@@ -19,7 +19,7 @@ fn argv(items: &[&str]) -> Vec<String> {
 }
 
 /// A chooser for calls that must never ask which browser to start.
-fn no_browser() -> Result<browser::Plan, browser::Unsupported> {
+fn no_browser() -> browser::Plan {
     panic!("this call chooses no browser")
 }
 
@@ -222,30 +222,6 @@ fn every_sign_in_shape_makes_its_call() {
         _ => panic!("no call"),
     };
     assert!(matches!(call, Call::List));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_launcher_this_port_lacks_defers_before_any_request() {
-    // The choice comes first: no connection is attempted (were one, the
-    // closed loopback port would answer `no_daemon`, not a deferral).
-    let link = Call::Link {
-        to: None,
-        open: true,
-        unless: false,
-    };
-    let unsupported = || Err(browser::Unsupported);
-    assert!(
-        answer(
-            link,
-            "http://127.0.0.1:9",
-            "t",
-            false,
-            &unsupported,
-            &no_launch
-        )
-        .await
-        .is_err()
-    );
 }
 
 #[test]
@@ -815,10 +791,10 @@ async fn a_launcher_that_fails_leaves_the_link_and_its_cause_after_one_mint() {
         let chosen = std::cell::Cell::new(0);
         let choose = || {
             chosen.set(chosen.get() + 1);
-            Ok(browser::Plan::Background {
+            browser::Plan::Background {
                 program: "/x/launcher".to_owned(),
                 args: vec!["%s".to_owned()],
-            })
+            }
         };
         let starts = std::cell::RefCell::new(Vec::new());
         let fail = |plan: &browser::Plan, url: &str| {
@@ -885,7 +861,7 @@ async fn a_refused_plan_prints_its_cause_through_the_real_launcher() {
         open: true,
         unless: false,
     };
-    let refused = || Ok(browser::Plan::Refused(Some(NO_DISPLAY.to_owned())));
+    let refused = || browser::Plan::Refused(Some(NO_DISPLAY.to_owned()));
     let out = answer(link, &origin, "t", false, &refused, &launch::open)
         .await
         .unwrap();
@@ -893,20 +869,4 @@ async fn a_refused_plan_prints_its_cause_through_the_real_launcher() {
     let mut want = Out::stdout(PRINTED.into(), 0);
     want.note = format!("pseudolife-mcp console: no browser opened: {NO_DISPLAY}\n");
     assert_eq!(out, want);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn windows_refusals_print_the_link_as_before() {
-    let (origin, task) = serve_once(signin_reply()).await;
-    let link = Call::Link {
-        to: None,
-        open: true,
-        unless: false,
-    };
-    let refused = || Ok(browser::Plan::Refused(None));
-    let out = answer(link, &origin, "t", false, &refused, &launch::open)
-        .await
-        .unwrap();
-    task.await.unwrap();
-    assert_eq!(out, Out::stdout(PRINTED.into(), 0));
 }

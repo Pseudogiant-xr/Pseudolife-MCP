@@ -1,9 +1,7 @@
 //! `export` / `import`: the logical bank transfer (`transfer_cli.py`) on an
 //! explicit `PSEUDOLIFE_MCP_DATABASE_URL`.
 //!
-//! A lite-tier bank is refused plainly before any effect;
-//! every non-canonical argv or input shape
-//! defers through the dispatcher's generic line.
+//! Inputs are handled natively or refused with a cause and repair step.
 use std::{
     ffi::OsString,
     io::{self, Write},
@@ -96,8 +94,6 @@ pub(super) enum Outcome {
     Done(String),
     /// `TransferError`: `"{mode} refused: {message}"` on stderr, exit 1.
     Refused(String),
-    /// A shape outside this candidate: the dispatcher's generic deferral.
-    Deferred,
     /// The native schema guard refused before making changes.
     SchemaRefused(String),
     /// A PostgreSQL failure after the work began (`native-pg-diagnostics`).
@@ -123,98 +119,112 @@ enum Request {
     },
 }
 
-/// An option value argparse would take as given: never empty or dash-led.
-fn option_value(value: Option<&OsString>) -> Option<OsString> {
-    let value = value?;
-    let text = value.to_str()?;
-    (!text.is_empty() && !text.starts_with('-')).then(|| value.clone())
-}
-
-fn parse(mode: &str, arguments: &[OsString]) -> Option<Request> {
-    if arguments.len() == 1 && arguments[0] == "--help" {
-        return Some(Request::Help);
-    }
-    let (mut out, mut data_dir, mut archive, mut force) = (None, None, None, false);
+fn parse(mode: &str, arguments: &[OsString]) -> Result<Request, String> {
+    let mut out = None;
+    let mut data_dir = None;
+    let mut archive = None;
+    let mut force = false;
+    let mut positional = false;
     let mut values = arguments.iter();
     while let Some(argument) = values.next() {
-        match argument.to_str()? {
-            "--out" if mode == "export" && out.is_none() => {
-                out = Some(option_value(values.next())?.into_string().ok()?);
+        let text = argument.to_str().ok_or_else(|| {
+            "argument is not valid Unicode — use a Unicode path or option.".to_owned()
+        })?;
+        if !positional && matches!(text, "--help" | "-h") {
+            return Ok(Request::Help);
+        }
+        if !positional && text == "--" {
+            positional = true;
+            continue;
+        }
+        let (key, inline) = text
+            .split_once('=')
+            .map_or((text, None), |(k, v)| (k, Some(v)));
+        if !positional && (key == "--data-dir" || (key == "--out" && mode == "export")) {
+            let value = match inline {
+                Some(value) => value.to_owned(),
+                None => values
+                    .next()
+                    .and_then(|v| v.to_str())
+                    .filter(|v| !v.starts_with('-'))
+                    .ok_or_else(|| format!("{key} needs a value — pass {key}=<path>."))?
+                    .to_owned(),
+            };
+            if value.is_empty() || value.contains('\0') {
+                return Err(format!(
+                    "{key} has an empty path or U+0000 — pass a nonempty filesystem path."
+                ));
             }
-            "--data-dir" if data_dir.is_none() => data_dir = Some(option_value(values.next())?),
-            "--force" if mode == "import" && !force => force = true,
-            value
-                if mode == "import"
-                    && archive.is_none()
-                    && !value.is_empty()
-                    && !value.starts_with('-') =>
-            {
-                archive = Some(value.to_owned());
+            if key == "--out" {
+                out = Some(value);
+            } else {
+                data_dir = Some(OsString::from(value));
             }
-            _ => return None,
+        } else if !positional && text == "--force" && mode == "import" {
+            force = true;
+        } else if mode == "import"
+            && archive.is_none()
+            && (positional || !text.starts_with('-'))
+            && !text.is_empty()
+            && !text.contains('\0')
+        {
+            archive = Some(text.to_owned());
+        } else {
+            return Err(format!(
+                "unexpected argument {} — run pseudolife-mcp {mode} --help for supported arguments.",
+                super::mode_repr(text)
+            ));
         }
     }
-    Some(if mode == "export" {
+    Ok(if mode == "export" {
         Request::Export { out, data_dir }
     } else {
         Request::Import {
-            archive: archive?,
+            archive: archive.ok_or_else(|| {
+                "archive path is missing — pass pseudolife-mcp import <archive.zip>.".to_owned()
+            })?,
             force,
             data_dir,
         }
     })
 }
 
-/// True when Python's `str(Path(value)) == value`, so printed paths and the
-/// `.part` sibling are spelled exactly as given. Other spellings defer.
-#[cfg(windows)]
-pub(super) fn canonical_path(value: &str) -> bool {
-    const RESERVED: [&str; 22] = [
-        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
-        "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-    ];
-    let rest = match value.as_bytes() {
-        [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic() => &value[3..],
-        _ => value,
+/// Connection diagnostics omit DSNs and credentials.
+fn database_refusal(error: crate::pg::Error) -> String {
+    use crate::pg::Error;
+    // An unescaped password can be parsed as an option name. Never render
+    // the parser's error payload, even when it looks like a setting name.
+    let (cause, fix) = match error {
+        Error::UnsupportedOption(_) | Error::InvalidOption(_) | Error::InvalidDsn => (
+            "unsupported or malformed PostgreSQL DSN option or syntax",
+            "correct PSEUDOLIFE_MCP_DATABASE_URL using supported options and quoted or percent-encoded values",
+        ),
+        Error::AmbientControl(_) => (
+            "unsupported PostgreSQL environment setting",
+            "remove unsupported PG environment settings and configure PSEUDOLIFE_MCP_DATABASE_URL directly",
+        ),
+        Error::RootCertificate => (
+            "PostgreSQL sslrootcert is not understood or unavailable",
+            "configure sslrootcert with an accessible trusted server certificate",
+        ),
+        Error::HostnameRules => (
+            "PostgreSQL server certificate does not match the required hostname rules",
+            "configure sslrootcert and a server certificate matching the DSN host",
+        ),
+        Error::Connection => (
+            "PostgreSQL connection failed",
+            "restore database access and retry",
+        ),
+        Error::SessionSetup => (
+            "PostgreSQL session setup failed",
+            "restore database access and retry",
+        ),
+        Error::Shutdown => (
+            "PostgreSQL connection shutdown failed",
+            "restore database access and retry",
+        ),
     };
-    !rest.is_empty()
-        && rest.split('\\').all(|part| {
-            let stem = part.split('.').next().unwrap_or("").to_ascii_lowercase();
-            !part.is_empty()
-                && part != "."
-                && !part.ends_with(['.', ' '])
-                && !RESERVED.contains(&stem.as_str())
-                && !part
-                    .chars()
-                    .any(|c| c < ' ' || matches!(c, '<' | '>' | ':' | '"' | '/' | '|' | '?' | '*'))
-        })
-}
-
-#[cfg(not(windows))]
-pub(super) fn canonical_path(value: &str) -> bool {
-    let rest = value.strip_prefix('/').unwrap_or(value);
-    !rest.is_empty()
-        && !value.contains('\0')
-        && rest.split('/').all(|part| !part.is_empty() && part != ".")
-}
-
-/// `embedded_pg.default_lite_data_dir()`; `None` when the oracle would reach
-/// an account database lookup this leaf does not reproduce.
-fn lite_default_dir() -> Option<PathBuf> {
-    let set = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
-    let base = if cfg!(windows) {
-        PathBuf::from(set("LOCALAPPDATA")?)
-    } else if cfg!(target_os = "macos") {
-        PathBuf::from(set("HOME")?)
-            .join("Library")
-            .join("Application Support")
-    } else {
-        match set("XDG_DATA_HOME") {
-            Some(value) => PathBuf::from(value),
-            None => PathBuf::from(set("HOME")?).join(".local").join("share"),
-        }
-    };
-    Some(base.join("pseudolife-mcp"))
+    format!("PSEUDOLIFE_MCP_DATABASE_URL: {cause} — {fix}.")
 }
 
 fn emit(stream: &mut dyn Write, text: &str) -> bool {
@@ -231,7 +241,6 @@ const EXIT_STDOUT_REFUSED: u8 = 120;
 
 fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
     let (ok, code) = match outcome {
-        Outcome::Deferred => return None,
         Outcome::Done(text) => {
             return Some(ExitCode::from(if emit(&mut io::stdout().lock(), &text) {
                 0
@@ -294,12 +303,12 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
 }
 
 pub(super) fn run(mode: &str, arguments: Vec<OsString>) -> Option<ExitCode> {
-    let request = parse(mode, &arguments)?;
+    let request = match parse(mode, &arguments) {
+        Ok(request) => request,
+        Err(message) => return finish(mode, Outcome::Refused(message)),
+    };
     let data_dir = match &request {
         Request::Help => {
-            if std::env::var_os("COLUMNS") != Some(OsString::from("80")) {
-                return None;
-            }
             let help = if mode == "export" {
                 EXPORT_HELP
             } else {
@@ -310,7 +319,10 @@ pub(super) fn run(mode: &str, arguments: Vec<OsString>) -> Option<ExitCode> {
         Request::Export { data_dir, .. } | Request::Import { data_dir, .. } => data_dir.as_ref(),
     };
     let dsn = match std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").filter(|v| !v.is_empty()) {
-        Some(dsn) => dsn.into_string().ok()?,
+        Some(dsn) => match dsn.into_string() {
+            Ok(dsn) => dsn,
+            Err(_) => return finish(mode, Outcome::Refused("PSEUDOLIFE_MCP_DATABASE_URL is not valid Unicode — set a Unicode PostgreSQL DSN.".into())),
+        },
         None => {
             let explicit = data_dir.map(PathBuf::from);
             if let Some(bank) = crate::cli::retired::find_lite_bank(explicit.as_deref()) {
@@ -333,35 +345,81 @@ pub(super) fn run(mode: &str, arguments: Vec<OsString>) -> Option<ExitCode> {
             });
         }
     };
-    // The oracle still resolves `_default_data_dir` with a DSN: the lite
-    // default (home) and, unless pg0 finds that dir, `Path.cwd()`. Either
-    // failing is a Python traceback, so it defers.
-    if data_dir.is_none()
-        && std::env::var_os("PSEUDOLIFE_MCP_DATA_DIR").is_none_or(|v| v.is_empty())
-    {
-        lite_default_dir()?;
-        std::env::current_dir().ok()?;
-    }
-    let dsn = crate::pg::Dsn::parse(&dsn).ok()?;
+    let dsn = match crate::pg::Dsn::parse_with_connection_options(&dsn) {
+        Ok(dsn) => dsn,
+        Err(error) => return finish(mode, Outcome::Refused(database_refusal(error))),
+    };
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return finish(
+                mode,
+                Outcome::Refused(format!(
+                    "cannot initialize the transfer runtime: {error} — free operating-system resources and retry."
+                )),
+            );
+        }
+    };
     let outcome = match request {
         Request::Help => unreachable!("help returned above"),
         Request::Export { out, .. } => {
-            let out = export::destination(out)?;
-            runtime()?.block_on(export::run(&dsn, &out))
+            let out = match export::destination(out) {
+                Ok(out) => out,
+                Err(message) => return finish(mode, Outcome::Refused(message)),
+            };
+            runtime.block_on(export::run(&dsn, &out))
         }
         Request::Import { archive, force, .. } => {
-            if !canonical_path(&archive) {
-                return None;
-            }
-            runtime()?.block_on(import::run(&dsn, Path::new(&archive), &archive, force))
+            runtime.block_on(import::run(&dsn, Path::new(&archive), &archive, force))
         }
     };
     finish(mode, outcome)
 }
 
-fn runtime() -> Option<tokio::runtime::Runtime> {
+fn runtime() -> io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .ok()
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    #[test]
+    fn runtime_resource_failure_is_refused() {
+        const CHILD: &str = "PSEUDOLIFE_TRANSFER_RESOURCE_TEST";
+        if std::env::var_os(CHILD).is_some() {
+            assert_eq!(
+                super::run("export", Vec::new()),
+                Some(std::process::ExitCode::from(1))
+            );
+            return;
+        }
+        // Enter the transfer directly: the binary's unrelated startup runtime
+        // otherwise consumes descriptors before dispatch can reach this code.
+        let output = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "ulimit -n 4; exec \"$1\" --exact cli::transfer::tests::runtime_resource_failure_is_refused --nocapture",
+                "transfer-resource-test",
+            ])
+            .arg(std::env::current_exe().unwrap())
+            .env_clear()
+            .env(CHILD, "1")
+            .env("HOME", std::env::temp_dir())
+            .env("PSEUDOLIFE_MCP_DATABASE_URL", "postgresql://nobody@127.0.0.1:9/pl_cf_absent")
+            .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
+            .env("PSEUDOLIFE_RELEASE_CHECK", "0")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(
+            stderr.contains("cannot initialize the transfer runtime"),
+            "{stderr}"
+        );
+        assert!(
+            stderr.contains("free operating-system resources and retry"),
+            "{stderr}"
+        );
+    }
 }
