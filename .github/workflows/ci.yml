@@ -848,6 +848,7 @@ jobs:
           tests/test_integrate_script.py::test_service_managing_harness_refuses_a_missing_turn_marker
           tests/test_integrate_script.py::test_harness_far_half_requires_every_unittest_command_to_execute_and_pass
           tests/test_integrate_script.py::test_harness_far_half_refuses_an_unknown_unit_runner_before_services
+          tests/test_integrate_script.py::test_harness_far_half_refuses_an_unpinned_fixture_requirement_before_services
           tests/test_integrate_script.py::test_harness_database_lock_covers_services_and_releases_after_failure
           tests/test_integrate_script.py::test_harness_waiting_for_worker_database_turn_leaves_suite_lock_free
           tests/test_integrate_script.py::test_the_harness_runs_on_the_dev_machine_and_open_checks_its_result

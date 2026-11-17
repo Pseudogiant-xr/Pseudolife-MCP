@@ -3743,6 +3743,16 @@ def test_harness_far_half_refuses_an_unknown_unit_runner_before_services(harness
 
 
 @needs_pwsh
+@pytest.mark.parametrize("requirement", ["onnx>=1.22", "--index-url=https://packages.invalid"])
+def test_harness_far_half_refuses_an_unpinned_fixture_requirement_before_services(harness_far, requirement):
+    head, ref, data = harness_far.batch()
+    encoded = base64.b64encode(json.dumps([requirement]).encode()).decode()
+    proc = harness_far.run_harness(head, ref, data, extra=("-ExtraRequirements", encoded))
+    assert proc.returncode == 3 and "literal package==version pins" in proc.stderr
+    assert harness_far.hook_calls() == [] and not harness_far.uv_log.exists()
+
+
+@needs_pwsh
 def test_harness_far_half_scrubs_ambient_environment_before_member_code(harness_far, monkeypatch):
     seen = harness_far.tmp / "uv-environment.jsonl"
     monkeypatch.setenv("FAKE_UV_ENV_LOG", str(seen))
