@@ -92,6 +92,44 @@ def test_a_filtered_rust_job_cannot_claim_the_entire_file(tree, command):
         recipe(tree)
 
 
+@pytest.mark.parametrize("job", ["rust", "parity-checks"])
+def test_unknown_pytest_launchers_refuse_but_installing_pytest_is_allowed(tree, job):
+    workflow(tree, job, "python -m pip install pytest pyyaml")
+    assert recipe(tree).commands
+    workflow(tree, job, "uv run python -m pytest rust/test_base.py")
+    with pytest.raises(selection.SelectionError, match="unsupported pytest launcher"):
+        recipe(tree)
+
+
+@pytest.mark.parametrize("option", ["--lf", "--deselect=rust/test_extra.py::test_extra", "--ignore-glob=*.py"])
+def test_unclassified_pytest_filters_cannot_narrow_parity_units(tree, option):
+    workflow(tree, "parity-checks", "python -m pytest rust/test_extra.py " + option)
+    with pytest.raises(selection.SelectionError):
+        recipe(tree)
+
+
+def test_controller_reads_the_requested_immutable_head_instead_of_its_own_list(tree, monkeypatch):
+    from ops import integrate
+
+    head = "a" * 40
+    reads = []
+    def source(rev, path):
+        reads.append((rev, path))
+        return tree.get(path)
+    monkeypatch.setattr(integrate, "_budget_text", source)
+    monkeypatch.setattr(integrate, "_out", lambda *args: "\n".join(tree))
+    monkeypatch.setattr(integrate, "RUST_HARNESS", ("rust/test_wrong_checkout.py",))
+    integrate._harness_recipe.cache_clear()
+    try:
+        result = integrate._harness_recipe(head)
+        assert "rust/test_extra.py" in result.commands[0].paths
+        assert "rust/test_wrong_checkout.py" not in result.commands[0].paths
+        assert reads and all(rev == head for rev, _ in reads)
+        assert (head, selection.WORKFLOW) in reads
+    finally:
+        integrate._harness_recipe.cache_clear()
+
+
 def test_known_native_only_filtered_mutation_command_stays_in_its_lane(tree):
     workflow(tree, "parity-checks", "python -m pytest rust/test_native.py -k witness")
     assert recipe(tree).commands[0].paths

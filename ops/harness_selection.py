@@ -97,10 +97,12 @@ def _steps(workflow, job):
 
 
 def _lines(step):
+    if not isinstance(step, dict):
+        raise SelectionError("a workflow step is not a mapping")
     run = step.get("run", "")
     if not isinstance(run, str):
         raise SelectionError("a workflow run command is not text")
-    for line in run.replace("`\n", " ").splitlines():
+    for line in run.replace("`\n", " ").replace("\\\n", " ").splitlines():
         line = line.strip()
         if line and not line.startswith("#"):
             try:
@@ -113,9 +115,15 @@ def _pytest(words, *, filtered=False):
     index = words.index("pytest")
     if words[:index] not in (["python", "-m"], ["python3", "-m"], []):
         raise SelectionError("unsupported pytest launcher in rust.yml")
-    if not filtered and any(word in ("-k", "-m", "--ignore", "--deselect", "--pyargs")
-                            or word.startswith(("--ignore=", "--deselect=")) for word in words[index + 1:]):
+    arguments = words[index + 1:]
+    if any(word.startswith(("--ignore", "--deselect", "--pyargs")) for word in arguments):
+        raise SelectionError("pytest selection is filtered by ignore, deselect or pyargs")
+    if not filtered and any(word in ("-k", "-m") for word in arguments):
         raise SelectionError("the Rust job's pytest selection is filtered; declare its complete selection")
+    options = {"-q", "-v", "-vv", "-ra", "-p", "--junitxml", "--require-databases", "-k", "-m"}
+    for word in arguments:
+        if word.startswith("-") and word not in options and not word.startswith(("--durations=", "--junitxml=")):
+            raise SelectionError(f"unknown pytest option {word}; classify the complete selection before gating")
     paths = tuple(word for word in words[index + 1:] if word.startswith("rust/"))
     if not paths:
         raise SelectionError("pytest command names no literal Rust test path")
@@ -137,7 +145,8 @@ def _classification(source):
         for path, entry in value["files"].items():
             _path(path)
             if (not isinstance(entry, dict) or set(entry) - {"kind", "reason", "native_tests", "unit_tests"}
-                    or entry.get("kind") not in ("unit", "native", "mixed") or not entry.get("reason")):
+                    or entry.get("kind") not in ("unit", "native", "mixed")
+                    or not isinstance(entry.get("reason"), str) or not entry["reason"].strip()):
                 raise ValueError(f"unclassified test file {path}")
             if entry["kind"] == "mixed":
                 selectors = [entry[key] for key in ("native_tests", "unit_tests") if key in entry]
@@ -237,6 +246,9 @@ def recipe(read, tree_paths):
         for words in _lines(step):
             if _is_pytest(words):
                 rust_paths.update(_pytest(words))
+            elif "pytest" in words and words[:4] not in (["python", "-m", "pip", "install"],
+                                                         ["python3", "-m", "pip", "install"]):
+                raise SelectionError("unsupported pytest launcher in the Rust job")
     if not rust_paths:
         raise SelectionError("the Rust job declares no readable pytest selections")
     missing = sorted(rust_paths - set(listed))
@@ -260,6 +272,9 @@ def recipe(read, tree_paths):
                     else:
                         pytest_paths.update(_units(path, classifications, read))
                 continue
+            if "pytest" in words and words[:4] not in (["python", "-m", "pip", "install"],
+                                                       ["python3", "-m", "pip", "install"]):
+                raise SelectionError("unsupported pytest launcher in parity-checks")
             if not words or words[0] not in ("python", "python3"):
                 continue
             if words[1:3] in (["-m", "pip"], ["-m", "venv"]):
@@ -280,7 +295,7 @@ def recipe(read, tree_paths):
             elif path not in NATIVE_PROGRAMS:
                 raise SelectionError(f"unknown Python parity command {path}; classify it before gating")
     available = set(tree_paths)
-    for path in pytest_paths:
+    for path in list(pytest_paths) + [path for command in additional for path in command.paths]:
         file = _path(path)
         if file not in available and not any(p.startswith(file.rstrip("/") + "/") for p in available):
             raise SelectionError(f"harness path {file} is absent from the batch head")

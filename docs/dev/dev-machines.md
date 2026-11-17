@@ -181,8 +181,13 @@ login/environment) and `Stop-HarnessServices` (clean up even after partial
 startup). The controller takes the database turn before the suite lock, matching
 a wrapped worker command whose pytest child takes the suite lock during startup.
 It holds both through cleanup and releases them in reverse order.
-It keeps its own `<repo>.rust-harness` worktree, `.rust-harness-venv`, and
-clone lock beside that configured clone, and refuses under 8 GB free there.
+It keeps its own `<repo>.rust-harness` worktree and clone lock beside that
+configured clone, and refuses under 8 GB free there. Every run creates a fresh
+`<repo>.rust-harness-env-<run-id>` environment, using uv's download cache.
+After service cleanup it removes only the exact environment it created:
+the run name must match, no reparse point may occur in that tree, and no
+process may still use it. A failed check leaves it for inspection and makes
+the gate not run. The log measures environment creation and dependency install.
 
 The shim step reads a separate UTF-8 file on the controller:
 `~/.pseudolife-mcp/locks/shim-tests.remote`. Like `rust-check.remote` it has
@@ -200,7 +205,10 @@ the work and cache filesystems need at least 8 GB free. The result records
 the exact head, selection, role, exit, summary and timestamps; logs and JSON
 stay private under the controller's `~/.pseudolife-mcp/suite-results`.
 
-Both commands accept `--lock-wait-seconds` (default 1200). A timeout,
+Both commands accept `--lock-wait-seconds` (default 1200) for their suite and
+clone locks. The harness's database turn refuses fast by default;
+`--database-turn-wait-seconds <seconds>` explicitly requests a bounded wait.
+A timeout,
 unreachable machine, missing dependency or service, failed cleanup or low
 disk is not a passing gate. Resolve the named cause and rerun the command;
 never substitute a note or another head's result. An interrupted worktree
@@ -212,26 +220,47 @@ The rules are in `CLAUDE.md` ("Sharing the machine"); this section holds the
 knobs and procedures they point at.
 
 - **Windows VM database turns.** Every database-using worker command must
-  use the same VM account/lock folder as the gate. Prefix a foreground command
-  with this one line, including over non-interactive SSH:
+  use the same VM account/lock folder as the gate. This account opts into an
+  exclusive machine turn because its harness starts and stops PostgreSQL:
+
+  ```powershell
+  New-Item -ItemType File -Force -Path "$HOME/.pseudolife-mcp/locks/test-postgres.turn-enabled"
+  ```
+
+  A service-managing gate refuses without this marker and prints that command.
+  With the marker, Rust pytest takes the turn even without `--require-databases`;
+  standalone database harness launchers and shared connection helpers take it
+  too. No marker means one existence check and the previous behavior: hosted
+  CI, contributors, and the Linux boxes need no new setup or exclusive turn.
+  Their permanently running PostgreSQL remains shared by targeted runs.
+
+  To include service startup and shutdown, or another database-using worker
+  command, prefix its foreground command with this one line, including over
+  non-interactive SSH:
 
   ```powershell
   pwsh -NoProfile -NonInteractive -File ops/dev-database-lock.ps1 -Holder worker -- python -m pytest <tests>
   ```
 
-  `-WaitSeconds 1200` is the configurable bounded wait. The script preserves
+  Contention refuses immediately by default; `-WaitSeconds 1200` requests a
+  bounded wait, and pytest accepts `--database-turn-wait-seconds 1200`.
+  The script preserves
   the command's exit code and holds `~/.pseudolife-mcp/locks/test-postgres.lock`
   until it returns or fails; keep service startup and shutdown inside the
   wrapped command. Do not detach work from it. The harness takes this lock
-  automatically. Its file records holder, PID, process creation time and
-  acquisition time; a waiter names the holder and elapsed hold time. A held
+  automatically. Its file records holder, PID, process creation time,
+  account ownership and acquisition time; a refusal or waiter names the
+  verified holder and elapsed hold time. A held
   Windows file handle excludes writers but permits metadata reads. Finally
   releases it; process death releases the OS handle. On Windows, the wrapper
   and harness contain descendants in a kill-on-close job so killing the
-  owner also terminates its child tree; inability to establish that job
-  refuses the run before acquiring the database lock. Stale metadata is
-  reclaimed only when PID plus creation time prove its owner is gone;
-  unreadable identity refuses, never an age-based guess. After an interrupted
+  owner also terminates its child tree. Dot-sourcing the helper or calling its
+  generic lock functions does not attach an interactive shell to that job.
+  The held OS handle is the truth: old metadata never blocks a free lock and
+  never frees a held one. If a live holder cannot be named, the refusal says
+  so and gives a process-list command. No age-based reclaim occurs. A gate
+  child reuses only a verified live ancestor's PID, creation time and account;
+  an environment flag grants no turn. After an interrupted
   SSH session, verify the owned children/services have stopped before retrying.
   The lock file is never deleted during normal operation. Experiments use
   `-LockPath <your own scratch lock>` and never the shared lock name.

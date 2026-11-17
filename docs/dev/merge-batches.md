@@ -664,8 +664,11 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    - The run takes the machine's shared database lock, its full-suite lock,
      then its clone lock, keeping all through service shutdown. Worker
      database commands take that same database lock (dev-machines.md,
-     "Sharing"). The bounded wait reports the holder and elapsed hold time;
-     `--lock-wait-seconds` changes its default 1200 seconds.
+     "Sharing"). The database turn refuses fast, naming the holder and elapsed
+     hold time; `--database-turn-wait-seconds` requests a bounded wait. Suite
+     and clone locks retain their configurable `--lock-wait-seconds` default
+     of 1200. Bare Rust pytest and standalone database harness launchers take
+     the turn on marker-enabled machines too.
    - `--require-databases` remains mandatory: missing login or Docker fails
      database cases instead of silently skipping them. Hosted runs without
      that option retain their existing platform/login skips.

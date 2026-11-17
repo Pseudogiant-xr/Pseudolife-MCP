@@ -9,8 +9,8 @@
 #      branch into a private ref that must name exactly the batch head;
 #   2. one harness worktree beside the clone (<repo>.rust-harness) is forced
 #      to that head and cleaned;
-#   3. a uv environment kept beside the clone (<repo>.rust-harness-venv) gets
-#      the head's own dev dependencies;
+#   3. a fresh run-named uv environment beside the clone gets the head's
+#      own dev dependencies and is removed safely after that run;
 #   4. the machine's private services hook (~/.pseudolife-mcp/
 #      rust-harness-services.ps1) starts its test PostgreSQL and a Linux
 #      Docker engine and must prove both answer (Start-HarnessServices throws
@@ -28,6 +28,8 @@ param(
     [Parameter(Mandatory)] [string] $Head,
     [Parameter(Mandatory)] [string] $Ref,
     [Parameter(Mandatory)] [string[]] $PytestArgs,
+    # Base64 JSON of the controller's batch-head unittest selections.
+    [string] $UnitCommands = '',
     [string] $Nonce = '',
     # Tests point this at a stand-in; integrate.py never passes it.
     [string] $ServicesHook = '',
@@ -113,6 +115,27 @@ function Assert-HarnessWorktreeHasNoReparsePoint([string] $Path) {
 if ($Head -notmatch '^[0-9a-f]{40}$' -or $Base -notmatch '^[0-9a-f]{40}$') { Stop-Run "the head and base must be full commit ids" }
 if ($Ref -notmatch '^refs/heads/integrate/[0-9A-Za-z._-]+$') { Stop-Run "the bundle's ref must be an integrate/* branch, not '$Ref'" }
 if ($Nonce -and $Nonce -notmatch '^[0-9a-f]{16,64}$') { Stop-Run "the nonce must be hex" }
+$units = @()
+try {
+    if ($UnitCommands) {
+        $units = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($UnitCommands))) -NoEnumerate
+        if ($units -isnot [array]) { throw 'the unittest selections must be an array' }
+        foreach ($unit in $units) {
+            if ($unit.runner -notin @('unittest-discover', 'unittest-file') -or -not $unit.paths.Count) {
+                throw 'unknown or empty unittest selection'
+            }
+            foreach ($path in $unit.paths) {
+                if ($path -notmatch '^[A-Za-z0-9_./-]+\.py$' -or '..' -in $path.Split('/')) {
+                    throw 'a unittest file is not a literal relative Python path'
+                }
+            }
+            if ($unit.runner -eq 'unittest-discover') {
+                if ($unit.start -notmatch '^[A-Za-z0-9_./-]+$' -or '..' -in $unit.start.Split('/') -or
+                    $unit.pattern -notmatch '^test_[A-Za-z0-9_.*?-]+\.py$') { throw 'unsupported unittest discovery selection' }
+            } elseif ($unit.paths.Count -ne 1) { throw 'a direct unittest command must name one file' }
+        }
+    }
+} catch { Stop-Run "cannot read the unittest selections: $($_.Exception.Message)" }
 if (-not (Test-Path -LiteralPath (Join-Path $Repo '.git'))) { Stop-Run "no git clone at the configured repo= path" }
 $Repo = (Resolve-Path -LiteralPath $Repo).ProviderPath.TrimEnd([char]92, [char]47)
 $noHooks = "$Repo.rust-harness-no-hooks"
@@ -296,6 +319,30 @@ try {
         try {
             & $py -m pytest -q -p no:cacheprovider --require-databases @PytestArgs
             $verdict = $LASTEXITCODE
+            if ($verdict -eq 0) {
+                foreach ($unit in $units) {
+                    $unitArgs = if ($unit.runner -eq 'unittest-discover') {
+                        @('-m', 'unittest', 'discover', '-s', $unit.start, '-p', $unit.pattern)
+                    } else { @($unit.paths[0]) }
+                    $unitClock = [Diagnostics.Stopwatch]::StartNew()
+                    $unitOutput = [Collections.Generic.List[string]]::new()
+                    & $py @unitArgs 2>&1 | ForEach-Object {
+                        $unitOutput.Add("$_")
+                        [Console]::Out.WriteLine("$_")
+                    }
+                    $verdict = $LASTEXITCODE
+                    $unitClock.Stop()
+                    if ($verdict -ne 0) { break }
+                    $text = $unitOutput -join "`n"
+                    $ran = [regex]::Match($text, '(?m)^Ran ([1-9][0-9]*) tests? in ')
+                    if (-not $ran.Success) { throw 'the unittest runner reported no executed cases; inspect its selection before retrying' }
+                    $skip = [regex]::Match($text, '(?m)^OK \(skipped=([0-9]+)\)')
+                    $skipped = if ($skip.Success) { [int]$skip.Groups[1].Value } else { 0 }
+                    $passed = [int]$ran.Groups[1].Value - $skipped
+                    if ($passed -lt 1) { throw 'the unittest selection skipped every case; fix its prerequisites before retrying' }
+                    [Console]::Out.WriteLine("$passed passed, $skipped skipped in $([math]::Round($unitClock.Elapsed.TotalSeconds, 3))s (unittest)")
+                }
+            }
         } finally {
             Pop-Location
         }

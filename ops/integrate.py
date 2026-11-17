@@ -1247,6 +1247,38 @@ def _budget_text(rev: str, path: str) -> str | None:
     return shown.stdout if shown.returncode == 0 else None
 
 
+@functools.lru_cache(maxsize=1)
+def _harness_reader():
+    # Load this controller's parser, never Python from the candidate head.
+    name = "_integrate_harness_selection"
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("harness_selection.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@functools.lru_cache(maxsize=128)
+def _harness_recipe(head: str):
+    """The immutable head's workflow, literal list and classified parity units."""
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise Refusal("harness selection needs a full batch-head commit id; rebuild the batch")
+    reader = _harness_reader()
+
+    def read(path):
+        source = _budget_text(head, path)
+        if source is None:
+            raise reader.SelectionError(f"cannot read {path} at {head[:12]}")
+        return source
+
+    try:
+        paths = _out("ls-tree", "-r", "--name-only", head).splitlines()
+        return reader.recipe(read, paths)
+    except (reader.SelectionError, OSError) as error:
+        raise Refusal(f"batch-head harness coverage refused at {head[:12]}: {error}; "
+                      "fix the workflow selection or its classification before gating") from None
+
+
 def _budget_json(rev: str, path: str):
     text = _budget_text(rev, path)
     return None if text is None else json.loads(text)
@@ -3131,7 +3163,7 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None,
     lines += [
         "", "## Validation", "",
         f"- Local full suite: {suite or '<filled in by `open`>'}",
-        f"- Rust harness Python tests (`{RUST_HARNESS_COMMAND}`, which the full "
+        f"- Rust harness Python tests (`{_harness_recipe(plan.head).display()}`, which the full "
         f"suite does not collect): {harness or '<filled in by `open`>'}",
         f"- Rust compile check (`{RUST_CHECK_COMMAND}` in `{RUST_CHECK_DIR}/`, which "
         f"checks all workspace targets): {_rust_check_cell(plan)}",
@@ -3261,7 +3293,7 @@ def build(args: argparse.Namespace) -> int:
           f"  1. {SUITE_COMMAND}   (the full suite on the remote machine, the batch "
           "head carried as a bundle; writes ~/.pseudolife-mcp/suite-results/*.json;\n"
           f"     {REAL_CLIENT_NOTE}; {SUITE_LOCAL_NOTE})\n"
-          f"  2. python ops/integrate.py harness   ({RUST_HARNESS_COMMAND} on the Windows dev VM)\n"
+          f"  2. python ops/integrate.py harness   ({_harness_recipe(plan.head).display()} on the Windows dev VM)\n"
           f"  3. python ops/integrate.py shim-tests   ({SHIM_TESTS_COMMAND} on the second Linux dev box)\n"
           "  4. python ops/integrate.py open --suite <suite.json> --harness <harness.json> --shim-tests <shim.json>\n"
           "A red suite: bisect locally, drop the culprit, switch back with "
@@ -3414,8 +3446,9 @@ def _gate_result_line(path: str | None, head: str, kind: str) -> str:
     harness = kind == HARNESS_RESULT_KIND
     name = "harness" if harness else "shim-tests"
     role = "Windows dev VM" if harness else "second Linux dev box"
-    command = RUST_HARNESS_COMMAND if harness else SHIM_TESTS_COMMAND
-    selection = list(RUST_HARNESS if harness else SHIM_TESTS_ARGS)
+    recipe = _harness_recipe(head) if harness else None
+    command = recipe.display() if harness else SHIM_TESTS_COMMAND
+    selection = recipe.record() if harness else list(SHIM_TESTS_ARGS)
     again = f"run `python ops/integrate.py {name}` and give `open --{name} <result.json>` for {head[:8]}"
     if not path:
         raise Refusal(f"give the {name} result: {again}")
@@ -3517,8 +3550,9 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
     name = "harness" if harness else "shim-tests"
     config = RUST_CHECK_REMOTE if harness else SHIM_TESTS_REMOTE
     role = "Windows dev VM" if harness else "second Linux dev box"
-    command = RUST_HARNESS_COMMAND if harness else SHIM_TESTS_COMMAND
-    selection = list(RUST_HARNESS if harness else SHIM_TESTS_ARGS)
+    recipe = _harness_recipe(head) if harness else None
+    command = recipe.display() if harness else SHIM_TESTS_COMMAND
+    selection = recipe.record() if harness else list(SHIM_TESTS_ARGS)
     cfg, cause = _remote_config(config, (role,), role)
     if not cfg:
         raise Refusal(f"{cause or 'no dev machine configured'}; configure {config.name} (docs/dev/dev-machines.md); no local fallback")
@@ -3531,7 +3565,9 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
         helper = base64.b64encode(DATABASE_LOCK_SCRIPT.encode("utf-8")).decode("ascii")
         script = script.replace('# LOAD_DATABASE_LOCK',
             f". ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{helper}'))))")
-        params = " -PytestArgs @(" + ", ".join(_ps_literal(p) for p in selection) + ")"
+        params = " -PytestArgs @(" + ", ".join(_ps_literal(p) for p in recipe.commands[0].paths) + ")"
+        unit_commands = base64.b64encode(json.dumps(selection[1:]).encode("utf-8")).decode("ascii")
+        params += " -UnitCommands " + _ps_literal(unit_commands)
         params += f" -LockWaitSeconds {args.lock_wait_seconds}"
         params += f" -DatabaseTurnWaitSeconds {args.database_turn_wait_seconds}"
     else:
@@ -3546,7 +3582,7 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
                                    RUST_HARNESS_REMOTE_TIMEOUT, shell="pwsh" if harness else "bash", log_path=log)
     summaries = ([m.group(1) for m in map(PYTEST_SUMMARY_RE.match, lines) if m] if harness else
                  [line.strip() for line in lines if "Summary [" in line])
-    summary = summaries[-1] if summaries else ""
+    summary = "; ".join(summaries) if harness else summaries[-1] if summaries else ""
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
     result = {"kind": kind, "machine": role, "commit": head, "branch": branch,
               "command": command, "selection": selection, "exit_code": code,

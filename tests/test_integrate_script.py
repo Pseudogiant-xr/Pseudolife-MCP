@@ -37,6 +37,12 @@ def _load():
 
 
 integrate = _load()
+_REAL_HARNESS_RECIPE = integrate._harness_recipe
+
+
+def _model_harness_recipe(paths=None):
+    reader = integrate._harness_reader()
+    return reader.Recipe((reader.Command("pytest", tuple(paths or integrate.RUST_HARNESS)),))
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -331,7 +337,7 @@ def world_without_guard(tmp_path, monkeypatch):
     return _make_world(tmp_path, monkeypatch, guard=False)
 
 
-def _make_world(tmp_path, monkeypatch, *, guard=True):
+def _make_world(tmp_path, monkeypatch, *, guard=True, harness_guard=False):
     origin = tmp_path / "origin.git"
     seed = tmp_path / "seed"
     work = tmp_path / "work"
@@ -344,6 +350,23 @@ def _make_world(tmp_path, monkeypatch, *, guard=True):
     # does not scan it).
     (seed / "rust").mkdir()
     (seed / "rust" / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+    if harness_guard:
+        for name, text in {
+            "ops/integrate.py": 'RUST_HARNESS = ("rust/test_base.py",)\n',
+            ".github/workflows/rust.yml": json.dumps({"jobs": {
+                "rust": {"steps": [{"run": "python -m pytest rust/test_base.py"}]},
+                "parity-checks": {"steps": []}}}),
+            "rust/ci/harness-test-selections.json": '{"schema": 1, "files": {}}\n',
+            "rust/test_base.py": "def test_base(): pass\n",
+        }.items():
+            (seed / name).parent.mkdir(parents=True, exist_ok=True)
+            (seed / name).write_text(text, encoding="utf-8")
+        monkeypatch.setattr(integrate, "_harness_recipe", _REAL_HARNESS_RECIPE)
+        _REAL_HARNESS_RECIPE.cache_clear()
+    else:
+        # This fixture models Git and admission, with no actual workflow/test
+        # tree. Coverage-specific tests opt into the real batch-head reader.
+        monkeypatch.setattr(integrate, "_harness_recipe", lambda head: _model_harness_recipe())
     _git(seed, "add", "-A")
     _git(seed, "commit", "-q", "-m", "base")
     _git(seed, "remote", "add", "origin", str(origin))
@@ -479,9 +502,11 @@ def _suite_result(world, *, commit: str | None = None, exit_code: int = 0,
 
 def _gate_result(world, gate_kind="rust-harness", **edit) -> Path:
     harness = gate_kind == "rust-harness"
-    result = {"kind": gate_kind, "commit": _git(world.work, "rev-parse", "HEAD"),
-              "command": integrate.RUST_HARNESS_COMMAND if harness else integrate.SHIM_TESTS_COMMAND,
-              "selection": list(integrate.RUST_HARNESS if harness else integrate.SHIM_TESTS_ARGS),
+    head = _git(world.work, "rev-parse", "HEAD")
+    recipe = integrate._harness_recipe(head) if harness else None
+    result = {"kind": gate_kind, "commit": head,
+              "command": recipe.display() if harness else integrate.SHIM_TESTS_COMMAND,
+              "selection": recipe.record() if harness else list(integrate.SHIM_TESTS_ARGS),
               "machine": "Windows dev VM" if harness else "second Linux dev box",
               "exit_code": 0, "summary": "767 passed in 1.0s", "not_run": None,
               "started": "2026-11-17T01:00:00+00:00", "ended": "2026-11-17T01:00:01+00:00"}
@@ -3468,7 +3493,7 @@ class HarnessFar(Far):
         monkeypatch.delenv("FAKE_HOOK_FAIL", raising=False)
         monkeypatch.delenv("FAKE_SERVICE", raising=False)
 
-    def batch(self, body: str = _GATE_TEST) -> tuple[str, str, str]:
+    def batch(self, body: str = _GATE_TEST, *, unit_body: str | None = None) -> tuple[str, str, str]:
         self.n += 1
         branch = f"integrate/{DATE}-batch-{self.n}"
         _git(self.seed, "switch", "-q", "-C", branch, self.base)
@@ -3476,6 +3501,8 @@ class HarnessFar(Far):
         gate_tests.mkdir(exist_ok=True)
         (gate_tests / "conftest.py").write_text(_GATE_CONFTEST, encoding="utf-8", newline="\n")
         (gate_tests / "test_gate.py").write_text(body, encoding="utf-8", newline="\n")
+        if unit_body is not None:
+            (gate_tests / "unit_gate.py").write_text(unit_body, encoding="utf-8", newline="\n")
         _git(self.seed, "add", "-A")
         _git(self.seed, "commit", "-q", "-m", f"batch {self.n}")
         head = _git(self.seed, "rev-parse", "HEAD")
@@ -3586,6 +3613,34 @@ def test_the_harness_far_half_tags_its_verdict_with_the_runs_nonce(harness_far):
 
 
 @needs_pwsh
+@pytest.mark.parametrize("outcome", ["pass", "fail", "empty"])
+def test_harness_far_half_requires_every_unittest_command_to_execute_and_pass(harness_far, outcome):
+    body = "import unittest\n"
+    if outcome != "empty":
+        body += "class UnitCase(unittest.TestCase):\n    def test_unit(self):\n        self.assertTrue(" + str(outcome == "pass") + ")\n"
+    body += "if __name__ == '__main__': unittest.main()\n"
+    head, ref, data = harness_far.batch(unit_body=body)
+    units = [{"runner": "unittest-file", "paths": ["gate_tests/unit_gate.py"], "start": "", "pattern": ""}]
+    encoded = base64.b64encode(json.dumps(units).encode()).decode()
+    proc = harness_far.run_harness(head, ref, data, extra=("-UnitCommands", encoded))
+    assert "1 passed" in proc.stdout and harness_far.hook_calls() == ["start", "stop"]
+    assert proc.returncode == {"pass": 0, "fail": 1, "empty": 3}[outcome], proc.stdout + proc.stderr
+    if outcome == "pass":
+        assert "(unittest)" in proc.stdout and "Ran 1 test" in proc.stdout
+    elif outcome == "empty":
+        assert "no executed cases" in proc.stderr
+
+
+@needs_pwsh
+def test_harness_far_half_refuses_an_unknown_unit_runner_before_services(harness_far):
+    head, ref, data = harness_far.batch()
+    encoded = base64.b64encode(json.dumps([{"runner": "unknown", "paths": ["gate_tests/unit_gate.py"]}]).encode()).decode()
+    proc = harness_far.run_harness(head, ref, data, extra=("-UnitCommands", encoded))
+    assert proc.returncode == 3 and "unknown or empty unittest selection" in proc.stderr
+    assert harness_far.hook_calls() == [] and not harness_far.uv_log.exists()
+
+
+@needs_pwsh
 def test_harness_far_half_scrubs_ambient_environment_before_member_code(harness_far, monkeypatch):
     seen = harness_far.tmp / "uv-environment.jsonl"
     monkeypatch.setenv("FAKE_UV_ENV_LOG", str(seen))
@@ -3663,6 +3718,93 @@ def test_harness_far_half_cleans_an_ordinary_untracked_file(harness_far):
     assert not file.exists()
 
 
+def _environment_cleanup_probe(tmp_path, environment, *, created=True, expected=None, run_id="a" * 32):
+    """Exercise the real cleanup function without running a gate or its services."""
+    script = tmp_path / "cleanup-probe.ps1"
+    script.write_text('''
+param($source, $path, $expected, $created, $id, $repo)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'source parse failed' }
+foreach ($name in @('Assert-HarnessWorktreeHasNoReparsePoint', 'Remove-OwnedHarnessEnvironment')) {
+    $definition = $ast.Find({ param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+    }, $true)
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+Remove-OwnedHarnessEnvironment -EnvironmentPath $path -ExpectedPath $expected -Created ($created -eq 'yes') -RunId $id -Repository $repo
+''', encoding="utf-8")
+    return subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
+                           str(ROOT / "ops/rust-harness-remote.ps1"), str(environment),
+                           str(expected or environment), "yes" if created else "no", run_id,
+                           str(tmp_path / "repo")], capture_output=True, text=True, timeout=45)
+
+
+@needs_pwsh
+@pytest.mark.parametrize("case", ["not-created", "wrong-run-name", "wrong-path", "ordinary"])
+def test_harness_environment_cleanup_removes_only_its_own_created_path(tmp_path, case):
+    environment = tmp_path / ("repo.rust-harness-env-" + "a" * 32)
+    environment.mkdir()
+    (environment / "ordinary-file").write_text("owned", encoding="utf-8")
+    run = _environment_cleanup_probe(tmp_path, environment, created=case != "not-created",
+        expected=tmp_path / "another-path" if case == "wrong-path" else environment,
+        run_id="b" * 32 if case == "wrong-run-name" else "a" * 32)
+    if case in ("wrong-run-name", "wrong-path"):
+        assert run.returncode != 0 and "path this run created" in run.stderr
+    else:
+        assert run.returncode == 0, run.stdout + run.stderr
+    assert environment.exists() == (case != "ordinary")
+
+
+@needs_pwsh
+def test_harness_environment_cleanup_refuses_a_link_without_touching_its_target(tmp_path):
+    environment = tmp_path / ("repo.rust-harness-env-" + "a" * 32)
+    environment.mkdir()
+    target = tmp_path / "outside"
+    target.mkdir()
+    content = target / "must-stay"
+    content.write_text("outside data", encoding="utf-8")
+    link = environment / "link"
+    if os.name == "nt":
+        script = tmp_path / "junction.ps1"
+        script.write_text("param($path,$target)\nNew-Item -ItemType Junction -Path $path -Target $target -ErrorAction Stop | Out-Null\n", encoding="utf-8")
+        made = subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
+                               str(link), str(target)], capture_output=True, text=True, timeout=30)
+        assert made.returncode == 0, made.stderr
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    try:
+        run = _environment_cleanup_probe(tmp_path, environment)
+        assert run.returncode != 0 and "reparse point" in run.stderr, run.stdout + run.stderr
+        assert content.read_text(encoding="utf-8") == "outside data"
+        assert environment.exists()
+    finally:
+        if os.path.lexists(link):
+            os.rmdir(link) if os.name == "nt" else link.unlink()
+
+
+@needs_pwsh
+def test_harness_environment_cleanup_refuses_an_active_process(tmp_path):
+    import psutil
+
+    environment = tmp_path / ("repo.rust-harness-env-" + "a" * 32)
+    environment.mkdir()
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(90)", str(environment)],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    identity = psutil.Process(process.pid).create_time()
+    try:
+        run = _environment_cleanup_probe(tmp_path, environment)
+        assert run.returncode != 0 and "process still uses" in run.stderr, run.stdout + run.stderr
+        assert environment.exists()
+    finally:
+        if process.poll() is None:
+            assert psutil.Process(process.pid).create_time() == identity
+            process.terminate()
+        process.wait(timeout=15)
+
+
 @needs_pwsh
 def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkeypatch, tmp_path, capsys):
     head, ref, _ = harness_far.batch()
@@ -3681,6 +3823,7 @@ def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkey
     monkeypatch.setattr(integrate, "RUST_HARNESS_REMOTE_SCRIPT", script)
     monkeypatch.setattr(integrate, "RUST_HARNESS", ("gate_tests",))
     monkeypatch.setattr(integrate, "RUST_HARNESS_COMMAND", "python -m pytest -q -p no:cacheprovider --require-databases gate_tests")
+    monkeypatch.setattr(integrate, "_harness_recipe", lambda head: _model_harness_recipe(("gate_tests",)))
     monkeypatch.setattr(integrate, "SUITE_RESULTS", tmp_path / "results")
     assert integrate.main(["harness", "--lock-wait-seconds", "0"]) == 0, capsys.readouterr()
     result, = integrate.SUITE_RESULTS.glob("*.json")
