@@ -258,3 +258,148 @@ pub(super) fn failure(operation: &str, error: &io::Error) -> u8 {
         "--out {operation} failed: {cause}{code}; {fix}; no archive was published"
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{io::Write, process::Command};
+
+    const SECRET: &str = "synthetic-staging-content-must-not-escape";
+    const CASE: &str = "PSEUDOLIFE_AUDIT_TEST_STAGING_CASE";
+
+    struct Directory(PathBuf);
+    impl Directory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("audit-staging-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn staging_failures_have_distinct_causes() {
+        if let Ok(case) = std::env::var(CASE) {
+            let directory = Directory::new();
+            #[cfg(windows)]
+            if case == "privacy" {
+                let path = directory.0.join("read-only-handle");
+                fs::write(&path, SECRET).unwrap();
+                let file = File::open(path).unwrap();
+                // This existing helper requires WRITE_OWNER and WRITE_DAC;
+                // a read-only handle provides neither. No product seam is used.
+                let error = crate::credentials::windows_security::make_private(&file).unwrap_err();
+                let error = io::Error::new(io::ErrorKind::PermissionDenied, error);
+                assert_eq!(failure("staging", &error), 2);
+                return;
+            }
+            assert!(matches!(case.as_str(), "removed" | "replaced"));
+            let destination = directory.0.join("archive.jsonl");
+            let staged = Staged::create(&destination).unwrap();
+            staged.file().write_all(SECRET.as_bytes()).unwrap();
+            #[cfg(windows)]
+            let mut staged = staged;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                // Production excludes delete sharing. Construct a valid
+                // existing receiver with delete sharing to reach its fence.
+                drop(staged.file.take());
+                staged.file = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .share_mode(7)
+                        .open(&staged.path)
+                        .unwrap(),
+                );
+            }
+            let path = staged.path.clone();
+            if case == "removed" {
+                fs::remove_file(&path).unwrap();
+            } else {
+                fs::rename(&path, directory.0.join("moved-staging-file")).unwrap();
+                fs::write(&path, b"replacement must survive").unwrap();
+            }
+            let error = staged.publish().unwrap_err();
+            assert_eq!(failure("publication", &error), 2);
+            assert!(!destination.exists());
+            if case == "replaced" {
+                assert_eq!(fs::read(path).unwrap(), b"replacement must survive");
+            }
+            return;
+        }
+        let cases = [
+            (
+                "removed",
+                "staged archive identity",
+                "private destination directory",
+            ),
+            (
+                "replaced",
+                "staged archive identity",
+                "private destination directory",
+            ),
+            #[cfg(windows)]
+            (
+                "privacy",
+                "owner-only staging permissions",
+                "owner-only permissions",
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (case, cause, fix) in cases {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cli::board_audit::output::tests::staging_failures_have_distinct_causes",
+                    "--nocapture",
+                ])
+                .env(CASE, case)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{case}: {:?}", output.stderr);
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            if !stderr.contains(cause) || !stderr.contains(fix) {
+                failures.push(format!("{case}: {stderr}"));
+            }
+            assert!(!stderr.contains(SECRET));
+            assert!(!String::from_utf8_lossy(&output.stdout).contains(SECRET));
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        let directory = Directory::new();
+        let destination = directory.0.join("complete.jsonl");
+        let staged = Staged::create(&destination).unwrap();
+        staged.file().write_all(b"complete archive\n").unwrap();
+        staged.publish().unwrap();
+        assert_eq!(fs::read(destination).unwrap(), b"complete archive\n");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reparse_identity_has_its_own_cause() {
+        use std::os::windows::fs::{OpenOptionsExt, symlink_file};
+        let directory = Directory::new();
+        let ordinary = directory.0.join("ordinary");
+        let redirect = directory.0.join("redirect");
+        fs::write(&ordinary, SECRET).unwrap();
+        symlink_file(&ordinary, &redirect).unwrap();
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(0x00200000)
+            .open(redirect)
+            .unwrap();
+        let message = identity(&file).unwrap_err().to_string();
+        assert!(
+            message.contains("staged archive is a reparse point"),
+            "{message}"
+        );
+        assert!(message.contains("without redirected paths"));
+        assert!(!message.contains(SECRET));
+        assert!(identity(&File::open(ordinary).unwrap()).is_ok());
+    }
+}
