@@ -2230,6 +2230,21 @@ def test_an_unreadable_base_workflow_refuses_without_blaming_a_member(tmp_path, 
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
+def test_an_unreadable_base_can_be_repaired_by_a_readable_batch_head(tmp_path, monkeypatch, capsys):
+    world = _make_world(tmp_path, monkeypatch, harness_guard=True)
+    world.advance_master({".github/workflows/rust.yml": "jobs: ["})
+    world.gh.add(11, world.pr(11, {"README.md": "independent change\n"}))
+    world.gh.add(12, world.pr(12, {".github/workflows/rust.yml": _coverage_workflow("rust/test_base.py")}))
+    assert _build() == 0, capsys.readouterr()
+    output = capsys.readouterr()
+    assert "warning" in output.err.lower() and "base" in output.err.lower()
+    assert "cannot read batch-head rust.yml" in output.err
+    plan = _plan(world)
+    assert [member["number"] for member in plan["merged"]] == [11, 12]
+    assert not plan["dropped"]
+    assert integrate._harness_recipe(plan["head"]).commands
+
+
 @pytest.mark.parametrize("invalid", [False, True])
 def test_census_conflict_resolution_still_checks_the_tentative_harness_selection(monkeypatch, invalid):
     from types import SimpleNamespace

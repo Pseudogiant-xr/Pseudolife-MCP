@@ -76,6 +76,48 @@ def test_unknown_parity_commands_or_classifications_refuse(tree, command):
         recipe(tree)
 
 
+@pytest.mark.parametrize("job,command", [
+    ("parity-checks", "& $python rust/test_extra.py"),
+    ("parity-checks", "& $python -m unittest rust/test_extra.py"),
+    ("parity-checks", "py rust/test_extra.py"),
+    ("parity-checks", "py -m unittest rust/test_extra.py"),
+    ("rust", "python rust/test_extra.py"),
+    ("rust", "python -m unittest rust/test_extra.py"),
+    ("new-job", "python -m pytest rust/test_extra.py"),
+    ("new-job", "python rust/test_extra.py"),
+    ("new-job", "& $python rust/test_extra.py"),
+    ("new-job", "python -m unittest discover"),
+])
+def test_every_job_refuses_an_unclassified_test_line_with_its_location(tree, job, command):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"].setdefault(job, {"steps": []})["steps"].append(
+        {"name": "Unclassified test command", "run": "# setup\n" + command})
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    with pytest.raises(selection.SelectionError) as error:
+        recipe(tree)
+    message = str(error.value)
+    assert job in message and "Unclassified test command" in message and "line 2" in message
+
+
+def test_an_action_cannot_hide_a_rust_test_command(tree):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"]["new-job"] = {"steps": [{"name": "Delegated test", "uses": "./.github/actions/tests",
+        "with": {"script": "python -m pytest rust/test_extra.py"}}]}
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    with pytest.raises(selection.SelectionError) as error:
+        recipe(tree)
+    assert all(word in str(error.value) for word in ("new-job", "Delegated test", "line 1", "uses"))
+
+
+@pytest.mark.parametrize("job", ["scope", "candidate", "stress", "daemon-image"])
+def test_non_selection_jobs_cannot_gain_a_direct_rust_test_line(tree, job):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"][job] = {"steps": [{"name": "Unexpected tests", "run": "python -m pytest rust/test_extra.py"}]}
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    with pytest.raises(selection.SelectionError, match=job):
+        recipe(tree)
+
+
 @pytest.mark.parametrize("launcher", ["python", "python3", "pytest"])
 def test_literal_pytest_launchers_are_supported(tree, launcher):
     command = launcher + (" -m pytest" if launcher != "pytest" else "")

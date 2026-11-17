@@ -25,6 +25,23 @@ def _backend():
     return _database_turn_platform
 
 
+def _current_identity(backend):
+    try:
+        identity = backend.identity(os.getpid())
+    except OSError as error:
+        raise RuntimeError(f"database turn identity() failed: {error}; restore this account's process-query access and retry") from None
+    if identity is None:
+        raise RuntimeError("database turn identity() found no live process; restore process-query access and retry")
+    return identity
+
+
+def _contain(backend):
+    try:
+        backend.contain_process_tree()
+    except OSError as error:
+        raise RuntimeError(f"database turn contain_process_tree() failed: {error}; restore permission to create and assign the owned process job, then retry") from None
+
+
 class Lease:
     def __init__(self, stream, *, pid: int, delegated: bool = False):
         self.stream = stream
@@ -138,7 +155,7 @@ def _acquire(path: Path, *, holder: str, wait_seconds: float,
     if previous is not None and not previous.closed:
         if previous.pid == os.getpid():
             if contain and not previous.contained:
-                _backend().contain_process_tree()
+                _contain(_backend())
                 previous.contained = True
             return previous
         previous.close()
@@ -153,11 +170,9 @@ def _acquire(path: Path, *, holder: str, wait_seconds: float,
         if stream is not None:
             lease = Lease(stream, pid=os.getpid())
             try:
-                identity = backend.identity(os.getpid())
-                if identity is None:
-                    raise RuntimeError("cannot verify this database turn's process identity")
+                identity = _current_identity(backend)
                 if contain:
-                    backend.contain_process_tree()
+                    _contain(backend)
                     lease.contained = True
                 record = {"holder": holder, "pid": identity.pid,
                           "process_started": identity.started, "owner": identity.owner,
@@ -182,7 +197,7 @@ def _acquire(path: Path, *, holder: str, wait_seconds: float,
             # cannot grant this reuse; the live owner must be an ancestor.
             lease = Lease(None, pid=os.getpid(), delegated=True)
             if contain:
-                backend.contain_process_tree()
+                _contain(backend)
                 lease.contained = True
             return lease
         who = _holder(record, owner)

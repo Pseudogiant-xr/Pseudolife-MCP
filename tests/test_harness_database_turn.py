@@ -191,3 +191,39 @@ def test_bounded_wait_retries_os_handle_and_reports_holder(tmp_path, backend, mo
     lease = turn.acquire(path, holder="arriving run", wait_seconds=1)
     assert not lease.delegated
     assert "another database run" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", ["identity", "contain_process_tree"])
+def test_os_failure_is_a_named_standalone_refusal_and_releases_the_handle(tmp_path, backend, monkeypatch, operation):
+    folder = tmp_path / "locks"
+    folder.mkdir()
+    (folder / database_turn.MARKER).touch()
+    monkeypatch.setattr(database_turn, "lock_folder", lambda: folder)
+    original = getattr(backend, operation)
+    def denied(*args):
+        raise PermissionError("synthetic access denied")
+    monkeypatch.setattr(backend, operation, denied)
+    with pytest.raises(SystemExit) as error:
+        database_turn.require_turn(contain=True)
+    message = str(error.value)
+    assert operation in message and "synthetic access denied" in message and "retry" in message
+    monkeypatch.setattr(backend, operation, original)
+    lease = database_turn.ensure_turn(contain=True)
+    assert lease is not None and not lease.delegated
+    lease.close()
+
+
+@pytest.mark.parametrize("delegated", [False, True])
+def test_containment_os_failure_during_reuse_is_a_refusal(tmp_path, backend, monkeypatch, delegated):
+    path = tmp_path / "turn.lock"
+    if delegated:
+        backend.busy = True
+        path.write_text(json.dumps(holder_record(backend)))
+        backend.identities[backend.current] = Identity(backend.current, "200", "test-owner", backend.holder)
+    else:
+        turn.acquire(path, holder="existing run")
+    def denied():
+        raise PermissionError("synthetic job access denied")
+    monkeypatch.setattr(backend, "contain_process_tree", denied)
+    with pytest.raises(RuntimeError, match="contain_process_tree.*synthetic job access denied.*retry"):
+        turn.acquire(path, holder="owned run", contain=True)

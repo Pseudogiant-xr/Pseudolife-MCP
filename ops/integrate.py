@@ -2005,7 +2005,12 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
 def _undo_merge_if_harness_incomplete(plan: Plan, member: Member, before: str) -> bool:
     # A refusal is attributable only when the preceding combined tree was
     # readable. Judge each tentative merge before any compile or full suite.
-    _harness_recipe(before)
+    try:
+        _harness_recipe(before)
+    except Refusal:
+        # A repair can span members. An inherited unreadable tree cannot be
+        # blamed on this member; the completed head is still checked strictly.
+        return False
     head = _out("rev-parse", "HEAD")
     try:
         _harness_recipe(head)
@@ -2205,7 +2210,11 @@ def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
     merge again from the base. Nothing else is added inside a batch."""
     # The freeze judges the whole listing (and the open pull requests it
     # carries) before the cut search narrows it to one member.
-    _harness_recipe(plan.base_sha)  # A broken base is never attributed to a member.
+    try:
+        _harness_recipe(plan.base_sha)
+    except Refusal as error:
+        print(f"warning: base {plan.base_sha[:12]} has unreadable harness coverage: {error}; "
+              "members may repair it, but the completed head must read cleanly", file=sys.stderr)
     _fetch_listed(members)       # the first landing reads the guard the members carry
     freeze = _freeze_module(plan.base_sha, members)
     prepass = _freeze_prepass(plan, freeze, members)
@@ -2213,6 +2222,7 @@ def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
     members = _release_cut_alone(plan, members, prepass.refused)
     cut_drops = list(plan.dropped)
     _merge_members(plan, members, freeze, prepass)
+    _harness_recipe(_out("rev-parse", "HEAD"))
     _record_carried(plan, prepass)
     _refuse_a_cut_beside_others(plan)
     inputs = _census_inputs(plan.base_sha)

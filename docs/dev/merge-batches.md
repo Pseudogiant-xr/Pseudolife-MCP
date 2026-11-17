@@ -655,12 +655,28 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    `tests/`, never these tests under `rust/`. Before any compile or suite,
    `build` reads rust.yml and the literal `RUST_HARNESS` from each tentative
    batch head without importing its Python. A member that makes the list
-   omit a Rust-job pytest path is left out with a comment; an unreadable
-   base refuses without blaming a member. The selection also includes the
+   omit a Rust-job pytest path is left out with a comment. An unreadable
+   base produces a warning naming the offending workflow lines; members
+   may repair it, and the completed head must read cleanly. The selection also includes the
    parity-checks job's candidate-free pytest cases and delegated unittest
    discovery, classified in `rust/ci/harness-test-selections.json`. Mixed
    files contribute their unit selectors; candidate-required cases stay in
    their lanes. Unknown commands, options or classifications fail closed.
+   Every job and `uses:` step in rust.yml is audited. Fixed test selections
+   come from `rust`, `parity-checks` and its mirrored `parity-selfhosted` job.
+   The fixture job may invoke the schema wrapper only in build-only mode.
+   The scope/pool jobs have explicitly classified routing helpers, and the
+   Rust job's other Python helpers generate/check metadata or replay selected
+   PR goldens. The daemon-image job's explicitly classified image tests and
+   probes stay in that hosted image lane. Stress jobs have explicitly
+   classified manual-dispatch drivers, not another fixed batch selection.
+   Other jobs cannot introduce a Rust test command without a classification:
+   any line carrying a Rust Python path, pytest or unittest must use a
+   recognised launcher in its classified job. A refusal names the job, step
+   and run-line number. Unknown actions/reusable jobs and executable action
+   inputs refuse too; recognised actions only check out, provision tools,
+   cache or transfer artifacts. Tests pin these boundaries, including a
+   new test-bearing line in another job.
    Candidate-free fixtures can declare optional package names in that file;
    their exact version pins come from the batch head's parity job and are
    installed into the fresh environment. Missing or conflicting pins refuse
@@ -670,6 +686,8 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    The command sends the head as a git bundle, runs the controller's
    `ops/rust-harness-remote.ps1`, and records its result and live log beside
    the suite results. No push or private gate kit is needed.
+   The candidate-free parity phase adds about 5.4 minutes to every gate,
+   measured including its fresh environment, service startup and cleanup.
    - The VM is configured through `rust-check.remote`, with role `Windows
      dev VM`. Its private `rust-harness-services.ps1` provides
      `Start-HarnessServices` and `Stop-HarnessServices`: start and prove the
@@ -683,6 +701,10 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
      and clone locks retain their configurable `--lock-wait-seconds` default
      of 1200. Bare Rust pytest and standalone database harness launchers take
      the turn on marker-enabled machines too.
+     Only the Windows dev VM currently carries the marker, because its gate
+     starts and stops PostgreSQL. Do not mark the Linux dev boxes yet: their
+     PostgreSQL stays up for concurrent targeted runs, and there is no
+     containment off Windows. Their no-marker path remains unchanged.
    - `--require-databases` remains mandatory: missing login or Docker fails
      database cases instead of silently skipping them. Hosted runs without
      that option retain their existing platform/login skips.

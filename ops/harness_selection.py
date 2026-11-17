@@ -20,6 +20,27 @@ NATIVE_PROGRAMS = frozenset({
     "rust/daemon/harness/graph_store.py", "rust/daemon/harness/principals.py",
     "rust/daemon/harness/gen_graph_unicode.py",
 })
+PARITY_JOBS = ("parity-checks", "parity-selfhosted")
+SETUP_ACTIONS = frozenset({
+    "actions/checkout@v4", "actions/setup-python@v5", "actions/cache@v4",
+    "actions/upload-artifact@v4", "actions/download-artifact@v4",
+    "dtolnay/rust-toolchain@stable", "Swatinem/rust-cache@v2",
+})
+# These are routing, generation, build, image-lane or manual-stress entry
+# points, not an open-ended exemption for Python in another job.
+JOB_PROGRAMS = {
+    "scope": {"rust/ci/parity_scope.py"},
+    "rust": {"rust/ci/pr_precheck.py", "rust/ci/pr_precheck_run.py",
+             "rust/daemon/harness/gen_schema_sql.py", "rust/producer_census.py", "rust/ci/inventory.py"},
+    "fixtures": {"rust/daemon/harness/schema_ci.py"},
+    "parity-pool": {"rust/ci/linux_pool.py"},
+    "daemon-image": {"rust/daemon/container_inputs.py", "rust/daemon/test_container.py",
+                     "rust/daemon/container_probe.py", "rust/daemon/harness/image_model_proof.py"},
+    "stress-plan": {"rust/ci/stress.py"},
+    "stress-build": {"rust/ci/stress.py"},
+    "stress": {"rust/ci/stress.py", "rust/cli_harness/lease_ci.py"},
+    "stress-report": {"rust/ci/stress.py", "rust/ci/stress_history.py"},
+}
 
 
 class SelectionError(ValueError):
@@ -101,19 +122,128 @@ def _steps(workflow, job):
         raise SelectionError(f"cannot read rust.yml {job}: {error}") from None
 
 
-def _lines(step):
+def _numbered_lines(step):
     if not isinstance(step, dict):
         raise SelectionError("a workflow step is not a mapping")
     run = step.get("run", "")
     if not isinstance(run, str):
         raise SelectionError("a workflow run command is not text")
-    for line in run.replace("`\n", " ").replace("\\\n", " ").splitlines():
-        line = line.strip()
+    pending, start = "", 1
+    for number, raw in enumerate(run.splitlines(), 1):
+        if not pending:
+            start = number
+        line = pending + raw.strip()
+        if line.endswith(("`", "\\")):
+            pending = line[:-1] + " "
+            continue
+        pending = ""
         if line and not line.startswith("#"):
             try:
-                yield shlex.split(line)
+                yield start, line, shlex.split(line)
             except ValueError as error:
-                raise SelectionError(f"cannot parse workflow command: {error}") from None
+                raise SelectionError(f"line {start}: cannot parse workflow command: {error}") from None
+    if pending:
+        raise SelectionError(f"line {start}: unfinished workflow command continuation")
+
+
+def _lines(step):
+    for _, _, words in _numbered_lines(step):
+        yield words
+
+
+def _test_bearing(text):
+    return bool(re.search(r"\brust[/\\][^\s\"']*\.py\b|pytest\b|(?:^|\s)-m\s*unittest\b", text))
+
+
+def _classify_line(job, text, words):
+    if not _test_bearing(text):
+        return
+    if any(word in {"&&", "||", ";", "|"} for word in words):
+        raise SelectionError("compound test-bearing commands need an explicit classification")
+    literal = words[:1] in (["python"], ["python3"])
+    pip = words[:4] in (["python", "-m", "pip", "install"], ["python3", "-m", "pip", "install"])
+    # The existing runtime-setup step uses its just-created interpreter only
+    # to install packages. This does not license variable test launchers.
+    pip = pip or (words[:2] == ["&", "$python"] and words[2:5] == ["-m", "pip", "install"])
+    if pip:
+        return
+    if _is_pytest(words):
+        if job not in ("rust", *PARITY_JOBS):
+            raise SelectionError("pytest is not classified as a test runner in this job")
+        _pytest(words, filtered=job != "rust")
+        return
+    if "pytest" in words:
+        raise SelectionError("unsupported pytest launcher")
+    if not literal:
+        if (job == "rust" and words[:3] == ["&", "$env:PRECHECK_PYTHON", "rust/ci/pr_precheck_run.py"]):
+            program, arguments = words[2], words[3:]
+        else:
+            raise SelectionError("unsupported Python launcher for a Rust script or unittest command")
+    elif len(words) >= 2:
+        program, arguments = words[1], words[2:]
+    else:
+        raise SelectionError("incomplete Python command")
+    if job in PARITY_JOBS and (program in WRAPPERS or program in NATIVE_PROGRAMS):
+        return
+    if job in PARITY_JOBS and program.startswith("rust/") and PurePosixPath(program).name.startswith("test_"):
+        if arguments:
+            raise SelectionError("unsupported direct unittest arguments; declare the literal file without options")
+        return
+    if program not in JOB_PROGRAMS.get(job, set()):
+        raise SelectionError(f"unclassified Rust script or unittest command {program!r}")
+    if program == "rust/ci/pr_precheck_run.py":
+        if "--only" not in arguments or arguments[arguments.index("--only") + 1:][:1] != ["goldens"]:
+            raise SelectionError("PR precheck driver is classified only for --only goldens")
+    if job == "fixtures" and ("--build-only" not in arguments or "--no-build" in arguments):
+        raise SelectionError("fixture wrapper is classified only for --build-only")
+    if program == "rust/ci/stress.py":
+        expected = {"stress-plan": "plan", "stress-build": "archive", "stress": "run", "stress-report": "report"}[job]
+        if arguments[:1] != [expected]:
+            raise SelectionError(f"stress driver is classified only for {expected}")
+    if program == "rust/daemon/test_container.py" and arguments:
+        raise SelectionError("image unittest entry point is classified without arguments")
+    if any(arguments[index:index + 2] == ["-m", "unittest"] for index in range(len(arguments))):
+        raise SelectionError("unclassified unittest arguments to a workflow helper")
+
+
+def _audit_jobs(workflow):
+    try:
+        jobs = workflow["jobs"]
+        if not isinstance(jobs, dict):
+            raise ValueError("jobs is not a mapping")
+    except (KeyError, TypeError, ValueError) as error:
+        raise SelectionError(f"cannot read rust.yml jobs: {error}") from None
+    result = {}
+    for job, value in jobs.items():
+        if not isinstance(value, dict) or "uses" in value:
+            raise SelectionError(f"rust.yml job {job!r}, step 'reusable job', line 1: unclassified uses job")
+        result[job] = []
+        for index, step in enumerate(_steps(workflow, job), 1):
+            label = step.get("name", step.get("id", f"step {index}")) if isinstance(step, dict) else f"step {index}"
+            where = f"rust.yml job {job!r}, step {label!r} (#{index})"
+            if not isinstance(step, dict):
+                raise SelectionError(f"{where}, line 1: step is not a mapping")
+            if "uses" in step:
+                if not isinstance(step["uses"], str) or step["uses"] not in SETUP_ACTIONS or "run" in step:
+                    raise SelectionError(f"{where}, line 1: unclassified uses step {step['uses']!r}")
+                if not isinstance(step.get("with", {}), dict):
+                    raise SelectionError(f"{where}, line 1: uses inputs are not a mapping")
+                if any(key in step.get("with", {}) for key in ("script", "run", "command")):
+                    raise SelectionError(f"{where}, line 1: executable uses inputs are not classified")
+                continue
+            try:
+                for number, text, words in _numbered_lines(step):
+                    location = f"{where}, line {number}"
+                    try:
+                        _classify_line(job, text, words)
+                    except SelectionError as error:
+                        raise SelectionError(f"{location}: {error}: {text}") from None
+                    result[job].append((location, words))
+            except SelectionError as error:
+                if str(error).startswith("rust.yml job "):
+                    raise
+                raise SelectionError(f"{where}, {error}") from None
+    return result
 
 
 def _pytest(words, *, filtered=False):
@@ -279,23 +409,25 @@ def recipe(read, tree_paths):
     except (yaml.YAMLError, OSError, KeyError) as error:
         raise SelectionError(f"cannot read batch-head rust.yml: {error}") from None
     listed = literal_harness(read("ops/integrate.py"))
+    audited = _audit_jobs(workflow)
     rust_paths = set()
-    for step in _steps(workflow, "rust"):
-        for words in _lines(step):
-            if _is_pytest(words):
-                rust_paths.update(_pytest(words))
-            elif "pytest" in words and words[:4] not in (["python", "-m", "pip", "install"],
-                                                         ["python3", "-m", "pip", "install"]):
-                raise SelectionError("unsupported pytest launcher in the Rust job")
+    rust_locations = {}
+    for where, words in audited.get("rust", []):
+        if _is_pytest(words):
+            for path in _pytest(words):
+                rust_paths.add(path)
+                rust_locations[path] = where
     if not rust_paths:
         raise SelectionError("the Rust job declares no readable pytest selections")
     missing = sorted(rust_paths - set(listed))
     if missing:
-        raise SelectionError("RUST_HARNESS omits Rust-job paths: " + ", ".join(missing))
+        raise SelectionError("RUST_HARNESS omits Rust-job paths: " + ", ".join(
+            f"{path} ({rust_locations[path]})" for path in missing))
     classifications = _classification(read(CLASSIFICATION))
     pytest_paths = set(listed)
     additional = []
-    for step in _steps(workflow, "parity-checks"):
+    parity_steps = [step for job in PARITY_JOBS if job in audited for step in _steps(workflow, job)]
+    for step in parity_steps:
         for words in _lines(step):
             if _is_pytest(words):
                 paths = _pytest(words, filtered=True)
@@ -349,7 +481,7 @@ def recipe(read, tree_paths):
     needed = {name for command in commands for path in command.paths
               for name in classifications.get(_path(path), {}).get("requirements", [])}
     pins = {name: set() for name in needed}
-    for step in _steps(workflow, "parity-checks"):
+    for step in parity_steps:
         for words in _lines(step):
             if words[:4] not in (["python", "-m", "pip", "install"], ["python3", "-m", "pip", "install"]):
                 continue
