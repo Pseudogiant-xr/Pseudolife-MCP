@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "0621ce7204e841d6",
+  "fingerprint": "813a3e6fa4a6c4f0",
+  "reason": "Adds 51 native audit cases to the existing PostgreSQL pytest step, with no additional job, artifact, installation or matrix item. The Windows dev VM measured 44.04 seconds (0.74 minutes) for the added file; hosted minutes from this pull request will replace this provisional observation before handoff."
+}
