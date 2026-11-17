@@ -10,20 +10,77 @@ pub(super) const NO_LOG: &str =
     "this bank has no audit log yet (schema older than v42); start a v42 daemon once to create it";
 const COLUMNS: &str = "seq,event,actor,principal,agent_id,recipient_agent_id,project,task,message_id,payload,created_at,hlc,prev_hash,hash";
 
-/// What a bank action ends in; `Deferred` happens before any effect.
+/// A refusal never claims the audit was checked or the operation completed.
 pub(super) enum Ending {
     Exit(u8),
-    Deferred,
+    Refused(&'static str),
 }
 
-/// The configured DSN, or `None` (no or empty variable, an unsupported DSN
-/// spelling, or a value that is not Unicode): those paths defer.
+/// None selects container transport, whose preflight rejects an invalid
+/// explicit setting before it can select a different bank.
 pub(super) fn dsn() -> Option<pg::Dsn> {
     let value = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL").ok()?;
     if value.is_empty() {
         return None;
     }
-    pg::Dsn::parse(&value).ok()
+    pg::Dsn::parse_with_connection_options(&value).ok()
+}
+
+pub(super) fn dsn_refusal() -> u8 {
+    let error = match std::env::var("PSEUDOLIFE_MCP_DATABASE_URL") {
+        Ok(value) => pg::Dsn::parse_with_connection_options(&value).err(),
+        Err(_) => None,
+    };
+    match error {
+        Some(error) => connection_error(error),
+        None => super::stats::error(
+            "PSEUDOLIFE_MCP_DATABASE_URL is missing or is not Unicode; set it to a valid PostgreSQL database URL",
+        ),
+    }
+}
+
+pub(super) fn connection_error(error: pg::Error) -> u8 {
+    let message = match error {
+        pg::Error::UnsupportedOption(name) if name == "sslmode" => "PSEUDOLIFE_MCP_DATABASE_URL sslmode is unsupported; choose disable, prefer, require, verify-ca or verify-full".to_owned(),
+        pg::Error::UnsupportedOption(_) => "PSEUDOLIFE_MCP_DATABASE_URL contains an unsupported option name; remove that option (supported names: host, port, user, password, dbname, sslmode, sslrootcert, application_name, connect_timeout)".to_owned(),
+        pg::Error::InvalidOption(name) => format!("PSEUDOLIFE_MCP_DATABASE_URL has an invalid {name} option; correct that option"),
+        pg::Error::InvalidDsn => "PSEUDOLIFE_MCP_DATABASE_URL is not a supported PostgreSQL URL or keyword connection string; correct that setting".to_owned(),
+        pg::Error::AmbientControl(name) if matches!(name.as_str(), "postgresql.crt" | "postgresql.key" | "root.crl") => {
+            format!("unsupported implicit PostgreSQL TLS file {name}; move that file out of the default PostgreSQL directory before retrying")
+        }
+        pg::Error::AmbientControl(name) => {
+            // Unknown PGSSL/PGTLS names may themselves contain pasted data.
+            // Match the Unicode folding used by TlsEnvironment on Windows.
+            let folded = name.to_uppercase();
+            let name = if folded.starts_with("PGSSL") { "PGSSL*" }
+                else if folded.starts_with("PGTLS") { "PGTLS*" }
+                else { &name };
+            format!("PostgreSQL ambient setting {name} is unsupported; remove that setting for this command and configure PSEUDOLIFE_MCP_DATABASE_URL explicitly")
+        }
+        pg::Error::RootCertificate => "PSEUDOLIFE_MCP_DATABASE_URL sslrootcert cannot be read as a trusted certificate; set sslrootcert to a readable PEM certificate".to_owned(),
+        pg::Error::HostnameRules => "PSEUDOLIFE_MCP_DATABASE_URL host does not match the TLS certificate's subject alternative names; use the host named by the server certificate".to_owned(),
+        pg::Error::SessionSetup => "PostgreSQL audit session setup failed; restore the session permissions for the login in PSEUDOLIFE_MCP_DATABASE_URL".to_owned(),
+        pg::Error::Connection | pg::Error::Shutdown => "PostgreSQL audit connection failed; restore connectivity and authentication for PSEUDOLIFE_MCP_DATABASE_URL".to_owned(),
+    };
+    super::stats::error(message)
+}
+
+const SNAPSHOT_ERROR: &str = "cannot start a read-only audit snapshot; restore database connectivity and transaction permissions for PSEUDOLIFE_MCP_DATABASE_URL";
+const LOG_ERROR: &str = "cannot inspect the audit schema; restore database connectivity and catalog permissions for PSEUDOLIFE_MCP_DATABASE_URL";
+const READ_ERROR: &str = "cannot read audit rows; restore database connectivity and SELECT permissions on coordination_events";
+const DECODE_ERROR: &str = "audit columns have unsupported database types or nulls; restore the coordination_events schema from a trusted backup";
+
+fn read_error(error: tokio_postgres::Error) -> &'static str {
+    use tokio_postgres::error::SqlState;
+    match error.code() {
+        Some(&SqlState::UNDEFINED_COLUMN | &SqlState::UNDEFINED_TABLE) => {
+            "audit schema is missing a required table or column; restore the coordination_events schema from a trusted backup"
+        }
+        Some(&SqlState::INSUFFICIENT_PRIVILEGE) => {
+            "audit SELECT permission was denied; grant the configured database login SELECT on coordination_events"
+        }
+        _ => READ_ERROR,
+    }
 }
 
 pub(super) async fn has_body_column(client: &impl GenericClient) -> Result<bool, ()> {
@@ -62,8 +119,8 @@ pub(super) struct Filters<'a> {
 pub(super) async fn audit_events(
     client: &impl GenericClient,
     filters: &Filters<'_>,
-) -> Result<Vec<(Map<String, Value>, f64)>, ()> {
-    let body = if has_body_column(client).await? {
+) -> Result<Vec<(Map<String, Value>, f64)>, &'static str> {
+    let body = if has_body_column(client).await.map_err(|_| LOG_ERROR)? {
         "body,body_salt"
     } else {
         "NULL::text AS body,NULL::text AS body_salt"
@@ -97,18 +154,19 @@ pub(super) async fn audit_events(
         format!(" WHERE {}", clauses.join(" AND "))
     };
     let sql = format!("SELECT {COLUMNS},{body} FROM coordination_events{filter} ORDER BY seq");
-    let rows = client.query(&sql, &params).await.map_err(|_| ())?;
-    let text = |row: &tokio_postgres::Row, name: &str| -> Result<Value, ()> {
-        let value: Option<String> = row.try_get(name).map_err(|_| ())?;
+    let rows = client.query(&sql, &params).await.map_err(read_error)?;
+    let text = |row: &tokio_postgres::Row, name: &str| -> Result<Value, &'static str> {
+        let value: Option<String> = row.try_get(name).map_err(|_| DECODE_ERROR)?;
         Ok(value.map_or(Value::Null, Value::String))
     };
     let mut out = Vec::with_capacity(rows.len());
     for row in &rows {
-        let seq: i64 = row.try_get("seq").map_err(|_| ())?;
-        let created_at: f64 = row.try_get("created_at").map_err(|_| ())?;
+        let seq: i64 = row.try_get("seq").map_err(|_| DECODE_ERROR)?;
+        let created_at: f64 = row.try_get("created_at").map_err(|_| DECODE_ERROR)?;
         if !created_at.is_finite() {
-            // Python would hash and print NaN/Infinity spellings: deferred.
-            return Err(());
+            return Err(
+                "audit created_at is not finite; restore valid audit rows from a trusted backup",
+            );
         }
         let mut map = Map::new();
         map.insert("seq".into(), Value::Number(seq.into()));
@@ -155,8 +213,9 @@ pub(super) fn no_log() -> Ending {
 }
 
 pub(super) async fn verify(dsn: &pg::Dsn, expect: Option<super::args::Head>) -> Ending {
-    let Ok(mut session) = pg::Session::open(dsn).await else {
-        return Ending::Deferred;
+    let mut session = match pg::Session::open(dsn).await {
+        Ok(session) => session,
+        Err(error) => return Ending::Exit(connection_error(error)),
     };
     let ending = verify_in(&mut session, expect).await;
     let _ = session.close().await;
@@ -165,15 +224,16 @@ pub(super) async fn verify(dsn: &pg::Dsn, expect: Option<super::args::Head>) -> 
 
 async fn verify_in(session: &mut pg::Session, expect: Option<super::args::Head>) -> Ending {
     let Ok(tx) = snapshot(session).await else {
-        return Ending::Deferred;
+        return Ending::Refused(SNAPSHOT_ERROR);
     };
     match log_present(&tx).await {
         Ok(true) => {}
         Ok(false) => return no_log(),
-        Err(()) => return Ending::Deferred,
+        Err(()) => return Ending::Refused(LOG_ERROR),
     }
-    let Ok(rows) = audit_events(&tx, &Filters::default()).await else {
-        return Ending::Deferred;
+    let rows = match audit_events(&tx, &Filters::default()).await {
+        Ok(rows) => rows,
+        Err(message) => return Ending::Refused(message),
     };
     let _ = tx.rollback().await;
     let mut walker = chain::Walker::new(expect);
@@ -188,13 +248,13 @@ async fn verify_in(session: &mut pg::Session, expect: Option<super::args::Head>)
         match walker.push(row) {
             Ok(None) => {}
             Ok(Some(report)) => return Ending::Exit(super::report(report, 1)),
-            Err(chain::Deferred) => return Ending::Deferred,
+            Err(chain::Failure::Unsupported(message)) => return Ending::Refused(message),
             Err(chain::Failure::Python) => return Ending::Exit(super::failed()),
         }
     }
     match walker.finish() {
         Ok((report, ok)) => Ending::Exit(super::report(report, if ok { 0 } else { 1 })),
-        Err(chain::Deferred) => Ending::Deferred,
+        Err(chain::Failure::Unsupported(message)) => Ending::Refused(message),
         Err(chain::Failure::Python) => Ending::Exit(super::failed()),
     }
 }
@@ -208,18 +268,18 @@ pub(super) async fn stats(
 ) -> Result<(Vec<Value>, Option<Vec<Value>>), Ending> {
     let mut session = pg::Session::open(dsn)
         .await
-        .map_err(|_| Ending::Exit(super::failed()))?;
+        .map_err(|error| Ending::Exit(connection_error(error)))?;
     let result = async {
         let tx = snapshot(&mut session).await.map_err(|_| Ending::Exit(super::failed()))?;
         if !log_present(&tx).await.map_err(|_| Ending::Exit(super::failed()))? { return Err(no_log()); }
         let rows = audit_events(&tx,&Filters { since:Some(first),until:Some(until),..Filters::default() })
-            .await.map_err(|_| Ending::Exit(super::failed()))?;
+            .await.map_err(Ending::Refused)?;
         let mut events = Vec::new();
         for (mut row,_) in rows {
             let payload = row["payload"].as_str().ok_or_else(|| Ending::Exit(super::failed()))?;
             let parsed = codec::python_loads(payload).map_err(|_| Ending::Exit(super::failed()))?;
             row.insert("payload".into(),super::stats::payload(parsed)
-                .map_err(|_| Ending::Deferred)?);
+                .map_err(|_| Ending::Refused("audit payload contains a value stats cannot represent; use an archive whose payload strings are valid Unicode"))?);
             events.push(Value::Object(row));
         }
         let present: bool = tx.query_one("SELECT to_regclass('public.coordination_wakes') IS NOT NULL",&[])
@@ -280,9 +340,25 @@ enum Resolved {
     Ambiguous(String),
 }
 
+fn agent_query_error(error: tokio_postgres::Error) -> &'static str {
+    use tokio_postgres::error::SqlState;
+    match error.code() {
+        Some(&SqlState::UNDEFINED_COLUMN | &SqlState::UNDEFINED_TABLE) => {
+            "--agent lookup schema is missing a required table or column; restore the coordination_agents and coordination_events schema from a trusted backup"
+        }
+        Some(&SqlState::INSUFFICIENT_PRIVILEGE) => {
+            "--agent lookup SELECT permission was denied; grant the configured database login SELECT on coordination_agents and coordination_events"
+        }
+        _ if error.is_closed() => {
+            "--agent lookup lost its database connection; restore connectivity to PSEUDOLIFE_MCP_DATABASE_URL"
+        }
+        _ => "--agent database lookup failed; report this database lookup failure",
+    }
+}
+
 /// `resolve_agent_id(conn, value)`: the value itself, or the one id it is a
 /// prefix of among registered addresses and the log's actors and recipients.
-async fn resolve_agent(client: &impl GenericClient, value: &str) -> Result<Resolved, ()> {
+async fn resolve_agent(client: &impl GenericClient, value: &str) -> Result<Resolved, &'static str> {
     if !is_id_prefix(value) {
         return Ok(Resolved::Id(value.to_owned()));
     }
@@ -293,12 +369,12 @@ async fn resolve_agent(client: &impl GenericClient, value: &str) -> Result<Resol
             &[&like],
         )
         .await
-        .map_err(|_| ())?;
+        .map_err(agent_query_error)?;
     let ids: Vec<String> = rows
         .iter()
         .map(|row| row.try_get::<_, String>(0))
         .collect::<Result<_, _>>()
-        .map_err(|_| ())?;
+        .map_err(|_| "--agent lookup columns have unsupported types or nulls; restore the coordination_agents and coordination_events schema from a trusted backup")?;
     Ok(match ids.len() {
         0 => Resolved::Missing,
         1 => Resolved::Id(ids[0].clone()),
@@ -328,29 +404,25 @@ fn export_line(map: Map<String, Value>) -> Option<String> {
 }
 
 pub(super) async fn export(dsn: &pg::Dsn, args: &Export) -> Ending {
-    let Ok(mut session) = pg::Session::open(dsn).await else {
-        return Ending::Deferred;
+    let mut session = match pg::Session::open(dsn).await {
+        Ok(session) => session,
+        Err(error) => return Ending::Exit(connection_error(error)),
     };
     let ending = export_in(&mut session, args).await;
     let _ = session.close().await;
     ending
 }
 
-enum Outcome {
-    Lines(String),
-    AgentRefused(String),
-}
-
 async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
     let Ok(tx) = snapshot(session).await else {
-        return Ending::Deferred;
+        return Ending::Refused(SNAPSHOT_ERROR);
     };
     match log_present(&tx).await {
         Ok(true) => {}
         Ok(false) => return no_log(),
-        Err(()) => return Ending::Deferred,
+        Err(()) => return Ending::Refused(LOG_ERROR),
     }
-    // Python creates the destination before agent resolution and payload decoding.
+    // Reserve a private staging file; the destination remains absent until success.
     let output = match Output::create(args) {
         Ok(output) => output,
         Err(ending) => return ending,
@@ -358,21 +430,17 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
     let outcome = match &args.agent {
         None => None,
         Some(agent) => match resolve_agent(&tx, agent).await {
-            Err(()) => return Ending::Deferred,
+            Err(message) => return Ending::Refused(message),
             Ok(Resolved::Id(id)) => Some(id),
             Ok(Resolved::Missing) => {
-                return write_lines(
-                    output,
-                    Outcome::AgentRefused(format!("no agent id starts with {agent}")),
-                );
+                crate::stderrln!("board-audit: no agent id starts with {agent}");
+                return Ending::Exit(2);
             }
             Ok(Resolved::Ambiguous(listed)) => {
-                return write_lines(
-                    output,
-                    Outcome::AgentRefused(format!(
-                        "--agent {agent} matches several ids: {listed}; give a longer prefix"
-                    )),
+                crate::stderrln!(
+                    "board-audit: --agent {agent} matches several ids: {listed}; give a longer prefix"
                 );
+                return Ending::Exit(2);
             }
         },
     };
@@ -383,26 +451,22 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
         since: args.since,
         until: args.until,
     };
-    let Ok(rows) = audit_events(&tx, &filters).await else {
-        return Ending::Deferred;
+    let rows = match audit_events(&tx, &filters).await {
+        Ok(rows) => rows,
+        Err(message) => return Ending::Refused(message),
     };
     let _ = tx.rollback().await;
-    let mut text = String::new();
     for (map, _) in rows {
         let Some(line) = export_line(map) else {
-            // Python has already emitted preceding stdout rows. A failed
-            // file export still removes the run's exclusive destination.
-            if output.file.is_none() {
-                let ending = write_lines(output, Outcome::Lines(text));
-                if !matches!(ending, Ending::Exit(0)) {
-                    return ending;
-                }
-            }
-            return Ending::Exit(super::failed());
+            return Ending::Exit(super::stats::error(
+                "audit payload cannot be encoded for export; restore a readable audit payload from a trusted backup; stdout output is incomplete and no file archive was published",
+            ));
         };
-        text.push_str(&line);
+        if let Err(code) = output.write(&line) {
+            return Ending::Exit(code);
+        }
     }
-    write_lines(output, Outcome::Lines(text))
+    Ending::Exit(output.finish())
 }
 
 /// `OSError.strerror` of a failed file write in CPython. POSIX: the C
@@ -427,149 +491,42 @@ pub(super) fn write_strerror(error: &std::io::Error) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Remove the destination on failure only while its identity still matches.
-/// The check and pathname unlink are separate on POSIX and Windows; an agent
-/// refusal preserves the empty file, as Python does.
-struct Output<'a> {
-    args: &'a Export,
-    file: Option<std::fs::File>,
-    keep: bool,
+/// A file archive is private until complete; stdout keeps streaming rows.
+struct Output {
+    file: Option<super::output::Staged>,
 }
-impl<'a> Output<'a> {
-    fn create(args: &'a Export) -> Result<Self, Ending> {
-        let file = if let Some(out) = &args.out {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(out)
-            {
-                Ok(file) => Some(file),
-                Err(error) => {
-                    return Err(match write_strerror(&error) {
-                        Some(text) => {
-                            crate::stderrln!("board-audit: cannot create {out}: {text}");
-                            Ending::Exit(2)
-                        }
-                        None => Ending::Deferred,
-                    });
-                }
-            }
+impl Output {
+    fn create(args: &Export) -> Result<Self, Ending> {
+        let file = args
+            .out
+            .as_ref()
+            .map(|out| {
+                super::output::Staged::create(std::path::Path::new(out))
+                    .map_err(|error| Ending::Exit(super::output::failure("staging", &error)))
+            })
+            .transpose()?;
+        Ok(Self { file })
+    }
+
+    fn write(&self, line: &str) -> Result<(), u8> {
+        use std::io::Write;
+        if let Some(file) = &self.file {
+            file.file()
+                .write_all(line.as_bytes())
+                .map_err(|e| super::output::failure("write", &e))
         } else {
-            None
-        };
-        Ok(Self {
-            args,
-            file,
-            keep: false,
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(&super::super::text_bytes(line)).and_then(|()| stdout.flush())
+                .map_err(|_| super::stats::error("stdout output is incomplete because the output was closed; rerun export with --out to a writable file"))
+        }
+    }
+
+    fn finish(self) -> u8 {
+        self.file.map_or(0, |file| {
+            file.publish()
+                .map_or_else(|e| super::output::failure("publication", &e), |()| 0)
         })
     }
-}
-impl Drop for Output<'_> {
-    fn drop(&mut self) {
-        if !self.keep
-            && let Some(file) = &self.file
-            && let Some(out) = &self.args.out
-            && created_destination(file, std::path::Path::new(out))
-        {
-            let _ = std::fs::remove_file(out);
-        }
-    }
-}
-
-#[cfg(unix)]
-pub(super) fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match (file.metadata(), std::fs::symlink_metadata(path)) {
-        (Ok(created), Ok(current)) => {
-            current.is_file() && created.dev() == current.dev() && created.ino() == current.ino()
-        }
-        _ => false,
-    }
-}
-
-#[cfg(windows)]
-#[allow(unsafe_code)]
-pub(super) fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
-    use std::{
-        mem,
-        os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
-    };
-    use windows_sys::Win32::{
-        Foundation::HANDLE,
-        Storage::FileSystem::{
-            BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_READ_ATTRIBUTES, GetFileInformationByHandle,
-        },
-    };
-    fn identity(file: &std::fs::File) -> Option<(u32, u32, u32)> {
-        // SAFETY: File owns the live handle and the initialized structure has
-        // the size and alignment required by GetFileInformationByHandle.
-        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { mem::zeroed() };
-        if unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut info) } == 0
-            || info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-            || (info.nFileIndexHigh == 0 && info.nFileIndexLow == 0)
-        {
-            return None;
-        }
-        Some((
-            info.dwVolumeSerialNumber,
-            info.nFileIndexHigh,
-            info.nFileIndexLow,
-        ))
-    }
-    let Ok(current) = std::fs::OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-    else {
-        return false;
-    };
-    identity(file).is_some_and(|created| Some(created) == identity(&current))
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn created_destination(_: &std::fs::File, _: &std::path::Path) -> bool {
-    false
-}
-
-fn write_lines(mut output: Output<'_>, outcome: Outcome) -> Ending {
-    use std::io::Write;
-    let (text, refusal) = match outcome {
-        Outcome::Lines(text) => (text, None),
-        Outcome::AgentRefused(message) => (String::new(), Some(message)),
-    };
-    if let Some(file) = &mut output.file {
-        let out = output.args.out.as_ref().expect("file destination");
-        if let Err(error) = file.write_all(text.as_bytes()).and_then(|()| file.flush()) {
-            // As `_export`: the file this run created is removed, then
-            // `cannot write PATH: <strerror>`, exit 2.
-            return match write_strerror(&error) {
-                Some(text) => {
-                    crate::stderrln!("board-audit: cannot write {out}: {text}");
-                    Ending::Exit(2)
-                }
-                // Declared: a Windows error the C runtime's mapping is not
-                // pinned for. The created file is already removed again.
-                None => Ending::Deferred,
-            };
-        }
-    } else if !text.is_empty() {
-        let mut stdout = std::io::stdout().lock();
-        if stdout
-            .write_all(&super::super::text_bytes(&text))
-            .and_then(|()| stdout.flush())
-            .is_err()
-        {
-            crate::stderrln!("board-audit: the output was closed before the export finished");
-            return Ending::Exit(2);
-        }
-    }
-    output.keep = true;
-    if let Some(message) = refusal {
-        crate::stderrln!("board-audit: {message}");
-        return Ending::Exit(2);
-    }
-    Ending::Exit(0)
 }
 
 #[cfg(test)]

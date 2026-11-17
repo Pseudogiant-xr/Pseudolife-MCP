@@ -1371,7 +1371,7 @@ function python {
     assert [call[3] for call in terminals] == expected_terminals
     if "maintainer_setup" in rows:
         for required in ("test_operator_transport.py", "test_audit_stats.py",
-                         "test_maintainer_setup_native.py"):
+                         "test_maintainer_setup_native.py", "test_audit_native.py"):
             assert f"rust/cli_harness/{required}" in terminals[-1]
     calls = [call for call in calls if call not in terminals]
     # One golden pass over every row of the shard; no live pass since the
@@ -1381,6 +1381,20 @@ function python {
     assert [call[i + 1] for i, word in enumerate(call[:-1]) if word == "--row"] == rows
     assert "--golden" in call
     assert call[call.index("--candidate") + 1] == "fixture-candidate"
+
+
+def test_w1c_guard_rejects_dropping_native_audit_tests(tmp_path, monkeypatch):
+    changed = copy.deepcopy(workflow())
+    job = changed["jobs"]["parity-checks"]
+    step = next(s for s in job["steps"] if s.get("name") == "CLI W1-C golden harness")
+    path = "rust/cli_harness/test_audit_native.py"
+    assert path in step["run"]
+    step["run"] = step["run"].replace(path, "")
+    suite = next(s["suite"] for s in job["strategy"]["matrix"]["include"]
+                 if "'maintainer_setup'" in s.get("w1c_rows", ""))
+    monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
+    with pytest.raises(AssertionError, match="test_audit_native.py"):
+        test_w1c_powershell_replays_every_row_of_its_shard(tmp_path, suite, False)
 
 
 def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():

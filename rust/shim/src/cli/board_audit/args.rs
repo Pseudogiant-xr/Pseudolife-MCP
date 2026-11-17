@@ -71,7 +71,7 @@ fn error(action: &str, message: impl std::fmt::Display) -> Option<Action> {
     )))
 }
 
-/// `None` retains input domains the native JSON codec cannot represent.
+/// `None` identifies non-Unicode OS arguments, which the caller refuses.
 pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
     let tokens = arguments
         .iter()
@@ -223,12 +223,7 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
     if !unknown.is_empty() {
         return error("", format!("unrecognized arguments: {}", unknown.join(" ")));
     }
-    if ["--since", "--until"]
-        .iter()
-        .any(|name| get(name).is_some_and(|value| time(value).is_none()))
-    {
-        return None;
-    }
+    // Every time occurrence was validated above, before the last-wins update.
     match action {
         "verify" => {
             let expect = get("--expect-head").and_then(|value| head(value).ok());
