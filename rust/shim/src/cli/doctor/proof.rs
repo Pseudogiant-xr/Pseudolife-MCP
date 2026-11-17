@@ -19,6 +19,10 @@ use unicode_casefold::UnicodeCaseFold;
 mod diagnostics;
 #[path = "proof_process.rs"]
 mod process;
+// This leaf is also compiled without the enclosing doctor module.
+#[allow(clippy::duplicate_mod)]
+#[path = "display.rs"]
+mod display;
 // The isolated proof contract includes this leaf without the CLI module tree.
 #[allow(clippy::duplicate_mod)]
 #[path = "../maintainer/sqlstate.rs"]
@@ -891,7 +895,7 @@ fn cleanup_failure(
     }
     if files_removed.is_err() {
         let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();
-        report["fixture_directory"] = json!(super::display_path(
+        report["fixture_directory"] = json!(display::display_path(
             &root.to_string_lossy(),
             token.as_deref()
         ));
@@ -923,16 +927,17 @@ mod path_privacy_tests {
                     command.env(key, value);
                 }
             }
+            let test = format!(
+                "{}::review_round2_cleanup_path_redaction",
+                module_path!().split_once("::").unwrap().1
+            );
             let output = command
                 .env(CHILD, "1")
                 .env("PSEUDOLIFE_MCP_TOKEN", "w44-proof-path-bearer")
-                .args([
-                    "--exact",
-                    "cli::doctor::proof::path_privacy_tests::review_round2_cleanup_path_redaction",
-                    "--nocapture",
-                ])
+                .args(["--exact", &test, "--nocapture"])
                 .output()
                 .unwrap();
+            assert!(String::from_utf8_lossy(&output.stdout).contains("running 1 test"));
             assert!(
                 output.status.success(),
                 "{}",
