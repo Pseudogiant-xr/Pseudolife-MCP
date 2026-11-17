@@ -5,6 +5,7 @@ import importlib.abc
 import os
 import json
 from pathlib import Path
+import runpy
 import tempfile
 import sys
 import unittest
@@ -203,23 +204,27 @@ class IndependentFixtures(unittest.TestCase):
                 if fullname == "pseudolife_memory" or fullname.startswith("pseudolife_memory."):
                     raise AssertionError("product imported: " + fullname)
 
-        saved = {n: m for n, m in sys.modules.items() if n == "pseudolife_memory"
+        saved = {n: m for n, m in sys.modules.items() if n == "graph_fixtures" or n == "pseudolife_memory"
                  or n.startswith("pseudolife_memory.")}
         guard = Block()
         sys.meta_path.insert(0, guard)
         for name in saved:
             del sys.modules[name]
         try:
+            # Execute the module body again: a cached graph_store import
+            # would hide a new top-level dependency from the blocker.
+            replay = runpy.run_path(graph_store.__file__)
             import graph_fixtures
             with patch("graph_fixtures.connect") as connection, patch("graph_fixtures.ensure_schema"):
                 graph_fixtures.seed("disposable fixture")
                 self.assertGreater(connection.return_value.__enter__.return_value.execute.call_count, 20)
-            with patch("graph_store.pg.create", side_effect=RuntimeError("reached disposable setup")), \
-                    patch("graph_store.pg.drop"):
+            with patch.object(replay["pg"], "create", side_effect=RuntimeError("reached disposable setup")), \
+                    patch.object(replay["pg"], "drop"):
                 with self.assertRaisesRegex(RuntimeError, "reached disposable setup"):
-                    graph_store.run(Path("unused"), "golden")
+                    replay["run"](Path("unused"), "golden")
         finally:
             sys.meta_path.remove(guard)
+            sys.modules.pop("graph_fixtures", None)
             sys.modules.update(saved)
 
     def test_seed_guards_target_before_open_and_connection_before_writes(self):
