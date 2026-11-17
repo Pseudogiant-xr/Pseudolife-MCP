@@ -6,17 +6,13 @@ use super::*;
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
 
-fn context() -> Context {
-    Context { utf8_argv: true }
-}
-
 fn argv(items: &[&str]) -> Vec<String> {
     items.iter().map(|item| (*item).to_owned()).collect()
 }
 
 /// A run that never reaches the host (help, usage errors).
 fn answer(items: &[&str]) -> Out {
-    decide(&argv(items), &context(), &Fake::free()).expect("answered")
+    decide(&argv(items), &Fake::free())
 }
 
 // ── the fake host ────────────────────────────────────────────────────────────
@@ -268,7 +264,7 @@ impl Host for Fake {
 
 /// Run `expose <items>` against `fake`: (stdout, stderr, exit).
 fn drive(fake: &Fake, items: &[&str]) -> (String, String, u8) {
-    let out = decide(&argv(items), &context(), fake).expect("answered natively");
+    let out = decide(&argv(items), fake);
     (
         String::from_utf16(&out.stdout).expect("stdout text"),
         out.stderr,
@@ -1126,10 +1122,12 @@ fn usage_errors_name_the_parser_that_reports_them() {
 }
 
 #[test]
-fn non_utf8_locale_argv_defers_only_when_non_ascii() {
-    let posix_c = Context { utf8_argv: false };
-    assert!(decide(&argv(&["café"]), &posix_c, &Fake::free()).is_err());
-    assert!(decide(&argv(&["bogus"]), &posix_c, &Fake::free()).is_ok());
+fn unicode_arguments_are_native_in_every_locale() {
+    let fake = Fake::free();
+    let out = decide(&argv(&["café"]), &fake);
+    assert_eq!(out.code, EXIT_USAGE);
+    assert!(fake.calls.borrow().is_empty());
+    assert_eq!(decide(&argv(&["bogus"]), &Fake::free()).code, EXIT_USAGE);
 }
 
 fn report(action: Action, json: bool) -> Report {
@@ -1174,5 +1172,41 @@ fn a_lone_surrogate_is_escaped_on_stderr_and_in_json() {
     assert_eq!(
         pyjson::backslashreplace(&text.finish(EXIT_OK).stdout),
         "serves a TCP forward to \\udc80\n"
+    );
+}
+
+#[test]
+fn noncanonical_usage_never_reaches_tailscale() {
+    for items in [
+        vec!["status", "--po", "80"],
+        vec!["tailscale", "--port", "-1"],
+        vec!["off", "--port", "8_0"],
+        vec!["--json", "status"],
+    ] {
+        let fake = Fake::free();
+        let out = decide(&argv(&items), &fake);
+        assert_eq!(out.code, EXIT_USAGE);
+        assert!(fake.calls.borrow().is_empty());
+        assert!(!fake.changed.get());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn undecodable_arguments_refuse_natively() {
+    use std::os::unix::ffi::OsStringExt;
+    assert_eq!(
+        run(vec![OsString::from_vec(vec![0xff])]),
+        Some(ExitCode::from(EXIT_USAGE))
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn undecodable_arguments_refuse_natively() {
+    use std::os::windows::ffi::OsStringExt;
+    assert_eq!(
+        run(vec![OsString::from_wide(&[0xd800])]),
+        Some(ExitCode::from(EXIT_USAGE))
     );
 }

@@ -22,8 +22,7 @@ forward (`tailscale`), removes that forward (`off`) and reports it
 the plan, and consent (`--yes`, or one `[y/N]` question when stdin is a
 terminal), `tailscale` runs `tailscale serve --bg --tcp=N
 tcp://127.0.0.1:N` and `off` runs `tailscale serve --tcp=N off`; each then
-reads `serve status --json` back and reports the state it finds. Only
-argument spellings outside the canonical form defer (below).
+reads `serve status --json` back and reports the state it finds. Every invocation now runs natively or returns a usage refusal before host access.
 
 The question itself (stdin a terminal) is not cased here: the row's stdin
 is a pipe, or the null device in `off-null-stdin` and
@@ -102,9 +101,6 @@ change, in the deferral cases) never leaves the machine.
   stand-in's argv log and its state. A whole number equal to that arm's own
   fixture port becomes `{PORT}`, after `daemon_tokens` has replaced
   `127.0.0.1:PORT`.
-- `expose-deferral`: a declared deferral before any `tailscale` call, or
-  after reads only; the oracle's streams and exit become the deferral line,
-  its files and requests stay compared (the candidate made the same reads).
 - `expose-native-wording`: lines the native client words differently on
   purpose, saying that nothing changed or what is still in place (the
   no-terminal refusal, a refused serve or removal, a permission refusal, a
@@ -112,13 +108,20 @@ change, in the deferral cases) never leaves the machine.
   exit code, calls, serve state and requests stay compared. Every case
   carries it, so live runs compare the rest.
 
-## Deferred (the dispatcher's `mode 'expose' is deferred` line, exit 1)
+## Native argument handling
 
-Only argument spellings outside the canonical form, before anything is
-run: an option before the action, abbreviations, `--`, a value starting
-with `-`, any other `-`-led token, `--yes=V` on `status`, a `--port` that
-`int()` reads but this port does not (a sign, spaces, underscores), argv
-that is not text, and non-ASCII argv under a locale that is not UTF-8.
+No argument shape defers. Unknown options and abbreviated options exit 2,
+naming the supported full spelling where identifiable, or the help command.
+Options before the action exit 2 and name where to put them. Signed,
+space-padded and underscore-separated ports exit 2 with `argument --port:
+use 1 to 65535 in plain digits`. An undecodable OS argument exits 2 with
+`argument is not valid Unicode; retype it as Unicode text; nothing changed`.
+Unicode text is parsed independently of the locale. All refusals precede
+host access; canonical calls and their order of checks are unchanged.
+The historical `defer-*` case IDs remain as regression cases for these
+native errors; their Linux and Windows goldens were deliberately replaced.
+The unit tests also cover `status --yes=1`, spaces and underscores in ports,
+unknown flags, Unicode and undecodable OS arguments, alongside valid inputs.
 
 Answered natively since 16 November 2026, where they deferred before: the
 change and the question; help and usage at any width, with colour settings
