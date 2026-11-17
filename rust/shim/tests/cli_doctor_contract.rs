@@ -1739,13 +1739,28 @@ fn native_non_unicode_arguments_and_environment_have_named_results() {
     }
     let good = home.0.join(&value);
     private_state(&good, br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"w44-secret-value"}"#);
-    let output = diagnose(&home, "http://127.0.0.1:1")
-        .arg("--agent-state")
-        .arg(good)
-        .output()
-        .unwrap();
-    if report(&output).contains_key("agent_state") {
-        failures.push("existing non-Unicode agent path");
+    for inline in [false, true] {
+        let mut command = diagnose(&home, "http://127.0.0.1:1");
+        if inline {
+            let mut argument = std::ffi::OsString::from("--agent-state=");
+            argument.push(&good);
+            command.arg(argument);
+        } else {
+            command.arg("--agent-state").arg(&good);
+        }
+        let output = command.output().unwrap();
+        let parsed = serde_json::from_slice::<Value>(&output.stdout).ok();
+        let ok = parsed.as_ref().is_some_and(|value| {
+            value.get("daemon_status").is_some() && value.get("agent_state").is_none()
+        });
+        eprintln!("existing non-Unicode agent path (inline={inline}): {ok}");
+        if !ok {
+            failures.push(if inline {
+                "inline non-Unicode agent path"
+            } else {
+                "existing non-Unicode agent path"
+            });
+        }
     }
     let output = command(&home).arg("doctor").arg(&value).output().unwrap();
     if output.status.code() != Some(2)
@@ -1817,22 +1832,10 @@ fn native_agent_link_and_plain_file_are_distinguished() {
 #[test]
 fn native_trusted_directory_redirect_is_read_normally() {
     let home = Home::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&home.0, std::fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    #[cfg(windows)]
-    {
-        // TEMP can grant other users Modify. Make this fixture's link holder private.
-        let output = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "$acl = New-Object System.Security.AccessControl.DirectorySecurity; $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User; $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'); $acl.SetAccessRuleProtection($true, $false); $acl.AddAccessRule($rule); Set-Acl -LiteralPath $env:W44_TEST_HOME -AclObject $acl"])
-            .env("W44_TEST_HOME", &home.0)
-            .output().unwrap();
-        assert!(output.status.success(), "fixture ACL setup failed");
-    }
+    // TEMP can grant other users Modify. Protect only this disposable holder.
+    pseudolife_stdio::board::state::private_dir(&home.0).unwrap();
     let directory = home.0.join("original");
-    std::fs::create_dir(&directory).unwrap();
+    pseudolife_stdio::board::state::private_dir(&directory).unwrap();
     private_state(&directory.join("state.json"), br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"w44-secret-value"}"#);
     let link = home.0.join("redirect");
     #[cfg(unix)]
@@ -1961,6 +1964,7 @@ fn native_reports_do_not_echo_bearers_or_credential_urls_from_answers() {
         .output()
         .unwrap();
     assert!(!report(&output).contains_key("error"));
+    assert_eq!(report(&output)["ok"], true);
     assert_eq!(report(&output)["daemon_status"], "ok");
     assert!(failures.is_empty(), "{failures:?}");
 }

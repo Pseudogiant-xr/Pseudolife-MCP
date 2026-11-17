@@ -30,7 +30,7 @@ fn claude_config_dir(env: &Env) -> Res<String> {
 
 fn codex_config_path(env: &Env) -> Res<String> {
     let home = match env.truthy("CODEX_HOME")? {
-        Some(dir) => path_str(&dir)?,
+        Some(dir) => pyenv::expand_home(&dir, env).map_err(|cause| cause.at("CODEX_HOME"))?,
         None => join(&pyenv::home(env)?, ".codex"),
     };
     Ok(join(&home, "config.toml"))
@@ -419,14 +419,11 @@ fn codex_command(env: &Env, block: &toml::Table) -> Res<bool> {
     let explicit = lookup("PSEUDOLIFE_CODEX_BIN")?.unwrap_or_default();
     let explicit = strip(&explicit);
     if !explicit.is_empty() {
-        if explicit.starts_with('~') {
-            return Err(Finding::new(
-                "PSEUDOLIFE_CODEX_BIN is not an absolute path; set its absolute executable path",
-            ));
-        }
-        let path = std::path::Path::new(explicit);
+        let explicit =
+            pyenv::expand_home(explicit, env).map_err(|cause| cause.at("PSEUDOLIFE_CODEX_BIN"))?;
+        let path = std::path::Path::new(&explicit);
         let absolute = path.is_absolute();
-        return Ok(absolute && is_file(explicit)?);
+        return Ok(absolute && is_file(&explicit)?);
     }
     let names: Vec<String> = if pyenv::WINDOWS {
         let pathext = lookup("PATHEXT")?
@@ -507,14 +504,7 @@ pub(super) enum CodexHooks {
 
 pub(super) fn codex_hooks(env: &Env) -> Res<CodexHooks> {
     let codex_home = match env.truthy("CODEX_HOME")? {
-        Some(dir) => {
-            if dir.starts_with('~') {
-                return Err(Finding::new(
-                    "CODEX_HOME starts with an unexpanded tilde; set an absolute home directory path",
-                ));
-            }
-            path_str(&dir)?
-        }
+        Some(dir) => pyenv::expand_home(&dir, env).map_err(|cause| cause.at("CODEX_HOME"))?,
         None => join(&pyenv::user_home(env)?, ".codex"),
     };
     let hooks_root = join(&join(&codex_home, "pseudolife"), "hooks");
@@ -697,6 +687,26 @@ pub(super) fn tunnel_root(env: &Env) -> Res<String> {
 #[cfg(test)]
 mod native_tests {
     use super::*;
+
+    #[test]
+    fn native_home_tilde_expansion_uses_configured_home() {
+        let mut env = Env::default();
+        let home = if pyenv::WINDOWS {
+            r"C:\absent-w44"
+        } else {
+            "/absent-w44"
+        };
+        env.set("HOME", home.into());
+        env.set("USERPROFILE", home.into());
+        env.set("CODEX_HOME", "~/.codex".into());
+        env.set("PSEUDOLIFE_CODEX_BIN", "~/codex".into());
+        assert!(codex_hooks(&env).is_ok());
+        assert!(!codex_command(&env, &toml::Table::new()).unwrap());
+        assert_eq!(
+            codex_config_path(&env).unwrap(),
+            join(&join(home, ".codex"), "config.toml")
+        );
+    }
 
     #[test]
     fn native_launcher_unicode_suffix_is_an_ordinary_path() {

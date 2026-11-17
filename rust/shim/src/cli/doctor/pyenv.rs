@@ -166,6 +166,27 @@ pub(super) fn home(env: &Env) -> Res<String> {
     path_str(&raw)
 }
 
+/// Expand this user's home without consulting other users or printing the path.
+pub(super) fn expand_home(text: &str, env: &Env) -> Res<String> {
+    if text == "~" {
+        return home(env);
+    }
+    if let Some(tail) = text
+        .strip_prefix("~/")
+        .or_else(|| WINDOWS.then(|| text.strip_prefix("~\\")).flatten())
+    {
+        // Concatenate before normalization: a repeated slash after '~' is
+        // still part of the suffix, not a new absolute path for Path::join.
+        return path_str(&format!("{}{SEP}{tail}", home(env)?));
+    }
+    if text.starts_with('~') {
+        return Err(Finding::new(
+            "named-user tilde expansion is unsupported; set an absolute path",
+        ));
+    }
+    path_str(text)
+}
+
 /// `USERPROFILE or HOME or Path.home()` (runtimes.home, client_updates.home).
 pub(super) fn user_home(env: &Env) -> Res<String> {
     match env.truthy("USERPROFILE")?.or(env.truthy("HOME")?) {

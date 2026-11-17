@@ -36,6 +36,24 @@ struct Args {
 const MAX_TIMEOUT: f64 = u32::MAX as f64;
 const HELP: &str = "Usage: pseudolife-mcp doctor [--timeout SECONDS] [--host HOST] [--agent-state FILE] [--disposable-proof]\n\nRead-only diagnostics; --disposable-proof instead uses an explicitly disposable database.\n  --timeout SECONDS  Positive finite seconds, at most 4294967295 (default 20).\n  --host HOST        codex, claude-code, claude-desktop, or generic (default).\n  --agent-state FILE Read a private saved registration; never rewrites it.\n  -h, --help         Show this help.\nOptions accept --name=value; repeated options use the last value.\n";
 
+/// Keep an OS path intact when it follows an ASCII option prefix.
+fn inline_agent_path(raw: &std::ffi::OsStr) -> Option<OsString> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        raw.as_bytes()
+            .strip_prefix(b"--agent-state=")
+            .map(|path| OsString::from_vec(path.to_vec()))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        let raw: Vec<u16> = raw.encode_wide().collect();
+        let prefix: Vec<u16> = "--agent-state=".encode_utf16().collect();
+        raw.strip_prefix(prefix.as_slice()).map(OsString::from_wide)
+    }
+}
+
 fn parse(values: &[OsString]) -> Result<Args, String> {
     let mut args = Args {
         proof: false,
@@ -45,6 +63,15 @@ fn parse(values: &[OsString]) -> Result<Args, String> {
     };
     let mut values = values.iter();
     while let Some(raw) = values.next() {
+        if let Some(path) = inline_agent_path(raw) {
+            if path.is_empty() {
+                return Err(
+                    "--agent-state is empty; supply the saved registration file path".into(),
+                );
+            }
+            args.agent_state = Some(path.into());
+            continue;
+        }
         let raw = raw
             .to_str()
             .ok_or("option name is not valid Unicode; use --help for supported options")?;
@@ -146,6 +173,12 @@ fn redact_report(value: &mut Value, token: Option<&str>) {
             .for_each(|value| redact_report(value, token)),
         _ => {}
     }
+}
+
+fn display_text(text: &str, token: Option<&str>) -> String {
+    let mut value = json!(text);
+    redact_report(&mut value, token);
+    value.as_str().unwrap().to_owned()
 }
 
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
@@ -1006,10 +1039,26 @@ async fn diagnose(
         } else if unrecognized {
             json!("unrecognized")
         } else {
-            status.clone().unwrap_or_else(|| json!("unreachable"))
+            status
+                .clone()
+                .map(|mut value| {
+                    if value != "ok" {
+                        redact_report(&mut value, token.as_deref());
+                    }
+                    value
+                })
+                .unwrap_or_else(|| json!("unreachable"))
         },
     );
-    put(&mut report, "dreams", dreams(health.as_ref()));
+    let mut displayed_health = health.clone();
+    if let Some(kind) = displayed_health
+        .as_mut()
+        .and_then(|map| map.get_mut("stall"))
+        .and_then(|stall| stall.get_mut("kind"))
+    {
+        redact_report(kind, token.as_deref());
+    }
+    put(&mut report, "dreams", dreams(displayed_health.as_ref()));
     let mut tools_present = None;
     let healthy = present.filter(|_| status == Some(json!("ok")));
     if let Some(cause) = &connection_problem {
@@ -1034,7 +1083,11 @@ async fn diagnose(
         // fail on the same credential.
         if let Some(health) = healthy {
             let (daemon_version, hooks_line) = health_details(health, hooks).await;
-            put(&mut report, "daemon_version", json!(daemon_version));
+            put(
+                &mut report,
+                "daemon_version",
+                json!(display_text(&daemon_version, token.as_deref())),
+            );
             put(&mut report, "codex_hooks", json!(hooks_line));
         }
     } else if unrecognized {
@@ -1077,7 +1130,11 @@ async fn diagnose(
         put(&mut report, "recovery", json!(recovery));
     } else if let Some(health) = present {
         let (daemon_version, hooks_line) = health_details(health, hooks).await;
-        put(&mut report, "daemon_version", json!(daemon_version));
+        put(
+            &mut report,
+            "daemon_version",
+            json!(display_text(&daemon_version, token.as_deref())),
+        );
         put(&mut report, "codex_hooks", json!(hooks_line));
         let proxy_hint = |text: &str| {
             if proxy_routes {
@@ -1120,6 +1177,7 @@ async fn diagnose(
                 }
                 let installed = env!("CARGO_PKG_VERSION");
                 if daemon_version != "unknown" && daemon_version != installed {
+                    let daemon_version = display_text(&daemon_version, token.as_deref());
                     put(&mut report, "ok", json!(false));
                     put(&mut report, "version_mismatch", json!(true));
                     put(
@@ -1216,26 +1274,6 @@ async fn diagnose(
         put(&mut report, "tunnels", json!(tunnels));
     }
     let ok = report.get("ok") == Some(&json!(true));
-    // Redact display fields after decisions, so a bearer that happens to equal
-    // a version or a protocol word cannot change the diagnostic's outcome.
-    for key in [
-        "daemon_version",
-        "dreams",
-        "recovery",
-        "credential_source",
-        "path_resolution",
-        "git_bash",
-        "codex_hooks",
-    ] {
-        if let Some(field) = report.get_mut(key) {
-            redact_report(field, token.as_deref());
-        }
-    }
-    if let Some(field) = report.get_mut("daemon_status")
-        && field != "ok"
-    {
-        redact_report(field, token.as_deref());
-    }
     let mut report = Value::Object(report);
     redact_report(&mut report, None);
     (report, ok)

@@ -97,6 +97,8 @@ integers and a 256-level nesting bound. Invalid TOML, unsupported setting types,
 non-Unicode environment values, invalid PATHEXT and filesystem failures are
 findings; the other checks still run. Windows path prefixes and drive-relative
 paths use native path handling. Non-Unicode saved-state paths use the OS path.
+Codex home and executable settings expand `~/` using the configured home;
+named-user forms such as `~other/` receive an absolute-path repair instruction.
 
 Saved-state parent components and trusted directory links are supported.
 A leaf link or an unsafe private file is reported with a remedy; the file is
