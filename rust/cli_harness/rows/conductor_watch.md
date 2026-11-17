@@ -114,8 +114,8 @@ return absence internally, not a dispatcher deferral.
 
 Previously supported inputs also change deliberately: invalid values in
 `--interval=-x`, `--max-age=-5` and `--owner=-abc` are no longer echoed.
-A `--max-age` of 309 to 640 nonzero digits is refused as non-finite rather
-than clamped to the watcher's maximum lifetime. A stdout failure adds a
+An overflowing `--max-age` of 309 to 640 digits (for example, 309 nines) is
+refused as non-finite rather than clamped to the watcher's maximum lifetime. A stdout failure adds a
 cause/remedy line on stderr when possible, and a failed first write exits 1
 without a dispatcher deferral. Invalid pid-record errors name the `.pid`
 path and ask the operator to restore a valid watcher record before retrying;
