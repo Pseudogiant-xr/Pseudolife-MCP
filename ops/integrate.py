@@ -1969,6 +1969,8 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
         if proc.returncode == 0:
             if _undo_merge_if_frozen(plan, m, freeze):
                 continue
+            if _undo_merge_if_harness_incomplete(plan, m, before):
+                continue
             plan.merged.append(m)
             print(f"  merged #{m.number} {m.sha[:12]} {m.title}")
             continue
@@ -1983,6 +1985,8 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
         if _merge_budget_conflict(plan.base_sha, conflicted):
             if _undo_merge_if_frozen(plan, m, freeze):
                 continue
+            if _undo_merge_if_harness_incomplete(plan, m, before):
+                continue
             plan.merged.append(m)
             print(f"  merged #{m.number} {m.sha[:12]} after normalizing derived CI budget metadata")
             continue
@@ -1994,6 +1998,22 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
         reason = _collision(m, conflicted, plan.merged, plan.base_sha)
         plan.dropped.append(Dropped(m, reason))
         print(f"  dropped #{m.number}: {reason}")
+
+
+def _undo_merge_if_harness_incomplete(plan: Plan, member: Member, before: str) -> bool:
+    # A refusal is attributable only when the preceding combined tree was
+    # readable. Judge each tentative merge before any compile or full suite.
+    _harness_recipe(before)
+    head = _out("rev-parse", "HEAD")
+    try:
+        _harness_recipe(head)
+    except Refusal as error:
+        git("reset", "--hard", before)
+        reason = str(error)
+        plan.dropped.append(Dropped(member, reason))
+        print(f"  dropped #{member.number}: {reason}")
+        return True
+    return False
 
 
 # The census script is member code, so it runs without the operator's tokens
@@ -2183,6 +2203,7 @@ def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
     merge again from the base. Nothing else is added inside a batch."""
     # The freeze judges the whole listing (and the open pull requests it
     # carries) before the cut search narrows it to one member.
+    _harness_recipe(plan.base_sha)  # A broken base is never attributed to a member.
     _fetch_listed(members)       # the first landing reads the guard the members carry
     freeze = _freeze_module(plan.base_sha, members)
     prepass = _freeze_prepass(plan, freeze, members)
@@ -3229,6 +3250,7 @@ def build(args: argparse.Namespace) -> int:
         judged = _merge_batch(plan, members)
         plan.markers = _new_markers(base_sha)
         plan.head = _out("rev-parse", "HEAD")
+        _harness_recipe(plan.head)  # Recheck after the generated metadata commit.
         if closed is not None:
             plan.after_drop = _after_drop_record(plan, closed)
         done = True

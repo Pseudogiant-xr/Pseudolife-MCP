@@ -2181,6 +2181,52 @@ def test_build_names_the_rust_harness_run_the_suite_does_not_cover(world, capsys
     out = capsys.readouterr().out
 
     assert integrate.RUST_HARNESS_COMMAND in out and "--harness" in out and "shim-tests" in out
+
+
+def _coverage_workflow(*paths):
+    return json.dumps({"jobs": {
+        "rust": {"steps": [{"run": "python -m pytest " + " ".join(paths)}]},
+        "parity-checks": {"steps": []}}})
+
+
+def test_build_drops_a_member_with_an_unlisted_batch_head_test_before_gating(tmp_path, monkeypatch, capsys):
+    world = _make_world(tmp_path, monkeypatch, harness_guard=True)
+    world.gh.add(11, world.pr(11, {"README.md": "independent change\n"}))
+    world.gh.add(12, world.pr(12, {
+        ".github/workflows/rust.yml": _coverage_workflow("rust/test_base.py", "rust/test_new.py"),
+        "rust/test_new.py": "def test_new(): pass\n",
+    }))
+    assert _build() == 0, capsys.readouterr()
+    plan = _plan(world)
+    assert [member["number"] for member in plan["merged"]] == [11]
+    assert len(plan["dropped"]) == 1 and plan["dropped"][0]["member"]["number"] == 12
+    assert "RUST_HARNESS omits" in plan["dropped"][0]["reason"]
+    assert world.cargo_calls() == []  # The admitted README change needs no build.
+    assert "rust/test_base.py" in integrate._harness_recipe(plan["head"]).display()
+    assert integrate.main(["open", "--suite", str(_suite_result(world)), *_gate_args(world)]) == 0, capsys.readouterr()
+    assert any("RUST_HARNESS omits" in body for _, body in world.gh.bodies("comment"))
+
+
+def test_build_accepts_a_workflow_and_its_matching_literal_list_together(tmp_path, monkeypatch, capsys):
+    world = _make_world(tmp_path, monkeypatch, harness_guard=True)
+    world.gh.add(12, world.pr(12, {
+        ".github/workflows/rust.yml": _coverage_workflow("rust/test_base.py", "rust/test_new.py"),
+        "ops/integrate.py": 'RUST_HARNESS = ("rust/test_base.py", "rust/test_new.py")\n',
+        "rust/test_new.py": "def test_new(): pass\n",
+    }))
+    assert _build() == 0, capsys.readouterr()
+    assert [member["number"] for member in _plan(world)["merged"]] == [12]
+    assert "rust/test_new.py" in integrate._harness_recipe(_plan(world)["head"]).commands[0].paths
+
+
+def test_an_unreadable_base_workflow_refuses_without_blaming_a_member(tmp_path, monkeypatch, capsys):
+    world = _make_world(tmp_path, monkeypatch, harness_guard=True)
+    world.advance_master({".github/workflows/rust.yml": "jobs: ["})
+    world.gh.add(11, world.pr(11, {"README.md": "independent change\n"}))
+    assert _build() == 2
+    assert "batch-head harness coverage refused" in capsys.readouterr().err
+    assert world.cargo_calls() == [] and world.remote_branches() == []
+    assert not world.gh.bodies("comment")
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
@@ -3728,7 +3774,7 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'source parse failed' }
-foreach ($name in @('Assert-HarnessWorktreeHasNoReparsePoint', 'Remove-OwnedHarnessEnvironment')) {
+foreach ($name in @('Assert-HarnessWorktreeHasNoReparsePoint', 'Get-HarnessLongPath', 'Remove-OwnedHarnessEnvironment')) {
     $definition = $ast.Find({ param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $true)
@@ -3786,12 +3832,29 @@ def test_harness_environment_cleanup_refuses_a_link_without_touching_its_target(
 
 
 @needs_pwsh
-def test_harness_environment_cleanup_refuses_an_active_process(tmp_path):
+@pytest.mark.parametrize("alias", [False, True])
+def test_harness_environment_cleanup_refuses_an_active_process(tmp_path, alias):
     import psutil
 
     environment = tmp_path / ("repo.rust-harness-env-" + "a" * 32)
     environment.mkdir()
-    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(90)", str(environment)],
+    argument = str(environment)
+    if alias:
+        if os.name != "nt":
+            pytest.skip("Windows 8.3 path aliases")
+        import ctypes
+        from ctypes import wintypes
+        short_path = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+        short_path.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+        short_path.restype = wintypes.DWORD
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = short_path(str(environment.parent), buffer, len(buffer))
+        assert 0 < length < len(buffer), ctypes.get_last_error()
+        assert "~" in buffer.value and os.path.samefile(environment.parent, buffer.value)
+        # The cleaner receives the short spelling, while the process names
+        # the long spelling of this same directory.
+        environment = Path(buffer.value) / environment.name
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(90)", argument],
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     identity = psutil.Process(process.pid).create_time()
     try:
@@ -4156,6 +4219,24 @@ def test_shim_far_half_refuses_unavailable_resources(far, monkeypatch, cause):
         if held:
             held.close()
     _hold_suite_lock(far.locks / "full-suite.lock").close()
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+def test_shim_far_half_refuses_loaded_tmpfs_before_running_member_code(far):
+    head, ref, data = far.batch()
+    for name, body in {"stat": "printf 'tmpfs\\n'\n",
+                       "df": "printf 'Used\\n5368709120\\n'\n"}.items():
+        path = far.tmp / "bin" / name
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+    proc = subprocess.run(["bash", str(ROOT / "ops/shim-tests-remote.sh"), str(far.repo), far.base,
+                           head, ref, "ab" * 16, "0"], input=data, capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+    assert "memory-backed" in proc.stderr and "above 4 GiB" in proc.stderr
+    assert "remove only your owned" in proc.stderr and "retry" in proc.stderr
+    assert far.cargo_calls() == []
+    assert not Path(str(far.repo) + ".shim-tests").exists()
+    assert not list(far.tmp.glob("shim-tests-*.bundle"))
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")

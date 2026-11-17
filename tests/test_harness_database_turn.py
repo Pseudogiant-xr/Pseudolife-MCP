@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 
 import pytest
 
@@ -32,6 +33,25 @@ def test_no_marker_does_only_one_existence_check(tmp_path, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", import_without_engine)
     assert database_turn.ensure_turn() is None
     assert checked == [tmp_path / database_turn.MARKER]
+
+
+def test_cli_bank_takes_the_turn_before_reading_the_test_login(monkeypatch):
+    from rust.cli_harness.rows import _bank
+
+    called = []
+    monkeypatch.setattr(_bank, "_DATABASE_TURN_MARKER", SimpleNamespace(exists=lambda: True))
+    def held(**kwargs):
+        called.append("turn")
+        raise RuntimeError("held by the gate")
+    monkeypatch.setattr(database_turn, "require_turn", held)
+    monkeypatch.setitem(sys.modules, "tests.pg_defaults", SimpleNamespace(
+        default_login=lambda: called.append("login") or ("pseudolife_test", "fixture-password")))
+    with pytest.raises(RuntimeError, match="held by the gate"):
+        _bank._login()
+    assert called == ["turn"]
+    monkeypatch.setattr(_bank, "_DATABASE_TURN_MARKER", SimpleNamespace(exists=lambda: False))
+    assert _bank._login() == ("pseudolife_test", "fixture-password")
+    assert called == ["turn", "login"]
 
 
 @pytest.fixture

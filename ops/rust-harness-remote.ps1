@@ -172,6 +172,29 @@ $verdict = $null
 $failure = $null
 $started = $false
 
+function Get-HarnessLongPath([string] $Path) {
+    if (-not ('HarnessPathSpelling' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class HarnessPathSpelling {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern uint GetLongPathName(string path, StringBuilder output, uint length);
+    public static string Expand(string path) {
+        var output = new StringBuilder(32768);
+        uint length = GetLongPathName(path, output, (uint)output.Capacity);
+        if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (length >= output.Capacity) throw new InvalidOperationException("path is too long");
+        return output.ToString();
+    }
+}
+'@
+    }
+    [HarnessPathSpelling]::Expand($Path)
+}
+
 function Remove-OwnedHarnessEnvironment {
     param([string] $EnvironmentPath, [string] $ExpectedPath, [bool] $Created,
           [string] $RunId, [string] $Repository)
@@ -182,10 +205,13 @@ function Remove-OwnedHarnessEnvironment {
     }
     Assert-HarnessWorktreeHasNoReparsePoint $EnvironmentPath
     if ($IsWindows) {
+        $longEnvironment = Get-HarnessLongPath $EnvironmentPath
         $users = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
             $_.ProcessId -ne $PID -and (
                 ($_.CommandLine -and $_.CommandLine.IndexOf($EnvironmentPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
-                ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($EnvironmentPath + '\', [StringComparison]::OrdinalIgnoreCase)))
+                ($_.CommandLine -and $_.CommandLine.IndexOf($longEnvironment, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+                ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($EnvironmentPath + '\', [StringComparison]::OrdinalIgnoreCase) -or
+                                        $_.ExecutablePath.StartsWith($longEnvironment + '\', [StringComparison]::OrdinalIgnoreCase))))
         })
         if ($users.Count) { throw 'a process still uses this run''s harness environment; inspect the owned process before retrying' }
     } else {

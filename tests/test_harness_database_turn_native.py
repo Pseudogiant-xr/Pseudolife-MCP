@@ -43,7 +43,8 @@ def live_holder(tmp_path, env):
     script = ("from pathlib import Path\nimport json,os,psutil,sys,time\n"
               "from rust.harness_support.database_turn import ensure_turn\n"
               "lease=ensure_turn(holder='held native test')\n"
-              "Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'started':psutil.Process().create_time()}))\n"
+              "ready=Path(sys.argv[1]); temporary=ready.with_suffix('.writing')\n"
+              "temporary.write_text(json.dumps({'pid':os.getpid(),'started':psutil.Process().create_time()})); temporary.replace(ready)\n"
               "time.sleep(90)\n")
     with (tmp_path / "holder.log").open("w", encoding="utf-8") as log:
         owner = subprocess.Popen([sys.executable, "-u", "-c", script, str(ready)],
@@ -206,8 +207,9 @@ def test_dot_sourced_lock_does_not_capture_unrelated_interactive_children(tmp_pa
     record = tmp_path / "child.json"
     script = tmp_path / "dot-source.ps1"
     sleeper = tmp_path / "sleeper.py"
-    sleeper.write_text("import json,os,psutil,sys,time\n"
-                       "with open(sys.argv[1], 'w') as f: json.dump({'pid':os.getpid(),'started':psutil.Process().create_time()}, f)\n"
+    sleeper.write_text("import json,os,psutil,sys,time\nfrom pathlib import Path\n"
+                       "ready=Path(sys.argv[1]); temporary=ready.with_suffix('.writing')\n"
+                       "temporary.write_text(json.dumps({'pid':os.getpid(),'started':psutil.Process().create_time()})); temporary.replace(ready)\n"
                        "time.sleep(90)\n", encoding="utf-8")
     script.write_text("""
 param($helper, $lock, $python, $sleeper, $record)

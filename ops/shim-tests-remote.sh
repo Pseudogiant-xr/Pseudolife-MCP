@@ -55,7 +55,7 @@ no_hooks="$repo.shim-tests-no-hooks"
 [[ ! -e "$no_hooks" && ! -L "$no_hooks" ]] || refuse 'the no-hooks path exists; remove it before retrying'
 for tool in git flock cargo python3 base64 stat df realpath; do command -v "$tool" >/dev/null || refuse "$tool is missing; install it on the second Linux dev box"; done
 problem=$(dev_tmp_preflight shim-tests) || refuse "$problem"
-export TMPDIR="$HOME/.cache/pseudolife-shim-tests/tmp"
+export TMPDIR="$repo.shim-tests-tmp"
 for location in "$repo" "$TMPDIR"; do
     problem=$(dev_tmp_disk_path shim-tests "$location") || refuse "$problem"
 done

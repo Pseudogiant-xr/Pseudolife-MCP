@@ -21,13 +21,16 @@ dev_tmp_preflight() {
 }
 
 dev_tmp_disk_path() {
-    local prefix=$1 path=$2 resolved
+    local prefix=$1 path=$2 resolved kind
     resolved=$(realpath -m -- "$path") || {
         printf '%s: cannot resolve an artifact path; fix its parent directory and retry\n' "$prefix"
         return 3
     }
     case "$resolved" in /tmp|/tmp/*)
-        printf '%s: artifact path resolves under /tmp; configure the clone, environment, cache and saved output under home, then retry\n' "$prefix"
-        return 3 ;;
+        kind=$(stat -f -c %T -- /tmp) || return 3
+        case "$kind" in tmpfs|ramfs)
+            printf '%s: artifact path resolves under memory-backed /tmp; configure the clone, environment, cache and saved output under home, then retry\n' "$prefix"
+            return 3 ;;
+        esac ;;
     esac
 }

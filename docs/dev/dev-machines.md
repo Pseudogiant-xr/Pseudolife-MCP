@@ -219,6 +219,17 @@ without `.git` is refused for inspection, never silently overwritten.
 The rules are in `CLAUDE.md` ("Sharing the machine"); this section holds the
 knobs and procedures they point at.
 
+- **Linux temporary storage.** The dev boxes' `/tmp` is memory-backed. Never
+  put checkouts, Cargo targets, environments, bundles, archives or saved
+  evidence there; use the home directory. Check `df -h /tmp` before broad
+  pytest runs, and remove only your own unused temporary files when done.
+  The suite dispatcher and shim far half refuse when a memory-backed `/tmp`
+  already holds more than 4 GiB, naming the cleanup and retry. The dispatcher
+  keeps its transient bundle and script under
+  `~/.cache/pseudolife-suite/dispatch` and sets `TMPDIR` under the same home
+  cache; the shim uses `<repo>.shim-tests-tmp`. Their worktrees, environments
+  and targets also remain on disk under home.
+
 - **Windows VM database turns.** Every database-using worker command must
   use the same VM account/lock folder as the gate. This account opts into an
   exclusive machine turn because its harness starts and stops PostgreSQL:

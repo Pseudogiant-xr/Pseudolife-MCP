@@ -651,9 +651,18 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
      (#1556, #1560).
 2. `python ops/integrate.py harness` runs the Rust harness Python tests on
    the Windows dev VM at that same head. The full suite collects only
-   `tests/`, never these tests under `rust/`. `RUST_HARNESS` lists every
-   pytest path of rust.yml's Rust job plus `rust/ci`; a test keeps that list
-   complete. The command sends the head as a git bundle, runs the controller's
+   `tests/`, never these tests under `rust/`. Before any compile or suite,
+   `build` reads rust.yml and the literal `RUST_HARNESS` from each tentative
+   batch head without importing its Python. A member that makes the list
+   omit a Rust-job pytest path is left out with a comment; an unreadable
+   base refuses without blaming a member. The selection also includes the
+   parity-checks job's candidate-free pytest cases and delegated unittest
+   discovery, classified in `rust/ci/harness-test-selections.json`. Mixed
+   files contribute their unit selectors; candidate-required cases stay in
+   their lanes. Unknown commands, options or classifications fail closed.
+   `harness` rechecks the final head and `open` requires that exact command
+   and runner selection in its result.
+   The command sends the head as a git bundle, runs the controller's
    `ops/rust-harness-remote.ps1`, and records its result and live log beside
    the suite results. No push or private gate kit is needed.
    - The VM is configured through `rust-check.remote`, with role `Windows

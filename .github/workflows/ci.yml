@@ -334,6 +334,7 @@ jobs:
           tests/test_coordination_console.py tests/test_coordination_receive_ack.py tests/test_coordination_storage.py
           tests/test_coordination_web.py tests/test_extractor_model_lists.py tests/test_integrate_script.py
           tests/test_integrate_snapshot_admission.py tests/test_move_cli.py tests/test_operator_engine_transport.py
+          tests/test_harness_database_turn.py tests/test_harness_database_turn_native.py tests/test_harness_selection.py
           tests/test_pdfium_pin.py tests/test_prune_worktrees.py tests/test_rehearse_activation.py
           tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_schema_version_guard.py
           tests/test_update_engine.py tests/test_suite_classes.py
@@ -836,6 +837,16 @@ jobs:
           tests/test_integrate_script.py::test_database_lock_owner_death_stops_its_child_before_reuse
           tests/test_integrate_script.py::test_database_lock_wrapper_preserves_exit_and_releases
           tests/test_integrate_script.py::test_database_lock_free_handle_overwrites_old_metadata
+          tests/test_harness_database_turn.py
+          tests/test_harness_database_turn_native.py
+          tests/test_harness_selection.py
+          tests/test_integrate_script.py::test_harness_environment_cleanup_removes_only_its_own_created_path
+          tests/test_integrate_script.py::test_harness_environment_cleanup_refuses_a_link_without_touching_its_target
+          tests/test_integrate_script.py::test_harness_environment_cleanup_refuses_an_active_process
+          tests/test_integrate_script.py::test_harness_environment_cannot_retain_a_removed_dependency
+          tests/test_integrate_script.py::test_service_managing_harness_refuses_a_missing_turn_marker
+          tests/test_integrate_script.py::test_harness_far_half_requires_every_unittest_command_to_execute_and_pass
+          tests/test_integrate_script.py::test_harness_far_half_refuses_an_unknown_unit_runner_before_services
           tests/test_integrate_script.py::test_harness_database_lock_covers_services_and_releases_after_failure
           tests/test_integrate_script.py::test_harness_waiting_for_worker_database_turn_leaves_suite_lock_free
           tests/test_integrate_script.py::test_the_harness_runs_on_the_dev_machine_and_open_checks_its_result

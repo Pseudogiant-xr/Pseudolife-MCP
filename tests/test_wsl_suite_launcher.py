@@ -1927,7 +1927,8 @@ echo "3 passed in 0.1s"
 '''
 
 
-def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, to_master: bool = False):
+def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, to_master: bool = False,
+                  tmp_used: int | None = None):
     repo, bare = tmp_path / "repo", tmp_path / "origin.git"
     (repo / "ops").mkdir(parents=True)
     for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1", "wsl-suite.sh", "dev-tmp-space.sh"):
@@ -1960,6 +1961,12 @@ def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, t
                        (fake_bin / "sudo", _FAKE_SUDO)):
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
+    if tmp_used is not None:
+        for name, body in {"stat": "printf 'tmpfs\\n'\n",
+                           "df": f"printf 'Used\\n{tmp_used}\\n'\n"}.items():
+            path = fake_bin / name
+            path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+            path.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
     env = {"HOME": str(home), "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
@@ -1988,6 +1995,43 @@ def test_the_remote_machine_gets_the_commit_and_an_unpushed_one_is_never_pushed(
     assert _read(tmp_path / "ssh-calls") == [f"ran {head} {head}"]
     assert on_origin is push_head          # a bundle pushes nothing
     assert ("travels as a bundle" in proc.stdout) is (not to_master)
+    dispatch = tmp_path / "remote-home/.cache/pseudolife-suite/dispatch"
+    assert dispatch.is_dir() and not list(dispatch.iterdir())
+    assert (tmp_path / "remote-home/.cache/pseudolife-suite/tmp").is_dir()
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_the_remote_suite_refuses_loaded_tmpfs_before_creating_artifacts(tmp_path):
+    proc, head, on_origin = _bundle_world(tmp_path, push_head=False, tmp_used=4 * 1024**3 + 1)
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+    assert "memory-backed" in proc.stdout and "above 4 GiB" in proc.stdout
+    assert "remove only your owned" in proc.stdout and "retry" in proc.stdout
+    assert not (tmp_path / "remote-home/.cache/pseudolife-suite/dispatch").exists()
+    assert not on_origin and not (tmp_path / "ssh-calls").exists()
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("kind,used,code", [
+    ("tmpfs", 4 * 1024**3, 0), ("tmpfs", 4 * 1024**3 + 1, 3),
+    ("ramfs", 5 * 1024**3, 3), ("ext2/ext3", 20 * 1024**3, 0),
+    ("tmpfs", "unknown", 3),
+])
+def test_dev_tmp_preflight_refuses_only_loaded_memory_backed_filesystems(tmp_path, kind, used, code):
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    for name, body in {"stat": f"printf '%s\\n' '{kind}'\n",
+                       "df": f"printf 'Used\\n%s\\n' '{used}'\n"}.items():
+        path = stubs / name
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+    result = subprocess.run([BASH, "-c", 'source "$1"; dev_tmp_preflight gate', "_",
+                             str(ROOT / "ops/dev-tmp-space.sh")], capture_output=True, text=True,
+                            env=hermetic_env(PATH=str(stubs) + os.pathsep + os.environ["PATH"]), timeout=15)
+    assert result.returncode == code, result.stdout + result.stderr
+    if code:
+        assert "/tmp" in result.stdout and "retry" in result.stdout
 
 
 @_LINUX_ONLY
