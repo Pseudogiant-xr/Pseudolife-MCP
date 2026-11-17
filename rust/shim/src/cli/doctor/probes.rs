@@ -354,10 +354,11 @@ pub(super) async fn health(
     if !success(answer.status) {
         // A genuine degraded daemon may return 503 with its health object.
         // An error page from a proxy is availability evidence, not bad client JSON.
+        // Retain structured auth refusals for the existing credential diagnosis.
         let parsed = (!answer.body_failed)
             .then(|| loads_bytes(&answer.body).ok().flatten())
             .flatten();
-        if matches!(&parsed, Some(Value::Object(map)) if matches!(map.get("status"), Some(Value::String(_) | Value::Null)))
+        if matches!(&parsed, Some(Value::Object(map)) if matches!(answer.status, 401 | 403) || matches!(map.get("status"), Some(Value::String(_) | Value::Null)))
         {
             return Ok(parsed);
         }

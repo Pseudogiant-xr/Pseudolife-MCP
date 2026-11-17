@@ -2419,6 +2419,19 @@ fn review_round2_utf8_bom_credentials_and_wake_agree() {
         if wakes[0] != wakes[1] {
             failed.push(client);
         }
+        std::fs::write(&path, format!("\u{feff}\u{feff}{text}")).unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
+        let map = report(&output);
+        let refused = map
+            .get("registrations")
+            .and_then(Value::as_str)
+            .is_some_and(|finding| {
+                finding.contains("byte-order marks") && finding.contains("remove")
+            });
+        eprintln!("double BOM named finding {client}: {refused}");
+        if !refused {
+            failed.push(client);
+        }
     }
     assert!(failed.is_empty(), "{failed:?}");
 }
@@ -2454,6 +2467,12 @@ fn review_round2_git_bash_bad_settings_keeps_path_checks() {
 #[test]
 fn review_round2_native_usage_and_help_precedence() {
     let home = Home::new();
+    let value = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state=--help")
+        .output()
+        .unwrap();
+    assert_eq!(value.status.code(), Some(1));
+    assert_eq!(report(&value)["error"], "DaemonUnavailable");
     let output = command(&home)
         .args([
             "doctor",

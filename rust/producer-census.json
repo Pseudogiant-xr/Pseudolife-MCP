@@ -422,11 +422,11 @@
     "rust/shim/src/cli/doctor/display.rs": "22561290db522be32f9b75b781e6e7d4db42a48886ebb5e1dbef2af27cdc848a",
     "rust/shim/src/cli/doctor/handshake.rs": "54c580f0063e838fab86da2c716894648a425a213697d444509aa100d12a53a0",
     "rust/shim/src/cli/doctor/mod.rs": "2ffcd59336dd27cd92e1026393662da60b9dfd71f8cdb6c88c98c7829ef5c424",
-    "rust/shim/src/cli/doctor/probes.rs": "a6ac8c57a2fdc6d367224deeba783a1fe9386d5331f59821e70fac1de952ca49",
+    "rust/shim/src/cli/doctor/probes.rs": "bb3125030f5b6b696a5cda371ebd108a8ba38198e1dc901ad12c8b2228f5d464",
     "rust/shim/src/cli/doctor/proof.rs": "80fd710f5e6a0d19f4de3c580ed790367c35c7d628fd0e944e72eca354dde0c9",
     "rust/shim/src/cli/doctor/proof_diagnostics.rs": "211bdb9072a840db3aade9033735b3de03e74ac1cae5c880a66e82232004d9f9",
     "rust/shim/src/cli/doctor/proof_process.rs": "9c485255fcae4fb13cec74bf377f4c3d321d779ff024678ae8f34d760373ec3a",
-    "rust/shim/src/cli/doctor/pyenv.rs": "ac9a0fabe57914515b4404b96fd90bd142114e624bb740c7e955c20dfa8bb32e",
+    "rust/shim/src/cli/doctor/pyenv.rs": "93cf79bce0ece3ce1b39a7cc307b271fff03d32bab313623cb3437eab03bec23",
     "rust/shim/src/cli/doctor/pyjson.rs": "4a60384b4a0d3329c5b95de68d860d846f44acb67b35a79d64d248719dd57d1e",
     "rust/shim/src/cli/doorbell_files.rs": "d14f64a6e978d508d5b281bf56704da83b5dc36ad1b6444a44bf4481c16c2c6b",
     "rust/shim/src/cli/doorbell_json.rs": "331e9444e3b4491af7664c456a54217262618eaec613626f09211d95c4b982c3",
@@ -86418,7 +86418,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/probes.rs:364",
+      "location": "rust/shim/src/cli/doctor/probes.rs:365",
       "method": "GET",
       "name": "/health",
       "shape": {
@@ -86432,7 +86432,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/probes.rs:373",
+      "location": "rust/shim/src/cli/doctor/probes.rs:374",
       "method": "GET",
       "name": "/health",
       "shape": {
@@ -122748,13 +122748,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:364",
+      "location": "rust/shim/src/cli/doctor/probes.rs:365",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:373",
+      "location": "rust/shim/src/cli/doctor/probes.rs:374",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },

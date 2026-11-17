@@ -273,7 +273,7 @@ pub(super) fn json_unbounded(text: &str) -> Option<Value> {
 
 /// Standard JSON, with a bounded depth independent of a Python interpreter.
 pub(super) fn json_loads(text: &str) -> Res<Option<Value>> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let text = without_bom(text)?;
     if json_depth(text.as_bytes()) > 256 {
         return Err(Finding::new(
             "JSON nesting exceeds 256 levels; reduce the nesting",
@@ -285,12 +285,22 @@ pub(super) fn json_loads(text: &str) -> Res<Option<Value>> {
 
 /// Parse TOML without exposing a parser excerpt (which may contain a token).
 pub(super) fn toml_loads(text: &str) -> Res<Option<toml::Table>> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let text = without_bom(text)?;
     text.parse::<toml::Table>().map(Some).map_err(|_| {
         Finding::new(
             "invalid TOML or a value outside TOML's supported range; correct the TOML syntax",
         )
     })
+}
+
+fn without_bom(text: &str) -> Res<&str> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    if text.starts_with('\u{feff}') {
+        return Err(Finding::new(
+            "input has multiple UTF-8 byte-order marks; remove the extra byte-order marks",
+        ));
+    }
+    Ok(text)
 }
 
 /// `os.path.join(directory, file)` for a file name with no drive or root.
