@@ -167,7 +167,6 @@ PLATFORM_EXCLUSIONS = {
         'doctor-which-skips-cwd': 'Registered only by the Windows doctor source branch.',
         'episode-home-drive-insensitive': 'Declared Windows-only drive spelling witness.',
         'hook-first-address-only': 'Declared Windows-only resolver witness.',
-        'pair-cleanup-error-swallowed': 'Registered only by the Windows pairing source branch.',
         'pair-not-owner-only': 'Registered only by the Windows pairing source branch.',
         'tunnel-dangling-junction-answered': 'Registered only by the Windows junction source branch.',
     },

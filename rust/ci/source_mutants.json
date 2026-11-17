@@ -237,7 +237,6 @@
     "move-url-message"
   ],
   "pair": [
-    "pair-cleanup-error-swallowed",
     "pair-constant-digest",
     "pair-file-kept-on-refusal",
     "pair-hash-of-wrong-text",
