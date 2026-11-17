@@ -22,6 +22,7 @@ principal, this token's SID, whether this shell is elevated, the process
 table. No test registers, reads, stops or removes a real task or process.
 """
 
+import base64
 import hashlib
 import os
 import re
@@ -121,6 +122,76 @@ def test_the_two_copies_of_the_task_lock_functions_are_identical() -> None:
     assert _block(_read(LOCK), "task lock") == _block(_read(NATIVE), "task lock")
     schedule = _read(ROOT / "rust/shim/src/cli/update/unattended/schedule.rs")
     assert 'include_str!("../../../extractor_shim/autostart.ps1")' in schedule
+
+
+def test_path_resolution_never_compiles_a_temporary_assembly() -> None:
+    for path in (LOCK, NATIVE):
+        text = _block(_read(path), "task lock")
+        assert "Add-Type" not in text, path.name
+        assert "[Reflection.Emit.AssemblyBuilderAccess]::Run" in text
+        assert "GetFinalPathNameByHandleW" in text
+
+
+@pytest.mark.parametrize("planted_root", [None, "C:/fixture-windows", "//server/windows"])
+def test_the_interactive_task_action_keeps_its_exact_bytes(planted_root: str | None) -> None:
+    if planted_root is not None and os.name != "nt":
+        pytest.skip("the planted Windows directory variants run on Windows")
+    text = _read(NATIVE)
+    function = text[text.index("function Get-NativeTaskCode("):text.index("function Get-RegisteredInvocation(")]
+    action = text[text.index("function Quote-Argument("):text.index("$user = [Security.Principal.WindowsIdentity]")]
+    system_root = os.environ.get("SystemRoot", "/fixture/windows")
+    powershell = (str(Path(system_root) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+                  if os.name == "nt" else "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+    script = (function + "\n" + f"$env:SystemRoot = '{planted_root or system_root}'\n" +
+              "$native = 'C:\\fixture dir\\launcher.exe'\n"
+              "$ownerExe = 'C:\\fixture dir\\runtime.exe'\n"
+              f"$c = @{{ PowerShell = '{powershell}'; ServeArgs = @('extractor-shim', 'claude', '--env-file', 'C:\\fixture dir\\settings.env') }}\n"
+              "function New-ScheduledTaskAction { param($Execute, $Argument) @{ Execute=$Execute; Arguments=$Argument } }\n" +
+              action +
+              # The action is already captured. The 5.1 CLR needs its real
+              # directory back for output formatting, not action creation.
+              f"\n$env:SystemRoot = '{system_root}'\n" +
+              "[Console]::Out.WriteLine($action.Execute)\n[Console]::Out.WriteLine($action.Arguments)\n")
+    expected = (
+        "$runtimeExe = 'C:\\fixture dir\\runtime.exe'\n"
+        "$psi = New-Object System.Diagnostics.ProcessStartInfo\n"
+        "$psi.FileName = 'C:\\fixture dir\\launcher.exe'\n"
+        "$psi.Arguments = '\"extractor-shim\" \"claude\" \"--env-file\" \"C:\\fixture dir\\settings.env\"'\n"
+        "$psi.UseShellExecute = $false\n"
+        "$psi.CreateNoWindow = $true\n"
+        "$process = [System.Diagnostics.Process]::Start($psi)\n"
+        "$process.WaitForExit()\n"
+        "exit $process.ExitCode"
+    )
+    for shell in _shells():
+        proc = _run(script, shell)
+        assert proc.returncode == 0, proc.stderr
+        lines = proc.stdout.strip().splitlines()
+        assert len(lines) == 2, proc.stdout
+        result = {"Execute": lines[0], "Arguments": lines[1]}
+        arguments = result["Arguments"]
+        assert arguments.startswith("-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ")
+        encoded = arguments.rsplit(" ", 1)[1]
+        # The here-string uses the source file's line endings on each host.
+        assert base64.b64decode(encoded).decode("utf-16-le").replace("\r\n", "\n") == expected
+        assert result["Execute"] == powershell
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows final path APIs")
+def test_path_resolution_uses_only_an_in_memory_assembly(tmp_path: Path) -> None:
+    checkout = tmp_path / "CheckOut Dir"
+    checkout.mkdir()
+    other = str(checkout).replace("CheckOut Dir", "checkout dir")
+    for path in (LOCK, NATIVE):
+        for shell in _shells():
+            script = (_block(_read(path), "task lock") +
+                      "function Add-Type { throw 'compilation must not run' }\n" +
+                      f"Get-CanonicalPath '{other}'\n" +
+                      "'DYNAMIC ' + $script:finalPathApi.Assembly.IsDynamic\n" +
+                      "'LOCATION ' + $script:finalPathApi.Assembly.Location\n")
+            proc = _run(script, shell)
+            assert proc.returncode == 0, (shell, proc.stderr)
+            assert proc.stdout.strip().splitlines() == [str(checkout.resolve()), "DYNAMIC True", "LOCATION"], (shell, proc.stdout)
 
 
 def test_every_logon_trigger_is_for_this_user_with_a_limited_principal() -> None:

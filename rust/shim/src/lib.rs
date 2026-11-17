@@ -24,6 +24,7 @@ pub mod sent_serve;
 pub mod setup;
 mod subscriptions;
 mod upstream;
+mod windows_powershell;
 mod wire_compatibility;
 mod wire_ids;
 mod wire_json;

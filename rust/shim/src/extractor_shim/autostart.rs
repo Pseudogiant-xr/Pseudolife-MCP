@@ -3,11 +3,146 @@ use super::config;
 use serde_json::json;
 use std::{ffi::OsString, fs, path::PathBuf, process::Command};
 
-struct Scratch(PathBuf);
+struct Scratch {
+    path: PathBuf,
+    #[cfg(windows)]
+    directory: Option<fs::File>,
+    #[cfg(windows)]
+    elevated: bool,
+}
+
+fn create_registration_directory(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(windows)]
+    if crate::credentials::windows_security::process_elevated()
+        .map_err(|e| format!("cannot check registration token elevation: {e}"))?
+    {
+        return crate::credentials::windows_security::create_registration_directory(path)
+            .map_err(|e| format!("cannot create protected registration scratch directory: {e}; rerun install-autostart"));
+    }
+    fs::create_dir(path).map_err(|e| format!("cannot create registration scratch directory: {e}"))
+}
+
+impl Scratch {
+    fn create(path: PathBuf) -> Result<Self, String> {
+        create_registration_directory(&path)?;
+        Self::open_created(path)
+    }
+
+    fn open_created(path: PathBuf) -> Result<Self, String> {
+        #[cfg(windows)]
+        let elevated = crate::credentials::windows_security::process_elevated()
+            .map_err(|e| format!("cannot check registration token elevation: {e}"))?;
+        #[cfg(windows)]
+        let directory =
+            crate::credentials::windows_security::open_registration_directory(&path, elevated)
+                .map_err(|e| {
+                    format!(
+                        "cannot open registration scratch directory: {e}; rerun install-autostart"
+                    )
+                })?;
+        Ok(Self {
+            path,
+            #[cfg(windows)]
+            directory: Some(directory),
+            #[cfg(windows)]
+            elevated,
+        })
+    }
+
+    fn write(&mut self, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        self.write_with(name, bytes, || Ok(()))
+    }
+
+    fn write_with(
+        &mut self,
+        name: &str,
+        bytes: &[u8],
+        before_open: impl FnOnce() -> std::io::Result<()>,
+    ) -> Result<PathBuf, String> {
+        use std::io::Write as _;
+        #[cfg(windows)]
+        let _directory = {
+            let directory = crate::credentials::windows_security::open_registration_directory(
+                &self.path,
+                self.elevated,
+            )
+            .map_err(|e| {
+                format!("cannot open registration scratch directory: {e}; rerun install-autostart")
+            })?;
+            let held = self
+                .directory
+                .as_ref()
+                .ok_or("registration scratch directory is closed")?;
+            let identity = crate::credentials::windows_security::folder_identity;
+            if identity(held).map_err(|e| e.to_string())?
+                != identity(&directory).map_err(|e| e.to_string())?
+            {
+                return Err(format!(
+                    "registration scratch directory changed; refusing to create {name}; rerun install-autostart"
+                ));
+            }
+            directory
+        };
+        let path = self.path.join(name);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.custom_flags(
+                windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT,
+            );
+        }
+        before_open().map_err(|e| format!("registration scratch control failed: {e}"))?;
+        let mut file = options.open(&path).map_err(|e| {
+            format!("cannot create new registration file {name}: {e}; rerun install-autostart")
+        })?;
+        file.write_all(bytes)
+            .map_err(|e| format!("cannot write registration file {name}: {e}"))?;
+        Ok(path)
+    }
+}
+
+fn registration_data(mut fields: serde_json::Value) -> Result<Vec<u8>, String> {
+    fields.as_object_mut().expect("registration object").insert(
+        "PowerShell".into(),
+        crate::windows_powershell::executable()?
+            .replace('/', "\\")
+            .into(),
+    );
+    Ok(serde_json::to_vec(&fields).expect("registration JSON"))
+}
+
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        #[cfg(windows)]
+        drop(self.directory.take());
+        let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+fn windows_registration_command(
+    script: &std::path::Path,
+    data: &std::path::Path,
+    script_bytes: &[u8],
+    data_bytes: &[u8],
+) -> Result<Command, String> {
+    use sha2::{Digest, Sha256};
+    // Read each file once, verify those bytes, then run/parse only those
+    // bytes. Neither the script nor its JSON is reopened after verification.
+    let script_digest = format!("{:x}", Sha256::digest(script_bytes));
+    let data_digest = format!("{:x}", Sha256::digest(data_bytes));
+    let bootstrap = format!(
+        "$ErrorActionPreference='Stop';try{{$s=[Security.Cryptography.SHA256]::Create();$b=[IO.File]::ReadAllBytes({script});$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{script_digest}'){{[Console]::Error.WriteLine('autostart registration script changed after it was written; nothing was run; rerun install-autostart');exit 5}};$d=[IO.File]::ReadAllBytes({data});$h=-join ($s.ComputeHash($d)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{data_digest}'){{[Console]::Error.WriteLine('autostart registration data changed after it was written; nothing was run; rerun install-autostart');exit 5}}}}catch{{[Console]::Error.WriteLine('cannot verify autostart registration files; rerun install-autostart: '+$_.Exception.Message);exit 1}}finally{{if($s){{$s.Dispose()}}}};try{{& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b))) -ConfigJson ([Text.Encoding]::UTF8.GetString($d))}}catch{{[Console]::Out.WriteLine(($_.Exception.Message -replace '\\s+',' ').Trim());exit 1}}",
+        script = crate::windows_powershell::path_expression(script)?,
+        data = crate::windows_powershell::path_expression(data)?,
+    );
+    let argv = crate::windows_powershell::encoded(&bootstrap)?;
+    let mut command = Command::new(&argv[0]);
+    command
+        .args(&argv[1..])
+        .envs(crate::windows_powershell::environment()?);
+    Ok(command)
 }
 
 /// The exit code of a refusal over a scheduled task this shell may not
@@ -191,10 +326,9 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     if !native.is_file() {
         return Err(format!("native launcher not found: {}", native.display()).into());
     }
-    let scratch = Scratch(
+    let mut scratch = Scratch::create(
         std::env::temp_dir().join(format!("pseudolife-shim-install-{}", uuid::Uuid::new_v4())),
-    );
-    fs::create_dir(&scratch.0).map_err(|e| e.to_string())?;
+    )?;
     let mut config_args = vec!["extractor-shim".to_owned(), "config".into()];
     config_args.extend(settings.iter().map(|s| s.to_string_lossy().into_owned()));
     let mut serve_args = vec![
@@ -215,14 +349,13 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
         ]);
     }
     let status = if cfg!(windows) {
-        let script = scratch.0.join("register.ps1");
-        let data = scratch.0.join("registration.json");
-        fs::write(&script,include_str!("autostart.ps1")).map_err(|e|e.to_string())?;
-        fs::write(&data,serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON")).map_err(|e|e.to_string())?;
-        Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File"]).arg(script).arg(data).status()
+        let script_bytes = include_bytes!("autostart.ps1");
+        let data_bytes = registration_data(json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args}))?;
+        let script = scratch.write("register.ps1", script_bytes)?;
+        let data = scratch.write("registration.json", &data_bytes)?;
+        windows_registration_command(&script, &data, script_bytes, &data_bytes)?.status()
     } else if cfg!(target_os="linux") {
-        let script = scratch.0.join("register.sh");
-        fs::write(&script,include_str!("autostart.sh")).map_err(|e|e.to_string())?;
+        let script = scratch.write("register.sh", include_bytes!("autostart.sh"))?;
         Command::new("bash").arg(script).arg(if remove {"remove"} else {"install"}).arg(&owner_exe).arg(&native).arg(kind).arg(&env_file).arg(name).arg(if replace {"yes"}else{"no"}).arg(port.to_string()).arg(host).arg(wait.to_string()).arg(serve_args.len().to_string()).args(serve_args).args(config_args).status()
     } else { return Err("native autostart requires Windows Task Scheduler or Linux systemd --user".into()); }
     .map_err(|e|format!("cannot run the platform registration helper: {e}"))?;
@@ -232,5 +365,502 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
         Err(Failure::Locked)
     } else {
         Err(format!("autostart registration failed ({status}); see the diagnostic above").into())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registration_uses_system_windows_powershell() {
+        let command = windows_registration_command(
+            "C:/fixture/register.ps1".as_ref(),
+            "C:/fixture/registration.json".as_ref(),
+            b"",
+            b"",
+        )
+        .unwrap();
+        let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        assert!(std::path::Path::new(command.get_program()).is_absolute());
+        assert_eq!(command.get_program(), expected.as_os_str());
+        assert!(command.get_args().any(|arg| arg == "-EncodedCommand"));
+    }
+
+    #[test]
+    fn registration_refuses_a_changed_script() {
+        registration_fixture("script");
+    }
+
+    #[test]
+    fn registration_refuses_changed_data() {
+        registration_fixture("data");
+    }
+
+    #[test]
+    fn registration_accepts_unchanged_files() {
+        registration_fixture("neither");
+    }
+
+    #[test]
+    fn registration_accepts_paths_with_typographic_quotes() {
+        registration_fixture("typographic");
+    }
+
+    fn fixture_script(source: &str) -> std::process::Output {
+        let mut scratch = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-result-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let script = scratch.write("register.ps1", source.as_bytes()).unwrap();
+        let data = scratch.write("registration.json", b"{}").unwrap();
+        windows_registration_command(&script, &data, source.as_bytes(), b"{}")
+            .unwrap()
+            .output()
+            .unwrap()
+    }
+
+    #[test]
+    fn registration_script_errors_are_one_plain_line() {
+        let output = fixture_script("throw \"fixture registration failure`nsecond line\"");
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "fixture registration failure second line"
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn registration_script_preserves_the_lock_refusal_exit_code() {
+        let output = fixture_script("[Console]::Error.WriteLine('fixture task locked');exit 3");
+        assert_eq!(output.status.code(), Some(3));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).trim(),
+            "fixture task locked"
+        );
+    }
+
+    #[test]
+    fn registration_child_uses_the_operating_system_environment() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "extractor_shim::autostart::tests::registration_environment_probe",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("SystemRoot", "C:/fixture-windows")
+            .env("WINDIR", "C:/fixture-windows")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "subprocess probe invoked by registration_child_uses_the_operating_system_environment"]
+    fn registration_environment_probe() {
+        // Registration's ownership snapshots also use JSON conversion.
+        let output = fixture_script(
+            "param([string]$ConfigJson) $c=$ConfigJson|ConvertFrom-Json; $null=$c|ConvertTo-Json; [Console]::Out.WriteLine('fixture environment accepted')",
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "fixture environment accepted"
+        );
+    }
+
+    #[test]
+    fn registration_files_are_created_exclusively() {
+        for name in ["register.ps1", "registration.json"] {
+            let mut scratch = Scratch::create(
+                std::env::temp_dir().join(format!("autostart-exclusive-{}", uuid::Uuid::new_v4())),
+            )
+            .unwrap();
+            let path = scratch.path.join(name);
+            fs::write(&path, b"existing fixture").unwrap();
+            assert!(
+                scratch.write(name, b"replacement").is_err(),
+                "existing {name} was overwritten"
+            );
+            assert_eq!(fs::read(path).unwrap(), b"existing fixture");
+        }
+    }
+
+    #[test]
+    fn registration_refuses_a_replaced_scratch_junction() {
+        let holder = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-junction-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let path = holder.path.join("registration");
+        let moved = holder.path.join("original");
+        let outside = holder.path.join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel"), b"unchanged").unwrap();
+        create_registration_directory(&path).unwrap();
+        fs::rename(&path, &moved).unwrap();
+        crate::credentials::windows_security::make_junction_for_test(&path, &outside).unwrap();
+        let result = Scratch::open_created(path.clone()).and_then(|mut scratch| {
+            scratch.write("register.ps1", b"script")?;
+            scratch.write("registration.json", b"data")?;
+            Ok(())
+        });
+        assert!(result.is_err(), "replaced scratch folder was accepted");
+        let reason = result.unwrap_err();
+        assert!(reason.contains("reparse"), "{reason}");
+        assert!(!outside.join("register.ps1").exists());
+        assert!(!outside.join("registration.json").exists());
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"unchanged");
+        if path.exists() {
+            fs::remove_dir(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn held_registration_directory_refuses_rename() {
+        let holder = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-held-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let scratch = Scratch::create(holder.path.join("registration")).unwrap();
+        let result = fs::rename(&scratch.path, holder.path.join("moved"));
+        assert!(result.is_err(), "a held registration directory was renamed");
+        assert_eq!(
+            result.unwrap_err().raw_os_error(),
+            Some(32),
+            "expected a sharing violation"
+        );
+        assert!(scratch.path.is_dir());
+    }
+
+    #[test]
+    fn held_registration_directory_prevents_write_redirection() {
+        let holder = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-held-write-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let mut scratch = Scratch::create(holder.path.join("registration")).unwrap();
+        let path = scratch.path.clone();
+        let moved = holder.path.join("moved");
+        let outside = holder.path.join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel"), b"unchanged").unwrap();
+        let mut rename_error = None;
+        let written = scratch
+            .write_with("register.ps1", b"fixture script", || {
+                match fs::rename(&path, &moved) {
+                    Ok(()) => crate::credentials::windows_security::make_junction_for_test(
+                        &path, &outside,
+                    )?,
+                    Err(error) => rename_error = Some(error),
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            rename_error.as_ref().and_then(std::io::Error::raw_os_error),
+            Some(32),
+            "the held folder could be swapped before file creation"
+        );
+        assert!(
+            !outside.join("register.ps1").exists(),
+            "registration file was redirected"
+        );
+        assert_eq!(fs::read(written).unwrap(), b"fixture script");
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"unchanged");
+    }
+
+    #[test]
+    fn rust_registration_data_drives_the_action_and_os_fallback() {
+        let embedded = include_str!("autostart.ps1");
+        let header = &embedded[..embedded.find("$native =").unwrap()];
+        let functions = &embedded[embedded.find("function Get-NativeTaskCode(").unwrap()
+            ..embedded.find("function Get-RegisteredInvocation(").unwrap()];
+        let action = &embedded[embedded.find("function Quote-Argument(").unwrap()
+            ..embedded
+                .find("$user = [Security.Principal.WindowsIdentity]")
+                .unwrap()];
+        let source = format!(
+            "{header}\n{functions}\n$native=[string]$c.Native;$ownerExe=[string]$c.OwnerExe\nfunction New-ScheduledTaskAction {{ param($Execute,$Argument) @{{Execute=$Execute;Arguments=$Argument}} }}\n{action}\n[Console]::Out.WriteLine($action.Execute)\n[Console]::Out.WriteLine($action.Arguments)"
+        );
+        let producer = registration_data(json!({
+            "Native":"C:\\fixture\\launcher.exe", "OwnerExe":"C:\\fixture\\runtime.exe",
+            "ServeArgs":["extractor-shim","claude","--env-file","C:\\fixture\\settings.env"]
+        }))
+        .unwrap();
+        let fields: serde_json::Value = serde_json::from_slice(&producer).unwrap();
+        let resolved = fields["PowerShell"]
+            .as_str()
+            .expect("Rust registration data must name PowerShell");
+        let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe");
+        assert_eq!(resolved, expected.to_str().unwrap());
+        assert!(
+            !resolved.contains('/'),
+            "registered action must retain Windows separators"
+        );
+        for case in ["producer", "provided value", "fallback"] {
+            let mut value = fields.clone();
+            if case == "provided value" {
+                value["PowerShell"] = "C:\\fixture-action\\powershell.exe".into();
+            }
+            if case == "fallback" {
+                value.as_object_mut().unwrap().remove("PowerShell");
+            }
+            let bytes = if case == "producer" {
+                producer.clone()
+            } else {
+                serde_json::to_vec(&value).unwrap()
+            };
+            let mut scratch = Scratch::create(
+                std::env::temp_dir()
+                    .join(format!("autostart-action-data-{}", uuid::Uuid::new_v4())),
+            )
+            .unwrap();
+            let script = scratch.write("register.ps1", source.as_bytes()).unwrap();
+            let data = scratch.write("registration.json", &bytes).unwrap();
+            let output = windows_registration_command(&script, &data, source.as_bytes(), &bytes)
+                .unwrap()
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{case}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut lines = stdout.lines();
+            let execute = lines.next().unwrap();
+            if case == "fallback" {
+                assert!(
+                    execute.eq_ignore_ascii_case(expected.to_str().unwrap()),
+                    "{execute}"
+                );
+            } else {
+                assert_eq!(execute, value["PowerShell"].as_str().unwrap());
+            }
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .starts_with("-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ")
+            );
+            assert!(lines.next().is_none());
+        }
+    }
+
+    #[test]
+    fn registration_scratch_removes_its_own_folder() {
+        let mut scratch = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-cleanup-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let path = scratch.path.clone();
+        let source = b"param([string]$ConfigJson) [Console]::Out.WriteLine('registered fixture')";
+        let script = scratch.write("register.ps1", source).unwrap();
+        let data = scratch.write("registration.json", b"{}").unwrap();
+        let output = windows_registration_command(&script, &data, source, b"{}")
+            .unwrap()
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "registered fixture"
+        );
+        drop(scratch);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn registration_scratch_has_admin_acl_and_owner_when_elevated() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, READ_CONTROL};
+        let output = Command::new(crate::windows_powershell::executable().unwrap())
+            .args(["-NoProfile", "-NonInteractive", "-Command", "[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"])
+            .output().unwrap();
+        assert!(output.status.success());
+        let elevated = String::from_utf8_lossy(&output.stdout).trim() == "True";
+        eprintln!("registration scratch elevated={elevated}");
+        let scratch = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-permissions-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let directory = fs::OpenOptions::new()
+            .read(true)
+            .access_mode(READ_CONTROL)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&scratch.path)
+            .unwrap();
+        let dacl = crate::credentials::windows_security::dacl_sddl(&directory);
+        if elevated {
+            let owner = crate::credentials::windows_security::owner_sddl(&directory);
+            assert!(
+                matches!(owner.as_str(), "O:BA" | "O:SY"),
+                "scratch owner is not Administrators or SYSTEM: {owner}"
+            );
+            assert!(
+                dacl.starts_with("D:P"),
+                "scratch DACL is not protected: {dacl}"
+            );
+            let entries: Vec<_> = dacl.split('(').skip(1).collect();
+            assert_eq!(entries.len(), 2, "{dacl}");
+            assert!(
+                entries.iter().any(|entry| entry.ends_with(";;;BA)")),
+                "{dacl}"
+            );
+            assert!(
+                entries.iter().any(|entry| entry.ends_with(";;;SY)")),
+                "{dacl}"
+            );
+            assert!(
+                entries.iter().all(|entry| entry.contains("OICI;FA")),
+                "{dacl}"
+            );
+        }
+        drop(directory);
+    }
+
+    #[test]
+    fn registration_hardening_controls() {
+        // One bounded stress selection runs every registration control.
+        // Each function remains a separately named ordinary unit test too.
+        for (name, check) in [
+            (
+                "interpreter",
+                registration_uses_system_windows_powershell as fn(),
+            ),
+            ("changed script", registration_refuses_a_changed_script),
+            ("changed data", registration_refuses_changed_data),
+            ("unchanged", registration_accepts_unchanged_files),
+            (
+                "literal paths",
+                registration_accepts_paths_with_typographic_quotes,
+            ),
+            ("plain error", registration_script_errors_are_one_plain_line),
+            (
+                "lock refusal",
+                registration_script_preserves_the_lock_refusal_exit_code,
+            ),
+            (
+                "child environment",
+                registration_child_uses_the_operating_system_environment,
+            ),
+            (
+                "exclusive files",
+                registration_files_are_created_exclusively,
+            ),
+            (
+                "replaced folder",
+                registration_refuses_a_replaced_scratch_junction,
+            ),
+            (
+                "held-folder rename",
+                held_registration_directory_refuses_rename,
+            ),
+            (
+                "held-folder write",
+                held_registration_directory_prevents_write_redirection,
+            ),
+            (
+                "action data",
+                rust_registration_data_drives_the_action_and_os_fallback,
+            ),
+            ("cleanup", registration_scratch_removes_its_own_folder),
+            (
+                "protected folder",
+                registration_scratch_has_admin_acl_and_owner_when_elevated,
+            ),
+        ] {
+            eprintln!("registration control: {name}");
+            check();
+        }
+    }
+
+    fn registration_fixture(changed: &str) {
+        let scratch = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let script = scratch.path.join(if changed == "typographic" {
+            "register ' é ‘ ’ “ ” $ ` [x].ps1"
+        } else {
+            "register ' é.ps1"
+        });
+        let data = scratch.path.join(if changed == "typographic" {
+            "registration ' é ‘ ’ “ ” $ ` [x].json"
+        } else {
+            "registration ' é.json"
+        });
+        let script_bytes = br#"param([string]$ConfigPath, [string]$ConfigJson)
+if (!$ConfigJson) { $ConfigJson = [IO.File]::ReadAllText($ConfigPath) }
+$c = $ConfigJson | ConvertFrom-Json
+[Console]::Out.WriteLine('registered ' + $c.Name)
+exit 0"#;
+        let data_bytes = br#"{"Name":"fixture"}"#;
+        // Each case uses the production command builder, with no real scheduler.
+        {
+            fs::write(&script, script_bytes).unwrap();
+            fs::write(&data, data_bytes).unwrap();
+            let mut command =
+                windows_registration_command(&script, &data, script_bytes, data_bytes).unwrap();
+            if changed == "script" {
+                fs::write(
+                    &script,
+                    "[Console]::Out.WriteLine('changed script ran');exit 0",
+                )
+                .unwrap();
+            } else if changed == "data" {
+                fs::write(&data, br#"{"Name":"changed data read"}"#).unwrap();
+            }
+            let output = command.output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if matches!(changed, "neither" | "typographic") {
+                assert_eq!(output.status.code(), Some(0), "{stdout} {stderr}");
+                assert_eq!(stdout.trim(), "registered fixture");
+            } else {
+                assert_eq!(
+                    output.status.code(),
+                    Some(5),
+                    "{changed}: {stdout} {stderr}"
+                );
+                assert!(stdout.is_empty(), "{stdout}");
+                assert!(
+                    stderr.contains(&format!("autostart registration {changed} changed")),
+                    "{stderr}"
+                );
+            }
+        }
     }
 }
