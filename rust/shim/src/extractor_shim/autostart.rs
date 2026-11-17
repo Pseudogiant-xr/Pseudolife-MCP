@@ -445,6 +445,50 @@ mod tests {
         assert!(!path.exists());
     }
 
+    #[test]
+    fn elevated_registration_scratch_has_a_protected_admin_dacl() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, READ_CONTROL};
+        let output = Command::new(crate::windows_powershell::executable().unwrap())
+            .args(["-NoProfile", "-NonInteractive", "-Command", "[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"])
+            .output().unwrap();
+        assert!(output.status.success());
+        let elevated = String::from_utf8_lossy(&output.stdout).trim() == "True";
+        eprintln!("registration scratch elevated={elevated}");
+        let scratch = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-permissions-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let directory = fs::OpenOptions::new()
+            .read(true)
+            .access_mode(READ_CONTROL)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&scratch.path)
+            .unwrap();
+        let dacl = crate::credentials::windows_security::dacl_sddl(&directory);
+        if elevated {
+            assert!(
+                dacl.starts_with("D:P"),
+                "scratch DACL is not protected: {dacl}"
+            );
+            let entries: Vec<_> = dacl.split('(').skip(1).collect();
+            assert_eq!(entries.len(), 2, "{dacl}");
+            assert!(
+                entries.iter().any(|entry| entry.ends_with(";;;BA)")),
+                "{dacl}"
+            );
+            assert!(
+                entries.iter().any(|entry| entry.ends_with(";;;SY)")),
+                "{dacl}"
+            );
+            assert!(
+                entries.iter().all(|entry| entry.contains("OICI;FA")),
+                "{dacl}"
+            );
+        }
+        drop(directory);
+    }
+
     fn registration_fixture(changed: &str) {
         let scratch = Scratch::create(
             std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())),
