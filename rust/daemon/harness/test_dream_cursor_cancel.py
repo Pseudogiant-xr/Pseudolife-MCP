@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dbstate
 import daemons
 import pgdisposable
-from dream_cursor_oracle import make_service, seed
+from dream_fixtures import recovery_state, seed
+from dream_fixture_data import RECOVERY
 
 pg = pgdisposable.Slice.from_env("w3d")
 
@@ -39,15 +40,10 @@ class CancelledWaiter(unittest.TestCase):
         names = [pg.name(pg.PREFIX + "panic_" + side) for side in ("t", "py", "rs")]
         try:
             template = pg.create(names[0])
-            seed(template, {"meta": {"dream_ack_secret_v1": "11" * 32},
-                            "entries": [{"text": "panic recovery probe", "ts": 1.0}]})
+            seed(template, RECOVERY["panic"]["fixture"])
             py_dsn, rs_dsn = [pg.create(n, template=names[0]) for n in names[1:]]
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            storage = PostgresStorage(py_dsn)
-            try:
-                expected = make_service(storage).dream_pull()
-            finally:
-                storage.close()
+            expected = RECOVERY["panic"]["response"]
+            recovery_state(py_dsn, "panic")
             expected_state = dbstate.dump(py_dsn)
             with tempfile.TemporaryDirectory(prefix="pl-w3d-panic-") as directory:
                 home = Path(directory)
@@ -72,18 +68,10 @@ class CancelledWaiter(unittest.TestCase):
         proc = None
         try:
             template = pg.create(names[0])
-            seed(template, {"meta": {"dream_ack_secret_v1": "11" * 32},
-                            "entries": [{"text": "cancellation probe", "ts": 1.0}]})
+            seed(template, RECOVERY["cancel"]["fixture"])
             py_dsn, rs_dsn = [pg.create(n, template=names[0]) for n in names[1:]]
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            storage = PostgresStorage(py_dsn)
-            try:
-                service = make_service(storage)
-                pulled = service.dream_pull()
-                service.dream_commit(pulled["commit_token"])
-                expected_next = service.dream_pull()
-            finally:
-                storage.close()
+            expected_next = RECOVERY["cancel"]["response"]
+            recovery_state(py_dsn, "cancel")
             expected_state = dbstate.dump(py_dsn)
             with tempfile.TemporaryDirectory(prefix="pl-w3d-cancel-") as directory:
                 home = Path(directory)

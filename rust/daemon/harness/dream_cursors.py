@@ -1,7 +1,7 @@
-"""Dream cursor differential runner; live, recorded goldens and source mutants.
+"""Dream cursor regression goldens, candidate recording and source mutants.
 
-Usage: python dream_cursors.py live --rust-bin PATH [--record] [--out FILE]
-       python dream_cursors.py golden --rust-bin PATH [--goldens DIR]
+Usage: python dream_cursors.py golden --rust-bin PATH [--goldens DIR]
+       python dream_cursors.py golden --rust-bin PATH --record-candidate [--write]
        python dream_cursors.py mutants --rust-bin PATH [--only NAME ...]
 Every action, including rejection, injected fault and restart, compares the
 response by type/value and all database tables/catalogs through dbstate.
@@ -25,6 +25,8 @@ sys.path.insert(0, str(HERE))
 import daemons
 import dbstate
 import pgdisposable
+import candidate_record
+from dream_fixtures import check_target
 from run import DB_NONDETERMINISTIC, diff_values, golden_scrub
 
 pg = pgdisposable.Slice.from_env("w3d")
@@ -334,24 +336,24 @@ def wire_action(action, saved):
 
 def seed_template(dsn: str, fixture: dict, home: Path) -> None:
     """Transfer setup over stdin; never materialize a signing key in a file."""
+    check_target(dsn)
     env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
     seeded = subprocess.run([sys.executable, str(HERE / "dream_cursor_oracle.py"), "--seed", "-"],
                             input=json.dumps(fixture), cwd=home, env=env,
                             capture_output=True, text=True, timeout=60)
     if seeded.returncode:
-        raise RuntimeError("Python template seed failed: " + seeded.stderr[-2000:])
+        raise RuntimeError("Dream template seed failed: " + seeded.stderr[-2000:])
 
 
-def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=None):
+def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=None, write=False):
     name = scenario["name"]
     tag = name.replace("-", "_")
     template = pg.name(pg.PREFIX + tag + "_t")
-    dbs = {side: pg.name(pg.PREFIX + tag + suffix) for side, suffix in (("python", "_py"), ("rust", "_rs"))}
-    if mode == "golden":
-        dbs.pop("python")
+    dbs = {"rust": pg.name(pg.PREFIX + tag + "_rs")}
     procs, dsns = {}, {}
     golden_path = golden_dir / f"dream-cursors-{name}.json"
-    golden = json.loads(golden_path.read_text(encoding="utf-8")) if mode == "golden" else None
+    golden = (json.loads(golden_path.read_text(encoding="utf-8"))
+              if golden_path.exists() or not record else {"steps": []})
     try:
         dsn = pg.create(template)
         seed_home = daemons.make_home(root, tag + "_seed", None)
@@ -363,7 +365,7 @@ def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=
             env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsns[side]})
             if side == "rust" and mutant:
                 env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
-            argv = [str(binary)] if side == "rust" else [sys.executable, str(HERE / "dream_cursor_oracle.py")]
+            argv = [str(binary)]
             procs[side] = Adapter(argv, env, home).start()
         saved, rows, recordings = {}, [], []
         prior_secrets, prior_database_secrets = {}, {}
@@ -383,11 +385,9 @@ def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=
                     answers[side] = fault(dsns[side], action)
                 else:
                     answers[side] = proc.call(request)
-            if mode == "golden":
-                answers["python"] = golden["steps"][index]["response"]
-            raw_python = answers["python"]
             if action.get("save"):
-                saved[action["save"]] = raw_python
+                saved[action["save"]] = (answers["rust"] if record
+                                        else golden["steps"][index]["response"])
             if scenario["generated_secret"]:
                 for side, response in answers.items():
                     if "secret" in response:
@@ -406,21 +406,22 @@ def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=
                     if secret is not None:
                         prior_database_secrets[side] = secret
                 states[side] = normalize_state(raw_state, before, scenario["generated_secret"])
-            if mode == "golden":
-                states["python"] = golden["steps"][index]["db_state"]
-                states["rust"] = golden_state(states["rust"], before)
-            result = compare_step(answers["python"], answers["rust"], states["python"], states["rust"])
+            states["rust"] = golden_state(states["rust"], before)
+            observed = {"response": answers["rust"], "db_state": states["rust"]}
+            expected = golden["steps"][index] if index < len(golden["steps"]) else observed
+            result = compare_step(expected["response"], observed["response"],
+                                  expected["db_state"], observed["db_state"])
             rows.append({"index": index, "op": action["op"], **result})
-            recordings.append({"response": answers["python"], "db_state": golden_state(states["python"], before)})
+            recordings.append(observed)
+        recording = None
         if record:
-            golden_dir.mkdir(parents=True, exist_ok=True)
-            golden_path.write_text(json.dumps({"scenario": name,
-                "normalizers": {"catalog": "exact unchanged-template invariant or changed-category value",
-                                "vectors": "existing run.golden_scrub digest",
-                                "clocks": "normalize_state preserves changed seeded clocks"},
-                "steps": recordings}, indent=2), encoding="utf-8")
+            recording = record_steps(golden_path, name, recordings, binary, write)
+        elif len(golden["steps"]) != len(recordings):
+            rows.append({"index": len(rows), "op": "case-count", "db_diffs": [],
+                         "diffs": ["recorded action count differs from scenario"]})
         return {"scenario": name, "steps": rows, "actions": len(rows),
-                "diff_actions": sum(bool(row["diffs"] or row["db_diffs"]) for row in rows)}
+                "diff_actions": sum(bool(row["diffs"] or row["db_diffs"]) for row in rows),
+                **({"recording_exit": recording} if record else {})}
     finally:
         for proc in procs.values():
             proc.stop()
@@ -428,17 +429,40 @@ def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=
             pg.drop(bank)
 
 
+def record_steps(path, name, steps, binary, write):
+    recorder = candidate_record.Recording(path, ("steps",), binary,
+                                         whole=True, defined=[name], single=True)
+    recorder.write = write
+    recorder.committed.setdefault("scenario", name)
+    observed = {"steps": steps}
+    refusal = candidate_record.refuse_mutant_environment() or candidate_record.deferral(observed)
+    failures = [refusal] if refusal else []
+    if not steps:
+        failures.append("no dream actions recorded")
+    recorder.observe(name, observed, failures, candidate_record.round_trip)
+    return recorder.finish(write, "python rust/daemon/harness/dream_cursors.py golden --rust-bin PATH")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("live", "golden", "mutants"))
+    parser.add_argument("mode", choices=("golden", "mutants"))
     parser.add_argument("--rust-bin", type=Path, required=True)
     parser.add_argument("--only", nargs="*")
-    parser.add_argument("--record", action="store_true")
+    parser.add_argument("--record-candidate", action="store_true")
+    parser.add_argument("--write", action="store_true")
     parser.add_argument("--goldens", type=Path, default=HERE / "goldens")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--ci-fixture", action="store_true",
                         help="allow the isolated loopback fixture and test login under RUNNER_TEMP in CI")
     args = parser.parse_args()
+    if args.write and not args.record_candidate:
+        parser.error("--write requires --record-candidate")
+    if args.record_candidate:
+        if args.mode != "golden":
+            parser.error("--record-candidate requires golden mode")
+        refusal = candidate_record.refuse_mutant_environment()
+        if refusal:
+            parser.error(refusal)
     valid_host = pg.HOST_PORT == "127.0.0.1:5433"
     if args.ci_fixture:
         host, _, port = pg.HOST_PORT.rpartition(":")
@@ -449,8 +473,6 @@ def main() -> int:
                       and pg.LOGIN_FILE.resolve().is_relative_to(Path(runner_temp).resolve()))
     if pg.SLICE != "w3d" or not valid_host:
         parser.error("requires slice w3d and local bench 127.0.0.1:5433, or an explicit isolated CI fixture")
-    if args.record and args.mode != "live":
-        parser.error("--record requires live mode")
     root = Path(tempfile.mkdtemp(prefix="pl-w3d-cursors-"))
     out = args.out or root / "result.json"
     selected = scenarios()
@@ -464,7 +486,7 @@ def main() -> int:
         controls = args.only or MUTANTS
         if set(controls) - set(MUTANTS):
             parser.error("unknown dream cursor mutant")
-        baseline = [run_scenario(s, args.rust_bin.resolve(), root, "live", args.goldens)
+        baseline = [run_scenario(s, args.rust_bin.resolve(), root, "golden", args.goldens)
                     for s in selected if s["name"] in {MUTANT_SCENARIOS[m] for m in controls}]
         if any(r["diff_actions"] for r in baseline):
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -473,17 +495,18 @@ def main() -> int:
             print("clean control differs; mutants not run; result", out, flush=True)
             return 1
         for mutant in controls:
-            rows = [run_scenario(s, args.rust_bin.resolve(), root, "live", args.goldens, mutant=mutant)
+            rows = [run_scenario(s, args.rust_bin.resolve(), root, "golden", args.goldens, mutant=mutant)
                     for s in selected if s["name"] == MUTANT_SCENARIOS[mutant]]
             results.append({"mutant": mutant, "caught": any(r["diff_actions"] for r in rows), "scenarios": rows})
             print(mutant, "caught" if results[-1]["caught"] else "SURVIVED", flush=True)
         failed = any(not r["caught"] for r in results)
     else:
         for scenario in selected:
-            result = run_scenario(scenario, args.rust_bin.resolve(), root, args.mode, args.goldens, args.record)
+            result = run_scenario(scenario, args.rust_bin.resolve(), root, args.mode, args.goldens,
+                                  args.record_candidate, write=args.write)
             results.append(result)
             print(result["scenario"], result["actions"], "actions", result["diff_actions"], "differ", flush=True)
-        failed = any(r["diff_actions"] for r in results)
+        failed = any(r["recording_exit"] if args.record_candidate else r["diff_actions"] for r in results)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"mode": args.mode, "results": results}, indent=2), encoding="utf-8")
     print("result", out, flush=True)

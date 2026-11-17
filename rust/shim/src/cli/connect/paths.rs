@@ -1,76 +1,133 @@
 //! Where `runtimes.py` looks for client files, the shim layout, and
 //! `_path_forms` (`normcase` of `abspath` and of a non-strict `realpath`).
 //!
-//! Every base directory taken from the environment must already be in the
-//! form `str(pathlib.Path(value))` prints (absolute, native separators, no
-//! empty, `.` or `..` parts, no trailing separator); anything else defers, so
-//! displayed paths never depend on pathlib's normalization rules.
-use super::Defer;
+//! Directory settings must name unambiguous absolute paths. Harmless separator
+//! and current-directory spellings are normalized without resolving links.
+use super::Refusal;
 use std::path::{Path, PathBuf};
 
 pub(in crate::cli) const PACKAGE: &str = "pseudolife-mcp";
 
-/// `os.environ.get(key)`, deferring on a value that is not valid Unicode.
-pub(in crate::cli) fn env(key: &str) -> Result<Option<String>, Defer> {
+/// Read a setting without ever including its value in a decoding error.
+pub(in crate::cli) fn env(key: &str) -> Result<Option<String>, Refusal> {
     match std::env::var(key) {
         Ok(value) => Ok(Some(value)),
         Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(std::env::VarError::NotUnicode(_)) => Err(Defer),
+        Err(std::env::VarError::NotUnicode(_)) => Err(Refusal(format!(
+            "{key} is not Unicode; set {key} to a Unicode value"
+        ))),
     }
 }
 
 /// `env.get(key)` when truthy (set and non-empty).
-pub(in crate::cli) fn env_truthy(key: &str) -> Result<Option<String>, Defer> {
+pub(in crate::cli) fn env_truthy(key: &str) -> Result<Option<String>, Refusal> {
     Ok(env(key)?.filter(|value| !value.is_empty()))
 }
 
-pub(in crate::cli) fn canonical(text: &str) -> bool {
-    if cfg!(windows) {
-        let bytes = text.as_bytes();
-        if bytes.len() < 3
-            || !bytes[0].is_ascii_alphabetic()
-            || bytes[1] != b':'
-            || bytes[2] != b'\\'
-            || text.contains('/')
-        {
-            return false;
-        }
-        let rest = &text[3..];
-        rest.is_empty()
-            || rest
-                .split('\\')
-                .all(|part| !part.is_empty() && part != "." && part != "..")
-    } else {
-        let Some(rest) = text.strip_prefix('/') else {
-            return false;
+/// Keep the absolute-path boundary; normalize only equivalent components.
+pub(in crate::cli) fn base(value: &str) -> Result<PathBuf, Refusal> {
+    setting("the current directory", value)
+}
+
+fn setting(key: &str, value: &str) -> Result<PathBuf, Refusal> {
+    #[cfg(windows)]
+    let normalized = {
+        use std::path::{Component, Prefix};
+        let device_error = || {
+            let remedy = if key == "the current directory" {
+                "run connect from an ordinary drive or UNC directory".to_owned()
+            } else {
+                format!("set {key} to its ordinary drive or UNC path")
+            };
+            Refusal(format!("{key} uses an unsupported device path; {remedy}"))
         };
-        rest.is_empty()
-            || rest
-                .split('/')
-                .all(|part| !part.is_empty() && part != "." && part != "..")
+        let normalized = match Path::new(value).components().next() {
+            Some(Component::Prefix(prefix)) => match prefix.kind() {
+                Prefix::Disk(_) | Prefix::UNC(_, _) => PathBuf::from(value),
+                Prefix::VerbatimDisk(_) | Prefix::VerbatimUNC(_, _) => {
+                    strip_verbatim(PathBuf::from(value))
+                }
+                _ => return Err(device_error()),
+            },
+            _ => PathBuf::from(value),
+        };
+        // A verbatim UNC server such as `.` must not become a device
+        // namespace after removing the verbatim wrapper.
+        if let Some(Component::Prefix(prefix)) = normalized.components().next()
+            && !matches!(prefix.kind(), Prefix::Disk(_) | Prefix::UNC(_, _))
+        {
+            return Err(device_error());
+        }
+        normalized
+    };
+    #[cfg(windows)]
+    let value = normalized.to_str().expect("Unicode input stays Unicode");
+    let path = Path::new(value);
+    if !path.is_absolute() {
+        return Err(Refusal(format!(
+            "{key} must be an absolute path; set {key} to the full directory path"
+        )));
+    }
+    if value.contains('\0')
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err(Refusal(format!(
+            "{key} contains a NUL or parent-directory component; set {key} to an absolute path without those components"
+        )));
+    }
+    Ok(path.components().collect())
+}
+
+pub(in crate::cli) fn show(path: &Path) -> Result<String, Refusal> {
+    path.to_str().map(str::to_owned).ok_or_else(|| {
+        Refusal(format!(
+            "the client configuration path {} is not Unicode; use a Unicode directory name",
+            path.display()
+        ))
+    })
+}
+
+/// XDG relative values are invalid and must be ignored, not resolved from cwd.
+fn xdg(key: &str, default: PathBuf) -> Result<PathBuf, Refusal> {
+    match env_truthy(key)? {
+        Some(value) if Path::new(&value).is_absolute() => setting(key, &value),
+        _ => Ok(default),
     }
 }
 
-/// A base directory from the environment, admitted only in canonical form.
-pub(in crate::cli) fn base(value: &str) -> Result<PathBuf, Defer> {
-    if canonical(value) {
-        Ok(PathBuf::from(value))
-    } else {
-        Err(Defer)
+pub(super) fn xdg_warnings() -> Vec<String> {
+    let mut warnings = Vec::new();
+    if !cfg!(windows) {
+        for (key, default) in [
+            ("XDG_DATA_HOME", "~/.local/share"),
+            ("XDG_CONFIG_HOME", "~/.config"),
+        ] {
+            if key == "XDG_CONFIG_HOME" && cfg!(target_os = "macos") {
+                continue;
+            }
+            if std::env::var(key)
+                .ok()
+                .is_some_and(|value| !value.is_empty() && !Path::new(&value).is_absolute())
+            {
+                warnings.push(format!("{key} is relative; ignored in favor of {default}"));
+            }
+        }
     }
-}
-
-pub(in crate::cli) fn show(path: &Path) -> Result<String, Defer> {
-    path.to_str().map(str::to_owned).ok_or(Defer)
+    warnings
 }
 
 /// `runtimes.home(env)`.
-pub(in crate::cli) fn home() -> Result<PathBuf, Defer> {
-    match env_truthy("USERPROFILE")?.or(env_truthy("HOME")?) {
-        Some(value) => base(&value),
-        // Path.home() would consult the platform's own records.
-        None => Err(Defer),
+pub(in crate::cli) fn home() -> Result<PathBuf, Refusal> {
+    for key in ["USERPROFILE", "HOME"] {
+        if let Some(value) = env_truthy(key)? {
+            return setting(key, &value);
+        }
     }
+    Err(Refusal(
+        "USERPROFILE and HOME are unset or empty; set HOME to your absolute home directory".into(),
+    ))
 }
 
 pub(in crate::cli) struct Layout {
@@ -79,11 +136,11 @@ pub(in crate::cli) struct Layout {
 }
 
 /// `runtimes.default_layout(env)`; `Ok(None)` is its ValueError.
-pub(in crate::cli) fn layout() -> Result<Option<Layout>, Defer> {
+pub(in crate::cli) fn layout() -> Result<Option<Layout>, Refusal> {
     let root = env_truthy("PSEUDOLIFE_SHIM_RUNTIMES")?;
     let launcher = env_truthy("PSEUDOLIFE_SHIM_LAUNCHER")?;
     if let (Some(root), Some(launcher)) = (root, launcher) {
-        let launcher = base(&launcher)?;
+        let launcher = setting("PSEUDOLIFE_SHIM_LAUNCHER", &launcher)?;
         let exe = launcher
             .extension()
             .and_then(|e| e.to_str())
@@ -92,14 +149,14 @@ pub(in crate::cli) fn layout() -> Result<Option<Layout>, Defer> {
             return Ok(None);
         }
         return Ok(Some(Layout {
-            root: base(&root)?,
+            root: setting("PSEUDOLIFE_SHIM_RUNTIMES", &root)?,
             launcher,
         }));
     }
     let user = home()?;
     if cfg!(windows) {
         let local = match env_truthy("LOCALAPPDATA")? {
-            Some(value) => base(&value)?,
+            Some(value) => setting("LOCALAPPDATA", &value)?,
             None => user.join("AppData").join("Local"),
         }
         .join(PACKAGE);
@@ -108,11 +165,7 @@ pub(in crate::cli) fn layout() -> Result<Option<Layout>, Defer> {
             launcher: local.join("bin").join("pseudolife-mcp.exe"),
         }));
     }
-    let data = match env_truthy("XDG_DATA_HOME")? {
-        Some(value) => base(&value)?,
-        None => user.join(".local").join("share"),
-    }
-    .join(PACKAGE);
+    let data = xdg("XDG_DATA_HOME", user.join(".local").join("share"))?.join(PACKAGE);
     Ok(Some(Layout {
         root: data.join("runtimes"),
         launcher: data.join("bin").join("pseudolife-mcp"),
@@ -120,25 +173,25 @@ pub(in crate::cli) fn layout() -> Result<Option<Layout>, Defer> {
 }
 
 /// `runtimes._claude_config_file(env)`.
-pub(in crate::cli) fn claude_config() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn claude_config() -> Result<PathBuf, Refusal> {
     Ok(match env_truthy("CLAUDE_CONFIG_DIR")? {
-        Some(value) => base(&value)?,
+        Some(value) => setting("CLAUDE_CONFIG_DIR", &value)?,
         None => home()?,
     }
     .join(".claude.json"))
 }
 
 /// `_settings_row`'s `settings.json`.
-pub(in crate::cli) fn claude_settings() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn claude_settings() -> Result<PathBuf, Refusal> {
     Ok(match env_truthy("CLAUDE_CONFIG_DIR")? {
-        Some(value) => base(&value)?,
+        Some(value) => setting("CLAUDE_CONFIG_DIR", &value)?,
         None => home()?.join(".claude"),
     }
     .join("settings.json"))
 }
 
 /// `runtimes._codex_config_file(env)`; only its existence is consulted.
-pub(in crate::cli) fn codex_config() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn codex_config() -> Result<PathBuf, Refusal> {
     Ok(match env_truthy("CODEX_HOME")? {
         Some(value) => PathBuf::from(value),
         None => home()?.join(".codex"),
@@ -146,27 +199,27 @@ pub(in crate::cli) fn codex_config() -> Result<PathBuf, Defer> {
     .join("config.toml"))
 }
 
-pub(in crate::cli) fn gemini_settings() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn gemini_settings() -> Result<PathBuf, Refusal> {
     Ok(home()?.join(".gemini").join("settings.json"))
 }
 
 /// `runtimes.desktop_config_files(env)`.
-pub(in crate::cli) fn desktop_configs() -> Result<Vec<PathBuf>, Defer> {
+pub(in crate::cli) fn desktop_configs() -> Result<Vec<PathBuf>, Refusal> {
     let user = home()?;
     let mut found = Vec::new();
     if cfg!(windows) {
         if let Some(local) = env_truthy("LOCALAPPDATA")? {
-            let packages = base(&local)?.join("Packages");
+            let packages = setting("LOCALAPPDATA", &local)?.join("Packages");
             let mut names = Vec::new();
             if let Ok(entries) = std::fs::read_dir(&packages) {
                 for entry in entries.flatten() {
                     let name = entry.file_name();
-                    let name = name.to_str().ok_or(Defer)?.to_owned();
-                    if name.len() >= 7
-                        && name.is_char_boundary(7)
-                        && name[..7].eq_ignore_ascii_case("claude_")
+                    if name
+                        .to_string_lossy()
+                        .get(..7)
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("claude_"))
                     {
-                        names.push(name);
+                        names.push(name.to_str().ok_or_else(|| Refusal("a Claude package directory under LOCALAPPDATA/Packages is not Unicode; repair that Claude Desktop installation".into()))?.to_owned());
                     }
                 }
             }
@@ -183,7 +236,7 @@ pub(in crate::cli) fn desktop_configs() -> Result<Vec<PathBuf>, Defer> {
             }
         }
         let appdata = match env_truthy("APPDATA")? {
-            Some(value) => base(&value)?,
+            Some(value) => setting("APPDATA", &value)?,
             None => user.join("AppData").join("Roaming"),
         };
         found.push(appdata.join("Claude").join("claude_desktop_config.json"));
@@ -197,10 +250,7 @@ pub(in crate::cli) fn desktop_configs() -> Result<Vec<PathBuf>, Defer> {
                 .join("claude_desktop_config.json"),
         ]);
     }
-    let config = match env_truthy("XDG_CONFIG_HOME")? {
-        Some(value) => base(&value)?,
-        None => user.join(".config"),
-    };
+    let config = xdg("XDG_CONFIG_HOME", user.join(".config"))?;
     Ok(vec![
         config.join("Claude").join("claude_desktop_config.json"),
     ])
@@ -443,19 +493,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_forms_only() {
+    fn equivalent_absolute_spellings_keep_the_same_path() {
+        let root = if cfg!(windows) { r"C:\data" } else { "/data" };
+        assert_eq!(
+            base(&format!("{root}/./client//")).unwrap(),
+            Path::new(root).join("client")
+        );
+        assert!(base("relative").is_err());
+        assert!(base(&format!("{root}/../client")).is_err());
         if cfg!(windows) {
-            assert!(canonical(r"C:\data\x"));
-            assert!(canonical(r"C:\"));
-            assert!(!canonical(r"C:\data\x\"));
-            assert!(!canonical("C:/data/x"));
-            assert!(!canonical(r"C:\data\.\x"));
-            assert!(!canonical(r"\\server\share"));
             assert_eq!(normcase(r"C:/A/İb"), r"c:\a\ib");
-        } else {
-            assert!(canonical("/home/x"));
-            assert!(!canonical("/home//x"));
-            assert!(!canonical("home/x"));
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unc_and_plain_verbatim_paths_normalize_without_device_paths() {
+        for key in [
+            "APPDATA",
+            "LOCALAPPDATA",
+            "USERPROFILE",
+            "the current directory",
+        ] {
+            for value in [r"\\server\share\dir\.\", r"\\?\UNC\server\share\dir\"] {
+                assert_eq!(
+                    setting(key, value).unwrap(),
+                    Path::new(r"\\server\share\dir")
+                );
+            }
+            assert_eq!(setting(key, r"\\?\C:\dir\").unwrap(), Path::new(r"C:\dir"));
+            for value in [
+                r"\\.\C:\dir",
+                r"\\?\GLOBALROOT\Device\HarddiskVolume1",
+                r"\\?\Volume{fixture}\dir",
+                r"\\?\UNC\.\C:\client",
+                r"\\?\UNC\?\C:\client",
+            ] {
+                let error = setting(key, value).unwrap_err().0;
+                assert!(error.contains(key) && error.contains("device"), "{error}");
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_unicode_display_path_names_the_location() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = PathBuf::from(std::ffi::OsString::from_vec(
+            b"/fixture-client/\xff.json".to_vec(),
+        ));
+        let error = show(&path).unwrap_err().0;
+        assert!(error.contains("/fixture-client/"), "{error}");
     }
 }
