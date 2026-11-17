@@ -103,8 +103,8 @@ def test_health_memory_golden_replay_validates_only_the_raw_candidate(reading):
 
 @pytest.mark.parametrize("reading", MEMORY_READINGS + [{"source": "unavailable"}])
 def test_recorded_health_memory_uses_replay_host_oracle_shape(reading, monkeypatch):
-    from pseudolife_memory.utils import memory_headroom
-    monkeypatch.setattr(memory_headroom, "read_memory_headroom", lambda: reading)
+    import host_memory
+    monkeypatch.setattr(host_memory, "memory_shape", lambda: run.normalize_memory(reading))
     golden = run.load_golden("tokens")
     case = next(c for c in run.Tokens().cases() if c["name"] == "health GET")
     recorded = golden["responses"][0]

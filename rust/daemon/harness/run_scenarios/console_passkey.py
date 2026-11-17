@@ -5,7 +5,7 @@ section 5; cutover blocker 8): the pre-auth ``POST
 sessions a revoked or rebound key ends, Python against Rust over HTTP.
 
 Each arm signs its own daemon-issued challenges with the same software
-Ed25519 keys (``tests/maintainer_authenticator.py``), so the public keys and
+Ed25519 keys (``console_authenticator.py``), so the public keys and
 counters compare while every MAC and challenge is verified against its own
 payload before its random bytes are normalized. The template carries the
 challenge secret and three keys written as the maintainer store writes them:
@@ -56,13 +56,8 @@ def b64(raw: bytes) -> str:
 
 def signer(name: str):
     """The fixture key ``name`` at sign count 1, one per arm."""
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from tests.maintainer_authenticator import SoftAuthenticator
-    out = SoftAuthenticator(-8, rp_id=RP_ID, origin=ORIGIN, sign_count=1)
-    seed = hashlib.sha256(("console-passkey-fixture:" + name).encode()).digest()
-    out.private = Ed25519PrivateKey.from_private_bytes(seed)
-    out.credential_id = seed[:16]
-    return out
+    from console_authenticator import ConsoleAuthenticator
+    return ConsoleAuthenticator(name, RP_ID, ORIGIN)
 
 
 def _clock(value):
@@ -118,10 +113,11 @@ def register(harness):
             import psycopg
             from psycopg.types.json import Jsonb
             sys.path.insert(0, str(harness.REPO))
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            PostgresStorage(dsn).close()   # the bank, its v59 tables included
+            from principal_fixtures import prepare_bank
+            prepare_bank(dsn)
             now = time.time()
             with psycopg.connect(dsn, autocommit=True) as conn:
+                harness.assert_disposable(conn)
                 conn.execute("INSERT INTO meta (key, value) VALUES ('maintainer_secret_v1', %s) "
                              "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
                              (Jsonb(SECRET),))

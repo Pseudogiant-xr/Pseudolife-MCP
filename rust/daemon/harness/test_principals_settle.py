@@ -1,5 +1,5 @@
 """Daemons start ready: ``Daemon.start`` waits for /health ``ready: true``
-(pseudolife_memory/readiness.py), which both daemons report only once
+(rust/harness_support/readiness.py), which both daemons report only once
 initialized with their stored-principal view loaded. Before that view's
 first read, a bearer no environment token matches is answered 503
 principals_unavailable instead of 401, which scenarios once had to wait for
@@ -14,7 +14,21 @@ import pytest
 
 import daemons
 import run
-from pseudolife_memory.principals import env_auth, resolve_principal_detailed
+from principal_fixtures import env_auth, environment_principal
+
+# Collected by the existing security-admission step, without a workflow change.
+from test_principal_fixtures import (  # noqa: F401
+    blocked,
+    test_environment_vectors_and_wrong_parser_control,
+    test_fixture_guards_precede_connections_and_writes,
+    test_health_golden_host_adjustment_without_package,
+    test_host_shape_and_malformed_controls,
+    test_readiness_classification_imports_without_package,
+    test_runner_guard_keeps_slice_restriction_without_package,
+    test_seed_paths_without_package_or_connections,
+    test_signer_vectors_and_bad_signature_control,
+    test_static_contract_is_package_independent_and_detects_wrong_headers,
+)
 
 
 def store_bearers(scn) -> list[str]:
@@ -31,7 +45,7 @@ def store_bearers(scn) -> list[str]:
             text = value.decode("latin-1") if isinstance(value, bytes) else value
             scheme, _, presented = text.partition(" ")
             if scheme.lower() == "bearer" and presented.strip(" \t") \
-                    and resolve_principal_detailed(text, mapped, singular)[0] is None:
+                    and environment_principal(text, mapped, singular) is None:
                 names.append(c["name"])
     return names
 
