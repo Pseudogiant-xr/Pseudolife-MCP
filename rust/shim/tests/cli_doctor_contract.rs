@@ -2055,6 +2055,55 @@ fn native_review_bad_claude_registration_keeps_codex_credentials() {
 }
 
 #[test]
+fn native_review_registration_source_path_redacts_credentials() {
+    let home = Home::new();
+    for directory in ["w44-secret-value", "ordinary-codex"] {
+        let codex = home.0.join(directory);
+        std::fs::create_dir(&codex).unwrap();
+        std::fs::write(
+            codex.join("config.toml"),
+            "[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN = 'w44-secret-value'\n",
+        )
+        .unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .env("CODEX_HOME", &codex)
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("w44-secret-value"));
+        let map = report(&output);
+        assert_eq!(map["error"], "DaemonUnavailable");
+        let source = map["credential_source"].as_str().unwrap();
+        assert!(source.starts_with("Codex registration ("));
+        if directory == "ordinary-codex" {
+            assert!(source.contains(directory));
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn native_review_git_bash_path_redacts_credentials() {
+    let home = Home::new();
+    let directory = home.0.join("w44-secret-value");
+    std::fs::create_dir(&directory).unwrap();
+    let bash = directory.join("bash.exe");
+    std::fs::write(&bash, b"fixture only; never executed").unwrap();
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .env("CLAUDE_CODE_GIT_BASH_PATH", &bash)
+        .env("PSEUDOLIFE_MCP_TOKEN", "w44-secret-value")
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("w44-secret-value"));
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .env("CLAUDE_CODE_GIT_BASH_PATH", &bash)
+        .output()
+        .unwrap();
+    assert_eq!(report(&output)["git_bash"], bash.to_string_lossy().as_ref());
+}
+
+#[test]
 fn native_review_expanded_codex_home_does_not_claim_plugin_absent() {
     let home = Home::new();
     let codex = home.0.join("codex");

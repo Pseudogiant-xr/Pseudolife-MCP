@@ -846,15 +846,17 @@ async fn diagnose(
         problem = Some(BearerProblem::Unsendable);
     }
     let git_bash = if pyenv::WINDOWS {
-        Some(clients::git_bash_report(&env).unwrap_or_else(|cause| {
-            vec![(
-                "git_bash",
-                json!(unread(
-                    "the Claude Code settings or PATH that locate Git Bash",
-                    &cause
-                )),
-            )]
-        }))
+        Some(
+            clients::git_bash_report(&env, token.as_deref()).unwrap_or_else(|cause| {
+                vec![(
+                    "git_bash",
+                    json!(unread(
+                        "the Claude Code settings or PATH that locate Git Bash",
+                        &cause
+                    )),
+                )]
+            }),
+        )
     } else {
         None
     };
@@ -896,11 +898,17 @@ async fn diagnose(
     for (key, value) in identity {
         put(&mut report, key, json!(value));
     }
-    put(
-        &mut report,
-        "credential_source",
-        json!(credential_source.as_deref().unwrap_or("none")),
-    );
+    let source = credential_source.as_deref().unwrap_or("none");
+    let source_display = ["Claude Code registration (", "Codex registration ("]
+        .iter()
+        .find_map(|prefix| {
+            source
+                .strip_prefix(prefix)
+                .and_then(|path| path.strip_suffix(')'))
+                .map(|path| format!("{prefix}{})", display_text(path, token.as_deref())))
+        })
+        .unwrap_or_else(|| source.to_owned());
+    put(&mut report, "credential_source", json!(source_display));
     if let Some(cause) = &registrations_unread {
         put(
             &mut report,

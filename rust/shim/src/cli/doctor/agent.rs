@@ -112,6 +112,10 @@ pub(super) enum Saved {
 pub(super) fn read(value: &Path, url: &str) -> Res<Saved> {
     let normalized = value.to_str().map(super::pyenv::path_str).transpose()?;
     let path = normalized.as_deref().map(Path::new).unwrap_or(value);
+    // Keep redirects visible to the trust walk, including those in the
+    // current directory for relative and Windows drive-relative paths.
+    let absolute = std::path::absolute(path).map_err(|error| Finding::io(&error))?;
+    let path = absolute.as_path();
     if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
         return Err(Finding::new(
             "selected file is a symbolic link; select the original private registration file",

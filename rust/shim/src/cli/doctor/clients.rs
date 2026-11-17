@@ -545,7 +545,7 @@ pub(super) fn codex_hooks(env: &Env) -> Res<CodexHooks> {
 }
 
 /// `git_bash_report(os.environ)` (Windows only).
-pub(super) fn git_bash_report(env: &Env) -> Res<Vec<(&'static str, Value)>> {
+pub(super) fn git_bash_report(env: &Env, token: Option<&str>) -> Res<Vec<(&'static str, Value)>> {
     // CLAUDE_CODE_GIT_BASH_PATH from the Claude Code settings env block wins.
     let base = match env.truthy("CLAUDE_CONFIG_DIR")? {
         Some(dir) => path_str(&dir)?,
@@ -609,6 +609,8 @@ pub(super) fn git_bash_report(env: &Env) -> Res<Vec<(&'static str, Value)>> {
         }
         None => false,
     };
+    let git_bash = git_bash.map(|path| super::display_text(&path, token));
+    let bash_on_path = bash_on_path.map(|path| super::display_text(&path, token));
     let mut report = vec![
         ("git_bash", json!(git_bash)),
         ("bash_on_path", json!(bash_on_path)),
