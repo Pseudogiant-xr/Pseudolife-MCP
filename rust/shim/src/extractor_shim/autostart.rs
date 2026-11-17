@@ -264,7 +264,21 @@ mod tests {
     }
 
     #[test]
-    fn registration_checks_both_files_before_using_their_bytes() {
+    fn registration_refuses_a_changed_script() {
+        registration_fixture("script");
+    }
+
+    #[test]
+    fn registration_refuses_changed_data() {
+        registration_fixture("data");
+    }
+
+    #[test]
+    fn registration_accepts_unchanged_files() {
+        registration_fixture("neither");
+    }
+
+    fn registration_fixture(changed: &str) {
         let scratch = Scratch(std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())));
         fs::create_dir(&scratch.0).unwrap();
         let script = scratch.0.join("register ' é.ps1");
@@ -276,7 +290,7 @@ $c = $ConfigJson | ConvertFrom-Json
 exit 0"#;
         let data_bytes = br#"{"Name":"fixture"}"#;
         // Each case uses the production command builder, with no real scheduler.
-        for changed in ["script", "data", "neither"] {
+        {
             fs::write(&script, script_bytes).unwrap();
             fs::write(&data, data_bytes).unwrap();
             let mut command = windows_registration_command(&script, &data, script_bytes, data_bytes).unwrap();
