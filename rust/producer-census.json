@@ -558,14 +558,14 @@
     "rust/shim/src/cli/test_login/scram.rs": "7433382dd2709a856ea0568017def16347839589b6b38a5bdec70b5d09a1d7a5",
     "rust/shim/src/cli/test_login/sql.rs": "d81f5f393862545a3e7e4d021da2ab0fd9734e18afc19e7d6ca20dd7469e5384",
     "rust/shim/src/cli/test_login/test_login_help.txt": "9d50bdcaae4ec34b79a3d9657f30ea373ca7d15d4b571f74b666794ccc2f00f0",
-    "rust/shim/src/cli/transfer.rs": "f7d15443c9a03fa8a5840b24f172993c4ecfd84d505a708742731b4549997969",
-    "rust/shim/src/cli/transfer/export.rs": "7686dcce77f5f9dec06f90c5c45b9beaaaddb37656469b361d1047f860dd7613",
+    "rust/shim/src/cli/transfer.rs": "23a2be6dec5e65f1b28e6ba82e1fbf4bca0fec4005fcfc37ca57b72b7f8cd98b",
+    "rust/shim/src/cli/transfer/export.rs": "fe9bdb30de389a9852ce976812026d3dd6e98846d4183ae78384b91f3fd02595",
     "rust/shim/src/cli/transfer/export_help.txt": "665910581b4428fcd8c23c4e868ddd86fb6612a09f4bc519c758ab60c0da1452",
-    "rust/shim/src/cli/transfer/import.rs": "9b415095c31c720a894fd551b723890171f6c0f9ca7e06d62aff663794e11494",
+    "rust/shim/src/cli/transfer/import.rs": "932b2bd7d895fd3e024a0ac27fb89af8a55c7ff2c601440768ff72eb0b444658",
     "rust/shim/src/cli/transfer/import_help.txt": "a535c9fb6e748c614155806ab8264f2006d3152695b2a079547574362fde0236",
-    "rust/shim/src/cli/transfer/json.rs": "266af9e82893edb6dec7d8cf7be03194df07800ad74b1089760b2058fa9a4b56",
-    "rust/shim/src/cli/transfer/schema.rs": "cc22ed272c72e04f225cdcebc2cb313191ca8346f112b7b4bf21d46cc771cbe2",
-    "rust/shim/src/cli/transfer/sql.rs": "faeeb860b38a10be0a29158c06630d814b0339df350d015611bccd62976fb717",
+    "rust/shim/src/cli/transfer/json.rs": "88f47cc3b39106fdff1d5697a254c4545bf06fb9e7a1cee3de401efeb252d8cd",
+    "rust/shim/src/cli/transfer/schema.rs": "851b85690fbba7ba87d90d95f696881f67ef75affa5d107f3fa5e799435a9d98",
+    "rust/shim/src/cli/transfer/sql.rs": "17feea1bffa71370a32ab63d7624f4c5b34329803283577090c968c47ad1d446",
     "rust/shim/src/cli/tunnel/bridge.rs": "3a7ac88d27e1da5dc69453a1017fd63abf408cae8010af2810daf4996e991835",
     "rust/shim/src/cli/tunnel/doctor_section.rs": "81f8198ff7788c460483c7cf72e9b49a7cea3a47207ccd5f478e8142b5330225",
     "rust/shim/src/cli/tunnel/dpapi.rs": "2084fe2306db68a3477538618a7ab85b1b5df92e7d338fe6f465a0caaeec7227",
@@ -3895,12 +3895,38 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/transfer/import.rs:171",
+          "location": "rust/shim/src/cli/transfer/import.rs:285",
           "shape": {
             "argv_source": "export .\"",
             "channel": "argv",
             "complete": false,
             "expression": ".\"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer/import.rs:299",
+          "shape": {
+            "argv_source": "export \",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\",",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer/import.rs:75",
+          "shape": {
+            "argv_source": "export \",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\",",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -4606,6 +4632,19 @@
             "channel": "argv",
             "complete": false,
             "expression": "<archive.zip>",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer.rs:184",
+          "shape": {
+            "argv_source": "import <archive.zip>.\".to_owned()",
+            "channel": "argv",
+            "complete": false,
+            "expression": "<archive.zip>.\".to_owned()",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -10531,7 +10570,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/transfer/schema.rs:55",
+          "location": "rust/shim/src/cli/transfer/export.rs:462",
+          "shape": {
+            "argv_source": "update and export with a release that supports the bank\",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "and export with a release that supports the bank\",",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer/schema.rs:54",
           "shape": {
             "argv_source": "update `); to roll back to this build instead, first restore the backup taken before that upgrade {RESTORE}.\"",
             "channel": "argv",
@@ -40681,6 +40733,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "rust/shim/src/cli/transfer.rs:410",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/tunnel/bridge.rs:262",
           "shape": {
             "channel": "environment",
@@ -42833,7 +42898,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/transfer.rs:22",
+          "location": "rust/shim/src/cli/transfer.rs:20",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42846,7 +42911,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/transfer.rs:312",
+          "location": "rust/shim/src/cli/transfer.rs:200",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42859,7 +42924,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/transfer/import.rs:533",
+          "location": "rust/shim/src/cli/transfer.rs:204",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42868,6 +42933,110 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer.rs:227",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "{cause} — {fix}.\")",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer.rs:321",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer.rs:324",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer.rs:409",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer/export.rs:350",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer/import.rs:193",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer/import.rs:798",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer/sql.rs:68",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "{cause} — {fix}.\")",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -43846,19 +44015,6 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/retired.rs:64",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/transfer.rs:340",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56005,6 +56161,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/doctor/proof.rs:531",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/transfer.rs:411",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -81641,7 +81810,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/transfer/import.rs:121",
+      "location": "rust/shim/src/cli/transfer/import.rs:225",
       "name": "and",
       "shape": {
         "argv_source": "and retry.\"",
@@ -85021,6 +85190,20 @@
       "kind": "environment",
       "location": "rust/shim/src/cli/test_login/mod.rs:40",
       "name": "PSEUDOLIFE_TEST_PG_USER",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "rust/shim/src/cli/transfer.rs:389",
+      "name": "PSEUDOLIFE_TRANSFER_RESOURCE_TEST",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -125046,27 +125229,87 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer.rs:184",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:import"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "rust/shim/src/cli/transfer.rs:2",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer.rs:22",
+      "location": "rust/shim/src/cli/transfer.rs:20",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer.rs:312",
+      "location": "rust/shim/src/cli/transfer.rs:200",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer.rs:340",
+      "location": "rust/shim/src/cli/transfer.rs:204",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer.rs:227",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer.rs:321",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer.rs:324",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer.rs:389",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TRANSFER_RESOURCE_TEST"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer.rs:409",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer.rs:410",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer.rs:411",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_RELEASE_CHECK"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer/export.rs:350",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer/export.rs:462",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
@@ -125082,19 +125325,37 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer/import.rs:121",
+      "location": "rust/shim/src/cli/transfer/import.rs:193",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer/import.rs:225",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:and"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer/import.rs:171",
+      "location": "rust/shim/src/cli/transfer/import.rs:285",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:export"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer/import.rs:533",
+      "location": "rust/shim/src/cli/transfer/import.rs:299",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:export"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer/import.rs:75",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:export"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer/import.rs:798",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
@@ -125118,9 +125379,15 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/transfer/schema.rs:55",
+      "location": "rust/shim/src/cli/transfer/schema.rs:54",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/transfer/sql.rs:68",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
