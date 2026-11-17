@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
-//! `pseudolife-mcp connect` without Python or PostgreSQL: canonical-argv
-//! deferrals, refusals before any connection, and file-only plans against a
+//! `pseudolife-mcp connect` without Python or PostgreSQL: native arguments, refusals before any connection, and file-only plans against a
 //! stand-in `/health`. Expected bytes are the Python oracle's
 //! (`connect_cli.py`), captured by the CLI-CONNECT harness row; the
 //! differential row proves verification, writes and rollback.
@@ -18,8 +17,713 @@ use std::{
     },
 };
 
-const DEFERRED: &str = "pseudolife-stdio: mode 'connect' is deferred in this candidate\n";
 const DEAD: &str = "http://127.0.0.1:9";
+
+// Each case is independent so the baseline records every removed fallback.
+macro_rules! native_arguments {
+    ($($name:ident: $args:expr => $code:expr, $message:expr;)*) => {$ (
+        #[test]
+        fn $name() {
+            let home = Home::new();
+            let before = home.tree();
+            let output = home.run(DEAD, $args);
+            assert_eq!(output.status.code(), Some($code), "{output:?}");
+            let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            assert!(text.contains($message), "{text}");
+            assert!(!text.contains("is deferred"));
+            assert_eq!(home.tree(), before);
+        }
+    )*};
+}
+
+native_arguments! {
+    native_help: &["--help"] => 0, "Usage: pseudolife-mcp connect";
+    native_short_help: &["-h"] => 0, "Usage: pseudolife-mcp connect";
+    native_option_before_url: &["--dry-run", DEAD] => 4, "/health";
+    native_equals_option: &[DEAD, "--token-file=t", "--dry-run"] => 4, "/health";
+    native_repeated_flag: &[DEAD, "--yes", "--yes", "--dry-run"] => 4, "/health";
+    native_separator: &["--dry-run", "--", DEAD] => 4, "/health";
+    native_missing_url: &[] => 2, "URL is required";
+    native_missing_value: &[DEAD, "--code"] => 2, "--code needs a value";
+    native_option_as_value: &[DEAD, "--code", "--yes"] => 2, "--code needs a value";
+    native_unknown_option: &[DEAD, "--tok", "t"] => 2, "unknown option";
+    native_extra_url: &[DEAD, "extra"] => 2, "one daemon URL";
+    native_empty_value: &[DEAD, "--client", ""] => 2, "--client needs a value";
+    native_empty_url: &["", DEAD] => 2, "daemon URL must not be empty";
+    native_duplicate_value: &[DEAD, "--client", "gemini", "--client", "codex"] => 2, "--client was given more than once";
+    native_invalid_ipvfuture: &["http://[v1.x]:9", "--dry-run"] => 2, "daemon URL";
+    native_invalid_ipv6: &["http://[nonsense]:9", "--dry-run"] => 2, "daemon URL";
+    native_invalid_zone: &["http://[fe80::1%25eth0]:9", "--dry-run"] => 2, "daemon URL";
+    native_url_control: &["http://127.0.0.1:9\n", "--dry-run"] => 2, "daemon URL";
+    native_dash_value: &[DEAD, "--token-file", "-t", "--dry-run"] => 4, "/health";
+    native_flag_with_value: &[DEAD, "--yes=false"] => 2, "--yes takes no value";
+}
+
+#[test]
+fn native_trailing_path_separator_selects_the_same_registration() {
+    let home = Home::new();
+    let health = Health::start();
+    home.write(".claude.json", &claude_registration(&home, DEAD));
+    let before = home.tree();
+    let normal = home.run(
+        &health.url,
+        &[
+            &health.url,
+            "--client",
+            "claude-code",
+            "--dry-run",
+            "--json",
+        ],
+    );
+    let changed = home
+        .command(&health.url)
+        .env("CLAUDE_CONFIG_DIR", format!("{}/", home.0.display()))
+        .args([
+            "connect",
+            &health.url,
+            "--client",
+            "claude-code",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(changed.status.code(), normal.status.code(), "{changed:?}");
+    // CLAUDE_CONFIG_DIR also selects settings.json in this directory.
+    let report: serde_json::Value = serde_json::from_slice(&changed.stdout).unwrap();
+    assert_eq!(report["rows"][0]["state"], "change");
+    assert_eq!(report["rows"][0]["file"], home.show(".claude.json"));
+    assert_eq!(home.tree(), before);
+}
+
+#[test]
+fn native_unsupported_saved_url_is_redacted_in_the_plan() {
+    let home = Home::new();
+    let health = Health::start();
+    claude_registration(&home, "http://fixture-user:fixture-secret@[v1.x]:9");
+    let before = home.tree();
+    let output = home.run(
+        &health.url,
+        &[
+            &health.url,
+            "--client",
+            "claude-code",
+            "--dry-run",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("<unreadable URL>"), "{text}");
+    assert!(!text.contains("fixture-secret") && !text.contains("fixture-user"));
+    assert_eq!(home.tree(), before);
+}
+
+#[test]
+fn native_unsupported_process_url_is_a_manual_row() {
+    let home = Home::new();
+    let health = Health::start();
+    let output = home.run(
+        "http://[v1.x]:9",
+        &[&health.url, "--client", "gemini", "--dry-run", "--json"],
+    );
+    assert_eq!(output.status.code(), Some(3));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let row = report["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["client"] == "environment")
+        .unwrap();
+    assert_eq!(row["state"], "manual");
+    assert!(row["detail"].as_str().unwrap().contains("<unreadable URL>"));
+}
+
+#[test]
+fn native_parent_components_name_the_directory_setting() {
+    let home = Home::new();
+    let output = home
+        .command(DEAD)
+        .env("CLAUDE_CONFIG_DIR", home.0.join("cwd/.."))
+        .args(["connect", DEAD, "--client", "claude-code", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("CLAUDE_CONFIG_DIR") && text.contains("parent-directory"),
+        "{text}"
+    );
+    assert_eq!(
+        home.run(DEAD, &[DEAD, "--client", "claude-code", "--dry-run"])
+            .status
+            .code(),
+        Some(4)
+    );
+}
+
+macro_rules! refused_environment {
+    ($($name:ident: $key:expr;)*) => {$ (
+        #[test]
+        fn $name() {
+            let home = Home::new();
+            let before = home.tree();
+            let output = home.command(DEAD).env($key, "relative-directory")
+                .args(["connect", DEAD, "--dry-run"]).output().unwrap();
+            assert_eq!(output.status.code(), Some(2), "{output:?}");
+            let text = String::from_utf8_lossy(&output.stderr);
+            assert!(text.contains($key) && text.contains("absolute"), "{text}");
+            assert_eq!(home.tree(), before);
+            // The same setting with an absolute path is admitted.
+            let output = home.command(DEAD).env($key, &home.0)
+                .args(["connect", DEAD, "--dry-run"]).output().unwrap();
+            assert_eq!(output.status.code(), Some(4), "{output:?}");
+        }
+    )*};
+}
+refused_environment! {
+    native_relative_home: "USERPROFILE";
+    native_relative_claude: "CLAUDE_CONFIG_DIR";
+}
+
+#[test]
+fn native_relative_home_fallback_names_home() {
+    let home = Home::new();
+    for (value, code) in [("relative-directory", 2), (home.0.to_str().unwrap(), 4)] {
+        let output = home
+            .command(DEAD)
+            .env_remove("USERPROFILE")
+            .env("HOME", value)
+            .args(["connect", DEAD, "--dry-run"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        if code == 2 {
+            let text = String::from_utf8_lossy(&output.stderr);
+            assert!(text.contains("HOME must be an absolute path"), "{text}");
+        }
+    }
+}
+
+fn check_layout_setting(key: &str) {
+    let home = Home::new();
+    let before = home.tree();
+    for relative in [true, false] {
+        let mut command = home.command(DEAD);
+        command
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", home.0.join("runtimes"))
+            .env(
+                "PSEUDOLIFE_SHIM_LAUNCHER",
+                home.0.join(if cfg!(windows) {
+                    "pseudolife-mcp.exe"
+                } else {
+                    "pseudolife-mcp"
+                }),
+            );
+        if relative {
+            command.env(key, "relative-directory");
+        }
+        let output = command
+            .args(["connect", DEAD, "--dry-run"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(if relative { 2 } else { 4 }),
+            "{output:?}"
+        );
+        if relative {
+            let text = String::from_utf8_lossy(&output.stderr);
+            assert!(text.contains(key) && text.contains("absolute"), "{text}");
+        }
+        assert_eq!(home.tree(), before);
+    }
+}
+
+#[test]
+fn native_relative_layout_root() {
+    check_layout_setting("PSEUDOLIFE_SHIM_RUNTIMES");
+}
+
+#[test]
+fn native_relative_layout_launcher() {
+    check_layout_setting("PSEUDOLIFE_SHIM_LAUNCHER");
+}
+
+#[cfg(unix)]
+#[test]
+fn native_relative_xdg_directories_use_defaults_and_report_once() {
+    let home = Home::new();
+    let health = Health::start();
+    let before = home.tree();
+    for key in ["XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
+        for json in [false, true] {
+            let mut command = home.command(DEAD);
+            command
+                .env(key, "relative-directory")
+                .args(["connect", DEAD, "--dry-run"]);
+            if json {
+                command.arg("--json");
+            }
+            let output = command.output().unwrap();
+            assert_eq!(output.status.code(), Some(4), "{output:?}");
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                text.matches(&format!("{key} is relative; ignored")).count(),
+                1,
+                "{text}"
+            );
+            assert!(text.contains("/health"), "{text}");
+        }
+        let output = home
+            .command(DEAD)
+            .env(key, &home.0)
+            .args(["connect", DEAD, "--dry-run"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(4), "{output:?}");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("ignored"));
+        let normal = home
+            .command(&health.url)
+            .env_remove(key)
+            .args(["connect", &health.url, "--dry-run", "--json"])
+            .output()
+            .unwrap();
+        let relative = home
+            .command(&health.url)
+            .env(key, "relative-directory")
+            .args(["connect", &health.url, "--dry-run", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(relative.status.code(), normal.status.code());
+        let normal: serde_json::Value = serde_json::from_slice(&normal.stdout).unwrap();
+        let relative: serde_json::Value = serde_json::from_slice(&relative.stdout).unwrap();
+        assert_eq!(relative["rows"], normal["rows"]);
+    }
+    assert_eq!(home.tree(), before);
+}
+
+#[cfg(windows)]
+#[test]
+fn native_unc_settings_are_accepted_and_device_settings_are_named() {
+    let home = Home::new();
+    let before = home.tree();
+    for key in ["APPDATA", "LOCALAPPDATA", "USERPROFILE"] {
+        // A missing local share needs no network-share fixture or write.
+        for path in [
+            r"\\127.0.0.1\w38-missing-share\client",
+            r"\\?\UNC\127.0.0.1\w38-missing-share\client",
+        ] {
+            let output = home
+                .command(DEAD)
+                .env(key, path)
+                .args(["connect", DEAD, "--dry-run"])
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(4), "{key}: {output:?}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("/health"),
+                "{output:?}"
+            );
+        }
+        let output = home
+            .command(DEAD)
+            .env(key, r"\\.\C:\client")
+            .args(["connect", DEAD, "--dry-run"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(text.contains(key) && text.contains("device"), "{text}");
+    }
+    assert_eq!(home.tree(), before);
+}
+
+#[test]
+fn native_unknown_options_name_only_the_option_and_suggest_the_spelling() {
+    let home = Home::new();
+    for (option, hint) in [
+        ("--token", "--token-file"),
+        ("--tok", "--token-file"),
+        ("--dry", "--dry-run"),
+        ("--mystery", "--help"),
+    ] {
+        let output = home.run(DEAD, &[DEAD, &format!("{option}=fixture-secret")]);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            text.contains("unknown option") && text.contains(hint),
+            "{text}"
+        );
+        assert!(!text.contains("fixture-secret"), "{text}");
+    }
+    for json in [false, true] {
+        let mut args = vec![DEAD, "--fixture-secret"];
+        if json {
+            args.push("--json");
+        }
+        let output = home.run(DEAD, &args);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!text.contains("fixture-secret"), "{text}");
+        assert!(
+            text.contains("unknown option") && text.contains("--help"),
+            "{text}"
+        );
+    }
+}
+#[cfg(windows)]
+refused_environment! {
+    native_relative_appdata: "APPDATA";
+    native_relative_localappdata: "LOCALAPPDATA";
+}
+
+fn check_json_limit(case: usize) {
+    let (text, cause, good) = &[
+        (
+            r#"{"x":"\ud800"}"#.to_owned(),
+            "surrogate",
+            r#"{"x":"\ud83d\ude00"}"#.to_owned(),
+        ),
+        (
+            format!("{{\"x\":{}{}}}", "[".repeat(100), "]".repeat(100)),
+            "100",
+            format!("{{\"x\":{}{}}}", "[".repeat(99), "]".repeat(99)),
+        ),
+        (
+            format!("{{\"x\":{}}}", "1".repeat(4301)),
+            "4300",
+            format!("{{\"x\":{}}}", "1".repeat(4300)),
+        ),
+    ][case];
+    let home = Home::new();
+    home.write(".claude.json", text);
+    let before = home.tree();
+    let output = home.run(DEAD, &[DEAD, "--client", "claude-code", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.contains(".claude.json") && message.contains(*cause),
+        "{message}"
+    );
+    assert_eq!(home.tree(), before);
+    home.write(".claude.json", good);
+    assert_eq!(
+        home.run(DEAD, &[DEAD, "--client", "claude-code", "--dry-run"])
+            .status
+            .code(),
+        Some(4)
+    );
+}
+
+#[test]
+fn native_json_surrogate() {
+    check_json_limit(0);
+}
+#[test]
+fn native_json_depth() {
+    check_json_limit(1);
+}
+#[test]
+fn native_json_integer_limit() {
+    check_json_limit(2);
+}
+
+#[test]
+fn native_del_token_is_refused_without_disclosure_or_writes() {
+    let home = Home::new();
+    let registration = claude_registration(&home, DEAD);
+    let mut data: serde_json::Value = serde_json::from_str(&registration).unwrap();
+    let env = &mut data["mcpServers"]["pseudolife-memory"]["env"];
+    env.as_object_mut()
+        .unwrap()
+        .remove("PSEUDOLIFE_MCP_TOKEN_FILE");
+    env["PSEUDOLIFE_MCP_TOKEN"] = serde_json::json!("fixture-secret\u{7f}");
+    home.write(".claude.json", &data.to_string());
+    let before = home.tree();
+    let output = home.run(DEAD, &[DEAD, "--client", "claude-code", "--yes"]);
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("PSEUDOLIFE_MCP_TOKEN") && text.contains("DEL"),
+        "{text}"
+    );
+    assert!(!text.contains("fixture-secret"));
+    assert_eq!(home.tree(), before);
+    data["mcpServers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_MCP_TOKEN"] =
+        serde_json::json!("fixture-secret~");
+    home.write(".claude.json", &data.to_string());
+    assert_eq!(
+        home.run(DEAD, &[DEAD, "--client", "claude-code", "--yes"])
+            .status
+            .code(),
+        Some(4)
+    );
+}
+
+fn non_unicode_value() -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(vec![b'x', 0xff])
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[120, 0xd800])
+    }
+}
+
+#[test]
+fn native_non_unicode_arguments_are_named_without_echoing_them() {
+    let home = Home::new();
+    let output = home
+        .command(DEAD)
+        .args(["connect", DEAD])
+        .arg(non_unicode_value())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("argument"));
+    assert_eq!(
+        home.run(DEAD, &[DEAD, "--client", "gemini", "--dry-run"])
+            .status
+            .code(),
+        Some(4)
+    );
+}
+
+#[test]
+fn native_non_unicode_environment_is_named_without_echoing_it() {
+    let home = Home::new();
+    let output = home
+        .command(DEAD)
+        .env("CLAUDE_CONFIG_DIR", non_unicode_value())
+        .args(["connect", DEAD, "--client", "claude-code", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("CLAUDE_CONFIG_DIR"));
+    let output = home
+        .command(DEAD)
+        .env("CLAUDE_CONFIG_DIR", home.0.join("é"))
+        .args(["connect", DEAD, "--client", "claude-code", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4));
+}
+
+#[test]
+fn native_health_json_limit_has_a_remedy() {
+    let home = Home::new();
+    let health = Health::response("200 OK", r#"{"status":"ok","x":"\ud800"}"#, "");
+    let output = home.run(
+        &health.url,
+        &[&health.url, "--client", "gemini", "--dry-run"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("/health") && text.contains("surrogate"),
+        "{text}"
+    );
+}
+
+#[test]
+fn native_unsupported_health_redirect_has_a_remedy() {
+    let home = Home::new();
+    let health = Health::response("302 Found", "", "Location: ftp://127.0.0.1:9/health\r\n");
+    let before = home.tree();
+    let output = home.run(
+        &health.url,
+        &[&health.url, "--client", "gemini", "--dry-run"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(text.contains("redirect") && text.contains("http"), "{text}");
+    assert_eq!(home.tree(), before);
+}
+
+#[test]
+fn native_missing_home_has_a_remedy() {
+    let home = Home::new();
+    let output = home
+        .command(DEAD)
+        .env_remove("HOME")
+        .env_remove("USERPROFILE")
+        .args(["connect", DEAD, "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(text.contains("HOME") && text.contains("set"), "{text}");
+}
+
+#[cfg(unix)]
+#[test]
+fn native_non_unicode_working_directory_has_a_remedy() {
+    let home = Home::new();
+    let cwd = home.0.join(non_unicode_value());
+    std::fs::create_dir(&cwd).unwrap();
+    let output = home
+        .command(DEAD)
+        .current_dir(&cwd)
+        .args(["connect", DEAD, "--client", "claude-code", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("current directory"));
+    assert_eq!(
+        home.run(DEAD, &[DEAD, "--client", "claude-code", "--dry-run"])
+            .status
+            .code(),
+        Some(4)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn native_non_unicode_token_path_has_a_remedy() {
+    let home = Home::new();
+    let cwd = home.0.join(non_unicode_value());
+    std::fs::create_dir(&cwd).unwrap();
+    let output = home
+        .command(DEAD)
+        .current_dir(&cwd)
+        .args([
+            "connect",
+            DEAD,
+            "--token-file",
+            "relative.token",
+            "--client",
+            "gemini",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--token-file"));
+    assert_eq!(
+        home.run(
+            DEAD,
+            &[
+                DEAD,
+                "--token-file",
+                "relative.token",
+                "--client",
+                "gemini",
+                "--dry-run"
+            ]
+        )
+        .status
+        .code(),
+        Some(4)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn native_del_in_token_file_names_the_setting() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    claude_registration(&home, DEAD);
+    let path = home.write("cwd/t.token", "fixture-secret\u{7f}");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let before = home.tree();
+    let output = home.run(DEAD, &[DEAD, "--client", "claude-code", "--yes"]);
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("PSEUDOLIFE_MCP_TOKEN_FILE") && text.contains("DEL"),
+        "{text}"
+    );
+    assert!(!text.contains("fixture-secret"));
+    assert_eq!(home.tree(), before);
+    let output = home.run(
+        DEAD,
+        &[
+            DEAD,
+            "--client",
+            "claude-code",
+            "--token-file",
+            path.to_str().unwrap(),
+            "--yes",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("--token-file") && text.contains("DEL"),
+        "{text}"
+    );
+    assert!(!text.contains("fixture-secret"));
+    assert_eq!(home.tree(), before);
+    std::fs::write(path, "fixture-secret~").unwrap();
+    assert_eq!(
+        home.run(DEAD, &[DEAD, "--client", "claude-code", "--yes"])
+            .status
+            .code(),
+        Some(4)
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn native_non_unicode_package_names_only_block_claude_packages() {
+    let home = Home::new();
+    let packages = home.0.join("AppData/Local/Packages");
+    std::fs::create_dir_all(packages.join(non_unicode_value())).unwrap();
+    let output = home.run(DEAD, &[DEAD, "--client", "claude-desktop", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(4));
+    let mut name = std::ffi::OsString::from("Claude_");
+    name.push(non_unicode_value());
+    std::fs::create_dir(packages.join(name)).unwrap();
+    let output = home.run(DEAD, &[DEAD, "--client", "claude-desktop", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("LOCALAPPDATA/Packages") && text.contains("Unicode"),
+        "{text}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn native_inaccessible_config_names_the_path_and_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let directory = home.0.join("locked");
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let output = home
+        .command(DEAD)
+        .env("CLAUDE_CONFIG_DIR", &directory)
+        .args(["connect", DEAD, "--client", "claude-code", "--dry-run"])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains(".claude.json") && text.contains("permission"),
+        "{text}"
+    );
+    let output = home
+        .command(DEAD)
+        .env("CLAUDE_CONFIG_DIR", &directory)
+        .args(["connect", DEAD, "--client", "claude-code", "--dry-run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4));
+}
 
 /// `connect --yes` re-points a Windows User-scope daemon URL it finds and
 /// re-creates an unattended-update scheduled task it finds, and these tests
@@ -138,6 +842,17 @@ struct Health {
 }
 impl Health {
     fn start() -> Self {
+        Self::response(
+            "200 OK",
+            r#"{"status": "ok", "auth": true, "version": "0.0.0-fixture"}"#,
+            "",
+        )
+    }
+    fn response(status: &str, body: &str, headers: &str) -> Self {
+        let response = format!(
+            "HTTP/1.1 {status}\r\n{headers}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -160,19 +875,12 @@ impl Health {
                 }
                 let target = line.split_whitespace().nth(1).unwrap_or("").to_owned();
                 seen.lock().unwrap().push(target.clone());
-                let (status, body) = if target == "/health" {
-                    (
-                        "200 OK",
-                        r#"{"status": "ok", "auth": true, "version": "0.0.0-fixture"}"#,
-                    )
+                let response = if target == "/health" {
+                    response.as_str()
                 } else {
-                    ("404 Not Found", "{}")
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
                 };
-                let _ = write!(
-                    stream,
-                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
+                let _ = stream.write_all(response.as_bytes());
             }
         });
         Self {
@@ -192,12 +900,6 @@ impl Drop for Health {
     }
 }
 
-fn deferred(output: &Output) {
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    assert_eq!(output.stderr, native_text(DEFERRED));
-}
-
 fn refused(output: &Output, code: i32, stderr: &str) {
     assert_eq!(output.status.code(), Some(code), "{output:?}");
     assert!(output.stdout.is_empty(), "{output:?}");
@@ -214,7 +916,7 @@ fn absent_rows(url: &str) -> String {
 }
 
 #[test]
-fn non_canonical_argv_defers_without_effect() {
+fn ordinary_argument_shapes_have_native_answers_without_effect() {
     let home = Home::new();
     home.write(".claude.json", "{\"mcpServers\": {}}\n");
     let before = home.tree();
@@ -231,10 +933,13 @@ fn non_canonical_argv_defers_without_effect() {
         &[DEAD, "--client"],
         &[DEAD, "--", "--yes"],
         &[DEAD, "extra"],
-        &["http://ex\u{e4}mple:9", "--dry-run"],
         &["http://[v1.x]:9", "--dry-run"],
     ] {
-        deferred(&home.run(DEAD, shape));
+        let output = home.run(DEAD, shape);
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("is deferred"),
+            "{output:?}"
+        );
     }
     assert_eq!(home.tree(), before);
 }
@@ -442,14 +1147,19 @@ fn a_current_registration_has_nothing_to_write() {
 }
 
 #[test]
-fn inputs_outside_the_native_domain_defer_before_any_request() {
+fn unsupported_json_refuses_but_a_trailing_directory_separator_is_native() {
     let health = Health::start();
     let url = health.url.clone();
     // A lone surrogate: a Python str that no Rust String holds.
     let home = Home::new();
     home.write(".claude.json", "{\"mcpServers\": {}, \"x\": \"\\ud800\"}\n");
     let before = home.tree();
-    deferred(&home.run(&url, &[&url, "--client", "claude-code", "--dry-run"]));
+    assert_eq!(
+        home.run(&url, &[&url, "--client", "claude-code", "--dry-run"])
+            .status
+            .code(),
+        Some(2)
+    );
     assert_eq!(home.tree(), before);
     // A config directory pathlib would print differently.
     let home = Home::new();
@@ -458,10 +1168,10 @@ fn inputs_outside_the_native_domain_defer_before_any_request() {
     command
         .env("CLAUDE_CONFIG_DIR", format!("{}/claude/", home.0.display()))
         .args(["connect", &url, "--client", "claude-code", "--dry-run"]);
-    deferred(&command.output().unwrap());
+    assert_eq!(command.output().unwrap().status.code(), Some(3));
     assert_eq!(home.tree(), before);
-    // Discovery runs before the health probe: nothing was asked of the daemon.
-    assert!(health.requests().is_empty());
+    // The unsupported JSON was refused before the request; the ordinary path reached health.
+    assert_eq!(health.requests(), ["/health"]);
 }
 
 #[test]
