@@ -1178,6 +1178,26 @@ Connection: close
     }
     #[cfg(windows)]
     #[test]
+    fn scheduler_bootstrap_preserves_literal_path_characters() {
+        use sha2::{Digest, Sha256};
+        let root = std::env::temp_dir().join(format!("schedule-path-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("register ' é ‘ ’ “ ” $ ` [x].ps1");
+        let script = "[Console]::Out.WriteLine('fixture scheduler ran');exit 3";
+        fs::write(&path, script).unwrap();
+        let digest = format!("{:x}", Sha256::digest(script.as_bytes()));
+        let (code, output) = seams::run_cli(
+            &windows_script_argv(&path, &digest).unwrap(),
+            None,
+            30,
+            false,
+        );
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(code, 3, "{output}");
+        assert_eq!(output.trim(), "fixture scheduler ran");
+    }
+    #[cfg(windows)]
+    #[test]
     fn a_scheduler_script_longer_than_the_command_line_limit_runs() {
         let script = format!(
             "$x='{}';[Console]::Out.WriteLine('ran');exit 3",

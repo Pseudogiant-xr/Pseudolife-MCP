@@ -52,3 +52,54 @@ pub(crate) fn base64(bytes: &[u8]) -> String {
     }
     out
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    fn check_interpreter_root(planted: Option<&str>) {
+        let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "windows_powershell::tests::interpreter_path_probe",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PSEUDOLIFE_TEST_EXPECTED_POWERSHELL", expected);
+        if let Some(root) = planted {
+            command.env("SystemRoot", root);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "subprocess probe, invoked by the three interpreter-root tests"]
+    fn interpreter_path_probe() {
+        let expected = std::env::var("PSEUDOLIFE_TEST_EXPECTED_POWERSHELL").unwrap();
+        assert_eq!(executable().unwrap(), expected);
+    }
+
+    #[test]
+    fn interpreter_ignores_a_planted_system_root() {
+        check_interpreter_root(Some("C:/fixture-windows"));
+    }
+
+    #[test]
+    fn interpreter_ignores_a_unc_system_root() {
+        check_interpreter_root(Some(r"\\server\windows"));
+    }
+
+    #[test]
+    fn interpreter_accepts_the_normal_system_root() {
+        check_interpreter_root(None);
+    }
+}

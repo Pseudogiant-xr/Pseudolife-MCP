@@ -133,15 +133,19 @@ def test_path_resolution_never_compiles_a_temporary_assembly() -> None:
         assert "GetFinalPathNameByHandleW" in text
 
 
-def test_the_interactive_task_action_keeps_its_exact_bytes() -> None:
+@pytest.mark.parametrize("planted_root", [None, "C:/fixture-windows", "//server/windows"])
+def test_the_interactive_task_action_keeps_its_exact_bytes(planted_root: str | None) -> None:
+    if planted_root is not None and os.name != "nt":
+        pytest.skip("the planted Windows directory variants run on Windows")
     text = _read(NATIVE)
     function = text[text.index("function Get-NativeTaskCode("):text.index("function Get-RegisteredInvocation(")]
     action = text[text.index("function Quote-Argument("):text.index("$user = [Security.Principal.WindowsIdentity]")]
     system_root = os.environ.get("SystemRoot", "/fixture/windows")
-    script = (function + "\n" + f"$env:SystemRoot = '{system_root}'\n" +
+    powershell = str(Path(system_root) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+    script = (function + "\n" + f"$env:SystemRoot = '{planted_root or system_root}'\n" +
               "$native = 'C:\\fixture dir\\launcher.exe'\n"
               "$ownerExe = 'C:\\fixture dir\\runtime.exe'\n"
-              "$c = @{ ServeArgs = @('extractor-shim', 'claude', '--env-file', 'C:\\fixture dir\\settings.env') }\n"
+              f"$c = @{{ PowerShell = '{powershell}'; ServeArgs = @('extractor-shim', 'claude', '--env-file', 'C:\\fixture dir\\settings.env') }}\n"
               "function New-ScheduledTaskAction { param($Execute, $Argument) @{ Execute=$Execute; Arguments=$Argument } }\n" +
               action + "\n$action | ConvertTo-Json -Compress\n")
     expected = (

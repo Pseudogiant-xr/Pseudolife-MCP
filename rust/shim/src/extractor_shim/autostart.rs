@@ -3,10 +3,34 @@ use super::config;
 use serde_json::json;
 use std::{ffi::OsString, fs, path::PathBuf, process::Command};
 
-struct Scratch(PathBuf);
+struct Scratch {
+    path: PathBuf,
+}
+
+fn create_registration_directory(path: &std::path::Path) -> Result<(), String> {
+    fs::create_dir(path).map_err(|e| e.to_string())
+}
+
+impl Scratch {
+    fn create(path: PathBuf) -> Result<Self, String> {
+        create_registration_directory(&path)?;
+        Self::open_created(path)
+    }
+
+    fn open_created(path: PathBuf) -> Result<Self, String> {
+        Ok(Self { path })
+    }
+
+    fn write(&mut self, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        let path = self.path.join(name);
+        fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(path)
+    }
+}
+
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(&self.path);
     }
 }
 
@@ -225,10 +249,9 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     if !native.is_file() {
         return Err(format!("native launcher not found: {}", native.display()).into());
     }
-    let scratch = Scratch(
+    let mut scratch = Scratch::create(
         std::env::temp_dir().join(format!("pseudolife-shim-install-{}", uuid::Uuid::new_v4())),
-    );
-    fs::create_dir(&scratch.0).map_err(|e| e.to_string())?;
+    )?;
     let mut config_args = vec!["extractor-shim".to_owned(), "config".into()];
     config_args.extend(settings.iter().map(|s| s.to_string_lossy().into_owned()));
     let mut serve_args = vec![
@@ -249,16 +272,13 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
         ]);
     }
     let status = if cfg!(windows) {
-        let script = scratch.0.join("register.ps1");
-        let data = scratch.0.join("registration.json");
         let script_bytes = include_bytes!("autostart.ps1");
         let data_bytes = serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON");
-        fs::write(&script,script_bytes).map_err(|e|e.to_string())?;
-        fs::write(&data,&data_bytes).map_err(|e|e.to_string())?;
+        let script = scratch.write("register.ps1", script_bytes)?;
+        let data = scratch.write("registration.json", &data_bytes)?;
         windows_registration_command(&script, &data, script_bytes, &data_bytes)?.status()
     } else if cfg!(target_os="linux") {
-        let script = scratch.0.join("register.sh");
-        fs::write(&script,include_str!("autostart.sh")).map_err(|e|e.to_string())?;
+        let script = scratch.write("register.sh", include_bytes!("autostart.sh"))?;
         Command::new("bash").arg(script).arg(if remove {"remove"} else {"install"}).arg(&owner_exe).arg(&native).arg(kind).arg(&env_file).arg(name).arg(if replace {"yes"}else{"no"}).arg(port.to_string()).arg(host).arg(wait.to_string()).arg(serve_args.len().to_string()).args(serve_args).args(config_args).status()
     } else { return Err("native autostart requires Windows Task Scheduler or Linux systemd --user".into()); }
     .map_err(|e|format!("cannot run the platform registration helper: {e}"))?;
@@ -311,18 +331,132 @@ mod tests {
         registration_fixture("typographic");
     }
 
-    fn registration_fixture(changed: &str) {
-        let scratch = Scratch(
-            std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())),
+    fn fixture_script(source: &str) -> std::process::Output {
+        let mut scratch = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-result-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let script = scratch.write("register.ps1", source.as_bytes()).unwrap();
+        let data = scratch.write("registration.json", b"{}").unwrap();
+        windows_registration_command(&script, &data, source.as_bytes(), b"{}")
+            .unwrap()
+            .output()
+            .unwrap()
+    }
+
+    #[test]
+    fn registration_script_errors_are_one_plain_line() {
+        let output = fixture_script("throw \"fixture registration failure`nsecond line\"");
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "fixture registration failure second line"
         );
-        fs::create_dir(&scratch.0).unwrap();
-        let script = scratch.0.join(if changed == "typographic" {
-            "register ' é ‘ ’ “ ”.ps1"
+        assert!(
+            output.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn registration_script_preserves_the_lock_refusal_exit_code() {
+        let output = fixture_script("[Console]::Error.WriteLine('fixture task locked');exit 3");
+        assert_eq!(output.status.code(), Some(3));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).trim(),
+            "fixture task locked"
+        );
+    }
+
+    #[test]
+    fn registration_files_are_created_exclusively() {
+        for name in ["register.ps1", "registration.json"] {
+            let mut scratch = Scratch::create(
+                std::env::temp_dir().join(format!("autostart-exclusive-{}", uuid::Uuid::new_v4())),
+            )
+            .unwrap();
+            let path = scratch.path.join(name);
+            fs::write(&path, b"existing fixture").unwrap();
+            assert!(
+                scratch.write(name, b"replacement").is_err(),
+                "existing {name} was overwritten"
+            );
+            assert_eq!(fs::read(path).unwrap(), b"existing fixture");
+        }
+    }
+
+    #[test]
+    fn registration_refuses_a_replaced_scratch_junction() {
+        let holder = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-junction-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let path = holder.path.join("registration");
+        let moved = holder.path.join("original");
+        let outside = holder.path.join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel"), b"unchanged").unwrap();
+        create_registration_directory(&path).unwrap();
+        fs::rename(&path, &moved).unwrap();
+        crate::credentials::windows_security::make_junction_for_test(&path, &outside).unwrap();
+        let result = Scratch::open_created(path.clone()).and_then(|mut scratch| {
+            scratch.write("register.ps1", b"script")?;
+            scratch.write("registration.json", b"data")?;
+            Ok(())
+        });
+        assert!(result.is_err(), "replaced scratch folder was accepted");
+        let reason = result.unwrap_err();
+        assert!(reason.contains("reparse"), "{reason}");
+        assert!(!outside.join("register.ps1").exists());
+        assert!(!outside.join("registration.json").exists());
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"unchanged");
+        if path.exists() {
+            fs::remove_dir(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn registration_scratch_removes_its_own_folder() {
+        let mut scratch = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-cleanup-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let path = scratch.path.clone();
+        let source = b"param([string]$ConfigJson) [Console]::Out.WriteLine('registered fixture')";
+        let script = scratch.write("register.ps1", source).unwrap();
+        let data = scratch.write("registration.json", b"{}").unwrap();
+        let output = windows_registration_command(&script, &data, source, b"{}")
+            .unwrap()
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "registered fixture"
+        );
+        drop(scratch);
+        assert!(!path.exists());
+    }
+
+    fn registration_fixture(changed: &str) {
+        let scratch = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let script = scratch.path.join(if changed == "typographic" {
+            "register ' é ‘ ’ “ ” $ ` [x].ps1"
         } else {
             "register ' é.ps1"
         });
-        let data = scratch.0.join(if changed == "typographic" {
-            "registration ' é ‘ ’ “ ”.json"
+        let data = scratch.path.join(if changed == "typographic" {
+            "registration ' é ‘ ’ “ ” $ ` [x].json"
         } else {
             "registration ' é.json"
         });
