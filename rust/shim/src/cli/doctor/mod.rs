@@ -285,7 +285,7 @@ pub(super) type Registration = (Vec<(String, String)>, Option<String>);
 /// (`console`): the overrides to apply and the source label, or `None`
 /// when a registration cannot be read. The caller decides how to report it.
 pub(super) fn registration_credentials() -> Option<Registration> {
-    clients::registration_credentials(&Env::default()).ok()
+    clients::registration_credentials(&Env::default(), &mut Vec::new()).ok()
 }
 
 /// Python truthiness of a JSON value.
@@ -765,11 +765,22 @@ async fn diagnose(
     for (key, value) in environment.additions() {
         env.set(key, value.clone());
     }
-    let (overrides, credential_source, registrations_unread) =
-        match clients::registration_credentials(&env) {
-            Ok((overrides, source)) => (overrides, source, None),
-            Err(error) => (Vec::new(), None, Some(error.to_string())),
+    let mut registration_findings = Vec::new();
+    let (overrides, credential_source) =
+        match clients::registration_credentials(&env, &mut registration_findings) {
+            Ok(found) => found,
+            Err(error) => {
+                registration_findings.push(error);
+                (Vec::new(), None)
+            }
         };
+    let registrations_unread = (!registration_findings.is_empty()).then(|| {
+        registration_findings
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ")
+    });
     for (key, value) in overrides {
         env.set(&key, value);
     }
@@ -858,7 +869,7 @@ async fn diagnose(
     let hooks = clients::codex_hooks(&env).unwrap_or_else(|cause| {
         clients::CodexHooks::Line(unread("the Codex home or its config.toml", &cause))
     });
-    let resolution = clients::path_resolution(&env).unwrap_or_else(
+    let resolution = clients::path_resolution(&env, token.as_deref()).unwrap_or_else(
         |cause| json!({"on_path": unread("PATH or the launcher location", &cause)}),
     );
     let tunnel_root = clients::tunnel_root(&env).ok();

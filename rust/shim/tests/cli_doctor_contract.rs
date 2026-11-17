@@ -1981,3 +1981,120 @@ fn native_reports_do_not_echo_bearers_or_credential_urls_from_answers() {
     );
     assert!(failures.is_empty(), "{failures:?}");
 }
+
+#[test]
+fn native_review_local_paths_redact_credentials() {
+    let home = Home::new();
+    let launcher = home.0.join(if cfg!(windows) {
+        "w44-secret-value.exe"
+    } else {
+        "w44-secret-value.é"
+    });
+    std::fs::write(&launcher, b"fixture").unwrap();
+    for token in ["w44-secret-value", "t"] {
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .env("PSEUDOLIFE_MCP_TOKEN", token)
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", "fixture")
+            .env("PSEUDOLIFE_SHIM_LAUNCHER", &launcher)
+            .output()
+            .unwrap();
+        let map = report(&output);
+        assert_eq!(map["error"], "DaemonUnavailable");
+        assert_eq!(map["daemon_status"], "unreachable");
+        if token != "t" {
+            assert!(!String::from_utf8_lossy(&output.stdout).contains(token));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
+            assert!(
+                map["path_resolution"]["launcher"]
+                    .as_str()
+                    .unwrap()
+                    .contains("[redacted]")
+            );
+        }
+    }
+}
+
+#[test]
+fn native_review_bad_claude_registration_keeps_codex_credentials() {
+    let home = Home::new();
+    std::fs::create_dir(home.0.join("claude")).unwrap();
+    std::fs::create_dir(home.0.join("codex")).unwrap();
+    std::fs::write(home.0.join("claude/.claude.json"), b"{").unwrap();
+    std::fs::write(
+        home.0.join("codex/config.toml"),
+        "[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN = 'w44-secret-value'\n",
+    )
+    .unwrap();
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    let map = report(&output);
+    assert!(
+        map["credential_source"]
+            .as_str()
+            .unwrap()
+            .starts_with("Codex registration")
+    );
+    assert!(
+        map["registrations"]
+            .as_str()
+            .unwrap()
+            .contains("invalid JSON")
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+    assert!(!map.contains_key("error"));
+    std::fs::write(home.0.join("claude/.claude.json"), b"{}").unwrap();
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    let map = report(&output);
+    assert!(
+        map["credential_source"]
+            .as_str()
+            .unwrap()
+            .starts_with("Codex registration")
+    );
+    assert!(!map.contains_key("registrations"));
+}
+
+#[test]
+fn native_review_expanded_codex_home_does_not_claim_plugin_absent() {
+    let home = Home::new();
+    let codex = home.0.join("codex");
+    std::fs::create_dir(&codex).unwrap();
+    std::fs::write(
+        codex.join("config.toml"),
+        "[plugins.\"pseudolife-memory@pseudolife-mcp\"]\nenabled = true\n",
+    )
+    .unwrap();
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(
+            200,
+            json!({"status":"ok", "version":env!("CARGO_PKG_VERSION"), "hooks_digest":"fixture"})
+                .to_string(),
+        )],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url)
+        .env("CODEX_HOME", "~/codex")
+        .output()
+        .unwrap();
+    let map = report(&output);
+    let line = map["codex_hooks"].as_str().unwrap();
+    assert!(
+        line.contains("CODEX_HOME") && line.contains("absolute"),
+        "{line}"
+    );
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(
+            200,
+            json!({"status":"ok", "version":env!("CARGO_PKG_VERSION"), "hooks_digest":"fixture"})
+                .to_string(),
+        )],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url)
+        .env("CODEX_HOME", &codex)
+        .output()
+        .unwrap();
+    let map = report(&output);
+    let line = map["codex_hooks"].as_str().unwrap();
+    assert!(line.starts_with("plugin-managed"), "{line}");
+}

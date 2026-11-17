@@ -65,34 +65,48 @@ pub(super) type Overrides = Vec<(String, String)>;
 
 /// `registration_credentials(os.environ)`: the overrides to apply and the
 /// credential source label.
-pub(super) fn registration_credentials(env: &Env) -> Res<(Overrides, Option<String>)> {
+pub(super) fn registration_credentials(
+    env: &Env,
+    findings: &mut Vec<Finding>,
+) -> Res<(Overrides, Option<String>)> {
     if env.var("PSEUDOLIFE_MCP_TOKEN")?.is_some() || env.var("PSEUDOLIFE_MCP_TOKEN_FILE")?.is_some()
     {
         return Ok((Vec::new(), Some("environment".into())));
     }
     // Claude Code first: ~/.claude.json's mcpServers.
-    let claude = claude_registration_path(env)?;
-    if let Text::Ok(text) = read_text(&claude, true)
-        && let Some(data) = json_loads(&text)
-            .map_err(|cause| cause.at("Claude Code registration (~/.claude.json)"))?
-        && let Some(block) = data
-            .get("mcpServers")
-            .and_then(Value::as_object)
-            .and_then(|servers| servers.get(SERVER))
-            .and_then(Value::as_object)
-            .and_then(|server| server.get("env"))
-            .and_then(Value::as_object)
-    {
-        let text_of = |key: &str| {
-            block
-                .get(key)
-                .and_then(Value::as_str)
-                .filter(|v| !v.is_empty())
-                .map(str::to_owned)
-        };
-        if let Some(found) = credential_overrides(env, text_of)? {
-            return Ok((found, Some(format!("Claude Code registration ({claude})"))));
+    let claude_result = (|| -> Res<Option<(Overrides, String)>> {
+        let claude = claude_registration_path(env)?;
+        if let Text::Ok(text) = read_text(&claude, true)
+            && let Some(data) = json_loads(&text)
+                .map_err(|cause| cause.at("Claude Code registration (~/.claude.json)"))?
+            && let Some(block) = data
+                .get("mcpServers")
+                .and_then(Value::as_object)
+                .and_then(|servers| servers.get(SERVER))
+                .and_then(Value::as_object)
+                .and_then(|server| server.get("env"))
+                .and_then(Value::as_object)
+        {
+            let text_of = |key: &str| {
+                block
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_owned)
+            };
+            if let Some(found) = credential_overrides(env, text_of)? {
+                return Ok(Some((
+                    found,
+                    format!("Claude Code registration ({claude})"),
+                )));
+            }
         }
+        Ok(None)
+    })();
+    match claude_result {
+        Ok(Some((overrides, source))) => return Ok((overrides, Some(source))),
+        Ok(None) => {}
+        Err(cause) => findings.push(cause),
     }
     // Then Codex: config.toml's mcp_servers.
     let codex = codex_config_path(env)?;
@@ -519,6 +533,14 @@ pub(super) fn codex_hooks(env: &Env) -> Res<CodexHooks> {
     if !config_text.contains(&format!("\"{PLUGIN_ID}\"")) {
         return Ok(CodexHooks::Line("not-configured".into()));
     }
+    if env
+        .truthy("CODEX_HOME")?
+        .is_some_and(|home| home.starts_with('~'))
+    {
+        return Err(Finding::new(
+            "CODEX_HOME uses home expansion, which plugin hook verification cannot resolve; set CODEX_HOME to the expanded absolute directory",
+        ));
+    }
     Ok(CodexHooks::Plugin)
 }
 
@@ -620,7 +642,7 @@ call that bash.exe by its full path.",
 }
 
 /// `path_resolution()`.
-pub(super) fn path_resolution(env: &Env) -> Res<Value> {
+pub(super) fn path_resolution(env: &Env, token: Option<&str>) -> Res<Value> {
     let found = pyenv::which("pseudolife-mcp", env)?;
     let launcher = match (
         env.truthy("PSEUDOLIFE_SHIM_RUNTIMES")?,
@@ -660,14 +682,32 @@ pub(super) fn path_resolution(env: &Env) -> Res<Value> {
         _ => None,
     };
     let mut report = Map::new();
-    report.insert("on_path".into(), json!(found));
-    report.insert("launcher".into(), json!(launcher));
+    report.insert(
+        "on_path".into(),
+        json!(
+            found
+                .as_deref()
+                .map(|path| super::display_text(path, token))
+        ),
+    );
+    report.insert(
+        "launcher".into(),
+        json!(
+            launcher
+                .as_deref()
+                .map(|path| super::display_text(path, token))
+        ),
+    );
     if let Some(launcher) = &launcher {
         let same = match &found {
             Some(found) => pyenv::real_normcase(found)? == pyenv::real_normcase(launcher)?,
             None => false,
         };
         if !same {
+            let launcher = super::display_text(launcher, token);
+            let found = found
+                .as_deref()
+                .map(|path| super::display_text(path, token));
             report.insert("warning".into(), json!(format!(
                 "`pseudolife-mcp` on PATH is {}, not the launcher {launcher}, so a terminal runs \
 another install. Run \"{launcher}\" update --clients-only to point the name at the launcher, then \
@@ -715,7 +755,7 @@ mod native_tests {
         env.set("PSEUDOLIFE_SHIM_RUNTIMES", "fixture".into());
         for path in ["absent-w44.é", "absent-w44.exe", "absent-w44"] {
             env.set("PSEUDOLIFE_SHIM_LAUNCHER", path.into());
-            assert!(path_resolution(&env).is_ok());
+            assert!(path_resolution(&env, None).is_ok());
         }
     }
 

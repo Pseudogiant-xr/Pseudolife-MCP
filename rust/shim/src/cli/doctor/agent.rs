@@ -7,6 +7,99 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path, time::Duration};
 
+#[cfg(all(test, windows))]
+mod native_path_tests {
+    use super::*;
+    use crate::credentials::windows_security::{
+        current_user_sid, make_junction_for_test, set_link_dacl_sddl,
+    };
+    use std::{io::Write, path::PathBuf, process::Command};
+
+    struct Scratch(PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn relative_state_child() {
+        let Some(path) = std::env::var_os("DOCTOR_STATE_CASE_PATH") else {
+            return;
+        };
+        let result = read(Path::new(&path), "http://127.0.0.1:1");
+        if std::env::var_os("DOCTOR_STATE_EXPECT_REFUSAL").is_some() {
+            assert!(
+                result.is_err(),
+                "untrusted current-directory junction was accepted"
+            );
+        } else {
+            assert!(
+                matches!(result, Ok(Saved::State(_))),
+                "trusted relative state was refused"
+            );
+        }
+    }
+
+    #[test]
+    fn native_relative_state_checks_current_directory_junction() {
+        let scratch = Scratch(
+            std::env::temp_dir().join(format!("pl-doctor-relative-{}", uuid::Uuid::new_v4())),
+        );
+        crate::board::state::private_dir(&scratch.0).unwrap();
+        let real = scratch.0.join("real");
+        let holder = scratch.0.join("holder");
+        crate::board::state::private_dir(&real).unwrap();
+        crate::board::state::private_dir(&holder).unwrap();
+        let mut state = crate::board::state::create(&real.join("state.json")).unwrap();
+        state.file.write_all(br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"fixture-secret"}"#).unwrap();
+        drop(state);
+        let link = holder.join("redirect");
+        make_junction_for_test(&link, &real).unwrap();
+        let me = current_user_sid().unwrap();
+        let drive = match scratch.0.components().next().unwrap() {
+            std::path::Component::Prefix(prefix) => match prefix.kind() {
+                std::path::Prefix::Disk(drive) | std::path::Prefix::VerbatimDisk(drive) => {
+                    drive as char
+                }
+                _ => panic!("fixture requires a drive path"),
+            },
+            _ => panic!("fixture requires an absolute path"),
+        };
+        let mut failures = Vec::new();
+        for untrusted in [true, false] {
+            let extra = if untrusted { "(A;;0x40;;;AU)" } else { "" };
+            set_link_dacl_sddl(
+                &holder,
+                &format!("D:(A;OICI;FA;;;{me})(A;OICI;FA;;;SY){extra}"),
+                true,
+            )
+            .unwrap();
+            for path in ["state.json".to_owned(), format!("{drive}:state.json")] {
+                let mut child = Command::new(std::env::current_exe().unwrap());
+                child
+                    .env_clear()
+                    .current_dir(&link)
+                    .args([
+                        "--exact",
+                        "cli::doctor::agent::native_path_tests::relative_state_child",
+                        "--nocapture",
+                    ])
+                    .env("DOCTOR_STATE_CASE_PATH", &path);
+                if untrusted {
+                    child.env("DOCTOR_STATE_EXPECT_REFUSAL", "1");
+                }
+                let output = child.output().unwrap();
+                if !output.status.success() {
+                    failures.push((untrusted, path));
+                }
+            }
+        }
+        std::fs::remove_dir(&link).unwrap();
+        assert!(failures.is_empty(), "relative state cells: {failures:?}");
+    }
+}
+
 /// The saved instance file as `read_legacy` would find it.
 pub(super) enum Saved {
     /// `state_path.exists()` is false.

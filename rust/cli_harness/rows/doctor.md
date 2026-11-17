@@ -99,6 +99,11 @@ findings; the other checks still run. Windows path prefixes and drive-relative
 paths use native path handling. Non-Unicode saved-state paths use the OS path.
 Codex home and executable settings expand `~/` using the configured home;
 named-user forms such as `~other/` receive an absolute-path repair instruction.
+Plugin hook verification uses a shared verifier that does not expand
+`CODEX_HOME`; when a plugin is found through a tilde path, doctor reports
+that limitation and asks for the expanded absolute directory. It does not
+misreport the plugin as absent. A malformed Claude registration is reported
+while credential discovery continues with the independent Codex registration.
 
 Saved-state parent components and trusted directory links are supported.
 A leaf link or an unsafe private file is reported with a remedy; the file is
