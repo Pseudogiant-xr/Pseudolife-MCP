@@ -112,7 +112,13 @@ fn update_dispatches_to_the_native_updater_help() {
 fn completed_modes_answer_help_and_argument_errors_without_deferring() {
     let home = std::env::temp_dir().join(format!("pl-dispatch-completed-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&home).unwrap();
-    for mode in ["conductor-watch", "delegate-watch", "expose", "test-login", "maintainer"] {
+    for mode in [
+        "conductor-watch",
+        "delegate-watch",
+        "expose",
+        "test-login",
+        "maintainer",
+    ] {
         for (argument, code) in [("--help", 0), ("--bad-dispatch-fixture-option", 2)] {
             let output = common::cli::cleared_command(std::path::Path::new(env!(
                 "CARGO_BIN_EXE_pseudolife-stdio"
