@@ -10,7 +10,7 @@ itself. No form is deferred to the Python client.
 - `create` accepts `--rotate`, `--json`, `--role`, `--file`, `--admin-url`,
   `--container` and repeatable `--bank`. Value options accept both a separate
   argument and `--option=value`. A final `--` is accepted.
-- Unknown commands, positionals, missing/empty values and repeated options
+- Unknown commands, positionals, missing/empty or dash-leading values and repeated options
   are usage errors. Abbreviations name the full option. Diagnostics omit
   argument values so an administrator URL cannot appear in them.
 - Home, login-file spelling, writability and staging limits are checked

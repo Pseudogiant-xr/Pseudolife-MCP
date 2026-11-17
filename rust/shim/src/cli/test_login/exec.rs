@@ -51,7 +51,7 @@ pub(super) fn admin_url_admitted(url: &str) -> Result<(), String> {
             "{control} is unsupported with --admin-url; unset that PostgreSQL environment control"
         ));
     }
-    environment.validate().map_err(|_| "--admin-url cannot use ambient PostgreSQL certificate/key/CRL files; remove those ambient files or configure supported TLS options in the DSN".into())
+    environment.validate().map_err(|_| "--admin-url cannot use ambient PostgreSQL certificate/key/CRL files; move those files out of the default PostgreSQL directory before retrying".into())
 }
 
 fn exception_name(error: &std::io::Error) -> &'static str {

@@ -353,8 +353,12 @@ fn parse(values: &[OsString]) -> Result<Args, String> {
                 .and_then(|v| v.to_str())
                 .ok_or_else(|| format!("{option} requires a UTF-8 value; supply {option}=VALUE"))?,
         };
-        if (value.starts_with('-') && inline.is_none()) || (value.is_empty() && option != "--role")
-        {
+        if value.starts_with('-') {
+            return Err(format!(
+                "{option} value must not start with '-'; supply a non-option value"
+            ));
+        }
+        if value.is_empty() && option != "--role" {
             return Err(format!(
                 "{option} requires a nonempty value; supply {option}=VALUE"
             ));

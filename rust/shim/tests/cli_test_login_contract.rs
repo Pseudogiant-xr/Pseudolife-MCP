@@ -535,6 +535,7 @@ fn invalid_homes_paths_and_ambient_tls_files_are_named() {
     assert_eq!(output.status.code(), Some(4));
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("certificate/key/CRL"));
+    assert!(text.contains("move those files out of the default PostgreSQL directory"));
     assert!(!text.contains("fixture-secret"));
     fs::remove_file(crl).unwrap();
     let output = run(home.path(), &["create", "--admin-url", CLOSED_URL], &[]);
@@ -562,6 +563,21 @@ fn equals_options_and_terminal_separator_reach_the_native_connection() {
                 .starts_with("test-login: the database refused:")
         );
         assert!(output.stderr.is_empty());
+    }
+    assert!(home.listing().is_empty());
+}
+
+#[test]
+fn equals_values_cannot_turn_a_container_name_into_a_docker_option() {
+    let home = Home::new("option-values");
+    for option in ["--container", "--role", "--file", "--admin-url", "--bank"] {
+        let argument = format!("{option}=--privileged");
+        let output = run(home.path(), &["create", &argument], &[]);
+        assert_eq!(output.status.code(), Some(2));
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(text.contains(option));
+        assert!(text.contains("must not start with '-'"));
+        assert!(!text.contains("--privileged"));
     }
     assert!(home.listing().is_empty());
 }
