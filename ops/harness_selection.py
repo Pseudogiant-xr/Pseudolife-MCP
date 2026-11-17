@@ -313,6 +313,8 @@ def recipe(read, tree_paths):
             if "pytest" in words and words[:4] not in (["python", "-m", "pip", "install"],
                                                        ["python3", "-m", "pip", "install"]):
                 raise SelectionError("unsupported pytest launcher in parity-checks")
+            if words and words[0] not in ("python", "python3") and any(word in ("python", "python3") for word in words):
+                raise SelectionError("unsupported Python launcher in parity-checks")
             if not words or words[0] not in ("python", "python3"):
                 continue
             if words[1:3] in (["-m", "pip"], ["-m", "venv"]):

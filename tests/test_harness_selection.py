@@ -67,6 +67,8 @@ def test_unreadable_workflow_refuses(tree, source):
     "python -m pytest -q rust/test_unknown.py",
     "python rust/new_harness.py --unit",
     "python -m unknown_unit_runner rust/test_extra.py",
+    "uv run python rust/test_extra.py",
+    "& python rust/test_extra.py",
 ])
 def test_unknown_parity_commands_or_classifications_refuse(tree, command):
     workflow(tree, "parity-checks", command)
