@@ -8,11 +8,10 @@
 //!   reporting the first error that is not ENOENT/ENOTDIR. The launcher is
 //!   then given [`SETTLE`] to exit: a zero exit or a program still running
 //!   (a browser in the foreground of its own session) is opened, a non-zero
-//!   exit is a failure with its status. Windows: `CreateProcess` with
-//!   nothing redirected, so the browser gets this command's own standard
-//!   handles, as CPython's child does (measured 2026-11-13, a program
-//!   CPython 3.11.9 started this way wrote into its parent's stdout pipe),
-//!   and opened when it is still running right after the start.
+//!   exit is a failure with its status. Windows: `CreateProcess` with all
+//!   three standard streams set to null, so the browser cannot keep the
+//!   caller's captured pipes open. Opened when still running or successfully
+//!   exited after the start; an observed non-zero exit reports its code.
 //! - Windows `os.startfile(url)`: `ShellExecuteW(NULL, NULL, url, NULL,
 //!   NULL, SW_SHOWNORMAL)` (the default verb), opened unless it returns 32
 //!   or less.
@@ -24,7 +23,7 @@ use super::browser::{Host, Plan};
 use std::ffi::OsString;
 
 /// The outcome of one launch: opened, or not, with the cause to print
-/// beside the link (none on Windows, whose printed answer is unchanged).
+/// beside the link.
 pub(super) type Launched = Result<(), Option<String>>;
 
 /// How long a POSIX launcher has to report failure by exiting non-zero.
@@ -106,13 +105,40 @@ impl Host for Machine {
     }
 }
 
-/// Windows `os.startfile(url)`; no cause, as before.
+/// Open the default Windows browser, preserving the system launch cause.
 #[cfg(windows)]
 fn start_file(url: &str) -> Launched {
-    if shell_execute(url) {
+    if url.encode_utf16().count() > 32767 {
+        return Err(Some("the sign-in URL is too long for the Windows default browser launcher; open the printed link yourself".to_owned()));
+    }
+    shell_result(shell_execute(url))
+}
+
+#[cfg(any(windows, test))]
+fn shell_result(code: isize) -> Launched {
+    if code > 32 {
         Ok(())
     } else {
-        Err(None)
+        // ShellExecuteW returns these compatibility codes, not a Win32
+        // GetLastError code (notably 31 means no association).
+        let cause = match code {
+            0 | 8 => "Windows is out of memory or resources",
+            2 => "the browser executable was not found",
+            3 => "the browser path was not found",
+            5 => "Windows denied access to the browser",
+            11 => "the browser executable is invalid",
+            26 => "a sharing violation prevented the launch",
+            27 => "the browser association is incomplete",
+            28 => "the browser hand-off timed out",
+            29 => "the browser hand-off failed",
+            30 => "the browser is busy",
+            31 => "no browser is associated with this URL",
+            32 => "a browser library was not found",
+            _ => "Windows returned an unknown launch error",
+        };
+        Err(Some(format!(
+            "could not open the default browser: {cause} (ShellExecuteW {code}); open the printed link yourself"
+        )))
     }
 }
 
@@ -122,25 +148,50 @@ fn start_file(_url: &str) -> Launched {
     Err(None)
 }
 
-/// A Windows background start; no cause, as before.
+/// A Windows background start, with an injectable result for offline tests.
 #[cfg(windows)]
 fn background(program: &str, args: &[String]) -> Launched {
-    if spawned(program, args) {
-        Ok(())
-    } else {
-        Err(None)
-    }
+    spawn_result(program, || {
+        let mut child = browser_command(program, args)
+            .spawn()
+            .map_err(|error| format!("could not start {program} ({error})"))?;
+        child
+            .try_wait()
+            .map_err(|error| format!("could not check {program} ({error})"))
+    })
+}
+
+#[cfg(any(windows, test))]
+fn browser_command(program: &str, args: &[String]) -> std::process::Command {
+    use std::process::Stdio;
+    let mut command = std::process::Command::new(program);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+#[cfg(any(windows, test))]
+fn spawn_result(
+    program: &str,
+    start: impl FnOnce() -> Result<Option<std::process::ExitStatus>, String>,
+) -> Launched {
+    let result = match start() {
+        Ok(None) => Ok(()),
+        Ok(Some(status)) if status.success() => Ok(()),
+        Ok(Some(status)) => Err(format!("{program} failed ({status})")),
+        Err(cause) => Err(cause),
+    };
+    result.map_err(|cause| Some(format!("{cause}; {}", super::browser::SET_WINDOWS_BROWSER)))
 }
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn shell_execute(url: &str) -> bool {
+fn shell_execute(url: &str) -> isize {
     use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
     let mut file: Vec<u16> = url.encode_utf16().collect();
-    // `path_converter` raises ValueError ("too long for Windows") past this.
-    if file.len() > 32767 {
-        return false;
-    }
     file.push(0);
     // SAFETY: `file` is a live NUL-terminated UTF-16 string for the whole
     // call; every other pointer argument is NULL, which ShellExecuteW
@@ -155,23 +206,7 @@ fn shell_execute(url: &str) -> bool {
             SW_SHOWNORMAL,
         )
     };
-    instance as usize > 32
-}
-
-#[cfg(windows)]
-fn spawned(program: &str, args: &[String]) -> bool {
-    // `browser::launchable` admits only a drive-absolute `.exe`. Nothing is
-    // redirected: the browser gets this command's standard handles.
-    match std::process::Command::new(program).args(args).spawn() {
-        Ok(child) => running(child),
-        Err(_) => false,
-    }
-}
-
-/// `p.poll() is None` right after the start.
-#[cfg(windows)]
-fn running(mut child: std::process::Child) -> bool {
-    matches!(child.try_wait(), Ok(None))
+    instance as isize
 }
 
 #[cfg(not(windows))]
@@ -396,6 +431,17 @@ mod posix {
     /// given [`super::SETTLE`] to exit. `Err` is the cause, worded for the
     /// user.
     pub(super) fn background(program: &str, args: &[String]) -> Result<(), String> {
+        // Same signal as installer::preflight's host_path; an empty value
+        // does not identify WSL. Injected below so tests never change env.
+        let wsl = std::env::var_os("WSL_DISTRO_NAME").is_some_and(|value| !value.is_empty());
+        background_with_wsl(program, args, wsl)
+    }
+
+    pub(super) fn background_with_wsl(
+        program: &str,
+        args: &[String],
+        wsl: bool,
+    ) -> Result<(), String> {
         let argv: Vec<&[u8]> = std::iter::once(program.as_bytes())
             .chain(args.iter().map(|arg| arg.as_bytes()))
             .collect();
@@ -410,7 +456,20 @@ mod posix {
         let deadline = std::time::Instant::now() + super::SETTLE;
         loop {
             match child.try_wait() {
-                Ok(Some(status)) if status.success() => return Ok(()),
+                // WSL's Explorer hands the URL to Windows and exits 1.
+                // Only this exact executable name and code are a hand-off.
+                Ok(Some(status))
+                    if status.success()
+                        || (cfg!(target_os = "linux")
+                            && wsl
+                            && Path::new(program).file_name().is_some_and(|name| {
+                                name.as_encoded_bytes()
+                                    .eq_ignore_ascii_case(b"explorer.exe")
+                            })
+                            && status.code() == Some(1)) =>
+                {
+                    return Ok(());
+                }
                 Ok(Some(status)) => return Err(format!("{program} failed ({status})")),
                 // Still running at the deadline: the browser itself.
                 Ok(None) if std::time::Instant::now() >= deadline => return Ok(()),

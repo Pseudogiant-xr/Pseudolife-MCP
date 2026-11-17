@@ -2,15 +2,13 @@
 //!
 //! Oracle: `pseudolife_memory/console_cli.py` (`main`, `credentials`,
 //! `request`, `_refusal`, `_list`, `_opened`, `open_browser`,
-//! `has_display`) with CPython 3.11's `webbrowser` (on macOS and Linux the
-//! browser follows native rules instead, `browser.rs`). Answered natively: help
+//! `has_display`). Browser selection follows native rules (`browser.rs`). Answered natively: help
 //! and argparse's errors (at `COLUMNS=80`), `--list [--json]`, `--revoke ID
 //! [--json]`, the sign-in (`[--no-open] [--to PAGE] [--json]
 //! [--unless-signed-in]`), the empty `--revoke` usage error and every
 //! refusal those reach. Which browser the sign-in would start is decided before the
-//! code is minted (`browser.rs`), so a launcher this port does not
-//! reproduce defers before any effect; once the daemon answers the sign-in
-//! with a 200 object the command answers every branch itself, each
+//! code is minted (`browser.rs`), with refusals naming their cause and fix;
+//! once the daemon answers the sign-in with a 200 object the command answers every branch itself, each
 //! malformed answer's refusal included.
 //! Anything else outside the reproduced domain that can be decided before a
 //! request defers before it
@@ -776,8 +774,8 @@ fn no_daemon(origin: &str, reason: &str, as_json: bool) -> Res<Out> {
     )
 }
 
-/// What `open_browser` would start, decided before the code is minted.
-type Chooser<'a> = &'a dyn Fn() -> Result<browser::Plan, browser::Unsupported>;
+/// The native browser choice, decided before the code is minted.
+type Chooser<'a> = &'a dyn Fn() -> browser::Plan;
 /// Starts a chosen plan for the link ([`launch::open`] outside the tests).
 type Launcher<'a> = &'a dyn Fn(&browser::Plan, &str) -> launch::Launched;
 
@@ -821,7 +819,7 @@ async fn answer(
                 }
             }
             if *open {
-                plan = Some(browser().map_err(|_| Defer)?);
+                plan = Some(browser());
             }
             let mut body = vec![("origin", J::Str(origin.to_owned()))];
             if let Some(to) = to {
@@ -917,10 +915,7 @@ fn decide(argv: &[String], context: &Context) -> Res<Out> {
 /// `None` defers to the dispatcher.
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     use std::io::IsTerminal;
-    // json.loads reads integers under this digit limit (4300 unset).
-    if std::env::var_os("PYTHONINTMAXSTRDIGITS").is_some() {
-        return None;
-    }
+    // PYTHONINTMAXSTRDIGITS is a Python setting, not a native-client option.
     let argv = values
         .into_iter()
         .map(OsString::into_string)

@@ -662,7 +662,9 @@ impl Update {
         }
         fs::rename(&part, &dump)?;
         let remote = format!("/tmp/pl_state-{stamp}.tgz");
-        let copied = if self.o.allow_auth_change && self.o.checkout.is_some() {
+        let copied = if (self.o.allow_auth_change && self.o.checkout.is_some())
+            || self.archive_with_helper
+        {
             let running = engine::inspect(self, daemon)?;
             let image = running["Image"].as_str().filter(|image| !image.is_empty())
                 .ok_or_else(|| UpdateError::usage("cannot identify the stopped image; restore its local image before retrying; nothing was deployed"))?;
