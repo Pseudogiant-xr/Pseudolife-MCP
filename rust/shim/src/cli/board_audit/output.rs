@@ -69,10 +69,25 @@ impl Staged {
     }
 
     fn owns_path(&self) -> bool {
-        fs::symlink_metadata(&self.path).is_ok_and(|m| m.is_file())
-            && File::open(&self.path)
+        let Ok(metadata) = fs::symlink_metadata(&self.path) else {
+            return false;
+        };
+        if !metadata.is_file() {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            // A restrictive umask may remove read permission. Identity and
+            // cleanup must not require reopening a file we created for writing.
+            (metadata.dev(), metadata.ino()) == self.identity
+        }
+        #[cfg(not(unix))]
+        {
+            File::open(&self.path)
                 .and_then(|file| identity(&file))
                 .is_ok_and(|id| id == self.identity)
+        }
     }
 }
 

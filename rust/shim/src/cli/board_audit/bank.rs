@@ -45,6 +45,9 @@ pub(super) fn connection_error(error: pg::Error) -> u8 {
         pg::Error::UnsupportedOption(_) => "PSEUDOLIFE_MCP_DATABASE_URL contains an unsupported option name; remove that option (supported names: host, port, user, password, dbname, sslmode, sslrootcert, application_name, connect_timeout)".to_owned(),
         pg::Error::InvalidOption(name) => format!("PSEUDOLIFE_MCP_DATABASE_URL has an invalid {name} option; correct that option"),
         pg::Error::InvalidDsn => "PSEUDOLIFE_MCP_DATABASE_URL is not a supported PostgreSQL URL or keyword connection string; correct that setting".to_owned(),
+        pg::Error::AmbientControl(name) if matches!(name.as_str(), "postgresql.crt" | "postgresql.key" | "root.crl") => {
+            format!("unsupported implicit PostgreSQL TLS file {name}; move that file out of the default PostgreSQL directory before retrying")
+        }
         pg::Error::AmbientControl(name) => {
             // Unknown PGSSL/PGTLS names may themselves contain pasted data.
             let name = if name.to_ascii_uppercase().starts_with("PGSSL") { "PGSSL*" }
@@ -335,9 +338,25 @@ enum Resolved {
     Ambiguous(String),
 }
 
+fn agent_query_error(error: tokio_postgres::Error) -> &'static str {
+    use tokio_postgres::error::SqlState;
+    match error.code() {
+        Some(&SqlState::UNDEFINED_COLUMN | &SqlState::UNDEFINED_TABLE) => {
+            "--agent lookup schema is missing a required table or column; restore the coordination_agents and coordination_events schema from a trusted backup"
+        }
+        Some(&SqlState::INSUFFICIENT_PRIVILEGE) => {
+            "--agent lookup SELECT permission was denied; grant the configured database login SELECT on coordination_agents and coordination_events"
+        }
+        _ if error.is_closed() => {
+            "--agent lookup lost its database connection; restore connectivity to PSEUDOLIFE_MCP_DATABASE_URL"
+        }
+        _ => "--agent database lookup failed; report this database lookup failure",
+    }
+}
+
 /// `resolve_agent_id(conn, value)`: the value itself, or the one id it is a
 /// prefix of among registered addresses and the log's actors and recipients.
-async fn resolve_agent(client: &impl GenericClient, value: &str) -> Result<Resolved, ()> {
+async fn resolve_agent(client: &impl GenericClient, value: &str) -> Result<Resolved, &'static str> {
     if !is_id_prefix(value) {
         return Ok(Resolved::Id(value.to_owned()));
     }
@@ -348,12 +367,12 @@ async fn resolve_agent(client: &impl GenericClient, value: &str) -> Result<Resol
             &[&like],
         )
         .await
-        .map_err(|_| ())?;
+        .map_err(agent_query_error)?;
     let ids: Vec<String> = rows
         .iter()
         .map(|row| row.try_get::<_, String>(0))
         .collect::<Result<_, _>>()
-        .map_err(|_| ())?;
+        .map_err(|_| "--agent lookup columns have unsupported types or nulls; restore the coordination_agents and coordination_events schema from a trusted backup")?;
     Ok(match ids.len() {
         0 => Resolved::Missing,
         1 => Resolved::Id(ids[0].clone()),
@@ -409,11 +428,7 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
     let outcome = match &args.agent {
         None => None,
         Some(agent) => match resolve_agent(&tx, agent).await {
-            Err(()) => {
-                return Ending::Refused(
-                    "cannot resolve --agent against the audit and agent tables; restore SELECT permissions on coordination_agents and coordination_events",
-                );
-            }
+            Err(message) => return Ending::Refused(message),
             Ok(Resolved::Id(id)) => Some(id),
             Ok(Resolved::Missing) => {
                 crate::stderrln!("board-audit: no agent id starts with {agent}");

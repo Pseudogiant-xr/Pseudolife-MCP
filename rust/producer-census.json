@@ -372,14 +372,14 @@
     "rust/shim/src/cli/backup_help.txt": "2592d27365e84c8939e891a5bbd82b0b7457d97b63cd9029ed1277c8fa19d9bc",
     "rust/shim/src/cli/board_audit/archive.rs": "902da0b5b37ea6a91b8d45391ec45614d7c8b73edeca274f15198d332b956215",
     "rust/shim/src/cli/board_audit/args.rs": "d8e24a5bf51c03f91830888d6107b9203a4364cf4b1e76ea37f5e56cadbfe16b",
-    "rust/shim/src/cli/board_audit/bank.rs": "181b88a728fb9e4b60578975df4a0674478a9ec6b8b9d3f7b2fa616b36f65d3c",
+    "rust/shim/src/cli/board_audit/bank.rs": "22ffc12b2155f99ff59fb26d0058ef98145ec0a05e16fc605ee5885361d07190",
     "rust/shim/src/cli/board_audit/chain.rs": "ea9b6f7557c4b79ea3fc04b4d5fde8a6513149924778401640fcb80ad5df426c",
     "rust/shim/src/cli/board_audit/chain_contracts.rs": "d749c4264bcef3ba11d3fcccd7f80c15c786ab1c36222924a1cbef186429594b",
     "rust/shim/src/cli/board_audit/codec.rs": "11200e0125c249447711dc1281901d02b08437c2eab139d2243cbe4fb3bc7088",
     "rust/shim/src/cli/board_audit/help.rs": "fa7a7992ca744c9a18106b2d4bf444c3cf3404fa5fd3752f646c178489b12f87",
     "rust/shim/src/cli/board_audit/metrics.rs": "846db7adcdf3444821e034d964648579dae0477ce3a50c5a7a570e53c1115a35",
     "rust/shim/src/cli/board_audit/mod.rs": "f180d770d952ab9dd12073314f9a8d0153a2440da59140e23e448bef87e59fea",
-    "rust/shim/src/cli/board_audit/output.rs": "0d3d9cf8b320ef88bbf0a17a3e3007a383d8dab79ae500baa4f53639c0ffc561",
+    "rust/shim/src/cli/board_audit/output.rs": "9b547e1825b65cef7edc214ee814b96527ea2c343b2ae56949261a6b26482c53",
     "rust/shim/src/cli/board_audit/redact.rs": "7055da0e108bc7ffd31f0e622486e42f111c7da5c7f51a002a08cb7996bcdea8",
     "rust/shim/src/cli/board_audit/stats.rs": "10ed6b288542094f853127fb183814d808d621ac71a3a441d6cd761d5fdb2a8d",
     "rust/shim/src/cli/board_audit/testdata/stats.json": "2dbbc7c653b2f2152f2266068b0ec26b189c67810e10126f9eb5ff02f28ccad7",
@@ -42432,6 +42432,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "rust/shim/src/cli/board_audit/bank.rs:351",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/board_audit/bank.rs:37",
           "shape": {
             "channel": "environment",
@@ -42497,46 +42510,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/board_audit/bank.rs:53",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/board_audit/bank.rs:55",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "rust/shim/src/cli/board_audit/bank.rs:56",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/board_audit/bank.rs:57",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42562,7 +42536,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/board_audit/bank.rs:63",
+          "location": "rust/shim/src/cli/board_audit/bank.rs:59",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42575,7 +42549,46 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/board_audit/bank.rs:64",
+          "location": "rust/shim/src/cli/board_audit/bank.rs:60",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/board_audit/bank.rs:61",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/board_audit/bank.rs:66",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/board_audit/bank.rs:67",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -121701,6 +121714,12 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/board_audit/bank.rs:351",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "rust/shim/src/cli/board_audit/bank.rs:37",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
@@ -121731,25 +121750,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/board_audit/bank.rs:53",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/board_audit/bank.rs:55",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "rust/shim/src/cli/board_audit/bank.rs:56",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/board_audit/bank.rs:57",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
@@ -121761,13 +121762,31 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/board_audit/bank.rs:63",
+      "location": "rust/shim/src/cli/board_audit/bank.rs:59",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/board_audit/bank.rs:64",
+      "location": "rust/shim/src/cli/board_audit/bank.rs:60",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/board_audit/bank.rs:61",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/board_audit/bank.rs:66",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/board_audit/bank.rs:67",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },

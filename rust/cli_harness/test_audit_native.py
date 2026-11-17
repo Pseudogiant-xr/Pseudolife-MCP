@@ -34,7 +34,7 @@ def candidate():
     return str(Path(value).resolve())
 
 
-def invoke(candidate, home, *args, dsn=None, extra=None, closed_stdout=False):
+def invoke(candidate, home, *args, dsn=None, extra=None, closed_stdout=False, umask=-1):
     home.mkdir(exist_ok=True)
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("PSEUDOLIFE_", "PG"))}
@@ -57,7 +57,7 @@ def invoke(candidate, home, *args, dsn=None, extra=None, closed_stdout=False):
         finally:
             os.close(write)
     return subprocess.run([candidate, "board-audit", *arguments], env=env,
-                          capture_output=True, timeout=30)
+                          capture_output=True, timeout=30, umask=umask)
 
 
 @pytest.fixture
@@ -329,7 +329,9 @@ def test_agent_lookup_failure_leaves_no_archive(candidate, bank, tmp_path):
         conn.commit()
     out = tmp_path / "out.jsonl"
     args = ["export", "--agent", "ffffffff", "--out", out]
-    assert_refused(invoke(candidate, tmp_path, *args, dsn=bank[1]), "--agent")
+    result = invoke(candidate, tmp_path, *args, dsn=bank[1])
+    assert_refused(result, "--agent")
+    assert b"schema" in result.stderr
     assert list(tmp_path.iterdir()) == []
     with _bank.connect(bank[0]) as conn:
         conn.execute("CREATE TABLE coordination_agents (agent_id text)")
@@ -337,6 +339,38 @@ def test_agent_lookup_failure_leaves_no_archive(candidate, bank, tmp_path):
     near = invoke(candidate, tmp_path, *args, dsn=bank[1])
     assert near.returncode == 2
     assert b"no agent id starts with" in near.stderr
+
+
+@pytest.mark.parametrize("name", ["postgresql.crt", "postgresql.key", "root.crl"])
+def test_implicit_tls_file_refusal_names_the_file_and_fix(candidate, bank, tmp_path, name):
+    directory = tmp_path / ("postgresql" if os.name == "nt" else ".postgresql")
+    directory.mkdir()
+    implicit = directory / name
+    implicit.write_text(SECRET)
+    result = invoke(candidate, tmp_path, "verify", dsn=bank[1])
+    assert_refused(result, name)
+    assert b"file" in result.stderr and b"move" in result.stderr
+    implicit.unlink()
+    assert invoke(candidate, tmp_path, "verify", dsn=bank[1]).returncode == 0
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
+@pytest.mark.parametrize("failure", [False, True])
+def test_write_only_umask_publishes_or_removes_staging(candidate, bank, tmp_path, failure):
+    out = tmp_path / "out.jsonl"
+    args = ["export", "--out", out]
+    if failure:
+        args += ["--agent", "ffffffff"]
+    result = invoke(candidate, tmp_path, *args, dsn=bank[1], umask=0o400)
+    assert result.returncode == (2 if failure else 0)
+    assert not list(tmp_path.glob(".board-audit-*.tmp"))
+    assert out.exists() != failure
+    if not failure:
+        assert out.stat().st_mode & 0o777 == 0o200
+        out.chmod(0o600)
+        assert len(out.read_bytes().splitlines()) == 1
+    near = tmp_path / "near.jsonl"
+    assert invoke(candidate, tmp_path, "export", "--out", near, dsn=bank[1], umask=0o077).returncode == 0
 
 
 def test_staging_error_names_out_and_leaves_no_file(candidate, bank, tmp_path):
