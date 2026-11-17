@@ -147,7 +147,11 @@ def test_the_interactive_task_action_keeps_its_exact_bytes(planted_root: str | N
               "$ownerExe = 'C:\\fixture dir\\runtime.exe'\n"
               f"$c = @{{ PowerShell = '{powershell}'; ServeArgs = @('extractor-shim', 'claude', '--env-file', 'C:\\fixture dir\\settings.env') }}\n"
               "function New-ScheduledTaskAction { param($Execute, $Argument) @{ Execute=$Execute; Arguments=$Argument } }\n" +
-              action + "\n[Console]::Out.WriteLine($action.Execute)\n[Console]::Out.WriteLine($action.Arguments)\n")
+              action +
+              # The action is already captured. The 5.1 CLR needs its real
+              # directory back for output formatting, not action creation.
+              f"\n$env:SystemRoot = '{system_root}'\n" +
+              "[Console]::Out.WriteLine($action.Execute)\n[Console]::Out.WriteLine($action.Arguments)\n")
     expected = (
         "$runtimeExe = 'C:\\fixture dir\\runtime.exe'\n"
         "$psi = New-Object System.Diagnostics.ProcessStartInfo\n"
