@@ -280,18 +280,18 @@ fn single_dash_input_verifies_literal_empty_file() {
 }
 
 #[test]
-fn remaining_audit_operations_stay_explicitly_deferred() {
+fn invalid_bank_setting_is_refused_without_echoing_it() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     for args in [vec!["export"], vec!["stats"], vec!["verify"]] {
         let output = command(&home).args(args).output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        assert!(
-            String::from_utf8(output.stderr)
-                .unwrap()
-                .contains("deferred")
-        );
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(error.contains("PSEUDOLIFE_MCP_DATABASE_URL"));
+        assert!(error.contains("correct that setting"));
+        assert!(!error.contains("invalid-disposable-sentinel"));
+        assert!(!error.contains("defer"));
     }
     assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
     fs::remove_dir_all(&home).unwrap();

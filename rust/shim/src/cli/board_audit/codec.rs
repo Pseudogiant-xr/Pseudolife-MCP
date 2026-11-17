@@ -249,7 +249,7 @@ fn ascii_string(text: &str, out: &mut String) {
 
 /// `json.dumps(value, ensure_ascii=True, separators=(",", ":"))` of a value
 /// Python read with `json.loads`: integers print as Python ints, floats as
-/// float repr, object order as read. `None` defers (a non-finite float).
+/// float repr, object order as read. `None` refuses a non-finite float.
 pub(super) fn ascii_compact(value: &Value, out: &mut String) -> Option<()> {
     match value {
         Value::Null => out.push_str("null"),

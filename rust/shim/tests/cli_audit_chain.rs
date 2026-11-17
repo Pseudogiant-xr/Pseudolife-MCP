@@ -366,7 +366,7 @@ fn an_existing_export_target_is_refused_before_any_bank() {
     assert_eq!(
         output.stderr,
         cli::native_text(&format!(
-            "board-audit: {} exists; export never replaces a file\n",
+            "board-audit: {} exists; export never replaces a file; choose an unused --out path\n",
             target.display()
         ))
     );
@@ -374,10 +374,10 @@ fn an_existing_export_target_is_refused_before_any_bank() {
 }
 
 #[test]
-fn bank_actions_distinguish_a_missing_bank_from_an_unsupported_dsn() {
+fn bank_actions_distinguish_a_missing_bank_from_a_failed_connection() {
     let home = Home::new();
-    let deferral = cli::native_text(
-        "board-audit: this path is deferred; native board-audit covers canonical verify, export and redact\n",
+    let failure = cli::native_text(
+        "board-audit: PostgreSQL audit connection failed; restore connectivity and authentication for PSEUDOLIFE_MCP_DATABASE_URL\n",
     );
     for args in [
         vec!["verify"],
@@ -405,15 +405,11 @@ fn bank_actions_distinguish_a_missing_bank_from_an_unsupported_dsn() {
                 command.env("PSEUDOLIFE_MCP_DATABASE_URL", url);
             }
             let output = command.output().unwrap();
-            let unsupported = url.is_some_and(|value| !value.is_empty());
-            assert_eq!(
-                output.status.code(),
-                Some(if unsupported { 1 } else { 2 }),
-                "{args:?}"
-            );
+            let configured = url.is_some_and(|value| !value.is_empty());
+            assert_eq!(output.status.code(), Some(2), "{args:?}");
             assert!(output.stdout.is_empty());
-            if unsupported {
-                assert_eq!(output.stderr, deferral, "{args:?}");
+            if configured {
+                assert_eq!(output.stderr, failure, "{args:?}");
             } else {
                 assert_eq!(
                     output.stderr,

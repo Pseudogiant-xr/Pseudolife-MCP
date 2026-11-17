@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "8bd3d054e597201f",
+  "fingerprint": "e870c1b9a74bdfee",
+  "reason": "Adds 64 native audit cases to the existing PostgreSQL parity pytest step: 62 Windows cases and two POSIX-only umask cases. Our own hosted run 44020774945 at 4e96ee082 measured a median 30.6 seconds for the first 58 Windows cases. Four Windows cases were added afterwards; their inclusive JUnit test time on the Windows dev VM at 2eb9eda8f was 2.998 seconds, so the charged figure is that measurement plus the estimate: 30.6 + 2.998 = 33.598 seconds (0.55997 minutes) for all 62 Windows cases. No job, artifact, installation, matrix item or other shard step is added. Final-head stress run IDs are recorded in the pull request Verification section. No generated baseline or budget limit is changed."
+}

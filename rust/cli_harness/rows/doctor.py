@@ -1096,14 +1096,14 @@ def cases() -> list[Case]:
                 + '[mcp_servers.pseudolife-memory.env]\n' + env_block)
     cli = "PSEUDOLIFE_CODEX_BIN = '{HOME}/bin/codex.exe'\n"
     for name, config in [
-        ("doorbell-on", codex('PSEUDOLIFE_WRITER_ID = "codex"\nPSEUDOLIFE_MCP_TOKEN = "t"\n' + cli)),
-        ("not-codex-writer", codex('PSEUDOLIFE_WRITER_ID = "claude-code"\nPSEUDOLIFE_MCP_TOKEN = "t"\n')),
+        ("doorbell-on", codex('PSEUDOLIFE_WRITER_ID = "codex"\nPSEUDOLIFE_MCP_TOKEN = "fixture-token"\n' + cli)),
+        ("not-codex-writer", codex('PSEUDOLIFE_WRITER_ID = "claude-code"\nPSEUDOLIFE_MCP_TOKEN = "fixture-token"\n')),
         ("no-bearer", codex('PSEUDOLIFE_WRITER_ID = "codex"\n' + cli)),
-        ("no-cli", codex('PSEUDOLIFE_WRITER_ID = "codex"\nPSEUDOLIFE_MCP_TOKEN = "t"\n'
+        ("no-cli", codex('PSEUDOLIFE_WRITER_ID = "codex"\nPSEUDOLIFE_MCP_TOKEN = "fixture-token"\n'
                          "PSEUDOLIFE_CODEX_BIN = '{HOME}/bin/absent.exe'\nPATH = ''\n")),
         ("doorbell-off", codex('PSEUDOLIFE_CODEX_DOORBELL = "0"\n')),
         ("doorbell-invalid", codex('PSEUDOLIFE_CODEX_DOORBELL = "ring"\n')),
-        ("forwarded-writer", codex('PSEUDOLIFE_MCP_TOKEN = "t"\n' + cli,
+        ("forwarded-writer", codex('PSEUDOLIFE_MCP_TOKEN = "fixture-token"\n' + cli,
                                    'env_vars = ["PSEUDOLIFE_WRITER_ID"]\n')),
         ("not-registered", '[mcp_servers.other]\ncommand = "x"\n'),
         ("servers-not-table", 'mcp_servers = "x"\n'),
@@ -1125,7 +1125,7 @@ def cases() -> list[Case]:
     add(case("codex-wake-bom", ["--host", "codex"], steps=[
         write("bin/codex.exe", b""),
         write(".codex/config.toml", "\ufeff" + codex('PSEUDOLIFE_WRITER_ID = "codex"\n'
-                                                     'PSEUDOLIFE_MCP_TOKEN = "t"\n' + cli))],
+                                                     'PSEUDOLIFE_MCP_TOKEN = "fixture-token"\n' + cli))],
         routes=ok))
     add(case("codex-registration-bom", ["--host", "codex"], steps=[
         write(".codex/config.toml", "\ufeff" + codex_toml)], routes=reg_routes))
