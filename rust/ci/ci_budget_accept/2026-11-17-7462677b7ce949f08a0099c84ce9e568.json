@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "9e2cc5d53781fed5",
+  "fingerprint": "c00c23b8bbba9df4",
+  "reason": "Adds enforced-turn, owned-environment cleanup and unittest runner cases. The 23-case native probe at 8bed07f4c passed in 117.10 s with normal TEMP and 113.78 s with real 8.3 TEMP on the Windows dev VM. The estimate increases from 24.1 to 27.1 minutes, charging the whole probe plus 62.90 s for remaining isolation/refusal cases and hosted overhead. The prior cost is grounded in hosted stress run 44026738823: 20 first attempts, median selection 179.5 s and maximum 229 s. No setup, matrix, job-count or limit increase; the complete lite job is re-measured on its next batch."
+}
