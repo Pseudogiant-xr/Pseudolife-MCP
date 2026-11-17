@@ -30,6 +30,29 @@ const AGENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "fedcba9876543210fedcba9876543210";
 
 #[test]
+fn native_closed_stdout_names_the_writable_stream_remedy() {
+    let sandbox = Sandbox::new();
+    let target = sandbox.root.join("read-only-output");
+    fs::write(&target, b"unchanged").unwrap();
+    // The child's stdout is a read-only descriptor, so its first write
+    // fails deterministically before any reader scheduling can matter.
+    let out = sandbox
+        .command(&["--help"])
+        .stdout(Stdio::from(fs::File::open(&target).unwrap()))
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stderr).contains("make stdout writable and retry"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(fs::read(&target).unwrap(), b"unchanged");
+    assert_eq!(sandbox.board.count("register"), 0);
+}
+
+#[test]
 fn native_preflight_answers_every_former_argument_deferral() {
     let sandbox = Sandbox::new();
     let state = sandbox.state("absent");
