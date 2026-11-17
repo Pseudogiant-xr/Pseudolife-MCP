@@ -569,10 +569,10 @@
    "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IHVucmVjb2duaXplZCBvcHRpb24gLS1oZTsgdXNlIC0taGVscCBpbiBmdWxsOyBwbGFjZSBhY3Rpb24gb3B0aW9ucyBhZnRlciB0YWlsc2NhbGUsIG9mZiBvciBzdGF0dXMK",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IHVucmVjb2duaXplZCBvcHRpb24gJy0taGUnOyB1c2UgLS1oZWxwIGluIGZ1bGwK",
    "window": [
-    1794935166.0778255,
-    1794935166.0806894
+    1794939023.448371,
+    1794939023.4523358
    ],
    "arm": "rust",
    "files": {
@@ -589,10 +589,10 @@
    "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uIC0tcG87IHVzZSAtLXBvcnQgaW4gZnVsbAo=",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uICctLXBvJzsgdXNlIC0tcG9ydCBpbiBmdWxsCg==",
    "window": [
-    1794935166.0816548,
-    1794935166.0843973
+    1794939023.4535446,
+    1794939023.4571483
    ],
    "arm": "rust",
    "files": {
@@ -609,10 +609,10 @@
    "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uIC0tOyBydW4gcHNldWRvbGlmZS1tY3AgZXhwb3NlIC0taGVscCBmb3Igc3VwcG9ydGVkIG9wdGlvbnMK",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uICctLSc7IHJ1biBwc2V1ZG9saWZlLW1jcCBleHBvc2UgLS1oZWxwIGZvciBzdXBwb3J0ZWQgb3B0aW9ucwo=",
    "window": [
-    1794935166.0853705,
-    1794935166.088088
+    1794939023.458101,
+    1794939023.4608965
    ],
    "arm": "rust",
    "files": {
@@ -649,10 +649,10 @@
    "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uIC14OyBydW4gcHNldWRvbGlmZS1tY3AgZXhwb3NlIC0taGVscCBmb3Igc3VwcG9ydGVkIG9wdGlvbnMK",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uICcteCc7IHJ1biBwc2V1ZG9saWZlLW1jcCBleHBvc2UgLS1oZWxwIGZvciBzdXBwb3J0ZWQgb3B0aW9ucwo=",
    "window": [
-    1794935166.0923927,
-    1794935166.0949879
+    1794939023.4616935,
+    1794939023.4646175
    ],
    "arm": "rust",
    "files": {
@@ -689,10 +689,10 @@
    "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IHVucmVjb2duaXplZCBvcHRpb24gLS1wb3J0OyBydW4gcHNldWRvbGlmZS1tY3AgZXhwb3NlIC0taGVscCBmb3Igc3VwcG9ydGVkIG9wdGlvbnM7IHBsYWNlIGFjdGlvbiBvcHRpb25zIGFmdGVyIHRhaWxzY2FsZSwgb2ZmIG9yIHN0YXR1cwo=",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IG9wdGlvbiAnLS1wb3J0JyBtdXN0IGZvbGxvdyBpdHMgYWN0aW9uOyBwdXQgaXQgYWZ0ZXIgdGFpbHNjYWxlLCBvZmYgb3Igc3RhdHVzCg==",
    "window": [
-    1794935166.0992036,
-    1794935166.1017127
+    1794939023.4653726,
+    1794939023.4681475
    ],
    "arm": "rust",
    "files": {
@@ -4318,16 +4318,16 @@
  },
  "recorded_from_candidate": {
   "defer-abbrev-main": {
-   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "commit": "79e576b341dbd10941810b86cb622c2ce6db8a53",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+   "candidate_sha256": "473bdaac45337f8ce9568c02062b9526b172bc708975399387e10578cc7ad16d"
   },
   "defer-abbrev-port": {
-   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "commit": "79e576b341dbd10941810b86cb622c2ce6db8a53",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+   "candidate_sha256": "473bdaac45337f8ce9568c02062b9526b172bc708975399387e10578cc7ad16d"
   },
   "defer-dash-value": {
    "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
@@ -4336,16 +4336,16 @@
    "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
   },
   "defer-double-dash": {
-   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "commit": "79e576b341dbd10941810b86cb622c2ce6db8a53",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+   "candidate_sha256": "473bdaac45337f8ce9568c02062b9526b172bc708975399387e10578cc7ad16d"
   },
   "defer-option-first": {
-   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "commit": "79e576b341dbd10941810b86cb622c2ce6db8a53",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+   "candidate_sha256": "473bdaac45337f8ce9568c02062b9526b172bc708975399387e10578cc7ad16d"
   },
   "defer-port-plus": {
    "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
@@ -4354,10 +4354,10 @@
    "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
   },
   "defer-short-other": {
-   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "commit": "79e576b341dbd10941810b86cb622c2ce6db8a53",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+   "candidate_sha256": "473bdaac45337f8ce9568c02062b9526b172bc708975399387e10578cc7ad16d"
   },
   "help-width": {
    "commit": "95aa47a15079bdb077d42fd69a2bae1e3128c35d",
