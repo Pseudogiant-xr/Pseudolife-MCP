@@ -3833,7 +3833,7 @@ foreach ($name in @('Assert-HarnessWorktreeHasNoReparsePoint', 'Get-HarnessLongP
     }, $true)
     . ([scriptblock]::Create($definition.Extent.Text))
 }
-Remove-OwnedHarnessEnvironment -EnvironmentPath $path -ExpectedPath $expected -Created ($created -eq 'yes') -RunId $id -Repository $repo
+Remove-OwnedHarnessEnvironment -EnvironmentPath $path -ExpectedPath ([IO.Path]::GetFullPath($expected)) -Created ($created -eq 'yes') -RunId $id -Repository $repo
 ''', encoding="utf-8")
     return subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
                            str(ROOT / "ops/rust-harness-remote.ps1"), str(environment),
