@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 import shutil
 import subprocess
@@ -37,22 +38,39 @@ def _candidate() -> Path:
     return Path(value).resolve()
 
 
+@contextmanager
+def _case_binary(source: Path, candidate: Path):
+    try:
+        os.link(source, candidate)
+    except OSError:
+        shutil.copy2(source, candidate)
+    try:
+        yield candidate
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def _case_binaries():
+    with ExitStack() as binaries:
+        yield binaries
+
+
 def _run(tmp_path: Path, *arguments: str, dsn: str | None = None, models: Path | None = None,
          extra_env: dict | None = None):
     source = _candidate()
-    candidate = tmp_path / source.name
-    shutil.copy2(source, candidate)
-    env = {key: value for key, value in os.environ.items()
-           if key in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP")}
-    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), PATH=str(tmp_path),
-               COLUMNS="80")
-    if dsn is not None:
-        env["PSEUDOLIFE_TEST_DATABASE_URL"] = dsn
-    if models is not None:
-        env["PSEUDOLIFE_DAEMON_ONNX_DIR"] = str(models)
-    env.update(extra_env or {})
-    return subprocess.run([str(candidate), "doctor", "--disposable-proof", *arguments],
-                          env=env, cwd=tmp_path, capture_output=True, text=True, timeout=15)
+    with _case_binary(source, tmp_path / source.name) as candidate:
+        env = {key: value for key, value in os.environ.items()
+               if key in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP")}
+        env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), PATH=str(tmp_path),
+                   COLUMNS="80")
+        if dsn is not None:
+            env["PSEUDOLIFE_TEST_DATABASE_URL"] = dsn
+        if models is not None:
+            env["PSEUDOLIFE_DAEMON_ONNX_DIR"] = str(models)
+        env.update(extra_env or {})
+        return subprocess.run([str(candidate), "doctor", "--disposable-proof", *arguments],
+                              env=env, cwd=tmp_path, capture_output=True, text=True, timeout=15)
 
 
 @pytest.mark.parametrize("copy_fallback", [False, True])
@@ -331,7 +349,7 @@ def test_corrupt_model_names_repair_and_removes_owned_bank(tmp_path, damage):
 @pytest.mark.parametrize("fault", ["create-denied", "create-query-canceled", "create-timeout", "drop-lost-reply", "drop-checkpoint-delay", pytest.param(
     "create-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract")), pytest.param(
     "drop-interrupt", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract"))])
-def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fault):
+def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fault, _case_binaries):
     """A loopback PostgreSQL wire fixture loses replies after accepting SQL."""
     import signal
     import socketserver
@@ -407,7 +425,7 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
         daemon_threads = True
 
     candidate = tmp_path / ("pseudolife-stdio.exe" if os.name == "nt" else "pseudolife-stdio")
-    shutil.copy2(source, candidate)
+    _case_binaries.enter_context(_case_binary(source, candidate))
     daemon = tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")
     daemon.write_bytes(b"intentionally not executable")
     models = _admission_models(tmp_path / "models")
@@ -484,7 +502,7 @@ def test_invalid_or_production_database_report_matches_python(tmp_path, monkeypa
 @pytest.mark.skipif(os.name == "nt" or os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
                     reason="POSIX signal and an explicit disposable server required")
 @pytest.mark.parametrize("mode", ["signal", "exited-descendant"])
-def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_path, mode):
+def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_path, mode, _case_binaries):
     import signal
     import sys
     import time
@@ -504,7 +522,7 @@ def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_pat
                 "SELECT datname FROM pg_database WHERE starts_with(datname, 'r2_')")}
 
     candidate = tmp_path / "pseudolife-stdio"
-    shutil.copy2(os.environ["PSEUDOLIFE_PROOF_CANDIDATE"], candidate)
+    _case_binaries.enter_context(_case_binary(Path(os.environ["PSEUDOLIFE_PROOF_CANDIDATE"]), candidate))
     marker = tmp_path / "daemon-started"
     daemon = tmp_path / "pseudolife-daemon"
     script = f"#!{sys.executable}\nimport os,time\nfrom pathlib import Path\n"
@@ -578,7 +596,7 @@ def test_native_proof_dsn_domain_refusal_names_the_actual_limit(tmp_path, dsn):
 @pytest.mark.parametrize("selection", ["empty", "daemon-relative", "daemon-relative-shadowed",
                                         "bare", "cwd-relative", "absolute", "symlink-only",
                                         "symlink-target-shadowed"])
-def test_runtime_library_loads_through_actual_daemon(tmp_path, selection):
+def test_runtime_library_loads_through_actual_daemon(tmp_path, selection, _case_binaries):
     """A completed native proof requires the real daemon to load its ORT model session."""
     import psycopg
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -598,8 +616,8 @@ def test_runtime_library_loads_through_actual_daemon(tmp_path, selection):
     binary_dir = tmp_path / "bin"
     binary_dir.mkdir()
     candidate = binary_dir / "pseudolife-stdio"
-    shutil.copy2(original, candidate)
-    shutil.copy2(original_daemon, binary_dir / "pseudolife-daemon")
+    _case_binaries.enter_context(_case_binary(original, candidate))
+    daemon = _case_binaries.enter_context(_case_binary(original_daemon, binary_dir / "pseudolife-daemon"))
     cwd = tmp_path / "work"
     cwd.mkdir()
     temp = tmp_path / "temp"
@@ -612,7 +630,8 @@ def test_runtime_library_loads_through_actual_daemon(tmp_path, selection):
     if selection.startswith("symlink-"):
         real_bin = tmp_path / "real-bin"
         real_bin.mkdir()
-        shutil.move(binary_dir / "pseudolife-daemon", real_bin / "pseudolife-daemon")
+        daemon = Path(shutil.move(daemon, real_bin / "pseudolife-daemon"))
+        _case_binaries.callback(daemon.unlink, missing_ok=True)
         # Discover through PATH, with no sibling daemon beside the CLI.
         (cwd / "pseudolife-daemon").symlink_to(real_bin / "pseudolife-daemon")
         env["PATH"] = str(cwd)
