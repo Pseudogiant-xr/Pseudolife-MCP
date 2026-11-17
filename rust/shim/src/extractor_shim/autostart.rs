@@ -17,9 +17,16 @@ fn windows_registration_command(
     data_bytes: &[u8],
 ) -> Result<Command, String> {
     use sha2::{Digest, Sha256};
-    let literal = |path: &std::path::Path| {
+    let path_expression = |path: &std::path::Path| {
         path.to_str()
-            .map(|p| format!("'{}'", p.replace('\'', "''")))
+            // PowerShell also recognizes typographic quote delimiters.
+            // Carry paths as data rather than quoting them as source.
+            .map(|p| {
+                format!(
+                    "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{}'))",
+                    crate::windows_powershell::base64(p.as_bytes()),
+                )
+            })
             .ok_or("the temporary autostart registration path must be UTF-8")
     };
     // Read each file once, verify those bytes, then run/parse only those
@@ -28,8 +35,8 @@ fn windows_registration_command(
     let data_digest = format!("{:x}", Sha256::digest(data_bytes));
     let bootstrap = format!(
         "$ErrorActionPreference='Stop';try{{$s=[Security.Cryptography.SHA256]::Create();$b=[IO.File]::ReadAllBytes({script});$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{script_digest}'){{[Console]::Error.WriteLine('autostart registration script changed after it was written; nothing was run; rerun install-autostart');exit 5}};$d=[IO.File]::ReadAllBytes({data});$h=-join ($s.ComputeHash($d)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{data_digest}'){{[Console]::Error.WriteLine('autostart registration data changed after it was written; nothing was run; rerun install-autostart');exit 5}}}}catch{{[Console]::Error.WriteLine('cannot verify autostart registration files; rerun install-autostart: '+$_.Exception.Message);exit 1}}finally{{if($s){{$s.Dispose()}}}};& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b))) -ConfigJson ([Text.Encoding]::UTF8.GetString($d))",
-        script = literal(script)?,
-        data = literal(data)?,
+        script = path_expression(script)?,
+        data = path_expression(data)?,
     );
     let argv = crate::windows_powershell::encoded(&bootstrap)?;
     let mut command = Command::new(&argv[0]);
