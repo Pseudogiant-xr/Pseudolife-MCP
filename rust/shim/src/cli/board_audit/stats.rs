@@ -123,7 +123,7 @@ fn export_events(input: &str) -> Result<Vec<Value>, u8> {
             continue;
         }
         let (mut row,_,_,payload) = super::archive::row(&line).map_err(|e| match e {
-            super::archive::Error::Deferred => super::deferred(),
+            super::archive::Error::Unsupported(message) => error(message),
             super::archive::Error::Encoding => super::failed(),
             e => error(format!("{input} line {line_number} {}", match e {
                 super::archive::Error::Duplicate => "has a duplicate key, so a reader and verify could see different values; it cannot be checked",
@@ -131,7 +131,7 @@ fn export_events(input: &str) -> Result<Vec<Value>, u8> {
             })),
         })?;
         if let Some(payload) = payload {
-            row["payload"] = self::payload(payload).map_err(|_| super::deferred())?;
+            row["payload"] = self::payload(payload).map_err(|_| error("audit payload contains a value stats cannot represent; use an archive whose payload strings are valid Unicode"))?;
         }
         events.push(row);
     }
@@ -208,7 +208,7 @@ pub(super) fn run(args: Stats) -> u8 {
             match runtime.block_on(bank::stats(&dsn, since - 604800.0, until, since)) {
                 Ok(v) => v,
                 Err(bank::Ending::Exit(code)) => return code,
-                Err(_) => return super::failed(),
+                Err(bank::Ending::Refused(message)) => return error(message),
             };
         let source = if wakes.is_some() { "bank" } else { "absent" };
         (

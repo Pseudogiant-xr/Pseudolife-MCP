@@ -2,7 +2,7 @@
 //!
 //! Rows arrive one at a time, so a break is reported before a later
 //! unreadable archive line is reached, as the Python generator walk does.
-//! `Err(Deferred)` means the row is outside the reproduced domain.
+//! Unsupported values cannot be verified and are refused without echoing data.
 use super::codec;
 use crate::sent_json::Json;
 use codec::J;
@@ -12,12 +12,16 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
+#[cfg(test)]
+#[path = "chain_contracts.rs"]
+mod native_contracts;
+
 #[derive(Debug)]
 pub(super) enum Failure {
-    Deferred,
+    Unsupported(&'static str),
     Python,
 }
-pub(super) use Failure::Deferred;
+const TIMESTAMP_RANGE: &str = "audit created_at is outside the supported retention timestamp range; retain the original archive and request support for this timestamp range";
 
 pub(super) struct Row {
     /// Columns by name; a parsed archive payload waits separately until hashing.
@@ -143,7 +147,7 @@ fn cut(row: &Row) -> Result<Option<(i64, String, Cut)>, Failure> {
 fn audit_cutoff(now: f64, days: i64) -> Result<i128, Failure> {
     let quotient = ((now - (days * 86400) as f64) / 86400.0).floor();
     if !quotient.is_finite() || quotient.abs() > 1e30 {
-        return Err(Deferred);
+        return Err(Failure::Unsupported(TIMESTAMP_RANGE));
     }
     Ok(quotient as i128 * 86400)
 }
@@ -156,7 +160,9 @@ fn equals_integer(value: &J, integer: i128) -> Result<bool, Failure> {
             && number.fract() == 0.0
             && number.abs() < 1e30
             && *number as i128 == integer),
-        _ => Err(Deferred),
+        _ => Err(Failure::Unsupported(
+            "audit cutoff is not numeric; restore an intact archive from a trusted backup",
+        )),
     }
 }
 
@@ -164,7 +170,9 @@ fn cutoff_json(value: &J) -> Result<Json, Failure> {
     match value {
         J::Int(token) => Ok(Json::Integer(token.clone())),
         J::Float(number) => Ok(Json::Float(*number)),
-        _ => Err(Deferred),
+        _ => Err(Failure::Unsupported(
+            "audit cutoff is not numeric; restore an intact archive from a trusted backup",
+        )),
     }
 }
 
@@ -212,7 +220,7 @@ impl Walker {
         let value = &row.value;
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_owned();
         let hash = text("hash");
-        if codec::hash(value, row.created_at).map_err(|_| Deferred)? != hash {
+        if codec::hash(value, row.created_at).map_err(|_| Failure::Unsupported("audit hash material cannot be encoded without changing its value; restore an intact archive from a trusted backup"))? != hash {
             return Ok(Some(broken(seq, "hash_mismatch")));
         }
         let event = text("event");
@@ -326,7 +334,7 @@ impl Walker {
                         // float(first created_at) < cutoff, exactly.
                         let floor = first.created_at.floor();
                         if floor.abs() > 1e30 {
-                            return Err(Deferred);
+                            return Err(Failure::Unsupported(TIMESTAMP_RANGE));
                         }
                         (floor as i128) >= cutoff
                     }

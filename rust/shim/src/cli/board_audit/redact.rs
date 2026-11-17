@@ -15,8 +15,8 @@ enum Stop {
     Refused(&'static str, Option<String>),
     /// `psycopg.errors.LockNotAvailable` under the five-second lock timeout.
     Busy,
-    /// Outside the reproduced domain; the transaction is rolled back.
-    Deferred,
+    /// Cannot complete safely; the transaction is rolled back.
+    Unsupported(&'static str),
     Python,
     /// The commit was not confirmed: the redaction may have landed.
     Unconfirmed,
@@ -29,7 +29,9 @@ impl From<tokio_postgres::Error> for Stop {
         } else if error.as_db_error().is_some() {
             Stop::Python
         } else {
-            Stop::Deferred
+            Stop::Unsupported(
+                "audit database response could not be decoded or the connection was interrupted; restore the database connection and schema before retrying redact",
+            )
         }
     }
 }
@@ -48,8 +50,8 @@ fn python_whitespace(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }
 
-/// The reason refusals, in the producer's order; `Err` defers a reason whose
-/// verdict needs the Cf/Co/Cn split the pinned category-C table cannot make.
+/// The reason checks retain their order; `Err` refuses a character whose
+/// Cf/Co/Cn category the pinned table cannot distinguish safely.
 fn reason_refusal(reason: &str) -> Result<Option<&'static str>, ()> {
     let certain = |c: char| {
         c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c) || c == '\u{2028}' || c == '\u{2029}'
@@ -79,7 +81,7 @@ fn is_id_prefix(value: &str) -> bool {
 fn clock() -> Result<f64, Stop> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| Stop::Deferred)?;
+        .map_err(|_| Stop::Unsupported("the system clock is before the Unix epoch; correct the system clock before redacting"))?;
     Ok(now.as_secs_f64())
 }
 
@@ -93,8 +95,12 @@ async fn append_redact(
     payload: &Value,
 ) -> Result<(i64, String), Stop> {
     let [agent_id, recipient, project, task] = fields;
-    let seq = head.0.checked_add(1).ok_or(Stop::Deferred)?;
-    let payload = codec::canonical(payload).map_err(|_| Stop::Deferred)?;
+    let seq = head.0.checked_add(1).ok_or(Stop::Unsupported("audit seq has exhausted the signed 64-bit range; retain the bank and request audit sequence migration support"))?;
+    let payload = codec::canonical(payload).map_err(|_| {
+        Stop::Unsupported(
+            "redaction payload cannot be encoded safely; use Unicode --reason text and retry",
+        )
+    })?;
     let row = json!({
         "seq": seq,
         "event": "redact",
@@ -109,7 +115,7 @@ async fn append_redact(
         "payload": payload,
         "prev_hash": head.1,
     });
-    let hash = codec::hash(&row, now).map_err(|_| Stop::Deferred)?;
+    let hash = codec::hash(&row, now).map_err(|_| Stop::Unsupported("redaction audit hash material cannot be encoded safely; restore intact audit metadata from a trusted backup"))?;
     tx.execute(
         "INSERT INTO coordination_events (seq,event,actor,principal,agent_id,recipient_agent_id,project,task,message_id,payload,created_at,hlc,prev_hash,hash) VALUES ($1,'redact','operator','',$2,$3,$4,$5,$6,$7,$8,'',$9,$10)",
         &[
@@ -166,7 +172,11 @@ async fn redact_in(
         return Err(Stop::Refused("invalid_message_id", None));
     }
     match reason_refusal(reason) {
-        Err(()) => return Err(Stop::Deferred),
+        Err(()) => {
+            return Err(Stop::Unsupported(
+                "--reason contains an unsupported Unicode category; replace that character with ordinary text without repeating the credential or message body",
+            ));
+        }
         Ok(Some(code)) => return Err(Stop::Refused(code, None)),
         Ok(None) => {}
     }
@@ -315,7 +325,7 @@ async fn redact_in(
     })
 }
 
-/// A commit the server did not confirm is reported, never deferred: the
+/// A commit the server did not confirm is reported separately: the
 /// redaction may have landed.
 async fn commit(tx: pg::Transaction<'_>) -> Result<(), Stop> {
     tx.commit().await.map_err(|_| Stop::Unconfirmed)
@@ -363,8 +373,9 @@ async fn vacuum(session: &mut pg::Session) -> Result<Vec<String>, ()> {
 }
 
 pub(super) async fn run(dsn: &pg::Dsn, message_id: &str, reason: &str) -> bank::Ending {
-    let Ok(mut session) = pg::Session::open(dsn).await else {
-        return bank::Ending::Deferred;
+    let mut session = match pg::Session::open(dsn).await {
+        Ok(session) => session,
+        Err(error) => return bank::Ending::Exit(bank::connection_error(error)),
     };
     let ending = run_in(&mut session, message_id, reason).await;
     let _ = session.close().await;
@@ -375,7 +386,11 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
     match bank::log_present(session.client()).await {
         Ok(true) => {}
         Ok(false) => return bank::no_log(),
-        Err(()) => return bank::Ending::Deferred,
+        Err(()) => {
+            return bank::Ending::Refused(
+                "cannot inspect the audit table before redact; restore database connectivity and catalog permissions for PSEUDOLIFE_MCP_DATABASE_URL",
+            );
+        }
     }
     match bank::has_body_column(session.client()).await {
         Ok(true) => {}
@@ -385,12 +400,16 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
             );
             return bank::Ending::Exit(2);
         }
-        Err(()) => return bank::Ending::Deferred,
+        Err(()) => {
+            return bank::Ending::Refused(
+                "cannot inspect the audit body column before redact; restore database connectivity and catalog permissions for PSEUDOLIFE_MCP_DATABASE_URL",
+            );
+        }
     }
     let redacted = match redact_in(session, message_id, reason).await {
         Ok(redacted) => redacted,
         Err(Stop::Python) => return bank::Ending::Exit(super::failed()),
-        Err(Stop::Deferred) => return bank::Ending::Deferred,
+        Err(Stop::Unsupported(message)) => return bank::Ending::Refused(message),
         Err(Stop::Busy) => {
             crate::stderrln!(
                 "board-audit: the board is busy: a row or the audit chain stayed locked for more than 5 s. Nothing was changed; retry"
@@ -428,10 +447,9 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
                 "already_redacted" => "this message's body is already redacted",
                 other => other,
             };
-            // Nothing was changed (rolled back), so a stdout that refuses
-            // the refusal line defers.
+            // Nothing was changed; a closed stdout is an output error.
             if super::print_line(&line).is_err() {
-                return bank::Ending::Deferred;
+                return bank::Ending::Exit(super::output_failed());
             }
             match detail {
                 Some(detail) => crate::stderrln!("board-audit: {explained}: {detail}"),
@@ -534,7 +552,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn driver_side_row_decode_errors_remain_deferred() {
+    async fn driver_side_row_decode_errors_are_safe_refusals() {
         let fixture = pg_wire::start().await;
         let dsn = pg::Dsn::parse(&fixture.dsn).unwrap();
         let session = pg::Session::open_in(&dsn, &pg::TlsEnvironment::default())
@@ -551,13 +569,13 @@ mod tests {
         session.close().await.unwrap();
         fixture.task.await.unwrap();
         assert!(
-            matches!(stop, Stop::Deferred),
-            "driver-side conversion errors remain deferred"
+            matches!(stop, Stop::Unsupported(message) if message.contains("audit database response") && !message.contains("SELECT")),
+            "driver-side conversion errors must be refused without exposing row data"
         );
     }
 
     #[test]
-    fn reason_refusals_and_category_deferrals() {
+    fn reason_refusals_and_unsupported_categories() {
         assert_eq!(reason_refusal("wrong paste"), Ok(None));
         assert_eq!(reason_refusal(" \u{1c} "), Ok(Some("invalid_reason")));
         assert_eq!(reason_refusal("bell\u{7}"), Ok(Some("invalid_reason")));

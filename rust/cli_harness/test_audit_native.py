@@ -34,7 +34,7 @@ def candidate():
     return str(Path(value).resolve())
 
 
-def invoke(candidate, home, *args, dsn=None, extra=None):
+def invoke(candidate, home, *args, dsn=None, extra=None, closed_stdout=False):
     home.mkdir(exist_ok=True)
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("PSEUDOLIFE_", "PG"))}
@@ -48,6 +48,14 @@ def invoke(candidate, home, *args, dsn=None, extra=None):
         env["PSEUDOLIFE_MCP_DATABASE_URL"] = dsn
     env.update(extra or {})
     arguments = [a if isinstance(a, bytes) else str(a) for a in args]
+    if closed_stdout:
+        read, write = os.pipe()
+        os.close(read)
+        try:
+            return subprocess.run([candidate, "board-audit", *arguments], env=env,
+                                  stdout=write, stderr=subprocess.PIPE, timeout=30)
+        finally:
+            os.close(write)
     return subprocess.run([candidate, "board-audit", *arguments], env=env,
                           capture_output=True, timeout=30)
 
@@ -116,13 +124,23 @@ def test_agent_refusal_leaves_no_archive(candidate, bank, tmp_path):
 
 
 def test_successful_archive_bytes_match_baseline(candidate, bank, tmp_path):
+    body, salt = "synthetic committed body 雪", "01" * 16
+    commitment = hashlib.sha256(bytes.fromhex(salt) + body.encode()).hexdigest()
+    sent = event(seq=2, event="send", message_id="message", body=body, body_salt=salt,
+                 prev_hash=event()["hash"], payload=json.dumps({"text_commitment": commitment}))
+    with _bank.connect(bank[0]) as conn:
+        columns = list(sent)
+        conn.execute(f"INSERT INTO coordination_events ({','.join(columns)}) "
+                     f"VALUES ({','.join(['%s'] * len(columns))})", list(sent.values()))
+        conn.commit()
     out = tmp_path / "out.jsonl"
     result = invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1])
     assert result.returncode == 0
-    row = event()
     # The exporter orders payload before created_at, as the stored column order does.
-    row["payload"] = json.loads(row["payload"])
-    expected = (json.dumps(row, ensure_ascii=True, separators=(",", ":")) + "\n").encode()
+    expected = b""
+    for row in [event(), sent]:
+        row["payload"] = json.loads(row["payload"])
+        expected += (json.dumps(row, ensure_ascii=True, separators=(",", ":")) + "\n").encode()
     assert out.read_bytes() == expected
     baseline = os.environ.get("PSEUDOLIFE_AUDIT_BASELINE")
     if baseline:
@@ -184,6 +202,11 @@ def test_query_failure_names_operation_without_database_detail(candidate, bank, 
         conn.commit()
     result = invoke(candidate, tmp_path, "verify", dsn=bank[1])
     assert_refused(result, "audit")
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("ALTER TABLE coordination_events ADD COLUMN hash text")
+        conn.execute("UPDATE coordination_events SET hash=%s", (event()["hash"],))
+        conn.commit()
+    assert invoke(candidate, tmp_path, "verify", dsn=bank[1]).returncode == 0
 
 
 @pytest.mark.parametrize("mode", ["verify", "export", "redact"])
@@ -237,6 +260,105 @@ def test_nonfinite_bank_timestamp_is_refused(candidate, bank, tmp_path, mode):
     result = invoke(candidate, tmp_path, *args, dsn=bank[1])
     assert_refused(result, "created_at")
     assert not out.exists()
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("UPDATE coordination_events SET created_at=%s, body=NULL", (event()["created_at"],))
+        conn.commit()
+    assert invoke(candidate, tmp_path, *args, dsn=bank[1]).returncode == 0
+
+
+def test_bank_payload_surrogate_stats_refusal(candidate, bank, tmp_path):
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("UPDATE coordination_events SET payload=%s", (json.dumps({"value": "\ud800" + SECRET}),))
+        conn.commit()
+    assert_refused(invoke(candidate, tmp_path, "stats", "--since", "0", dsn=bank[1]), "payload")
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("UPDATE coordination_events SET payload=%s", (event()["payload"],))
+        conn.commit()
+    assert invoke(candidate, tmp_path, "stats", "--since", "0", dsn=bank[1]).returncode == 0
+
+
+def test_sequence_exhaustion_rolls_back_every_redaction_change(candidate, bank, tmp_path):
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("UPDATE coordination_events SET seq=%s", (2**63 - 1,))
+        conn.execute("INSERT INTO coordination_messages VALUES (%s,%s,'original','sender','recipient','p','t',1e12)",
+                     ("example", SECRET))
+        conn.commit()
+        before = conn.execute("SELECT * FROM coordination_messages").fetchall()
+    result = invoke(candidate, tmp_path, "redact", "--message-id", "example", "--reason", "wrong paste", dsn=bank[1])
+    assert_refused(result, "seq")
+    with _bank.connect(bank[0]) as conn:
+        assert conn.execute("SELECT * FROM coordination_messages").fetchall() == before
+        assert conn.execute("SELECT count(*) FROM coordination_events").fetchone()[0] == 1
+        conn.execute("UPDATE coordination_events SET seq=1")
+        conn.commit()
+    near = invoke(candidate, tmp_path, "redact", "--message-id", "example", "--reason", "wrong paste", dsn=bank[1])
+    assert near.returncode == 0
+    assert SECRET.encode() not in near.stdout + near.stderr
+
+
+@pytest.mark.parametrize("operation", ["verify", "export", "redact"])
+def test_database_column_decode_refusal_is_safe(candidate, bank, tmp_path, operation):
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("ALTER TABLE coordination_events ALTER COLUMN seq TYPE text USING seq::text")
+        conn.commit()
+    args = [operation]
+    if operation == "redact":
+        args += ["--message-id", "example", "--reason", "wrong paste"]
+    assert_refused(invoke(candidate, tmp_path, *args, dsn=bank[1]), "audit")
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("ALTER TABLE coordination_events ALTER COLUMN seq TYPE bigint USING seq::bigint")
+        conn.commit()
+    near = invoke(candidate, tmp_path, *args, dsn=bank[1])
+    assert near.returncode == (1 if operation == "redact" else 0)
+
+
+def test_agent_lookup_failure_leaves_no_archive(candidate, bank, tmp_path):
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("DROP TABLE coordination_agents")
+        conn.commit()
+    out = tmp_path / "out.jsonl"
+    args = ["export", "--agent", "ffffffff", "--out", out]
+    assert_refused(invoke(candidate, tmp_path, *args, dsn=bank[1]), "--agent")
+    assert list(tmp_path.iterdir()) == []
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("CREATE TABLE coordination_agents (agent_id text)")
+        conn.commit()
+    near = invoke(candidate, tmp_path, *args, dsn=bank[1])
+    assert near.returncode == 2
+    assert b"no agent id starts with" in near.stderr
+
+
+def test_staging_error_names_out_and_leaves_no_file(candidate, bank, tmp_path):
+    missing = tmp_path / "missing"
+    out = missing / "out.jsonl"
+    assert_refused(invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1]), "--out")
+    assert not out.exists()
+    missing.mkdir()
+    assert invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1]).returncode == 0
+
+
+@pytest.mark.parametrize("mode", ["verify", "redact", "export"])
+def test_closed_stdout_refuses_without_claiming_completion(candidate, bank, tmp_path, mode):
+    args = [mode]
+    if mode == "redact":
+        args += ["--message-id", "example", "--reason", "wrong paste"]
+    result = invoke(candidate, tmp_path, *args, dsn=bank[1], closed_stdout=True)
+    assert result.returncode == 2
+    assert b"stdout" in result.stderr
+    assert b"defer" not in result.stderr
+    assert SECRET.encode() not in result.stderr
+    if mode == "export":
+        assert b"incomplete" in result.stderr
+    near = invoke(candidate, tmp_path, *args, dsn=bank[1])
+    assert near.returncode == (1 if mode == "redact" else 0)
+
+
+@pytest.mark.parametrize("option", ["options", "sslmode", "connect_timeout"])
+def test_invalid_connection_option_is_secret_safe(candidate, bank, tmp_path, option):
+    result = invoke(candidate, tmp_path, "verify", dsn=bank[1] + f"?{option}={SECRET}")
+    assert_refused(result, "PSEUDOLIFE_MCP_DATABASE_URL")
+    near = invoke(candidate, tmp_path, "verify", dsn=bank[1] + "?sslmode=disable&connect_timeout=5")
+    assert near.returncode == 0
 
 
 @pytest.mark.parametrize("timestamp", [1e36, -1e36])
@@ -262,6 +384,25 @@ def test_nonunicode_argument_is_refused_without_echo(candidate, tmp_path):
     argument = "\ud800" if os.name == "nt" else b"\xff"
     assert_refused(invoke(candidate, tmp_path, "verify", argument), "arguments")
     assert invoke(candidate, tmp_path, "verify", "--help").returncode == 0
+
+
+def test_first_retained_timestamp_outside_comparison_range_is_refused(candidate, tmp_path):
+    archive = tmp_path / "input.jsonl"
+    now = 1700000000.0
+    for timestamp, refused in [(1e32, True), (now, False)]:
+        first = event(seq=2, created_at=timestamp)
+        prune = event(seq=3, event="audit_prune", actor="daemon", created_at=now,
+                      prev_hash=first["hash"], payload=json.dumps(dict(
+                          through_seq=1, through_hash="0" * 64, retention_days=1,
+                          cutoff=int((now - 86400) // 86400 * 86400))))
+        for row in [first, prune]:
+            row["payload"] = json.loads(row["payload"])
+        archive.write_text(json.dumps(first) + "\n" + json.dumps(prune), encoding="utf-8")
+        result = invoke(candidate, tmp_path, "verify", "--input", archive)
+        if refused:
+            assert_refused(result, "created_at")
+        else:
+            assert result.returncode == 0
 
 
 def test_late_payload_failure_keeps_stdout_prefix_but_never_publishes_file(candidate, bank, tmp_path):
@@ -308,8 +449,8 @@ def test_existing_and_locked_destinations_are_never_replaced(candidate, tmp_path
     assert out.read_bytes() == b"existing archive\n"
 
 
-@pytest.mark.parametrize("code", [0, 23])
-def test_container_export_is_invisible_until_success(candidate, tmp_path, code):
+@pytest.mark.parametrize("code,racing_destination", [(0, False), (23, False), (0, True)])
+def test_container_export_is_invisible_until_success(candidate, tmp_path, code, racing_destination):
     import shlex
     import sys
     import threading
@@ -348,13 +489,18 @@ raise SystemExit(int(os.environ['FIXTURE_EXIT']))
             time.sleep(.01)
         ready = (tmp_path / "ready").exists()
         premature = out.exists()
+        if racing_destination and not premature:
+            out.write_bytes(b"racing destination\n")
     finally:
         (tmp_path / "release").touch()
         worker.join(timeout=35)
     assert ready and result
     assert not premature, "container output was published before its exit status"
-    assert result[0].returncode == code
+    assert result[0].returncode == (2 if racing_destination else code)
     assert out.exists() == (code == 0)
-    if code == 0:
+    if racing_destination:
+        assert out.read_bytes() == b"racing destination\n"
+        assert b"publication" in result[0].stderr
+    elif code == 0:
         assert out.read_bytes() == b'{"container":"fixture"}\n'
     assert not list(tmp_path.glob(".board-audit-*.tmp"))

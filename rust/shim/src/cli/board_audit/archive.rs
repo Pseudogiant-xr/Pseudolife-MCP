@@ -1,4 +1,4 @@
-//! Lazy archive rows as `_read_export` admits them; other domains defer.
+//! Lazy archive rows; unsupported values fail without displaying their contents.
 use super::{super::pyjson, codec};
 use serde_json::Value;
 
@@ -7,7 +7,7 @@ pub(super) enum Error {
     Duplicate,
     NotJson,
     InvalidRow,
-    Deferred,
+    Unsupported(String),
     Encoding,
 }
 
@@ -48,9 +48,14 @@ pub(super) fn row(text: &str) -> Result<(Value, i64, f64, Option<pyjson::J>), Er
             map.insert(key.to_owned(), Value::Null);
         } else if COLUMNS.contains(&key) || matches!(key, "body" | "body_salt") {
             let mut text = String::new();
-            codec::python_compact(&item, true, false, &mut text).ok_or(Error::Deferred)?;
+            let unsupported = || {
+                Error::Unsupported(format!(
+                    "audit field {key} cannot be represented without changing its value; restore a supported archive from a trusted backup"
+                ))
+            };
+            codec::python_compact(&item, true, false, &mut text).ok_or_else(unsupported)?;
             let value = super::super::doorbell_seen::json::value_from_str(&text)
-                .map_err(|_| Error::Deferred)?;
+                .map_err(|_| unsupported())?;
             map.insert(key.to_owned(), value);
         }
     }
@@ -87,16 +92,16 @@ pub(super) fn row(text: &str) -> Result<(Value, i64, f64, Option<pyjson::J>), Er
     if token.contains(['.', 'e', 'E']) {
         return Err(Error::InvalidRow);
     }
-    let seq = token.parse::<i64>().map_err(|_| Error::Deferred)?;
+    let seq = token.parse::<i64>().map_err(|_| Error::Unsupported("audit seq is outside the signed 64-bit range; restore an archive exported from the bank rather than editing sequence numbers".into()))?;
     let Some(timestamp) = value["created_at"].as_number() else {
         return Err(Error::InvalidRow);
     };
     let created_at = timestamp
         .to_string()
         .parse::<f64>()
-        .map_err(|_| Error::Deferred)?;
+        .map_err(|_| Error::Unsupported("audit created_at is not a finite timestamp; restore the original archive from a trusted backup".into()))?;
     if !created_at.is_finite() {
-        return Err(Error::Deferred);
+        return Err(Error::Unsupported("audit created_at is not a finite timestamp; restore the original archive from a trusted backup".into()));
     }
     let payload = payload.expect("required payload column was checked");
     let pending = if let pyjson::J::Str(text) = payload {
@@ -104,7 +109,7 @@ pub(super) fn row(text: &str) -> Result<(Value, i64, f64, Option<pyjson::J>), Er
         None
     } else {
         // Python checks links before hashing a parsed payload. Its UTF-8
-        // encoding can fail, so defer canonicalization until that point.
+        // encoding can fail, so delay canonicalization until that point.
         Some(payload)
     };
     Ok((value, seq, created_at, pending))

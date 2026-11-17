@@ -28,12 +28,18 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         .spawn(move || run_inner(arguments))
         .ok()
         .and_then(|worker| worker.join().ok())
-        .unwrap_or_else(deferred)
+        .unwrap_or_else(|| {
+            stats::error(
+                "audit worker could not complete; free system resources and retry the command",
+            )
+        })
 }
 
 fn run_inner(arguments: Vec<OsString>) -> u8 {
     let Some(action) = args::parse(&arguments) else {
-        return deferred();
+        return stats::error(
+            "arguments contain non-Unicode text; supply Unicode arguments and paths",
+        );
     };
     match action {
         args::Action::Error(message) => {
@@ -76,7 +82,7 @@ fn run_inner(arguments: Vec<OsString>) -> u8 {
                             || cfg!(target_os = "macos") && error.raw_os_error() == Some(62)
                             || cfg!(windows)
                                 && matches!(error.raw_os_error(), Some(21 | 123 | 206 | 1921)) => {}
-                    Err(_) => return failed(),
+                    Err(error) => return output::failure("destination inspection", &error),
                 }
             }
             if bank::dsn().is_none() {
@@ -100,17 +106,19 @@ where
     Fut: std::future::Future<Output = bank::Ending>,
 {
     let Some(dsn) = bank::dsn() else {
-        return deferred();
+        return bank::dsn_refusal();
     };
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
     else {
-        return deferred();
+        return stats::error(
+            "audit runtime could not start; free system resources and retry the command",
+        );
     };
     match runtime.block_on(work(dsn)) {
         bank::Ending::Exit(code) => code,
-        bank::Ending::Deferred => deferred(),
+        bank::Ending::Refused(message) => stats::error(message),
     }
 }
 
@@ -212,7 +220,7 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
         }
         let (value, seq, created_at, pending_payload) = match archive::row(&line) {
             Ok(row) => row,
-            Err(archive::Error::Deferred) => return deferred(),
+            Err(archive::Error::Unsupported(message)) => return stats::error(message),
             Err(archive::Error::Encoding) => return failed(),
             Err(error) => {
                 let diagnostic = match error {
@@ -234,25 +242,23 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
         }) {
             Ok(None) => {}
             Ok(Some(broken)) => return report(broken, 1),
-            Err(chain::Deferred) => return deferred(),
+            Err(chain::Failure::Unsupported(message)) => return stats::error(message),
             Err(chain::Failure::Python) => return failed(),
         }
     }
     match walker.finish() {
         Ok((report_value, intact)) => report(report_value, if intact { 0 } else { 1 }),
-        Err(chain::Deferred) => deferred(),
+        Err(chain::Failure::Unsupported(message)) => stats::error(message),
         Err(chain::Failure::Python) => failed(),
     }
 }
 
 /// `print(json.dumps(value))` before any effect: one line on stdout and the
-/// given exit code. A stdout that refuses the line defers: CPython's answer
-/// there (a buffered print, then a failed flush at interpreter shutdown,
-/// exit 120 and an ignored-exception trailer) is not reproduced.
+/// given exit code. A closed stdout is an output failure, not an integrity result.
 fn report(value: Json, code: u8) -> u8 {
     match print_line(&value) {
         Ok(()) => code,
-        Err(()) => deferred(),
+        Err(()) => output_failed(),
     }
 }
 
@@ -269,11 +275,10 @@ fn print_line(value: &Json) -> Result<(), ()> {
         .map_err(|_| ())
 }
 
-fn deferred() -> u8 {
-    crate::stderrln!(
-        "board-audit: this path is deferred; native board-audit covers canonical verify, export and redact"
-    );
-    1
+fn output_failed() -> u8 {
+    stats::error(
+        "stdout could not receive the audit result; rerun with stdout connected to a writable destination",
+    )
 }
 
 fn failed() -> u8 {

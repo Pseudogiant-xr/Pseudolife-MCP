@@ -47,7 +47,10 @@ async fn failed_export_preserves_a_replacement_created_while_the_query_waits() {
         .await
         .unwrap()
         .unwrap();
-    assert!(!appeared_before_success, "a failed export must never publish its destination");
+    assert!(
+        !appeared_before_success,
+        "a failed export must never publish its destination"
+    );
     assert!(!result.status.success());
     assert!(result.stdout.is_empty());
     assert!(
@@ -84,7 +87,10 @@ async fn failed_export_removes_its_own_unreplaced_destination() {
         .await
         .unwrap()
         .unwrap();
-    assert!(!appeared_before_success, "the final path was visible during a failing export");
+    assert!(
+        !appeared_before_success,
+        "the final path was visible during a failing export"
+    );
     assert!(!result.status.success());
     assert!(result.stdout.is_empty());
     assert!(

@@ -512,28 +512,6 @@ def archive(variant: str) -> bytes:
 
 # --- named rules ---------------------------------------------------------------
 
-DEFERRAL = ("board-audit: this path is deferred; native board-audit covers canonical "
-            "verify, export and redact\n")
-
-
-def _native(text: str) -> bytes:
-    return (text.replace("\n", "\r\n") if core.WINDOWS else text).encode("utf-8")
-
-
-@normalize.rule("rust-deferral")
-def rust_deferral(obs: dict) -> None:
-    """A declared deferral case: the candidate must print the deferral line,
-    exit 1 and change nothing. The oracle arm still runs, but its exit and
-    streams are replaced by that expectation and its files by the home as
-    setup left it; the database is compared as observed (unchanged)."""
-    if obs.get("arm") != "python":
-        return
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-    obs["files"] = dict(obs.get("before", {}))
-
-
 @normalize.rule("audit-redact-clock")
 def audit_redact_clock(obs: dict) -> None:
     """A redaction's own event is stamped with the arm's wall clock, which
@@ -1264,14 +1242,15 @@ def cases() -> list[core.Case]:
                     "token=" + "q7Hd2kLm9Pz4" + "Rt6Wv8Xy1Bc3"),
         redact_case("redact-busy", "rich", _rich("to_redact"), "wrong paste", hold=True),
         redact_case("redact-nolog", "nolog", "0" * 32, "why"),
-        # declared deferrals: the candidate defers and changes nothing
+        # Historical case ids remain stable across native implementation.
         *stats_cases(),
         *transport_cases(),
         file_case("verify-help", ["verify", "--help"]),
         read_case("export-joined-option", "rich", ["export", "--task=t1"]),
         read_case("export-float-spelling", "rich", ["export", "--since", "1.7e9"]),
-        read_case("defer-dsn-option", "rich", ["verify"], rules=("rust-deferral",),
-                  env={"PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name("rich"))
+        # Empty-chain verification pins native DSN options without random head bytes.
+        read_case("defer-dsn-option", "empty", ["verify"],
+                  env={"PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name("empty"))
                        + "?application_name=audit"}),
         read_case("export-out-missing-dir", "rich",
                   ["export", "--out", _home("missing/out.jsonl")]),
@@ -1287,7 +1266,7 @@ def cases() -> list[core.Case]:
         file_case("input-not-json", ["verify", "--input", _home("archive.jsonl")],
                   files={"archive.jsonl": b"not JSON\n"}),
         redact_case("defer-reason-format-char", "rich", _rich("to_redact"),
-                    "zero​width", rules=("rust-deferral",)),
+                    "zero​width", rules=()),
         # review round 1 (O1): a repeated key is reported when its object closes
         archive_case("input-duplicate-nested-then-long-int", "duplicate-nested-then-long-int"),
         archive_case("input-duplicate-truncated", "duplicate-truncated"),
@@ -1297,15 +1276,15 @@ def cases() -> list[core.Case]:
                   ["verify", "--input", "C:.\\missing-audit-archive.jsonl"],
                   platforms=("windows",)),
         # (O2) a stdout that refuses the report
-        archive_case("defer-input-stdout-closed", "rich", rules=("rust-deferral",),
+        archive_case("defer-input-stdout-closed", "rich",
                      stdout_closed=True),
         read_case("defer-bank-verify-stdout-closed", "rich", ["verify"],
-                  rules=("rust-deferral",), stdout_closed=True),
+                  stdout_closed=True),
         redact_case("redact-stdout-closed", "rich", _rich("to_redact"), "wrong paste",
                     rules=("audit-redact-clock", "audit-stdout-closed-trailer"),
                     stdout_closed=True),
         redact_case("defer-redact-refusal-stdout-closed", "rich", _rich("redacted"), "again",
-                    rules=("rust-deferral",), stdout_closed=True),
+                    rules=(), stdout_closed=True),
         # (O4) coverage: LEAST(expires_at, now), ambiguous prefixes, pre-v46,
         # the vacuum-skip path with warnings hidden by default
         redact_case("redact-future-expiry", "rich", _rich("future"), "wrong paste"),
@@ -1330,8 +1309,6 @@ MUTANTS = [
            ("export-invalid-nonnumeric",)),
     Mutant("audit-repeat-first-wins", "audit", "shim/src/cli/board_audit/args.rs",
            "slot.1 = value;", "let _ = value;", ("input-repeated", "export-repeated-abbreviated")),
-    Mutant("audit-create-message", "audit", "shim/src/cli/board_audit/bank.rs",
-           "cannot create {out}: {text}", "cannot write {out}: {text}", ("export-out-missing-dir",)),
     Mutant("audit-read-message", "audit", "shim/src/cli/board_audit/mod.rs",
            "board-audit: cannot read {input}", "board-audit: unreadable {input}", ("input-directory",)),
     Mutant("audit-payload-depth-capped", "audit", "shim/src/cli/board_audit/codec.rs",
@@ -1373,9 +1350,6 @@ MUTANTS = [
            "                dict.push((key, value));\n            }\n"
            "            if self.unique && repeated { self.duplicate = true; return Err(Refused::NotJson); }",
            ("input-duplicate-truncated", "input-duplicate-then-long-int")),
-    Mutant("audit-verify-stdout-closed-exit-1", "audit", "shim/src/cli/board_audit/mod.rs",
-           "        Err(()) => deferred(),", "        Err(()) => 1,",
-           ("defer-input-stdout-closed", "defer-bank-verify-stdout-closed")),
     Mutant("audit-redact-stdout-closed-exit-1", "audit", "shim/src/cli/board_audit/redact.rs",
            "    } else {\n        120\n    };", "    } else {\n        1\n    };",
            ("redact-stdout-closed",)),

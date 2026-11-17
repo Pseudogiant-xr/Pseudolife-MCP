@@ -22,11 +22,10 @@ fn no_bank() -> u8 {
         "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)",
     )
 }
-/// Before any forwarding: a database URL this transport does not serve yet
-/// (the generic deferral), or a lite-tier bank (its plain refusal).
+/// An explicit unsupported database setting must never select another bank.
 fn local_answer() -> Option<u8> {
     if std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").is_some_and(|v| !v.is_empty()) {
-        return Some(super::deferred());
+        return Some(super::bank::dsn_refusal());
     }
     let bank = crate::cli::retired::find_lite_bank(None)?;
     Some(stats::error(crate::cli::retired::lite_bank_refusal(&bank)))
