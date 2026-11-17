@@ -5,8 +5,8 @@
 //! opens: `no usable expiry time`).
 use super::pyjson::{self, J};
 
-/// `sys.get_int_max_str_digits()` with `PYTHONINTMAXSTRDIGITS` unset (the
-/// command defers when it is set).
+/// The fixed native limit, matching CPython's default. The Python-only
+/// `PYTHONINTMAXSTRDIGITS` setting does not alter or defer this command.
 const MAX_STR_DIGITS: usize = 4300;
 /// `_PY_LONG_MAX_STR_DIGITS_THRESHOLD`: the digit limit is checked only
 /// past this many digits (the same answer, kept for the reader).

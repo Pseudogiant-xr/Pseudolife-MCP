@@ -1531,6 +1531,7 @@ def test_binaryless_harness_units_run_on_both_platforms():
                      "rust/daemon/harness/test_w2d_rerank_check.py",
                      "rust/daemon/harness/test_w2d_trace_compare.py",
                      "rust/cli_harness/test_update_row.py",
+                     "rust/cli_harness/test_console_browser.py",
                      # The harness's offline self-test, source-mutant anchors
                      # included: on a pull request's own checks, not only in
                      # the batch's cli shard.
