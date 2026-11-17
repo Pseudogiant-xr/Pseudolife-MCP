@@ -36,7 +36,7 @@ lite bank is refused with the Docker migration instruction.
 | Chain walk: `broken_link` (genesis / prev hash), `sequence_gap`, `hash_mismatch`, `body_mismatch` (salt without body, body not opening `text_commitment`, body still beside its operator redact), `body_missing` / `body_not_exported` for the lowest unexplained v46 send, `unanchored_start` (cut record: daemon actor, window >= 1 day, `audit_cutoff`, first row not older), `head_pruned` (with `start_cut`), `head_missing`, `head_mismatch`; report key order and `print(json.dumps(report))` spelling | `verify_audit_chain` 1035-1150, `_cut` 988-1010, `audit_cutoff` 978-985, `body_commitment` 516-525, `_body_matches` 1024-1032 |
 | Redact: id shape (`invalid_message_id`), reason (`invalid_reason`: blank, > 240 chars, Cc/Cf/Cs/Zl/Zp), `secret_like_body`, prefix resolution (`message_not_found` / `ambiguous_message_id`), one transaction: live row `FOR UPDATE`, chain lock, send event, `gone`/`kept`/`removed` paths, `already_redacted`, `body_in_hashed_payload`, live copy blanked with `expires_at=LEAST(expires_at, now)`, chained operator `redact` event, burst siblings; refusal JSON echoes the id as given plus the `_REDACT_REFUSALS` line (`: detail` when present); busy (`LockNotAvailable`, 5 s) exit 2 | `CoordinationStore.redact` 3987-4112, `_burst_siblings` 4114, `_redact` 318-365, `_REDACT_REFUSALS` 58-71 |
 | Post-commit `_vacuum` (`SET client_min_messages TO warning`, both VACUUMs, setting restored; WARNING notices are skips), `vacuumed` and the four stderr notes, the `--expect-head` record line | `_vacuum` 283-315, `_redact` 331-365 |
-| `--out` failures identify staging, write or publication, the I/O kind and OS code, and the destination requirement; staged output is removed, and the final path is unchanged | native `board_audit/output.rs` |
+| `--out` failures identify staging, write or publication with a plain cause and correction; staged output is removed, and the final path is unchanged | native `board_audit/output.rs` |
 | Archive rows: a repeated key is reported when its object closes (`object_pairs_hook`), so a scan error or an over-long integer earlier in that object wins | `_read_export` 250-257, `_unique_keys` 224-230 |
 | A redaction whose result line stdout refuses: exit 120 after every stderr note (CPython's failed shutdown flush) | `_redact` 337-365 |
 
@@ -77,9 +77,19 @@ warn that its output is incomplete. A closed verify or refusal stdout is an
 output error, never a successful verification or a Python fallback.
 
 `test_audit_native.py` pins these refusals, legitimate neighboring inputs,
-secret-safe output, transactional rollback and staged publication. Historical
-case ids beginning with `defer-` remain stable but now pin native behavior;
-the deferral normalization rule has been removed.
+secret-safe output, transactional rollback and staged publication. The recorded
+historical ids `defer-dsn-option` and `defer-bank-verify-stdout-closed` remain
+stable and pin native behavior; the deferral normalization rule is removed.
+Six cases without recorded goldens were removed in favor of these direct tests:
+
+| Removed case | Test in `test_audit_native.py` |
+|---|---|
+| `defer-input-stdout-closed` | `test_input_verify_closed_stdout_has_safe_refusal` |
+| `defer-reason-format-char` | `test_unclassified_reason_is_refused_without_redaction` |
+| `defer-redact-refusal-stdout-closed` | `test_closed_stdout_refuses_without_claiming_completion[redact]` |
+| `export-out-missing-dir` | `test_staging_error_names_out_and_leaves_no_file` |
+| `export-create-before-payload` | `test_staging_error_names_out_and_leaves_no_file` (invalid payload cannot precede staging failure) |
+| `export-invalid-payload-out` | `test_late_payload_failure_keeps_stdout_prefix_but_never_publishes_file` |
 
 ## Declared divergences
 

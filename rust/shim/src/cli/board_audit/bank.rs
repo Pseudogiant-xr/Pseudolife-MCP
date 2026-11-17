@@ -50,8 +50,10 @@ pub(super) fn connection_error(error: pg::Error) -> u8 {
         }
         pg::Error::AmbientControl(name) => {
             // Unknown PGSSL/PGTLS names may themselves contain pasted data.
-            let name = if name.to_ascii_uppercase().starts_with("PGSSL") { "PGSSL*" }
-                else if name.to_ascii_uppercase().starts_with("PGTLS") { "PGTLS*" }
+            // Match the Unicode folding used by TlsEnvironment on Windows.
+            let folded = name.to_uppercase();
+            let name = if folded.starts_with("PGSSL") { "PGSSL*" }
+                else if folded.starts_with("PGTLS") { "PGTLS*" }
                 else { &name };
             format!("PostgreSQL ambient setting {name} is unsupported; remove that setting for this command and configure PSEUDOLIFE_MCP_DATABASE_URL explicitly")
         }

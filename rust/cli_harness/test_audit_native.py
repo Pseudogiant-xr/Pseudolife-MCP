@@ -248,6 +248,21 @@ def test_ambient_control_is_named_and_not_echoed(candidate, bank, tmp_path, mode
     assert near.returncode == 0
 
 
+@pytest.mark.parametrize("prefix", ["PGſSL", "PGTLſ"])
+def test_unicode_folded_ambient_name_never_echoes_key(candidate, bank, tmp_path, prefix):
+    result = invoke(candidate, tmp_path, "verify", dsn=bank[1],
+                    extra={prefix + SECRET: SECRET})
+    if os.name == "nt":
+        assert_refused(result, prefix.upper() + "*")
+    else:
+        # These names are not PostgreSQL controls on a case-sensitive OS.
+        assert result.returncode == 0
+    assert SECRET.encode() not in result.stdout + result.stderr
+    near = invoke(candidate, tmp_path, "verify", dsn=bank[1],
+                  extra={prefix[:-1] + "X": SECRET})
+    assert near.returncode == 0
+
+
 def test_stats_surrogate_payload_is_refused_without_echo(candidate, tmp_path):
     row = event()
     row["payload"] = {"metadata": "\ud800" + SECRET}
@@ -376,10 +391,63 @@ def test_write_only_umask_publishes_or_removes_staging(candidate, bank, tmp_path
 def test_staging_error_names_out_and_leaves_no_file(candidate, bank, tmp_path):
     missing = tmp_path / "missing"
     out = missing / "out.jsonl"
-    assert_refused(invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1]), "--out")
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("UPDATE coordination_events SET payload=%s", ("invalid " + SECRET,))
+        conn.commit()
+    result = invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1])
+    assert_refused(result, "--out")
+    assert b"parent directory does not exist" in result.stderr
+    assert b"create the parent directory" in result.stderr
     assert not out.exists()
+    with _bank.connect(bank[0]) as conn:
+        conn.execute("UPDATE coordination_events SET payload=%s", (event()["payload"],))
+        conn.commit()
     missing.mkdir()
     assert invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1]).returncode == 0
+
+
+def test_unwritable_export_parent_has_permission_fix(candidate, bank, tmp_path):
+    parent = tmp_path / "private"
+    parent.mkdir()
+    out = parent / "out.jsonl"
+    if os.name == "nt":
+        import csv
+        identity = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"],
+                                  check=True, capture_output=True, text=True)
+        sid = next(csv.reader(identity.stdout.splitlines()))[1]
+        deny = subprocess.run(["icacls", str(parent), "/deny", f"*{sid}:(WD,AD)"],
+                              capture_output=True)
+        assert deny.returncode == 0
+    else:
+        parent.chmod(0o500)
+    try:
+        result = invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1])
+        assert_refused(result, "--out")
+        assert b"permission denied" in result.stderr
+        assert b"choose a destination writable by your user" in result.stderr
+        assert not out.exists()
+        assert not list(parent.iterdir())
+    finally:
+        if os.name == "nt":
+            reset = subprocess.run(["icacls", str(parent), "/remove:d", f"*{sid}"],
+                                   capture_output=True)
+            assert reset.returncode == 0
+        else:
+            parent.chmod(0o700)
+    assert invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1]).returncode == 0
+
+
+def test_input_verify_closed_stdout_has_safe_refusal(candidate, tmp_path):
+    row = event()
+    row["payload"] = json.loads(row["payload"])
+    archive = tmp_path / "input.jsonl"
+    archive.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    result = invoke(candidate, tmp_path, "verify", "--input", archive, closed_stdout=True)
+    assert_refused(result, "stdout")
+    assert b"writable destination" in result.stderr
+    near = invoke(candidate, tmp_path, "verify", "--input", archive)
+    assert near.returncode == 0
+    assert json.loads(near.stdout)["ok"] is True
 
 
 @pytest.mark.parametrize("mode", ["verify", "redact", "export"])
@@ -485,6 +553,7 @@ def test_existing_and_locked_destinations_are_never_replaced(candidate, tmp_path
         result = invoke(candidate, tmp_path, "export", "--out", out, dsn="not-a-dsn")
         assert result.returncode == 2
         assert b"exists; export never replaces a file" in result.stderr
+        assert b"choose an unused --out path" in result.stderr
     finally:
         if handle is not None:
             close = ctypes.WinDLL("kernel32").CloseHandle
@@ -546,6 +615,8 @@ raise SystemExit(int(os.environ['FIXTURE_EXIT']))
     if racing_destination:
         assert out.read_bytes() == b"racing destination\n"
         assert b"publication" in result[0].stderr
+        assert b"destination already exists" in result[0].stderr
+        assert b"choose an unused --out path" in result[0].stderr
     elif code == 0:
         assert out.read_bytes() == b'{"container":"fixture"}\n'
     assert not list(tmp_path.glob(".board-audit-*.tmp"))

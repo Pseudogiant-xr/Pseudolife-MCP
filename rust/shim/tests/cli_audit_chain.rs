@@ -366,7 +366,7 @@ fn an_existing_export_target_is_refused_before_any_bank() {
     assert_eq!(
         output.stderr,
         cli::native_text(&format!(
-            "board-audit: {} exists; export never replaces a file\n",
+            "board-audit: {} exists; export never replaces a file; choose an unused --out path\n",
             target.display()
         ))
     );

@@ -74,7 +74,9 @@ fn run_inner(arguments: Vec<OsString>) -> u8 {
                 // Checked before any bank is resolved, as `_export` does.
                 match std::fs::metadata(out) {
                     Ok(_) => {
-                        crate::stderrln!("board-audit: {out} exists; export never replaces a file");
+                        crate::stderrln!(
+                            "board-audit: {out} exists; export never replaces a file; choose an unused --out path"
+                        );
                         return 2;
                     }
                     Err(error)

@@ -205,9 +205,56 @@ fn rename_exclusive(_: &Path, _: &Path) -> io::Result<()> {
 }
 
 pub(super) fn failure(operation: &str, error: &io::Error) -> u8 {
+    let (cause, fix) = match error.kind() {
+        io::ErrorKind::NotFound if operation == "staging" => (
+            "parent directory does not exist",
+            "create the parent directory before exporting",
+        ),
+        io::ErrorKind::NotFound => (
+            "the staged archive or destination directory is missing",
+            "keep the destination directory available and retry the export",
+        ),
+        io::ErrorKind::PermissionDenied
+            if cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)) =>
+        {
+            (
+                "an archive path is locked by another process",
+                "close the program using that path before retrying",
+            )
+        }
+        io::ErrorKind::PermissionDenied => (
+            "permission denied",
+            "choose a destination writable by your user",
+        ),
+        io::ErrorKind::AlreadyExists => {
+            ("destination already exists", "choose an unused --out path")
+        }
+        io::ErrorKind::NotADirectory => (
+            "a parent path component is not a directory",
+            "choose an --out path inside an existing directory",
+        ),
+        io::ErrorKind::StorageFull => (
+            "the destination filesystem is full",
+            "free space on that filesystem before retrying",
+        ),
+        io::ErrorKind::ReadOnlyFilesystem => (
+            "the destination filesystem is read-only",
+            "choose a destination on a writable filesystem",
+        ),
+        io::ErrorKind::InvalidInput => (
+            "the destination path is unsupported",
+            "choose a valid --out path for this filesystem",
+        ),
+        _ => (
+            "the filesystem refused the archive operation",
+            "choose a writable destination on a filesystem supporting exclusive rename",
+        ),
+    };
+    let code = error
+        .raw_os_error()
+        .map(|code| format!(" (OS error {code})"))
+        .unwrap_or_default();
     super::stats::error(format!(
-        "--out {operation} failed ({:?}, OS code {:?}); choose a writable destination on a filesystem supporting exclusive rename; no archive was published",
-        error.kind(),
-        error.raw_os_error()
+        "--out {operation} failed: {cause}{code}; {fix}; no archive was published"
     ))
 }
