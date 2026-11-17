@@ -8,6 +8,9 @@ const POSTGRES: &str = "pseudolife-mcp-postgres";
 const PSQL: &str = r#"psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB""#;
 const LIST: &str = include_str!("list_sql.sql");
 const OLD_LIST: &str = include_str!("list_sql_v53.sql");
+const LIST_ERROR: Refusal = Refusal::new(
+    "the PostgreSQL container returned an invalid invite list response; update the daemon and PostgreSQL schema before listing again",
+);
 
 fn program(name: &str) -> Option<std::path::PathBuf> {
     let mut names = vec![name.to_owned()];
@@ -50,15 +53,15 @@ fn docker() -> OsString {
 }
 
 /// The `tailscale` `expose status` would run, from `find_tailscale()`'s
-/// answer: absent is no URL; a lookup this port cannot answer for defers.
-fn tailscale_binary(lookup: Result<Option<String>, ()>) -> Result<Option<PathBuf>, Defer> {
+/// answer: absent is no URL; an unsafe lookup requires an explicit --url.
+fn tailscale_binary(lookup: Result<Option<String>, ()>) -> Result<Option<PathBuf>, Refusal> {
     lookup
         .map(|found| found.map(PathBuf::from))
-        .map_err(|()| Defer)
+        .map_err(|()| Refusal::new("tailscale could not be located safely from PATH; pass --url with the daemon origin to skip discovery"))
 }
 
-/// `invite_cli.exposed_url(port)`. `Err` defers, before anything is written.
-pub(super) async fn exposed_url(port: u32) -> Result<Option<String>, Defer> {
+/// Discover an exposed origin before anything is written.
+pub(super) async fn exposed_url(port: u32) -> Result<Option<String>, Refusal> {
     // `expose_cli.find_tailscale()`, as `expose status` finds it: absolute
     // PATH directories only, never the current directory.
     let Some(binary) = tailscale_binary(crate::cli::program_lookup::find_tailscale())? else {
@@ -268,7 +271,7 @@ fn forward(args: &Args, url: Option<String>) -> Vec<OsString> {
     out.into_iter().map(Into::into).collect()
 }
 
-pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u8, Defer> {
+pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u8, Refusal> {
     if std::env::var_os("PSEUDOLIFE_DAEMON_EXEC").is_some_and(|v| !v.is_empty()) {
         return Ok(report.fail(
             EXIT_REFUSED,
@@ -344,7 +347,7 @@ fn by_hand(report: &mut Report, why: &str, sql: &str) -> u8 {
     report.fail(EXIT_FAILED, &format!("{why}. With the Postgres container running, the same change by hand is: docker exec -i {POSTGRES} psql -U pseudolife -d pseudolife_memory -c \"{sql}\""))
 }
 
-async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Defer> {
+async fn through_postgres(args: &Args, report: &mut Report) -> Result<u8, Refusal> {
     let mut sql = if args.list {
         LIST.into()
     } else {
@@ -441,24 +444,24 @@ fn image_version(stdout: &str) -> Option<u64> {
 /// columns, or 13 with v59's `owned` (null for an environment row). The
 /// stopped daemon's `coordination.not_owner_principals` is in its volume,
 /// not this host's config, so an environment row's owner is unknown.
-fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Defer> {
-    let value: serde_json::Value = serde_json::from_str(text).map_err(|_| Defer)?;
+fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rejected>), Refusal> {
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|_| LIST_ERROR)?;
     let mut rows = Vec::new();
-    for row in value["principals"].as_array().ok_or(Defer)? {
+    for row in value["principals"].as_array().ok_or(LIST_ERROR)? {
         let row = row
             .as_array()
             .filter(|r| r.len() == 12 || r.len() == 13)
-            .ok_or(Defer)?;
-        let time = |i: usize| -> Result<Option<f64>, Defer> {
+            .ok_or(LIST_ERROR)?;
+        let time = |i: usize| -> Result<Option<f64>, Refusal> {
             if row[i].is_null() {
                 Ok(None)
             } else {
-                row[i].as_f64().map(Some).ok_or(Defer)
+                row[i].as_f64().map(Some).ok_or(LIST_ERROR)
             }
         };
-        let stored = row[11].as_bool().ok_or(Defer)?;
-        let paired = stored && row[3].as_bool().ok_or(Defer)?;
-        let pending = stored && row[4].as_bool().ok_or(Defer)?;
+        let stored = row[11].as_bool().ok_or(LIST_ERROR)?;
+        let paired = stored && row[3].as_bool().ok_or(LIST_ERROR)?;
+        let pending = stored && row[4].as_bool().ok_or(LIST_ERROR)?;
         let expires = time(5)?;
         let revoked = time(8)?;
         let state = if !stored {
@@ -475,7 +478,7 @@ fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rej
             "unpaired"
         };
         rows.push(invite_db::Listed {
-            principal: row[0].as_str().ok_or(Defer)?.into(),
+            principal: row[0].as_str().ok_or(LIST_ERROR)?.into(),
             state,
             paired,
             pending,
@@ -485,7 +488,7 @@ fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rej
                 None
             },
             board: if stored {
-                Some(row[2].as_bool().ok_or(Defer)?)
+                Some(row[2].as_bool().ok_or(LIST_ERROR)?)
             } else {
                 None
             },
@@ -503,13 +506,13 @@ fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rej
     }
     rows.sort_by(|a, b| a.principal.cmp(&b.principal));
     let mut rejected = Vec::new();
-    for row in value["rejected"].as_array().ok_or(Defer)? {
-        let row = row.as_array().filter(|r| r.len() == 4).ok_or(Defer)?;
+    for row in value["rejected"].as_array().ok_or(LIST_ERROR)? {
+        let row = row.as_array().filter(|r| r.len() == 4).ok_or(LIST_ERROR)?;
         rejected.push(invite_db::Rejected {
-            hash_prefix: row[0].as_str().ok_or(Defer)?.into(),
-            rejections: row[1].as_i64().ok_or(Defer)?,
-            first_seen_at: row[2].as_f64().ok_or(Defer)?,
-            last_seen_at: row[3].as_f64().ok_or(Defer)?,
+            hash_prefix: row[0].as_str().ok_or(LIST_ERROR)?.into(),
+            rejections: row[1].as_i64().ok_or(LIST_ERROR)?,
+            first_seen_at: row[2].as_f64().ok_or(LIST_ERROR)?,
+            last_seen_at: row[3].as_f64().ok_or(LIST_ERROR)?,
         });
     }
     Ok((rows, rejected))
@@ -518,6 +521,33 @@ fn decode_list(text: &str) -> Result<(Vec<invite_db::Listed>, Vec<invite_db::Rej
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_refusal_tailscale_lookup_names_path_and_url() {
+        let error = tailscale_binary(Err(())).unwrap_err();
+        assert!(format!("{error:?}").contains("PATH"));
+        assert!(tailscale_binary(Ok(None)).is_ok());
+        assert!(tailscale_binary(Ok(Some("/usr/bin/tailscale".into()))).is_ok());
+    }
+
+    #[test]
+    fn native_refusal_list_decode_names_the_response() {
+        for text in [
+            "fixture-private-secret",
+            "{}",
+            r#"{"principals":[[]],"rejected":[]}"#,
+            r#"{"principals":[],"rejected":[[]]}"#,
+        ] {
+            let error = match decode_list(text) {
+                Err(error) => error,
+                Ok(_) => panic!("invalid list accepted"),
+            };
+            let diagnostic = format!("{error:?}");
+            assert!(diagnostic.contains("list"));
+            assert!(!diagnostic.contains("fixture-private-secret"));
+        }
+        assert!(decode_list(r#"{"principals":[],"rejected":[]}"#).is_ok());
+    }
+
     #[test]
     fn stopped_daemon_rows_keep_state_and_environment_semantics() {
         let (rows, rejected) = decode_list(r#"{"principals":[["z",null,null,false,false,null,null,null,null,100,99,false],["a","core",true,false,true,101,50,null,null,100,null,true]],"rejected":[["01234567",3,90,99]]}"#).unwrap();
@@ -779,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tailscale_lookup_this_port_cannot_answer_defers() {
+    fn an_unsafe_tailscale_lookup_refuses() {
         assert!(tailscale_binary(Err(())).is_err());
         assert_eq!(tailscale_binary(Ok(None)).ok(), Some(None));
         assert_eq!(
