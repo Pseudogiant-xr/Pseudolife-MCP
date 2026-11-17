@@ -50,8 +50,7 @@ unchanged and removes it.
 Checked when the row loads: every case whose action is `tailscale` names
 its port (the fixture daemon's, or the closed port 9), so no arm reaches a
 daemon on the default 8765; and every address a `tailscale` case's
-scenario holds is on loopback, so the oracle's tailnet probe (after the
-change, in the deferral cases) never leaves the machine.
+scenario holds is on loopback, so the tailnet probe after the change never leaves the machine.
 
 ## What runs, in the oracle's order (checked)
 

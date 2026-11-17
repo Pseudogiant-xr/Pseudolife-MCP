@@ -168,10 +168,11 @@ fn option_error(option: &str, action: Option<Action>) -> String {
                 && full.starts_with(option)
                 && (*full != "--yes" || action != Some(Action::Status))
         });
+    let quoted = super::py_repr(option);
     match fix {
-        Some(full) => format!("unrecognized option {option}; use {full} in full"),
+        Some(full) => format!("unrecognized option {quoted}; use {full} in full"),
         None => format!(
-            "unrecognized option {option}; run pseudolife-mcp expose --help for supported options"
+            "unrecognized option {quoted}; run pseudolife-mcp expose --help for supported options"
         ),
     }
 }
@@ -206,6 +207,7 @@ fn parse_action(action: Action, rest: &[String]) -> Parsed {
         };
         match (option, inline) {
             ("-h" | "--help", None) => return Parsed::Help(action),
+            ("-h" | "--help", Some(_)) => return error("--help takes no value; use --help".into()),
             ("--json", None) => args.json = true,
             ("--yes", None) if action.changes() => args.yes = true,
             // `status` has no --yes: an unknown option, kept as an extra.
@@ -218,6 +220,15 @@ fn parse_action(action: Action, rest: &[String]) -> Parsed {
                     None => match tokens.peek() {
                         None => {
                             return error("argument --port: expected one argument".into());
+                        }
+                        Some(value)
+                            if value.starts_with("--")
+                                || value.as_str() == "-h"
+                                || value.starts_with("-h=") =>
+                        {
+                            return error(
+                                "--port needs a value from 1 to 65535; use --port PORT".into(),
+                            );
                         }
                         Some(_) => tokens.next().map(String::as_str).unwrap_or_default(),
                     },
@@ -260,13 +271,21 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
         "off" => Action::Off,
         "status" => Action::Status,
         word if word.starts_with('-') => {
-            return Parsed::Error(
-                None,
-                format!(
-                    "{}; place action options after tailscale, off or status",
-                    option_error(word, None)
+            let option = word.split_once('=').map_or(word, |(option, _)| option);
+            let message = match option {
+                "-h" | "--help" => "--help takes no value; use --help".into(),
+                "--port" | "--yes" | "--json" => format!(
+                    "option {} must follow its action; put it after {}",
+                    super::py_repr(option),
+                    if option == "--yes" {
+                        "tailscale or off"
+                    } else {
+                        "tailscale, off or status"
+                    }
                 ),
-            );
+                _ => option_error(option, None),
+            };
+            return Parsed::Error(None, message);
         }
         word => {
             return Parsed::Error(
@@ -403,7 +422,7 @@ mod tests {
     #[test]
     fn noncanonical_arguments_refuse_before_host_access() {
         for (argv, fix) in [
-            (vec!["--he"], "--help"),
+            (vec!["--he"], "use --help in full"),
             (vec!["--port", "9", "status"], "after"),
             (vec!["status", "--po", "8765"], "--port"),
             (vec!["status", "--"], "--help"),
@@ -440,6 +459,77 @@ mod tests {
         }
         assert_eq!(run(&["off", "--yes"]), args(Action::Off, 8765, true, false));
         assert_eq!(run(&["status", "--help"]), Parsed::Help(Action::Status));
+    }
+
+    #[test]
+    fn misplaced_options_name_the_position_and_one_repair() {
+        for option in ["--port", "--yes", "--json", "--port=9"] {
+            let Parsed::Error(None, message) = run(&[option, "9", "status"]) else {
+                panic!("usage expected")
+            };
+            assert!(message.contains("must follow"), "{message}");
+            assert!(!message.contains("unrecognized"), "{message}");
+            assert!(!message.contains("--help"), "{message}");
+        }
+        let Parsed::Error(None, message) = run(&["--he"]) else {
+            panic!("usage expected")
+        };
+        assert!(message.contains("use --help in full"));
+        assert!(!message.contains("after") && !message.contains("follow"));
+        assert_eq!(run(&["--help"]), Parsed::MainHelp);
+        assert_eq!(
+            run(&["status", "--port", "9"]),
+            args(Action::Status, 9, false, false)
+        );
+    }
+
+    #[test]
+    fn help_with_an_explicit_value_names_the_flag_error() {
+        for argv in [
+            vec!["--help=1"],
+            vec!["-h=1"],
+            vec!["status", "--help=1"],
+            vec!["off", "-h=1"],
+        ] {
+            assert!(
+                matches!(run(&argv), Parsed::Error(_, m) if m.contains("--help takes no value"))
+            );
+        }
+        assert_eq!(run(&["off", "--help"]), Parsed::Help(Action::Off));
+    }
+
+    #[test]
+    fn a_port_followed_by_an_option_needs_a_value() {
+        for option in ["--yes", "--json", "--help", "-h"] {
+            assert!(
+                matches!(run(&["tailscale", "--port", option]), Parsed::Error(_, m)
+                if m.contains("--port needs a value") && m.contains("1 to 65535"))
+            );
+        }
+        assert_eq!(
+            run(&["tailscale", "--port", "80", "--yes"]),
+            args(Action::Tailscale, 80, true, false)
+        );
+        for value in ["--port=-x", "--port=-"] {
+            assert!(
+                matches!(run(&["tailscale", value]), Parsed::Error(_, m) if m.contains("plain digits"))
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_options_escape_control_characters() {
+        for argv in [vec!["--bad\u{1b}x"], vec!["status", "--bad\u{1b}x"]] {
+            let Parsed::Error(_, message) = run(&argv) else {
+                panic!("usage expected")
+            };
+            assert!(!message.contains('\u{1b}'));
+            assert!(message.contains("'--bad\\x1bx'"));
+        }
+        assert_eq!(
+            run(&["status", "--json"]),
+            args(Action::Status, 8765, false, true)
+        );
     }
 
     #[test]
