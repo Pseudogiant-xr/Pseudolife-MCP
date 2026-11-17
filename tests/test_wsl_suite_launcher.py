@@ -1498,7 +1498,7 @@ def _remote_suite(tmp_path: Path, branch: str, *, origin: bool = False,
     stand-in; returns the run, the result JSON it wrote and the commit."""
     repo = tmp_path / "repo"
     (repo / "ops").mkdir(parents=True)
-    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1"):
+    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1", "dev-tmp-space.sh"):
         shutil.copy(ROOT / "ops" / name, repo / "ops" / name)
     for argv in (["init", "-q", "-b", branch], ["add", "-A"],
                  ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "x"]):
@@ -1930,7 +1930,7 @@ echo "3 passed in 0.1s"
 def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, to_master: bool = False):
     repo, bare = tmp_path / "repo", tmp_path / "origin.git"
     (repo / "ops").mkdir(parents=True)
-    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1", "wsl-suite.sh"):
+    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1", "wsl-suite.sh", "dev-tmp-space.sh"):
         shutil.copy(ROOT / "ops" / name, repo / "ops" / name)
     def git(cwd, *argv):
         return subprocess.run(["git", "-C", str(cwd), "-c", "user.email=t@example.com",

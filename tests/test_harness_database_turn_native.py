@@ -40,22 +40,32 @@ def marker(home):
 @contextmanager
 def live_holder(tmp_path, env):
     ready = tmp_path / "holder-ready"
-    script = ("from pathlib import Path\nimport sys,time\n"
+    script = ("from pathlib import Path\nimport json,os,psutil,sys,time\n"
               "from rust.harness_support.database_turn import ensure_turn\n"
               "lease=ensure_turn(holder='held native test')\n"
-              "Path(sys.argv[1]).write_text('ready')\n"
+              "Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'started':psutil.Process().create_time()}))\n"
               "time.sleep(90)\n")
     with (tmp_path / "holder.log").open("w", encoding="utf-8") as log:
         owner = subprocess.Popen([sys.executable, "-u", "-c", script, str(ready)],
                                  env=env, stdout=log, stderr=subprocess.STDOUT)
         identity = psutil.Process(owner.pid).create_time()
+        holder = None
+        holder_identity = None
         try:
             deadline = time.monotonic() + 30
             while not ready.exists() and owner.poll() is None and time.monotonic() < deadline:
                 time.sleep(.05)
             assert ready.exists(), (tmp_path / "holder.log").read_text(encoding="utf-8")
-            yield owner
+            holder_identity = json.loads(ready.read_text())
+            holder = psutil.Process(holder_identity["pid"])
+            assert holder.create_time() == holder_identity["started"]
+            assert holder.pid == owner.pid or owner.pid in [parent.pid for parent in holder.parents()]
+            yield holder  # Windows' venv launcher is a different process.
         finally:
+            if holder is not None and holder.is_running():
+                assert holder.create_time() == holder_identity["started"]
+                holder.terminate()
+                holder.wait(timeout=15)
             if owner.poll() is None:
                 assert psutil.Process(owner.pid).create_time() == identity
                 owner.terminate()  # This owned Popen handle, never a name/pattern.
@@ -221,16 +231,22 @@ exit 0
 """, encoding="utf-8")
     process = None
     identity = None
+    output = tmp_path / "dot-source.log"
     try:
-        run = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
-                              str(ROOT / "ops/dev-database-lock.ps1"), str(tmp_path / "own.lock"),
-                              sys.executable, str(sleeper), str(record)], env=env,
-                             capture_output=True, text=True, timeout=40)
-        assert run.returncode == 0, run.stdout + run.stderr
+        # A surviving child's inherited handles must not make communicate()
+        # wait for pipe EOF after the interactive parent's process has exited.
+        with output.open("w", encoding="utf-8") as log:
+            run = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
+                                  str(ROOT / "ops/dev-database-lock.ps1"), str(tmp_path / "own.lock"),
+                                  sys.executable, str(sleeper), str(record)], env=env,
+                                 stdout=log, stderr=log, timeout=40)
+        assert run.returncode == 0, output.read_text(encoding="utf-8")
         identity = json.loads(record.read_text())
         process = psutil.Process(identity["pid"])
         assert process.create_time() == identity["started"] and process.is_running()
     finally:
+        if identity is None and record.exists():
+            identity = json.loads(record.read_text())
         if identity:
             try:
                 process = psutil.Process(identity["pid"])

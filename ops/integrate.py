@@ -200,6 +200,8 @@ SHIM_TESTS_ARGS = ("nextest", "run", "--locked", "-p", "pseudolife-stdio", "--li
 SHIM_TESTS_COMMAND = "cargo " + " ".join(SHIM_TESTS_ARGS)
 try:
     SHIM_TESTS_REMOTE_SCRIPT = Path(__file__).with_name("shim-tests-remote.sh").read_text(encoding="utf-8")
+    TMP_SPACE_SCRIPT = Path(__file__).with_name("dev-tmp-space.sh").read_text(encoding="utf-8")
+    SHIM_TESTS_REMOTE_SCRIPT = SHIM_TESTS_REMOTE_SCRIPT.replace('# LOAD_TMP_GUARD', TMP_SPACE_SCRIPT)
     DATABASE_LOCK_SCRIPT = Path(__file__).with_name("dev-database-lock.ps1").read_text(encoding="utf-8")
 except OSError:
     SHIM_TESTS_REMOTE_SCRIPT = DATABASE_LOCK_SCRIPT = None

@@ -118,8 +118,9 @@ if ($Nonce -and $Nonce -notmatch '^[0-9a-f]{16,64}$') { Stop-Run "the nonce must
 $units = @()
 try {
     if ($UnitCommands) {
-        $units = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($UnitCommands))) -NoEnumerate
-        if ($units -isnot [array]) { throw 'the unittest selections must be an array' }
+        $unitJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($UnitCommands))
+        if (-not $unitJson.TrimStart().StartsWith('[')) { throw 'the unittest selections must be an array' }
+        $units = @(ConvertFrom-Json -InputObject $unitJson)
         foreach ($unit in $units) {
             if ($unit.runner -notin @('unittest-discover', 'unittest-file') -or -not $unit.paths.Count) {
                 throw 'unknown or empty unittest selection'
@@ -321,9 +322,10 @@ try {
             $verdict = $LASTEXITCODE
             if ($verdict -eq 0) {
                 foreach ($unit in $units) {
-                    $unitArgs = if ($unit.runner -eq 'unittest-discover') {
-                        @('-m', 'unittest', 'discover', '-s', $unit.start, '-p', $unit.pattern)
-                    } else { @($unit.paths[0]) }
+                    $unitPaths = @($unit.paths)
+                    if ($unit.runner -eq 'unittest-discover') {
+                        $unitArgs = @('-m', 'unittest', 'discover', '-s', $unit.start, '-p', $unit.pattern)
+                    } else { $unitArgs = @($unitPaths[0]) }
                     $unitClock = [Diagnostics.Stopwatch]::StartNew()
                     $unitOutput = [Collections.Generic.List[string]]::new()
                     & $py @unitArgs 2>&1 | ForEach-Object {
