@@ -377,6 +377,8 @@ fn resolve_owner(flag: Option<&str>, context: &Context<'_>) -> Res<Result<String
     if let Some(flag) = flag {
         return Ok(if is_agent_id(flag.as_bytes()) {
             Ok(flag.to_owned())
+        } else if flag.starts_with('-') {
+            Err("--owner is not an agent id (32 lowercase hex)".into())
         } else {
             Err(format!(
                 "--owner {} is not an agent id (32 lowercase hex)",
@@ -524,7 +526,6 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
         None => default_state(owner.as_ref().ok().map(String::as_str), context)?,
     };
     let home = crate::credentials::python_home_with(|key| (context.var)(key));
-    shown(&home)?;
     if args.stop {
         let Some(state) = state else {
             return Ok(Out::say(

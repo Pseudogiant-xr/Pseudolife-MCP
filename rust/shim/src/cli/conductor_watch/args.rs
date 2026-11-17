@@ -182,6 +182,9 @@ fn age(text: &str) -> Result<(), String> {
         .strip_suffix(|c: char| "smhdSMHD".contains(c))
         .unwrap_or(stripped);
     if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        if stripped.len() > 640 || stripped.starts_with('-') {
+            return Err("not a duration; use 90, 90s, 20m, 2h or 7d".into());
+        }
         return Err(format!(
             "not a duration: {} (use 90, 90s, 20m, 2h or 7d)",
             super::py_repr(text)
@@ -209,6 +212,9 @@ fn check(option: &str, kind: Kind, value: &str) -> Result<Option<String>, ()> {
                 "_non_negative"
             };
             match python_float(value)? {
+                None if value.starts_with('-') => {
+                    refused("invalid number; use a plain ASCII decimal number")
+                }
                 None => refused(&format!("invalid {name} value: {}", super::py_repr(value))),
                 // `not value > 0` and `not value >= 0`: NaN fails both.
                 Some(number) if kind == Kind::Positive && (number.is_nan() || number <= 0.0) => {

@@ -30,6 +30,46 @@ const AGENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "fedcba9876543210fedcba9876543210";
 
 #[test]
+fn native_new_refusals_do_not_echo_option_values() {
+    let sandbox = Sandbox::new();
+    let long = format!("{}fixture-secret", "x".repeat(641));
+    let mut failures = Vec::new();
+    for argv in [
+        vec!["--max-age", &long],
+        vec!["--owner", "-fixture-secret"],
+        vec!["--interval", "-fixture-secret"],
+    ] {
+        let out = sandbox.run(&argv);
+        let message = text(&out.stderr);
+        if out.status.code() != Some(2)
+            || message.contains("fixture-secret")
+            || !message.contains("use") && !message.contains("pass --owner")
+        {
+            failures.push(message);
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "newly admitted option values were echoed or lacked a remedy"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn native_explicit_state_stop_does_not_require_a_unicode_home() {
+    use std::os::unix::ffi::OsStringExt;
+    let sandbox = Sandbox::new();
+    let state = sandbox.state("absent");
+    let out = sandbox
+        .command(&["--stop", "--state", state.to_str().unwrap()])
+        .env("HOME", OsString::from_vec(vec![0xff]))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("nothing changed"));
+}
+
+#[test]
 fn native_closed_stdout_names_the_writable_stream_remedy() {
     let sandbox = Sandbox::new();
     let target = sandbox.root.join("read-only-output");
