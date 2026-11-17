@@ -107,7 +107,7 @@ def assert_refused(result, parameter):
     assert not result.stdout
     assert b"defer" not in result.stderr.lower()
     assert parameter.encode() in result.stderr
-    assert SECRET.encode() not in result.stdout + result.stderr
+    assert SECRET.encode() not in (result.stdout or b"") + result.stderr
 
 
 def test_agent_refusal_leaves_no_archive(candidate, bank, tmp_path):
