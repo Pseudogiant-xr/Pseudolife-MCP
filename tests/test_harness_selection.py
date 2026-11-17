@@ -108,6 +108,14 @@ def test_unclassified_pytest_filters_cannot_narrow_parity_units(tree, option):
         recipe(tree)
 
 
+@pytest.mark.parametrize("arguments", ["$env:EXTRA_TESTS", "${EXTRA_TESTS}",
+    "tests/test_outside_rust.py", "&& python rust/new_harness.py", "--junitxml", "-p"])
+def test_unreadable_or_unclassified_pytest_arguments_refuse(tree, arguments):
+    workflow(tree, "rust", "python -m pytest rust/test_base.py " + arguments)
+    with pytest.raises(selection.SelectionError):
+        recipe(tree)
+
+
 def test_controller_reads_the_requested_immutable_head_instead_of_its_own_list(tree, monkeypatch):
     from ops import integrate
 

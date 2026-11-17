@@ -125,16 +125,44 @@ def _pytest(words, *, filtered=False):
         raise SelectionError("pytest selection is filtered by ignore, deselect or pyargs")
     if not filtered and any(word in ("-k", "-m") for word in arguments):
         raise SelectionError("the Rust job's pytest selection is filtered; declare its complete selection")
-    options = {"-q", "-v", "-vv", "-ra", "-p", "--junitxml", "--require-databases", "-k", "-m"}
-    for word in arguments:
-        if word.startswith("-") and word not in options and not word.startswith(("--durations=", "--junitxml=")):
-            raise SelectionError(f"unknown pytest option {word}; classify the complete selection before gating")
-    paths = tuple(word for word in words[index + 1:] if word.startswith("rust/"))
+    paths = []
+    position = 0
+    while position < len(arguments):
+        word = arguments[position]
+        position += 1
+        if word.startswith("rust/"):
+            _path(word)
+            paths.append(word)
+        elif word in {"-q", "-v", "-vv", "-ra", "--require-databases"}:
+            continue
+        elif word.startswith(("--durations=", "--junitxml=")) and word.partition("=")[2]:
+            continue
+        elif word in {"-p", "--junitxml", "-k", "-m"}:
+            if position == len(arguments) or arguments[position].startswith("-"):
+                raise SelectionError(f"pytest option {word} has no readable value")
+            value = arguments[position]
+            position += 1
+            if word == "-p" and value != "no:cacheprovider":
+                raise SelectionError("unknown pytest plugin; classify its selection before gating")
+            if word == "--junitxml" and value == "(Join-Path":
+                if position + 1 >= len(arguments) or not arguments[position + 1].endswith(")"):
+                    raise SelectionError("unreadable pytest report path")
+                position += 2
+            elif word == "--junitxml" and value == "${{":
+                if position + 1 >= len(arguments) or not arguments[position + 1].startswith("}}/"):
+                    raise SelectionError("unreadable pytest report path")
+                position += 2
+        elif (word == ">" and position < len(arguments)
+              and re.fullmatch(r"\$[A-Za-z_][A-Za-z0-9_]*", arguments[position])
+              and arguments[position + 1:] in ([], ["2>&1"])):
+            position = len(arguments)  # Known parity mutation report redirection.
+        else:
+            raise SelectionError(f"unknown pytest argument {word}; classify the complete selection before gating")
     if not paths:
         raise SelectionError("pytest command names no literal Rust test path")
     for path in paths:
         _path(path)
-    return paths
+    return tuple(paths)
 
 
 def _is_pytest(words):
