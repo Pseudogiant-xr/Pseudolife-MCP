@@ -37,7 +37,7 @@ class SurpriseFixtureTests(unittest.TestCase):
         connection = MagicMock()
         connection.__enter__.return_value = connection
         connection.execute.side_effect = lambda statement, parameters: rows.append(parameters)
-        with patch("principal_fixtures.prepare_bank") as prepare_bank, \
+        with patch.object(run, "prepare_bank") as prepare_bank, \
                 patch("psycopg.connect", return_value=connection), \
                 patch.object(run, "assert_disposable"):
             fixture = run.JsonFloatTies()
