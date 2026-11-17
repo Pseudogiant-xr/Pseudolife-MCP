@@ -426,6 +426,47 @@ mod tests {
     }
 
     #[test]
+    fn registration_child_uses_the_operating_system_environment() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "extractor_shim::autostart::tests::registration_environment_probe",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("SystemRoot", "C:/fixture-windows")
+            .env("WINDIR", "C:/fixture-windows")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "subprocess probe invoked by registration_child_uses_the_operating_system_environment"]
+    fn registration_environment_probe() {
+        // Registration's ownership snapshots also use JSON conversion.
+        let output = fixture_script(
+            "param([string]$ConfigJson) $c=$ConfigJson|ConvertFrom-Json; $null=$c|ConvertTo-Json; [Console]::Out.WriteLine('fixture environment accepted')",
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "fixture environment accepted"
+        );
+    }
+
+    #[test]
     fn registration_files_are_created_exclusively() {
         for name in ["register.ps1", "registration.json"] {
             let mut scratch = Scratch::create(
@@ -564,6 +605,10 @@ mod tests {
             (
                 "lock refusal",
                 registration_script_preserves_the_lock_refusal_exit_code,
+            ),
+            (
+                "child environment",
+                registration_child_uses_the_operating_system_environment,
             ),
             (
                 "exclusive files",

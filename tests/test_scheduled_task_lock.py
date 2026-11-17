@@ -148,7 +148,7 @@ def test_the_interactive_task_action_keeps_its_exact_bytes(planted_root: str | N
               "$ownerExe = 'C:\\fixture dir\\runtime.exe'\n"
               f"$c = @{{ PowerShell = '{powershell}'; ServeArgs = @('extractor-shim', 'claude', '--env-file', 'C:\\fixture dir\\settings.env') }}\n"
               "function New-ScheduledTaskAction { param($Execute, $Argument) @{ Execute=$Execute; Arguments=$Argument } }\n" +
-              action + "\n$action | ConvertTo-Json -Compress\n")
+              action + "\n[Console]::Out.WriteLine($action.Execute)\n[Console]::Out.WriteLine($action.Arguments)\n")
     expected = (
         "$runtimeExe = 'C:\\fixture dir\\runtime.exe'\n"
         "$psi = New-Object System.Diagnostics.ProcessStartInfo\n"
@@ -163,7 +163,9 @@ def test_the_interactive_task_action_keeps_its_exact_bytes(planted_root: str | N
     for shell in _shells():
         proc = _run(script, shell)
         assert proc.returncode == 0, proc.stderr
-        result = json.loads(proc.stdout)
+        lines = proc.stdout.strip().splitlines()
+        assert len(lines) == 2, proc.stdout
+        result = {"Execute": lines[0], "Arguments": lines[1]}
         arguments = result["Arguments"]
         assert arguments.startswith("-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ")
         encoded = arguments.rsplit(" ", 1)[1]
