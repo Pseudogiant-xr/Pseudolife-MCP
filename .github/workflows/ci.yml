@@ -843,6 +843,7 @@ jobs:
           tests/test_integrate_script.py::test_harness_environment_cleanup_removes_only_its_own_created_path
           tests/test_integrate_script.py::test_harness_environment_cleanup_refuses_a_link_without_touching_its_target
           tests/test_integrate_script.py::test_harness_environment_cleanup_refuses_an_active_process
+          tests/test_integrate_script.py::test_harness_environment_cleanup_refuses_an_owned_child_without_an_argv_path
           tests/test_integrate_script.py::test_harness_environment_cannot_retain_a_removed_dependency
           tests/test_integrate_script.py::test_service_managing_harness_refuses_a_missing_turn_marker
           tests/test_integrate_script.py::test_harness_far_half_requires_every_unittest_command_to_execute_and_pass

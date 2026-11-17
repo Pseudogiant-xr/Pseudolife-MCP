@@ -3922,6 +3922,50 @@ def test_harness_environment_cleanup_refuses_an_active_process(tmp_path, alias):
 
 
 @needs_pwsh
+@pytest.mark.skipif(os.name != "nt", reason="Windows owned-job cleanup")
+def test_harness_environment_cleanup_refuses_an_owned_child_without_an_argv_path(harness_far, monkeypatch):
+    import psutil
+
+    marker = harness_far.tmp / "indirect-child.json"
+    monkeypatch.setenv("FAKE_INDIRECT_READY", str(marker))
+    child_code = '''import json,os,psutil,time
+from pathlib import Path
+os.chdir(os.environ['FAKE_GATE_ENVIRONMENT'])
+ready = Path(os.environ['FAKE_INDIRECT_READY'])
+pending = ready.with_suffix('.writing')
+pending.write_text(json.dumps({'pid':os.getpid(),'started':psutil.Process().create_time()}))
+pending.replace(ready)
+time.sleep(90)
+'''
+    body = _GATE_TEST + f'''
+    import runpy, subprocess, sys, time
+    runpy.run_path({str(ROOT / "tests/windowless_children.py")!r})['install']()
+    env = dict(os.environ, FAKE_GATE_ENVIRONMENT=sys.prefix, PYTHONPATH=os.pathsep.join(sys.path))
+    child = subprocess.Popen([sys._base_executable, '-c', {child_code!r}], env=env,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 20
+    while not os.path.exists(os.environ['FAKE_INDIRECT_READY']) and child.poll() is None and time.monotonic() < deadline:
+        time.sleep(.05)
+    assert os.path.exists(os.environ['FAKE_INDIRECT_READY'])
+'''
+    head, ref, data = harness_far.batch(body)
+    proc = harness_far.run_harness(head, ref, data)
+    assert proc.returncode == 3 and "owned run process remains" in proc.stderr, proc.stdout + proc.stderr
+    # Refuse before deleting even the first file, then the owned job ends
+    # the leaked child when its launcher exits. No name-based cleanup.
+    environment = Path(json.loads(harness_far.uv_log.read_text().splitlines()[0])[-1])
+    assert (environment / "pyvenv.cfg").is_file()
+    assert (environment / "Scripts/python.exe").is_file()
+    identity = json.loads(marker.read_text())
+    try:
+        child = psutil.Process(identity["pid"])
+        assert child.create_time() == identity["started"]
+        child.wait(timeout=15)
+    except psutil.NoSuchProcess:
+        pass
+
+
+@needs_pwsh
 def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkeypatch, tmp_path, capsys):
     head, ref, _ = harness_far.batch()
     monkeypatch.chdir(harness_far.seed)

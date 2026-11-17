@@ -40,6 +40,11 @@ public static class DevDatabaseProcessTree {
     [DllImport("kernel32.dll", SetLastError=true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool QueryInformationJobObject(IntPtr job, int kind, IntPtr data, uint size, out uint written);
+    [DllImport("kernel32.dll")]
+    static extern uint GetCurrentProcessId();
     [DllImport("kernel32.dll")]
     static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll")]
@@ -68,6 +73,31 @@ public static class DevDatabaseProcessTree {
             throw new Win32Exception(error, "AssignProcessToJobObject failed");
         }
         lifetimeJob = job;
+    }
+    public static long[] RemainingChildren() {
+        if (lifetimeJob == IntPtr.Zero) return new long[0];
+        int capacity = 16;
+        while (true) {
+            int size = checked(8 + capacity * IntPtr.Size);
+            IntPtr data = Marshal.AllocHGlobal(size);
+            try {
+                uint written;
+                bool ok = QueryInformationJobObject(lifetimeJob, 3, data, (uint)size, out written);
+                int error = ok ? 0 : Marshal.GetLastWin32Error();
+                if (!ok && error != 234) throw new Win32Exception(error, "Cannot inspect owned run processes");
+                int assigned = Marshal.ReadInt32(data, 0), count = Marshal.ReadInt32(data, 4);
+                if (!ok || count < assigned) {
+                    capacity = Math.Max(checked(capacity * 2), assigned);
+                    continue;
+                }
+                var children = new System.Collections.Generic.List<long>();
+                for (int i = 0; i < count; i++) {
+                    long pid = Marshal.ReadIntPtr(data, 8 + i * IntPtr.Size).ToInt64();
+                    if (pid != GetCurrentProcessId()) children.Add(pid);
+                }
+                return children.ToArray();
+            } finally { Marshal.FreeHGlobal(data); }
+        }
     }
 }
 '@

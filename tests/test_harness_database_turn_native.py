@@ -31,6 +31,8 @@ def environment(home):
 
 
 def marker(home):
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("enabled-machine native locks are exercised on Windows and Linux dev machines")
     locks = home / ".pseudolife-mcp/locks"
     locks.mkdir(parents=True, exist_ok=True)
     (locks / "test-postgres.turn-enabled").touch()

@@ -205,6 +205,15 @@ function Remove-OwnedHarnessEnvironment {
     }
     Assert-HarnessWorktreeHasNoReparsePoint $EnvironmentPath
     if ($IsWindows) {
+        # A child can use the environment through cwd or its own environment
+        # variables without naming it in argv. The owned job covers those
+        # children even after an intermediate launcher has exited.
+        if ('DevDatabaseProcessTree' -as [type]) {
+            $remaining = @([DevDatabaseProcessTree]::RemainingChildren())
+            if ($remaining.Count) {
+                throw "an owned run process remains (PID $($remaining -join ', ')); inspect it before removing the environment"
+            }
+        }
         $longEnvironment = Get-HarnessLongPath $EnvironmentPath
         $users = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
             $_.ProcessId -ne $PID -and (
