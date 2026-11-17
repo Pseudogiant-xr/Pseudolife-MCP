@@ -185,6 +185,29 @@ def test_direct_unittest_files_keep_their_original_runner(tree):
     assert selection.Command("unittest-file", ("rust/test_extra.py",)) in recipe(tree).commands
 
 
+def test_unit_fixture_dependencies_use_the_batch_workflows_exact_pins(tree):
+    value = json.loads(tree[selection.CLASSIFICATION])
+    value["files"]["rust/test_extra.py"]["requirements"] = ["onnx"]
+    tree[selection.CLASSIFICATION] = json.dumps(value)
+    workflow(tree, "parity-checks", 'python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"')
+    result = recipe(tree)
+    assert result.requirements == ("onnx==1.22.0",)
+    assert result.record()[0]["requirements"] == ["onnx==1.22.0"]
+    tree[selection.WORKFLOW] = tree[selection.WORKFLOW].replace("onnx==1.22.0", "onnx==1.23.0")
+    assert recipe(tree).requirements == ("onnx==1.23.0",)
+
+
+@pytest.mark.parametrize("command", ["", "python -m pip install onnx>=1.22",
+    "python -m pip install onnx==1.22.0 onnx==1.23.0"])
+def test_a_fixture_dependency_without_one_exact_workflow_pin_refuses(tree, command):
+    value = json.loads(tree[selection.CLASSIFICATION])
+    value["files"]["rust/test_extra.py"]["requirements"] = ["onnx"]
+    tree[selection.CLASSIFICATION] = json.dumps(value)
+    workflow(tree, "parity-checks", command)
+    with pytest.raises(selection.SelectionError, match="exact workflow pin"):
+        recipe(tree)
+
+
 def test_missing_selected_file_refuses_before_remote_work(tree):
     tree.pop("rust/test_extra.py")
     with pytest.raises(selection.SelectionError, match="absent from the batch head"):

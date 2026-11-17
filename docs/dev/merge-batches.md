@@ -661,6 +661,10 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    discovery, classified in `rust/ci/harness-test-selections.json`. Mixed
    files contribute their unit selectors; candidate-required cases stay in
    their lanes. Unknown commands, options or classifications fail closed.
+   Candidate-free fixtures can declare optional package names in that file;
+   their exact version pins come from the batch head's parity job and are
+   installed into the fresh environment. Missing or conflicting pins refuse
+   before gating, and the result binds those pins beside its test selection.
    `harness` rechecks the final head and `open` requires that exact command
    and runner selection in its result.
    The command sends the head as a git bundle, runs the controller's

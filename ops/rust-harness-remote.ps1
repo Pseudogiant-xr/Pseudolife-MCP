@@ -30,6 +30,8 @@ param(
     [Parameter(Mandatory)] [string[]] $PytestArgs,
     # Base64 JSON of the controller's batch-head unittest selections.
     [string] $UnitCommands = '',
+    # Optional fixture dependencies pinned by the batch-head parity workflow.
+    [string] $ExtraRequirements = '',
     [string] $Nonce = '',
     # Tests point this at a stand-in; integrate.py never passes it.
     [string] $ServicesHook = '',
@@ -137,6 +139,19 @@ try {
         }
     }
 } catch { Stop-Run "cannot read the unittest selections: $($_.Exception.Message)" }
+$requirements = @()
+try {
+    if ($ExtraRequirements) {
+        $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ExtraRequirements))
+        if (-not $json.TrimStart().StartsWith('[')) { throw 'fixture requirements must be an array' }
+        $requirements = @(ConvertFrom-Json -InputObject $json)
+        foreach ($requirement in $requirements) {
+            if ($requirement -isnot [string] -or $requirement -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9.+!-]*$') {
+                throw 'fixture requirements must be literal package==version pins'
+            }
+        }
+    }
+} catch { Stop-Run "cannot read fixture requirements: $($_.Exception.Message)" }
 if (-not (Test-Path -LiteralPath (Join-Path $Repo '.git'))) { Stop-Run "no git clone at the configured repo= path" }
 $Repo = (Resolve-Path -LiteralPath $Repo).ProviderPath.TrimEnd([char]92, [char]47)
 $noHooks = "$Repo.rust-harness-no-hooks"
@@ -333,7 +348,7 @@ try {
             if (Test-Path -LiteralPath $candidate) { $py = $candidate; break }
         }
         if (-not $py) { $failure = "uv made no Python in $([IO.Path]::GetFileName($venv))"; break }
-        & uv pip install --quiet --python $py --torch-backend cpu -e "$gate[dev]"
+        & uv pip install --quiet --python $py --torch-backend cpu -e "$gate[dev]" @requirements
         if ($LASTEXITCODE -ne 0) { $failure = "the head's dev dependencies did not install (uv exit $LASTEXITCODE)"; break }
         $environmentClock.Stop()
         [Console]::Out.WriteLine("rust-harness: fresh environment creation and install: $([math]::Round($environmentClock.Elapsed.TotalSeconds, 3)) s")

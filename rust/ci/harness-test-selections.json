@@ -139,6 +139,7 @@
     },
     "rust/daemon/harness/test_startup_fidelity.py": {
       "kind": "unit",
+      "requirements": ["onnx"],
       "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
     },
     "rust/daemon/harness/test_static.py": {

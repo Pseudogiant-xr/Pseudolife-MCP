@@ -3630,10 +3630,12 @@ def harness_far(tmp_path, monkeypatch):
 
 
 @needs_pwsh
-def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_far):
+@pytest.mark.parametrize("requirements", [(), ("onnx==1.22.0",)])
+def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_far, requirements):
     head, ref, data = harness_far.batch()
 
-    proc = harness_far.run_harness(head, ref, data)
+    encoded = base64.b64encode(json.dumps(requirements).encode()).decode()
+    proc = harness_far.run_harness(head, ref, data, extra=("-ExtraRequirements", encoded))
 
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
     assert _verdict(proc) == "rust-harness: pytest exit 0"
@@ -3646,7 +3648,8 @@ def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_
     environment = Path(installs[0][-1])
     assert environment.name.startswith(harness_far.repo.name + ".rust-harness-env-")
     assert not environment.exists()
-    assert installs[1][:2] == ["pip", "install"] and installs[1][-1] == f"{gate}[dev]"
+    assert installs[1][:2] == ["pip", "install"]
+    assert installs[1][installs[1].index("-e") + 1:] == [f"{gate}[dev]", *requirements]
     assert harness_far.harness_leftovers() == []
 
 

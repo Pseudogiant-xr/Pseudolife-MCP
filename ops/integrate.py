@@ -3594,6 +3594,8 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
         params = " -PytestArgs @(" + ", ".join(_ps_literal(p) for p in recipe.commands[0].paths) + ")"
         unit_commands = base64.b64encode(json.dumps(selection[1:]).encode("utf-8")).decode("ascii")
         params += " -UnitCommands " + _ps_literal(unit_commands)
+        requirements = base64.b64encode(json.dumps(recipe.requirements).encode("utf-8")).decode("ascii")
+        params += " -ExtraRequirements " + _ps_literal(requirements)
         params += f" -LockWaitSeconds {args.lock_wait_seconds}"
         params += f" -DatabaseTurnWaitSeconds {args.database_turn_wait_seconds}"
     else:

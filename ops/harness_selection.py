@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import fnmatch
 import json
 from pathlib import PurePosixPath
+import re
 import shlex
 
 import yaml
@@ -40,9 +41,13 @@ class Command:
 @dataclass(frozen=True)
 class Recipe:
     commands: tuple[Command, ...]
+    requirements: tuple[str, ...] = ()
 
     def record(self):
-        return [command.record() for command in self.commands]
+        result = [command.record() for command in self.commands]
+        if self.requirements:
+            result[0]["requirements"] = list(self.requirements)
+        return result
 
     def display(self):
         out = []
@@ -144,10 +149,15 @@ def _classification(source):
             raise ValueError("unsupported classification schema")
         for path, entry in value["files"].items():
             _path(path)
-            if (not isinstance(entry, dict) or set(entry) - {"kind", "reason", "native_tests", "unit_tests"}
+            if (not isinstance(entry, dict) or set(entry) - {"kind", "reason", "native_tests", "unit_tests", "requirements"}
                     or entry.get("kind") not in ("unit", "native", "mixed")
                     or not isinstance(entry.get("reason"), str) or not entry["reason"].strip()):
                 raise ValueError(f"unclassified test file {path}")
+            requirements = entry.get("requirements", [])
+            if (not isinstance(requirements, list) or
+                    not all(isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name)
+                            for name in requirements)):
+                raise ValueError(f"invalid fixture requirements for {path}")
             if entry["kind"] == "mixed":
                 selectors = [entry[key] for key in ("native_tests", "unit_tests") if key in entry]
                 if (len(selectors) != 1 or not isinstance(selectors[0], list) or not selectors[0]
@@ -301,4 +311,22 @@ def recipe(read, tree_paths):
             raise SelectionError(f"harness path {file} is absent from the batch head")
     commands = [Command("pytest", tuple(sorted(pytest_paths)))]
     commands.extend(sorted(set(additional), key=lambda c: (c.runner, c.paths, c.pattern)))
-    return Recipe(tuple(commands))
+    # Candidate-free fixtures can need optional packages installed explicitly
+    # in the parity job. Bind those to that same head's pins, not a persistent
+    # environment or a second set of versions in the controller.
+    needed = {name for command in commands for path in command.paths
+              for name in classifications.get(_path(path), {}).get("requirements", [])}
+    pins = {name: set() for name in needed}
+    for step in _steps(workflow, "parity-checks"):
+        for words in _lines(step):
+            if words[:4] not in (["python", "-m", "pip", "install"], ["python3", "-m", "pip", "install"]):
+                continue
+            for word in words[4:]:
+                match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9_.-]*)==([A-Za-z0-9][A-Za-z0-9.+!-]*)", word)
+                if match and match[1] in pins:
+                    pins[match[1]].add(word)
+    for name, choices in pins.items():
+        if len(choices) != 1:
+            raise SelectionError(f"fixture dependency {name} needs one exact workflow pin in parity-checks")
+    requirements = tuple(sorted(next(iter(choices)) for choices in pins.values()))
+    return Recipe(tuple(commands), requirements)
