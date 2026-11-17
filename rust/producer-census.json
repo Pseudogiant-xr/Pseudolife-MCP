@@ -367,7 +367,7 @@
     "rust/shim/src/board/state.rs": "dc8c8205e49953d098ee5386a8876562fd5584ee8eee6359f0aae5d53bcb0e05",
     "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
     "rust/shim/src/cache.rs": "266bb3545eb3f2cabc10c84c1d1ace7c9a300db588d32b40fc0eb2dbb0c38502",
-    "rust/shim/src/cli.rs": "dacc5f0dc333254acb115e0cc6c8ec20fe5f0d2c9c7d8351686387792e0b50cb",
+    "rust/shim/src/cli.rs": "d9fb3fd9632c1bdc331fd4279747ee1e6a7f0a9c89bfdfaf5a0c5af2c6f99f38",
     "rust/shim/src/cli/backup/archive.rs": "2bc8fff38e08d8b0e90012e827b175c45dadbcf6527258b16c911dd4ea1aa1fd",
     "rust/shim/src/cli/backup/args.rs": "ed12e2e6a3dd45fe6c656ae29d8d7c52f039d31ca33562522e279ef6f467db2b",
     "rust/shim/src/cli/backup/dump.rs": "a0b8e15d7e91c5c10ddabdb62f4bfa959c1d85b32d136e41c83f42946b5aafc0",
@@ -388,13 +388,13 @@
     "rust/shim/src/cli/board_audit/transport.rs": "c1a3db3bced9cf6d56f6cb39fdf6d9e7aac7c04844ade45f012d06e231cc3d2c",
     "rust/shim/src/cli/briefing_help.txt": "443e8b51f02b3a1ac9c381d3653ceb9a6a6e5142398fe992c29edd3b523ee638",
     "rust/shim/src/cli/briefing_hook.rs": "8bf7c0f73f5377078155f42c08e44c13faaf880f7fe52170b164966e61d2faa5",
-    "rust/shim/src/cli/conductor_watch/args.rs": "8b51d2693c5d1d750301ddcf99d2f1932a6b855f8eec6d8d67bf95d6aa413b5d",
+    "rust/shim/src/cli/conductor_watch/args.rs": "6d3d65ed2b891428ebee0c1cfe3569705d831302279fab7cbf2024103a11f01c",
     "rust/shim/src/cli/conductor_watch/events.rs": "5d4e09484f8374212b34796382a44638e12c778ef195c66492b9483ca2eb617a",
     "rust/shim/src/cli/conductor_watch/help.txt": "f8c467dcb07393f82f34532a1ae88afa93ca445e4cb0df89756f00db8a4ce76f",
-    "rust/shim/src/cli/conductor_watch/mod.rs": "f9f23b579c17fad5d0e70842a3a7f84f091617c396e05ace4eebbf66d548c64a",
+    "rust/shim/src/cli/conductor_watch/mod.rs": "00ed75dea214c6b81b9baccb9d4ae35293331c01fe8029f2f099a6c8b1ce2e0c",
     "rust/shim/src/cli/conductor_watch/sources.rs": "fa750427f62cff550caed1c17783941fe5645690b85140396105a98305d66f45",
     "rust/shim/src/cli/conductor_watch/start.rs": "90deef2dee73d98ca55bf6024a49d020c56d98a273b1a69c00ae13d748173f0d",
-    "rust/shim/src/cli/conductor_watch/tests.rs": "3555dd9bb23701619ab83452bd47de76b7b3e8e5f1376de363506199040f81c6",
+    "rust/shim/src/cli/conductor_watch/tests.rs": "ba0b7a022f508ae7a3313dc4494efed9899f54d7945d936d8bc30caf0f486b90",
     "rust/shim/src/cli/conductor_watch/watch.rs": "dcf44ba5aef08e547c762ae7b6bd616f8eff0f0861c1a3979eb28b1671cc0772",
     "rust/shim/src/cli/connect/args.rs": "404c11aa25a38a3cedd13e531f4129d349a71f5915dbb66ff8e9029a4431e7ec",
     "rust/shim/src/cli/connect/codex.rs": "7401076157c28d2a81615c5c99a996df30c75c124cd180c5ebda2d801291269f",
@@ -4624,7 +4624,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli.rs:278",
+          "location": "rust/shim/src/cli.rs:276",
           "shape": {
             "argv_source": "--help \\n\",",
             "channel": "argv",
@@ -34081,6 +34081,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/briefing_hook.rs:758",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/conductor_watch/mod.rs:358",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -80524,7 +80537,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:35",
       "name": "conductor-watch",
       "shape": {
         "argv_source": "conductor-watch \";",
@@ -80538,7 +80551,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/conductor_watch/mod.rs:41",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
       "name": "delegate-watch",
       "shape": {
         "argv_source": "delegate-watch is deprecated: use pseudolife-mcp conductor-watch\";",
@@ -80552,7 +80565,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/conductor_watch/tests.rs:258",
+      "location": "rust/shim/src/cli/conductor_watch/tests.rs:385",
       "name": "conductor-watch",
       "shape": {
         "argv_source": "conductor-watch : error: unrecognized arguments: --bogus\\n\")",
@@ -121310,7 +121323,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli.rs:278",
+      "location": "rust/shim/src/cli.rs:276",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:help"
     },
@@ -121566,13 +121579,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:35",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:conductor-watch"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/conductor_watch/mod.rs:41",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:358",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:delegate-watch"
     },
@@ -121584,7 +121603,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/conductor_watch/tests.rs:258",
+      "location": "rust/shim/src/cli/conductor_watch/tests.rs:385",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:conductor-watch"
     },

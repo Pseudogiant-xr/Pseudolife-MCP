@@ -74,39 +74,39 @@ lock it works rather than matches.
 | Paths as pathlib prints them; `with_suffix` replacing only the last suffix | `pathlib` |
 | The deprecation notice before anything else for `delegate-watch` | `cli.main` |
 
-## Deferred (the dispatcher's `mode 'conductor-watch' is deferred` line, exit 1)
+## Native completion (18 November 2026)
 
-Every deferral is decided before any effect.
+Neither command name has a dispatcher deferral. Historical `defer-*` case
+names remain stable; their goldens now pin the native answers:
 
-- argparse corners: abbreviations and ambiguous prefixes (case
-  `defer-abbreviation`), `--`, a value starting with `-` after a space (case
-  `defer-dash-value`), an unknown `--word=V`, any other token starting with
-  `-`; help or usage at a width other than `COLUMNS=80`, with `FORCE_COLOR`
-  / `PYTHON_COLORS` / `NO_COLOR` set or on a terminal; non-UTF-8 argv.
-  argparse classifies every argument before it runs any action, so one such
-  token anywhere defers the whole argv, even after a `--help` or a type
-  error that would otherwise act first (cases `defer-help-before-ambiguous`,
-  `defer-error-before-ambiguous`).
-- Number spellings outside plain ASCII decimal and the `nan` / `inf` /
-  `infinity` words (`1_0`, surrounding spaces, other digits, `nan(1)`: case
-  `defer-underscore-interval`); a `--max-age` longer than 640 characters,
-  where the oracle's integer digit limit decides the count (case
-  `defer-age-digit-limit`).
-- On Windows a `--state` starting with two separators (UNC, `\\?\`,
-  `\\.\`), whose drive rules decide pathlib's `name` (case
-  `defer-state-unc`).
-- A state whose last component ends in a dot (pathlib's `with_suffix`
-  treats it differently across versions; case `defer-state-trailing-dot`),
-  a non-UTF-8 path or session id, an empty POSIX `HOME`.
-- A pid record nested past 500 levels (the oracle parses deeper ones, where
-  the record may still name a watcher, and reads its RecursionError, at a
-  depth not measured, as no watcher), pid text with underscores or
-  non-ASCII digits, and outside Windows and Linux any live pid (the oracle
-  runs `ps`); on Linux a stat that cannot be read, is not UTF-8 or has no
-  field 22 (the oracle falls back to `ps`).
-- `PYTHONINTMAXSTRDIGITS` set; an `.agent` file that cannot be opened or
-  read for another reason; a `.stop` write refused with a Windows code
-  outside the listed ones while nothing is printed yet.
+- Help and usage use one fixed layout regardless of terminal, colour or
+  `COLUMNS`. Python locale and integer-digit-limit settings are ignored.
+  Help and errors act in argument order.
+- Abbreviations name the full options; unknown short options, `--` and
+  unknown `--word=value` forms give a usage error with `--help` as the remedy.
+  Unknown values are not echoed. A value beginning with a dash is accepted;
+  if it is itself a known option, use `--option=VALUE` to disambiguate it.
+- Nonstandard numeric spellings are refused with a plain ASCII decimal
+  remedy. `--max-age` has no Python digit limit; a finite positive duration
+  is accepted, including long zero-padded numbers, and overflow is refused.
+- Windows UNC and device state paths are refused with a local-file remedy.
+  Trailing-dot state names and non-Unicode paths, arguments or session ids
+  are refused with a corrected-path or Unicode remedy. An empty POSIX HOME
+  needs a home directory or an explicit state path.
+- A pid string containing underscores or non-ASCII digits, or a pid record
+  exceeding 500 nesting levels, is refused without changing the record or
+  writing a stop request. Repair the record before retrying. Ordinary ASCII
+  pid records retain their existing start-time and lock checks.
+- Unreadable session `.agent` files name the read failure and explicit
+  `--owner` remedy. Stop-write failures always name the writable-directory
+  remedy, with native OS text when no historical errno mapping exists.
+- Failed output exits 1; a failed stdout write reports its cause and remedy
+  on stderr when possible. A failed alias notice prevents any stop request.
+
+Process start times are native on Windows, Linux and macOS. An unqueryable
+process falls back to the existing state-lock proof; it does not defer.
+The missing-source case in `watch.rs` and optional owner-record lookups
+return absence internally, not a dispatcher deferral.
 
 ## Declared divergences
 
@@ -117,8 +117,8 @@ Every deferral is decided before any effect.
   exit status of its interpreter's choosing (1, or 120 from its shutdown
   flush). The candidate writes nothing and exits 1. Both must leave the
   home as setup left it: no stop request.
-- Not cased: under the deprecated name, a `.stop` write refused with a
-  Windows code outside the listed ones, after the notice was printed. Both
+- Not cased: a `.stop` write refused with a Windows code outside the
+  listed ones, under either command name. Both
   refuse with exit 2 and nothing changed; the reason in parentheses is the
   C runtime's errno text in the oracle and Rust's description of the Win32
   code in the candidate. With a listed code (case
@@ -132,7 +132,7 @@ a record names no watcher (unit test `record_pids_read_as_int_does`).
 
 ## Hosted CI and goldens
 
-The row runs live on both OSes in the `w1c-connection` shard. Every case is
+The row replays committed Rust regression goldens on both OSes in the `w1c-connection` shard. Every case is
 built from fixed bytes, so all are golden cases. Both goldens bind the
 oracle tree with the conductor-watch defect fixes (the `_state_path`,
 `_stop`, `_running` and `_non_negative` refusals above): Windows from this

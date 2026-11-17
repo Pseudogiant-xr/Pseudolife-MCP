@@ -6,8 +6,7 @@
 //! owner refusals, and a start that finds a watcher already running on its
 //! state (same owner: exit 0; another: exit 2), with or without `--detach`.
 //! `start.rs` runs the watch (`watch.rs`) in the foreground or detached.
-//! The argument spellings listed in `rust/cli_harness/rows/conductor_watch.md`
-//! still defer before any effect.
+//! Every invocation is answered natively, including preflight refusals.
 //!
 //! `--stop` never kills: it writes the `.stop` request only when the pid
 //! record names a live process whose start time is the one recorded, and
@@ -27,10 +26,8 @@ use std::{
     process::ExitCode,
 };
 
-/// Outside the reproduced domain: the dispatcher's deferral line.
-#[derive(Debug)]
-struct Defer;
-type Res<T> = Result<T, Defer>;
+/// A preflight refusal: no files have been changed and no child started.
+type Res<T> = Result<T, String>;
 
 const EXIT_OK: u8 = 0;
 const EXIT_SETUP: u8 = 2;
@@ -40,10 +37,7 @@ const PROG: &str = "pseudolife-mcp conductor-watch";
 const DEPRECATED_MODE: &str =
     "pseudolife-mcp delegate-watch is deprecated: use pseudolife-mcp conductor-watch";
 const CLEARS: &str = "decision events";
-/// Pid records nested deeper defer: the oracle's `json.loads` raises
-/// RecursionError (read as no watcher) somewhere past 900 levels on this
-/// path, which was not measured, and parses anything shallower, where the
-/// record may still name a live watcher; this stays far inside it.
+/// Refuse excessively nested pid records before querying or changing anything.
 const DEPTH: usize = 500;
 
 /// Python `repr()` of a str.
@@ -62,7 +56,9 @@ fn py_str(value: Option<&J>) -> String {
 
 /// `str(path)`: pathlib's spelling, which must be text to be printed here.
 fn shown(path: &Path) -> Res<String> {
-    path.to_str().map(str::to_owned).ok_or(Defer)
+    path.to_str().map(str::to_owned).ok_or_else(|| {
+        "a watcher path is not Unicode; use a Unicode --state path and home directory".into()
+    })
 }
 
 /// `Path.with_suffix(suffix)` (CPython 3.11), for a last component that is
@@ -72,9 +68,9 @@ fn with_suffix(path: &Path, suffix: &str) -> Res<PathBuf> {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or(Defer)?;
+        .ok_or("--state has no Unicode file name; use a Unicode file path")?;
     if name.is_empty() || name.ends_with('.') {
-        return Err(Defer);
+        return Err("--state file name ends in a dot; remove the trailing dot".into());
     }
     let stem = match name.rfind('.') {
         Some(index) if index > 0 => &name[..index],
@@ -115,17 +111,16 @@ impl Out {
 /// The process environment and stream facts a decision reads.
 struct Context<'a> {
     var: &'a dyn Fn(&str) -> Option<OsString>,
-    columns_80: bool,
-    colour_stdout: bool,
-    colour_stderr: bool,
-    utf8_argv: bool,
 }
 
 impl Context<'_> {
     fn text(&self, name: &str) -> Res<Option<String>> {
         match (self.var)(name) {
             None => Ok(None),
-            Some(value) => value.into_string().map(Some).map_err(|_| Defer),
+            Some(value) => value
+                .into_string()
+                .map(Some)
+                .map_err(|_| format!("{name} is not Unicode; set {name} to a Unicode value")),
         }
     }
 }
@@ -237,7 +232,7 @@ fn record_pid(value: Option<&J>) -> Res<Option<i64>> {
         Some(J::Wtf(_)) => None,
         Some(J::Str(text)) => {
             if !text.is_ascii() || text.contains('_') {
-                return Err(Defer);
+                return Err("pid record has non-ASCII digits or underscores; use an ASCII decimal pid in the record before retrying".into());
             }
             // An ASCII str reaches `PyLong_FromString` unchanged, which
             // strips C `isspace` only; U+001C..U+001F stay and raise.
@@ -265,7 +260,7 @@ fn running(state: &Path) -> Res<Option<pyjson::Dict>> {
     let record = match pyjson::loads(&text, DEPTH) {
         Ok(J::Dict(record)) => record,
         Ok(_) | Err(pyjson::Refused::NotJson) => return Ok(None),
-        Err(pyjson::Refused::TooDeep) => return Err(Defer),
+        Err(pyjson::Refused::TooDeep) => return Err("pid record exceeds 500 nesting levels; restore a valid watcher pid record before retrying".into()),
     };
     // `int(record["pid"])`: a missing key and a JSON null both fail there.
     let Some(pid) = record_pid(pyjson::get(&record, "pid"))? else {
@@ -359,7 +354,8 @@ fn lstart(seconds: i64) -> Option<String> {
 
 /// `resolve_digest_path(session)`: the session's digest file.
 fn digest(session: &str) -> Res<PathBuf> {
-    super::wait_mail::digest_path(&OsString::from(session)).ok_or(Defer)
+    super::wait_mail::digest_path(&OsString::from(session)).ok_or_else(||
+        "cannot resolve the session digest path; set PSEUDOLIFE_DIGEST_DIR to a readable Unicode directory".into())
 }
 
 /// `CLAUDE_CODE_SESSION_ID`, `None` when unset or empty (`if not session`).
@@ -400,8 +396,7 @@ fn resolve_owner(flag: Option<&str>, context: &Context<'_>) -> Res<Result<String
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(Err(format!("no board address file at {name}")));
         }
-        // Unreadable in a way not reproduced here.
-        Err(_) => return Err(Defer),
+        Err(error) => return Err(agent_read_error(&error)),
     };
     if info.file_type().is_symlink() {
         return Ok(Err(format!("{name} is a link, not a regular file")));
@@ -422,12 +417,20 @@ fn resolve_owner(flag: Option<&str>, context: &Context<'_>) -> Res<Result<String
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    let file = options.open(&path).map_err(|_| Defer)?;
-    if !file.metadata().map_err(|_| Defer)?.is_file() {
+    let file = options
+        .open(&path)
+        .map_err(|error| agent_read_error(&error))?;
+    if !file
+        .metadata()
+        .map_err(|error| agent_read_error(&error))?
+        .is_file()
+    {
         return Ok(Err(format!("{name} is not a regular file")));
     }
     let mut head = Vec::new();
-    file.take(256).read_to_end(&mut head).map_err(|_| Defer)?;
+    file.take(256)
+        .read_to_end(&mut head)
+        .map_err(|error| agent_read_error(&error))?;
     let first = head.split(|b| *b == b'\n').next().unwrap_or_default();
     let mut end = first.len();
     while end > 0 && first[end - 1] == b'\r' {
@@ -443,6 +446,13 @@ fn resolve_owner(flag: Option<&str>, context: &Context<'_>) -> Res<Result<String
     })
 }
 
+fn agent_read_error(error: &io::Error) -> String {
+    format!(
+        "cannot read the session .agent file ({}); pass --owner <32-hex board agent id of the session to wake>",
+        error.kind()
+    )
+}
+
 /// `default_state(environ, owner)`.
 fn default_state(owner: Option<&str>, context: &Context<'_>) -> Res<Option<PathBuf>> {
     if let Some(session) = session(context)? {
@@ -453,8 +463,7 @@ fn default_state(owner: Option<&str>, context: &Context<'_>) -> Res<Option<PathB
     };
     #[cfg(unix)]
     if context.text("HOME")?.is_some_and(|home| home.is_empty()) {
-        // POSIX `Path.home()` with an empty HOME: not reproduced.
-        return Err(Defer);
+        return Err("HOME is empty; set HOME to your home directory or pass --state <path>".into());
     }
     let home = crate::credentials::python_home_with(|key| (context.var)(key));
     Ok(Some(super::wait_mail::pathlib(
@@ -495,25 +504,11 @@ fn already(record: &pyjson::Dict) -> Out {
     )
 }
 
-/// `main` up to the state's lock; `Err(Defer)` past it.
+/// Decide every preflight before taking the state lock.
 fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
-    // Outside UTF-8 decoding CPython sees other characters than these.
-    if !context.utf8_argv && !argv.iter().all(|argument| argument.is_ascii()) {
-        return Err(Defer);
-    }
-    // json.loads reads integers under this digit limit (4300 unset).
-    if context.text("PYTHONINTMAXSTRDIGITS")?.is_some() {
-        return Err(Defer);
-    }
     let parsed = args::parse(argv);
-    let parser_output = matches!(parsed, args::Parsed::Help | args::Parsed::Error(_));
-    if parser_output && !context.columns_80 {
-        return Err(Defer);
-    }
     let args = match parsed {
-        args::Parsed::Help if context.colour_stdout => return Err(Defer),
         args::Parsed::Help => return Ok(Out::stdout(args::HELP.trim_end().to_owned(), EXIT_OK)),
-        args::Parsed::Error(_) if context.colour_stderr => return Err(Defer),
         args::Parsed::Error(message) => {
             return Ok(Out {
                 stderr: format!("{}{PROG}: error: {message}\n", args::usage()),
@@ -521,7 +516,6 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
                 ..Out::default()
             });
         }
-        args::Parsed::Defer => return Err(Defer),
         args::Parsed::Args(args) => args,
     };
     let owner = resolve_owner(args.owner.as_deref(), context)?;
@@ -530,6 +524,7 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
         None => default_state(owner.as_ref().ok().map(String::as_str), context)?,
     };
     let home = crate::credentials::python_home_with(|key| (context.var)(key));
+    shown(&home)?;
     if args.stop {
         let Some(state) = state else {
             return Ok(Out::say(
@@ -558,7 +553,7 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
             ));
         }
     };
-    let state = state.ok_or(Defer)?;
+    let state = state.ok_or("cannot choose a state path; pass --state <path>")?;
     // One watcher per owner: one already watching for this owner from
     // another state file answers the start.
     let record = match running(&state)? {
@@ -624,7 +619,7 @@ fn stop(state: &Path) -> Res<Out> {
 /// Win32 code (`_dosmaperr`), then that errno's message. Codes 3, 5 and 32
 /// were measured against CPython 3.11 (2026-11-13: a missing directory, a
 /// directory or hidden file, a file held with no sharing); 2, the rest of
-/// 19..=36 and 112 follow the C runtime's documented table. Others defer.
+/// 19..=36 and 112 follow the C runtime's documented table. Other codes use the native error description.
 fn strerror(error: &io::Error) -> Option<String> {
     let code = error.raw_os_error()?;
     if cfg!(windows) {
@@ -683,92 +678,63 @@ fn emit(stream: &mut impl io::Write, text: &str) -> Result<(), usize> {
     super::move_cli::emit(stream, &super::text_bytes(text))
 }
 
-/// `None` defers to the dispatcher before any effect.
+/// Every invocation returns a native result, including stream failures.
 pub(super) fn run(mode: &str, values: Vec<OsString>) -> Option<ExitCode> {
-    use std::io::IsTerminal;
-    let argv = values
+    let var = |name: &str| std::env::var_os(name);
+    let context = Context { var: &var };
+    let mut out = match values
         .into_iter()
         .map(OsString::into_string)
         .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    let colour = super::move_cli::colour_env(|name| std::env::var_os(name).is_some());
-    let var = |name: &str| std::env::var_os(name);
-    let context = Context {
-        var: &var,
-        columns_80: std::env::var_os("COLUMNS").is_some_and(|value| value == "80"),
-        colour_stdout: colour || io::stdout().is_terminal(),
-        colour_stderr: colour || io::stderr().is_terminal(),
-        utf8_argv: super::move_cli::utf8_argv(),
+    {
+        Ok(argv) => decide(&argv, &context).unwrap_or_else(|reason| Out::say(&reason, EXIT_SETUP)),
+        Err(_) => Out::say(
+            "an argument is not Unicode; pass Unicode option values and file paths",
+            EXIT_USAGE,
+        ),
     };
-    let out = decide(&argv, &context).ok()?;
-    let notice = if mode == "delegate-watch" {
-        format!(
-            "{DEPRECATED_MODE}
-"
-        )
-    } else {
-        String::new()
-    };
-    // The oracle prints the deprecation notice before it does anything
-    // else: a notice that cannot be written stops it before the stop
-    // request, so the request must not have been made by then.
-    let mut wrote = match emit(&mut io::stderr().lock(), &notice) {
-        Ok(()) => !notice.is_empty(),
-        Err(0) => return None,
-        Err(_) => return Some(ExitCode::from(1)),
-    };
-    let mut out = out;
+    if mode == "delegate-watch"
+        && emit(&mut io::stderr().lock(), &format!("{DEPRECATED_MODE}\n")).is_err()
+    {
+        return Some(ExitCode::from(1));
+    }
+    // Do not hold either output lock across the watch or the detached child.
     if let Some(start) = out.start.take() {
-        let code = if start.args.detach {
+        return Some(ExitCode::from(if start.args.detach {
             start::detach(&start)
         } else {
             start::foreground(&start)
-        };
-        return Some(ExitCode::from(code));
+        }));
     }
-    if let Some(path) = out.stop_file.take() {
-        // The pid file was just read beside it, so its directory exists
-        // (the oracle's mkdir is a no-op). A refused write changed nothing:
-        // `_stop` says why and exits 2. A reason not reproduced defers while
-        // nothing is printed; after the notice it is Rust's own text
-        // (declared in the row's notes).
-        match write_stop(&path) {
-            Ok(()) => wrote = true,
-            Err(error) => {
-                let reason = match strerror(&error) {
-                    Some(reason) => reason,
-                    None if !wrote => return None,
-                    None => error.to_string(),
-                };
-                // The state was printable, so its sibling and directory are.
-                out = Out::say(&stop_refusal(&path, &reason).ok()?, EXIT_SETUP);
-            }
-        }
+    Some(ExitCode::from(finish(
+        out,
+        &mut io::stdout().lock(),
+        &mut io::stderr().lock(),
+    )))
+}
+
+/// Stream failures never turn an invocation into a dispatcher fallback.
+fn finish(mut out: Out, stdout: &mut impl io::Write, stderr: &mut impl io::Write) -> u8 {
+    if let Some(path) = out.stop_file.take()
+        && let Err(error) = write_stop(&path)
+    {
+        let reason = strerror(&error).unwrap_or_else(|| error.to_string());
+        out = Out::say(
+            &stop_refusal(&path, &reason).unwrap_or_else(|reason| reason),
+            EXIT_SETUP,
+        );
     }
-    let mut failed = false;
-    for (stderr, text) in [(false, &out.stdout), (true, &out.stderr)] {
-        if failed || text.is_empty() {
-            continue;
-        }
-        let result = if stderr {
-            emit(&mut io::stderr().lock(), text)
-        } else {
-            emit(&mut io::stdout().lock(), text)
-        };
-        match result {
-            Ok(()) => wrote = true,
-            Err(written) => {
-                failed = true;
-                wrote |= written > 0;
-            }
-        }
+    if emit(stdout, &out.stdout).is_err() {
+        let _ = emit(
+            stderr,
+            "conductor-watch: cannot write stdout; make stdout writable and retry\n",
+        );
+        return 1;
     }
-    match (failed, wrote) {
-        (false, _) => Some(ExitCode::from(out.code)),
-        // Nothing left and nothing written: the deferral line instead.
-        (true, false) => None,
-        (true, true) => Some(ExitCode::from(1)),
+    if emit(stderr, &out.stderr).is_err() {
+        return 1;
     }
+    out.code
 }
 
 #[cfg(test)]

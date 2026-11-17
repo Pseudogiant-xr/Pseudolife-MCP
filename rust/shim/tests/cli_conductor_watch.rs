@@ -29,6 +29,189 @@ const OWNER: &str = "0123456789abcdef0123456789abcdef";
 const AGENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "fedcba9876543210fedcba9876543210";
 
+#[test]
+fn native_preflight_answers_every_former_argument_deferral() {
+    let sandbox = Sandbox::new();
+    let state = sandbox.state("absent");
+    let state = state.to_str().unwrap();
+    let mut failures = Vec::new();
+    let long = "1".repeat(4301);
+    for (argv, code, message) in [
+        (vec!["--sto"], 2, "--stop"),
+        (vec!["--s"], 2, "full option"),
+        (vec!["--"], 2, "--help"),
+        (vec!["-x"], 2, "--help"),
+        (vec!["--unknown=fixture-secret"], 2, "--help"),
+        (vec!["--interval", "1_0"], 2, "ASCII decimal"),
+        (vec!["--settle", "nan(1)"], 2, "ASCII decimal"),
+        (vec!["--interval", "١"], 2, "ASCII decimal"),
+        (vec!["--max-age", &long], 2, "finite"),
+        (
+            vec!["--stop", "--state", "-watch.json"],
+            0,
+            "nothing changed",
+        ),
+        (vec!["--stop", "--state", state], 0, "nothing changed"),
+        (vec!["--help", "--s"], 0, "usage:"),
+    ] {
+        let out = sandbox.run(&argv);
+        let output = format!("{}{}", text(&out.stdout), text(&out.stderr));
+        if out.status.code() != Some(code)
+            || !output.contains(message)
+            || output.contains("deferred")
+            || output.contains("fixture-secret")
+        {
+            failures.push(format!("expected {code}/{message}: {output}"));
+        }
+    }
+    #[cfg(windows)]
+    for path in [
+        r"\\server\share\watch.json",
+        r"\\?\C:\watch.json",
+        r"\\.\watch",
+    ] {
+        let out = sandbox.run(&["--stop", "--state", path]);
+        if out.status.code() != Some(2) || !text(&out.stderr).contains("local --state") {
+            failures.push(text(&out.stderr));
+        }
+    }
+    assert!(!state.is_empty());
+    assert_eq!(sandbox.board.count("register"), 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_help_and_unicode_ignore_python_locale_and_layout_settings() {
+    let sandbox = Sandbox::new();
+    let mut failures = Vec::new();
+    for mode in ["conductor-watch", "delegate-watch"] {
+        let path = std::env::join_paths([sandbox.root.join("bin")]).unwrap();
+        let env = sandbox.env(&path);
+        for columns in ["30", "100"] {
+            let out =
+                common::cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+                    .envs(env.clone())
+                    .current_dir(sandbox.root.join("work"))
+                    .env("COLUMNS", columns)
+                    .env("FORCE_COLOR", "1")
+                    .env("NO_COLOR", "1")
+                    .env("PYTHON_COLORS", "1")
+                    .env("PYTHONINTMAXSTRDIGITS", "invalid")
+                    .env("PYTHONUTF8", "0")
+                    .env("LC_ALL", "C")
+                    .args([mode, "--help"])
+                    .output()
+                    .unwrap();
+            if out.status.code() != Some(0) || !text(&out.stdout).starts_with("usage:") {
+                failures.push(text(&out.stderr));
+            }
+        }
+    }
+    let state = sandbox.state("é");
+    let out = sandbox
+        .command(&["--stop", "--state", state.to_str().unwrap()])
+        .env("PYTHONUTF8", "0")
+        .env("LC_ALL", "C")
+        .output()
+        .unwrap();
+    if out.status.code() != Some(0) {
+        failures.push(text(&out.stderr));
+    }
+    assert_eq!(sandbox.board.count("register"), 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_path_and_record_refusals_preserve_files_and_do_not_start() {
+    let sandbox = Sandbox::new();
+    let state = sandbox.state("record");
+    fs::create_dir_all(state.parent().unwrap()).unwrap();
+    let mut failures = Vec::new();
+    for body in [
+        r#"{"pid":"1_0"}"#.to_owned(),
+        r#"{"pid":"١"}"#.to_owned(),
+        format!(
+            r#"{{"extra":{}0{},"pid":0}}"#,
+            "[".repeat(501),
+            "]".repeat(501)
+        ),
+    ] {
+        fs::write(state.with_extension("pid"), &body).unwrap();
+        let out = sandbox.run(&["--stop", "--state", state.to_str().unwrap()]);
+        if out.status.code() != Some(2) || !text(&out.stderr).contains("pid record") {
+            failures.push(text(&out.stderr));
+        }
+        assert_eq!(
+            fs::read_to_string(state.with_extension("pid")).unwrap(),
+            body
+        );
+        assert!(!state.with_extension("stop").exists());
+    }
+    let out = sandbox.run(&["--stop", "--state", &format!("{}.", state.display())]);
+    if out.status.code() != Some(2) || !text(&out.stderr).contains("trailing dot") {
+        failures.push(text(&out.stderr));
+    }
+    // A non-directory ancestor makes stat/open fail without special privileges.
+    let blocked = sandbox.root.join("blocked");
+    fs::write(&blocked, b"fixture").unwrap();
+    let out = sandbox
+        .command(&[])
+        .env("CLAUDE_CODE_SESSION_ID", "fixture-session")
+        .env("PSEUDOLIFE_DIGEST_DIR", &blocked)
+        .output()
+        .unwrap();
+    if out.status.code() != Some(2)
+        || !text(&out.stderr).contains("--owner")
+        || text(&out.stderr).contains("deferred")
+    {
+        failures.push(text(&out.stderr));
+    }
+    assert_eq!(fs::read(&blocked).unwrap(), b"fixture");
+    assert_eq!(sandbox.board.count("register"), 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_non_unicode_arguments_and_session_ids_have_a_remedy() {
+    let sandbox = Sandbox::new();
+    #[cfg(unix)]
+    let opaque = {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(vec![0xff])
+    };
+    #[cfg(windows)]
+    let opaque = {
+        use std::os::windows::ffi::OsStringExt;
+        OsString::from_wide(&[0xd800])
+    };
+    let arg = sandbox.command(&["--state"]).arg(&opaque).output().unwrap();
+    let session = sandbox
+        .command(&[])
+        .env("CLAUDE_CODE_SESSION_ID", &opaque)
+        .output()
+        .unwrap();
+    let mut failures = Vec::new();
+    for out in [arg, session] {
+        if out.status.code() != Some(2) || !text(&out.stderr).contains("Unicode") {
+            failures.push(text(&out.stderr));
+        }
+    }
+    let state = sandbox.state("absent");
+    let out = sandbox
+        .command(&[
+            "--stop",
+            "--owner",
+            OWNER,
+            "--state",
+            state.to_str().unwrap(),
+        ])
+        .env("HOME", "")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// A board on a loopback port this test owns, answering the calls a
 /// watcher makes; the owner is always listed.
 struct Board {

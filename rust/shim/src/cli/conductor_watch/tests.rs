@@ -10,6 +10,139 @@ use std::{collections::HashMap, sync::atomic::AtomicUsize};
 const OWNER: &str = "0123456789abcdef0123456789abcdef";
 const OTHER: &str = "fedcba9876543210fedcba9876543210";
 
+#[test]
+fn native_output_failures_exit_without_a_dispatcher_fallback() {
+    struct Broken(usize);
+    impl io::Write for Broken {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let written = bytes.len().min(self.0);
+            if written == 0 {
+                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+            }
+            self.0 -= written;
+            Ok(written)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    for count in [0, 3] {
+        let mut stderr = Vec::new();
+        assert_eq!(
+            finish(
+                Out::stdout("help".into(), 0),
+                &mut Broken(count),
+                &mut stderr
+            ),
+            1
+        );
+        assert!(
+            String::from_utf8(stderr)
+                .unwrap()
+                .contains("make stdout writable")
+        );
+    }
+    assert_eq!(
+        finish(Out::say("usage", 2), &mut Vec::new(), &mut Broken(0)),
+        1
+    );
+    let mut stdout = Vec::new();
+    assert_eq!(
+        finish(Out::stdout("help".into(), 0), &mut stdout, &mut Vec::new()),
+        0
+    );
+    assert_eq!(stdout, super::super::text_bytes("help\n"));
+}
+
+#[test]
+fn native_arguments_never_need_the_python_parser() {
+    for argv in [
+        &["--sto"][..],
+        &["--s"],
+        &["--"],
+        &["-x"],
+        &["--zz=private"],
+        &["--settle", "nan(1)"],
+        &["--interval", "1_0"],
+    ] {
+        let out = decided(argv);
+        assert_eq!(out.code, 2, "{argv:?}");
+        assert!(!out.stderr.contains("private"));
+    }
+    assert!(decided(&["--sto"]).stderr.contains("--stop"));
+    let out = decided(&["--stop", "--state", "-watch.json"]);
+    assert_eq!(out.code, 0);
+    assert!(
+        decided(&["--owner", OWNER, "--interval", "0.1"])
+            .start
+            .is_some()
+    );
+    assert!(
+        decided(&["--max-age", &"1".repeat(641)])
+            .stderr
+            .contains("finite")
+    );
+    assert!(
+        decided(&[
+            "--owner",
+            OWNER,
+            "--state",
+            "watch.json",
+            "--max-age",
+            &format!("{}1", "0".repeat(641))
+        ])
+        .start
+        .is_some()
+    );
+}
+
+#[test]
+fn native_help_ignores_python_environment_and_stream_layout() {
+    let vars = |name: &str| match name {
+        "PYTHONINTMAXSTRDIGITS" | "FORCE_COLOR" => Some(OsString::from("invalid")),
+        "COLUMNS" => Some(OsString::from("30")),
+        "LANG" => Some(OsString::from("C")),
+        _ => None,
+    };
+    let context = Context { var: &vars };
+    let out = decide(&["--help".into()], &context).expect("native fixed help");
+    assert_eq!(out.code, 0);
+    assert!(decide(&["--owner".into(), "é".into()], &context).is_ok());
+}
+
+#[test]
+fn native_preflight_refusals_leave_the_state_unchanged() {
+    let scratch = Scratch::new();
+    let state = scratch.state();
+    let trailing = format!("{state}.");
+    assert!(
+        format!("{:?}", decide_with(&["--stop", "--state", &trailing], &[])).contains("--state")
+    );
+    for pid in ["1_0", "١"] {
+        scratch.pid_file(&format!(r#"{{"pid":"{pid}"}}"#));
+        let result = decide_with(&["--stop", "--state", &state], &[]);
+        assert!(format!("{result:?}").contains("pid record"));
+        assert!(!scratch.0.join("s.stop").exists());
+    }
+    scratch.pid_file(&format!(
+        r#"{{"extra":{}0{},"pid":0}}"#,
+        "[".repeat(501),
+        "]".repeat(501)
+    ));
+    let result = decide_with(&["--stop", "--state", &state], &[]);
+    assert!(format!("{result:?}").contains("500"));
+    scratch.pid_file(r#"{"pid":0}"#);
+    assert_eq!(decided(&["--stop", "--state", &state]).code, 0);
+    #[cfg(unix)]
+    assert!(
+        format!(
+            "{:?}",
+            decide_with(&["--stop", "--owner", OWNER], &[("HOME", "")])
+        )
+        .contains("HOME")
+    );
+}
+
 struct Scratch(PathBuf);
 
 impl Scratch {
@@ -42,13 +175,7 @@ fn decide_with(argv: &[&str], vars: &[(&str, &str)]) -> Res<Out> {
         .map(|(key, value)| ((*key).to_owned(), OsString::from(value)))
         .collect();
     let var = move |name: &str| vars.get(name).cloned();
-    let context = Context {
-        var: &var,
-        columns_80: true,
-        colour_stdout: false,
-        colour_stderr: false,
-        utf8_argv: true,
-    };
+    let context = Context { var: &var };
     let argv: Vec<String> = argv.iter().map(|item| (*item).to_owned()).collect();
     decide(&argv, &context)
 }
@@ -467,7 +594,7 @@ fn a_running_watcher_answers_a_start() {
 }
 
 #[test]
-fn a_start_is_decided_before_any_effect_and_edge_spellings_still_defer() {
+fn a_start_is_decided_before_any_effect_and_edge_spellings_are_native() {
     let scratch = Scratch::new();
     let state = scratch.state();
     for (argv, detach) in [
@@ -481,16 +608,20 @@ fn a_start_is_decided_before_any_effect_and_edge_spellings_still_defer() {
         assert_eq!(start.files.state, Path::new(&state));
         assert!(out.stdout.is_empty() && out.stderr.is_empty());
     }
-    for argv in [&["--sto"][..], &["--stop", "--state", &format!("{state}.")]] {
-        assert!(decide_with(argv, &[]).is_err(), "{argv:?}");
-    }
+    assert_eq!(decided(&["--sto"]).code, 2);
+    assert!(decide_with(&["--stop", "--state", &format!("{state}.")], &[]).is_err());
     // Refused or answered before any effect now, no longer deferred.
     assert_eq!(decided(&["--stop", "--state", ""]).code, 2);
     assert_eq!(
         decided(&["--stop", "--interval", "inf", "--state", &state]).code,
         0
     );
-    assert!(decide_with(&["--stop"], &[("PYTHONINTMAXSTRDIGITS", "0")]).is_err());
+    assert_eq!(
+        decide_with(&["--stop"], &[("PYTHONINTMAXSTRDIGITS", "0")])
+            .unwrap()
+            .code,
+        2
+    );
     assert_eq!(fs::read_dir(&scratch.0).unwrap().count(), 0);
 }
 

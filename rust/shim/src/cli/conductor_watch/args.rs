@@ -1,17 +1,4 @@
-//! `conductor_watch_cli.parser().parse_args` for the argv this port answers.
-//!
-//! Admitted tokens: every option spelled in full, `-h`, `--help`,
-//! `--opt=V` (on a flag, argparse's "ignored explicit argument" error), a
-//! value as the next argument when it does not start with `-`, positional
-//! words and unknown `--words` that no option starts with (argparse's
-//! "unrecognized arguments" error). Options act in order, as argparse's do:
-//! help exits where it is met, a missing value or a refused type errors
-//! there, extras are reported once every option is consumed. Repeats are
-//! argparse's: the last value wins, `--lease` appends. An abbreviation, any
-//! other token starting with `-`, `--`, a value starting with `-` after a
-//! space, an unknown `--word=V`, a number spelling outside plain ASCII
-//! decimal, `inf`, `infinity` and `nan` (`1_0`, spaces, other digits) and
-//! a Windows `--state` starting with two separators defer.
+//! Native conductor-watch arguments. Options use their full names; help has a fixed layout.
 
 /// `parser().format_help()` at `COLUMNS=80` (argparse wraps at 78).
 pub(super) const HELP: &str = include_str!("help.txt");
@@ -93,7 +80,6 @@ pub(super) enum Parsed {
     Help,
     /// argparse's error message (after `prog: error: `), exit 2.
     Error(String),
-    Defer,
 }
 
 const FLAGS: [&str; 2] = ["--detach", "--stop"];
@@ -187,34 +173,28 @@ fn python_float(text: &str) -> Result<Option<f64>, ()> {
     text.parse::<f64>().map(Some).map_err(|_| ())
 }
 
-/// CPython applies its integer digit limit only to texts longer than this
-/// (`sys.int_info.str_digits_check_threshold`).
-const INT_LIMIT_FREE: usize = 640;
-
 /// `lease_cli.parse_duration` then `_age`'s check. Its pattern is ASCII
 /// (`re.ASCII`), so a non-ASCII digit or unit letter is no duration.
-fn age(text: &str) -> Result<Result<(), String>, ()> {
+fn age(text: &str) -> Result<(), String> {
     let stripped = super::super::pyjson::py_strip(text);
-    // Past this length CPython's integer digit limit (4300 by default,
-    // moved by PYTHONINTMAXSTRDIGITS) may refuse the count: not decided here.
-    if stripped.len() > INT_LIMIT_FREE {
-        return Err(());
-    }
     // `([0-9]+)([smhd]?)` under IGNORECASE: the unit is one optional letter.
     let number = stripped
         .strip_suffix(|c: char| "smhdSMHD".contains(c))
         .unwrap_or(stripped);
     if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
-        return Ok(Err(format!(
+        return Err(format!(
             "not a duration: {} (use 90, 90s, 20m, 2h or 7d)",
             super::py_repr(text)
-        )));
+        ));
     }
     // Any multiple of zero seconds is zero; any other count is above it.
     if number.bytes().all(|b| b == b'0') {
-        return Ok(Err("must be above 0".into()));
+        return Err("must be above 0".into());
     }
-    Ok(Ok(()))
+    if !age_seconds(text).is_some_and(f64::is_finite) {
+        return Err("duration must be finite; use a smaller --max-age".into());
+    }
+    Ok(())
 }
 
 /// argparse's type call: `Ok(None)` accepts, `Ok(Some(message))` refuses.
@@ -240,11 +220,18 @@ fn check(option: &str, kind: Kind, value: &str) -> Result<Option<String>, ()> {
                 Some(_) => None,
             }
         }
-        Kind::Age => match age(value)? {
+        Kind::Age => match age(value) {
             Ok(()) => None,
             Err(message) => refused(&message),
         },
-        Kind::State => match path_name(value)? {
+        Kind::State
+            if cfg!(windows)
+                && value.starts_with(['/', '\\'])
+                && value[1..].starts_with(['/', '\\']) =>
+        {
+            refused("UNC and device paths are not supported; use a local --state file path")
+        }
+        Kind::State => match path_name(value) {
             "" | "." | ".." => refused(&format!(
                 "{} has no file name; give a file path such as \
                  ~/.pseudolife-mcp/watch/<owner>.json",
@@ -259,23 +246,19 @@ fn check(option: &str, kind: Kind, value: &str) -> Result<Option<String>, ()> {
 /// drive and root, `""` when there is none. pathlib drops empty and `.`
 /// components. On Windows `/` also separates and `X:` (an ASCII letter) is
 /// a drive; a text starting with two separators (UNC, `\\?\`, `\\.\`) has
-/// drive rules not reproduced here, so it defers.
-fn path_name(text: &str) -> Result<&str, ()> {
+/// already been refused by `check`.
+fn path_name(text: &str) -> &str {
     let separator = |c: char| c == '/' || (cfg!(windows) && c == '\\');
     let mut rest = text;
     if cfg!(windows) {
-        if rest.starts_with(separator) && rest[1..].starts_with(separator) {
-            return Err(());
-        }
         let bytes = rest.as_bytes();
         if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
             rest = &rest[2..];
         }
     }
-    Ok(rest
-        .split(separator)
+    rest.split(separator)
         .rfind(|part| !part.is_empty() && *part != ".")
-        .unwrap_or(""))
+        .unwrap_or("")
 }
 
 fn store(args: &mut Args, option: &str, value: &str) {
@@ -287,36 +270,23 @@ fn store(args: &mut Args, option: &str, value: &str) {
     }
 }
 
-/// Whether argparse classifies `token` in a way this port reproduces: a
-/// word, an option spelled in full (alone or as `--opt=V`), or an unknown
-/// `--word` no option starts with.
-fn classified(token: &str) -> bool {
-    if !token.starts_with('-')
-        || matches!(token, "-h" | "--help")
-        || FLAGS.contains(&token)
-        || kind(token).is_some()
-    {
-        return true;
-    }
-    if let Some((option, _)) = token.split_once('=') {
-        return kind(option).is_some() || FLAGS.contains(&option);
-    }
-    token.len() > 2
-        && token.starts_with("--")
-        && !token.contains(' ')
-        && !known().any(|option| option.starts_with(token))
+fn unknown(token: &str) -> Parsed {
+    let option = token.split('=').next().unwrap_or(token);
+    let choices: Vec<_> = known().filter(|name| name.starts_with(option)).collect();
+    let message = if choices.is_empty() || option == "-" || option == "--" {
+        "unsupported option; use --help and spell options in full".to_owned()
+    } else {
+        format!(
+            "abbreviated option; use the full option {}",
+            choices.join(" or ")
+        )
+    };
+    Parsed::Error(message)
 }
 
 /// argparse's consumption order: options act as they are met; words
 /// collect as extras, reported once every option has been consumed.
 pub(super) fn parse(argv: &[String]) -> Parsed {
-    // argparse classifies every argument before it runs any action, so a
-    // token it settles its own way (an abbreviation, an ambiguous prefix,
-    // `--`, `-x`, an unknown `--word=V`) defers the whole argv, even after
-    // a --help or a type error that would otherwise act first.
-    if !argv.iter().all(|token| classified(token)) {
-        return Parsed::Defer;
-    }
     let mut args = Args::default();
     let mut extras: Vec<&str> = Vec::new();
     let mut tokens = argv.iter().peekable();
@@ -337,15 +307,29 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
             }
             continue;
         }
-        if let Some(kind) = kind(token) {
+        if let Some(value_kind) = kind(token) {
             let value = match tokens.peek() {
-                Some(value) if !value.starts_with('-') => value.as_str(),
+                Some(value)
+                    if kind(value).is_none()
+                        && !FLAGS.contains(&value.as_str())
+                        && !matches!(value.as_str(), "-h" | "--help") =>
+                {
+                    value.as_str()
+                }
                 None => return Parsed::Error(format!("argument {token}: expected one argument")),
-                Some(_) => return Parsed::Defer,
+                Some(_) => {
+                    return Parsed::Error(format!(
+                        "argument {token}: expected one argument; use {token}=VALUE for an option-like value"
+                    ));
+                }
             };
             tokens.next();
-            match check(token, kind, value) {
-                Err(()) => return Parsed::Defer,
+            match check(token, value_kind, value) {
+                Err(()) => {
+                    return Parsed::Error(format!(
+                        "argument {token}: unsupported value; use a plain ASCII decimal number"
+                    ));
+                }
                 Ok(Some(message)) => return Parsed::Error(message),
                 Ok(None) => store(&mut args, token, value),
             }
@@ -354,7 +338,11 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
         if let Some((option, value)) = token.split_once('=') {
             if let Some(kind) = kind(option) {
                 match check(option, kind, value) {
-                    Err(()) => return Parsed::Defer,
+                    Err(()) => {
+                        return Parsed::Error(format!(
+                            "argument {option}: unsupported value; use a plain ASCII decimal number"
+                        ));
+                    }
                     Ok(Some(message)) => return Parsed::Error(message),
                     Ok(None) => store(&mut args, option, value),
                 }
@@ -366,7 +354,10 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
                     super::py_repr(value)
                 ));
             }
-            return Parsed::Defer;
+            if option == "--help" {
+                return Parsed::Error("argument --help: does not take a value; use --help".into());
+            }
+            return unknown(option);
         }
         // An unknown `--word` no option starts with is an extra; a prefix
         // of one is an abbreviation (or ambiguous), argparse's business.
@@ -378,7 +369,7 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
             extras.push(token);
             continue;
         }
-        return Parsed::Defer;
+        return unknown(token);
     }
     if !extras.is_empty() {
         return Parsed::Error(format!("unrecognized arguments: {}", extras.join(" ")));
@@ -404,10 +395,8 @@ mod tests {
     }
 
     #[test]
-    fn a_token_argparse_settles_itself_defers_before_help_or_an_error() {
-        // argparse classifies every argument before it runs any action: a
-        // later abbreviation or ambiguous prefix is settled (or refused)
-        // before an earlier --help or type error acts.
+    fn help_and_errors_are_native_in_argument_order() {
+        // Help and errors act when met; later tokens cannot cause a fallback.
         for argv in [
             &["--help", "--s"][..],
             &["-h", "--sto"],
@@ -416,18 +405,22 @@ mod tests {
             &["zz", "--help", "-x"],
             &["--stop=1", "--"],
         ] {
-            assert_eq!(run(argv), Parsed::Defer, "{argv:?}");
+            assert!(!matches!(run(argv), Parsed::Args(_)), "{argv:?}");
         }
         // Options spelled in full and unknown words still let help act.
         assert_eq!(run(&["--help", "--stop", "--zz", "word"]), Parsed::Help);
     }
 
     #[test]
-    fn a_duration_long_enough_for_the_integer_digit_limit_defers() {
+    fn long_durations_are_checked_by_value_without_a_python_digit_limit() {
         let long = "1".repeat(641);
-        assert_eq!(run(&["--max-age", &long]), Parsed::Defer);
+        assert!(matches!(run(&["--max-age", &long]), Parsed::Error(_)));
         assert!(matches!(
             run(&["--max-age", &"1".repeat(640)]),
+            Parsed::Error(_)
+        ));
+        assert!(matches!(
+            run(&["--max-age", &format!("{}1", "0".repeat(641))]),
             Parsed::Args(_)
         ));
     }
@@ -547,7 +540,10 @@ mod tests {
             }
             // UNC and extended forms: pathlib's drive rules, not reproduced.
             for text in ["\\\\srv\\share", "//srv/share/x", "\\\\?\\C:"] {
-                assert_eq!(run(&["--state", text]), Parsed::Defer, "{text:?}");
+                assert!(
+                    matches!(run(&["--state", text]), Parsed::Error(_)),
+                    "{text:?}"
+                );
             }
         } else {
             for text in ["a\\..", "C:", "//srv/share"] {
@@ -592,7 +588,7 @@ mod tests {
             run(&["--settle", "nanx"]),
             error("argument --settle: invalid _non_negative value: 'nanx'")
         );
-        assert_eq!(run(&["--settle", "nan(1)"]), Parsed::Defer);
+        assert!(matches!(run(&["--settle", "nan(1)"]), Parsed::Error(_)));
     }
 
     #[test]
@@ -694,14 +690,12 @@ mod tests {
     }
 
     #[test]
-    fn argparse_corners_defer() {
+    fn unsupported_argument_shapes_are_answered_natively() {
         for argv in [
             &["--sto"][..],
             &["--own", "x"],
             &["--s"],
             &["--lease-c=x"],
-            &["--state", "-x"],
-            &["--owner", "--stop"],
             &["--"],
             &["-x"],
             &["-"],
@@ -713,7 +707,7 @@ mod tests {
             &["--settle", " 1"],
             &["--interval", "\u{661}"],
         ] {
-            assert_eq!(run(argv), Parsed::Defer, "{argv:?}");
+            assert!(!matches!(run(argv), Parsed::Args(_)), "{argv:?}");
         }
     }
 

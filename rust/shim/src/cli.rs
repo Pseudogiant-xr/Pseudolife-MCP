@@ -58,8 +58,6 @@ const DEFERRED_MODES: &[&str] = &[
     "import",
     "maintainer",
     "console",
-    "conductor-watch",
-    "delegate-watch",
 ];
 
 fn text_bytes(text: &str) -> Vec<u8> {
