@@ -71,40 +71,6 @@ fn success(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
-#[cfg(test)]
-mod native_tests {
-    use super::*;
-    #[test]
-    fn native_probe_encoding_and_type_findings() {
-        let mut failed = Vec::new();
-        for body in [
-            b"{\0}\0".as_slice(),
-            b"\xff\xfe{\0}\0",
-            b"\xfe\xff\0{\0}",
-            b"\xed\xa0\x80",
-        ] {
-            let text = format!("{:?}", loads_bytes(body));
-            let ok = text.contains("UTF-8");
-            eprintln!("probe encoding cell {body:?}: {ok}");
-            if !ok {
-                failed.push(text);
-            }
-        }
-        let text = format!("{:?}", python_str(Some(&json!(["w44-secret-value"]))));
-        if !text.contains("text") || text.contains("w44-secret-value") {
-            failed.push(text);
-        }
-        assert!(failed.is_empty(), "{failed:?}");
-        assert!(loads_bytes(b"{\"status\":\"ok\"}").unwrap().is_some());
-        assert!(
-            loads_bytes(b"\xef\xbb\xbf{\"status\":\"ok\"}")
-                .unwrap()
-                .is_some()
-        );
-        assert_eq!(python_str(Some(&json!("localhost"))).unwrap(), "localhost");
-    }
-}
-
 /// `board_status.board_probe`: `{"state", "line"}`.
 pub(super) async fn board(
     url: &str,
@@ -359,5 +325,39 @@ pub(super) async fn health(url: &str, timeout: Duration) -> Res<Option<Value>> {
     match std::str::from_utf8(&answer.body) {
         Ok(text) => json_loads(text),
         Err(_) => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    #[test]
+    fn native_probe_encoding_and_type_findings() {
+        let mut failed = Vec::new();
+        for body in [
+            b"{\0}\0".as_slice(),
+            b"\xff\xfe{\0}\0",
+            b"\xfe\xff\0{\0}",
+            b"\xed\xa0\x80",
+        ] {
+            let text = format!("{:?}", loads_bytes(body));
+            let ok = text.contains("UTF-8");
+            eprintln!("probe encoding cell {body:?}: {ok}");
+            if !ok {
+                failed.push(text);
+            }
+        }
+        let text = format!("{:?}", python_str(Some(&json!(["w44-secret-value"]))));
+        if !text.contains("text") || text.contains("w44-secret-value") {
+            failed.push(text);
+        }
+        assert!(failed.is_empty(), "{failed:?}");
+        assert!(loads_bytes(b"{\"status\":\"ok\"}").unwrap().is_some());
+        assert!(
+            loads_bytes(b"\xef\xbb\xbf{\"status\":\"ok\"}")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(python_str(Some(&json!("localhost"))).unwrap(), "localhost");
     }
 }
