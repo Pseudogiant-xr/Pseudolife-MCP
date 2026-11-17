@@ -40,7 +40,7 @@ dropped like a conflict. When the batch changes anything under rust/,
 `build` last runs CI's compile step there (`RUST_CHECK`), since neither the
 suite nor the harness run compiles Rust; a failure drops nothing, keeps the
 branch for bisecting and is recorded in the plan, and `open` refuses it.
-Nothing resolves a conflict, no member is edited
+Only derived metadata conflicts are resolved, no member code is edited
 and nothing force-pushes. `merge` merges the batch pull request `open` published,
 with a merge commit, only while its head is the built head, every check on
 it finished without a failure and master has not moved past it; every merge
@@ -300,6 +300,7 @@ class Plan:
     markers: list[str] = field(default_factory=list)
     census_commit: str = ""   # the generated census commit, when there is one
     census_drift: list[str] = field(default_factory=list)   # manual shapes it withdrew
+    census_conflicts: list[int] = field(default_factory=list)   # members regenerated after a conflict
     # Members whose head the batch already contained when `build` reached
     # them (a stacked child merged first, or a head already on master): no
     # merge commit of their own, so `open` and `merge` do not demand one.
@@ -345,6 +346,8 @@ class Plan:
             del data["rust_check_where"]
         if not data["after_drop"]:
             del data["after_drop"]
+        if not data["census_conflicts"]:
+            del data["census_conflicts"]
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @staticmethod
@@ -1401,6 +1404,27 @@ def _metadata_target(root: Path, relative: str) -> Path:
     return target
 
 
+def _merge_census_conflict(base_sha: str, conflicted: list[str]) -> bool:
+    # Budget normalization completes its merge itself, so mixed conflicts
+    # still drop. Never accept a placeholder when master has no generator.
+    if conflicted != [CENSUS_JSON] or _census_inputs(base_sha) is None:
+        return False
+    stages = _out("ls-files", "--stage", "--", CENSUS_JSON).splitlines()
+    if (len(stages) != 3
+            or any(line.split()[0] not in ("100644", "100755") for line in stages)):
+        return False
+    root = Path(_out("rev-parse", "--show-toplevel")).resolve()
+    target = _metadata_target(root, CENSUS_JSON)
+    if not target.is_file():
+        return False
+    # Deterministic placeholder only: _merge_batch must regenerate the head
+    # before it can save a plan, and rebuilds without the culprits on failure.
+    git("checkout", "--ours", "--", CENSUS_JSON)
+    git("add", "--", CENSUS_JSON)
+    git("commit", "--no-edit")
+    return True
+
+
 def _regenerate_budget(plan: Plan, root: Path) -> set[str]:
     tools = _budget_tools(plan.base_sha)
     if tools is None:
@@ -1909,6 +1933,13 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
             print(f"  merged #{m.number} {m.sha[:12]} {m.title}")
             continue
         conflicted = _out("diff", "--name-only", "--diff-filter=U").splitlines()
+        if _merge_census_conflict(plan.base_sha, conflicted):
+            if _undo_merge_if_frozen(plan, m, freeze):
+                continue
+            plan.merged.append(m)
+            plan.census_conflicts.append(m.number)
+            print(f"  merged #{m.number} {m.sha[:12]}; census conflict awaits regeneration")
+            continue
         if _merge_budget_conflict(plan.base_sha, conflicted):
             if _undo_merge_if_frozen(plan, m, freeze):
                 continue
@@ -2090,6 +2121,7 @@ def _remerge(plan: Plan, members: list[Member], dropped: list[Dropped],
     """Merge `members` but `out` again from the base, in their order."""
     git("reset", "-q", "--hard", plan.base_sha)
     plan.merged, plan.dropped, plan.contained, plan.carried = [], list(dropped), [], []
+    plan.census_conflicts = []
     _merge_members(plan, [m for m in members if m.number not in out], freeze, prepass)
     _record_carried(plan, prepass)
 
@@ -2145,6 +2177,8 @@ def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
         print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
         _remerge(plan, members, cut_drops + drops, out, freeze, prepass)
         _refuse_a_cut_beside_others(plan)
+    for number in plan.census_conflicts:
+        print(f"  Regenerated census conflict for #{number}")
     return judged
 
 
@@ -3062,12 +3096,14 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None,
     if plan.dropped:
         lines += ["", "## Dropped", ""]
         lines += [f"- #{d.member.number}: {d.reason}" for d in plan.dropped]
-    if plan.census_commit or plan.census_drift:
+    if plan.census_commit or plan.census_drift or plan.census_conflicts:
         lines += ["", "## Generated CI metadata", ""]
         if plan.census_commit:
             lines += [f"`{plan.census_commit}` refreshes derived producer-census/CI-budget metadata "
                       "for this head in the batch's one generated commit. Authored budgets and "
                       "reviewed acceptance reasons are preserved; no member code was edited."]
+        for number in plan.census_conflicts:
+            lines += [f"Regenerated census conflict for #{number} on the batch head."]
         if plan.census_drift:
             lines += [""] * bool(plan.census_commit) + [
                       "Trusted manual shapes withdrawn because a member changed "
@@ -3953,6 +3989,11 @@ def merge(args: argparse.Namespace) -> int:
 
 
 def status(args: argparse.Namespace) -> int:
+    branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
+    plan = Plan.load(branch) if branch.startswith(PREFIX) else None
+    if plan and plan.head == _out("rev-parse", "HEAD"):
+        for number in plan.census_conflicts:
+            print(f"Regenerated census conflict for #{number} on {plan.head[:12]}")
     git("fetch", "-q", REMOTE, BASE)
     base_sha = _out("rev-parse", f"{REMOTE}/{BASE}")
     members = ready(args.label)
@@ -3966,6 +4007,8 @@ def status(args: argparse.Namespace) -> int:
         moved = "" if head == m.sha else f" (fetched head {head[:12]} differs)"
         clean, files = _merge_tree(base_sha, head)
         merge = "merges cleanly" if clean else f"conflicts with master in {', '.join(files)}"
+        if files == [CENSUS_JSON] and _census_inputs(base_sha) is not None:
+            merge = "census-only conflict with master; the batch will regenerate it"
         draft = " draft," if m.draft else ""
         shown = (f" (report-only red, not counted: {', '.join(m.report_only_red)})"
                  if m.report_only_red else "")

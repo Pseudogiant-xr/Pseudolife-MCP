@@ -4093,6 +4093,95 @@ def test_a_member_whose_census_master_staled_still_lands(world, capsys):
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
 
 
+def _conflicting_censuses(world, *, source_conflict=False, broken=False):
+    _with_census(world)
+    first = {"ops/ten.sh": "10\n",
+             "rust/producer-census.json": _census(tool="t\n", ten="10\n")}
+    second = {"ops/eleven.sh": "11\n",
+              "rust/producer-census.json": _census(tool="t\n", eleven="11\n")}
+    if source_conflict:
+        first["a.txt"], second["a.txt"] = "first\n", "second\n"
+    if broken:
+        second["rust/producer_census.py"] = (
+            'raise SystemExit("conflicting census regeneration broken")\n' + _stub())
+    heads = [world.pr(10, first), world.pr(11, second)]
+    for number, sha in zip((10, 11), heads):
+        world.gh.add(number, sha)
+    return heads
+
+
+def test_census_only_conflicts_are_regenerated_and_keep_the_batch_shape(world, capsys):
+    heads = _conflicting_censuses(world)
+    assert _publish(world) == 0, capsys.readouterr()
+    branch = f"integrate/{DATE}-batch-1"
+    assert _second_parents(world.origin, branch) == heads
+    (sha, subject, files), = _census_commits(world.origin, branch)
+    assert subject == integrate.CENSUS_SUBJECT and files == [integrate.CENSUS_JSON]
+    expected = _census(tool="t\n", ten="10\n", eleven="11\n")
+    assert _census_at(world.origin, branch) == expected
+    subprocess.run([sys.executable, integrate.CENSUS], cwd=world.work, check=True,
+                   capture_output=True)
+    assert (world.work / integrate.CENSUS_JSON).read_text(encoding="utf-8") == expected
+    assert _git(world.work, "status", "--porcelain") == ""
+    assert _plan(world)["census_conflicts"] == [11]
+    assert "Regenerated census conflict for #11" in capsys.readouterr().out
+    (_, created), = world.gh.bodies("create")
+    assert "Regenerated census conflict for #11" in created
+    assert not world.gh.bodies("comment")
+    assert integrate.main(["status"]) == 0
+    assert "Regenerated census conflict for #11" in capsys.readouterr().out
+    # A valid published batch still refuses a second generated non-merge commit.
+    _git(world.work, "commit", "--allow-empty", "-qm", integrate.CENSUS_SUBJECT)
+    plan = integrate.Plan.load(branch)
+    plan.head = _git(world.work, "rev-parse", "HEAD")
+    plan.save()
+    assert _open(world) == 2
+    assert "neither a member merge nor the one generated commit" in capsys.readouterr().err
+
+
+def test_census_plus_source_conflict_still_drops_the_member(world, capsys):
+    first, second = _conflicting_censuses(world, source_conflict=True)
+    assert _publish(world) == 0, capsys.readouterr()
+    branch = f"integrate/{DATE}-batch-1"
+    assert _second_parents(world.origin, branch) == [first]
+    (args, comment), = world.gh.bodies("comment")
+    assert args[2] == "11" and "a.txt" in comment and "conflicts with #10" in comment
+    assert _census_at(world.origin, branch) == _census(tool="t\n", ten="10\n")
+
+
+@pytest.mark.parametrize("stage", [1, 2, 3])
+def test_census_conflict_rejects_non_regular_index_stages(world, monkeypatch, stage):
+    _with_census(world)
+    original = integrate._out
+
+    def index(*args):
+        if args == ("ls-files", "--stage", "--", integrate.CENSUS_JSON):
+            return "\n".join(f"{'120000' if n == stage else '100644'} {'a' * 40} {n}\t"
+                             + integrate.CENSUS_JSON for n in (1, 2, 3))
+        return original(*args)
+
+    monkeypatch.setattr(integrate, "_out", index)
+    assert not integrate._merge_census_conflict(
+        _git(world.work, "rev-parse", "HEAD"), [integrate.CENSUS_JSON])
+    assert _git(world.work, "status", "--porcelain") == ""
+
+
+def test_census_conflict_regeneration_failure_rebuilds_without_resolved_members(world, capsys):
+    _conflicting_censuses(world, broken=True)
+    third = world.pr(12, {"b.txt": "retained\n"})
+    world.gh.add(12, third)
+    assert _publish(world) == 0, capsys.readouterr()
+    branch = f"integrate/{DATE}-batch-1"
+    assert _second_parents(world.origin, branch) == [third]
+    assert _census_at(world.origin, branch) == _census(tool="t\n")
+    comments = {args[2]: text for args, text in world.gh.bodies("comment")}
+    assert set(comments) == {"10", "11"}
+    assert all("conflicting census regeneration broken" in text for text in comments.values())
+    assert not _plan(world).get("census_conflicts")
+    (_, created), = world.gh.bodies("create")
+    assert "Regenerated census conflict" not in created
+
+
 @pytest.mark.parametrize("files", [
     {"b.txt": "b\n"},                                   # nothing the census hashes
     {"ops/tool.sh.bak": "x\n"},                         # a near miss beside a hashed file
@@ -4745,6 +4834,17 @@ def _rust_job_pytest_paths() -> list[str]:
             if "pytest" in words:
                 paths += [w for w in words[words.index("pytest") + 1:] if w.startswith("rust/")]
     return paths
+
+
+def test_harness_agreement_guards_run_on_every_pull_request():
+    import yaml
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    step, = [s for s in workflow["jobs"]["guards"]["steps"]
+             if s.get("name") == "Tree-wide guards"]
+    assert "if" not in step
+    for name in ("test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness",
+                 "test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips"):
+        assert f"tests/test_integrate_script.py::{name}" in step["run"].split()
 
 
 def test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness():

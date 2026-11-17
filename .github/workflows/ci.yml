@@ -304,6 +304,7 @@ jobs:
         # embedder mode; its one real_model case is left to the test job.
         # test_installer_bash32.py scans the installers' shell files for what
         # macOS's bash 3.2 misreads, before a batch reaches the macOS lane.
+        # Catch Rust workflow/harness drift on the PR that introduces it.
         run: >-
           python -m pytest -q -m "not real_model"
           tests/test_release_ux.py tests/test_eval_evidence.py
@@ -314,6 +315,8 @@ jobs:
           tests/test_changelog_fragments.py tests/test_wall_clock_budgets.py
           "tests/test_disposable_database_guard.py::test_every_reap_and_full_bank_truncate_is_guarded_first"
           tests/test_fake_embedder.py tests/test_installer_bash32.py
+          tests/test_integrate_script.py::test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness
+          tests/test_integrate_script.py::test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips
 
       - name: Live tests that read rust/ files
         # Since the Python freeze a Rust-only batch skips the Python lanes on

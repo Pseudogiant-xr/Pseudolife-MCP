@@ -6,7 +6,7 @@
 //! `Connection: close`), per-receive socket timeouts and
 //! `HTTPRedirectHandler`'s limits.
 use super::pyjson::{self, J};
-use super::{Cred, Defer};
+use super::{Cred, Refusal};
 use crate::cli::hook_http;
 use std::time::Duration;
 
@@ -15,7 +15,7 @@ use std::time::Duration;
 /// opener follows them; a 3xx reply here is where its redirect handler
 /// raised `HTTPError` (no target, a refused scheme, the repeat limits), whose
 /// body `e.read()` parses like any other.
-pub(super) async fn probe_health(url: &str) -> Result<Option<J>, Defer> {
+pub(super) async fn probe_health(url: &str) -> Result<Option<J>, Refusal> {
     let Some(reply) = hook_http::get_bounded(
         url,
         "/health",
@@ -29,8 +29,7 @@ pub(super) async fn probe_health(url: &str) -> Result<Option<J>, Defer> {
         return Ok(None);
     };
     if reply.unsupported {
-        // An ftp: or non-text redirect target urllib would still follow.
-        return Err(Defer);
+        return Err(Refusal("the daemon /health response redirects to an unsupported URL; use its direct http(s) daemon origin".into()));
     }
     if reply.body_failed {
         return Ok(None);
@@ -38,7 +37,7 @@ pub(super) async fn probe_health(url: &str) -> Result<Option<J>, Defer> {
     let Ok(text) = std::str::from_utf8(&reply.body) else {
         return Ok(None);
     };
-    pyjson::loads(text)
+    pyjson::loads(text).map_err(|cause| Refusal(format!("the daemon /health response is unsupported: {}; repair the daemon or reverse proxy's JSON response", cause.0)))
 }
 
 /// The `Authorization` value urllib would send: `http.client` encodes a
