@@ -62,40 +62,32 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
     // `console` answers every bare form itself now (with this machine's own
     // registration it would ask the daemon for a sign-in link and open a
     // browser), so it gets the one argv that defers before it reads a
-    // credential: help at a width other than 80 columns. The watcher runs
-    // natively now; an abbreviated option (`--sto`) is one of the argument
-    // spellings it still defers before any effect. The emptied home, the
+    // credential: help at a width other than 80 columns. The emptied home, the
     // closed daemon address and the browser that is no program fence a mode
     // that stops deferring off the machine's real daemon and browser.
     let home = std::env::temp_dir().join(format!("pl-dispatch-home-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    let state = home.join("watch.json");
-    let state = state.to_str().unwrap();
-    let start = ["--sto", "--state", state];
-    let cases: [(&str, &[&str]); 4] = [
-        ("maintainer", &[]),
-        ("console", &["--help"]),
-        ("conductor-watch", &start),
-        ("delegate-watch", &start),
-    ];
+    let cases: [(&str, &[&str]); 2] = [("maintainer", &[]), ("console", &["--help"])];
     for (mode, args) in cases {
-        let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
-            .arg(mode)
-            .args(args)
-            .env("COLUMNS", "100")
-            .env("HOME", &home)
-            .env("USERPROFILE", &home)
-            .env("APPDATA", &home)
-            .env("LOCALAPPDATA", &home)
-            .env("XDG_CONFIG_HOME", &home)
-            .env("CLAUDE_CONFIG_DIR", &home)
-            .env("CODEX_HOME", &home)
-            .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
-            .env("BROWSER", "pl-dispatch-no-browser")
-            .env_remove("PSEUDOLIFE_MCP_TOKEN")
-            .env_remove("PSEUDOLIFE_MCP_TOKEN_FILE")
-            .output()
-            .unwrap();
+        let output = common::cli::cleared_command(std::path::Path::new(env!(
+            "CARGO_BIN_EXE_pseudolife-stdio"
+        )))
+        .arg(mode)
+        .args(args)
+        .env("COLUMNS", "100")
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("APPDATA", &home)
+        .env("LOCALAPPDATA", &home)
+        .env("XDG_CONFIG_HOME", &home)
+        .env("CLAUDE_CONFIG_DIR", &home)
+        .env("CODEX_HOME", &home)
+        .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
+        .env("BROWSER", "pl-dispatch-no-browser")
+        .env_remove("PSEUDOLIFE_MCP_TOKEN")
+        .env_remove("PSEUDOLIFE_MCP_TOKEN_FILE")
+        .output()
+        .unwrap();
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         let expected = bytes(&format!(
@@ -114,4 +106,50 @@ fn update_dispatches_to_the_native_updater_help() {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
     assert!(String::from_utf8_lossy(&output.stdout).contains("--engine python|rust"));
+}
+
+#[test]
+fn completed_modes_answer_help_and_argument_errors_without_deferring() {
+    let home = std::env::temp_dir().join(format!("pl-dispatch-completed-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&home).unwrap();
+    for mode in ["conductor-watch", "delegate-watch", "expose", "test-login"] {
+        for (argument, code) in [("--help", 0), ("--bad-dispatch-fixture-option", 2)] {
+            let output = common::cli::cleared_command(std::path::Path::new(env!(
+                "CARGO_BIN_EXE_pseudolife-stdio"
+            )))
+            .args([mode, argument])
+            .current_dir(&home)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("APPDATA", &home)
+            .env("LOCALAPPDATA", &home)
+            .env("XDG_CONFIG_HOME", &home)
+            .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
+            .env("BROWSER", "pl-dispatch-no-browser")
+            .output()
+            .unwrap();
+            assert_eq!(output.status.code(), Some(code), "{mode} {argument}");
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!text.contains("is deferred in this candidate"), "{mode}");
+            assert!(!text.contains("unknown mode"), "{mode}");
+            if code == 0 {
+                assert!(!output.stdout.is_empty());
+                if mode == "delegate-watch" {
+                    assert_eq!(
+                        output.stderr,
+                        bytes(
+                            "pseudolife-mcp delegate-watch is deprecated: use pseudolife-mcp conductor-watch\n"
+                        )
+                    );
+                } else {
+                    assert!(output.stderr.is_empty());
+                }
+            }
+        }
+    }
+    std::fs::remove_dir_all(home).unwrap();
 }

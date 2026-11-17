@@ -17,7 +17,7 @@ real ``tailscale`` resolves; every case whose action is ``tailscale`` names
 its port (the fixture's, or the closed port 9), so no arm reaches a daemon
 on the default 8765; and every address the stand-in reports in such a case
 is on loopback, so the tailnet probe never leaves the machine. Scope and
-deferrals: ``rows/expose.md``.
+native refusals: ``rows/expose.md``.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ from .. import core, normalize
 from ..core import Case
 from ..fixture_daemon import FixtureDaemon, json_body, redirect, text
 
-DEFERRAL = "pseudolife-stdio: mode 'expose' is deferred in this candidate\n"
 DEAD_PORT = "9"
 TS_PATH = "{HOME}/bin"
 # The lookup's inputs, pinned: PATH holds only the stand-in's directory, and
@@ -258,20 +257,6 @@ def expose_native_wording(obs: dict) -> None:
         normalize._put(obs, field, data)
 
 
-@normalize.rule("expose-deferral")
-def expose_deferral(obs: dict) -> None:
-    """A declared deferral before any effect the stand-in records as a
-    change: the candidate prints the deferral line (exit 1). The oracle's
-    streams become that expectation; its files and requests stay compared,
-    so the candidate must have made exactly the oracle's reads (a case
-    chosen so that the oracle changes nothing)."""
-    if obs.get("arm") != "python":
-        return
-    obs["exit"] = 1
-    normalize._put(obs, "stdout", b"")
-    normalize._put(obs, "stderr", _native(DEFERRAL))
-
-
 # --- scenarios ----------------------------------------------------------------------
 
 LOOPBACK = "127.0.0.1"
@@ -376,7 +361,7 @@ def cases() -> list[Case]:
     add(case("extras-then-bad-port", ["tailscale", "zz", "--port", "x"]))
     add(case("extras-tailscale", ["tailscale", "--port", DEAD_PORT, "zz"]))
 
-    # Declared deferrals in argparse (before any effect).
+    # Native argument refusals (historical case IDs retained).
     for case_id, argv in (("defer-abbrev-main", ["--he"]),
                           ("defer-abbrev-port", ["status", "--po", "8765"]),
                           ("defer-double-dash", ["status", "--"]),
@@ -384,9 +369,7 @@ def cases() -> list[Case]:
                           ("defer-short-other", ["status", "-x"]),
                           ("defer-port-plus", ["off", "--port", "+8765"]),
                           ("defer-option-first", ["--port", "9", "status"])):
-        # No stand-in: the candidate defers before any lookup, so the oracle
-        # arm must make no tailscale call either.
-        add(case(case_id, argv, rules=("expose-deferral",)))
+        add(case(case_id, argv))
     # Help is argparse's 80-column text at any width.
     add(case("help-width", ["-h"], env={"COLUMNS": "100"}))
     # Python's integer digit limit means nothing to the native client.

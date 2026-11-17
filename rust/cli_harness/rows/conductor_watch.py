@@ -33,7 +33,6 @@ OWNER = "0123456789abcdef0123456789abcdef"
 OTHER = "fedcba9876543210fedcba9876543210"
 WATCHER = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
 SESSION = "conductor-watch-fixture-session"
-DEFERRAL = "pseudolife-stdio: mode 'conductor-watch' is deferred in this candidate\n"
 FILE = "shim/src/cli/conductor_watch/mod.rs"
 ARGS = "shim/src/cli/conductor_watch/args.rs"
 NOBIN = "{HOME}" + os.sep + "nobin"
@@ -52,21 +51,6 @@ def _digest_key() -> str:
 
 
 # --- rules ---------------------------------------------------------------------
-
-@normalize.rule("conductor-watch-deferral")
-def conductor_watch_deferral(obs: dict) -> None:
-    """A declared deferral case: the candidate must print the dispatcher's
-    deferral line, exit 1 and leave the home as setup left it. The oracle
-    runs on (to its "no board" refusal); its observation is replaced by that
-    expectation, its files by the snapshot taken when setup finished."""
-    if obs.get("arm") != "python":
-        return
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-    obs["files"] = obs.get("setup_files", {})
-    obs["modes"] = obs.get("setup_modes", {})
-
 
 @normalize.rule("conductor-watch-start-no-board")
 def conductor_watch_start_no_board(obs: dict) -> None:
@@ -210,8 +194,8 @@ def _agent_file(body: bytes | None = None, kind: str = "file"):
 
 
 def _steps(*steps, keep: bool = False):
-    """Run ``steps``; ``keep`` (deferral cases) snapshots the home they leave,
-    which the deferral rule expects the candidate to leave untouched."""
+    """Run ``steps``; ``keep`` snapshots the initial home for a case whose
+    output failure must leave its files untouched."""
     def setup(arm):
         for step in steps:
             step(arm)
@@ -238,7 +222,7 @@ def _after(arm, obs):
 SESSION_ENV = {"CLAUDE_CODE_SESSION_ID": SESSION, "PSEUDOLIFE_DIGEST_DIR": "{HOME}/digests"}
 
 
-KEEP = ("conductor-watch-deferral", "conductor-watch-notice-unwritten")
+KEEP = ("conductor-watch-notice-unwritten",)
 
 
 def case(case_id: str, argv: list[str], *, env=None, steps=(), rules=(), mode="conductor-watch",
@@ -434,22 +418,21 @@ def cases() -> list[Case]:
     add(case("start-stale-record-no-board", ["--owner", OWNER, "--state", STATE],
              steps=(_private_folder("w"), _record("w/s.json", pid=0, agent_id=WATCHER, owner=OWNER)),
              rules=("conductor-watch-start-no-board",)))
-    # Declared deferrals: argument spellings answered before any effect.
-    add(case("defer-abbreviation", ["--sto", "--state", STATE], rules=("conductor-watch-deferral",)))
-    add(case("defer-dash-value", ["--state", "-x", "--stop"], rules=("conductor-watch-deferral",)))
+    # Former deferrals: native refusals or safe native answers.
+    add(case("defer-abbreviation", ["--sto", "--state", STATE], rules=()))
+    add(case("defer-dash-value", ["--state", "-x", "--stop"], rules=()))
     add(case("defer-underscore-interval", ["--interval", "1_0", "--stop", "--state", STATE],
-             rules=("conductor-watch-deferral",)))
-    # UNC and extended paths: pathlib's drive rules for them are not ported.
+             rules=()))
+    # UNC and device paths are refused with a local-path remedy.
     add(case("defer-state-unc", ["--stop", "--state", "\\\\srv\\share"], platforms=("windows",),
-             rules=("conductor-watch-deferral",)))
+             rules=()))
     add(case("defer-state-trailing-dot", ["--stop", "--state", "{HOME}/w/s."],
-             rules=("conductor-watch-deferral",)))
-    # argparse classifies every argument before it runs any action, so an
-    # ambiguous prefix later in argv wins over an earlier --help or type error.
-    add(case("defer-help-before-ambiguous", ["--help", "--s"], rules=("conductor-watch-deferral",)))
+             rules=()))
+    # Help and type errors act in argument order, independent of later prefixes.
+    add(case("defer-help-before-ambiguous", ["--help", "--s"], rules=()))
     add(case("defer-error-before-ambiguous", ["--interval", "x", "--s"],
-             rules=("conductor-watch-deferral",)))
-    # Past 640 characters the oracle's integer digit limit decides the count.
+             rules=()))
+    # An overflowing duration is a native usage error.
     add(case("defer-age-digit-limit", ["--stop", "--state", STATE, "--max-age", "1" * 4301],
-             rules=("conductor-watch-deferral",)))
+             rules=()))
     return c
