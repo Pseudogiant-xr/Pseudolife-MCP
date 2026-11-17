@@ -34,12 +34,42 @@ fn with_dbname(url: &str, database: &str) -> String {
     }
 }
 
-/// The admin URL parses in the admitted grammar and no ambient libpq control
-/// this client refuses is set; otherwise the caller defers before any effect.
-pub(super) fn admin_url_admitted(url: &str) -> bool {
-    Dsn::parse(url).is_ok()
-        && Dsn::parse(&with_dbname(url, "postgres")).is_ok()
-        && TlsEnvironment::from_environment().validate().is_ok()
+/// Refuse unsupported settings without including the administrator URL or values.
+pub(super) fn admin_url_admitted(url: &str) -> Result<(), String> {
+    Dsn::parse(url).map_err(admin_url_error)?;
+    Dsn::parse(&with_dbname(url, "postgres")).map_err(admin_url_error)?;
+    let environment = TlsEnvironment::from_environment();
+    if let Some(control) = environment.ambient_controls.first() {
+        let control = control_name(control);
+        return Err(format!(
+            "{control} is unsupported with --admin-url; unset that PostgreSQL environment control"
+        ));
+    }
+    environment.validate().map_err(|_| "--admin-url cannot use ambient PostgreSQL certificate/key/CRL files; move those files out of the default PostgreSQL directory before retrying".into())
+}
+
+fn safe_setting_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn control_name(control: &str) -> &str {
+    // Preserve the actual case of identifiers, including Windows pghost.
+    // A malformed PGSSL*/PGTLS* name can itself contain credential text.
+    if safe_setting_name(control) {
+        control
+    } else {
+        "a malformed PostgreSQL environment control name"
+    }
+}
+
+fn admin_url_error(error: crate::pg::Error) -> String {
+    match error {
+        crate::pg::Error::InvalidOption(option) => format!(
+            "--admin-url has an invalid {option} setting; supply a supported PostgreSQL TCP DSN"),
+        crate::pg::Error::UnsupportedOption(option) if safe_setting_name(&option) => format!(
+            "--admin-url has unsupported option {option}; remove that option and supply a supported PostgreSQL TCP DSN"),
+        _ => "--admin-url is not a supported PostgreSQL TCP DSN; supply a PostgreSQL DSN with one explicit TCP host".into(),
+    }
 }
 
 fn exception_name(error: &std::io::Error) -> &'static str {
@@ -213,6 +243,17 @@ async fn container_query(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_identifiers_preserve_case_and_malformed_names_hide_credentials() {
+        for name in ["PGHOST", "pghost", "PGSSL_min_protocol_version"] {
+            assert_eq!(control_name(name), name);
+        }
+        let shown = control_name("PGSSLpostgresql://u:fixture-secret@127.0.0.1/db");
+        assert_eq!(shown, "a malformed PostgreSQL environment control name");
+        assert!(!shown.contains("fixture-secret"));
+        assert!(!shown.contains("postgresql://"));
+    }
 
     #[test]
     fn the_database_is_set_in_both_grammars() {

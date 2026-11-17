@@ -48,17 +48,13 @@ const DEFERRED_MODES: &[&str] = &[
     "doctor",
     "connect",
     "invite",
-    "test-login",
     "pair",
-    "expose",
     "tunnel",
     "move",
     "backup",
     "export",
     "import",
     "console",
-    "conductor-watch",
-    "delegate-watch",
 ];
 
 fn text_bytes(text: &str) -> Vec<u8> {

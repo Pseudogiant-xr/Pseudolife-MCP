@@ -1,17 +1,4 @@
-//! `expose_cli._parser().parse_args` (CPython 3.11 argparse) for the argv
-//! this port answers.
-//!
-//! The main parser has `-h` and one positional, the required subparsers
-//! action (`tailscale`, `off`, `status`), which consumes every word from the
-//! first one on. Admitted: an empty argv (the "required" error), `-h` /
-//! `--help` first (the main help), a first word that is no action (the
-//! "invalid choice" error), or an action word followed by its own options
-//! spelled in full: `-h`, `--help`, `--port V`, `--port=V`, `--yes` (not on
-//! `status`, where it is an unrecognized extra), `--json`, `--opt=V` on a
-//! flag (argparse's "ignored explicit argument" error), and words (extras,
-//! reported by the main parser once the subparser is done). An option before
-//! the action word, an abbreviation, `--`, any other token starting with
-//! `-` and a value starting with `-` are argparse's own business and defer.
+//! Native argument parsing for expose; errors precede host access.
 
 /// `pseudolife-mcp expose -h` at `COLUMNS=80` (argparse wraps at 78).
 pub(super) const MAIN_HELP: &str = concat!(
@@ -116,7 +103,6 @@ pub(super) enum Parsed {
     /// argparse's message after `prog: error: `, with the parser that
     /// reports it (`None` is the main parser), exit 2.
     Error(Option<Action>, String),
-    Defer,
 }
 
 /// CPython 3.11's default `sys.get_int_max_str_digits()`.
@@ -172,6 +158,25 @@ fn int_accepts(value: &str) -> bool {
         && body.bytes().all(|b| b.is_ascii_digit() || b == b'_')
 }
 
+fn option_error(option: &str, action: Option<Action>) -> String {
+    let fix = ["--help", "--port", "--json", "--yes"]
+        .into_iter()
+        .find(|full| {
+            option.starts_with("--")
+                && option.len() > 2
+                && option.len() < full.len()
+                && full.starts_with(option)
+                && (*full != "--yes" || action != Some(Action::Status))
+        });
+    let quoted = super::py_repr(option);
+    match fix {
+        Some(full) => format!("unrecognized option {quoted}; use {full} in full"),
+        None => format!(
+            "unrecognized option {quoted}; run pseudolife-mcp expose --help for supported options"
+        ),
+    }
+}
+
 fn explicit(option: &str, value: &str) -> String {
     format!(
         "argument {option}: ignored explicit argument {}",
@@ -202,6 +207,7 @@ fn parse_action(action: Action, rest: &[String]) -> Parsed {
         };
         match (option, inline) {
             ("-h" | "--help", None) => return Parsed::Help(action),
+            ("-h" | "--help", Some(_)) => return error("--help takes no value; use --help".into()),
             ("--json", None) => args.json = true,
             ("--yes", None) if action.changes() => args.yes = true,
             // `status` has no --yes: an unknown option, kept as an extra.
@@ -215,10 +221,21 @@ fn parse_action(action: Action, rest: &[String]) -> Parsed {
                         None => {
                             return error("argument --port: expected one argument".into());
                         }
-                        Some(value) if value.starts_with('-') => return Parsed::Defer,
+                        Some(value)
+                            if value.starts_with("--")
+                                || value.as_str() == "-h"
+                                || value.starts_with("-h=") =>
+                        {
+                            return error(
+                                "--port needs a value from 1 to 65535; use --port PORT".into(),
+                            );
+                        }
                         Some(_) => tokens.next().map(String::as_str).unwrap_or_default(),
                     },
                 };
+                if value.starts_with('-') {
+                    return error("argument --port: use 1 to 65535 in plain digits".into());
+                }
                 match port_value(value) {
                     Ok(Some(port)) => args.port = port,
                     Ok(None) => {
@@ -227,10 +244,12 @@ fn parse_action(action: Action, rest: &[String]) -> Parsed {
                             super::py_repr(value)
                         ));
                     }
-                    Err(()) => return Parsed::Defer,
+                    Err(()) => {
+                        return error("argument --port: use 1 to 65535 in plain digits".into());
+                    }
                 }
             }
-            _ => return Parsed::Defer,
+            _ => return error(option_error(option, Some(action))),
         }
     }
     if !extras.is_empty() {
@@ -251,7 +270,23 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
         "tailscale" => Action::Tailscale,
         "off" => Action::Off,
         "status" => Action::Status,
-        word if word.starts_with('-') => return Parsed::Defer,
+        word if word.starts_with('-') => {
+            let option = word.split_once('=').map_or(word, |(option, _)| option);
+            let message = match option {
+                "-h" | "--help" => "--help takes no value; use --help".into(),
+                "--port" | "--yes" | "--json" => format!(
+                    "option {} must follow its action; put it after {}",
+                    super::py_repr(option),
+                    if option == "--yes" {
+                        "tailscale or off"
+                    } else {
+                        "tailscale, off or status"
+                    }
+                ),
+                _ => option_error(option, None),
+            };
+            return Parsed::Error(None, message);
+        }
         word => {
             return Parsed::Error(
                 None,
@@ -385,20 +420,125 @@ mod tests {
     }
 
     #[test]
-    fn argparse_corners_defer() {
-        for argv in [
-            &["--he"][..],
-            &["--port", "9", "status"],
-            &["status", "--po", "8765"],
-            &["status", "--"],
-            &["tailscale", "--port", "-1"],
-            &["status", "-x"],
-            &["status", "--yes=1"],
-            &["off", "--port", "+8765"],
-            &["status", "--zz"],
+    fn noncanonical_arguments_refuse_before_host_access() {
+        for (argv, fix) in [
+            (vec!["--he"], "use --help in full"),
+            (vec!["--port", "9", "status"], "after"),
+            (vec!["status", "--po", "8765"], "--port"),
+            (vec!["status", "--"], "--help"),
+            (vec!["tailscale", "--port", "-1"], "plain digits"),
+            (vec!["status", "-x"], "--help"),
+            (vec!["status", "--yes=1"], "--help"),
+            (vec!["off", "--port", "+8765"], "plain digits"),
+            (vec!["off", "--port", " 80"], "plain digits"),
+            (vec!["off", "--port", "8_0"], "plain digits"),
+            (vec!["status", "--zz"], "--help"),
         ] {
-            assert_eq!(run(argv), Parsed::Defer, "{argv:?}");
+            assert!(
+                matches!(run(&argv), Parsed::Error(_, m) if m.contains(fix)),
+                "{argv:?}"
+            );
         }
+        assert_eq!(run(&["--help"]), Parsed::MainHelp);
+        assert_eq!(
+            run(&["status", "--port", "80"]),
+            args(Action::Status, 80, false, false)
+        );
+        assert_eq!(run(&["off", "--yes"]), args(Action::Off, 8765, true, false));
+    }
+
+    #[test]
+    fn option_repairs_are_supported_by_the_selected_action() {
+        for option in ["--y", "--ye"] {
+            assert!(matches!(run(&["status", option]), Parsed::Error(_, m)
+                if m.contains("--help") && !m.contains("use --yes")));
+            assert!(matches!(run(&["off", option]), Parsed::Error(_, m)
+                if m.contains("use --yes in full")));
+            assert!(matches!(run(&["tailscale", option]), Parsed::Error(_, m)
+                if m.contains("use --yes in full")));
+        }
+        assert_eq!(run(&["off", "--yes"]), args(Action::Off, 8765, true, false));
+        assert_eq!(run(&["status", "--help"]), Parsed::Help(Action::Status));
+    }
+
+    #[test]
+    fn misplaced_options_name_the_position_and_one_repair() {
+        for option in ["--port", "--yes", "--json", "--port=9"] {
+            let Parsed::Error(None, message) = run(&[option, "9", "status"]) else {
+                panic!("usage expected")
+            };
+            assert!(message.contains("must follow"), "{message}");
+            assert!(!message.contains("unrecognized"), "{message}");
+            assert!(!message.contains("--help"), "{message}");
+        }
+        let Parsed::Error(None, message) = run(&["--he"]) else {
+            panic!("usage expected")
+        };
+        assert!(message.contains("use --help in full"));
+        assert!(!message.contains("after") && !message.contains("follow"));
+        assert_eq!(run(&["--help"]), Parsed::MainHelp);
+        assert_eq!(
+            run(&["status", "--port", "9"]),
+            args(Action::Status, 9, false, false)
+        );
+    }
+
+    #[test]
+    fn main_help_abbreviation_has_only_its_spelling_repair() {
+        let Parsed::Error(None, message) = run(&["--he"]) else {
+            panic!("usage expected")
+        };
+        assert!(message.contains("use --help in full"));
+        assert!(!message.contains("after") && !message.contains("follow"));
+    }
+
+    #[test]
+    fn help_with_an_explicit_value_names_the_flag_error() {
+        for argv in [
+            vec!["--help=1"],
+            vec!["-h=1"],
+            vec!["status", "--help=1"],
+            vec!["off", "-h=1"],
+        ] {
+            assert!(
+                matches!(run(&argv), Parsed::Error(_, m) if m.contains("--help takes no value"))
+            );
+        }
+        assert_eq!(run(&["off", "--help"]), Parsed::Help(Action::Off));
+    }
+
+    #[test]
+    fn a_port_followed_by_an_option_needs_a_value() {
+        for option in ["--yes", "--json", "--help", "-h"] {
+            assert!(
+                matches!(run(&["tailscale", "--port", option]), Parsed::Error(_, m)
+                if m.contains("--port needs a value") && m.contains("1 to 65535"))
+            );
+        }
+        assert_eq!(
+            run(&["tailscale", "--port", "80", "--yes"]),
+            args(Action::Tailscale, 80, true, false)
+        );
+        for value in ["--port=-x", "--port=-"] {
+            assert!(
+                matches!(run(&["tailscale", value]), Parsed::Error(_, m) if m.contains("plain digits"))
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_options_escape_control_characters() {
+        for argv in [vec!["--bad\u{1b}x"], vec!["status", "--bad\u{1b}x"]] {
+            let Parsed::Error(_, message) = run(&argv) else {
+                panic!("usage expected")
+            };
+            assert!(!message.contains('\u{1b}'));
+            assert!(message.contains("'--bad\\x1bx'"));
+        }
+        assert_eq!(
+            run(&["status", "--json"]),
+            args(Action::Status, 8765, false, true)
+        );
     }
 
     #[test]

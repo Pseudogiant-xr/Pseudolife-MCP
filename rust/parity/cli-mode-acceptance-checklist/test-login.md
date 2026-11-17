@@ -1,3 +1,3 @@
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|
-| test-login | 5 | ported-with-substitution | native | Native admin-URL and Postgres-container psql creation retained; top-level/create help implemented. The login file stays on the invoking host, so this host operation does not rerun inside the daemon container. All 51 Linux non-Docker cases matched and native Windows contracts passed; both-platform goldens (including seven real Linux container cases) and the image proof passed; hosted stress remains pending. |
+| test-login | 5 | ported-with-substitution | native | Every invocation is answered natively: bare/help usage, equals-form value options and named preflight refusals replace all dispatcher deferrals. Admin-URL and container creation, privilege restrictions and owner-only credential staging remain. Contract tests cover refusals and legitimate near misses; the row observes disposable server state and credential-file permissions. |

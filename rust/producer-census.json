@@ -367,7 +367,7 @@
     "rust/shim/src/board/state.rs": "dc8c8205e49953d098ee5386a8876562fd5584ee8eee6359f0aae5d53bcb0e05",
     "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
     "rust/shim/src/cache.rs": "266bb3545eb3f2cabc10c84c1d1ace7c9a300db588d32b40fc0eb2dbb0c38502",
-    "rust/shim/src/cli.rs": "dacc5f0dc333254acb115e0cc6c8ec20fe5f0d2c9c7d8351686387792e0b50cb",
+    "rust/shim/src/cli.rs": "2221107adb9495ba57adeb0774d8d5ced39b20a36e54fbb4fad2d4c033d623ae",
     "rust/shim/src/cli/backup/archive.rs": "2bc8fff38e08d8b0e90012e827b175c45dadbcf6527258b16c911dd4ea1aa1fd",
     "rust/shim/src/cli/backup/args.rs": "ed12e2e6a3dd45fe6c656ae29d8d7c52f039d31ca33562522e279ef6f467db2b",
     "rust/shim/src/cli/backup/dump.rs": "a0b8e15d7e91c5c10ddabdb62f4bfa959c1d85b32d136e41c83f42946b5aafc0",
@@ -390,13 +390,13 @@
     "rust/shim/src/cli/board_audit/transport.rs": "de07dfa8433fbcd1d13222c4acc01bdf7feaa54a1d968af492ae4dbb96bcc15c",
     "rust/shim/src/cli/briefing_help.txt": "443e8b51f02b3a1ac9c381d3653ceb9a6a6e5142398fe992c29edd3b523ee638",
     "rust/shim/src/cli/briefing_hook.rs": "8bf7c0f73f5377078155f42c08e44c13faaf880f7fe52170b164966e61d2faa5",
-    "rust/shim/src/cli/conductor_watch/args.rs": "8b51d2693c5d1d750301ddcf99d2f1932a6b855f8eec6d8d67bf95d6aa413b5d",
+    "rust/shim/src/cli/conductor_watch/args.rs": "32fa1865f19894bfd0a984460f4366b8378d2d582507bf206df873da68e9e6b9",
     "rust/shim/src/cli/conductor_watch/events.rs": "5d4e09484f8374212b34796382a44638e12c778ef195c66492b9483ca2eb617a",
     "rust/shim/src/cli/conductor_watch/help.txt": "f8c467dcb07393f82f34532a1ae88afa93ca445e4cb0df89756f00db8a4ce76f",
-    "rust/shim/src/cli/conductor_watch/mod.rs": "f9f23b579c17fad5d0e70842a3a7f84f091617c396e05ace4eebbf66d548c64a",
+    "rust/shim/src/cli/conductor_watch/mod.rs": "eb35a78b5f2c130ec8f11f4bb3070679d5229e439ee06ba5e792b32adb82551a",
     "rust/shim/src/cli/conductor_watch/sources.rs": "fa750427f62cff550caed1c17783941fe5645690b85140396105a98305d66f45",
     "rust/shim/src/cli/conductor_watch/start.rs": "90deef2dee73d98ca55bf6024a49d020c56d98a273b1a69c00ae13d748173f0d",
-    "rust/shim/src/cli/conductor_watch/tests.rs": "3555dd9bb23701619ab83452bd47de76b7b3e8e5f1376de363506199040f81c6",
+    "rust/shim/src/cli/conductor_watch/tests.rs": "0bedd9b0efeac0348abe5038c17c6eeed4ccf459ddc53a9e5bbe693105ddb1d9",
     "rust/shim/src/cli/conductor_watch/watch.rs": "dcf44ba5aef08e547c762ae7b6bd616f8eff0f0861c1a3979eb28b1671cc0772",
     "rust/shim/src/cli/connect/args.rs": "404c11aa25a38a3cedd13e531f4129d349a71f5915dbb66ff8e9029a4431e7ec",
     "rust/shim/src/cli/connect/codex.rs": "7401076157c28d2a81615c5c99a996df30c75c124cd180c5ebda2d801291269f",
@@ -438,10 +438,10 @@
     "rust/shim/src/cli/doorbell_seen.rs": "dbfa57d6cd989f61114992bed3b4b78fff1f0597e4845397241148a35cd03f4d",
     "rust/shim/src/cli/episode.rs": "cf39ca9de9effb7bed1e110fdb2fddda55407b8ae2d0ccc98455aef7ea235bec",
     "rust/shim/src/cli/episode_input.rs": "deb1f4bbc2dedd6395793f40064310c7e5d8277bdfb8232146f8cee060c7536b",
-    "rust/shim/src/cli/expose/args.rs": "6fb4beed761767f4809d5428334a28efee3f94f4932ffec6ff39a14e3064c6f3",
-    "rust/shim/src/cli/expose/mod.rs": "04e4bff9670fa0579d9d951e2be808760551a04f8b2d6ffab795bfdf15edf1ea",
+    "rust/shim/src/cli/expose/args.rs": "251f6045cfb8e5d85687443676f3c8100dea72c7ddc3e6ac50f1a053daf91c4d",
+    "rust/shim/src/cli/expose/mod.rs": "c9266672d28508be85d077c9fcf37ef3f1a290724d26b76cf15d84c2ee0d1872",
     "rust/shim/src/cli/expose/tailscale.rs": "0b514c98094fab11a07a848d938e2d428cf24f05e196390a67d68ea0a3c7082f",
-    "rust/shim/src/cli/expose/tests.rs": "34bb6802de6fb641abcaf814ad672f741b7021d13f7d29749c806be5d9b8de3b",
+    "rust/shim/src/cli/expose/tests.rs": "4d29f5b4535b145ece9ddde7a4d6e1b5067972835d4d6e42d6975d31d186c6f3",
     "rust/shim/src/cli/hook_http.rs": "b6041ceaf0a7a7cb976d843412acc94c4957988e96d004b3e875fabe82ad990c",
     "rust/shim/src/cli/hook_json.rs": "ec016389716157c2eed558af5dab9774fbbc98d256e6a8e9e7784e8b73cc7602",
     "rust/shim/src/cli/host_connection.rs": "7b3423379687a70960ea50bf0e8f2d47560633f7d1950997bc5aebd9a933278c",
@@ -4407,7 +4407,24 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/args.rs:18",
+          "location": "rust/shim/src/cli/expose/args.rs:175",
+          "shape": {
+            "argv_source": "expose --help for supported options\"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--help for supported options\"",
+            "omitted_optional": null,
+            "parameters": {
+              "--help": {
+                "expression": "for"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/expose/args.rs:5",
           "shape": {
             "argv_source": "expose [-h] {tailscale,off,status} ...\\n\",",
             "channel": "argv",
@@ -4420,7 +4437,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/args.rs:73",
+          "location": "rust/shim/src/cli/expose/args.rs:60",
           "shape": {
             "argv_source": "expose {} [-h] [--port PORT]{yes} [--json]\\n\",",
             "channel": "argv",
@@ -4437,7 +4454,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:1140",
+          "location": "rust/shim/src/cli/expose/mod.rs:1124",
           "shape": {
             "argv_source": "expose {}\", action.name()),",
             "channel": "argv",
@@ -4450,7 +4467,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:1144",
+          "location": "rust/shim/src/cli/expose/mod.rs:1128",
           "shape": {
             "argv_source": "expose \".to_owned(),",
             "channel": "argv",
@@ -4463,7 +4480,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:674",
+          "location": "rust/shim/src/cli/expose/mod.rs:1171",
+          "shape": {
+            "argv_source": "expose : error: argument is not valid Unicode; retype it as Unicode text; nothing changed\\n\".into(),",
+            "channel": "argv",
+            "complete": false,
+            "expression": ": error: argument is not valid Unicode; retype it as Unicode text; nothing changed\\n\".into(),",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/expose/mod.rs:663",
           "shape": {
             "argv_source": "expose off --port {port}`\",",
             "channel": "argv",
@@ -4480,7 +4510,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:722",
+          "location": "rust/shim/src/cli/expose/mod.rs:711",
           "shape": {
             "argv_source": "expose tailscale --port {port}`\",",
             "channel": "argv",
@@ -4497,7 +4527,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:752",
+          "location": "rust/shim/src/cli/expose/mod.rs:741",
           "shape": {
             "argv_source": "expose off --port {port}\"",
             "channel": "argv",
@@ -4514,7 +4544,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:1116",
+          "location": "rust/shim/src/cli/expose/tests.rs:1112",
           "shape": {
             "argv_source": "expose off [-h] [--port PORT] [--yes] [--json]\\n\\",
             "channel": "argv",
@@ -4534,7 +4564,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:1117",
+          "location": "rust/shim/src/cli/expose/tests.rs:1113",
           "shape": {
             "argv_source": "expose off: error: argument --port: not a port: '0'\\n\"",
             "channel": "argv",
@@ -4547,7 +4577,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:1122",
+          "location": "rust/shim/src/cli/expose/tests.rs:1118",
           "shape": {
             "argv_source": "expose [-h] {tailscale,off,status} ...\\n\\",
             "channel": "argv",
@@ -4560,7 +4590,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:1123",
+          "location": "rust/shim/src/cli/expose/tests.rs:1119",
           "shape": {
             "argv_source": "expose : error: unrecognized arguments: --yes\\n\"",
             "channel": "argv",
@@ -4573,7 +4603,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:486",
+          "location": "rust/shim/src/cli/expose/tests.rs:482",
           "shape": {
             "argv_source": "expose tailscale --port 8443`\\n\"",
             "channel": "argv",
@@ -4590,7 +4620,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:783",
+          "location": "rust/shim/src/cli/expose/tests.rs:779",
           "shape": {
             "argv_source": "expose tailscale --port 8443`\\n\"",
             "channel": "argv",
@@ -4607,7 +4637,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:830",
+          "location": "rust/shim/src/cli/expose/tests.rs:826",
           "shape": {
             "argv_source": "expose off --port 8443`\\n\"",
             "channel": "argv",
@@ -4698,7 +4728,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli.rs:278",
+          "location": "rust/shim/src/cli.rs:275",
           "shape": {
             "argv_source": "--help \\n\",",
             "channel": "argv",
@@ -5454,7 +5484,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:749",
+          "location": "rust/shim/src/cli/expose/mod.rs:738",
           "shape": {
             "argv_source": "invite <machine>` here, then give the code it prints to that machine's installer (option 2), or run `pseudolife-mcp pair {url} <code>` there\"",
             "channel": "argv",
@@ -5467,7 +5497,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:317",
+          "location": "rust/shim/src/cli/expose/tests.rs:313",
           "shape": {
             "argv_source": "invite <machine>` here, then give the code it prints to that machine's installer (option 2), or run `pseudolife-mcp pair {URL} <code>` there\\nto remove the forward: pseudolife-mcp expose off --port {PORT}\\n\",",
             "channel": "argv",
@@ -34180,6 +34210,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "rust/shim/src/cli/conductor_watch/mod.rs:368",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/doorbell_seen.rs:202",
           "shape": {
             "channel": "environment",
@@ -49679,7 +49722,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:947",
+          "location": "rust/shim/src/cli/expose/mod.rs:936",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51652,7 +51695,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:947",
+          "location": "rust/shim/src/cli/expose/mod.rs:936",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -80832,7 +80875,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:35",
       "name": "conductor-watch",
       "shape": {
         "argv_source": "conductor-watch \";",
@@ -80846,7 +80889,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/conductor_watch/mod.rs:41",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
       "name": "delegate-watch",
       "shape": {
         "argv_source": "delegate-watch is deprecated: use pseudolife-mcp conductor-watch\";",
@@ -80860,7 +80903,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/conductor_watch/tests.rs:258",
+      "location": "rust/shim/src/cli/conductor_watch/tests.rs:415",
       "name": "conductor-watch",
       "shape": {
         "argv_source": "conductor-watch : error: unrecognized arguments: --bogus\\n\")",
@@ -90869,7 +90912,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:246",
+      "location": "rust/shim/src/cli/expose/mod.rs:235",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90883,7 +90926,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:813",
+      "location": "rust/shim/src/cli/expose/mod.rs:802",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90897,7 +90940,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:827",
+      "location": "rust/shim/src/cli/expose/mod.rs:816",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90911,7 +90954,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:836",
+      "location": "rust/shim/src/cli/expose/mod.rs:825",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90925,7 +90968,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:845",
+      "location": "rust/shim/src/cli/expose/mod.rs:834",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90939,7 +90982,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:918",
+      "location": "rust/shim/src/cli/expose/mod.rs:907",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90953,7 +90996,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:925",
+      "location": "rust/shim/src/cli/expose/mod.rs:914",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90967,7 +91010,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/tests.rs:317",
+      "location": "rust/shim/src/cli/expose/tests.rs:313",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90981,7 +91024,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/tests.rs:363",
+      "location": "rust/shim/src/cli/expose/tests.rs:359",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90995,7 +91038,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/tests.rs:377",
+      "location": "rust/shim/src/cli/expose/tests.rs:373",
       "method": null,
       "name": "/health",
       "shape": {
@@ -121758,7 +121801,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli.rs:278",
+      "location": "rust/shim/src/cli.rs:275",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:help"
     },
@@ -122110,13 +122153,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:35",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:conductor-watch"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/conductor_watch/mod.rs:41",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:368",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:delegate-watch"
     },
@@ -122128,7 +122177,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/conductor_watch/tests.rs:258",
+      "location": "rust/shim/src/cli/conductor_watch/tests.rs:415",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:conductor-watch"
     },
@@ -123348,179 +123397,191 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/args.rs:18",
+      "location": "rust/shim/src/cli/expose/args.rs:175",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/args.rs:73",
+      "location": "rust/shim/src/cli/expose/args.rs:5",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:1140",
+      "location": "rust/shim/src/cli/expose/args.rs:60",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:1144",
+      "location": "rust/shim/src/cli/expose/mod.rs:1124",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:246",
+      "location": "rust/shim/src/cli/expose/mod.rs:1128",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:expose"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/expose/mod.rs:1171",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:expose"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/expose/mod.rs:235",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:674",
+      "location": "rust/shim/src/cli/expose/mod.rs:663",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:722",
+      "location": "rust/shim/src/cli/expose/mod.rs:711",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:749",
+      "location": "rust/shim/src/cli/expose/mod.rs:738",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:752",
+      "location": "rust/shim/src/cli/expose/mod.rs:741",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:813",
+      "location": "rust/shim/src/cli/expose/mod.rs:802",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:813",
+      "location": "rust/shim/src/cli/expose/mod.rs:802",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:827",
+      "location": "rust/shim/src/cli/expose/mod.rs:816",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:836",
+      "location": "rust/shim/src/cli/expose/mod.rs:825",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:845",
+      "location": "rust/shim/src/cli/expose/mod.rs:834",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:918",
+      "location": "rust/shim/src/cli/expose/mod.rs:907",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:925",
+      "location": "rust/shim/src/cli/expose/mod.rs:914",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:947",
+      "location": "rust/shim/src/cli/expose/mod.rs:936",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:947",
+      "location": "rust/shim/src/cli/expose/mod.rs:936",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:1116",
+      "location": "rust/shim/src/cli/expose/tests.rs:1112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:1117",
+      "location": "rust/shim/src/cli/expose/tests.rs:1113",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:1122",
+      "location": "rust/shim/src/cli/expose/tests.rs:1118",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:1123",
+      "location": "rust/shim/src/cli/expose/tests.rs:1119",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:317",
+      "location": "rust/shim/src/cli/expose/tests.rs:313",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:317",
+      "location": "rust/shim/src/cli/expose/tests.rs:313",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:363",
+      "location": "rust/shim/src/cli/expose/tests.rs:359",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:363",
+      "location": "rust/shim/src/cli/expose/tests.rs:359",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:377",
+      "location": "rust/shim/src/cli/expose/tests.rs:373",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:486",
+      "location": "rust/shim/src/cli/expose/tests.rs:482",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:783",
+      "location": "rust/shim/src/cli/expose/tests.rs:779",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:830",
+      "location": "rust/shim/src/cli/expose/tests.rs:826",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
