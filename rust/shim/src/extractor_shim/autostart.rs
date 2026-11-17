@@ -24,12 +24,12 @@ fn windows_registration_command(
     };
     // Read each file once, verify those bytes, then run/parse only those
     // bytes. Neither the script nor its JSON is reopened after verification.
+    let script_digest = format!("{:x}", Sha256::digest(script_bytes));
+    let data_digest = format!("{:x}", Sha256::digest(data_bytes));
     let bootstrap = format!(
         "$ErrorActionPreference='Stop';try{{$s=[Security.Cryptography.SHA256]::Create();$b=[IO.File]::ReadAllBytes({script});$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{script_digest}'){{[Console]::Error.WriteLine('autostart registration script changed after it was written; nothing was run; rerun install-autostart');exit 5}};$d=[IO.File]::ReadAllBytes({data});$h=-join ($s.ComputeHash($d)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{data_digest}'){{[Console]::Error.WriteLine('autostart registration data changed after it was written; nothing was run; rerun install-autostart');exit 5}}}}catch{{[Console]::Error.WriteLine('cannot verify autostart registration files; rerun install-autostart: '+$_.Exception.Message);exit 1}}finally{{if($s){{$s.Dispose()}}}};& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b))) -ConfigJson ([Text.Encoding]::UTF8.GetString($d))",
         script = literal(script)?,
         data = literal(data)?,
-        script_digest = format!("{:x}", Sha256::digest(script_bytes)),
-        data_digest = format!("{:x}", Sha256::digest(data_bytes)),
     );
     let argv = crate::windows_powershell::encoded(&bootstrap)?;
     let mut command = Command::new(&argv[0]);
