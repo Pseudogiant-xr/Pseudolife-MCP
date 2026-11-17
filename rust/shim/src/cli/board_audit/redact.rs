@@ -98,7 +98,7 @@ async fn append_redact(
     let seq = head.0.checked_add(1).ok_or(Stop::Unsupported("audit seq has exhausted the signed 64-bit range; retain the bank and request audit sequence migration support"))?;
     let payload = codec::canonical(payload).map_err(|_| {
         Stop::Unsupported(
-            "redaction payload cannot be encoded safely; use Unicode --reason text and retry",
+            "redaction payload cannot be encoded safely; report this internal encoding failure",
         )
     })?;
     let row = json!({
@@ -115,7 +115,7 @@ async fn append_redact(
         "payload": payload,
         "prev_hash": head.1,
     });
-    let hash = codec::hash(&row, now).map_err(|_| Stop::Unsupported("redaction audit hash material cannot be encoded safely; restore intact audit metadata from a trusted backup"))?;
+    let hash = codec::hash(&row, now).map_err(|_| Stop::Unsupported("redaction audit hash material cannot be encoded safely; report this internal encoding failure"))?;
     tx.execute(
         "INSERT INTO coordination_events (seq,event,actor,principal,agent_id,recipient_agent_id,project,task,message_id,payload,created_at,hlc,prev_hash,hash) VALUES ($1,'redact','operator','',$2,$3,$4,$5,$6,$7,$8,'',$9,$10)",
         &[
@@ -549,6 +549,37 @@ mod tests {
     #[allow(dead_code)]
     mod pg_wire {
         include!("../../../tests/common/pg_wire.rs");
+    }
+
+    async fn constructed_encoding_failure(payload: Value, now: f64, expected: &str) {
+        let fixture = pg_wire::start().await;
+        let dsn = pg::Dsn::parse(&fixture.dsn).unwrap();
+        let session = pg::Session::open_in(&dsn, &pg::TlsEnvironment::default())
+            .await
+            .unwrap();
+        let result = append_redact(
+            session.client(),
+            (0, GENESIS.into()),
+            now,
+            [None, None, None, None],
+            "example",
+            &payload,
+        )
+        .await;
+        session.close().await.unwrap();
+        fixture.task.await.unwrap();
+        let Err(Stop::Unsupported(message)) = result else {
+            panic!("constructed unencodable input must be refused before any INSERT");
+        };
+        assert!(message.contains(expected));
+        assert!(!message.contains("synthetic-secret"));
+    }
+
+    #[tokio::test]
+    async fn constructed_payload_encoding_failure_is_safe() {
+        let payload = serde_json::from_str(r#"{"synthetic-secret":1e400}"#).unwrap();
+        constructed_encoding_failure(payload, 1.0, "payload cannot be encoded").await;
+        assert!(codec::canonical(&json!({"reason":"valid Unicode é"})).is_ok());
     }
 
     #[tokio::test]

@@ -378,9 +378,9 @@
     "rust/shim/src/cli/board_audit/codec.rs": "11200e0125c249447711dc1281901d02b08437c2eab139d2243cbe4fb3bc7088",
     "rust/shim/src/cli/board_audit/help.rs": "fa7a7992ca744c9a18106b2d4bf444c3cf3404fa5fd3752f646c178489b12f87",
     "rust/shim/src/cli/board_audit/metrics.rs": "846db7adcdf3444821e034d964648579dae0477ce3a50c5a7a570e53c1115a35",
-    "rust/shim/src/cli/board_audit/mod.rs": "43088cb218d6a7f955fad516761096b61824826169248ac63875b8fca57d6b65",
+    "rust/shim/src/cli/board_audit/mod.rs": "f180d770d952ab9dd12073314f9a8d0153a2440da59140e23e448bef87e59fea",
     "rust/shim/src/cli/board_audit/output.rs": "0d3d9cf8b320ef88bbf0a17a3e3007a383d8dab79ae500baa4f53639c0ffc561",
-    "rust/shim/src/cli/board_audit/redact.rs": "fe559978716e5e251829848c9ccf10d9d9f7f771e1b07ca7dc9eaa268f4a3c2e",
+    "rust/shim/src/cli/board_audit/redact.rs": "7055da0e108bc7ffd31f0e622486e42f111c7da5c7f51a002a08cb7996bcdea8",
     "rust/shim/src/cli/board_audit/stats.rs": "10ed6b288542094f853127fb183814d808d621ac71a3a441d6cd761d5fdb2a8d",
     "rust/shim/src/cli/board_audit/testdata/stats.json": "2dbbc7c653b2f2152f2266068b0ec26b189c67810e10126f9eb5ff02f28ccad7",
     "rust/shim/src/cli/board_audit/time.rs": "980e3c801c406fa063112c420bf0fe8c676835f3cbd3cbaab19b3ed62becfbef",
@@ -42601,7 +42601,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/board_audit/mod.rs:286",
+          "location": "rust/shim/src/cli/board_audit/mod.rs:298",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -121779,7 +121779,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/board_audit/mod.rs:286",
+      "location": "rust/shim/src/cli/board_audit/mod.rs:298",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },

@@ -23,16 +23,20 @@ use std::{
 pub fn run(arguments: Vec<OsString>) -> u8 {
     // Deep historical payloads also recurse when dropped; use the same
     // stack allowance as the other commands using the Python JSON reader.
-    std::thread::Builder::new()
+    let worker = match std::thread::Builder::new()
         .stack_size(64 << 20)
         .spawn(move || run_inner(arguments))
-        .ok()
-        .and_then(|worker| worker.join().ok())
-        .unwrap_or_else(|| {
-            stats::error(
-                "audit worker could not complete; free system resources and retry the command",
-            )
-        })
+    {
+        Ok(worker) => worker,
+        Err(_) => {
+            return stats::error(
+                "audit worker could not start; free system resources and retry the command",
+            );
+        }
+    };
+    worker.join().unwrap_or_else(|_| {
+        stats::error("audit worker panicked and completion is unknown; inspect the audit head before retrying the command")
+    })
 }
 
 fn run_inner(arguments: Vec<OsString>) -> u8 {
@@ -258,21 +262,29 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
 fn report(value: Json, code: u8) -> u8 {
     match print_line(&value) {
         Ok(()) => code,
-        Err(()) => output_failed(),
+        Err(ReportError::Encoding) => stats::error(
+            "audit result cannot be encoded safely; report this internal encoding failure",
+        ),
+        Err(ReportError::Output) => output_failed(),
     }
+}
+
+enum ReportError {
+    Encoding,
+    Output,
 }
 
 /// One `print(json.dumps(value))` line; `Err` when stdout refused it (or the
 /// value holds something the encoder refuses, which nothing here builds).
-fn print_line(value: &Json) -> Result<(), ()> {
-    let bytes = sent_json::encode(value).map_err(|_| ())?;
+fn print_line(value: &Json) -> Result<(), ReportError> {
+    let bytes = sent_json::encode(value).map_err(|_| ReportError::Encoding)?;
     let mut text = String::from_utf8(bytes).expect("report is UTF-8");
     text.push('\n');
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(&super::text_bytes(&text))
         .and_then(|()| stdout.flush())
-        .map_err(|_| ())
+        .map_err(|_| ReportError::Output)
 }
 
 fn output_failed() -> u8 {
@@ -291,6 +303,16 @@ fn failed() -> u8 {
 #[cfg(test)]
 mod tests {
     use super::PythonLines;
+
+    #[test]
+    fn constructed_invalid_report_is_refused_before_stdout() {
+        let value = super::Json::Integer("synthetic-secret".into());
+        assert!(matches!(
+            super::print_line(&value),
+            Err(super::ReportError::Encoding)
+        ));
+        assert!(super::sent_json::encode(&super::Json::Integer("1".into())).is_ok());
+    }
 
     #[test]
     fn cr_and_utf8_at_decode_boundaries_keep_line_semantics() {

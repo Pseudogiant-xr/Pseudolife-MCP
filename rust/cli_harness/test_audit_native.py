@@ -159,6 +159,17 @@ def test_bad_database_setting_has_actionable_secret_safe_refusal(candidate, tmp_
     assert_refused(result, "PSEUDOLIFE_MCP_DATABASE_URL")
 
 
+@pytest.mark.parametrize("mode", ["verify", "export", "redact", "stats"])
+def test_nonunicode_database_setting_refuses_without_fallback(candidate, bank, tmp_path, mode):
+    args = [mode]
+    if mode == "redact":
+        args += ["--message-id", "example", "--reason", "wrong paste"]
+    result = invoke(candidate, tmp_path, *args, dsn=SECRET + "\udcff")
+    assert_refused(result, "PSEUDOLIFE_MCP_DATABASE_URL")
+    near = invoke(candidate, tmp_path, *args, dsn=bank[1])
+    assert near.returncode == (1 if mode == "redact" else 0)
+
+
 @pytest.mark.parametrize("field,value,parameter", [
     ("seq", 2**63, "seq"),
     ("created_at", 1e309, "created_at"),
