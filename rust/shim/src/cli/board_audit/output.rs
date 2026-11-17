@@ -9,12 +9,16 @@ use std::{
 #[derive(Debug)]
 enum StagingFailure {
     IdentityLost,
+    #[cfg(windows)]
+    ReparsePoint,
 }
 
 impl fmt::Display for StagingFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::IdentityLost => "staged archive identity could not be confirmed before publication; retry in a private destination directory",
+            #[cfg(windows)]
+            Self::ReparsePoint => "staged archive is a reparse point; choose a destination without redirected paths",
         })
     }
 }
@@ -62,7 +66,7 @@ impl Staged {
         };
         #[cfg(windows)]
         crate::credentials::windows_security::make_private(staged.file())
-            .map_err(|_| io::Error::from(io::ErrorKind::PermissionDenied))?;
+            .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error))?;
         Ok(staged)
     }
 
@@ -148,7 +152,10 @@ fn identity(file: &File) -> io::Result<(u64, u64)> {
         return Err(io::Error::last_os_error());
     }
     if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        return Err(io::ErrorKind::PermissionDenied.into());
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            StagingFailure::ReparsePoint,
+        ));
     }
     Ok((
         u64::from(info.dwVolumeSerialNumber),
@@ -236,6 +243,15 @@ pub(super) fn failure(operation: &str, error: &io::Error) -> u8 {
     {
         return super::stats::error(format!(
             "--out {operation} failed: {cause}; no archive was published"
+        ));
+    }
+    #[cfg(windows)]
+    if error
+        .get_ref()
+        .is_some_and(|source| source.is::<crate::credentials::CredentialError>())
+    {
+        return super::stats::error(format!(
+            "--out {operation} failed: owner-only staging permissions could not be established; choose a destination supporting owner-only permissions; no archive was published"
         ));
     }
     let (cause, fix) = match error.kind() {
