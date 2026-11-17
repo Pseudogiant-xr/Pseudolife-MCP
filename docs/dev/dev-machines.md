@@ -219,12 +219,14 @@ without `.git` is refused for inspection, never silently overwritten.
 The rules are in `CLAUDE.md` ("Sharing the machine"); this section holds the
 knobs and procedures they point at.
 
-- **Linux temporary storage.** The dev boxes' `/tmp` is memory-backed. Never
-  put checkouts, Cargo targets, environments, bundles, archives or saved
-  evidence there; use the home directory. Check `df -h /tmp` before broad
+- **Linux temporary storage.** Keep checkouts, Cargo targets, environments,
+  bundles, archives and saved evidence under the home directory. Check the
+  actual filesystem with `df -h /tmp` before broad
   pytest runs, and remove only your own unused temporary files when done.
-  The suite dispatcher and shim far half refuse when a memory-backed `/tmp`
-  already holds more than 4 GiB, naming the cleanup and retry. The dispatcher
+  The suite dispatcher and shim far half inspect the actual filesystem type
+  and refuse only when a memory-backed `/tmp` already holds more than 4 GiB,
+  naming the cleanup and retry. A disk-backed `/tmp` passes this check.
+  The dispatcher
   keeps its transient bundle and script under
   `~/.cache/pseudolife-suite/dispatch` and sets `TMPDIR` under the same home
   cache; the shim uses `<repo>.shim-tests-tmp`. Their worktrees, environments
