@@ -1126,15 +1126,9 @@ Connection: close
         // UTF-16 base64 of the bootstrap stays far below the limit.
         assert!(bootstrap.len() * 2 * 4 / 3 < 2000);
         assert!(task_lock_functions().len() > 4000);
-        assert!(
-            bootstrap.contains(&format!(
-                "ReadAllBytes({})",
-                crate::windows_powershell::path_expression(std::path::Path::new(
-                    "C:/temp/pseudolife-schedule-x.ps1"
-                ))
-                .unwrap()
-            ))
-        );
+        let path = std::path::Path::new("C:/temp/pseudolife-schedule-x.ps1");
+        let expression = crate::windows_powershell::path_expression(path).unwrap();
+        assert!(bootstrap.contains(&format!("ReadAllBytes({expression})")));
         let check = bootstrap.find(&format!("if($h -ne '{digest}')")).unwrap();
         assert!(check < bootstrap.find("[scriptblock]::Create").unwrap());
         assert!(bootstrap.contains(&format!("exit {SCRIPT_CHANGED}")));
