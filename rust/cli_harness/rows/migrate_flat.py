@@ -15,17 +15,11 @@ import re
 
 from .. import normalize
 from ..core import Case
-from ..mutants import Mutant
 from . import _bank, backup
 
 DB = _bank.name("pl_cf_migrate_flat")
 CREATED = False
 MARKER = "flat_band_migration_v1"
-
-MUTANTS = [
-    Mutant("migrate-flat-apply-fence", "migrate_flat", "shim/src/cli/migrate_flat.rs",
-           "if !apply {", "if false && !apply {", ("no-apply",)),
-]
 
 
 @atexit.register

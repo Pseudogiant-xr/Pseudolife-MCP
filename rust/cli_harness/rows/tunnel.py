@@ -20,7 +20,7 @@ field edited. Guards on every arm:
   home (``PATH`` is empty, ``COMSPEC`` and ``PATHEXT`` are removed);
 - every daemon URL, saved in a profile or passed as an argument, is the
   arm's own loopback listener, which records any connection (none may
-  happen; the ``tunnel-saved-url-connect`` mutant proves it would show);
+  happen; its automatic source-mutant check was retired on 17 November 2026);
 - the caller's real ``~/.pseudolife-mcp`` is compared by ``lstat`` metadata
   only (names, size, mtime_ns, mode, inode, link count, Windows attributes)
   before and after the arm. No file there is opened or read; links and
@@ -43,7 +43,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import core, normalize
-from ..mutants import Mutant
 
 SEP = "\\" if core.WINDOWS else "/"
 NEAR = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%dT00:00:00Z")
@@ -841,91 +840,3 @@ def cases() -> list[core.Case]:
         defer("defer-repeated-option", ["status", "--json", "--json", "--profile-dir", DIR],
               profile()),
     ]
-
-
-MUTANTS = [
-    Mutant("tunnel-dispatch-dropped", "tunnel", "shim/src/cli.rs",
-           'if mode == "tunnel"\n', 'if mode == "tunnel-dropped"\n',
-           ("status-pending-json", "update-no-dir")),
-    Mutant("tunnel-update-exit-3", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           'return Ok((format!("{NO_PROFILES}\\n"), 3));',
-           'return Ok((format!("{NO_PROFILES}\\n"), 0));', ("update-no-dir", "update-empty-dir")),
-    Mutant("tunnel-refresh-attention-flipped", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           '!matches!(self, Refresh::None) && self.state() != "refreshed"',
-           '!matches!(self, Refresh::None) && self.state() == "refreshed"',
-           ("status-refresh-refreshed", "status-refresh-pending")),
-    Mutant("tunnel-near-expiry-window", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "remaining < chrono::Duration::days(7)", "remaining < chrono::Duration::days(2)",
-           ("status-expiry-near",)),
-    # Review of #678 at 6447829f: the reported expiry one day earlier stays
-    # in the near-expiry class (and in the old rule's one-to-three-day
-    # window), so only a comparison bound to the seeded value sees it.
-    Mutant("tunnel-near-expiry-day-earlier", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "                    quoted(text),\n                    bool_text(expired)\n",
-           "                    quoted(&(*instant - chrono::Duration::days(1))"
-           ".format(\"%Y-%m-%dT%H:%M:%SZ\").to_string()),\n"
-           "                    bool_text(expired)\n",
-           ("status-expiry-near",)),
-    Mutant("tunnel-stdout-refusal-ignored", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "    Some(if stdout_refused {\n", "    Some(if false && stdout_refused {\n",
-           ("status-pending-json-stdout-closed", "status-pending-text-stdout-closed",
-            "update-no-dir-stdout-closed")),
-    Mutant("tunnel-key-presence-inverted", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "        Some(present) => bool_text(present),\n",
-           "        Some(present) => bool_text(!present),\n",
-           ("status-pending-json",)),
-    Mutant("tunnel-owner-only-skipped", "tunnel", "shim/src/cli/tunnel/store.rs",
-           "    if !owner_only_file(&file) {\n", "    if false && !owner_only_file(&file) {\n",
-           ("status-not-owner-only", "status-key-not-owner-only",
-            "status-refresh-not-owner-only")),
-    Mutant("tunnel-tunnel-id-class", "tunnel", "shim/src/cli/tunnel/store.rs",
-           "        u8::is_ascii_hexdigit,\n", "        u8::is_ascii_alphanumeric,\n",
-           ("status-bad-tunnel-id", "setup-bad-tunnel-id")),
-    Mutant("tunnel-verify-message", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           '"finish tunnel setup before requesting cloud verification"',
-           '"finish tunnel setup before requesting verification"',
-           ("verify-pending",)),
-    Mutant("tunnel-ambiguous-literal-accepted", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "        // Only a literal credential: setup requires a file.\n        return Err(Fail::Tunnel(AMBIGUOUS));",
-           "        // Only a literal credential: setup requires a file.\n        return Err(Fail::Defer);",
-           ("setup-literal-token-env",)),
-    Mutant("tunnel-expiry-order", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "let expired = *instant <= now;", "let expired = *instant >= now;",
-           ("status-expired-text", "status-expiry-date-only")),
-    # review round 1
-    Mutant("tunnel-saved-url-connect", "tunnel", "shim/src/cli/tunnel/store.rs",
-           "            validate_url(url)?;\n            url.to_owned()\n",
-           "            validate_url(url)?;\n"
-           "            let _ = std::net::TcpStream::connect(url.trim_start_matches(\"http://\"));\n"
-           "            url.to_owned()\n",
-           ("status-pending-json",)),
-    Mutant("tunnel-challenge-bound", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "        Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 100 => {",
-           "        Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 1000 => {",
-           ("defer-status-deep-challenge",)),
-    Mutant("tunnel-existing-profile-resumed", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "    if occupied(&path)? {\n", "    if false && occupied(&path)? {\n",
-           ("defer-setup-existing-profile",)),
-    Mutant("tunnel-codex-registration-ignored", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "|| occupied(&codex)?", "|| false",
-           ("defer-setup-codex-registration",)),
-    Mutant("tunnel-redirect-message", "tunnel", "shim/src/cli/tunnel/store.rs",
-           "fs::metadata(&target).is_ok() => Err(Fail::Tunnel(REDIRECT)),",
-           "fs::metadata(&target).is_ok() => Err(Fail::Tunnel(UNSAFE_PATH)),",
-           ("status-profile-junction", "status-profile-symlink")),
-
-    Mutant("tunnel-reserved-number-key-admitted", "tunnel", "shim/src/cli/tunnel/syntax.rs",
-           "    if reserved_number_key(text) {\n", "    if false && reserved_number_key(text) {\n",
-           ("defer-status-refresh-reserved-id", "defer-status-result-reserved-id")),
-]
-
-if core.WINDOWS:
-    # Only Windows reaches this branch: on Unix every redirect leaf, dangling
-    # symlinks included, is refused by the arm before it.
-    MUTANTS.append(
-        Mutant("tunnel-dangling-junction-answered", "tunnel", "shim/src/cli/tunnel/store.rs",
-               "        // A dangling Windows junction: Path.is_symlink() is not decided here.\n"
-               "        Ok(_) => Err(Fail::Defer),",
-               "        // A dangling Windows junction: Path.is_symlink() is not decided here.\n"
-               "        Ok(_) => Err(Fail::Tunnel(REDIRECT)),",
-               ("defer-profile-dangling-junction",)))

@@ -68,7 +68,6 @@ import psutil  # attributes each request to connect or to its handshake child
 
 from .. import normalize
 from ..core import WINDOWS, Case
-from ..mutants import Mutant
 from . import _handshake_cache  # noqa: F401 (registers shim-handshake-cache-name)
 
 # Fixture credentials, generated per harness process so that neither the
@@ -1318,95 +1317,3 @@ def cases() -> list[Case]:
     add(case("rollback-read-only-dir", [url, "--yes"], url=url, port=port,
              setup=read_only_gemini, after=writable_gemini, platforms=("linux",)))
     return out
-
-
-# ── mutant control ──────────────────────────────────────────────────────────
-
-MUTANTS = [
-    Mutant("connect-exit-nothing-4", "connect", "shim/src/cli/connect/mod.rs",
-           "const EXIT_NOTHING: u8 = 3;", "const EXIT_NOTHING: u8 = 4;",
-           ("none-found", "manual-only")),
-    Mutant("connect-skip-settings-write", "connect", "shim/src/cli/connect/mod.rs",
-           'let applied = if rows[index].json.is_some() {',
-           'let applied = if rows[index].json.is_some() && rows[index].place != "settings" {',
-           ("apply-move-yes",)),
-    Mutant("connect-changes-reverse-sort", "connect", "shim/src/cli/connect/discover.rs",
-           "sorted.sort_by(|a, b| a.0.cmp(&b.0));", "sorted.sort_by(|a, b| b.0.cmp(&a.0));",
-           ("dry-run-docs", "dry-run-installer-json")),
-    Mutant("connect-message-token", "connect", "shim/src/cli/connect/mod.rs",
-           "already names {url}; nothing to write", "already names {url}; nothing to change",
-           ("nothing-to-write",)),
-    Mutant("connect-no-credential-check", "connect", "shim/src/cli/connect/mod.rs",
-           "&& !net::credential_valid(&ctx.url, token).await", "&& false",
-           ("verify-refused",)),
-    Mutant("connect-no-backup", "connect", "shim/src/cli/connect/mod.rs",
-           "backup = Some(files::backup(&path)?);", "backup = None;",
-           ("apply-move-yes",)),
-    Mutant("connect-rollback-keeps-writes", "connect", "shim/src/cli/connect/mod.rs",
-           "outcome.extend(rollback(&steps, &created));", "outcome.extend(rollback(&[], &created));",
-           ("rollback-held-file", "rollback-read-only-dir")),
-    Mutant("connect-cache-url-last", "connect", "shim/src/cache.rs",
-           'let mut data = Map::from_iter([("url".to_owned(), Value::String(self.url.clone()))]);\n'
-           "            data.extend(cached);",
-           "let mut data = cached;\n"
-           '            data.insert("url".to_owned(), Value::String(self.url.clone()));',
-           ("apply-move-yes",)),
-    Mutant("connect-json-indent-4", "connect", "shim/src/cli/connect/pyjson.rs",
-           "out.extend(std::iter::repeat_n(' ', level * 2));",
-           "out.extend(std::iter::repeat_n(' ', level * 4));",
-           ("apply-move-yes",)),
-    # Review of #678 (2026-10-10): Rust's shortest digits on an exact tie.
-    Mutant("connect-stderr-warning-ignored", "connect", "shim/src/cli/connect/mod.rs",
-           "if !self.json && !emit(&mut std::io::stderr().lock(), &line) {",
-           "if !self.json && !emit(&mut std::io::stderr().lock(), &line) && false {",
-           ("apply-remote-stderr-closed", "apply-board-off-stderr-closed")),
-    # Review of #678 at 6447829f: a refused stdout must change the status.
-    Mutant("connect-stdout-refusal-ignored", "connect", "shim/src/cli/connect/mod.rs",
-           "        if self.stdout_refused.get() {\n            EXIT_STDOUT_REFUSED\n",
-           "        if false && self.stdout_refused.get() {\n            EXIT_STDOUT_REFUSED\n",
-           ("apply-move-yes-stdout-closed", "apply-move-json-stdout-closed")),
-    Mutant("connect-float-ties", "connect", "shim/src/cli/connect/pyjson.rs",
-           "    let (digits, exponent) = shortest_digits(value.abs());\n"
-           "    let significant = digits.as_str();\n",
-           "    let (digits, exponent) = scientific(&format!(\"{:e}\", value.abs()));\n"
-           "    let significant = digits.trim_end_matches('0');\n",
-           ("apply-float-ties",)),
-    Mutant("connect-backup-stamp-millis", "connect", "shim/src/cli/connect/files.rs",
-           '"%Y%m%d-%H%M%S-%6f"', '"%Y%m%d-%H%M%S-%3f"', ("apply-move-yes",)),
-    Mutant("connect-config-not-private", "connect", "shim/src/cli/connect/files.rs",
-           "        make_private(&file)?;\n", "        let _ = &file;\n",
-           ("apply-move-yes", "rollback-read-only-dir")),
-    Mutant("connect-verify-reverse-order", "connect", "shim/src/cli/connect/mod.rs",
-           "for (credential, label) in credentials {",
-           "for (credential, label) in credentials.into_iter().rev() {",
-           ("verify-second-credential-refused",)),
-    Mutant("connect-header-utf8", "connect", "shim/src/cli/connect/net.rs",
-           "value.push(u8::try_from(u32::from(c)).ok()?);",
-           "value.extend(c.to_string().as_bytes());",
-           ("literal-beyond-latin-1",)),
-    Mutant("connect-remote-keeps-spawn", "connect", "shim/src/cli/connect/discover.rs",
-           'if !matches!(current.as_str(), "1" | "true" | "yes" | "on") {',
-           'if !matches!(current.as_str(), "1" | "true" | "yes" | "on" | "") {',
-           ("dry-run-remote",)),
-    # Same-outcome controls (review of #670): each request is still refused
-    # or answered exactly as before, so only the raw request fields show it.
-    # A Latin-1 credential sent as UTF-8: still rejected with the same 401,
-    # refusal and files, but a different credential on the wire.
-    Mutant("connect-latin-1-credential-as-utf8", "connect", "shim/src/cli/connect/net.rs",
-           "    for c in token.chars() {\n"
-           "        value.push(u8::try_from(u32::from(c)).ok()?);\n"
-           "    }\n",
-           "    for c in token.chars() {\n"
-           "        let byte = u8::try_from(u32::from(c)).ok()?;\n"
-           "        if byte < 0x80 {\n"
-           "            value.push(byte);\n"
-           "        } else {\n"
-           "            value.extend(c.to_string().as_bytes());\n"
-           "        }\n"
-           "    }\n",
-           ("literal-latin-1",)),
-    # A changed request field the daemon ignores.
-    Mutant("connect-user-agent-changed", "connect", "shim/src/cli/hook_http.rs",
-           '.header("User-Agent", "Python-urllib/3.11");',
-           '.header("User-Agent", "Python-urllib/3.12");', ("health-degraded",)),
-]

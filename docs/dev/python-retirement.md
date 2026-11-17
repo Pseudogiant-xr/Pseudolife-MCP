@@ -205,10 +205,10 @@ working native repair path without silently changing approved hook definitions;
 the hook approval rules still apply.
 
 Read `tests/suite_classes.txt` as collection policy, not proof that live tests
-are package-independent: a live guard can import Python helpers. The weekly
-source mutants and manual stress oracle selection must each have a
-replacement or an explicit retirement decision before deleting their
-implementation (the security exceptions in `rust/ci/inventory.py` were
+are package-independent: a live guard can import Python helpers. The source
+mutants were explicitly retired on 17 November 2026; manual stress oracle
+selection still needs a replacement or an explicit retirement decision
+before deleting its implementation (the security exceptions in `rust/ci/inventory.py` were
 replaced by Rust tests and removed on 16 November 2026).
 
 ## Work to leave until afterwards

@@ -42,6 +42,14 @@ keeps a job out of the budget.
 
 ## Changing the shape of CI
 
+The CLI source-mutant job was retired on 17 November 2026. Its last measured
+weekly reference used 106 hosted jobs and about 842 runner-minutes; these
+were outside the pull-request budget. Removing it saves that scheduled
+work without lowering the remaining test coverage budgets. The deletion
+has a null-fingerprint acceptance, and the changed Parity gate and Rust
+inventory step have their own acceptances. The integration census updates
+the shared fingerprint baseline; an author branch does not regenerate it.
+
 1. Make the change and push it. Since 2026-10-29 an ordinary pull request
    runs only the fast lanes, even when it edits a workflow, so its own
    runs measure only those. A changed heavy job carries an `accept` entry

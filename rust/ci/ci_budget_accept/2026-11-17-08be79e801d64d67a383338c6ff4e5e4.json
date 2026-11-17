@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "7cb9ba381e8ad527",
+  "fingerprint": "f655902a708fc676",
+  "reason": "Renames the inventory step after removing CLI source-mutant declarations and their roster/anchor upkeep tests; golden replay inventory and retirement guards remain. No job, setup or test file is added, and the removed source scans offset the small retirement guards, so the measured cost remains an upper bound."
+}

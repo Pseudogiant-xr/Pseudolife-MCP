@@ -82,8 +82,9 @@ contract covers argument forms, URLs, token cleanup and the hash-only request.
   notes the database clock as a write reaches a row; `invite-written`
   accepts a written time only within 50 ms before that reading
   (`code_expires_at - ttl` likewise), and the printed expiry only spelled
-  exactly as the oracle spells the stored value. Mutant
-  `invite-ttl-shortened` (0.6 s short) is caught by it.
+  exactly as the oracle spells the stored value. The historical
+  `invite-ttl-shortened` control (0.6 s short) was caught by it before the
+  automatic source-mutant checks retired on 17 November 2026.
 
 ## Hosted CI and goldens
 

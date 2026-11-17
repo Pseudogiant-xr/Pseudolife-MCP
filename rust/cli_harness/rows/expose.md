@@ -110,7 +110,7 @@ change, in the deferral cases) never leaves the machine.
   no-terminal refusal, a refused serve or removal, a permission refusal, a
   serve that did not take). The oracle's line becomes the native one; its
   exit code, calls, serve state and requests stay compared. Every case
-  carries it, so live runs and the mutant control compare the rest.
+  carries it, so live runs compare the rest.
 
 ## Deferred (the dispatcher's `mode 'expose' is deferred` line, exit 1)
 
@@ -222,9 +222,9 @@ Declared limits:
 
 ## Hosted CI and goldens
 
-The row's goldens are replayed on both OSes in the `w1c-connection` shard,
-and its mutants run against the oracle in the `expose-0` source-mutant
-shard. Every case is built from fixed bytes, so all are golden cases. The
+The row's goldens are replayed on both OSes in the `w1c-connection` shard.
+Its source-mutant shard was retired on 17 November 2026. Every case is
+built from fixed bytes, so all are golden cases. The
 oracle-recorded cases bind `c6c3b6d4` (git), the commit of the Python fixes
 of 2026-11-13 (the lookup, unreadable output, addresses): Windows from this
 checkout (CPython 3.11.9), Linux from a WSL Ubuntu clone of the branch

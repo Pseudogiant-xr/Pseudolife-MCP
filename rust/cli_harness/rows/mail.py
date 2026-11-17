@@ -19,7 +19,6 @@ from pathlib import Path
 
 from .. import producers as p
 from ..core import Case
-from ..mutants import Mutant
 
 SESSION = "w1b-mail-session"
 KEY = p.digest_key(SESSION)
@@ -286,40 +285,3 @@ def cases() -> list[Case]:
     add(Case("stdout-closed", ["wait-mail", *SID], setup=seed(), stdout_closed=True,
              rules=DELIVERY + ("mail-stdout-error-text", "python-shutdown-flush")))
     return c
-
-
-MUTANTS = [
-    Mutant("mail-expired-listener", "mail", "shim/src/cli/wait_mail.rs",
-           "let expiry = wall_time()\n"
-           "            + self\n"
-           "                .deadline\n"
-           "                .saturating_duration_since(Instant::now())\n"
-           "                .as_secs_f64()\n"
-           "                .min(60.0);",
-           "let expiry = wall_time() - 2.0;", ("ring-arrives-later",)),
-    Mutant("mail-ring-13-digits", "mail", "shim/src/cli/wait_mail.rs",
-           "if head.len() > 12 {", "if head.len() > 13 {",
-           ("ring-thirteen-digits", "ring-twelve-digits")),
-    Mutant("mail-any-decision-rings", "mail", "shim/src/cli/wait_mail.rs",
-           '!reason.starts_with(b"rung ")', '!reason.starts_with(b"")',
-           ("ring-not-rung", "ring-fires")),
-    Mutant("mail-skip-seen-advance", "mail", "shim/src/cli/wait_mail.rs",
-           'mark_seen(&digest.with_extension("seen"), &watermark)',
-           "{ let _ = &watermark; Ok::<(), MarkerError>(()) }", ("ring-fires", "ring-past-seen")),
-    Mutant("mail-timeout-exit-4", "mail", "shim/src/cli/wait_mail.rs",
-           "re-arm to keep waiting.\\n\",\n                args::general(args.timeout)\n"
-           "            ));\n            return 3;",
-           "re-arm to keep waiting.\\n\",\n                args::general(args.timeout)\n"
-           "            ));\n            return 4;", ("plain-mail-no-ring",)),
-    Mutant("mail-ledger-kind", "mail", "shim/src/cli/wait_mail.rs",
-           '"{}\\twait\\t{}\\t{}\\t{size}\\t{ring}\\n"', '"{}\\twake\\t{}\\t{}\\t{size}\\t{ring}\\n"',
-           ("ring-fires",)),
-    Mutant("mail-help-token", "mail", "shim/src/cli/wait_mail_help.txt",
-           "plain", "plane", ("help",)),
-    Mutant("mail-no-listener", "mail", "shim/src/cli/wait_mail.rs",
-           "        listener.renew();\n        match fs::metadata(digest) {",
-           "        match fs::metadata(digest) {", ("plain-mail-no-ring",)),
-    Mutant("mail-keeps-leading-dot", "mail", "shim/src/cli/wait_mail_args.rs",
-           ".filter(|component| !matches!(component, Component::CurDir))",
-           ".filter(|_component| true)", ("no-digest-file-dot-relative",)),
-]

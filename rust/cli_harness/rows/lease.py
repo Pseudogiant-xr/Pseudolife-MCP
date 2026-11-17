@@ -23,7 +23,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from .. import core, normalize
-from ..mutants import Mutant
 from . import _bank
 
 NAME = "fixture"
@@ -445,27 +444,3 @@ def cases():
     add("check-gated-empty-command", ["check", NAME, "--"])
     add("check-gated-json", ["check", NAME, "--json", *gated])
     return result
-
-
-MUTANTS = [
-    Mutant("lease-lock-name", "lease", "shim/src/cli/lease/lock.rs",
-           'format!("lease-{safe}{suffix}.lock")', 'format!("lease-{safe}.lock")', ("run-hashed-name",)),
-    Mutant("lease-child-status", "lease", "shim/src/cli/lease/run.rs",
-           "Ok(exit_status(status))", "Ok(0)", ("run-child-status",)),
-    Mutant("lease-os-truth", "lease", "shim/src/cli/lease/view.rs",
-           'let held = local["state"] == "held" || (!report["holder"].is_null() && !stale);',
-           'let held = false;', ("check-held",)),
-    Mutant("lease-stale-mirror", "lease", "shim/src/cli/lease/view.rs",
-           'let stale = local["state"] == "free"', 'let stale = false && local["state"] == "free"',
-           ("check-board-same-mirror",)),
-    Mutant("lease-timeout-status", "lease", "shim/src/cli/lease/run.rs",
-           '            75\n        }\n        Err(RunError::Lock', '            0\n        }\n        Err(RunError::Lock',
-           ("run-timeout",)),
-    Mutant("lease-release-mirror", "lease", "shim/src/cli/lease/run.rs",
-           "board.release(&name).await;", "let _ = &name;", ("run-board-free",)),
-    Mutant("lease-list-filter", "lease", "shim/src/cli/lease/view.rs",
-           "wanted.as_ref().is_none_or(|w| w == &file)", "wanted.as_ref().is_none_or(|_w| true)",
-           ("list-board-filter-missing",)),
-    Mutant("lease-gated-refusal", "lease", "shim/src/cli/lease/run.rs",
-           "            return 75;\n", "            return 1;\n", ("check-gated-held",)),
-]
