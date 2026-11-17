@@ -47,7 +47,9 @@ def test_admission_state(integrate, state, admitted):
 def test_status_explains_snapshot_admission_before_build(integrate, monkeypatch, capsys, state):
     value = member(integrate, state)
     value.rust_jobs = "Rust / ubuntu-latest: in_progress; Rust / windows-latest: success"
-    monkeypatch.setattr(integrate, "git", lambda *a, **kw: None)
+    # Keep status on a member branch, with no integrate/* plan to load.
+    monkeypatch.setattr(integrate, "git", lambda *a, **kw:
+                        subprocess.CompletedProcess(a, 0, "topic/snapshot-admission\n", ""))
     monkeypatch.setattr(integrate, "_out", lambda *a: SHA)
     monkeypatch.setattr(integrate, "ready", lambda *a: [value])
     monkeypatch.setattr(integrate, "_fetch_head", lambda *a: SHA)
