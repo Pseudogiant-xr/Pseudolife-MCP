@@ -109,6 +109,106 @@ def test_an_action_cannot_hide_a_rust_test_command(tree):
     assert all(word in str(error.value) for word in ("new-job", "Delegated test", "line 1", "uses"))
 
 
+@pytest.mark.parametrize("command", [
+    "python -m pip install pytest;python -m pytest rust/test_hidden.py",
+    "python -m pip install pytest&&python -m pytest rust/test_hidden.py",
+    "python -m pip install pytest||python -m pytest rust/test_hidden.py",
+    "python -m pip install pytest|python -m pytest rust/test_hidden.py",
+    "python -m pip install pytest&python -m pytest rust/test_hidden.py",
+    "python rust/daemon/harness/run.py golden;python rust/test_hidden.py",
+    "python rust/ci/pr_precheck.py --github-output out;python rust/test_hidden.py",
+    "cd rust;python daemon/harness/test_hidden.py",
+    "cd rust;& $python daemon/harness/test_hidden.py",
+])
+def test_glued_shell_operators_cannot_hide_another_command(tree, command):
+    job = "rust" if "pr_precheck" in command else "parity-checks"
+    workflow(tree, job, command)
+    with pytest.raises(selection.SelectionError, match="compound"):
+        recipe(tree)
+
+
+@pytest.mark.parametrize("continuation", ["\\", "`"])
+def test_comment_continuation_does_not_swallow_the_next_command(tree, continuation):
+    workflow(tree, "rust", "# ignored " + continuation + "\npython -m pytest rust/test_hidden.py")
+    with pytest.raises(selection.SelectionError, match="omits.*rust/test_hidden.py"):
+        recipe(tree)
+
+
+@pytest.mark.parametrize("job", ["rust", "candidate", "candidate-harness"])
+@pytest.mark.parametrize("command", ["python daemon/harness/test_new.py", "python -m pytest daemon/harness/test_new.py"])
+def test_job_working_directory_cannot_hide_a_relative_script(tree, job, command):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"].setdefault(job, {"steps": []}).update({"defaults": {"run": {"working-directory": "rust"}}})
+    value["jobs"][job]["steps"].append({"run": command})
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    with pytest.raises(selection.SelectionError):
+        recipe(tree)
+
+
+@pytest.mark.parametrize("prefix", ["cd rust\n", "Set-Location rust\n", ""])
+def test_step_working_directory_cannot_change_a_claimed_root_selection(tree, prefix):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"]["rust"]["steps"].append({"working-directory": "rust" if not prefix else ".",
+        "run": prefix + "python -m pytest rust/test_base.py"})
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    with pytest.raises(selection.SelectionError, match="working.directory"):
+        recipe(tree)
+
+
+@pytest.mark.parametrize("argument", ["$env:X", "${{ matrix.f }}", "$X", "${X}"])
+def test_nonliteral_python_script_arguments_refuse(tree, argument):
+    workflow(tree, "rust", "python " + argument)
+    with pytest.raises(selection.SelectionError):
+        recipe(tree)
+
+
+@pytest.mark.parametrize("command", ["bash rust/run-new.sh", "pwsh -File rust/run-new.ps1", "./rust/run-new.sh",
+    "& ./rust/run-new.ps1", "sh daemon/run-new.sh", "./rust/run-new.PS1"])
+def test_unknown_shell_wrappers_refuse(tree, command):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"]["candidate"] = {"defaults": {"run": {"working-directory": "rust"}}, "steps": [{"run": command}]}
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    with pytest.raises(selection.SelectionError):
+        recipe(tree)
+
+
+@pytest.mark.parametrize("defaults", [None, {"run": []}])
+def test_malformed_working_directory_defaults_are_a_reader_refusal(tree, defaults):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"]["rust"]["defaults"] = defaults
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    with pytest.raises(selection.SelectionError, match="working.directory"):
+        recipe(tree)
+
+
+def test_non_test_python_source_with_unbalanced_shell_quotes_is_skipped(tree):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"]["new-job"] = {"steps": [{"shell": "python", "run": "text = '''don't'''"}]}
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    assert recipe(tree).commands
+
+
+def test_unparseable_test_command_still_refuses(tree):
+    workflow(tree, "rust", 'python -m pytest "rust/test_hidden.py')
+    with pytest.raises(selection.SelectionError, match="cannot parse"):
+        recipe(tree)
+
+
+def test_root_step_override_and_quoted_package_markers_remain_supported(tree):
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"]["rust"]["defaults"] = {"run": {"working-directory": "rust"}}
+    for step in value["jobs"]["rust"]["steps"]:
+        step["working-directory"] = "."
+    value["jobs"]["rust"]["steps"].append({"run": 'python -m pip install "pytest; python_version>=3.11"'})
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    assert recipe(tree).commands
+
+
+def test_known_parity_report_redirection_is_not_a_compound_command(tree):
+    workflow(tree, "parity-checks", "python -m pytest rust/test_native.py -k witness > $log 2>&1")
+    assert recipe(tree).commands
+
+
 @pytest.mark.parametrize("job", ["scope", "candidate", "stress", "daemon-image"])
 def test_non_selection_jobs_cannot_gain_a_direct_rust_test_line(tree, job):
     value = yaml.safe_load(tree[selection.WORKFLOW])

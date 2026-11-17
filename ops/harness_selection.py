@@ -29,7 +29,7 @@ SETUP_ACTIONS = frozenset({
 # These are routing, generation, build, image-lane or manual-stress entry
 # points, not an open-ended exemption for Python in another job.
 JOB_PROGRAMS = {
-    "scope": {"rust/ci/parity_scope.py"},
+    "scope": {"rust/ci/parity_scope.py", "ops/ci_batch_passed.py"},
     "rust": {"rust/ci/pr_precheck.py", "rust/ci/pr_precheck_run.py",
              "rust/daemon/harness/gen_schema_sql.py", "rust/producer_census.py", "rust/ci/inventory.py"},
     "fixtures": {"rust/daemon/harness/schema_ci.py"},
@@ -41,6 +41,7 @@ JOB_PROGRAMS = {
     "stress": {"rust/ci/stress.py", "rust/cli_harness/lease_ci.py"},
     "stress-report": {"rust/ci/stress.py", "rust/ci/stress_history.py"},
 }
+JOB_MODULES = {"scope": {"ops.ci_push_passed"}, "stress": {"evals.rust_port.oracle_selection"}}
 
 
 class SelectionError(ValueError):
@@ -122,6 +123,13 @@ def _steps(workflow, job):
         raise SelectionError(f"cannot read rust.yml {job}: {error}") from None
 
 
+def _default_directory(value, inherited):
+    defaults = value.get("defaults", {})
+    if not isinstance(defaults, dict) or not isinstance(defaults.get("run", {}), dict):
+        raise SelectionError("line 1: unreadable working-directory defaults")
+    return defaults.get("run", {}).get("working-directory", inherited)
+
+
 def _numbered_lines(step):
     if not isinstance(step, dict):
         raise SelectionError("a workflow step is not a mapping")
@@ -130,10 +138,15 @@ def _numbered_lines(step):
         raise SelectionError("a workflow run command is not text")
     pending, start = "", 1
     for number, raw in enumerate(run.splitlines(), 1):
+        # A shell comment cannot continue its next physical line. If the
+        # preceding command continued into this comment, its newline ends it.
+        comment = raw.lstrip().startswith("#")
+        if comment and not pending:
+            continue
         if not pending:
             start = number
-        line = pending + raw.strip()
-        if line.endswith(("`", "\\")):
+        line = pending + ("" if comment else raw.strip())
+        if not comment and line.endswith(("`", "\\")):
             pending = line[:-1] + " "
             continue
         pending = ""
@@ -141,8 +154,11 @@ def _numbered_lines(step):
             try:
                 yield start, line, shlex.split(line)
             except ValueError as error:
-                raise SelectionError(f"line {start}: cannot parse workflow command: {error}") from None
-    if pending:
+                # Run bodies can be Python or another language. A shell
+                # lexer failure without a test token is a classified skip.
+                if _test_bearing(line):
+                    raise SelectionError(f"line {start}: cannot parse workflow command: {error}") from None
+    if pending and _test_bearing(pending):
         raise SelectionError(f"line {start}: unfinished workflow command continuation")
 
 
@@ -152,14 +168,37 @@ def _lines(step):
 
 
 def _test_bearing(text):
-    return bool(re.search(r"\brust[/\\][^\s\"']*\.py\b|pytest\b|(?:^|\s)-m\s*unittest\b", text))
+    return bool(re.search(r"\brust[/\\][^\s\"']*\.(?:py|sh|ps1)\b|pytest\b|(?:^|\s)-m\s*unittest\b", text))
 
 
-def _classify_line(job, text, words):
-    if not _test_bearing(text):
+def _compound(text):
+    # File-descriptor duplication is one command's reporting, not another
+    # shell command. _pytest validates the supported redirection separately.
+    text = re.sub(r"(?<!\S)[12]>&[12](?=\s|$)", "", text)
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    for index, token in enumerate(lexer):
+        if token and set(token) <= set(";&|"):
+            if index == 0 and token == "&" and text.startswith("& "):
+                continue  # PowerShell's call operator, not a bash separator.
+            return True
+    return False
+
+
+def _classify_line(job, text, words, *, directory="."):
+    launcher = words[0] if words else ""
+    python = launcher in {"python", "python3", "python.exe", "py", "py.exe", "pytest"}
+    called_python = launcher == "&" and len(words) > 1 and "python" in words[1].lower()
+    embedded_python = bool(re.search(
+        r"(?:^|[;&|{}])\s*(?:&\s*)?(?:python3?|py|pytest|\$(?:env:)?\w*python\w*)\b(?!\s*=)", text, re.I))
+    shell = launcher in {"bash", "sh", "pwsh", "powershell"}
+    script = any(re.search(r"\.(?:sh|ps1)$", word, re.I) for word in words)
+    if not (_test_bearing(text) or python or called_python or embedded_python or shell or script):
         return
-    if any(word in {"&&", "||", ";", "|"} for word in words):
+    if _compound(text):
         raise SelectionError("compound test-bearing commands need an explicit classification")
+    if shell or script:
+        raise SelectionError("unclassified shell script invocation; declare its test coverage before gating")
     literal = words[:1] in (["python"], ["python3"])
     pip = words[:4] in (["python", "-m", "pip", "install"], ["python3", "-m", "pip", "install"])
     # The existing runtime-setup step uses its just-created interpreter only
@@ -167,6 +206,11 @@ def _classify_line(job, text, words):
     pip = pip or (words[:2] == ["&", "$python"] and words[2:5] == ["-m", "pip", "install"])
     if pip:
         return
+    if literal and words[1:3] == ["-m", "venv"]:
+        return
+    if directory not in (".", "./", "${{ github.workspace }}"):
+        raise SelectionError("test/script working-directory must be the explicit repository root; "
+                             "put it in a root-directory step without cd or Set-Location")
     if _is_pytest(words):
         if job not in ("rust", *PARITY_JOBS):
             raise SelectionError("pytest is not classified as a test runner in this job")
@@ -183,6 +227,10 @@ def _classify_line(job, text, words):
         program, arguments = words[1], words[2:]
     else:
         raise SelectionError("incomplete Python command")
+    if program == "-m" and arguments[:1] and arguments[0] in JOB_MODULES.get(job, set()):
+        return
+    if any(symbol in program for symbol in ("$", "{", "}", "`")):
+        raise SelectionError("non-literal Python script argument; declare its literal path before gating")
     if job in PARITY_JOBS and (program in WRAPPERS or program in NATIVE_PROGRAMS):
         return
     if job in PARITY_JOBS and program.startswith("rust/") and PurePosixPath(program).name.startswith("test_"):
@@ -232,10 +280,14 @@ def _audit_jobs(workflow):
                     raise SelectionError(f"{where}, line 1: executable uses inputs are not classified")
                 continue
             try:
+                directory = step.get("working-directory", _default_directory(
+                    value, _default_directory(workflow, ".")))
                 for number, text, words in _numbered_lines(step):
                     location = f"{where}, line {number}"
                     try:
-                        _classify_line(job, text, words)
+                        if words[:1] and words[0].lower() in {"cd", "pushd", "set-location", "push-location"}:
+                            directory = None  # Never infer state from an imperative shell command.
+                        _classify_line(job, text, words, directory=directory)
                     except SelectionError as error:
                         raise SelectionError(f"{location}: {error}: {text}") from None
                     result[job].append((location, words))
