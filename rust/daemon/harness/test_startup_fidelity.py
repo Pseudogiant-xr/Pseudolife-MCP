@@ -37,11 +37,12 @@ class SurpriseFixtureTests(unittest.TestCase):
         connection = MagicMock()
         connection.__enter__.return_value = connection
         connection.execute.side_effect = lambda statement, parameters: rows.append(parameters)
-        with patch("pseudolife_memory.storage.postgres.PostgresStorage"), \
+        with patch("principal_fixtures.prepare_bank") as prepare_bank, \
                 patch("psycopg.connect", return_value=connection), \
                 patch.object(run, "assert_disposable"):
             fixture = run.JsonFloatTies()
             fixture.prepare_template("fixture-dsn")
+        prepare_bank.assert_called_once_with("fixture-dsn")
 
         with tempfile.TemporaryDirectory() as directory:
             model = Path(directory) / "model"
