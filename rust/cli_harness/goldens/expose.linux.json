@@ -566,15 +566,15 @@
   },
   "defer-abbrev-main": {
    "home": null,
-   "utc_offset": 39600,
-   "exit": 0,
-   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCgpNYWtlIHRoaXMgaG9zdCdzIGRhZW1vbiByZWFjaGFibGUgZnJvbSB0aGUgdGFpbG5ldCAoVGFpbHNjYWxlIFNlcnZlLCBUQ1ApLgoKcG9zaXRpb25hbCBhcmd1bWVudHM6CiAge3RhaWxzY2FsZSxvZmYsc3RhdHVzfQogICAgdGFpbHNjYWxlICAgICAgICAgICBmb3J3YXJkIHRhaWxuZXQgcG9ydCA8cG9ydD4gdG8gdGhlIGRhZW1vbiBvbgogICAgICAgICAgICAgICAgICAgICAgICAxMjcuMC4wLjE6PHBvcnQ+CiAgICBvZmYgICAgICAgICAgICAgICAgIHJlbW92ZSB0aGF0IGZvcndhcmQgKG5ldmVyIGFueXRoaW5nIGVsc2Ugb24gdGhlIHBvcnQpCiAgICBzdGF0dXMgICAgICAgICAgICAgIHByaW50IHRoZSBjbGllbnQgVVJMLCBvciB3aHkgdGhlcmUgaXMgbm9uZQoKb3B0aW9uczoKICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdAo=",
-   "stderr": "",
+   "utc_offset": 0,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IHVucmVjb2duaXplZCBvcHRpb24gLS1oZTsgdXNlIC0taGVscCBpbiBmdWxsOyBwbGFjZSBhY3Rpb24gb3B0aW9ucyBhZnRlciB0YWlsc2NhbGUsIG9mZiBvciBzdGF0dXMK",
    "window": [
-    1794540191.7313313,
-    1794540191.893193
+    1794935166.0778255,
+    1794935166.0806894
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir"
@@ -586,15 +586,15 @@
   },
   "defer-abbrev-port": {
    "home": null,
-   "utc_offset": 39600,
-   "exit": 0,
-   "stdout": "bm90IGV4cG9zZWQ6IHRoZSB0YWlsc2NhbGUgQ0xJIHdhcyBub3QgZm91bmQK",
-   "stderr": "",
+   "utc_offset": 0,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uIC0tcG87IHVzZSAtLXBvcnQgaW4gZnVsbAo=",
    "window": [
-    1794540191.8936975,
-    1794540192.0508955
+    1794935166.0816548,
+    1794935166.0843973
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir"
@@ -606,15 +606,15 @@
   },
   "defer-double-dash": {
    "home": null,
-   "utc_offset": 39600,
+   "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IHVucmVjb2duaXplZCBhcmd1bWVudHM6IC0tCg==",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uIC0tOyBydW4gcHNldWRvbGlmZS1tY3AgZXhwb3NlIC0taGVscCBmb3Igc3VwcG9ydGVkIG9wdGlvbnMK",
    "window": [
-    1794540192.0513008,
-    1794540192.2051632
+    1794935166.0853705,
+    1794935166.088088
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir"
@@ -626,15 +626,15 @@
   },
   "defer-dash-value": {
    "home": null,
-   "utc_offset": 39600,
+   "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSB0YWlsc2NhbGUgWy1oXSBbLS1wb3J0IFBPUlRdIFstLXllc10gWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgZXhwb3NlIHRhaWxzY2FsZTogZXJyb3I6IGFyZ3VtZW50IC0tcG9ydDogbm90IGEgcG9ydDogJy0xJwo=",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSB0YWlsc2NhbGUgWy1oXSBbLS1wb3J0IFBPUlRdIFstLXllc10gWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgZXhwb3NlIHRhaWxzY2FsZTogZXJyb3I6IGFyZ3VtZW50IC0tcG9ydDogdXNlIDEgdG8gNjU1MzUgaW4gcGxhaW4gZGlnaXRzCg==",
    "window": [
-    1794540192.205574,
-    1794540192.366729
+    1794935166.0891075,
+    1794935166.0916426
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir"
@@ -646,15 +646,15 @@
   },
   "defer-short-other": {
    "home": null,
-   "utc_offset": 39600,
+   "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IHVucmVjb2duaXplZCBhcmd1bWVudHM6IC14Cg==",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXMgWy1oXSBbLS1wb3J0IFBPUlRdIFstLWpzb25dCnBzZXVkb2xpZmUtbWNwIGV4cG9zZSBzdGF0dXM6IGVycm9yOiB1bnJlY29nbml6ZWQgb3B0aW9uIC14OyBydW4gcHNldWRvbGlmZS1tY3AgZXhwb3NlIC0taGVscCBmb3Igc3VwcG9ydGVkIG9wdGlvbnMK",
    "window": [
-    1794540192.3671465,
-    1794540192.5249133
+    1794935166.0923927,
+    1794935166.0949879
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir"
@@ -666,15 +666,15 @@
   },
   "defer-port-plus": {
    "home": null,
-   "utc_offset": 39600,
-   "exit": 4,
+   "utc_offset": 0,
+   "exit": 2,
    "stdout": "",
-   "stderr": "ZXhwb3NlOiB0aGUgdGFpbHNjYWxlIENMSSB3YXMgbm90IGZvdW5kOiBpbnN0YWxsIFRhaWxzY2FsZSAoaHR0cHM6Ly90YWlsc2NhbGUuY29tL2Rvd25sb2FkKSwgdGhlbiBydW4gYHRhaWxzY2FsZSB1cGAK",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBvZmYgWy1oXSBbLS1wb3J0IFBPUlRdIFstLXllc10gWy0tanNvbl0KcHNldWRvbGlmZS1tY3AgZXhwb3NlIG9mZjogZXJyb3I6IGFyZ3VtZW50IC0tcG9ydDogdXNlIDEgdG8gNjU1MzUgaW4gcGxhaW4gZGlnaXRzCg==",
    "window": [
-    1794540192.5254078,
-    1794540192.6711197
+    1794935166.0957816,
+    1794935166.0983815
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir"
@@ -686,15 +686,15 @@
   },
   "defer-option-first": {
    "home": null,
-   "utc_offset": 39600,
+   "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IGFyZ3VtZW50IGFjdGlvbjogaW52YWxpZCBjaG9pY2U6ICc5JyAoY2hvb3NlIGZyb20gJ3RhaWxzY2FsZScsICdvZmYnLCAnc3RhdHVzJykK",
+   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGV4cG9zZSBbLWhdIHt0YWlsc2NhbGUsb2ZmLHN0YXR1c30gLi4uCnBzZXVkb2xpZmUtbWNwIGV4cG9zZTogZXJyb3I6IHVucmVjb2duaXplZCBvcHRpb24gLS1wb3J0OyBydW4gcHNldWRvbGlmZS1tY3AgZXhwb3NlIC0taGVscCBmb3Igc3VwcG9ydGVkIG9wdGlvbnM7IHBsYWNlIGFjdGlvbiBvcHRpb25zIGFmdGVyIHRhaWxzY2FsZSwgb2ZmIG9yIHN0YXR1cwo=",
    "window": [
-    1794540192.671513,
-    1794540192.8228009
+    1794935166.0992036,
+    1794935166.1017127
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir"
@@ -4317,6 +4317,48 @@
   }
  },
  "recorded_from_candidate": {
+  "defer-abbrev-main": {
+   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+  },
+  "defer-abbrev-port": {
+   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+  },
+  "defer-dash-value": {
+   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+  },
+  "defer-double-dash": {
+   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+  },
+  "defer-option-first": {
+   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+  },
+  "defer-port-plus": {
+   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+  },
+  "defer-short-other": {
+   "commit": "53a9281ad05d99d2a12f2a94999f901e7e9eb870",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "53cd8f62af07ad92af5f3e41c090e60bf4e07c9d321196818ee4eee2f86d22d6"
+  },
   "help-width": {
    "commit": "95aa47a15079bdb077d42fd69a2bae1e3128c35d",
    "rust_tree": "clean",
