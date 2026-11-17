@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "e8f6bea60a907dc1",
+  "fingerprint": "74c4e1638858f288",
+  "reason": "Adds two database-free harness agreement assertions to the existing Tree-wide guards pytest process; no job, service, matrix or setup change. Both assertions passed with the four focused regressions in 2.29 seconds on a Linux dev box; hosted guards step timing is recorded in the PR verification."
+}
