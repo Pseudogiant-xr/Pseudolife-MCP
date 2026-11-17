@@ -508,6 +508,41 @@ fn native_parser_and_environment_errors_name_the_fix_without_values() {
 }
 
 #[test]
+fn invalid_homes_paths_and_ambient_tls_files_are_named() {
+    let home = Home::new("preflight");
+    for arguments in [
+        vec!["create", "--file", "line\nfixture-secret.env"],
+        vec!["create", "--file", "."],
+    ] {
+        assert_refused(&home, &arguments, &[]);
+    }
+    for value in ["relative", "line\nfixture-secret"] {
+        assert_refused(
+            &home,
+            &["create", "--admin-url", CLOSED_URL],
+            &[("HOME", value), ("USERPROFILE", value)],
+        );
+    }
+    let directory = if cfg!(windows) {
+        home.path().join("AppData").join("postgresql")
+    } else {
+        home.path().join(".postgresql")
+    };
+    fs::create_dir_all(&directory).unwrap();
+    let crl = directory.join("root.crl");
+    fs::write(&crl, "fixture-secret").unwrap();
+    let output = run(home.path(), &["create", "--admin-url", CLOSED_URL], &[]);
+    assert_eq!(output.status.code(), Some(4));
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("certificate/key/CRL"));
+    assert!(!text.contains("fixture-secret"));
+    fs::remove_file(crl).unwrap();
+    let output = run(home.path(), &["create", "--admin-url", CLOSED_URL], &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("the database refused:"));
+}
+
+#[test]
 fn equals_options_and_terminal_separator_reach_the_native_connection() {
     let home = Home::new("equals");
     for suffix in [vec![], vec!["--"]] {
