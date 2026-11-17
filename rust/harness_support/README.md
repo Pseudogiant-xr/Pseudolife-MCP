@@ -5,6 +5,18 @@ the Rust binaries. Disposable-bank guards and HTTP readiness interpretation
 belong here; product implementations, scenario expectations, schema ownership
 and process lifecycle belong with their respective owners.
 
+Modules: `database_guard.py` (disposable-bank refusal), `readiness.py` (HTTP
+readiness), and `schema.py` (execution of the daemon's committed schema plan).
+The schema executor contains no DDL and imports no product code. It runs in
+one transaction, or a savepoint inside a caller-owned transaction, and refuses
+unknown operations. On Linux the `cli-startup` schema step compares its complete
+catalog and rows with a schema-only Rust probe; it does not seed relations or
+advance the writer epoch as a full storage open does. Other OSes skip this
+comparison because the plan and PostgreSQL semantics are client-OS independent.
+The existing schema-test discovery runs a non-spawning parsed-plan/SQL hash
+check on both OSes, including CRLF, UTF-8 and paths containing spaces. A schema
+artifact change updates that hash alongside the Linux equivalence proof.
+
 Import helpers by their repository-qualified name:
 
 ```python
