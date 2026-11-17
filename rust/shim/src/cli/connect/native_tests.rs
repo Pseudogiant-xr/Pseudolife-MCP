@@ -12,6 +12,62 @@ use std::rc::Rc;
 const NEW: &str = "http://10.0.0.7:8765";
 const OLD: &str = "http://10.0.0.5:8765";
 
+#[test]
+fn an_unsupported_user_scope_url_is_redacted_and_planned() {
+    let rows = env_rows(FakeEnv {
+        user: Some(value(
+            "REG_SZ",
+            "http://fixture-user:fixture-secret@[v1.x]:9",
+        ))
+        .into(),
+        ..FakeEnv::default()
+    });
+    assert_eq!(rows[0].state, "change");
+    assert_eq!(rows[0].changes[0].1.as_deref(), Some("<unreadable URL>"));
+}
+
+#[test]
+fn read_token_del_is_refused_before_creating_a_directory() {
+    let root = std::env::temp_dir().join(format!("connect-del-{}", uuid::Uuid::new_v4()));
+    let path = root.join("client.token");
+    let result = files::write_token_file(&path, b"fixture-secret\x7f");
+    let absent = !root.exists();
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(
+        matches!(result, Err(files::TokenFail::Helper(ref reason)) if reason.contains("DEL") && reason.contains("write-token-file") && !reason.contains("--read-token") && !reason.contains("fixture-secret"))
+    );
+    assert!(absent);
+    let result = files::write_token_file_for(&path, b"fixture-secret\x7f", "stdin (--read-token)");
+    assert!(
+        matches!(result, Err(files::TokenFail::Helper(ref reason)) if reason.contains("--read-token") && !reason.contains("fixture-secret"))
+    );
+    assert!(!root.exists());
+    files::write_token_file(&path, b"fixture-secret~")
+        .unwrap_or_else(|_| panic!("valid token was refused"));
+    assert!(path.is_file());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_config_filename_names_the_location() {
+    use std::os::unix::ffi::OsStringExt;
+    let root = std::env::temp_dir().join(format!("connect-name-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join(std::ffi::OsString::from_vec(b"fixture-\xff.json".to_vec()));
+    std::fs::write(&path, "{}").unwrap();
+    let error = files::load_json(&path).err().unwrap().0;
+    let _ = std::fs::remove_dir_all(root);
+    assert!(error.contains("fixture-"), "{error}");
+}
+
+#[test]
+fn schedule_compatibility_refusal_does_not_repeat_no_changes() {
+    let error = Refusal::from(Defer);
+    let message = format!("{}; nothing was changed", error.0);
+    assert_eq!(message.matches("nothing was changed").count(), 1);
+}
+
 fn ctx(clients: Vec<&'static str>, url: &str) -> Ctx {
     Ctx {
         url: url.to_owned(),
@@ -907,8 +963,7 @@ fn a_schedule_of_the_other_kind_names_its_removal_before_any_schedule_step() {
 
 #[test]
 fn a_hand_edited_url_is_a_manual_row_not_a_deferral() {
-    // URLs the oracle's urlsplit would treat in ways the native port defers
-    // on: an IPvFuture host, a character outside printable ASCII.
+    // Unsupported saved URLs remain manual: an IPvFuture host or an invalid port.
     for url in ["http://[v1.fe]:8765", "http://10.0.0.5:8765\u{e9}"] {
         let fake = Rc::new(FakeScheduler {
             installed: vec![(true, Some(url), Some("04:30"), false, None)],
@@ -917,7 +972,7 @@ fn a_hand_edited_url_is_a_manual_row_not_a_deferral() {
         let rows = schedule_rows(&fake, NEW, true);
         assert_eq!(rows[0].state, "manual", "{url}");
         assert!(
-            rows[0].detail.contains("a daemon URL connect cannot show"),
+            rows[0].detail.contains("<unreadable URL>"),
             "{}",
             rows[0].detail
         );
@@ -1325,4 +1380,62 @@ fn a_task_setting_schedule_would_drop_is_named_with_both_ways_on() {
     assert!(detail.contains("re-register the task by hand with the new daemon URL (its URL is inside the task's `-EncodedCommand` script"), "{detail}");
     assert!(!detail.contains("argument to"), "{detail}");
     assert!(detail.ends_with(&format!("to drop it, re-schedule it: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`")), "{detail}");
+}
+
+#[cfg(unix)]
+#[test]
+fn native_runtime_failure_names_the_system_cause() {
+    const CHILD: &str = "PSEUDOLIFE_CONNECT_RUNTIME_TEST";
+    if let Ok(mode) = std::env::var(CHILD) {
+        let result = run(["http://127.0.0.1:9", "--client", "gemini", "--dry-run"]
+            .into_iter()
+            .map(OsString::from)
+            .collect());
+        assert_eq!(
+            result,
+            Some(ExitCode::from(if mode == "fault" { 1 } else { 4 }))
+        );
+        return;
+    }
+    let home = std::env::temp_dir().join(format!("connect-runtime-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&home).unwrap();
+    for mode in ["fault", "control"] {
+        let mut child = if mode == "fault" {
+            let mut command = std::process::Command::new("/bin/sh");
+            command.args(["-c", "ulimit -n 4; exec \"$1\" --exact cli::connect::native_tests::native_runtime_failure_names_the_system_cause --nocapture --test-threads=1", "connect-runtime-test"])
+                .arg(std::env::current_exe().unwrap());
+            command
+        } else {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.args([
+                "--exact",
+                "cli::connect::native_tests::native_runtime_failure_names_the_system_cause",
+                "--nocapture",
+                "--test-threads=1",
+            ]);
+            command
+        };
+        let output = child
+            .env_clear()
+            .env(CHILD, mode)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
+            .current_dir(&home)
+            .output()
+            .unwrap();
+        let empty = std::fs::read_dir(&home).unwrap().next().is_none();
+        if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&home);
+            panic!("{mode}: {output:?}");
+        }
+        assert!(empty);
+        if mode == "fault" {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("I/O runtime"),
+                "{output:?}"
+            );
+        }
+    }
+    std::fs::remove_dir(home).unwrap();
 }
