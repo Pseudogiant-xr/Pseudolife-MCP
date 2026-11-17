@@ -4,7 +4,7 @@
 //! User-scope one. The unattended-update schedule rows are `schedule.rs`'s.
 use super::files::{self, Read};
 use super::pyjson::{self, Dict, J};
-use super::{Cred, Defer, paths, url};
+use super::{Cred, Refusal, paths, url};
 use super::{
     DEFAULT_URL, DESKTOP_SERVER, FILE_KEY, NO_SPAWN_KEY, SERVER, STATE_KEY, TOKEN_KEY, URL_KEY,
 };
@@ -19,7 +19,7 @@ pub(super) struct Ctx {
 }
 
 impl Ctx {
-    fn shim(&self) -> Result<String, Defer> {
+    fn shim(&self) -> Result<String, Refusal> {
         match &self.layout {
             Some(layout) if files::is_file(&layout.launcher)? => paths::show(&layout.launcher),
             _ => Ok("<shim path>".to_owned()),
@@ -67,7 +67,7 @@ pub(super) fn row(
     file: Option<&Path>,
     key: Option<&str>,
     state: &'static str,
-) -> Result<Row, Defer> {
+) -> Result<Row, Refusal> {
     Ok(Row {
         client,
         place,
@@ -94,7 +94,7 @@ pub(super) fn manual(
     file: Option<&Path>,
     key: Option<&str>,
     detail: String,
-) -> Result<Row, Defer> {
+) -> Result<Row, Refusal> {
     let mut found = row(client, place, file, key, "manual")?;
     found.detail = detail;
     Ok(found)
@@ -153,7 +153,7 @@ pub(super) fn after(env: &Dict, edits: &Edits) -> Dict {
     result
 }
 
-pub(super) fn changes(env: &Dict, edits: &Edits) -> Result<Changes, Defer> {
+pub(super) fn changes(env: &Dict, edits: &Edits) -> Result<Changes, Refusal> {
     let mut sorted: Vec<_> = edits.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     let mut shown = Vec::new();
@@ -180,7 +180,7 @@ pub(super) fn changes(env: &Dict, edits: &Edits) -> Result<Changes, Defer> {
 }
 
 /// `_credential(env)`: the file wins.
-pub(super) fn credential(env: &Dict) -> Result<Option<Cred>, Defer> {
+pub(super) fn credential(env: &Dict) -> Result<Option<Cred>, Refusal> {
     if let Some(value) = pyjson::get(env, FILE_KEY).filter(|v| v.truthy()) {
         return Ok(Some(Cred::File(value.py_str()?)));
     }
@@ -190,7 +190,7 @@ pub(super) fn credential(env: &Dict) -> Result<Option<Cred>, Defer> {
     Ok(None)
 }
 
-fn registration_edits(env: &Dict, ctx: &Ctx) -> Result<Edits, Defer> {
+fn registration_edits(env: &Dict, ctx: &Ctx) -> Result<Edits, Refusal> {
     let mut edits = Vec::new();
     if get_str(env, URL_KEY) != Some(ctx.url.as_str()) {
         edits.push((URL_KEY.to_owned(), Some(ctx.url.clone())));
@@ -270,7 +270,7 @@ fn is_shim(entry: &J) -> bool {
     })
 }
 
-fn register_command(client: &str, ctx: &Ctx) -> Result<String, Defer> {
+fn register_command(client: &str, ctx: &Ctx) -> Result<String, Refusal> {
     let token = ctx.token_file.as_deref().unwrap_or("<token file>");
     let shim = ctx.shim()?;
     let mut pairs = Vec::new();
@@ -306,7 +306,7 @@ fn register_command(client: &str, ctx: &Ctx) -> Result<String, Defer> {
     })
 }
 
-pub(super) fn absent(client: &'static str, ctx: &Ctx) -> Result<Row, Defer> {
+pub(super) fn absent(client: &'static str, ctx: &Ctx) -> Result<Row, Refusal> {
     let mut found = row(client, "registration", None, None, "absent")?;
     found.detail = format!(
         "no registration; connect never creates one. To register: {}",
@@ -321,7 +321,7 @@ fn json_registration(
     path: &Path,
     key: &str,
     entry: &Dict,
-) -> Result<Row, Defer> {
+) -> Result<Row, Refusal> {
     let empty = Vec::new();
     let env = match raw(entry, "env") {
         None | Some(J::Null) => &empty,
@@ -337,7 +337,7 @@ fn json_registration(
         }
     };
     let edits = registration_edits(env, ctx)?;
-    let command = get_str(entry, "command").ok_or(Defer)?;
+    let command = get_str(entry, "command").ok_or_else(|| Refusal(format!("{}: mcpServers.{key}.command is not a string; re-register this client with its stdio shim command", path.display())))?;
     let state = if edits.is_empty() {
         "current"
     } else {
@@ -355,7 +355,7 @@ fn json_registration(
     Ok(found)
 }
 
-fn non_shim(client: &'static str, path: &Path, key: &str, entry: &J) -> Result<Row, Defer> {
+fn non_shim(client: &'static str, path: &Path, key: &str, entry: &J) -> Result<Row, Refusal> {
     let kind = entry
         .as_dict()
         .and_then(|entry| pyjson::get(entry, "type"))
@@ -388,7 +388,7 @@ fn servers_of(data: &Option<Dict>) -> Option<&Dict> {
         .and_then(J::as_dict)
 }
 
-fn claude_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+fn claude_rows(ctx: &Ctx) -> Result<Vec<Row>, Refusal> {
     let path = paths::claude_config()?;
     let (data, error) = data_of(files::read_json(&path)?);
     if let Some(error) = error {
@@ -430,8 +430,8 @@ fn claude_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             }
         }
     }
-    let cwd = std::env::current_dir().map_err(|_| Defer)?;
-    let cwd = paths::base(cwd.to_str().ok_or(Defer)?)?;
+    let cwd = std::env::current_dir().map_err(|_| Refusal("the current directory cannot be read; change to an accessible directory and re-run connect".into()))?;
+    let cwd = paths::base(cwd.to_str().ok_or_else(|| Refusal("the current directory is not Unicode; change to a Unicode directory and re-run connect".into()))?)?;
     let local = cwd.join(".mcp.json");
     let (local_data, local_error) = data_of(files::read_json(&local)?);
     let scoped = servers_of(&local_data).is_some_and(|scoped| pyjson::has(scoped, SERVER));
@@ -457,7 +457,7 @@ fn claude_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
     Ok(rows)
 }
 
-fn settings_row(ctx: &Ctx, registration: &Row) -> Result<Row, Defer> {
+fn settings_row(ctx: &Ctx, registration: &Row) -> Result<Row, Refusal> {
     let path = paths::claude_settings()?;
     let (data, error) = data_of(files::read_json(&path)?);
     if let Some(error) = error {
@@ -503,7 +503,7 @@ fn settings_row(ctx: &Ctx, registration: &Row) -> Result<Row, Defer> {
     Ok(found)
 }
 
-fn desktop_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+fn desktop_rows(ctx: &Ctx) -> Result<Vec<Row>, Refusal> {
     let mut rows = Vec::new();
     for path in paths::desktop_configs()? {
         let (data, error) = data_of(files::read_json(&path)?);
@@ -557,7 +557,7 @@ fn desktop_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
     Ok(rows)
 }
 
-fn gemini_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+fn gemini_rows(ctx: &Ctx) -> Result<Vec<Row>, Refusal> {
     let path = paths::gemini_settings()?;
     let (data, error) = data_of(files::read_json(&path)?);
     if let Some(error) = error {
@@ -578,7 +578,7 @@ fn gemini_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
     }])
 }
 
-fn environment_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+fn environment_rows(ctx: &Ctx) -> Result<Vec<Row>, Refusal> {
     let mut rows = Vec::new();
     if let Some(ambient) = paths::env_truthy(URL_KEY)? {
         let normalised = url::validated(&ambient)?.unwrap_or_else(|()| ambient.clone());
@@ -605,9 +605,9 @@ fn environment_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
 /// it), never one that creates it; when no User-scope value overrides it, a
 /// Machine-scope value naming another daemon is a manual row (`connect`
 /// never writes Machine scope).
-pub(super) fn windows_environment_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+pub(super) fn windows_environment_rows(ctx: &Ctx) -> Result<Vec<Row>, Refusal> {
     let backend = super::user_env::backend();
-    let normalised = |value: &str| -> Result<String, Defer> {
+    let normalised = |value: &str| -> Result<String, Refusal> {
         Ok(url::validated(value)?.unwrap_or_else(|()| value.to_owned()))
     };
     let user = match backend.user(URL_KEY) {
@@ -661,7 +661,7 @@ pub(super) fn windows_environment_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
 
 /// Discovery; `codex` holds the Codex rows, read asynchronously from Codex's
 /// app-server (`super::codex::rows`), in their place in the plan.
-pub(super) fn discover(ctx: &Ctx, codex: Vec<Row>) -> Result<Vec<Row>, Defer> {
+pub(super) fn discover(ctx: &Ctx, codex: Vec<Row>) -> Result<Vec<Row>, Refusal> {
     let mut rows = Vec::new();
     if ctx.clients.contains(&"claude-code") {
         rows.extend(claude_rows(ctx)?);

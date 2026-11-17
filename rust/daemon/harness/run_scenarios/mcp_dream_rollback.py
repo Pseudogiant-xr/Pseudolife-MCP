@@ -27,10 +27,10 @@ def register(harness):
 
         def prepare_template(self, dsn):
             import psycopg
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            PostgresStorage(dsn).close()
-            with psycopg.connect(dsn) as conn:
+            from dream_fixtures import connection, initialize
+            with connection(dsn) as conn:
                 harness.assert_disposable(conn)
+                initialize(conn)
                 self.first_run = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM dream_runs").fetchone()[0]
                 conn.execute("INSERT INTO meta (key,value) VALUES ('cortex_dream_cursor','42') "
                              "ON CONFLICT (key) DO UPDATE SET value=excluded.value")
