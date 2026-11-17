@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "0621ce7204e841d6",
-  "fingerprint": "813a3e6fa4a6c4f0",
-  "reason": "Adds 64 native audit cases to the existing PostgreSQL pytest step, with no additional job, artifact, installation or matrix item. This PR's clean hosted Windows stress run 44020774945 passed all 20 iterations without retries; its 58-case precursor selection measured a median 30.6 seconds (0.51 minutes) of test execution from the stress report, excluding shared setup. Four additional Windows cases cover the review fixes; two other cases exercise POSIX-only umasks. No other shard's steps change. Ordinary PR run 44014517377 skips the edited heavy parity job, whose complete cost remains subject to batch measurement. The final selection's hosted times are reported in the PR body; no baseline or limit is raised."
-}

@@ -379,7 +379,7 @@
     "rust/shim/src/cli/board_audit/help.rs": "fa7a7992ca744c9a18106b2d4bf444c3cf3404fa5fd3752f646c178489b12f87",
     "rust/shim/src/cli/board_audit/metrics.rs": "846db7adcdf3444821e034d964648579dae0477ce3a50c5a7a570e53c1115a35",
     "rust/shim/src/cli/board_audit/mod.rs": "537d3809e4dc6831f0c4e4337f4cb4aac139ef4d939f814b405bbdc55dd38ab3",
-    "rust/shim/src/cli/board_audit/output.rs": "d8a32db4b122ff14e1344125de517e254789e25e4a676357b52237f059c2eddf",
+    "rust/shim/src/cli/board_audit/output.rs": "39219e7fde31409c00de0aa1cd8abe14864faa95c80edb3ad1716265abe497bc",
     "rust/shim/src/cli/board_audit/redact.rs": "7055da0e108bc7ffd31f0e622486e42f111c7da5c7f51a002a08cb7996bcdea8",
     "rust/shim/src/cli/board_audit/stats.rs": "10ed6b288542094f853127fb183814d808d621ac71a3a441d6cd761d5fdb2a8d",
     "rust/shim/src/cli/board_audit/testdata/stats.json": "2dbbc7c653b2f2152f2266068b0ec26b189c67810e10126f9eb5ff02f28ccad7",
