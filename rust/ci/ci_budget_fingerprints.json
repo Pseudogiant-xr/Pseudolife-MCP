@@ -8,7 +8,7 @@
       "scope": "fea2d407b8bf12cd",
       "test": "492e9b9ddbe2b98f",
       "test-lite-macos": "80749dd59844bee1",
-      "test-lite-windows": "954d6243529019c3"
+      "test-lite-windows": "9e2cc5d53781fed5"
     },
     "python-freeze.yml": {
       "python-freeze": "966b18bec375a6a2"

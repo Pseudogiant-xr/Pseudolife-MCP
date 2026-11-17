@@ -65,7 +65,10 @@ def base(monkeypatch):
     """A three-event chain, the second payload not canonical, in a base
     every copy made under ``PL_HARNESS_BASE_DATABASE`` starts from."""
     if not pgdisposable.LOGIN_FILE.exists():
-        pytest.skip("no disposable-bank login here")
+        import database_gate
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     import psycopg
     from pseudolife_memory.storage.coordination import GENESIS_HASH
     from pseudolife_memory.storage.schema import SCHEMA_SQL

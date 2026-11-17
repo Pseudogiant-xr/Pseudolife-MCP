@@ -1,4 +1,5 @@
 use super::*;
+use crate::windows_powershell::base64;
 
 const TASK: &str = "Pseudolife Unattended Update";
 const CLIENT_TASK: &str = "Pseudolife Client Update";
@@ -132,12 +133,10 @@ fn user_environment(name: &str) -> Option<String> {
         let script = format!(
             "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); [Environment]::GetEnvironmentVariable('{name}','User') | ConvertTo-Json -Compress"
         );
-        let shell = std::env::var_os("SystemRoot")
-            .map(PathBuf::from)?
-            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let shell = crate::windows_powershell::executable().ok()?;
         let (code, out) = seams::run_cli(
             &[
-                shell.to_str()?.into(),
+                shell,
                 "-NoLogo".into(),
                 "-NoProfile".into(),
                 "-NonInteractive".into(),
@@ -394,13 +393,7 @@ fn powershell_literal(text: &str) -> Result<String> {
 }
 
 fn windows_powershell() -> Result<String> {
-    std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .ok_or_else(|| UpdateError::usage("SystemRoot is missing; cannot locate Windows PowerShell for the scheduled environment"))?
-        .join("System32/WindowsPowerShell/v1.0/powershell.exe")
-        .to_str()
-        .map(str::to_owned)
-        .ok_or_else(|| UpdateError::usage("the scheduler executable path must be UTF-8"))
+    crate::windows_powershell::executable().map_err(UpdateError::usage)
 }
 
 fn schedule_windows(argv: &[String]) -> Result<(String, String)> {
@@ -512,30 +505,17 @@ const SCRIPT_CHANGED: i32 = 5;
 /// can write this user's temporary folder (an unelevated one, when this
 /// command runs elevated) cannot swap the script in between.
 fn windows_script_argv(path: &std::path::Path, digest: &str) -> Result<Vec<String>> {
-    Ok(vec![
-        windows_powershell()?,
-        "-NoLogo".into(),
-        "-NoProfile".into(),
-        "-NonInteractive".into(),
-        "-EncodedCommand".into(),
-        base64(
-            &windows_script_bootstrap(path, digest)?
-                .encode_utf16()
-                .flat_map(u16::to_le_bytes)
-                .collect::<Vec<_>>(),
-        ),
-    ])
+    crate::windows_powershell::encoded(&windows_script_bootstrap(path, digest)?)
+        .map_err(UpdateError::usage)
 }
 
 /// The bootstrap [`windows_script_argv`] encodes: read the file once, check
 /// its hash, run those same bytes.
 fn windows_script_bootstrap(path: &std::path::Path, digest: &str) -> Result<String> {
-    let path = path
-        .to_str()
-        .ok_or_else(|| UpdateError::usage("the temporary scheduler script path must be UTF-8"))?;
+    let path = crate::windows_powershell::path_expression(path).map_err(UpdateError::usage)?;
     Ok(format!(
         "$b=[IO.File]::ReadAllBytes({});$s=[Security.Cryptography.SHA256]::Create();$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{digest}'){{[Console]::Error.WriteLine('the scheduler script changed after it was written; nothing was run');exit {SCRIPT_CHANGED}}};try{{. ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b)))}}catch{{[Console]::Out.WriteLine(($_.Exception.Message -replace '\\s+',' ').Trim());exit 1}}",
-        powershell_literal(path)?
+        path
     ))
 }
 
@@ -629,29 +609,6 @@ fn windows_registration(
         powershell_literal(executable)?,
         powershell_literal(arguments)?,
     ))
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let a = chunk[0] as usize;
-        let b = chunk.get(1).copied().unwrap_or(0) as usize;
-        let c = chunk.get(2).copied().unwrap_or(0) as usize;
-        out.push(ALPHABET[a >> 2] as char);
-        out.push(ALPHABET[((a & 3) << 4) | (b >> 4)] as char);
-        out.push(if chunk.len() > 1 {
-            ALPHABET[((b & 15) << 2) | (c >> 6)] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            ALPHABET[c & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
 }
 
 /// Whether `--schedule` writes the client schedule here (a shim runtime with
@@ -1169,7 +1126,9 @@ Connection: close
         // UTF-16 base64 of the bootstrap stays far below the limit.
         assert!(bootstrap.len() * 2 * 4 / 3 < 2000);
         assert!(task_lock_functions().len() > 4000);
-        assert!(bootstrap.contains("ReadAllBytes('C:/temp/pseudolife-schedule-x.ps1')"));
+        let path = std::path::Path::new("C:/temp/pseudolife-schedule-x.ps1");
+        let expression = crate::windows_powershell::path_expression(path).unwrap();
+        assert!(bootstrap.contains(&format!("ReadAllBytes({expression})")));
         let check = bootstrap.find(&format!("if($h -ne '{digest}')")).unwrap();
         assert!(check < bootstrap.find("[scriptblock]::Create").unwrap());
         assert!(bootstrap.contains(&format!("exit {SCRIPT_CHANGED}")));
@@ -1214,6 +1173,56 @@ Connection: close
         let _ = fs::remove_file(&path);
         assert_eq!(code, SCRIPT_CHANGED, "{output}");
         assert!(!output.contains("swapped"), "{output}");
+    }
+    #[cfg(windows)]
+    #[test]
+    fn scheduler_bootstrap_preserves_literal_path_characters() {
+        use sha2::{Digest, Sha256};
+        let root = std::env::temp_dir().join(format!("schedule-path-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("register ' é ‘ ’ “ ” $ ` [x].ps1");
+        let script = "[Console]::Out.WriteLine('fixture scheduler ran');exit 3";
+        fs::write(&path, script).unwrap();
+        let digest = format!("{:x}", Sha256::digest(script.as_bytes()));
+        let (code, output) = seams::run_cli(
+            &windows_script_argv(&path, &digest).unwrap(),
+            None,
+            30,
+            false,
+        );
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(code, 3, "{output}");
+        assert_eq!(output.trim(), "fixture scheduler ran");
+    }
+    #[cfg(windows)]
+    #[test]
+    fn scheduler_child_uses_the_operating_system_environment() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::update::unattended::schedule::tests::scheduler_environment_probe",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("SystemRoot", "C:/fixture-windows")
+            .env("WINDIR", "C:/fixture-windows")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess probe invoked by scheduler_child_uses_the_operating_system_environment"]
+    fn scheduler_environment_probe() {
+        let (code, output) = run_windows_script("$null='{}'|ConvertFrom-Json|ConvertTo-Json; [Console]::Out.WriteLine('fixture environment accepted')").unwrap();
+        assert_eq!(code, 0, "{output}");
+        assert_eq!(output.trim(), "fixture environment accepted");
     }
     #[cfg(windows)]
     #[test]

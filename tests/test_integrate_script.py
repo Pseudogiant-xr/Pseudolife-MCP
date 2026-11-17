@@ -261,9 +261,33 @@ with open(bundle, "wb") as out:
 with open(log, "a", encoding="utf-8") as out:
     out.write(json.dumps({"argv": argv, "script": script, "bundle": bundle}) + "\n")
 import re
-nonce = re.search(r"-Nonce '([0-9a-f]+)'", script).group(1)
+if script.startswith("set -- "):
+    import shlex
+    nonce = shlex.split(script.splitlines()[0])[6]
+else:
+    nonce = re.search(r"-Nonce '([0-9a-f]+)'", script).group(1)
 tag = f"rust-check {nonce}:"
 mode = os.environ.get("FAKE_SSH_MODE", "pass")
+if script.startswith("set -- ") and mode in ("pass", "red"):
+    code = 0 if mode == "pass" else 100
+    sys.stderr.write("Summary [1.2s] 12 tests run: 12 passed, 0 skipped\n"
+                     f"shim-tests {nonce}: nextest exit {code}\n")
+    sys.exit(code)
+if "-PytestArgs" in script:
+    tag = f"rust-harness {nonce}:"
+    if mode == "pass":
+        sys.stderr.write("rust-harness: Linux Docker engine up after 6 s\n"
+                         "2876 passed, 20 skipped, 10 warnings, 153 subtests passed in 1004.76s (0:16:44)\n"
+                         f"{tag} pytest exit 0\n")
+        sys.exit(0)
+    if mode == "red":
+        sys.stderr.write("FAILED rust/ci/test_x.py::test_y\n"
+                         "1 failed, 2875 passed, 20 skipped in 990.01s (0:16:30)\n"
+                         f"{tag} pytest exit 1\n")
+        sys.exit(1)
+    if mode == "nohook":
+        sys.stderr.write(f"{tag} not run: this machine has no services hook\n")
+        sys.exit(3)
 if mode == "unreachable":
     sys.stderr.write("ssh: connect to host vm port 22: Connection timed out\n")
     sys.exit(255)
@@ -360,6 +384,8 @@ def _make_world(tmp_path, monkeypatch, *, guard=True):
     monkeypatch.setattr(integrate, "RUST_CHECK_REMOTE", remote_file, raising=False)
     monkeypatch.setattr(integrate, "RUST_CHECK_SSH", (sys.executable, str(fake_ssh)),
                         raising=False)
+    monkeypatch.setattr(integrate, "SUITE_RESULTS", tmp_path / "suite-results", raising=False)
+    monkeypatch.setattr(integrate, "SHIM_TESTS_REMOTE", tmp_path / "shim-tests.remote", raising=False)
 
     class World:
         pass
@@ -451,14 +477,27 @@ def _suite_result(world, *, commit: str | None = None, exit_code: int = 0,
     return path
 
 
-def _harness_note(world) -> str:
-    head = _git(world.work, "rev-parse", "HEAD")
-    return f"767 passed at {head[:8]} on the maintainer's Windows host"
+def _gate_result(world, gate_kind="rust-harness", **edit) -> Path:
+    harness = gate_kind == "rust-harness"
+    result = {"kind": gate_kind, "commit": _git(world.work, "rev-parse", "HEAD"),
+              "command": integrate.RUST_HARNESS_COMMAND if harness else integrate.SHIM_TESTS_COMMAND,
+              "selection": list(integrate.RUST_HARNESS if harness else integrate.SHIM_TESTS_ARGS),
+              "machine": "Windows dev VM" if harness else "second Linux dev box",
+              "exit_code": 0, "summary": "767 passed in 1.0s", "not_run": None,
+              "started": "2026-11-17T01:00:00+00:00", "ended": "2026-11-17T01:00:01+00:00"}
+    result.update(edit)
+    path = world.work.parent / f"{gate_kind}-result.json"
+    path.write_text(json.dumps(result), encoding="utf-8")
+    return path
+
+
+def _gate_args(world) -> list[str]:
+    return ["--harness", str(_gate_result(world)),
+            "--shim-tests", str(_gate_result(world, "shim-tests"))]
 
 
 def _open(world, **result) -> int:
-    return integrate.main(["open", "--suite", str(_suite_result(world, **result)),
-                           "--harness-note", _harness_note(world)])
+    return integrate.main(["open", "--suite", str(_suite_result(world, **result)), *_gate_args(world)])
 
 
 def _publish(world) -> int:
@@ -2027,7 +2066,7 @@ def test_open_takes_a_stated_suite_result_and_says_it_was_not_checked(world, cap
     head = _git(world.work, "rev-parse", "HEAD")
     note = f"passed at {head[:8]} on the Linux dev box, 18868 passed, real client: yes"
     assert integrate.main(["open", "--suite-note", note,
-                           "--harness-note", _harness_note(world)]) == 0, capsys.readouterr()
+                           *_gate_args(world)]) == 0, capsys.readouterr()
 
     (_, body), = world.gh.bodies("create")
     assert f"Local full suite: {note} (stated by the operator, not checked)" in body
@@ -2078,7 +2117,7 @@ def test_open_refuses_a_stated_result_that_does_not_say_real_client_yes(world, c
                  f"passed at {head[:8]}, real client: no",
                  f"passed at {head[:8]}, real client: yes, given by the caller (not built by this run)"):
         assert integrate.main(["open", "--suite-note", note,
-                               "--harness-note", _harness_note(world)]) == 2
+                               *_gate_args(world)]) == 2
         err = capsys.readouterr().err
         assert "real client: yes" in err and integrate.SUITE_COMMAND in err
     assert world.remote_branches() == [] and world.gh.mutations() == []
@@ -2090,68 +2129,45 @@ def test_build_names_the_rust_harness_run_the_suite_does_not_cover(world, capsys
     assert _build() == 0
     out = capsys.readouterr().out
 
-    assert integrate.RUST_HARNESS_COMMAND in out and "--harness-note" in out
+    assert integrate.RUST_HARNESS_COMMAND in out and "--harness" in out and "shim-tests" in out
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
-@pytest.mark.parametrize("note", [None, "767 passed, trust me"])
-def test_open_refuses_without_the_rust_harness_result_for_this_head(world, capsys, note):
+def test_open_refuses_without_the_rust_harness_result_for_this_head(world, capsys):
     _three_with_a_collision(world)
     assert _build() == 0
-    capsys.readouterr()
-
-    argv = ["open", "--suite", str(_suite_result(world))]
-    assert integrate.main(argv + (["--harness-note", note] if note else [])) == 2
-
-    err = capsys.readouterr().err
-    head = _git(world.work, "rev-parse", "HEAD")
-    assert head[:8] in err and ("--harness-note" in err)
-    if note is None:
-        assert integrate.RUST_HARNESS_COMMAND in err
+    assert integrate.main(["open", "--suite", str(_suite_result(world))]) == 2
+    assert "--harness" in capsys.readouterr().err
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
-@pytest.mark.parametrize("result", ["passed at {head}", "0 passed at {head}",
-                                    "3 failed, 764 passed at {head}",
-                                    "764 passed, 1 error at {head}",
-                                    "764 passed, 2 errors at {head}"])
-def test_open_refuses_a_harness_note_without_a_clean_pass_count(world, capsys, result):
+def test_harness_note_is_no_longer_an_open_bypass(world):
+    with pytest.raises(SystemExit) as error:
+        integrate.main(["open", "--harness-note", "767 passed at abcdef12"])
+    assert error.value.code == 2
+    assert world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("result", ["passed", "0 passed", "3 failed, 764 passed",
+                                    "764 passed, 1 error", "764 passed, 2 errors"])
+def test_open_refuses_a_harness_result_without_a_clean_pass_count(world, capsys, result):
     _three_with_a_collision(world)
     assert _build() == 0
-    capsys.readouterr()
-    head = _git(world.work, "rev-parse", "HEAD")
-
-    assert integrate.main(["open", "--suite", str(_suite_result(world)),
-                           "--harness-note", result.format(head=head[:8])]) == 2
-
-    assert "passed" in capsys.readouterr().err
+    args = _gate_args(world)
+    _gate_result(world, summary=result)
+    assert integrate.main(["open", "--suite", str(_suite_result(world)), *args]) == 2
+    assert "failed" in capsys.readouterr().err
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
-@pytest.mark.parametrize("result", ["767 passed at {head} (error-free)",
-                                    "767 passed at {head}; log logs/errors.log",
-                                    "767 passed, 0 failed at {head}"])
-def test_open_accepts_a_clean_harness_note_that_mentions_errors_in_prose(world, capsys, result):
+def test_open_records_both_gate_results_beside_the_suite(world, capsys):
     _three_with_a_collision(world)
     assert _build() == 0
-    capsys.readouterr()
-    head = _git(world.work, "rev-parse", "HEAD")
-
-    assert integrate.main(["open", "--suite", str(_suite_result(world)),
-                           "--harness-note", result.format(head=head[:8])]) == 0, \
-        capsys.readouterr()
-
-
-def test_open_records_the_rust_harness_result_beside_the_suite(world, capsys):
-    _three_with_a_collision(world)
-    assert _build() == 0
-
     assert _open(world) == 0, capsys.readouterr()
-
     (_, body), = world.gh.bodies("create")
-    assert (f"Rust harness Python tests (`{integrate.RUST_HARNESS_COMMAND}`, which the "
-            f"full suite does not collect): {_harness_note(world)} (stated by the "
-            "operator, not checked)") in body
+    assert "Windows dev VM: 767 passed" in body
+    assert "second Linux dev box: 767 passed" in body
+    assert "stated by the operator" not in body
 
 
 def test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips():
@@ -2205,7 +2221,7 @@ def test_a_batch_changing_rust_is_compile_checked_by_build(world, capsys):
     assert _open(world) == 0, capsys.readouterr()
     (_, body), = world.gh.bodies("create")
     assert (f"Rust compile check (`{integrate.RUST_CHECK_COMMAND}` in `rust/`, which "
-            f"neither run above compiles): passed at `{head}`") in body
+            f"checks all workspace targets): passed at `{head}`") in body
 
 
 def test_a_batch_that_changes_nothing_under_rust_is_not_compile_checked(world, capsys):
@@ -2690,6 +2706,162 @@ def test_a_dry_run_names_the_remote_without_contacting_it(world, capsys):
     assert "would run" in out and "on the Windows dev VM" in out
 
 
+# The harness run on the dev machine (`harness`), and `open --harness`
+# checking its result instead of an operator's note.
+
+def _harness(world, capsys, mode: str = "pass") -> tuple[int, dict, Path]:
+    os.environ["FAKE_SSH_MODE"] = mode
+    try:
+        code = integrate.main(["harness"])
+    finally:
+        os.environ.pop("FAKE_SSH_MODE", None)
+    capsys.readouterr()
+    (result,) = sorted(integrate.SUITE_RESULTS.glob("*-harness-*.json"))[-1:]
+    return code, json.loads(result.read_text(encoding="utf-8")), result
+
+
+def _open_with_harness(world, result: Path) -> int:
+    return integrate.main(["open", "--suite", str(_suite_result(world)), "--harness", str(result),
+                           "--shim-tests", str(_gate_result(world, "shim-tests"))])
+
+
+def test_the_harness_runs_on_the_dev_machine_and_open_checks_its_result(world, capsys):
+    _rust_member(world)
+    world.configure_remote()
+    assert _build() == 0, capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+
+    code, result, path = _harness(world, capsys)
+
+    assert code == 0
+    assert result["kind"] == "rust-harness" and result["commit"] == head
+    assert result["machine"] == "Windows dev VM"
+    assert result["command"] == integrate.RUST_HARNESS_COMMAND and result["exit_code"] == 0
+    assert result["summary"].startswith("2876 passed, 20 skipped")
+    assert Path(result["log"]).is_file()
+    harness_call = world.ssh_calls()[-1]
+    assert "-PytestArgs @(" in harness_call["script"]
+    for test_path in integrate.RUST_HARNESS:
+        assert f"'{test_path}'" in harness_call["script"], test_path
+    assert "Start-HarnessServices" in harness_call["script"]
+    assert "Enter-DevDatabaseLock" in harness_call["script"]
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+    assert _open_with_harness(world, path) == 0, capsys.readouterr()
+    (_, body), = world.gh.bodies("create")
+    assert f"passed at `{head}` on the Windows dev VM: 2876 passed, 20 skipped" in body
+    assert "stated by the operator" not in body.split("Rust harness")[1].splitlines()[0]
+
+
+@pytest.mark.parametrize("edit, cause", [
+    ({"commit": "0" * 40}, "not this batch head"),
+    ({"command": "python -m pytest rust/ci"}, "another selection"),
+    ({"exit_code": 1, "summary": "1 failed, 2875 passed in 9.0s"}, "the harness failed"),
+    ({"exit_code": 0, "summary": "2875 passed, 1 error in 9.0s"}, "the harness failed"),
+    ({"exit_code": None, "not_run": "on the Windows dev VM: ssh exit 255: x"}, "did not run"),
+    ({"machine": "athena"}, "no known dev machine role"),
+    ({"kind": "suite"}, "is not a result"),
+])
+def test_open_refuses_a_harness_result_that_proves_less(world, capsys, edit, cause):
+    _rust_member(world)
+    world.configure_remote()
+    assert _build() == 0, capsys.readouterr()
+    _, result, path = _harness(world, capsys)
+    result.update(edit)
+    path.write_text(json.dumps(result), encoding="utf-8")
+
+    assert _open_with_harness(world, path) == 2
+    assert cause in capsys.readouterr().err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_open_refuses_a_missing_harness_result(world, capsys, tmp_path):
+    _rust_member(world)
+    world.configure_remote()
+    assert _build() == 0, capsys.readouterr()
+    capsys.readouterr()
+
+    assert _open_with_harness(world, tmp_path / "nowhere.json") == 2
+    assert "cannot read the harness result" in capsys.readouterr().err
+    assert world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("mode, code", [("red", 1), ("nohook", 3), ("unreachable", 3)])
+def test_a_red_or_unrun_harness_writes_a_result_open_refuses(world, capsys, mode, code):
+    _rust_member(world)
+    world.configure_remote()
+    assert _build() == 0, capsys.readouterr()
+
+    got, result, path = _harness(world, capsys, mode)
+
+    assert got == code and result["commit"] == _git(world.work, "rev-parse", "HEAD")
+    if mode == "red":
+        assert result["exit_code"] == 1 and result["summary"].startswith("1 failed")
+    else:
+        assert result["exit_code"] is None and result["not_run"]
+    assert _open_with_harness(world, path) == 2
+    assert world.gh.mutations() == []
+
+
+def test_the_harness_without_a_dev_machine_refuses_local_fallback(world, capsys):
+    _rust_member(world)
+    assert _build() == 0, capsys.readouterr()
+    capsys.readouterr()
+
+    assert integrate.main(["harness"]) == 2
+    err = capsys.readouterr().err
+    assert "rust-check.remote" in err and "no local fallback" in err
+    assert world.ssh_calls() == []
+
+
+def test_the_harness_needs_a_built_batch(world, capsys):
+    world.configure_remote()
+    assert integrate.main(["harness"]) == 2
+    assert "run `python ops/integrate.py build` first" in capsys.readouterr().err
+    assert world.ssh_calls() == []
+
+
+@pytest.mark.parametrize("mode,expected", [("pass", 0), ("red", 100), ("unreachable", 3),
+                                           ("spoof", 3), ("trailing", 3)])
+def test_shim_gate_records_only_the_remote_verdict(world, capsys, monkeypatch, mode, expected):
+    _rust_member(world)
+    assert _build() == 0
+    integrate.SHIM_TESTS_REMOTE.write_text("ssh=dev-box-two\nrepo=/tmp/gate-repo\nrole=second Linux dev box\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_SSH_MODE", mode)
+    assert integrate.main(["shim-tests"]) == expected, capsys.readouterr()
+    (path,) = integrate.SUITE_RESULTS.glob("*-shim-tests-*.json")
+    result = json.loads(path.read_text())
+    assert result["kind"] == "shim-tests"
+    assert result["command"] == integrate.SHIM_TESTS_COMMAND
+    assert result["selection"] == list(integrate.SHIM_TESTS_ARGS)
+    assert result["commit"] == _git(world.work, "rev-parse", "HEAD")
+    args = ["open", "--suite", str(_suite_result(world)), "--harness", str(_gate_result(world)),
+            "--shim-tests", str(path)]
+    assert integrate.main(args) == (0 if mode == "pass" else 2), capsys.readouterr()
+
+
+@pytest.mark.parametrize("kind", ["rust-harness", "shim-tests"])
+@pytest.mark.parametrize("edit", [
+    {"selection": []}, {"commit": "f" * 40}, {"kind": "suite"}, {"command": "true"},
+    {"machine": "remote dev machine"}, {"exit_code": False}, {"exit_code": "0"},
+    {"exit_code": None}, {"not_run": "offline"}, {"summary": "0 passed"},
+    {"summary": "10 passed, 1 failed"}, {"summary": None}, {"started": None},
+    {"ended": "2000-01-01T00:00:00+00:00"}, {"started": "2026-11-17T01:00:00"},
+])
+def test_gate_result_requires_the_complete_run_contract(world, kind, edit):
+    path = _gate_result(world, kind, **edit)
+    with pytest.raises(integrate.Refusal):
+        integrate._gate_result_line(str(path), _git(world.work, "rev-parse", "HEAD"), kind)
+
+
+def test_shim_gate_without_configuration_never_uses_this_machine(world, capsys):
+    _rust_member(world)
+    assert _build() == 0
+    assert integrate.main(["shim-tests"]) == 2
+    assert "shim-tests.remote" in capsys.readouterr().err
+    assert world.ssh_calls() == []
+
+
 def test_the_far_half_is_read_from_the_checkout_build_started_in():
     # Read once, at load: a member that changes the script cannot change the
     # check that judges its own batch.
@@ -2747,6 +2919,8 @@ with open(os.environ["FAKE_FAR_CARGO_LOG"], "a", encoding="utf-8") as log:
                           "env": dict(os.environ),
                           "suite_lock_free": suite_lock_free()}) + "\n")
 code = int(os.environ.get("FAKE_FAR_CARGO_EXIT", "0"))
+if sys.argv[1:3] == ["nextest", "run"]:
+    sys.stderr.write("Summary [1.2s] 12 tests run: 12 passed, 0 skipped\n")
 if code:
     sys.stderr.write("error[E0061]: this function takes 3 arguments\n")
 sys.exit(code)
@@ -2754,8 +2928,8 @@ sys.exit(code)
 
 # Stands in for ssh by running the remote command here, stdin passed on.
 _LOCAL_SSH = r'''
-import subprocess, sys
-sys.exit(subprocess.run(sys.argv[-1].split(), stdin=sys.stdin).returncode)
+import shlex, subprocess, sys
+sys.exit(subprocess.run(shlex.split(sys.argv[-1]), stdin=sys.stdin).returncode)
 '''
 
 
@@ -3187,6 +3361,606 @@ def test_build_and_the_far_half_agree_end_to_end(far, monkeypatch, tmp_path):
     record, errors = integrate._remote_rust_check(plan, cfg)
     assert record == "failed: error[E0061]: this function takes 3 arguments", errors
     assert len(far.cargo_calls()) == 2
+
+
+# The harness's far half (ops/rust-harness-remote.ps1) for real under pwsh,
+# against a local clone, with stand-ins for uv (a real venv that sees this
+# interpreter's packages) and for the machine's services hook.
+_FAKE_UV = r'''
+import json, os, subprocess, sys
+with open(os.environ["FAKE_UV_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\n")
+if os.environ.get("FAKE_UV_ENV_LOG"):
+    names = ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SERVICE_DSN", "SOME_SERVICE",
+             "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "PYTHONHOME")
+    with open(os.environ["FAKE_UV_ENV_LOG"], "a", encoding="utf-8") as log:
+        log.write(json.dumps({name: name in os.environ for name in names}) + "\n")
+if sys.argv[1] == "venv":
+    import glob, site
+    target = sys.argv[-1]
+    code = subprocess.run([sys.executable, "-m", "venv", target]).returncode
+    if code == 0:
+        # The new environment sees this interpreter's packages (pytest),
+        # also when this interpreter is itself a virtual environment.
+        # lib64 is a link to lib on some Linux venvs: one is enough.
+        lib = sorted(glob.glob(os.path.join(target, "**", "site-packages"), recursive=True))[0]
+        with open(os.path.join(lib, "parent.pth"), "w", encoding="utf-8") as pth:
+            pth.write("\n".join(site.getsitepackages()) + "\n")
+    sys.exit(code)
+sys.exit(int(os.environ.get("FAKE_UV_PIP_EXIT", "0")))
+'''
+
+_FAKE_HOOK = r'''
+function Start-HarnessServices {
+    Add-Content -LiteralPath $env:FAKE_HOOK_LOG -Value 'start'
+    if ($env:FAKE_HOOK_FAIL) { throw 'the test PostgreSQL did not start' }
+    $env:FAKE_SERVICE = 'up'
+}
+function Stop-HarnessServices { Add-Content -LiteralPath $env:FAKE_HOOK_LOG -Value 'stop' }
+'''
+
+# The batch's own tests, standing in for RUST_HARNESS: they see the
+# services' environment, and the option rust/conftest.py defines.
+_GATE_CONFTEST = '''
+def pytest_addoption(parser):
+    parser.addoption("--require-databases", action="store_true")
+'''
+_GATE_TEST = '''
+import os
+def test_the_services_are_up(request):
+    assert os.environ["FAKE_SERVICE"] == "up"
+    assert request.config.getoption("--require-databases")
+'''
+
+
+class HarnessFar(Far):
+    def __init__(self, tmp_path, monkeypatch):
+        super().__init__(tmp_path, monkeypatch)
+        bin_dir = tmp_path / "bin"
+        (bin_dir / "fake_uv.py").write_text(_FAKE_UV, encoding="utf-8")
+        if os.name == "nt":
+            (bin_dir / "uv.cmd").write_text(f'@"{sys.executable}" "%~dp0fake_uv.py" %*\r\n',
+                                            encoding="utf-8")
+        else:
+            uv = bin_dir / "uv"
+            uv.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$(dirname "$0")/fake_uv.py" "$@"\n',
+                          encoding="utf-8")
+            uv.chmod(0o755)
+        self.uv_log = tmp_path / "uv.jsonl"
+        self.hook_log = tmp_path / "hook.log"
+        self.hook = tmp_path / "rust-harness-services.ps1"
+        self.hook.write_text(_FAKE_HOOK, encoding="utf-8")
+        monkeypatch.setenv("FAKE_UV_LOG", str(self.uv_log))
+        monkeypatch.setenv("FAKE_HOOK_LOG", str(self.hook_log))
+        monkeypatch.delenv("FAKE_HOOK_FAIL", raising=False)
+        monkeypatch.delenv("FAKE_SERVICE", raising=False)
+
+    def batch(self, body: str = _GATE_TEST) -> tuple[str, str, str]:
+        self.n += 1
+        branch = f"integrate/{DATE}-batch-{self.n}"
+        _git(self.seed, "switch", "-q", "-C", branch, self.base)
+        gate_tests = self.seed / "gate_tests"
+        gate_tests.mkdir(exist_ok=True)
+        (gate_tests / "conftest.py").write_text(_GATE_CONFTEST, encoding="utf-8", newline="\n")
+        (gate_tests / "test_gate.py").write_text(body, encoding="utf-8", newline="\n")
+        _git(self.seed, "add", "-A")
+        _git(self.seed, "commit", "-q", "-m", f"batch {self.n}")
+        head = _git(self.seed, "rev-parse", "HEAD")
+        bundle = self.tmp / f"h{self.n}.bundle"
+        _git(self.seed, "bundle", "create", "-q", str(bundle), f"refs/heads/{branch}",
+             f"^{self.base}")
+        return head, f"refs/heads/{branch}", base64.b64encode(bundle.read_bytes()).decode()
+
+    def run_harness(self, head: str, ref: str, data: str, *, hook: Path | None = None,
+                    extra: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [_PWSH, "-NoProfile", "-NonInteractive", "-File",
+             str(ROOT / "ops" / "rust-harness-remote.ps1"), "-Repo", str(self.repo),
+             "-Base", self.base, "-Head", head, "-Ref", ref,
+             "-ServicesHook", str(hook or self.hook), "-DatabaseLockPath", str(self.tmp / "own-database.lock"),
+             "-PytestArgs", "gate_tests", *extra],
+            input=data, capture_output=True, text=True, encoding="utf-8", timeout=600)
+
+    def hook_calls(self) -> list[str]:
+        return self.hook_log.read_text(encoding="utf-8").split() if self.hook_log.is_file() else []
+
+    def harness_leftovers(self) -> list[str]:
+        refs = _git(self.repo, "for-each-ref", "--format=%(refname)", "refs/rust-harness/")
+        return refs.splitlines() + [p.name for p in self.tmp.glob("far.rust-harness-*.bundle")]
+
+
+@pytest.fixture
+def harness_far(tmp_path, monkeypatch):
+    return HarnessFar(tmp_path, monkeypatch)
+
+
+@needs_pwsh
+def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_far):
+    head, ref, data = harness_far.batch()
+
+    proc = harness_far.run_harness(head, ref, data)
+
+    assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
+    assert _verdict(proc) == "rust-harness: pytest exit 0"
+    assert "1 passed" in proc.stdout
+    assert harness_far.hook_calls() == ["start", "stop"]
+    gate = Path(f"{harness_far.repo}.rust-harness")
+    assert _git(gate, "rev-parse", "HEAD") == head
+    installs = [json.loads(line) for line in harness_far.uv_log.read_text(encoding="utf-8").splitlines()]
+    assert installs[0][0] == "venv" and Path(installs[0][-1]) == Path(f"{harness_far.repo}.rust-harness-venv")
+    assert installs[1][:2] == ["pip", "install"] and installs[1][-1] == f"{gate}[dev]"
+    assert harness_far.harness_leftovers() == []
+
+
+@needs_pwsh
+def test_a_failing_batch_test_is_pytests_exit_and_the_services_still_stop(harness_far):
+    head, ref, data = harness_far.batch("def test_red():\n    assert False\n")
+
+    proc = harness_far.run_harness(head, ref, data)
+
+    assert proc.returncode == 1
+    assert _verdict(proc) == "rust-harness: pytest exit 1"
+    assert harness_far.hook_calls() == ["start", "stop"]
+    assert harness_far.harness_leftovers() == []
+
+
+@needs_pwsh
+def test_services_that_do_not_start_are_not_run_and_are_stopped(harness_far, monkeypatch):
+    head, ref, data = harness_far.batch()
+    monkeypatch.setenv("FAKE_HOOK_FAIL", "1")
+
+    proc = harness_far.run_harness(head, ref, data)
+
+    assert proc.returncode == 3
+    assert "could not start this machine's services" in _verdict(proc), proc.stderr[-2000:]
+    assert "did not start" in _verdict(proc)
+    assert harness_far.hook_calls() == ["start", "stop"]
+
+
+@needs_pwsh
+def test_a_machine_without_a_services_hook_is_not_run(harness_far, tmp_path):
+    head, ref, data = harness_far.batch()
+
+    proc = harness_far.run_harness(head, ref, data, hook=tmp_path / "no-such-hook.ps1")
+
+    assert proc.returncode == 3 and "no services hook" in _verdict(proc), proc.stderr[-2000:]
+    assert harness_far.hook_calls() == []
+
+
+@needs_pwsh
+def test_the_harness_far_half_refuses_a_bundle_that_is_not_the_batch_head(harness_far):
+    _, ref, data = harness_far.batch()
+    other, _, _ = harness_far.batch()
+
+    proc = harness_far.run_harness(other, ref, data)
+
+    assert proc.returncode == 3 and "not the batch head" in _verdict(proc), proc.stderr[-2000:]
+    assert harness_far.hook_calls() == [] and harness_far.harness_leftovers() == []
+
+
+@needs_pwsh
+def test_the_harness_far_half_tags_its_verdict_with_the_runs_nonce(harness_far):
+    head, ref, data = harness_far.batch()
+    nonce = "0a" * 16
+
+    proc = harness_far.run_harness(head, ref, data, extra=("-Nonce", nonce))
+
+    assert _verdict(proc) == f"rust-harness {nonce}: pytest exit 0", proc.stderr[-2000:]
+
+
+@needs_pwsh
+def test_harness_far_half_scrubs_ambient_environment_before_member_code(harness_far, monkeypatch):
+    seen = harness_far.tmp / "uv-environment.jsonl"
+    monkeypatch.setenv("FAKE_UV_ENV_LOG", str(seen))
+    for name in ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SERVICE_DSN"):
+        monkeypatch.setenv(name, "planted-disposable-value")
+    monkeypatch.setenv("SOME_SERVICE", "https://user:disposable@example.com/x")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k must_not_select_anything")
+    monkeypatch.setenv("PYTEST_PLUGINS", "must_not_load_this_plugin")
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("RUSTUP_TOOLCHAIN", "1.94.0")
+    hook_check = """
+    if ($env:GH_TOKEN -or $env:SERVICE_DSN -or $env:PYTEST_ADDOPTS) { throw 'ambient environment reached the services hook' }
+    $env:PSEUDOLIFE_TEST_PG_PASSWORD = 'hook-test-login'
+"""
+    harness_far.hook.write_text(_FAKE_HOOK.replace("$env:FAKE_SERVICE = 'up'", hook_check + "$env:FAKE_SERVICE = 'up'"), encoding="utf-8")
+    head, ref, data = harness_far.batch(_GATE_TEST + """
+    for name in ('GH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'SERVICE_DSN', 'SOME_SERVICE',
+                 'PYTEST_ADDOPTS', 'PYTEST_PLUGINS', 'PYTEST_DISABLE_PLUGIN_AUTOLOAD'):
+        assert name not in os.environ, name
+    assert os.environ['PSEUDOLIFE_TEST_PG_PASSWORD'] == 'hook-test-login'
+    assert os.environ['RUSTUP_TOOLCHAIN'] == '1.94.0'
+""")
+    proc = harness_far.run_harness(head, ref, data)
+    observed = [json.loads(line) for line in seen.read_text(encoding="utf-8").splitlines()]
+    assert observed and all(not any(row.values()) for row in observed), observed
+    assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
+    assert "1 passed" in proc.stdout and harness_far.hook_calls() == ["start", "stop"]
+
+
+@needs_pwsh
+@pytest.mark.skipif(os.name != "nt", reason="real Windows junctions")
+@pytest.mark.parametrize("placement", ["root", "child", "nested"])
+def test_harness_far_half_refuses_junctions_without_touching_the_target(harness_far, placement):
+    head, ref, data = harness_far.batch()
+    first = harness_far.run_harness(head, ref, data)
+    assert first.returncode == 0, first.stderr
+    gate = Path(f"{harness_far.repo}.rust-harness")
+    target = harness_far.tmp / "junction-target"
+    if placement == "root":
+        gate.rename(target)
+        junction = gate
+    else:
+        target.mkdir()
+        junction = gate / ("untracked-junction" if placement == "child" else "untracked-directory/junction")
+        junction.parent.mkdir(exist_ok=True)
+    (target / "must-stay.txt").write_text("outside data\n", encoding="utf-8")
+    before = {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    script = harness_far.tmp / "junction.ps1"
+    script.write_text("param($path, $target)\nNew-Item -ItemType Junction -Path $path -Target $target -ErrorAction Stop | Out-Null\n", encoding="utf-8")
+    made = subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script), str(junction), str(target)], capture_output=True, text=True, timeout=30)
+    assert made.returncode == 0, made.stderr
+    try:
+        proc = harness_far.run_harness(head, ref, data)
+        assert proc.returncode == 3, proc.stdout[-2000:] + proc.stderr[-2000:]
+        reported = re.search(r"reparse point at '([^']+)'", proc.stderr)
+        assert reported and os.path.samefile(reported.group(1), junction), proc.stderr
+        assert "remove" in proc.stderr and "retry" in proc.stderr
+        assert {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*") if p.is_file()} == before
+    finally:
+        if junction.exists():
+            os.rmdir(junction)  # Remove the owned junction itself, never its target.
+        if placement == "root":
+            target.rename(gate)
+
+
+@needs_pwsh
+def test_harness_far_half_cleans_an_ordinary_untracked_file(harness_far):
+    head, ref, data = harness_far.batch()
+    first = harness_far.run_harness(head, ref, data)
+    assert first.returncode == 0, first.stderr
+    file = Path(f"{harness_far.repo}.rust-harness") / "ordinary-untracked.txt"
+    file.write_text("clean this owned file\n", encoding="utf-8")
+    proc = harness_far.run_harness(head, ref, data)
+    assert proc.returncode == 0, proc.stderr
+    assert not file.exists()
+
+
+@needs_pwsh
+def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkeypatch, tmp_path, capsys):
+    head, ref, _ = harness_far.batch()
+    monkeypatch.chdir(harness_far.seed)
+    ssh = tmp_path / "local_ssh.py"
+    ssh.write_text(_LOCAL_SSH, encoding="utf-8")
+    monkeypatch.setattr(integrate, "RUST_CHECK_SSH", (sys.executable, str(ssh)))
+    plan = integrate.Plan(branch=ref.removeprefix("refs/heads/"), base_sha=harness_far.base,
+                          label=LABEL, head=head, rust_check="passed")
+    monkeypatch.setattr(integrate, "_built_batch", lambda: (plan.branch, plan, head))
+    cfg = {"ssh": "dev-vm", "repo": str(harness_far.repo), "role": "Windows dev VM"}
+    monkeypatch.setattr(integrate, "_remote_config", lambda *args: (cfg, ""))
+    script = integrate.RUST_HARNESS_REMOTE_SCRIPT.replace("$ServicesHook = ''", "$ServicesHook = " + integrate._ps_literal(str(harness_far.hook)))
+    script = script.replace("$DatabaseLockPath = ''", "$DatabaseLockPath = " + integrate._ps_literal(str(tmp_path / "own-database.lock")))
+    monkeypatch.setattr(integrate, "RUST_HARNESS_REMOTE_SCRIPT", script)
+    monkeypatch.setattr(integrate, "RUST_HARNESS", ("gate_tests",))
+    monkeypatch.setattr(integrate, "RUST_HARNESS_COMMAND", "python -m pytest -q -p no:cacheprovider --require-databases gate_tests")
+    monkeypatch.setattr(integrate, "SUITE_RESULTS", tmp_path / "results")
+    assert integrate.main(["harness", "--lock-wait-seconds", "0"]) == 0, capsys.readouterr()
+    result, = integrate.SUITE_RESULTS.glob("*.json")
+    assert "passed" in integrate._gate_result_line(str(result), head, "rust-harness")
+    assert harness_far.hook_calls() == ["start", "stop"]
+    assert harness_far.harness_leftovers() == []
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+def test_shim_controller_sends_its_script_and_bundle_over_stdin(far, monkeypatch, tmp_path, capsys):
+    head, ref, _ = far.batch()
+    monkeypatch.chdir(far.seed)
+    ssh = tmp_path / "local_ssh.py"
+    ssh.write_text(_LOCAL_SSH, encoding="utf-8")
+    monkeypatch.setattr(integrate, "RUST_CHECK_SSH", (sys.executable, str(ssh)))
+    plan = integrate.Plan(branch=ref.removeprefix("refs/heads/"), base_sha=far.base,
+                          label=LABEL, head=head, rust_check="passed")
+    monkeypatch.setattr(integrate, "_built_batch", lambda: (plan.branch, plan, head))
+    cfg = {"ssh": "dev-box-two", "repo": str(far.repo), "role": "second Linux dev box"}
+    monkeypatch.setattr(integrate, "_remote_config", lambda *args: (cfg, ""))
+    monkeypatch.setattr(integrate, "SUITE_RESULTS", tmp_path / "results")
+    assert integrate.main(["shim-tests", "--lock-wait-seconds", "0"]) == 0, capsys.readouterr()
+    result, = integrate.SUITE_RESULTS.glob("*.json")
+    assert "passed" in integrate._gate_result_line(str(result), head, "shim-tests")
+    assert not any(c["suite_lock_free"] for c in far.cargo_calls() if c["argv"][:2] == ["nextest", "run"])
+
+
+def _lock_command(lock, *command, wait=0):
+    return [_PWSH, "-NoProfile", "-NonInteractive", "-File",
+            str(ROOT / "ops/dev-database-lock.ps1"), "-LockPath", str(lock),
+            "-Holder", "test worker", "-WaitSeconds", str(wait), "--", *command]
+
+
+@needs_pwsh
+@pytest.mark.parametrize("failure", ["none", "cleanup", "disk"])
+def test_harness_database_lock_covers_services_and_releases_after_failure(harness_far, failure, monkeypatch):
+    lock = harness_far.tmp / "own-database.lock"
+    monkeypatch.setenv("FAKE_DATABASE_LOCK", str(lock))
+    monkeypatch.setenv("FAKE_LOCK_HELPER", str(ROOT / "ops/dev-database-lock.ps1"))
+    monkeypatch.setenv("FAKE_PWSH", _PWSH)
+    # Both service boundaries must be inside the same lock as the tests.
+    check = r'''
+    & $env:FAKE_PWSH -NoProfile -NonInteractive -File $env:FAKE_LOCK_HELPER -LockPath $env:FAKE_DATABASE_LOCK -WaitSeconds 0 -- $env:FAKE_PWSH -NoProfile -NonInteractive -Command 'exit 0' 2>$null
+    if ($LASTEXITCODE -ne 3) { throw 'database lock was not held' }
+'''
+    hook = _FAKE_HOOK.replace("$env:FAKE_SERVICE = 'up'", check + "$env:FAKE_SERVICE = 'up'")
+    hook = hook.replace("function Stop-HarnessServices {", "function Stop-HarnessServices {" + check)
+    if failure == "cleanup":
+        hook += "\nfunction Stop-HarnessServices { throw 'cleanup failed' }\n"
+    harness_far.hook.write_text(hook, encoding="utf-8")
+    body = _GATE_TEST + '''
+    import subprocess
+    p = subprocess.run([os.environ["FAKE_PWSH"], "-NoProfile", "-NonInteractive", "-File",
+        os.environ["FAKE_LOCK_HELPER"], "-LockPath", os.environ["FAKE_DATABASE_LOCK"],
+        "-WaitSeconds", "0", "--", "missing-command-must-not-run"], capture_output=True, text=True)
+    assert p.returncode == 3 and "wait exhausted" in p.stderr
+'''
+    head, ref, data = harness_far.batch(body)
+    proc = harness_far.run_harness(head, ref, data, extra=("-MinFreeGB", "1000000") if failure == "disk" else ())
+    assert proc.returncode == (0 if failure == "none" else 3), proc.stdout + proc.stderr
+    if failure == "cleanup":
+        assert "stopping the services failed" in _verdict(proc)
+    if failure == "disk":
+        assert "floor" in _verdict(proc) and harness_far.hook_calls() == []
+    again = subprocess.run(_lock_command(lock, sys.executable, "-c", "pass"), capture_output=True, text=True, timeout=30)
+    assert again.returncode == 0, again.stderr
+    _hold_suite_lock(harness_far.locks / "full-suite.lock").close()
+
+
+@needs_pwsh
+def test_harness_waiting_for_worker_database_turn_leaves_suite_lock_free(harness_far, tmp_path):
+    import time
+
+    ready, release = tmp_path / "worker-ready", tmp_path / "worker-release"
+    worker_script = tmp_path / "worker.py"
+    worker_script.write_text(
+        "from pathlib import Path\nimport time\n"
+        f"Path({str(ready)!r}).touch()\n"
+        f"while not Path({str(release)!r}).exists(): time.sleep(.05)\n",
+        encoding="utf-8")
+    lock = tmp_path / "own-database.lock"
+    head, ref, data = harness_far.batch()
+    command = [_PWSH, "-NoProfile", "-NonInteractive", "-File",
+               str(ROOT / "ops/rust-harness-remote.ps1"), "-Repo", str(harness_far.repo),
+               "-Base", harness_far.base, "-Head", head, "-Ref", ref,
+               "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock),
+               "-LockWaitSeconds", "60", "-PytestArgs", "gate_tests"]
+    gate = None
+    output = tmp_path / "gate.log"
+    with (tmp_path / "worker.log").open("w", encoding="utf-8") as worker_log, output.open("w", encoding="utf-8") as gate_log:
+        worker = subprocess.Popen(_lock_command(lock, sys.executable, str(worker_script)),
+                                  stdout=worker_log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 30
+            while not ready.exists() and worker.poll() is None and time.monotonic() < deadline:
+                time.sleep(.05)
+            assert ready.exists(), (tmp_path / "worker.log").read_text(encoding="utf-8")
+            gate = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=gate_log,
+                                    stderr=subprocess.STDOUT, text=True)
+            gate.stdin.write(data)
+            gate.stdin.close()
+            deadline = time.monotonic() + 30
+            while "database lock: waiting" not in output.read_text(encoding="utf-8") and gate.poll() is None and time.monotonic() < deadline:
+                time.sleep(.05)
+            assert "database lock: waiting" in output.read_text(encoding="utf-8")
+            # A wrapped full suite reaches this lock after taking its database
+            # turn. The queued harness must not hold it while waiting on us.
+            _hold_suite_lock(harness_far.locks / "full-suite.lock").close()
+            release.touch()
+            assert worker.wait(timeout=30) == 0
+            assert gate.wait(timeout=180) == 0, output.read_text(encoding="utf-8")
+            assert harness_far.hook_calls() == ["start", "stop"]
+        finally:
+            release.touch()
+            if worker.poll() is None:
+                worker.wait(timeout=30)
+            if gate is not None and gate.poll() is None:
+                gate.kill()  # the owned Popen handle, never a process-name search
+                gate.wait(timeout=30)
+
+
+@needs_pwsh
+def test_database_lock_excludes_another_worker_and_names_holder(tmp_path):
+    import time
+    lock = tmp_path / "own-database.lock"
+    marker = tmp_path / "entered"
+    script = tmp_path / "hold.ps1"
+    script.write_text("[IO.File]::WriteAllText($args[0], 'ready'); Start-Sleep -Seconds 60", encoding="utf-8")
+    with subprocess.Popen(_lock_command(lock, str(script), str(marker)),
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as holder:
+        try:
+            deadline = time.monotonic() + 30
+            while not marker.exists() and holder.poll() is None and time.monotonic() < deadline:
+                time.sleep(.05)
+            assert marker.exists(), holder.communicate(timeout=5)
+            run = subprocess.run(_lock_command(lock, sys.executable, "-c", "print('overlapped')", wait=1),
+                                 capture_output=True, text=True, timeout=30)
+            assert run.returncode == 3
+            assert "test worker" in run.stderr and "held for" in run.stderr
+            assert "overlapped" not in run.stdout
+        finally:
+            if holder.poll() is None:
+                holder.kill()  # this Popen owns the process handle, never a name search
+            holder.communicate(timeout=10)
+    # The killed owner's PID and creation time are now verifiably stale.
+    resumed = subprocess.run(_lock_command(lock, sys.executable, "-c", "print('resumed')"),
+                             capture_output=True, text=True, timeout=30)
+    assert resumed.returncode == 0, resumed.stderr
+    assert "resumed" in resumed.stdout
+
+
+@needs_pwsh
+@pytest.mark.parametrize("code", [0, 7])
+def test_database_lock_wrapper_preserves_exit_and_releases(tmp_path, code):
+    lock = tmp_path / "own-database.lock"
+    run = subprocess.run(_lock_command(lock, sys.executable, "-c", f"import sys; sys.exit({code})"),
+                         capture_output=True, text=True, timeout=30)
+    assert run.returncode == code, run.stderr
+    again = subprocess.run(_lock_command(lock, sys.executable, "-c", "pass"),
+                           capture_output=True, text=True, timeout=30)
+    assert again.returncode == 0, again.stderr
+
+
+@needs_pwsh
+@pytest.mark.skipif(os.name != "nt", reason="Windows process lifetime after TerminateProcess")
+@pytest.mark.parametrize("entrypoint", ["worker", "harness"])
+def test_database_lock_owner_death_stops_its_child_before_reuse(harness_far, tmp_path, entrypoint):
+    import time
+    import psutil
+    lock = tmp_path / "own-database.lock"
+    marker = tmp_path / "child.json"
+    child_code = ("import json, os, psutil, time\n"
+                  f"with open({str(marker)!r}, 'w') as f:\n"
+                  "    json.dump({'pid': os.getpid(), 'started': psutil.Process().create_time()}, f)\n"
+                  "time.sleep(90)\n")
+    if entrypoint == "worker":
+        script = tmp_path / "child.py"
+        script.write_text(child_code, encoding="utf-8")
+        command = _lock_command(lock, sys.executable, str(script))
+        data = None
+    else:
+        head, ref, data = harness_far.batch("def test_child():\n" + "\n".join("    " + line for line in child_code.splitlines()) + "\n")
+        command = [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(ROOT / "ops/rust-harness-remote.ps1"),
+                   "-Repo", str(harness_far.repo), "-Base", harness_far.base, "-Head", head, "-Ref", ref,
+                   "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock), "-PytestArgs", "gate_tests"]
+    child = None
+    identity = None
+    with (tmp_path / "owner.log").open("w", encoding="utf-8") as log:
+        with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, text=True) as owner:
+            try:
+                if data:
+                    owner.stdin.write(data)
+                owner.stdin.close()
+                deadline = time.monotonic() + 60
+                while not marker.exists() and owner.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.05)
+                assert marker.exists(), (tmp_path / "owner.log").read_text(encoding="utf-8")
+                # The child closes the marker before sleeping. Retry a partial write.
+                for _ in range(100):
+                    try:
+                        identity = json.loads(marker.read_text())
+                        break
+                    except ValueError:
+                        time.sleep(.01)
+                assert identity
+                child = psutil.Process(identity["pid"])
+                assert child.create_time() == identity["started"]
+                owner.kill()  # this exact Popen handle, never a process-name search
+                owner.wait(timeout=10)
+                child.wait(timeout=10)
+                resumed = subprocess.run(_lock_command(lock, sys.executable, "-c", "pass"), capture_output=True, text=True, timeout=30)
+                assert resumed.returncode == 0, resumed.stderr
+            finally:
+                if owner.poll() is None:
+                    owner.kill()
+                    owner.wait(timeout=10)
+                if child is not None:
+                    try:
+                        if child.is_running() and child.create_time() == identity["started"]:
+                            child.kill()
+                            child.wait(timeout=10)
+                    except psutil.NoSuchProcess:
+                        pass
+
+
+@needs_pwsh
+@pytest.mark.parametrize("state", ["alive", "reused", "unreadable"])
+def test_database_lock_reclaims_only_proven_stale_identity(tmp_path, state):
+    lock = tmp_path / "own-database.lock"
+    script = tmp_path / "identity.ps1"
+    script.write_text("""
+param($helper, $lock, $state)
+. $helper
+$record = @{ holder='previous worker'; pid=$PID; process_started=[Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().Ticks.ToString(); acquired=[DateTimeOffset]::UtcNow.AddDays(-10).ToString('o') }
+if ($state -eq 'reused') { $record.process_started = ([long]$record.process_started - 1).ToString() }
+if ($state -eq 'unreadable') { $record.Remove('process_started') }
+[IO.File]::WriteAllText($lock, ($record | ConvertTo-Json -Compress))
+try {
+    $hold = Enter-DevDatabaseLock -Path $lock -Holder 'next worker' -WaitSeconds 0
+    Exit-DevDatabaseLock $hold
+    exit 0
+} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 3 }
+""", encoding="utf-8")
+    run = subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
+                          str(ROOT / "ops/dev-database-lock.ps1"), str(lock), state],
+                         capture_output=True, text=True, timeout=30)
+    assert run.returncode == (0 if state == "reused" else 3), run.stderr
+    if state == "unreadable":
+        assert "identity" in run.stderr and "cannot" in run.stderr
+    if state == "alive":
+        assert "previous worker" in run.stderr
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_shim_far_half_checks_head_and_holds_the_suite_lock(far, mismatch):
+    head, ref, data = far.batch()
+    if mismatch:
+        head, _, _ = far.batch()
+    proc = subprocess.run(["bash", str(ROOT / "ops/shim-tests-remote.sh"), str(far.repo), far.base,
+                           head, ref, "ab" * 16, "0"], input=data, capture_output=True,
+                          text=True, timeout=60)
+    if mismatch:
+        assert proc.returncode == 3 and "batch head" in proc.stderr, proc.stderr
+        assert not any(call["argv"][:2] == ["nextest", "run"] for call in far.cargo_calls())
+    else:
+        assert proc.returncode == 0, proc.stderr
+        call = [c for c in far.cargo_calls() if c["argv"][:2] == ["nextest", "run"]][0]
+        assert call["argv"] == list(integrate.SHIM_TESTS_ARGS)
+        assert not call["suite_lock_free"]
+        assert call["target"] == str(far.repo) + ".shim-tests-target"
+        assert "Summary [" in proc.stderr
+        assert _verdict(proc) == "shim-tests " + "ab" * 16 + ": nextest exit 0"
+    assert not list(far.tmp.glob("shim-tests-*.bundle"))
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+@pytest.mark.parametrize("cause", ["busy", "disk", "nextest"])
+def test_shim_far_half_refuses_unavailable_resources(far, monkeypatch, cause):
+    head, ref, data = far.batch()
+    held = _hold_suite_lock(far.locks / "full-suite.lock") if cause == "busy" else None
+    if cause == "disk":
+        fake = far.tmp / "bin" / "df"
+        fake.write_text("#!/bin/sh\nprintf 'Avail\\n1\\n'\n", encoding="utf-8")
+        fake.chmod(0o755)
+    if cause == "nextest":
+        monkeypatch.setenv("FAKE_FAR_CARGO_EXIT", "101")
+    try:
+        proc = subprocess.run(["bash", str(ROOT / "ops/shim-tests-remote.sh"), str(far.repo), far.base,
+                               head, ref, "ab" * 16, "0"], input=data, capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 3, proc.stdout + proc.stderr
+        assert {"busy": "lock wait exhausted", "disk": "under 8 GB", "nextest": "cargo-nextest is missing"}[cause] in proc.stderr
+        assert not any(call["argv"][:2] == ["nextest", "run"] for call in far.cargo_calls())
+    finally:
+        if held:
+            held.close()
+    _hold_suite_lock(far.locks / "full-suite.lock").close()
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+def test_shim_far_half_scrubs_ambient_environment_before_member_code(far, monkeypatch):
+    head, ref, data = far.batch()
+    for name in ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SERVICE_DSN"):
+        monkeypatch.setenv(name, "planted-disposable-value")
+    monkeypatch.setenv("SOME_SERVICE", "https://user:disposable@example.com/x")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k must_not_select_anything")
+    monkeypatch.setenv("NEXTEST_FILTER_EXPR", "test(must_not_select_anything)")
+    monkeypatch.setenv("NEXTEST_PROFILE", "must-not-exist")
+    monkeypatch.setenv("RUSTUP_TOOLCHAIN", "1.94.0")
+    proc = subprocess.run(["bash", str(ROOT / "ops/shim-tests-remote.sh"), str(far.repo), far.base,
+                           head, ref, "ab" * 16, "0"], input=data, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    call = next(c for c in far.cargo_calls() if c["argv"][:2] == ["nextest", "run"])
+    visible = set(call["env"])
+    for name in ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SERVICE_DSN", "SOME_SERVICE",
+                 "PYTEST_ADDOPTS", "NEXTEST_FILTER_EXPR", "NEXTEST_PROFILE"):
+        assert name not in visible, name
+    assert call["env"]["RUSTUP_TOOLCHAIN"] == "1.94.0"
 
 
 # The real census module with only its snapshot cut down to its input
@@ -5316,7 +6090,7 @@ def test_open_judges_the_compile_check_before_the_suite_result(world, monkeypatc
     # suite that `suite` then refuses.
     _uncompiled_batch(world, monkeypatch, capsys, case)
     if suite == "none":
-        code = integrate.main(["open", "--harness-note", _harness_note(world)])
+        code = integrate.main(["open", *_gate_args(world)])
     else:
         code = _open(world, **({"real_client": False} if suite == "no-real-client" else {}))
 
@@ -5332,7 +6106,7 @@ def test_build_names_the_remote_suite_step_first(world, capsys):
     assert _build() == 0
     out = capsys.readouterr().out
     suite = out.index("1. python ops/integrate.py suite")
-    assert suite < out.index("2. ") < out.index("3. python ops/integrate.py open --suite")
+    assert suite < out.index("2. python ops/integrate.py harness") < out.index("3. python ops/integrate.py shim-tests") < out.index("4. python ops/integrate.py open --suite")
     assert "carried as a bundle" in out and integrate.SUITE_LOCAL_NOTE in out
 
 
@@ -5406,7 +6180,7 @@ def test_a_batch_after_a_drop_opens_without_a_suite_and_merges_on_test(world, ca
     assert [d["number"] for d in record["dropped"]] == [11]
     assert record["dropped"][0]["files"] == ["c.txt"]
     assert [r["number"] for r in record["remaining"]] == [10, 12]
-    assert "after a drop" in out and "No local suite or harness run" in out
+    assert "after a drop" in out and "No local suite, harness or shim run" in out
     assert "open --suite" not in out
 
     # No suite result and no harness note: the mode needs neither.
@@ -5941,14 +6715,41 @@ def test_after_drop_waits_when_no_run_on_the_new_head_is_listed(world, capsys):
     assert "Parity / windows-latest (not reported yet)" in capsys.readouterr().err
 
 
-def test_after_drop_open_still_checks_a_suite_result_it_is_given(world, capsys):
+@pytest.mark.parametrize("result", [{"exit_code": 1}, {"commit": "f" * 40}])
+def test_after_drop_open_still_checks_a_suite_result_it_is_given(world, capsys, result):
     _closed_red(world, capsys)
     assert _build("--after-drop", "900") == 0, capsys.readouterr()
     capsys.readouterr()
 
-    assert _open(world, exit_code=1) == 2
+    before = world.gh.bodies("create")
+    assert _open(world, **result) == 2, capsys.readouterr()
+    assert world.gh.bodies("create") == before
 
-    assert "the suite failed on this head" in capsys.readouterr().err
+
+@pytest.mark.parametrize("kind", ["rust-harness", "shim-tests"])
+@pytest.mark.parametrize("edit", [{"exit_code": 1}, {"commit": "f" * 40},
+                                 {"exit_code": None, "not_run": "offline"}])
+def test_after_drop_open_checks_each_supplied_gate_result(world, capsys, kind, edit):
+    _closed_red(world, capsys)
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
+    flag = "--harness" if kind == "rust-harness" else "--shim-tests"
+    before = world.gh.bodies("create")
+    assert integrate.main(["open", flag, str(_gate_result(world, kind, **edit))]) == 2
+    assert world.gh.bodies("create") == before
+
+
+@pytest.mark.parametrize("kind,label", [("suite", "Local full suite"),
+    ("rust-harness", "Rust harness Python tests"), ("shim-tests", "Shim unit tests")])
+def test_after_drop_open_records_a_passing_supplied_result(world, capsys, kind, label):
+    _closed_red(world, capsys)
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+    flag = {"suite": "--suite", "rust-harness": "--harness", "shim-tests": "--shim-tests"}[kind]
+    path = _suite_result(world) if kind == "suite" else _gate_result(world, kind)
+    assert integrate.main(["open", flag, str(path)]) == 0, capsys.readouterr()
+    (_, body) = world.gh.bodies("create")[-1]
+    line = next(line for line in body.splitlines() if line.startswith(f"- {label}"))
+    assert f"passed at `{head}`" in line and "not run" not in line
 
 
 def test_after_drop_body_says_the_harness_was_not_run(world, capsys):
@@ -5957,7 +6758,9 @@ def test_after_drop_body_says_the_harness_was_not_run(world, capsys):
     (_, body) = world.gh.bodies("create")[-1]
     assert "Rust harness Python tests" in body
     line = next(l for l in body.splitlines() if l.startswith("- Rust harness Python tests"))
-    assert "not run: a batch built after a drop skips it" in line
+    assert "not run: a batch built after a drop skips the suite, harness and shim tests" in line
+    assert "- Shim unit tests" in body
+    assert "not run:" in next(l for l in body.splitlines() if l.startswith("- Shim unit tests"))
 
 
 def test_after_drop_carries_a_status_context_that_succeeded(world, capsys):
