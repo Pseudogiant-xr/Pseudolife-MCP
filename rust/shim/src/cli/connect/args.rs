@@ -1,11 +1,27 @@
-//! Canonical argv only: the target URL first, then each option at most once
-//! with its value as the next argument. Help, abbreviations, `--opt=value`,
-//! `--` and values that start with `-` defer, as does anything that is not
-//! valid Unicode.
+//! Connect's arguments, without echoing credential-bearing input in errors.
+use super::Refusal;
 use std::ffi::OsString;
+
+pub(super) const HELP: &str = "Usage: pseudolife-mcp connect [OPTIONS] URL
+
+Re-point existing client registrations at an http(s) daemon origin.
+Options may appear before or after URL; values also accept --option=value.
+
+  --client NAMES     all, or comma-separated claude-code,codex,claude-desktop,gemini
+  --token-file PATH  Use an existing private token file
+  --read-token       Read a token into a new --token-file after confirmation
+  --code CODE        Redeem a pairing code
+  --read-code        Read the pairing code from the terminal or stdin
+  --dry-run          Show the plan without writing files
+  --yes              Apply without a confirmation prompt
+  --json             Emit a JSON report
+  -h, --help         Show this help
+
+connect never creates client registrations. Use --yes for unattended apply.";
 
 #[derive(Debug, Default)]
 pub(super) struct Args {
+    pub help: bool,
     pub url: String,
     pub token_file: Option<String>,
     pub read_token: bool,
@@ -19,40 +35,119 @@ pub(super) struct Args {
     pub json: bool,
 }
 
-pub(super) fn parse(values: &[OsString]) -> Option<Args> {
-    let mut values = values.iter().map(|value| value.to_str());
-    let url = values.next()??;
-    if url.is_empty() || url.starts_with('-') {
-        return None;
-    }
-    let mut args = Args {
-        url: url.to_owned(),
-        ..Args::default()
-    };
+pub(super) fn parse(values: &[OsString]) -> Result<Args, Refusal> {
+    let values = values
+        .iter()
+        .map(|value| {
+            value.to_str().ok_or_else(|| {
+                Refusal(
+                    "an argument is not Unicode; pass Unicode arguments (nothing was changed)"
+                        .into(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut args = Args::default();
     let mut seen = Vec::new();
-    while let Some(option) = values.next() {
-        let option = option?;
-        if seen.contains(&option) {
-            return None;
+    let mut index = 0;
+    let mut positional = false;
+    while let Some(&word) = values.get(index) {
+        index += 1;
+        if !positional && matches!(word, "--help" | "-h") {
+            args.help = true;
+            return Ok(args);
         }
-        seen.push(option);
-        let mut value = || -> Option<String> {
-            let value = values.next()??;
-            (!value.is_empty() && !value.starts_with('-')).then(|| value.to_owned())
-        };
+        if !positional && word == "--" {
+            positional = true;
+            continue;
+        }
+        if positional || !word.starts_with('-') {
+            if word.is_empty() {
+                return Err(Refusal(
+                    "the daemon URL must not be empty; pass an http(s) daemon origin".into(),
+                ));
+            }
+            if !args.url.is_empty() {
+                return Err(Refusal(
+                    "give exactly one daemon URL; see `pseudolife-mcp connect --help`".into(),
+                ));
+            }
+            args.url = word.to_owned();
+            continue;
+        }
+        let (option, inline) = word
+            .split_once('=')
+            .map_or((word, None), |(key, value)| (key, Some(value)));
         match option {
-            "--token-file" => args.token_file = Some(value()?),
-            "--client" => args.client = Some(value()?),
-            "--read-token" => args.read_token = true,
-            "--code" => args.code = Some(value()?),
-            "--read-code" => args.read_code = true,
-            "--dry-run" => args.dry_run = true,
-            "--yes" => args.yes = true,
-            "--json" => args.json = true,
-            _ => return None,
+            "--token-file" | "--client" | "--code" => {
+                if seen.contains(&option) {
+                    return Err(Refusal(format!(
+                        "{option} was given more than once; pass it once"
+                    )));
+                }
+                seen.push(option);
+                let value = inline
+                    .or_else(|| {
+                        let value = values.get(index).copied()?;
+                        if value.starts_with("--") || value == "-h" {
+                            return None;
+                        }
+                        index += 1;
+                        Some(value)
+                    })
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        Refusal(format!("{option} needs a value; use {option}=VALUE"))
+                    })?;
+                match option {
+                    "--token-file" => args.token_file = Some(value.into()),
+                    "--client" => args.client = Some(value.into()),
+                    _ => args.code = Some(value.into()),
+                }
+            }
+            "--read-token" | "--read-code" | "--dry-run" | "--yes" | "--json" => {
+                if inline.is_some() {
+                    return Err(Refusal(format!(
+                        "{option} takes no value; use {option} alone"
+                    )));
+                }
+                match option {
+                    "--read-token" => args.read_token = true,
+                    "--read-code" => args.read_code = true,
+                    "--dry-run" => args.dry_run = true,
+                    "--yes" => args.yes = true,
+                    _ => args.json = true,
+                }
+            }
+            _ => {
+                // An arbitrary dash-leading word may be a pasted token. Only
+                // suggest known option names, never echo the supplied bytes.
+                let hint = [
+                    "--token-file",
+                    "--read-token",
+                    "--read-code",
+                    "--dry-run",
+                    "--client",
+                    "--code",
+                    "--json",
+                    "--yes",
+                ]
+                .into_iter()
+                .find(|known| option.len() > 2 && known.starts_with(option));
+                let remedy = hint.map_or_else(
+                    || "see `pseudolife-mcp connect --help`".to_owned(),
+                    |known| format!("use {known}; see `pseudolife-mcp connect --help`"),
+                );
+                return Err(Refusal(format!("unknown option; {remedy}")));
+            }
         }
     }
-    Some(args)
+    if args.url.is_empty() {
+        return Err(Refusal(
+            "a daemon URL is required; use `pseudolife-mcp connect [OPTIONS] URL`".into(),
+        ));
+    }
+    Ok(args)
 }
 
 #[cfg(test)]
@@ -77,8 +172,8 @@ mod tests {
         .unwrap();
         assert_eq!(args.token_file.as_deref(), Some("t"));
         assert!(args.dry_run && args.json && !args.yes);
-        assert!(parse(&argv(&["http://h:1"])).is_some());
-        assert!(parse(&argv(&["http://h:1", "--yes", "--json"])).is_some());
+        assert!(parse(&argv(&["http://h:1"])).is_ok());
+        assert!(parse(&argv(&["http://h:1", "--yes", "--json"])).is_ok());
         let paired = parse(&argv(&["http://h:1", "--code", "AAAA-BBBB-CCCC", "--yes"])).unwrap();
         assert_eq!(paired.code.as_deref(), Some("AAAA-BBBB-CCCC"));
         assert!(
@@ -89,22 +184,16 @@ mod tests {
     }
 
     #[test]
-    fn other_shapes_defer() {
+    fn invalid_shapes_have_usage_errors() {
         for shape in [
-            &["--dry-run", "http://h:1"][..],
-            &["http://h:1", "--yes", "--yes"],
-            &["http://h:1", "--token-file=t"],
-            &["http://h:1", "--token"],
+            &["http://h:1", "--token"][..],
             &["http://h:1", "--code"],
             &["http://h:1", "--code", "--yes"],
-            &["http://h:1", "--token-file", "-t"],
             &["http://h:1", "--client"],
             &["http://h:1", "--client", ""],
-            &["http://h:1", "-h"],
-            &["http://h:1", "--"],
             &[],
         ] {
-            assert!(parse(&argv(shape)).is_none(), "{shape:?}");
+            assert!(parse(&argv(shape)).is_err(), "{shape:?}");
         }
     }
 }

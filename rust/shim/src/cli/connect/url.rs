@@ -1,7 +1,7 @@
 //! `urllib.parse.urlsplit` (CPython 3.11) for the printable-ASCII domain, and
 //! connect's three uses of it: the target's validation
 //! (`codex_connection._validated_daemon_url`), `_shown_url` and
-//! `_is_loopback_url`. Anything outside that domain defers.
+//! `_is_loopback_url`. Unsupported origins are invalid, never dispatcher fallbacks.
 use super::Defer;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -17,8 +17,8 @@ const SCHEME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
 
 /// `Ok(Err(()))` is Python's ValueError.
 pub(super) fn urlsplit(url: &str) -> Result<Result<Split, ()>, Defer> {
-    if !url.chars().all(|c| ('!'..='~').contains(&c)) {
-        return Err(Defer);
+    if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Ok(Err(()));
     }
     let mut scheme = String::new();
     let mut rest = url;
@@ -45,13 +45,13 @@ pub(super) fn urlsplit(url: &str) -> Result<Result<Split, ()>, Defer> {
                 .split_once('[')
                 .map_or("", |(_, b)| b.split_once(']').map_or(b, |(h, _)| h));
             if bracketed.starts_with('v') || bracketed.contains('%') {
-                return Err(Defer);
+                return Ok(Err(()));
             }
             if bracketed.parse::<Ipv6Addr>().is_err() {
                 if bracketed.parse::<Ipv4Addr>().is_ok() {
                     return Ok(Err(()));
                 }
-                return Err(Defer);
+                return Ok(Err(()));
             }
         }
     }
@@ -147,11 +147,30 @@ pub(super) fn validated(url: &str) -> Result<Result<String, ()>, Defer> {
     {
         return Ok(Err(()));
     }
-    Ok(Ok(format!(
+    let origin = format!(
         "{}://{}",
         parsed.scheme,
         parsed.netloc.trim_end_matches('/')
-    )))
+    );
+    // Validate the original path, credentials, query and fragment above before
+    // IDNA conversion: a general URL parser would normalize /child/.. to /.
+    if !origin.is_ascii() {
+        return Ok(reqwest::Url::parse(&origin)
+            .map_err(|_| ())
+            .and_then(|url| {
+                if url.path() != "/"
+                    || url.query().is_some()
+                    || url.fragment().is_some()
+                    || !url.username().is_empty()
+                    || url.password().is_some()
+                {
+                    Err(())
+                } else {
+                    Ok(url.origin().ascii_serialization())
+                }
+            }));
+    }
+    Ok(Ok(origin))
 }
 
 /// `_shown_url`: scheme and host[:port] only.
@@ -164,11 +183,17 @@ pub(super) fn shown(value: &str) -> Result<String, Defer> {
     let Ok(port) = parsed.port() else {
         return Ok(UNREADABLE.to_owned());
     };
-    let Some(host) = parsed.hostname() else {
+    let Some(mut host) = parsed.hostname() else {
         return Ok(UNREADABLE.to_owned());
     };
     if parsed.scheme.is_empty() {
         return Ok(UNREADABLE.to_owned());
+    }
+    if !host.is_ascii() {
+        let Ok(url) = reqwest::Url::parse(&format!("{}://{host}", parsed.scheme)) else {
+            return Ok(UNREADABLE.to_owned());
+        };
+        host = url.host_str().unwrap_or_default().to_owned();
     }
     let host = if host.contains(':') {
         format!("[{host}]")
@@ -183,7 +208,9 @@ pub(super) fn shown(value: &str) -> Result<String, Defer> {
 
 /// `daemon_url._is_loopback_url` for an already validated URL.
 pub(super) fn is_loopback(url: &str) -> Result<bool, Defer> {
-    let parsed = urlsplit(url)?.map_err(|()| Defer)?;
+    let Ok(parsed) = urlsplit(url)? else {
+        return Ok(false);
+    };
     let host = parsed.hostname().unwrap_or_default();
     if host == "localhost" {
         return Ok(true);
@@ -222,10 +249,30 @@ mod tests {
         assert_eq!(shown("localhost:8765").unwrap(), "<unreadable URL>");
         assert_eq!(shown("http://h:0").unwrap(), "http://h");
         assert_eq!(shown("http://[::1]:1").unwrap(), "http://[::1]:1");
-        assert!(shown("http://é").is_err());
+        assert_eq!(shown("http://é").unwrap(), "http://xn--9ca");
         assert!(is_loopback("http://127.0.0.1:1").unwrap());
         assert!(!is_loopback("http://127.1:1").unwrap());
         assert!(is_loopback("http://LOCALHOST:1").unwrap());
         assert!(is_loopback("http://[::ffff:127.0.0.1]:1").unwrap());
+    }
+}
+
+#[cfg(test)]
+mod native_url_regressions {
+    #[test]
+    fn unicode_host_is_idna_without_changing_origin_boundaries() {
+        assert_eq!(
+            super::validated("https://é.example:8765").ok(),
+            Some(Ok("https://xn--9ca.example:8765".into()))
+        );
+        for input in [
+            "https://é.example/child/..",
+            "https://u:p@é.example",
+            "https://é.example/?x",
+            "https://é.example/#x",
+            "https://é.example\\child",
+        ] {
+            assert!(matches!(super::validated(input), Ok(Err(()))), "{input}");
+        }
     }
 }
