@@ -12,7 +12,9 @@ Phase 1/2 remainder. The original 26 plus upstream maintainer/test-login made 28
 at the `f709abb5` pin; `delegate-watch` (#755, 2026-10-15) makes 29 on master
 (`cli.py` at `98c5d6bf`). Tier labels record the requested scope, not a claim of HTTP-only
 dependencies: recovery, audit and lease operator actions reach PostgreSQL directly.
-Audit and lease have explicit-DSN native subsets using the Rust PostgreSQL client; recovery remains deferred, as do the unsupported audit and lease shapes.
+Audit and lease have explicit-DSN paths using the Rust PostgreSQL client.
+Native coordination recovery has its own row. #1699 completed the native
+audit answers, including refusals for unsupported input.
 
 The first slice implements help and unknown dispatch and adds a separate 15-case
 CLI corpus, strict byte self-replay/candidate judge, environment selector and help
@@ -33,20 +35,18 @@ All nine reported PR checks passed at `779c588c`. The five existing
 name concrete oracle nodes or internal test-function pools awaiting a process
 adapter; a function name without parameter suffixes is not a routed node claim.
 
-The Native column, after Status, says what the Rust binary (`rust/shim`) does with the mode on
-master: `native` (every shape the row claims), `partly` (the ported sub-rows the
-Evidence cell names run natively, other shapes defer by name before any effect)
-or `defers` (every invocation prints the deferral and exits 1: the mode is in
-`DEFERRED_MODES` in `shim/src/cli.rs` and has no native leaf). A mode's Status stays `deferred` until every sub-row closes; the
-sub-rows' own status is in Parity rows. Audited at `75a8015e` (2026-11-01): 9
-modes native, 15 partly and 5 defer. The count is of 29 logical modes, with
-`conductor-watch` and its deprecated `delegate-watch` spelling sharing the
-existing `delegate-watch` row; both deferred with no native leaf at that audit,
-and both are partly native since CLI-CONDUCTOR-WATCH-SETUP (2026-11-13). Check `shim/src/main.rs` as well as `shim/src/cli.rs`: the former
-dispatches the native lease, board-audit, maintainer and sent-serve paths
-before the latter's deferral list. `restore` (added by d3d3899c,
-2026-11-04, after this audit and outside its count) has its own entry and
-is partly native: its gates before Docker.
+The Native column describes the inputs covered by each row. `native` or
+`yes` marks native answers for that scope. `partly` marks a native subset.
+The Status column records acceptance of the sub-rows in the parity register.
+The November 1 inventory at `75a8015e` predates the sweeps.
+At master `690bc4402` (18 November 2026), `DEFERRED_MODES` in
+`shim/src/cli.rs` lists `tunnel` and `move`. The command table in
+[`CUTOVER.md`](../../CUTOVER.md#what-is-left) describes when those modes still
+reach the generic deferral. `conductor-watch` and its deprecated
+`delegate-watch` spelling share one row. #1723 completed native answers for
+both spellings. `shim/src/main.rs` also dispatches native coordination
+recovery, lease, board-audit, maintainer and serve before the dispatcher in
+`shim/src/cli.rs`.
 
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|

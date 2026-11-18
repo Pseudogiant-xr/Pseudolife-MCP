@@ -293,7 +293,8 @@ person who removes a clone by hand: its size, and the first rule below that
 holds it, or `list only; nothing keeps it (every commit on origin/master,
 clean, idle); remove it by hand if no one needs it`. Two gaps keep removal
 out of this change: user files in a clone's build tree, and borrowers of
-its objects the sweep cannot see. Both are filed as a follow-up.
+its objects the sweep cannot see. [Issue #1691](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1691)
+tracks both gaps.
 
 A child of a `--clone-root` with its own `.git` dir, and not a registered
 worktree, shows `nothing keeps it` when all of these hold:
