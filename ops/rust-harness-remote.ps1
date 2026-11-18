@@ -115,7 +115,7 @@ function Assert-HarnessWorktreeHasNoReparsePoint([string] $Path) {
 
 
 if ($Head -notmatch '^[0-9a-f]{40}$' -or $Base -notmatch '^[0-9a-f]{40}$') { Stop-Run "the head and base must be full commit ids" }
-if ($Ref -notmatch '^refs/heads/integrate/[0-9A-Za-z._-]+$') { Stop-Run "the bundle's ref must be an integrate/* branch, not '$Ref'" }
+if ($Ref -cnotmatch '^refs/heads/(integrate|stacked)/[0-9A-Za-z._-]+$') { Stop-Run "the bundle's ref must be an integrate/* branch or a stacked/* branch, not '$Ref'" }
 if ($Nonce -and $Nonce -notmatch '^[0-9a-f]{16,64}$') { Stop-Run "the nonce must be hex" }
 $units = @()
 try {
