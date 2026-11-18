@@ -7,7 +7,7 @@
       "lock-resolve": "8a6a510bef8d635b",
       "scope": "fea2d407b8bf12cd",
       "test": "492e9b9ddbe2b98f",
-      "test-lite-macos": "80749dd59844bee1",
+      "test-lite-macos": "e3799ac5656e30db",
       "test-lite-windows": "edf7c89844208f89"
     },
     "python-freeze.yml": {

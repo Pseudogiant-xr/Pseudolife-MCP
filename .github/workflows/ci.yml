@@ -925,9 +925,13 @@ jobs:
     # empty scope runs the suite instead of skipping it.
     if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-macos') }}
     runs-on: macos-latest
-    # Curated like the Windows lane: the hook and installer surface needs no
-    # embedding model, so this is minutes, not the full suite.
-    timeout-minutes: 25
+    # The hook and installer tests need no embedding model. Batch #1745
+    # attempt 2 (2026-11-19) hit 25 minutes after 2m57s of setup, a 4m13s
+    # native build and 18m01s of tests, with the last progress line at 69%.
+    # At that pace the tests would take about 26 minutes, or 33 minutes
+    # with setup and build. Round up from that projection plus 10% for
+    # uneven test durations and job cleanup.
+    timeout-minutes: 37
 
     steps:
       - uses: actions/checkout@v4
