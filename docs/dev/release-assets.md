@@ -2,10 +2,10 @@
 
 The native CLI archives publish with every release
 (`.github/workflows/release.yml`), because the installers download them,
-and they are on the GitHub release before PyPI publishes. The updaters
-learn that a release exists from PyPI and then download its archives,
-and PyPI cannot be unpublished, so a failed native build stops the
-release before PyPI. The Rust daemon image needs the human-approved
+and they are on the GitHub release before PyPI publishes. Older updaters
+learn that a release exists from PyPI and then download its archives.
+PyPI cannot be unpublished, so a failed native build stops the release
+before PyPI. The Rust daemon image needs the human-approved
 `publish` job, and additionally its
 repository variable, which stays enabled since it became the default
 Docker engine in 0.23.0. This contract does not authorize a release.
@@ -90,9 +90,10 @@ to the selected image when using them with a release.
 
 The daemon discovers releases with one unauthenticated GET to
 `https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/latest`.
-This is the contract for the native client's later discovery migration too;
-its current `latest_release` still reads PyPI. Use GitHub's latest release,
-not the largest version found by listing tags or releases. Do not fall back
+The native client's unpinned release updates, update checks and unattended
+Docker updates use the same endpoint and metadata contract. Client-only
+updates on a separate machine still follow the configured daemon's version.
+Use GitHub's latest release as selected by this endpoint. Do not fall back
 to PyPI or an older release when that answer is incomplete.
 
 - Require JSON booleans `draft: false` and `prerelease: false`.
@@ -121,7 +122,12 @@ to PyPI or an older release when that answer is incomplete.
 
 The request has no credentials, body or installed-version telemetry. Send
 `Accept: application/vnd.github+json` and the fixed User-Agent
-`pseudolife-daemon`, disable redirects, and use a five-second total timeout.
+`pseudolife-daemon` (daemon) or `pseudolife-mcp` (client), disable redirects,
+and use a five-second total timeout. The client makes one request per
+discovery with no retry. An unattended Docker update runs daily and carries
+the discovered tag into deployment. An unattended client-only update makes
+no discovery request. Hosts behind the same public IP share the GitHub limit.
+
 The background task checks immediately at startup; neither startup nor a
 request waits for the result. Keep the last accepted release and its
 `checked_at` in memory through failures; restart starts with an empty cache.

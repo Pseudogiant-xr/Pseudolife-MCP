@@ -498,7 +498,10 @@ impl Update {
                 "this host selected a checkout engine; run update --checkout <repo>; release updates leave it unchanged",
             ));
         }
-        let target = self.target_version()?;
+        let Some(target) = self.target_version()? else {
+            self.step(NO_PUBLISHED_RELEASE);
+            return Ok(());
+        };
         self.report.target = Some(target.clone());
         let before = self.daemon_health();
         let current = current
