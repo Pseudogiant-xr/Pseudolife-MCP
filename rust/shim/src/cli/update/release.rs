@@ -782,7 +782,9 @@ impl Update {
                 }
                 // The clients move once, after the Rust leg's gate, never mid-way.
                 let daemon_only = std::mem::replace(&mut self.o.daemon_only, true);
-                let first = self.deploy_release(current.clone(), before_recreate, previous.clone());
+                let first = self.with_release_tag(&target, |update| {
+                    update.deploy_release(current.clone(), before_recreate, previous.clone())
+                });
                 self.o.reinstall = reinstall;
                 self.o.rollback_suffix = suffix;
                 self.o.daemon_only = daemon_only;
@@ -795,10 +797,10 @@ impl Update {
                 // the release index again.
                 let before_import = self.report.rollback.clone();
                 self.o.engine = Some("rust".into());
-                let tag = self.o.tag.replace(target.clone());
-                let second = self.deploy_release(Some(target.clone()), None, previous);
+                let second = self.with_release_tag(&target, |update| {
+                    update.deploy_release(Some(target.clone()), None, previous)
+                });
                 self.o.engine = requested;
-                self.o.tag = tag;
                 self.defaulted_engine = defaulted;
                 if self.report.rollback.is_object() {
                     self.report.rollback["before_import"] = before_import;

@@ -150,7 +150,8 @@ The existing `updates.check_releases: false` setting and
 `PSEUDOLIFE_RELEASE_CHECK=0` environment override still disable all checks.
 Asset completeness does not prove that container images are published: image
 jobs still wait for the human-approved PyPI job, after native asset attachment.
-That publication-order gap is separate from release discovery.
+The native client and daemon can discover the release while image publication
+still awaits approval. Image-based updates can fail during that window.
 
 ## Image and publication gates
 

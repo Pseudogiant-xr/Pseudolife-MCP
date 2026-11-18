@@ -18,7 +18,7 @@ mod windows_job;
 use super::lease::lock as os_lock;
 pub(crate) use options::Options;
 use seams::{Environment, compose_args, compose_environment, display, stamp, tree_state};
-pub(crate) use seams::{data_dir, fetch_json, home, run_cli};
+pub(crate) use seams::{data_dir, home, run_cli};
 
 /// The unattended-update schedules as `connect` reads and re-creates them.
 pub(crate) mod schedules {
@@ -48,7 +48,7 @@ pub(crate) const PG_CONTAINER: &str = "pseudolife-mcp-postgres";
 pub(crate) const DAEMON_SERVICE: &str = "pseudolife-daemon";
 const GITHUB_RELEASE: &str =
     "https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/latest";
-const LEGACY_PYPI_JSON: &str = "https://pypi.org/pypi/pseudolife-mcp/json";
+const RELEASE_METADATA_LIMIT: usize = 1024 * 1024;
 const NO_PUBLISHED_RELEASE: &str = "no newer release with all native assets is published yet";
 pub(crate) type Result<T> = std::result::Result<T, UpdateError>;
 
@@ -76,6 +76,27 @@ fn discovery_client() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never())
+}
+
+async fn discovery_body(mut response: reqwest::Response) -> Result<Vec<u8>> {
+    let too_large =
+        || discovery_error("GitHub release metadata exceeds the size limit. Retry later");
+    if response
+        .headers()
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok()?.parse::<u64>().ok())
+        .is_some_and(|size| size > RELEASE_METADATA_LIMIT as u64)
+    {
+        return Err(too_large());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(discovery_transport_error)? {
+        if chunk.len() > RELEASE_METADATA_LIMIT - bytes.len() {
+            return Err(too_large());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 fn latest_release() -> Result<Option<String>> {
@@ -109,6 +130,11 @@ where
     match response.status().as_u16() {
         200 => {}
         404 => return Ok(None),
+        status @ 300..=399 => {
+            return Err(discovery_error(&format!(
+                "GitHub returned a redirection status for release discovery (HTTP {status}). Install the current client or retry with --tag <published version>"
+            )));
+        }
         status => {
             let headers = response.headers();
             let rate_limited = status == 429
@@ -118,11 +144,12 @@ where
                             .get("x-ratelimit-remaining")
                             .is_some_and(|value| value == "0")
                         // Secondary rate limits can omit both headers.
-                        || response.json::<Value>().await.is_ok_and(|data| {
-                            data["message"].as_str().is_some_and(|message| {
-                                message.to_ascii_lowercase().contains("rate limit")
-                            })
-                        })));
+                        || serde_json::from_slice::<Value>(&discovery_body(response).await?)
+                            .is_ok_and(|data| {
+                                data["message"].as_str().is_some_and(|message| {
+                                    message.to_ascii_lowercase().contains("rate limit")
+                                })
+                            })));
             let detail = if rate_limited {
                 "GitHub API rate limit reached; retry after the limit resets".to_owned()
             } else {
@@ -131,27 +158,35 @@ where
             return Err(discovery_error(&detail));
         }
     }
-    let data = response.json::<Value>().await.map_err(|error| {
-        if error.is_decode() {
-            invalid_release_metadata()
-        } else {
-            discovery_transport_error(error)
-        }
-    })?;
+    let data: Value = serde_json::from_slice(&discovery_body(response).await?)
+        .map_err(|_| invalid_release_metadata())?;
     match (data["draft"].as_bool(), data["prerelease"].as_bool()) {
         (Some(false), Some(false)) => {}
         (Some(_), Some(_)) => return Ok(None),
         _ => return Err(invalid_release_metadata()),
     }
-    let version = data["tag_name"]
-        .as_str()
-        .and_then(|s| s.strip_prefix('v'))
-        .filter(|s| s.len() <= 32 && plain_release(s) && version_key(s).is_some())
-        .ok_or_else(invalid_release_metadata)?;
+    let version = release_version(&data).ok_or_else(invalid_release_metadata)?;
     if data.get("assets").is_some_and(|assets| !assets.is_array()) {
         return Err(invalid_release_metadata());
     }
     Ok(complete_assets(&data, version).then(|| version.to_owned()))
+}
+
+// Keep the positive version range and component rules aligned with the daemon.
+fn release_version(data: &Value) -> Option<&str> {
+    let version = data["tag_name"]
+        .as_str()
+        .and_then(|s| s.strip_prefix('v'))?;
+    let parts: Vec<_> = version.split('.').collect();
+    if !(1..=32).contains(&version.len())
+        || !(2..=4).contains(&parts.len())
+        || parts.iter().any(|s| {
+            s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) || s.parse::<u64>().is_err()
+        })
+    {
+        return None;
+    }
+    Some(version)
 }
 
 // Keep this in step with the daemon while the two discovery paths are separate.
@@ -241,6 +276,11 @@ pub(crate) struct Report {
     pub ok: bool,
     pub exit_code: u8,
 }
+#[cfg(test)]
+type ReleaseLookup = Box<dyn Fn() -> Result<Option<String>> + Send + Sync>;
+#[cfg(test)]
+type CommandProbe = fn(&[String]) -> (i32, String);
+
 pub(crate) struct Update {
     pub o: Options,
     pub report: Report,
@@ -276,6 +316,12 @@ pub(crate) struct Update {
     /// An unattended run the guard turned daemon-only: its refusal, which
     /// keeps the client steps out even if a later step reached them.
     pub tunnel_refused: Option<String>,
+    #[cfg(test)]
+    release_lookup: Option<ReleaseLookup>,
+    #[cfg(test)]
+    health_probe: Option<fn() -> Option<Value>>,
+    #[cfg(test)]
+    command_probe: Option<CommandProbe>,
 }
 
 /// The checkout as the deploy later names it to the shim step.
@@ -409,6 +455,12 @@ impl Update {
             tunnel_probe: tunnel_guard::probe,
             tunnel_checked: false,
             tunnel_refused: None,
+            #[cfg(test)]
+            release_lookup: None,
+            #[cfg(test)]
+            health_probe: None,
+            #[cfg(test)]
+            command_probe: None,
         }
     }
     /// Refuses, before anything is changed, a run whose client steps would
@@ -503,6 +555,10 @@ impl Update {
         timeout: u64,
         stream: bool,
     ) -> (i32, String) {
+        #[cfg(test)]
+        if let Some(probe) = self.command_probe {
+            return probe(args);
+        }
         let mut cmd = vec![self.docker.clone()];
         cmd.extend_from_slice(args);
         run_cli(&cmd, env, timeout, stream && !self.o.as_json)
@@ -516,6 +572,10 @@ impl Update {
         )
     }
     pub fn daemon_health(&self) -> Option<Value> {
+        #[cfg(test)]
+        if let Some(probe) = self.health_probe {
+            return probe();
+        }
         seams::fetch_health_json(
             &format!("{}/health", self.o.daemon_url.trim_end_matches('/')),
             3,
@@ -563,23 +623,26 @@ impl Update {
         .into())
     }
     pub fn target_version(&self) -> Result<Option<String>> {
-        if let Some(tag) = &self.o.tag {
-            return Ok(Some(tag.clone()));
+        #[cfg(test)]
+        if let Some(discover) = &self.release_lookup {
+            return self.target_version_with(discover);
         }
-        // The unpinned Python leg of the legacy import still selects from PyPI.
-        // The subsequent Rust leg already supplies its target as a tag.
-        if self.after_import {
-            return fetch_json(LEGACY_PYPI_JSON, 10)
-                .and_then(|data| {
-                    data["info"]["version"]
-                        .as_str()
-                        .filter(|s| plain_release(s))
-                        .map(str::to_owned)
-                })
-                .map(Some)
-                .ok_or_else(|| UpdateError::usage("could not read the newest release from PyPI; name one with --tag <version>. Nothing was changed"));
+        self.target_version_with(latest_release)
+    }
+    fn target_version_with(
+        &self,
+        discover: impl FnOnce() -> Result<Option<String>>,
+    ) -> Result<Option<String>> {
+        match &self.o.tag {
+            Some(tag) => Ok(Some(tag.clone())),
+            None => discover(),
         }
-        latest_release()
+    }
+    fn with_release_tag<T>(&mut self, target: &str, run: impl FnOnce(&mut Self) -> T) -> T {
+        let tag = self.o.tag.replace(target.to_owned());
+        let result = run(self);
+        self.o.tag = tag;
+        result
     }
     pub fn refuse_downgrade(&self, current: Option<&str>, target: &str) -> Result<()> {
         if let Some(current) = current
