@@ -163,9 +163,10 @@ Each change waits for hosted CI once, on its batch:
 ## Docs-only pull requests
 
 A docs-only pull request may be merged straight onto master without a
-batch. "Docs-only" is the definition in `CLAUDE.md` ("Running tests"): the
-diff lists only `*.md`, `llms.txt` / `llms-full.txt` and non-code files
-under `docs/`. All of these hold first:
+batch. "Docs-only" is the definition in `CLAUDE.md` ("Docs-only changes"):
+every path in the diff passes `is_docs` in `rust/ci/parity_scope.py`, so
+Markdown under a code directory (`evals/`, `plugin/`, most of `rust/`) is
+not docs-only. All of these hold first:
 
 - It is independent: nothing it says depends on a pull request that is
   still open. One that documents unmerged work joins the batch that carries
@@ -177,8 +178,9 @@ under `docs/`. All of these hold first:
   merge, or add the pull request to the next one.
 - Its review pass is recorded, the doc guards passed at its head, and every
   check at its head was read and is green on the current merge ref.
-- It is merged with a merge commit (`gh pr merge <n> --merge`), never
-  squash.
+- It is merged with a merge commit, never squash, pinned to the head that
+  was checked so a push after the checks is refused (`gh pr merge <n>
+  --merge --match-head-commit <full sha>`).
 
 What it costs: the push to master runs the whole push matrix, because the
 push workflows do not skip a docs-only diff. Measured on 18 November 2026 on
@@ -187,9 +189,11 @@ started. Until they skip it, each direct merge spends about one hosted run
 on the account's 20 slots, so do not merge one shortly before a batch opens.
 
 Who merges: the maintainer, or a session the maintainer delegated merges to
-in their own words. A change to `CLAUDE.md` or another policy page is
-docs-only by this definition, and the maintainer still approves its text
-first.
+in their own words. A policy change (any change to a rule that governs how
+agents work on the project, in `CLAUDE.md` or any other file) is docs-only
+by this definition when it touches only docs; the maintainer approves the
+text it merges with first, and then only the maintainer or the conductor
+merges it.
 
 ## Joining a batch
 
@@ -304,7 +308,7 @@ changed file reaches snapshot rows, using the net merge-tree diff against
 that base just as CI does. Runtime edits already present on master do not
 turn a remaining docs-only or test-only diff into a replay requirement.
 Conflicting heads follow the existing merge/drop path rather than wait for
-replay evidence that GitHub cannot produce: budget-only conflicts retain
+replay evidence that GitHub cannot produce: compatible budget-only conflicts retain
 the existing normalization and use the batch's replay, census-only conflicts
 are regenerated on the batch head, and other conflicts
 are dropped. Documentation accompanied only by the generated
@@ -399,7 +403,8 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   refuse it (`#N, once ready: ...`, or "nothing else refuses it"): the
   freeze, a refused parent its head carries, every CI budget job missing an
   accept record, a release cut's unfolded fragments, and a conflict with
-  master (one only in the budget file is normalized, so it is not shown). A conflict with another member
+  master (a compatible one only in the budget file is normalized, so it is
+  not shown). A conflict with another member
   shows only once it merges. The report never refuses the build.
 - **`--dry-run`** does the same merges on a detached HEAD, prints the plan,
   the body and the comments `open` would post, then switches back; it
@@ -1030,7 +1035,8 @@ raw `gh pr merge`, so this script is the only path there. That rule lives
 in the maintainer's own configuration, not in this repository: a Codex
 session, or any other harness, has no such block and relies on the written
 rule (CLAUDE.md, "Shipping checklist" item 4): a batch merges through
-`python ops/integrate.py merge`, and only a merge under the
+`python ops/integrate.py merge`, a docs-only pull request merges directly
+only under "Docs-only pull requests" above, and a merge under the
 `merge-forward` skill's exceptions is made by hand, by the maintainer.
 
 The maintainer runs it, or the session the maintainer delegated merging

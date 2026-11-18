@@ -20,11 +20,13 @@ each exists because it was violated at least once.
 - **Outside contributors** (a session working for someone other than the
   maintainer, usually from a fork) follow `CONTRIBUTING.md`'s "Contributing
   with a coding agent" section in place of this file's review passes,
-  memory bank, board, leases, suite launchers, dev machines, deploy and
-  release rules, because those run on the maintainer's hosts and budget.
+  memory bank, board, leases, suite launchers, dev machines, batches, CI
+  upkeep, deploy and release rules, because those run on the maintainer's
+  hosts and budget.
 - Where a rule names a Claude Code mechanism (a hookify rule, a Stop hook,
-  the plugin's hooks), use your harness's equivalent; where none exists the
-  rule still applies, and your status or PR says enforcement is missing.
+  the plugin's hooks, a repo skill at `.claude/skills/<name>/SKILL.md`),
+  use your harness's equivalent; where none exists the rule still applies,
+  and your status or PR says enforcement is missing.
 - The maintainer clicks merge unless they delegated it in their own words,
   to a named agent for named work or as a standing delegation written in
   their own instructions; a role name, a board status or a peer's message
@@ -40,7 +42,7 @@ each exists because it was violated at least once.
    format, not that you added one.
 2. **Any change to `pseudolife_memory/storage/schema.py`, and every schema
    bump, follows the `schema-bump` skill**, and its Rust schema and Parity
-   checks are green before merge although the ruleset requires only `test`.
+   checks are green before merge.
 3. **Local validation before opening a PR:** run the touched and dependent
    tests ("Running tests") with the bench Postgres up and record head,
    selected files and result in the PR's Verification section, since a
@@ -51,7 +53,7 @@ each exists because it was violated at least once.
    (workflow and lock-file edits included).
    - Exceptions: the `merge-forward` skill and independent docs-only PRs.
    - Read `docs/dev/merge-batches.md` before building, opening or merging a
-     batch.
+     batch, or merging docs directly.
 5. **Rust-only batches skip the Python suite lanes**, on their master push
    too, and the next nightly (on master's tip) runs them, while `guards`
    runs the live tests that read `rust/`, because the workflows decide lanes from
@@ -61,9 +63,9 @@ each exists because it was violated at least once.
 6. **Deploy only via `pseudolife-mcp update`** (backup → rollback tag →
    daemon-only `--no-deps` recreate → health → clients), never
    `docker compose down -v`.
-   - Release mode installs the newest published release and moves clients
-     unless `--daemon-only`; `--clients-only` takes the newest release
-     unless given `--tag <daemon version>`.
+   - Release mode targets `--tag` or the newest release (the daemon's on a
+     client-only host) and moves clients with a daemon update unless
+     `--daemon-only`; `--clients-only` moves them alone.
    - Merged but unreleased master needs checkout mode (`ops/update.ps1` /
      `ops/update.sh`), because a checkout-built daemon reports the last
      release's version, so release mode's "nothing to do" there proves
@@ -78,10 +80,11 @@ each exists because it was violated at least once.
 8. **A change is not released until install and update do its setup**
    (next section); the release procedure checks it.
 9. **A CI change pays for its slots:** one that adds a hosted job, shard or
-   setup cost re-measures `rust/ci/ci_budget.json` from its own hosted runs
-   and raises a limit only with its reason (`rust/ci/test_ci_budget.py`),
-   because every job shares the account's 20 hosted slots; read
-   `docs/dev/ci-budget.md` before adding a job or shard.
+   setup cost records its prices and acceptances with
+   `rust/ci/ci_budget.py` as `docs/dev/ci-budget.md` says (read it before
+   pricing one) and raises a limit only with its reason
+   (`rust/ci/test_ci_budget.py`), because every job shares the account's 20
+   hosted slots.
 10. **Python is frozen since 14 November 2026:** a change under
     `pseudolife_memory/` (the Console build `pseudolife_memory/web/static/`
     excepted) is made in Rust instead, because batch admission
@@ -130,12 +133,13 @@ touched, with no retrofit sweep.
   errors, plugin hooks, CLI output, the Console, the served instructions)
   **is a product bug**, also in our own sessions; host friction (Claude
   Code, Codex, the OS) is out of scope.
-- Fix it in its own PR with a regression test when the fix is small,
-  otherwise open an issue with the repro and the regression test it needs,
-  because folding it into other work hides it.
+- Fix a non-security bug in its own PR with a regression test when the fix
+  is small, otherwise open an issue with the repro and the regression test
+  it needs, because folding it into other work hides it.
 - A session that cannot open a PR or issue (a subagent, a reviewer) reports
   the repro to its parent or the maintainer.
-- Data loss or a security failure is escalated to the maintainer at once.
+- Data loss or a security failure is escalated to the maintainer at once, a
+  security failure privately (`SECURITY.md`).
 - **A guard never blocks a legitimate path:** it decides on the exact
   signal it documents, never a text match something else can produce, and
   its tests include the near-miss legitimate call.
@@ -157,9 +161,9 @@ touched, with no retrofit sweep.
   frozen package's code no longer changes (`docs/dev/merge-batches.md` "What
   CI runs where" says when the frozen files still run; read it before
   relying on them).
-- A new test file adds its line there: a test of a freeze-exception change,
-  or of anything that survives, is live; read the header of
-  `tests/suite_classes.txt`.
+- Each new `tests/test_*.py` adds its line there: a test of an open
+  freeze-exception change, or of anything that survives, is live; read the
+  header of `tests/suite_classes.txt`.
 - **Exit codes:** never pipe a test run through a pager, since the pipe
   replaces pytest's exit code; redirect, or use `set -o pipefail; ... | tee
   log | tail -60`:
@@ -175,7 +179,7 @@ touched, with no retrofit sweep.
 - Document dynamic-import, subprocess and fixture gaps, and take the
   full-suite path when they cannot be bounded.
 - **Never split a broad selection to dodge the suite lock**, because
-  targeted runs never lock and that is exactly the incentive.
+  targeted runs never lock.
 - **A local full suite before the PR is required only for** schema, DDL and
   migration changes, shared test infrastructure (conftest, fixtures,
   imported helpers, the suite lock), changes whose coverage cannot be
@@ -203,40 +207,39 @@ touched, with no retrofit sweep.
   `creationflags`, `msvcrt`, `SIGBREAK`, scheduled tasks, launchd, the
   `.ps1` launchers; code resting on signals, kill, file locks, detached
   sessions; Windows daemon lifecycle) run that platform's affected tests
-  natively as a targeted run, and those files are in its CI lite lane
-  (`test-lite-windows` / `test-lite-macos`; a freeze-exception change's
-  tests are live, so they can be); an unbounded Windows change
-  takes the Windows dev VM's native full suite, and macOS has only CI.
-- **Docs-only changes** (`git diff --name-only origin/master...` lists only
-  `*.md`, `llms.txt` / `llms-full.txt` and non-code files under `docs/`)
-  skip the local full suite and run the doc guards (`tests/test_release_ux.py`,
-  `test_llms_txt.py`, `test_atlas_currency.py`, `test_eval_evidence.py`,
-  `test_i18n_readme.py`) plus every test naming a touched path (`git grep -l
-  <basename> tests/`); any `.py`, `.ps1`, `.sh`, `.json` outside `docs/`, or
-  anything under `tests/`, `ops/`, plugin hooks, workflows or packaging, is
-  not docs-only.
+  natively as a targeted run, and those files are in its CI lane
+  (`test-lite-windows` or `test-windows-nightly`, `test-lite-macos`); an
+  unbounded Windows change takes the Windows dev VM's native full suite,
+  and macOS has only CI.
+- **Docs-only changes** (every path `git diff --no-renames --name-only
+  origin/master...` lists passes `is_docs` in `rust/ci/parity_scope.py`:
+  Markdown outside the code directories, `llms.txt` / `llms-full.txt` and
+  non-code files under `docs/`) skip the local full suite and run the doc
+  guards (`tests/test_release_ux.py`, `test_llms_txt.py`,
+  `test_atlas_currency.py`, `test_eval_evidence.py`, `test_i18n_readme.py`)
+  plus every test naming a touched path (`git grep -l <basename> tests/
+  rust/ evals/`); packaging is never docs-only.
 - **Test-only changes** (only `tests/test_*.py`, non-code test data and
   docs) skip the local full suite unless they touch a shared fixture,
   module-level state,
   conftest, suite admission or an imported helper, or their cross-file
   effect is uncertain.
-- **An integration batch** runs its full suite on the Linux box through
-  `python ops/integrate.py suite` (with the native client the hosted `test`
-  lane builds), the Rust harness run `build` prints and, when it changes
-  `rust/`, `cargo check`, on its head before `open` pushes it, because that
-  costs less than one CI run and the suite never collects `rust/`.
-- Nothing is fixed inside a batch except the one generated census commit
-  (a conflicting member or a red batch's culprit is dropped with a comment,
-  and a conflict in the generated census alone is regenerated, not a drop),
-  and it merges with a merge commit, never squash, so GitHub marks its
-  members merged.
+- **An integration batch** runs `python ops/integrate.py suite`, `harness`
+  and `shim-tests` on its head before `open` pushes it (`build` prints each
+  and handles `cargo check`), because that costs less than one CI run and
+  the suite never collects `rust/`.
+- Nothing is fixed inside a batch except the one generated census commit (a
+  conflicting member or a red batch's culprit is dropped with a comment,
+  and a census-only conflict or a compatible budget-only one is
+  regenerated, not a drop), and it merges with a merge commit, never
+  squash, so GitHub marks its members merged.
 - **A batch built again after a drop** (`build --after-drop`) skips the
-  local gates only when the dropped pull request shares no code with the
-  rest, because the closed batch already paid for them
-  (`docs/dev/merge-batches.md` "After a drop", read before using it).
+  suite, harness and shim-tests gates, never the compile check, under the
+  conditions of `docs/dev/merge-batches.md` "After a drop" (read before
+  using it).
 - **The next batch may be built and gated on an open batch's head**, and
   its local passes carry to the rebuild only when both heads have the same
-  Git tree (`docs/dev/merge-batches.md`).
+  Git tree.
 - **A batch is built when none is open and two or more PRs are ready, or a
   lone PR has waited about one hosted-run cycle or is urgent or a release
   cut**, because a batch of one pays a full hour of hosted CI for one
@@ -244,9 +247,10 @@ touched, with no retrofit sweep.
 - **On the maintainer's Windows host, full suites run on the Linux box**
   (`pwsh ops/remote-suite.ps1`, backgrounded and redirected), and in WSL
   only while `~/.pseudolife-mcp/locks/pc-available` says he made this PC
-  available (`docs/dev/dev-machines.md` "Sharing"), because a suite here
-  overloads the desktop he is using and native ones stall it
-  (`full-suite.windows`: `refuse`).
+  available (`docs/dev/dev-machines.md` "Sharing"; without that mark, set
+  `PSEUDOLIFE_SUITE_WHERE=remote`), because a suite here overloads the
+  desktop he is using and native ones stall it (`full-suite.windows`:
+  `refuse`).
 - `PSEUDOLIFE_SUITE_LOCK=off` is never a way around that refusal, because
   it only skips the queue, not the stall.
 - Both launchers (`ops/remote-suite.ps1`, `ops/wsl-suite.ps1`) test the
@@ -255,23 +259,25 @@ touched, with no retrofit sweep.
   `~/.pseudolife-mcp/suite-results`; read `docs/dev/dev-machines.md` before
   a first run on a machine.
 - **One full suite per machine at a time**, because two exhaust memory and
-  kill test daemons: `tests/conftest.py` queues full runs (all of `tests/`,
-  half its files, or an exclude-only `-k` / `-m`) on
-  `~/.pseudolife-mcp/locks/full-suite.lock`, targeted runs never lock, and a
-  WSL or other-user run does not see your lock.
+  kill test daemons: `tests/conftest.py` queues full runs (`tests/` or at
+  least half its eligible test files, as `is_full_run` in
+  `tests/suite_lock.py` decides) on
+  `~/.pseudolife-mcp/locks/full-suite.lock`, targeted runs never lock, and
+  a WSL or other-user run does not see your lock.
 - The suite runs CPU-only (`CUDA_VISIBLE_DEVICES=-1`, never `""`, which
   leaves the GPU usable on Windows; `PSEUDOLIFE_TEST_CUDA=1` opts in).
-- A run the bench Postgres rejects refuses to start; the fix is the
-  maintainer's `pseudolife-mcp test-login create`, never copying `ops/.env`
-  into a worktree, which holds the bank owner's password.
+- A full run the bench Postgres rejects refuses to start; follow the fix
+  its preflight names (often the maintainer's `pseudolife-mcp test-login
+  create`), never copying `ops/.env` into a worktree, which holds the bank
+  owner's password.
 
 ### Sharing the machine
 
 - Keep `suite=running|queued|idle` and any `gpu=` in your board status,
   because the suite lock is mirrored as the lease `full-suite`
   (`full-suite@<name>` on a dev machine) and notifies peers whose status
-  shows `suite=running|queued` or `gpu=` or who parked with `park_clear_by:
-  full-suite`.
+  shows `suite=running|queued` or `gpu=` or who parked with
+  `park_clear_by:` that lease.
 - A mirrored run needs no hand-written SUITE-START/END; without a bearer
   the mirror says so once and the lock alone rules.
 - A run the mirror does not cover (a lock-off or bearer-less run, a GPU
@@ -282,19 +288,18 @@ touched, with no retrofit sweep.
   statuses until their next turn.
 - **Machine notices go in your board status, never in mail to a conductor
   or the session that launched you** (taking or releasing a machine, a run
-  starting, ending or being stopped, an acknowledgement), because every mail
-  wakes a parked session to re-read its context; mail it only for a ruling
-  you need, an answer it asked for, a credential or data-safety event and a
-  finished pull request.
+  starting, ending or stopped, an acknowledgement), because mail wakes a
+  parked session to re-read its context; mail it only for a ruling you
+  need, an answer it asked for, a credential or data-safety event, a pushed
+  head, a finished PR and this section's SUITE-START/END.
 - **CPU- or memory-saturating work never overlaps a full suite** (stress
   repros, benchmark sweeps, a model server, a large in-memory eval), since
   overlap causes timing flakes and os error 1455.
-- Let the lease check run the work (`lease check full-suite -- <command>` on
-  this host, `lease check full-suite@<name> -- <command>` on a dev machine,
-  nested for `gpu`), because a `;` after a bare check runs the work whatever
-  it said.
-- Also look for `suite=running` in `memory_agents` list, and stop at once if
-  a suite starts.
+- Let the lease check run the work (`pseudolife-mcp lease check full-suite
+  -- <command>`, `full-suite@<name>` for a dev machine, nested for `gpu`),
+  because a `;` after a bare check runs the work whatever it said.
+- Also look for that machine's `suite=running` in `memory_agents` list, and
+  stop at once if its suite starts.
 - **Broadcast a symptom with evidence of shared impact** (a hung
   interpreter, os error 1455, a silent daemon, a failure peers' runs show
   too) by `memory_message` before debugging it, because it is usually
@@ -311,10 +316,11 @@ touched, with no retrofit sweep.
 
 ## Dev machines (where work runs)
 
-- The homelab hypervisor carries Linux dev boxes and a Windows dev VM
-  (read `docs/dev/dev-machines.md` before first use); names, addresses,
-  lease names and database settings stay in private config and the memory
-  bank, never in the tree.
+- The homelab hypervisor carries the controller (the only host of agent
+  sessions there), Linux dev boxes and a Windows dev VM (read
+  `docs/dev/dev-machines.md` before first use); names, addresses, lease
+  names and database settings stay in private config and the memory bank,
+  never in the tree.
 - A PR cites a dev-machine run by role ("Windows dev VM", "Linux dev box"),
   never by name or address, with commit, command and result.
 - **They are development tools, not merge gates, except that**
@@ -327,16 +333,16 @@ touched, with no retrofit sweep.
 - **Never the live bank:** every dev machine tests against its own test
   PostgreSQL, never the live bank's server or the Windows host's bench.
 - One full suite per machine under its own lock and `full-suite@<name>`
-  lease, two at once on the hypervisor and never three, and your board
-  status says which you hold.
+  lease, two heavy runs (suite or gate) per hypervisor, never three, and
+  your board status says which you hold.
 - **A Windows-only hosted CI failure gets one rerun** on the current merge
   ref naming the test and its flake issue (open one if none exists), unless
   its signature is deterministic; a second failure, or a deterministic one,
   goes to the VM.
-- On the VM, loop the failing test or slice (20 runs to start, CPU load only
-  while no other dev machine runs a suite): a reproduction gets a fix PR, a
-  confirmed flake a deflake PR, and an unreproduced failure a deflake PR or
-  an issue naming the hosted run once it recurs, because 20 clean runs only rule out rates above about 15%.
+- On the VM, loop the failing test or slice as `docs/dev/dev-machines.md`
+  "Sharing" says (read it before the first loop): a reproduction gets a fix
+  PR, a confirmed flake a deflake PR, and an unreproduced failure a deflake
+  PR or an issue naming the hosted run once it recurs.
 - **A PR that adds a `windows-latest` test resting on real process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
   timeouts (a harness `run.py` scenario included; a test that only mocks
@@ -356,8 +362,8 @@ touched, with no retrofit sweep.
 ## Disk space (builds and long runs)
 
 - **Check free space before** a Rust build, full suite, eval run or bulk
-  download (`df -h /`, `Get-PSDrive`) and don't start below 8 GB, because a
-  full disk kills runs mid-step.
+  download on each volume it writes to (`df -h <path>`, `Get-PSDrive`) and
+  don't start below 8 GB, because a full disk kills runs mid-step.
 - **A Rust `target/` is a cache:** keep one per worktree, or share one only
   between builds that `cargo clean -p` their workspace's packages when the
   checkout changes, and `cargo clean` your own stale profiles before a big
@@ -382,9 +388,10 @@ prove are yours.
   harness's task stop, or `taskkill /PID <pid> /T /F` (Git Bash: `taskkill
   //PID <pid> //T //F`, and the Windows PID is `cat /proc/$!/winpid` because
   `$!` is an MSYS PID; PowerShell: `(Start-Process ... -PassThru).Id`).
-- Record the start time at launch (`(Get-Process -Id <pid>).StartTime`) and
-  re-check PID and start time just before stopping, because PIDs are reused
-  and command lines repeat; if either mismatches or can't be read, don't.
+- Record the start time at launch or discovery (`(Get-Process -Id
+  <pid>).StartTime`) and re-check PID and start time just before stopping,
+  because PIDs are reused and command lines repeat; if either mismatches or
+  can't be read, don't.
 - **By a marker unique to your run** once it left your tree (a run id in
   argv or your own harness home; the shared worktree path is not unique):
   exclude the searcher and its parent, check the matches, stop them by PID.
@@ -409,7 +416,7 @@ prove are yours.
   tests** (source in any language, scripts, hooks, workflows, dependency
   and lock files, `tests/conftest.py` and shared test helpers) **also runs a
   Codex second review** in the background over the same diff, `codex exec
-  review --base origin/master -m gpt-6.1-sol -c
+  review --base <its base> -m gpt-6.2-sol -c
   model_reasoning_effort='"high"' -o "$OUT.md" > "$OUT.log" 2>&1` (`$OUT`
   per pass outside the tree, named by the reviewed short sha;
   `--uncommitted` pre-commit, `--commit <sha>` for one commit), because one
@@ -428,21 +435,21 @@ prove are yours.
   reviewer of any kind reviews the diff it was given, starts no other
   review, subagent or Codex run, and does not call its own pass
   single-reviewer.
-- When Codex authored and owns the PR, one fresh `gpt-6.1-sol` review at
+- When Codex authored and owns the PR, one fresh `gpt-6.2-sol` review at
   high effort or above meets both passes, since a second same-model pass
   adds little independence for its cost; a Claude session that owns or
   forwards it still runs both.
 - **Under a conductor, the opener reviews once** (its review pass and Codex
   second review, or the one review for a Codex-owned PR) before handing
-  over, and the conductor reviews each fix round without a second pair,
+  over, and the conductor reviews each fix round alone, without Codex,
   because two pairs on one fix round only duplicate each other; a
   scope-widening or self-initiated change still gets the opener's fresh
-  pair.
+  review as above.
 - **Perf, cache and index changes get an independent review before
   commit** (`/code-review` medium or a reviewer subagent).
 - **Codex approves hooks by their `plugin/hooks/hooks.json` definition**
   (command, commandWindows, timeout, async, statusMessage, matcher), so
-  changing those or adding a handler makes every Codex user re-approve: put
+  changing those or adding a handler can make every Codex user re-approve: put
   new behaviour in an existing handler's script, and if unavoidable update
   the pin in `tests/test_codex_hook_launcher.py` and say so in the changelog
   fragment.
@@ -451,7 +458,8 @@ prove are yours.
   does is decoration: say so).
 - **A tuning constant set for a measured reason carries a comment naming
   the measurement** (what, when, scale; see `recency_boost_enabled` in
-  `utils/config.py`), added as files are touched, no retrofit sweeps.
+  `pseudolife_memory/utils/config.py`), added as files are touched, no
+  retrofit sweeps.
 - **Eval- or retrieval-affecting changes run `evals/regression_gate.ps1`
   before commit, and extraction or dream-path changes re-run the ladder
   instead**; the bench server, comparator and control-arm rules are "Eval
@@ -509,9 +517,10 @@ not release from memory of it.
 
 ## Memory (Pseudolife MCP tools)
 
-- Log `memory_outcome` at task end, since outcomes alone feed the lessons
-  shown at session start; deploys and eval results get a `memory_store`
-  with source `pseudolife-mcp`, status chatter `source="status"`.
+- In-turn subagents report instead of writing memory; a session logs
+  `memory_outcome` at task end, since outcomes alone feed the lessons shown
+  at session start; deploys and eval results get a `memory_store` with
+  source `pseudolife-mcp`, status chatter `source="status"`.
 - **In-flight work is written, not remembered:** launching long-running
   work writes a `source="status"` entry (what, where, expected finish) and
   another when it ends or is abandoned.
@@ -532,8 +541,8 @@ uses:
 - **episode**: the session-scoped handle every write is stamped with.
 - **dream**: consolidation: pull the unconsolidated stream, extract claims,
   `fact_set`, advance the monotonic cursor.
-- **cortex / slot / supersede**: the canonical-fact store; one current value
-  per `(entity, attribute)`; replacement that keeps the old value as audit
-  history.
+- **cortex / slot / supersede**: the canonical-fact store; one current
+  value or member set per `(entity, attribute)`; replacement that keeps the
+  old value as audit history.
 - **lessons / outcomes**: `memory_outcome` signals distilled into the
   guidance shown at session start.

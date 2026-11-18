@@ -6,8 +6,8 @@ description: Use for any change to pseudolife_memory/storage/schema.py, and for 
 # Schema change and schema bump checklist
 
 A schema bump touches several files that each have a guard test, and the
-Rust port pins the schema in more places still. Missing one fails CI in a
-lane the master ruleset does not require, so it is easy to merge broken.
+Rust port pins the schema in more places still. Missing one fails CI, and
+a parity pin fails only in the batch, after the member PR looked green.
 The v30 bump found steps 7 and 8 the hard way; the v56 bump missed every
 Rust step below and four Parity jobs failed, and its CLI harness goldens
 failed a second round after the first re-record.
@@ -92,8 +92,8 @@ The Rust plan hashes the whole file, so even a comment change needs this.
 
 ## D. Before merge
 
-13. The master ruleset requires only the Python `test` job, so the Rust
-    workflow's schema and Parity checks must be green before merge
-    regardless.
+13. The master ruleset requires `test` and both `Parity` checks, and the
+    Rust workflow's schema check runs under them, so all must be green
+    before merge.
 14. A schema/DDL/migration change requires a local full suite (CLAUDE.md,
     "Running tests").

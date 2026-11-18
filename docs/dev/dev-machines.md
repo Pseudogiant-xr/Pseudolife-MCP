@@ -18,6 +18,9 @@ in the memory bank (search "dev machines homelab"), never in this tree.
   suite here overloads the desktop he is using; never natively, because a
   native Windows full suite's hook-script tests start Git Bash processes in
   bursts that stall mouse input.
+- **The controller** (a guest of the same hypervisor). The only homelab
+  machine that hosts agent sessions; it sends work to the machines below
+  and runs none of their suites itself.
 - **Linux dev boxes** (the homelab "box" and its sibling, guests of one
   hypervisor). Linux full suites, Rust builds and tests on Linux, and long
   or CPU-heavy Linux work that would otherwise load the Windows host.
@@ -38,10 +41,11 @@ in the memory bank (search "dev machines homelab"), never in this tree.
   `test-lite-windows`); the Windows installer, hook and board plumbing runs
   in the non-required `test-windows-nightly` job.
 
-The dev machines share the hypervisor's RAM, which carries two full suites
-at once in any mix (two Linux boxes, or a Linux box and the Windows VM),
-never three. Nothing enforces that limit: `ops/remote-suite.ps1` checks
-only the machine it dispatches to.
+The dev machines share the hypervisor's RAM, which carries two heavy runs
+at once in any mix (a full suite or a batch's `harness` or `shim-tests`
+gate, on two Linux boxes or a Linux box and the Windows VM), never three.
+Nothing enforces that limit: `ops/remote-suite.ps1` checks only the machine
+it dispatches to.
 
 ## Test databases
 
@@ -62,8 +66,9 @@ only the machine it dispatches to.
   `tests/pg_defaults.py`). Dispatched runs add a systemd `MemoryMax=16G`
   scope, since the box also serves the live daemon; that needs
   password-free sudo that may preserve the environment (`NOPASSWD:SETENV:`
-  for `systemd-run`, or `NOPASSWD: ALL`). Sessions on a box run
-  `python -m pytest tests/` natively, under the same one-suite lock.
+  for `systemd-run`, or `NOPASSWD: ALL`). No agent session runs on a box:
+  the controller hosts them and dispatches work here; a run started on the
+  box by hand (`python -m pytest tests/`) takes the same one-suite lock.
 - **The Windows VM** uses the `[lite]` extra's embedded PostgreSQL on
   loopback inside the VM, started for each test run by a wrapper kept in
   the VM's private config. A Windows SSH session's child processes end
