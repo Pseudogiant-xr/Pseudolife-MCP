@@ -39,6 +39,7 @@ const ORPHAN: &str = "this profile name has a saved key or process record withou
 const DIRECTORY: &str = "cannot use the tunnel directory; pass --profile-dir pointing to a plain directory your account owns, then retry";
 const WRITE: &str =
     "could not save the tunnel profile; check the tunnel directory permissions and retry setup";
+const CLEANUP: &str = "could not remove the private tunnel staging file; close programs using the tunnel directory and remove the leftover .tunnel-setup-* file before retrying";
 #[cfg(unix)]
 const UNSUPPORTED_MOVE: &str = "the filesystem refused an atomic no-replace move for the tunnel profile; use --profile-dir on a filesystem that supports it";
 #[cfg(unix)]
@@ -395,8 +396,18 @@ fn publish_profile(
             .map_err(|_| Fail::Tunnel(SYNC))?;
         Ok(())
     })();
-    let _ = fs::remove_file(stage);
-    result
+    finish_publication(result, || fs::remove_file(&stage))
+}
+
+fn finish_publication(
+    result: Result<(), Fail>,
+    remove: impl FnMut() -> io::Result<()>,
+) -> Result<(), Fail> {
+    match store::sharing_retry(remove) {
+        Ok(()) => result,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => result,
+        Err(_) => Err(Fail::Tunnel(CLEANUP)),
+    }
 }
 
 fn publication_error(error: io::Error) -> Fail {
@@ -474,6 +485,30 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
         assert_eq!(result, Err(Fail::Tunnel(WRITE)));
         assert_eq!(entries, 0);
+    }
+
+    #[test]
+    fn profile_publication_reports_if_staging_cleanup_fails() {
+        let result = finish_publication(Err(Fail::Tunnel(WRITE)), || {
+            Err(io::Error::other("fixture cleanup failure"))
+        });
+        assert_eq!(result, Err(Fail::Tunnel(CLEANUP)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn profile_publication_retries_a_sharing_violation_during_cleanup() {
+        let mut attempts = 0;
+        let result = finish_publication(Err(Fail::Tunnel(WRITE)), || {
+            attempts += 1;
+            if attempts == 1 {
+                Err(io::Error::from_raw_os_error(32))
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result, Err(Fail::Tunnel(WRITE)));
+        assert_eq!(attempts, 2);
     }
 
     #[test]
