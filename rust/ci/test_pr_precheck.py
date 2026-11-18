@@ -62,14 +62,9 @@ def test_the_native_move_source_reaches_the_move_row(path, move):
     assert ("move" in precheck.rows_for(path, {})) is move
 
 
-@pytest.mark.parametrize("path", ["docs/note.md", "changelog.d/2026-11-05-example.md"])
+@pytest.mark.parametrize("path", ["README.md", "docs/guide/install.md", "changelog.d/2026-11-05-example.md"])
 def test_document_changes_need_no_replay(path):
     assert precheck.rows_for(path, {}) == ()
-
-
-@pytest.mark.parametrize("path", ["README.md", "docs/guide/install.md"])
-def test_docs_with_readers_outside_fast_ci_use_normal_precheck_selection(path):
-    assert precheck.rows_for(path, {}) == precheck.ROWS
 
 
 def test_daemon_implementation_reaches_the_row_that_invokes_its_binary():

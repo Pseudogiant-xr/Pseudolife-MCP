@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "af168ac1178ab8a3",
+  "fingerprint": "a4bf8f4c0a00a5f2",
+  "reason": "The existing guards job gains documentation and classifier tests and moves citations and extractor model checks to its common step. The estimate charges their measured local cost with margin; the runner and setup are unchanged."
+}

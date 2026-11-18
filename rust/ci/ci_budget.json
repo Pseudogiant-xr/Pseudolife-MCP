@@ -169,8 +169,8 @@
         "minutes": 0.2
       },
       "guards": {
-        "minutes": 9.3,
-        "estimate": "2026-11-15: a Rust-only batch or push also runs the 20 live tests that read rust/ files, with a PostgreSQL service. That step took 12.3 min on two workers on a Windows desktop (1,532 passed, 7 platform skips); about 6 is expected on hosted ubuntu-latest, plus the 1.9 measured for the tree-wide guards and about 0.5 for the service. The step also runs tests/test_installer_legacy_hooks_native.py since #1560 (the legacy-hooks tests that reach the native client's hook-settings): 26 cases in 30.9 s serially in WSL at e78826f72, so about 0.3 more on two workers. An ordinary pull request skips the step (about 2.4). Re-measure from the first Rust-only batch's run."
+        "minutes": 9.7,
+        "estimate": "Prior estimate 9.3 minutes plus 0.4 for documentation guards and Linux scope coverage. The added selection on the first Linux dev box at c680a1318 took 19.95 seconds. It covered the LLMS and translation guards, citations, model lists, the scope tests, Rust plan readers and producer census readers. The 24-second allowance charges the whole selection, including the readers moved from the existing Rust-only step. No extra runner or dependency setup."
       },
       "lock-resolve": {
         "minutes": 0.5
