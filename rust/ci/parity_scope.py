@@ -173,8 +173,7 @@ SHIM_COMMANDS = {
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }
-# The scope step's documentation-only rule, which Python's re cannot take
-# verbatim (its lookbehind is variable-width); tests check both agree.
+# The documentation-only rule shared by workflow scope and parity selection.
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
 CODE_SUFFIX = re.compile(r"\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)$")
 # The port's plan pages under rust/ that no Rust or parity job reads; the

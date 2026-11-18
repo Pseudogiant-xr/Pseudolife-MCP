@@ -100,7 +100,20 @@ Each change waits for hosted CI once, on its batch:
 - **A batch pull request** (from `integrate/*`) runs everything its diff
   needs, exactly as every pull request did before 2026-10-21 (the
   Rust-only and documentation-only scope skips still apply).
-- **A master push** skips what its batch already passed on the same code.
+- **A direct documentation-only master push** runs the same lanes as an
+  ordinary documentation-only pull request. CI runs `scope`, `guards`,
+  `lock-resolve` and `frontend`; Rust shim runs `Scope` and both
+  `Parity` gates. Both workflows use the Rust documentation predicate over
+  the push's before and after trees. A single merge uses its first parent
+  as the before tree. A multi-commit push includes its entire net change.
+  A missing, empty or unreadable range, a force push, or an ambiguous
+  API result keeps the full lanes. The generated producer census is
+  eligible alongside docs on pull requests and merge groups only.
+  Documentation can stale the census until the next batch regenerates
+  it. Rust shim reports that drift in the push's Scope job summary.
+  The nightly still runs the lanes skipped by this push.
+- **A master push from an integration batch** skips what that batch
+  already passed on the same code.
   `ops/integrate.py merge` merges a batch with a merge commit only while
   master is its base or an ancestor of its head, so the commit pushed to
   master has the batch head's tree. Each scope job runs

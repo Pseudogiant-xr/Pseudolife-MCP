@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 import parity_scope
+from rust.ci.docs_scope import documentation_only
 from parity_scope import ALL, FLOOR, ROW_SUITES, SHARDS, SHIM_COMMANDS, SUITES, matrix, reached, select
 from test_workflow import CODE_CHANGES, DOCS_ONLY_CHANGES, W1C_SUITES
 
@@ -226,73 +227,17 @@ def test_code_matches_the_scope_job(files):
     assert not all(parity_scope.is_docs(path) for path in files)
 
 
-def test_is_docs_agrees_with_the_scope_jobs_regex_path_by_path():
-    # The same paths through PowerShell's -cnotmatch with the scope job's
-    # own rule, so a difference in meaning (not only in text) fails here.
-    import os
-    import subprocess
-    step = next(s for s in raw_workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
-    rule = re.search(r"\$docs = '([^']+)'", step["run"]).group(1)
-    paths = sorted({path for files in DOCS_ONLY_CHANGES + CODE_CHANGES for path in files} | {
-        "rust/README.md", "docs/a/b.md", "docs/x.PY", "llms.txt", "llms-full.txt", "llms2.txt",
-        "Docs/x.md", "TESTS/a.md", "a/b/c.md", "docs/sub/run.yaml"})
-    script = ("$rule = $env:PL_RULE; foreach ($p in ($env:PL_PATHS -split \"`n\")) "
-              "{ if ($p -cnotmatch $rule) { 'code' } else { 'docs' } }")
-    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", script],
-                            env=dict(os.environ, PL_RULE=rule, PL_PATHS="\n".join(paths)),
-                            capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    verdicts = result.stdout.split()
-    assert len(verdicts) == len(paths)
-    for path, verdict in zip(paths, verdicts):
-        assert parity_scope.is_docs(path) == (verdict == "docs"), path
-
-
-@pytest.mark.parametrize("files, rust", [
-    (["docs/guide/x.md"], "false"),
-    # ops/integrate.py build regenerates the census whenever a batch changes
-    # a scanned doc; that alone must not cost a docs-only batch the skip.
-    (["docs/guide/x.md", "rust/producer-census.json"], "false"),
-    # Near misses: the census alone, or beside code, still runs Rust.
-    (["rust/producer-census.json"], "true"),
-    (["docs/guide/x.md", "rust/producer-census.json", "rust/shim/src/main.rs"], "true"),
-    (["docs/guide/x.md", "rust/contract-inventory.json"], "true"),
+@pytest.mark.parametrize("files, push_docs, pr_docs", [
+    (["docs/guide/x.md"], True, True),
+    (["docs/guide/x.md", "rust/producer-census.json"], False, True),
+    (["rust/producer-census.json"], False, False),
+    (["docs/guide/x.md", "rust/producer-census.json", "rust/shim/src/main.rs"], False, False),
+    (["docs/guide/x.md", "rust/contract-inventory.json"], False, False),
+    ([], False, False),
 ])
-def test_the_scope_job_skips_rust_for_docs_and_their_regenerated_census(tmp_path, files, rust):
-    # The scope step itself, run by pwsh on a pull request whose head commit
-    # changes `files`.
-    import os
-    import subprocess
-    step = next(s for s in raw_workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
-    def git(*args):
-        subprocess.run(["git", "-c", "user.name=Scope fixture", "-c", "user.email=scope@example.com",
-                        *args], cwd=tmp_path, check=True, capture_output=True)
-    git("init", "-q")
-    (tmp_path / "base.txt").write_text("base\n", encoding="utf-8")
-    git("add", "-A")
-    git("commit", "-qm", "base")
-    for path in files:
-        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / path).write_text("changed\n", encoding="utf-8")
-    git("add", "-A")
-    git("commit", "-qm", "head")
-    output = tmp_path / "github-output.txt"
-    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", step["run"]],
-                            cwd=tmp_path, capture_output=True, text=True,
-                            env=dict(os.environ, EVENT_NAME="pull_request",
-                                     HEAD_REF="integrate/2026-10-27-batch-1",
-                                     GITHUB_OUTPUT=str(output)))
-    assert result.returncode == 0, result.stderr
-    assert f"rust={rust}" in output.read_text(encoding="utf-8-sig").split()
-
-
-def test_the_documentation_rule_is_the_scope_jobs():
-    step = next(s for s in raw_workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
-    rule = re.search(r"\$docs = '([^']+)'", step["run"]).group(1)
-    assert rule == ("^(rust/(CUTOVER|DEV|SEMANTICS-CHECKLIST)\\.md"
-                    "|(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\\.github)/)"
-                    "([^/\"].*\\.md|llms(-full)?\\.txt|docs/.*(?<!\\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs"
-                    "|toml|yml|yaml))))$"), "the scope job's docs rule changed; update parity_scope.is_docs"
+def test_only_prs_or_merge_groups_count_the_regenerated_census_as_docs(files, push_docs, pr_docs):
+    assert documentation_only(files) is push_docs
+    assert documentation_only(files, allow_generated_census=True) is pr_docs
 
 
 def test_the_plan_pages_counted_as_docs_are_read_by_no_code():

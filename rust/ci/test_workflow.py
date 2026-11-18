@@ -646,14 +646,14 @@ DOCS_ONLY_SKIP = {"scope": {"result": "success", "outputs": {"rust": "false"}},
                   "parity-checks": {"result": "skipped"}}
 
 
-@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
-def test_parity_gate_accepts_a_documentation_only_pull_request_or_merge_group(event):
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
+def test_parity_gate_accepts_a_classified_documentation_only_change(event):
     executed = run_gate(DOCS_ONLY_SKIP, event)
     assert executed.returncode == 0, executed.stderr
 
 
-@pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
-def test_parity_gate_accepts_the_docs_skip_only_on_pull_requests(event):
+@pytest.mark.parametrize("event", ["schedule", "workflow_dispatch"])
+def test_parity_gate_rejects_a_docs_skip_on_schedule_or_dispatch(event):
     assert run_gate(DOCS_ONLY_SKIP, event).returncode == 1
 
 
@@ -664,7 +664,7 @@ def test_parity_gate_accepts_the_docs_skip_only_on_pull_requests(event):
     {"result": "skipped", "outputs": {}},
     {"result": "cancelled", "outputs": {"rust": "false"}},
 ])
-@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
 def test_parity_gate_rejects_skips_scope_did_not_choose(scope, event):
     needs = copy.deepcopy(DOCS_ONLY_SKIP)
     needs["scope"] = scope
@@ -673,10 +673,11 @@ def test_parity_gate_rejects_skips_scope_did_not_choose(scope, event):
 
 @pytest.mark.parametrize("job", ["rust", "candidate", "parity-checks"])
 @pytest.mark.parametrize("result", ["failure", "cancelled", ""])
-def test_parity_gate_still_fails_a_broken_job_on_a_docs_pull_request(job, result):
+@pytest.mark.parametrize("event", ["pull_request", "push"])
+def test_parity_gate_still_fails_a_broken_job_on_a_docs_change(job, result, event):
     needs = copy.deepcopy(DOCS_ONLY_SKIP)
     needs[job]["result"] = result
-    assert run_gate(needs, "pull_request").returncode == 1
+    assert run_gate(needs, event).returncode == 1
 
 
 # An ordinary pull request (not from integrate/*): scope says full=false, the
@@ -723,46 +724,40 @@ def test_parity_gate_still_requires_the_rust_job_on_an_ordinary_pull_request(job
 BATCH_REF = "integrate/2026-10-21-batch-1"
 
 
-def run_scope(tmp_path, event, files, git_exit=0, base_ref="refs/heads/master", fetch_exit=0,
+def run_scope(monkeypatch, event, files, git_exit=0, base_ref="refs/heads/master", fetch_exit=0,
               head_ref=None):
     """The scope step's outputs, in order. `head_ref` is github.head_ref, set
     by Actions only for pull requests: by default a batch branch's, which
     runs everything its diff needs."""
-    import os
+    from rust.ci import docs_scope
+
     if head_ref is None:
         head_ref = BATCH_REF if event == "pull_request" else ""
     step = next(s for s in workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
     assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}",
                            "MERGE_GROUP_BASE_REF": "${{ github.event.merge_group.base_ref }}",
-                           "HEAD_REF": "${{ github.head_ref }}"}
-    output = tmp_path / "github_output"
-    output.write_text("", encoding="utf-8")
+                           "HEAD_REF": "${{ github.head_ref }}",
+                           "GITHUB_TOKEN": "${{ github.token }}"}
     # Stand in for `git fetch` and `git diff`, the step's only external inputs.
     # A pull request diffs its merge commit against the base parent; a merge
     # group fetches master's tip and diffs that against the group head, so
     # every unmerged queue entry counts whatever merge_group.base_sha names.
-    bootstrap = r'''
-function git {
-    $line = $args -join ' '
-    if ($env:EVENT_NAME -ceq 'merge_group' -and $line -ceq 'fetch --no-tags --depth=1 origin refs/heads/master') {
-        $global:LASTEXITCODE = [int]$env:PL_FIXTURE_FETCH_EXIT
-        return
-    }
-    $base = if ($env:EVENT_NAME -ceq 'merge_group') { 'FETCH_HEAD' } else { 'HEAD^1' }
-    # Renames must list both paths, or rust/x.md -> docs/x.md reads as docs.
-    if ($line -cne "diff --no-renames --name-only $base HEAD") { throw "unexpected git $args" }
-    $global:LASTEXITCODE = [int]$env:PL_FIXTURE_GIT_EXIT
-    if ($env:PL_FIXTURE_FILES) { $env:PL_FIXTURE_FILES -split "`n" }
-}
-'''
-    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", bootstrap + step["run"]],
-                            env=dict(os.environ, EVENT_NAME=event, GITHUB_OUTPUT=str(output),
-                                     HEAD_REF=head_ref,
-                                     MERGE_GROUP_BASE_REF=base_ref, PL_FIXTURE_FETCH_EXIT=str(fetch_exit),
-                                     PL_FIXTURE_FILES="\n".join(files), PL_FIXTURE_GIT_EXIT=str(git_exit)),
-                            capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout + result.stderr
-    return output.read_text(encoding="utf-8-sig").split()
+    def git(*args):
+        if event == "merge_group" and args == ("fetch", "--no-tags", "--depth=1", "origin", base_ref):
+            if fetch_exit:
+                raise subprocess.CalledProcessError(fetch_exit, args)
+            return ""
+        base = "FETCH_HEAD" if event == "merge_group" else "HEAD^1"
+        # Renames must list both paths or a move from code to docs looks safe.
+        assert args == ("-c", "core.quotePath=true", "diff", "--no-renames", "--name-only", base, "HEAD", "--")
+        if git_exit:
+            raise subprocess.CalledProcessError(git_exit, args)
+        return "\n".join(files)
+
+    monkeypatch.setattr(docs_scope, "git", git)
+    full, rust = docs_scope.rust_scope({"EVENT_NAME": event, "HEAD_REF": head_ref,
+                                       "MERGE_GROUP_BASE_REF": base_ref})
+    return [f"full={str(full).lower()}", f"rust={str(rust).lower()}"]
 
 
 DOCS_ONLY_CHANGES = [
@@ -814,39 +809,39 @@ CODE_CHANGES = [
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", DOCS_ONLY_CHANGES)
-def test_scope_skips_a_documentation_only_pull_request(tmp_path, files, event):
-    assert run_scope(tmp_path, event, files) == ["full=true", "rust=false"]
+def test_scope_skips_a_documentation_only_pull_request(monkeypatch, files, event):
+    assert run_scope(monkeypatch, event, files) == ["full=true", "rust=false"]
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", CODE_CHANGES)
-def test_scope_runs_everything_for_any_other_change(tmp_path, files, event):
-    assert run_scope(tmp_path, event, files) == ["full=true", "rust=true"]
+def test_scope_runs_everything_for_any_other_change(monkeypatch, files, event):
+    assert run_scope(monkeypatch, event, files) == ["full=true", "rust=true"]
 
 
-def test_scope_runs_everything_for_a_mixed_merge_group(tmp_path):
+def test_scope_runs_everything_for_a_mixed_merge_group(monkeypatch):
     # A docs PR and a code PR queued together: the group is not docs-only.
     group = ["CLAUDE.md", "docs/guide/configuration.md", "rust/daemon/src/main.rs"]
-    assert run_scope(tmp_path, "merge_group", group) == ["full=true", "rust=true"]
+    assert run_scope(monkeypatch, "merge_group", group) == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("base_ref, fetch_exit", [
     ("", 0), ("master", 0), ("refs/heads/topic", 0), ("refs/heads/master2", 0),
     ("REFS/HEADS/MASTER", 0), ("refs/heads/master", 128)])
-def test_scope_runs_everything_without_a_fetched_master_tip(tmp_path, base_ref, fetch_exit):
-    assert run_scope(tmp_path, "merge_group", ["CLAUDE.md"], base_ref=base_ref,
+def test_scope_runs_everything_without_a_fetched_master_tip(monkeypatch, base_ref, fetch_exit):
+    assert run_scope(monkeypatch, "merge_group", ["CLAUDE.md"], base_ref=base_ref,
                      fetch_exit=fetch_exit) == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
-def test_scope_never_skips_outside_pull_requests(tmp_path, event):
-    assert run_scope(tmp_path, event, ["CLAUDE.md"]) == ["full=true", "rust=true"]
+def test_scope_never_skips_without_a_recognized_change(monkeypatch, event):
+    assert run_scope(monkeypatch, event, ["CLAUDE.md"]) == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files, git_exit", [([], 0), (["CLAUDE.md"], 128)])
-def test_scope_runs_everything_on_an_empty_or_unreadable_diff(tmp_path, files, git_exit, event):
-    assert run_scope(tmp_path, event, files, git_exit) == ["full=true", "rust=true"]
+def test_scope_runs_everything_on_an_empty_or_unreadable_diff(monkeypatch, files, git_exit, event):
+    assert run_scope(monkeypatch, event, files, git_exit) == ["full=true", "rust=true"]
 
 
 # Ordinary pull requests skip the candidate build and the parity matrix (their
@@ -859,40 +854,40 @@ ORDINARY_REFS = ["claude/some-change", "fix/x", "integrate", "integrated/x",
 @pytest.mark.parametrize("files, rust", [(["rust/daemon/src/main.rs"], "true"),
                                          (["pseudolife_memory/service.py"], "true"),
                                          (["CLAUDE.md"], "false")])
-def test_scope_marks_an_ordinary_pull_request_not_full(tmp_path, head_ref, files, rust):
+def test_scope_marks_an_ordinary_pull_request_not_full(monkeypatch, head_ref, files, rust):
     # `rust` is still classified by the diff, so the Rust job runs for code.
-    assert run_scope(tmp_path, "pull_request", files, head_ref=head_ref) == ["full=false", f"rust={rust}"]
+    assert run_scope(monkeypatch, "pull_request", files, head_ref=head_ref) == ["full=false", f"rust={rust}"]
 
 
 @pytest.mark.parametrize("ci_input", [".github/workflows/rust.yml", ".github/workflows/ci.yml",
                                       "pyproject.toml", "ops/requirements.lock.txt",
                                       "rust/Cargo.lock", "frontend/package-lock.json",
                                       "rust/rust-toolchain.toml"])
-def test_scope_keeps_an_ordinary_pull_request_changing_ci_inputs_fast(tmp_path, ci_input):
+def test_scope_keeps_an_ordinary_pull_request_changing_ci_inputs_fast(monkeypatch, ci_input):
     # Only batches spend the heavy lanes (maintainer, 2026-10-29). A workflow
     # or dependency edit runs its full lanes on its batch's head, under the
     # edited workflow, before it can reach master.
-    assert run_scope(tmp_path, "pull_request", ["rust/daemon/src/main.rs", ci_input],
+    assert run_scope(monkeypatch, "pull_request", ["rust/daemon/src/main.rs", ci_input],
                      head_ref="claude/some-change") == ["full=false", "rust=true"]
 
 
 @pytest.mark.parametrize("files, git_exit", [([], 0), (["rust/daemon/src/main.rs"], 128)])
-def test_scope_keeps_an_ordinary_pull_request_with_an_unreadable_diff_full(tmp_path, files,
+def test_scope_keeps_an_ordinary_pull_request_with_an_unreadable_diff_full(monkeypatch, files,
                                                                           git_exit):
-    assert run_scope(tmp_path, "pull_request", files, git_exit,
+    assert run_scope(monkeypatch, "pull_request", files, git_exit,
                      head_ref="claude/some-change") == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("head_ref", [BATCH_REF, "integrate/2026-10-07-rust-modes", ""])
-def test_scope_runs_everything_for_a_batch_or_unnamed_pull_request(tmp_path, head_ref):
+def test_scope_runs_everything_for_a_batch_or_unnamed_pull_request(monkeypatch, head_ref):
     # An empty head ref (Actions did not supply one) fails safe to full.
-    assert run_scope(tmp_path, "pull_request", ["rust/daemon/src/main.rs"],
+    assert run_scope(monkeypatch, "pull_request", ["rust/daemon/src/main.rs"],
                      head_ref=head_ref) == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("event", ["merge_group", "push", "schedule", "workflow_dispatch"])
-def test_scope_reads_the_head_ref_only_for_pull_requests(tmp_path, event):
-    assert run_scope(tmp_path, event, ["rust/daemon/src/main.rs"],
+def test_scope_reads_the_head_ref_only_for_pull_requests(monkeypatch, event):
+    assert run_scope(monkeypatch, event, ["rust/daemon/src/main.rs"],
                      head_ref="claude/some-change") == ["full=true", "rust=true"]
 
 

@@ -65,6 +65,7 @@
 # nothing). A lane the batch skipped runs, except that a Rust-only batch's
 # push skips the Python lanes too since the Python freeze (scope, below).
 # The nightly stays the full backstop; no required check reads a push run.
+# A direct documentation-only push also runs only the fast lanes and guards.
 #
 # Merge queue (docs/specs/2026-10-19-merge-queue.md): `merge_group` runs the
 # same jobs under the same check names, so the ruleset's required `test` check
@@ -173,6 +174,14 @@ jobs:
         # and the nightly runs the lanes. A lane the batch passed is covered.
         run: python3 -m ops.ci_push_passed --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT" --not-if-job-passed guards
 
+      - name: Check for a direct documentation-only master push
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          scope=$(python3 -m rust.ci.docs_scope ci) || scope=unknown
+          printf 'DOCS_PUSH_SCOPE=%s\n' "$scope" >> "$GITHUB_ENV"
+
       - name: Classify the change
         id: scope
         env:
@@ -183,6 +192,11 @@ jobs:
           WEEKLY_FROZEN: ${{ steps.weekly.outputs.frozen }}
         shell: bash
         run: |
+          case "$EVENT_NAME:${DOCS_PUSH_SCOPE:-}" in
+            push:docs) echo "python=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            push:unknown) echo "python=true" >> "$GITHUB_OUTPUT"
+                          echo "include_frozen=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
           case "$EVENT_NAME" in
             pull_request) base=HEAD^1 ;;
             # A master push is classified by the merge it pushes (its first
