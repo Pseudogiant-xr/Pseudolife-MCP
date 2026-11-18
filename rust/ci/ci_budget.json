@@ -151,10 +151,10 @@
   "ci.yml": {
     "limits": {
       "jobs": 7,
-      "runner_minutes": 96,
+      "runner_minutes": 97,
       "longest_job_minutes": 41,
       "critical_path_minutes": 41,
-      "why": "2026-11-14 (issue #1408): re-measured on master push 43456549451 and batches 43495728956 and 43476091008, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run). The test job grew from 22.4 to 34.0 minutes (27.1-37.3 across those runs and batch 43525635914, whose first attempt the 35-minute pytest bound killed), so the runner-minute, longest-job and critical-path limits are about 10% above the slowest: 87.1 -> 96, 37.3 -> 41, scope -> test 37.5 -> 41. What they buy: a suite as slow as today's finishes instead of costing a batch cycle. 2026-11-14 (the Python freeze): test-lite-linux, the whole suite on embedded PostgreSQL, left with the lite tier, so the job limit falls to 7; the minute limits stay until the first two batches that collect only the live test files are measured."
+      "why": "2026-11-14 (issue #1408): re-measured on master push 43456549451 and batches 43495728956 and 43476091008, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run). The test job grew from 22.4 to 34.0 minutes (27.1-37.3 across those runs and batch 43525635914, whose first attempt the 35-minute pytest bound killed), so the runner-minute, longest-job and critical-path limits are about 10% above the slowest: 87.1 -> 96, 37.3 -> 41, scope -> test 37.5 -> 41. What they buy: a suite as slow as today's finishes instead of costing a batch cycle. 2026-11-14 (the Python freeze): test-lite-linux, the whole suite on embedded PostgreSQL, left with the lite tier, so the job limit falls to 7; the minute limits stay until the first two batches that collect only the live test files are measured. 2026-11-18: raise the runner-minute limit from 96 to 97 to cover the 96.6-minute sum after pricing Windows lite at 29.6 minutes from its two latest successful batches. The added allowance accounts for work those runs already performed."
     },
     "pip_no_compile": false,
     "needs_without_data": {},
@@ -179,8 +179,8 @@
         "estimate": "2026-11-14: the 34.0 measured (#1557) plus 1.2 for building the native client the installer tests run, from the steps' times in rust.yml's ordinary PR precheck jobs, which ran the same toolchain, cache and `cargo build --locked -p pseudolife-stdio -j 4` (runs 43513352894, 43516792342, 2026-11-13): toolchain 0.1, cache restore 0.2-0.3, build 0.4-0.9 on ubuntu-latest."
       },
       "test-lite-windows": {
-        "minutes": 27.1,
-        "estimate": "2026-11-18: retain the prior 24.1 min, based on hosted Windows stress run 44026738823 at 6604486a1 (20 first attempts: median 179.5 s, maximum 229 s) and the five environment/junction cases' 68.00 s on the Windows dev VM. Add 3.0 min for the opt-in database turn, fresh-environment cleanup and unittest selection cases: a 23-case native probe at 8bed07f4c took 117.10 s in normal TEMP and 113.78 s under real 8.3 TEMP. Charge that entire probe, including its pre-existing passing-services case, and reserve another 62.90 s for the remaining isolation/refusal cases and hosted overhead. The added policy/selection tests are in-process. No setup, matrix, job-count or limit increase; re-measure the complete lite job on its next batch."
+        "minutes": 29.6,
+        "estimate": "2026-11-18: rounded median of the two latest successful batch jobs (44235130748 at 29m35s and 44249447299 at 29m31s). Both attempts of 44273357010 hit the 30-minute limit before the 1,784-test selection finished, with 1,732 and 1,664 passes and 23 skips each. Native build steps took 2m53s and 3m07s, up to about two minutes over a warm build, because the restored cache lacked aws-lc-sys compiled with the new AWS_LC_SYS_NO_JITTER_ENTROPY setting. The full duration on that head is over 30 minutes and remains unmeasured. Re-measure from successful batches with the 40-minute timeout."
       },
       "test-lite-macos": {
         "minutes": 21.3,

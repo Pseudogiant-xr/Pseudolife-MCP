@@ -88,7 +88,7 @@ function Get-FreeBytes([string] $path) {
 }
 
 if ($Head -notmatch '^[0-9a-f]{40}$' -or $Base -notmatch '^[0-9a-f]{40}$') { Stop-Check "the head and base must be full commit ids" }
-if ($Ref -notmatch '^refs/heads/integrate/[0-9A-Za-z._-]+$') { Stop-Check "the bundle's ref must be an integrate/* branch, not '$Ref'" }
+if ($Ref -cnotmatch '^refs/heads/(integrate|stacked)/[0-9A-Za-z._-]+$') { Stop-Check "the bundle's ref must be an integrate/* branch or a stacked/* branch, not '$Ref'" }
 if ($Nonce -and $Nonce -notmatch '^[0-9a-f]{16,64}$') { Stop-Check "the nonce must be hex" }
 if (-not (Test-Path -LiteralPath (Join-Path $Repo '.git'))) { Stop-Check "no git clone at the configured repo= path" }
 # Beside the clone, whatever spelling repo= used (a trailing separator would

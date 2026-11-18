@@ -111,6 +111,17 @@ fn legacy_python_runtime_is_never_selected_or_deleted() {
     assert!(legacy.is_dir());
 }
 #[test]
+fn a_checkout_build_runs_in_the_checkout_so_cargo_reads_its_config() {
+    // `update -All` may start from any directory; Cargo reads the checkout's
+    // `.cargo/config.toml` (aws-lc without CPU-jitter entropy, #1688) only
+    // when it runs inside the checkout.
+    let repo = Path::new("checkout-root");
+    let command = install::checkout_build_command(Path::new("cargo"), repo, Path::new("scratch"));
+    assert_eq!(command.get_current_dir(), Some(repo));
+    let manifest = repo.join("rust/Cargo.toml");
+    assert!(command.get_args().any(|arg| arg == manifest.as_os_str()));
+}
+#[test]
 fn install_is_side_by_side_and_skips_incomplete_sequence() {
     let f = Fixture::new();
     let old = f.install("1.0.0");
