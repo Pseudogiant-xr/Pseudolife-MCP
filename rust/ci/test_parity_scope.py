@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 import parity_scope
-from rust.ci.docs_scope import documentation_only
+from rust.ci.docs_scope import documentation_only, push_docs_eligible
 from parity_scope import ALL, FLOOR, ROW_SUITES, SHARDS, SHIM_COMMANDS, SUITES, matrix, reached, select
 from test_workflow import CODE_CHANGES, DOCS_ONLY_CHANGES, W1C_SUITES
 
@@ -231,11 +231,20 @@ def test_code_matches_the_scope_job(files):
     "docs/x.PY", "docs/x.Sh", "docs/x.sql", "docs/x.ipynb", "docs/x.psd1",
     "docs/x.zsh", "docs/x.tsx", "docs/Makefile", "docs/Dockerfile",
     "Docs/x.md", "TESTS/a.md", "llms2.txt",
+])
+def test_docs_path_hardening_excludes_code_suffixes(path):
+    assert not parity_scope.is_docs(path)
+
+
+@pytest.mark.parametrize("path", [
     "README.md", "examples/CLAUDE.memory.md", "examples/hook-instructions.md",
     "examples/commands/dream.md", ".claude/skills/sample/SKILL.md",
+    "docs/dev/merge-batches.md", "docs/guide/configuration.md", "docs/specs/example.md",
+    "docs/atlas/atlas.json", "docs/images/diagram.svg", "docs/atlas/atlas.html",
 ])
 def test_fast_docs_paths_exclude_code_and_files_read_outside_the_guards(path):
-    assert not parity_scope.is_docs(path)
+    assert parity_scope.is_docs(path)
+    assert not push_docs_eligible(path)
 
 
 @pytest.mark.parametrize("files, push_docs, pr_docs", [

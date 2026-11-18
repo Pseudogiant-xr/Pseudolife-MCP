@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "e870c1b9a74bdfee",
+  "fingerprint": "93171525f727f997",
+  "reason": "The helper fingerprint changes for the docs suffix allowlist and compatibility proof. Master-admitted documentation paths in supported formats retain their existing parity selection; the reader exclusions apply only to master pushes. The compatibility test does a local Git comparison and short PowerShell probes in the existing eval shard. Templates, setup and runner count are unchanged."
+}

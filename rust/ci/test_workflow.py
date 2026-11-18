@@ -4,6 +4,7 @@ import argparse
 import copy
 from collections import Counter
 import json
+import os
 import re
 from pathlib import Path
 import shlex
@@ -761,13 +762,15 @@ def run_scope(monkeypatch, event, files, git_exit=0, base_ref="refs/heads/master
 
 
 DOCS_ONLY_CHANGES = [
-    ["docs/note.md"],
-    ["docs/i18n/README.source.md"],
-    ["docs/runbooks/note.MD", "llms.txt", "llms-full.txt"],
-    ["docs/images/diagram.PNG"],
+    ["CLAUDE.md"],
+    ["README.md", "CHANGELOG.md", "changelog.d/2026-10-17-x.md"],
+    ["docs/guide/configuration.md", "docs/atlas/atlas.json", "llms.txt", "llms-full.txt"],
+    ["examples/CLAUDE.memory.md", "frontend/README.md", "README.zh-CN.md"],
+    ["docs/images/diagram.svg"],
+    ["docs/runbooks/note.MD", "docs/images/diagram.PNG"],
     # The port's plan pages no Rust or parity job reads (parity_scope.RUST_PLAN_DOCS).
     ["rust/CUTOVER.md"],
-    ["rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md", "docs/note.md"],
+    ["rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md", "CLAUDE.md"],
 ]
 CODE_CHANGES = [
     ["CLAUDE.md", "rust/README.md"],
@@ -787,10 +790,6 @@ CODE_CHANGES = [
     ["docs/atlas/atlas.js"],
     ["docs/run.ps1"],
     ["docs/setup.sh"],
-    ["docs/atlas/atlas.json"],
-    ["docs/guide/configuration.md"],
-    ["docs/dev/merge-batches.md"],
-    ["docs/specs/example.md"],
     ["notes.txt"],
     ["src.md.py"],
     ["RUST/README.md"],
@@ -820,6 +819,58 @@ def test_scope_skips_a_documentation_only_pull_request(monkeypatch, files, event
 @pytest.mark.parametrize("files", CODE_CHANGES)
 def test_scope_runs_everything_for_any_other_change(monkeypatch, files, event):
     assert run_scope(monkeypatch, event, files) == ["full=true", "rust=true"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="baseline workflow comparison runs on Linux")
+def test_pr_and_batch_doc_selection_matches_master(tmp_path, monkeypatch):
+    from parity_scope import select
+    from pr_precheck import rows_for
+
+    paths = ["README.md", "docs/guide/configuration.md", "docs/dev/merge-batches.md",
+             "docs/specs/2026-10-19-merge-queue.md", "AGENTS.md", "CONTRIBUTING.md",
+             "examples/CLAUDE.memory.md", "examples/hook-instructions.md", "examples/commands/dream.md",
+             "docs/atlas/atlas.json", "docs/images/diagram.svg", "docs/images/diagram.png",
+             "docs/atlas/atlas.html", "llms.txt", "llms-full.txt", "rust/CUTOVER.md",
+             ".claude/skills/release-procedure/SKILL.md", "CHANGELOG.md", "changelog.d/note.md",
+             "docs/i18n/README.source.md"]
+    master = "5318cf0593484d15b8c32122c9689d13ebd680cc"
+
+    def source(path):
+        result = subprocess.run(["git", "show", f"{master}:{path}"], cwd=ROOT,
+                                capture_output=True, check=False)
+        if result.returncode:
+            pytest.skip("pinned master baseline is absent from this checkout")
+        return result.stdout
+
+    modules = tmp_path / "rust/ci"
+    modules.mkdir(parents=True)
+    for name in ("parity_scope.py", "pr_precheck.py"):
+        (modules / name).write_bytes(source(f"rust/ci/{name}"))
+    probe = ("import json,sys; from parity_scope import select; from pr_precheck import rows_for; "
+             "paths = json.load(sys.stdin); "
+             "print(json.dumps([[select('pull_request', [p])[0], rows_for(p, {})] for p in paths]))")
+    baseline = subprocess.check_output([sys.executable, "-c", probe], cwd=modules,
+                                       input=json.dumps(paths), text=True)
+    assert [[select("pull_request", [path])[0], list(rows_for(path, {}))] for path in paths] == json.loads(baseline)
+
+    old_scope = next(step["run"] for step in yaml.safe_load(source(".github/workflows/rust.yml"))
+                     ["jobs"]["scope"]["steps"] if step.get("id") == "scope")
+    fake_git = r'''
+function git {
+    $global:LASTEXITCODE = 0
+    if ($args[0] -ceq "diff") { ConvertFrom-Json $env:W59_SCOPE_PATHS }
+}
+'''
+    script = tmp_path / "master-scope.ps1"
+    script.write_text(fake_git + "\n" + old_scope, encoding="utf-8")
+    for event, ref in (("pull_request", "docs/topic"), ("pull_request", BATCH_REF), ("merge_group", "")):
+        env = dict(os.environ, EVENT_NAME=event, HEAD_REF=ref, MERGE_GROUP_BASE_REF="refs/heads/master",
+                   GITHUB_OUTPUT=str(tmp_path / "github-output"), W59_SCOPE_PATHS=json.dumps(paths))
+        baseline = subprocess.check_output(["pwsh", "-NoProfile", "-File", str(script)], env=env, text=True)
+        expected = [line for line in baseline.splitlines() if line.startswith(("full=", "rust="))]
+        assert expected == [f"full={str(ref != 'docs/topic').lower()}", "rust=false"]
+        for path in paths:
+            assert run_scope(monkeypatch, event, [path], head_ref=ref) == expected, path
 
 
 def test_scope_runs_everything_for_a_mixed_merge_group(monkeypatch):

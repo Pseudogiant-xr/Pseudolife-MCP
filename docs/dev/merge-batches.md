@@ -107,8 +107,8 @@ Each change waits for hosted CI once, on its batch:
   the push event's `before` and `after` trees. The same range covers the
   entire net change on a multi-commit push.
   A missing, empty or unreadable range, a force push, or an ambiguous
-  API result keeps the full lanes. The generated producer census is
-  eligible alongside docs on pull requests and merge groups only.
+  API result keeps the push lanes it had before this shortcut. The generated
+  producer census is eligible alongside docs on pull requests and merge groups only.
   Documentation can stale the census until the next batch regenerates
   it. Rust shim reports that drift in the push's Scope job summary.
   The nightly still runs the lanes skipped by this push.

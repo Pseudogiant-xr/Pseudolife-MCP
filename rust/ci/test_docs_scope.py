@@ -129,6 +129,9 @@ def ci_outputs(root, tmp_path, env, before, weekly=""):
     ("direct", "docs"),
     ("multiple-shallow", "docs"),
     ("rust-multiple-shallow", "other"),
+    ("rust-only-push", "other"),
+    ("rust-plan-api-failure", "unknown"),
+    ("rust-plan-docs", "docs"),
     ("python", "other"),
     ("workflow", "other"),
     ("census", "other"),
@@ -154,6 +157,11 @@ def ci_outputs(root, tmp_path, env, before, weekly=""):
 def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
     root, before, commit = repo
     paths = ["docs/example.md"]
+    if case == "rust-only-push":
+        paths = ["rust/first.rs"]
+    if case.startswith("rust-plan-"):
+        # A real plan path receives the legacy Rust-only verdict.
+        paths = [min(docs_scope.RUST_PLAN_DOCS)]
     mixed = {"python": "helper.py", "workflow": ".github/workflows/rust.yml",
              "census": "rust/producer-census.json"}
     if case in mixed:
@@ -235,7 +243,7 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
 
     def get(path):
         if path.endswith("/pulls"):
-            if case == "api-failure":
+            if case in ("api-failure", "rust-plan-api-failure"):
                 raise ci_batch_passed.ApiError("HTTP 503")
             if case == "merge-api-empty":
                 return []
@@ -265,15 +273,26 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
 
     fast = {"lock-resolve", "frontend"}
     python_checks = {"test", "test-lite-windows", "test-lite-macos"}
-    ci_expected = fast | ({"guards"} if expected == "docs" else python_checks)
+    rust_only = case in ("rust-only-push", "rust-plan-api-failure")
+    ci_expected = fast | ({"guards"} if expected == "docs" or rust_only else python_checks)
     if case == "batch-passed":
         ci_expected.remove("test")
     assert selected_lanes("ci.yml", CI_JOBS, "push", ci) == ci_expected
+    assert ci.get("rust_only") == ("true" if rust_only else None)
     assert selected_lanes("rust.yml", RUST_JOBS, "push", rust_outputs) == (
         set() if expected == "docs" else set(RUST_JOBS))
     assert reports == ([env] if expected == "docs" else [])
     if case in ("missing-shallow-base", "rust-multiple-shallow"):
         assert ci["include_frozen"] == "true"
+
+
+def test_rust_only_batch_pull_request_keeps_its_reader_guards(repo, tmp_path):
+    root, before, commit = repo
+    commit("rust/first.rs")
+    env = {"EVENT_NAME": "pull_request", "HEAD_REF": "integrate/fixture"}
+    ci, _ = ci_outputs(root, tmp_path, env, before)
+    assert ci == {"python": "false", "rust_only": "true"}
+    assert selected_lanes("ci.yml", CI_JOBS, "pull_request", ci) == {"guards", "lock-resolve", "frontend"}
 
 
 @pytest.mark.parametrize("weekly", ["", "true"])

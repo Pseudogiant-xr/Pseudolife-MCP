@@ -160,10 +160,6 @@ def rows_for(path: str, owners: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
         return ROWS
     if path.startswith("tests/"):
         return ROWS if parts[-1] == "__init__.py" or len(parts) > 1 and parts[1].removesuffix(".py") in harness_imports("tests") else ()
-    # CI can require the full Rust job for prose with other readers. The
-    # README and guide prose still do not feed the CLI golden rows.
-    if path == "README.md" or (path.startswith("docs/guide/") and PurePosixPath(path).suffix.lower() == ".md"):
-        return ()
     if is_docs(path) or path.startswith(("frontend/", "changelog.d/", ".github/")):
         return ()
     # Other production and deployment inputs may be consumed by a CLI row.

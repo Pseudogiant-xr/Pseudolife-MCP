@@ -5,18 +5,32 @@ import argparse
 from collections.abc import Iterable, Mapping
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
 
 from ops.ci_batch_passed import BATCH_PREFIX, MASTER, ApiError, github_get
 
-from .parity_scope import is_docs
+from .parity_scope import RUST_PLAN_DOCS, is_docs
 
 ROOT = Path(__file__).resolve().parents[2]
 CENSUS = "rust/producer-census.json"
 SHA = re.compile(r"[0-9a-f]{40}")
+PUSH_DOCS_SUFFIXES = frozenset({".md", ".png"})
+PUSH_DOCS_FULL_CI_DIRS = ("docs/dev/", "docs/guide/", "docs/specs/")
+
+
+def push_docs_eligible(path: str) -> bool:
+    """Check that the kept master-push jobs cover this document's readers."""
+    if not is_docs(path):
+        return False
+    if path in RUST_PLAN_DOCS or path in ("CLAUDE.md", "CHANGELOG.md", "llms.txt", "llms-full.txt"):
+        return True
+    if path.startswith("changelog.d/"):
+        return PurePosixPath(path).suffix == ".md"
+    return (path.startswith("docs/") and not path.lower().startswith(PUSH_DOCS_FULL_CI_DIRS)
+            and PurePosixPath(path).suffix.lower() in PUSH_DOCS_SUFFIXES)
 
 
 def documentation_only(paths: Iterable[str], *, allow_generated_census: bool = False) -> bool:
@@ -105,7 +119,7 @@ def push_scope(env: Mapping[str, str]) -> str:
         paths, regular = changed_paths(before, after)
         if not paths:
             raise ValueError("empty changed-file range")
-        if regular and documentation_only(paths) and is_direct_push(env, after):
+        if regular and all(map(push_docs_eligible, paths)) and is_direct_push(env, after):
             return "docs"
         return "other"
     except (ApiError, OSError, subprocess.SubprocessError, ValueError, KeyError, AttributeError) as error:

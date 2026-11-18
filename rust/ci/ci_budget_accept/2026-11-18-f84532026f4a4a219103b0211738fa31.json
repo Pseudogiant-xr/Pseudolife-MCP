@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "e870c1b9a74bdfee",
-  "fingerprint": "c675a4e140ce0e61",
-  "reason": "The path predicate changed, so the parity scope helper fingerprint changes. No templates, test steps or runner setup change inside the parity shards. A path with uncovered readers takes the existing coverage."
-}
