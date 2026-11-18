@@ -165,15 +165,20 @@ fn prepare_directory(root: &Path) -> Result<(), Fail> {
             state::private_dir(parent).map_err(|_| Fail::Tunnel(DIRECTORY))?;
         }
         #[cfg(unix)]
-        let created = {
+        {
             use std::os::unix::fs::DirBuilderExt;
-            fs::DirBuilder::new().mode(0o700).create(root)
-        };
-        #[cfg(windows)]
-        let created = crate::credentials::windows_security::create_dir_owner_only(root);
-        if created.is_err_and(|error| error.kind() != io::ErrorKind::AlreadyExists) {
-            return Err(Fail::Tunnel(DIRECTORY));
+            if fs::DirBuilder::new()
+                .mode(0o700)
+                .create(root)
+                .is_err_and(|error| error.kind() != io::ErrorKind::AlreadyExists)
+            {
+                return Err(Fail::Tunnel(DIRECTORY));
+            }
         }
+        // The Windows helper also sets ownership to the current user. The
+        // token's default owner can otherwise be the Administrators group.
+        #[cfg(windows)]
+        state::private_dir(root).map_err(|_| Fail::Tunnel(DIRECTORY))?;
     }
     check_directory(root)
 }

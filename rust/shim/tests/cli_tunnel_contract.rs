@@ -240,7 +240,12 @@ fn setup_saves_an_authenticated_private_profile_and_reuses_it_unchanged() {
     let home = setup_home();
     let daemon = common::Fixture::start();
     let output = setup_against(&home, &daemon.url, true);
-    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(output.stderr.is_empty());
     let path = home.path("tunnels/dot.profile.json");
     let saved = pseudolife_stdio::board::state::read(&path, 65536).unwrap();
