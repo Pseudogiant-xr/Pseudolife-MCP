@@ -180,7 +180,7 @@
       },
       "test-lite-windows": {
         "minutes": 29.6,
-        "estimate": "2026-11-18: rounded median of the two latest successful batch jobs (44235130748 at 29m35s and 44249447299 at 29m31s). Run 44273357010 was cancelled around 30 minutes after pytest printed its passing summary. The job now has a 40-minute timeout and identical steps. Re-measure from successful batches with that definition."
+        "estimate": "2026-11-18: rounded median of the two latest successful batch jobs (44235130748 at 29m35s and 44249447299 at 29m31s). Both attempts of 44273357010 hit the 30-minute limit before the 1,784-test selection finished, with 1,732 and 1,664 passes and 23 skips each. Native build steps took 2m53s and 3m07s, up to about two minutes over a warm build, because the restored cache lacked aws-lc-sys compiled with the new AWS_LC_SYS_NO_JITTER_ENTROPY setting. The full duration on that head is over 30 minutes and remains unmeasured. Re-measure from successful batches with the 40-minute timeout."
       },
       "test-lite-macos": {
         "minutes": 21.3,

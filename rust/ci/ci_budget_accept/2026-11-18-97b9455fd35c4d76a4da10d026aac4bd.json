@@ -4,5 +4,5 @@
   "job": "test-lite-windows",
   "before": "c00c23b8bbba9df4",
   "fingerprint": "edf7c89844208f89",
-  "reason": "Only the job timeout changes. The same steps ran in 29m35s and 29m31s on batches 44235130748 and 44249447299. Batch 44273357010 was cancelled after pytest printed its passing summary. The 40-minute cutoff gives about 10 minutes of headroom, and the 29.6-minute estimate comes from the two completed runs."
+  "reason": "Only the job timeout changes. The 29.6-minute estimate comes from successful batches 44235130748 and 44249447299. Both attempts of 44273357010 reached 30 minutes before all 1,784 tests had run (1,732 and 1,664 passes, 23 skips each). The restored Rust cache lacked aws-lc-sys compiled with AWS_LC_SYS_NO_JITTER_ENTROPY, adding up to about two minutes of native build time versus a warm run. The new timeout allows ten minutes beyond the old cutoff while the full duration at that head remains unmeasured."
 }

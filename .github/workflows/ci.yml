@@ -578,10 +578,14 @@ jobs:
     if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-windows') }}
     runs-on: windows-latest
     # No embedding model is loaded. On 2026-11-18 batches #1735 and #1737
-    # finished in 29m35s and 29m31s. Batch #1742 timed out just after pytest
-    # reported 1,732 passes, with 6m24s of setup including a 2m53s native
-    # build. Allow about 10 minutes above the observed wall time for slower
-    # runners, cache rebuilds and job cleanup.
+    # finished in 29m35s and 29m31s. Both #1742 attempts hit 30 minutes
+    # before the 1,784-test selection finished (1,732 and 1,664 passed,
+    # 23 skipped each). The restored cache lacked the aws-lc-sys build
+    # made with AWS_LC_SYS_NO_JITTER_ENTROPY in .cargo/config.toml. Native
+    # builds took 2m53s and 3m07s, up to about 2 minutes over a warm build.
+    # The time to finish that head is still unknown. Allow 10 minutes
+    # beyond the old cutoff for the run, including pytest's 600s
+    # faulthandler dump if a test hangs late.
     timeout-minutes: 40
 
     steps:
