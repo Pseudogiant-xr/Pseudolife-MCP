@@ -9,6 +9,9 @@ and process lifecycle belong with their respective owners.
 HTTP readiness, and `schema.py` executes the daemon's committed schema plan.
 `bank_fixture.py` uses that plan and seeds the built-in relations and writer
 epoch for the dream, graph and principal harnesses.
+`import_blocker.py` lets the harness tests reload cached modules and reject
+imports of the frozen Python package. The principal parity tests also collect
+the readiness and cold-import controls in `test_readiness.py`.
 The schema executor contains no DDL and imports no product code. It runs in
 one transaction, or a savepoint inside a caller-owned transaction, and refuses
 unknown operations. On Linux the `cli-startup` schema step compares its complete

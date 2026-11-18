@@ -118,10 +118,6 @@
       "kind": "unit",
       "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
     },
-    "rust/daemon/harness/test_principal_fixtures.py": {
-      "kind": "unit",
-      "reason": "The shared principal and Console fixture controls mock the connection and run through test_principals_settle in parity."
-    },
     "rust/daemon/harness/test_principals_settle.py": {
       "kind": "unit",
       "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
@@ -168,10 +164,6 @@
     "rust/daemon/harness/test_w2d_seed_base.py": {
       "kind": "unit",
       "reason": "Uses the test PostgreSQL login but no built Rust candidate; the gate requires databases."
-    },
-    "rust/harness_support/test_readiness.py": {
-      "kind": "unit",
-      "reason": "Cold import controls block the Python package without spawning a process or opening a database."
     }
   }
 }

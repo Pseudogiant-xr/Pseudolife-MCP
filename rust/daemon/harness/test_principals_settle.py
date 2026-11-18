@@ -15,6 +15,16 @@ import pytest
 import daemons
 import run
 from principal_fixtures import env_auth, environment_principal
+from rust.harness_support.test_readiness import (  # noqa: F401
+    test_cold_import_blocker_rejects_product_and_evicts_cached_fixture,
+    test_cold_import_restores_namespace_binding,
+    test_harness_imports_without_product_package,
+    test_read_health_bypasses_proxies_and_preserves_http_errors,
+    test_ready_requires_success_and_true,
+    test_stage_completion_is_distinct_from_readiness,
+    test_timeout_diagnostics_distinguish_unanswered_malformed_and_pending,
+    test_transport_failure_propagates_to_the_harness,
+)
 
 # Collected by the existing security-admission step, without a workflow change.
 from test_principal_fixtures import (  # noqa: F401

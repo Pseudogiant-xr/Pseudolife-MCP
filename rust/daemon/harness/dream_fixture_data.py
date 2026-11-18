@@ -1,4 +1,4 @@
-"""Generated fixture data; do not edit by hand.
+"""Baseline recovery data for the dream-cursor harness.
 
 Source commit: 7f2e6eacf77343e1d446ecbff38eee9447afbce6.
 A one-time capture compared full catalogs and table rows after fixture seeding.
