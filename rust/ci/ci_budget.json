@@ -26,8 +26,7 @@
     ],
     "jobs": {
       "Scope": {
-        "minutes": 0.2,
-        "estimate": "Docs-only master push with the report-only producer census scan: not re-measured. The stored figure is from the existing scope job."
+        "minutes": 0.2
       },
       "Rust / ubuntu-latest": {
         "minutes": 16.2
