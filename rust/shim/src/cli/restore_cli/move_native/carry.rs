@@ -2,7 +2,7 @@
 //! settings. Only which settings are supplied crosses SSH. Compose is
 //! rendered with fixture values on the target; it never receives a source
 //! bearer from a dry run.
-use std::{collections::BTreeMap, fs, path::Path, time::Duration};
+use std::{collections::BTreeMap, path::Path, time::Duration};
 
 use serde_json::Value;
 
@@ -53,6 +53,18 @@ fn source_values(container: &Value) -> [String; 4] {
 }
 
 pub(super) fn source(docker: &mut impl Docker, facts: &Facts) -> Result<[bool; 4], String> {
+    source_with_token(docker, facts, || {
+        crate::credentials::CredentialProvider::from_environment()
+            .and_then(|provider| provider.snapshot())
+            .map(|snapshot| snapshot.token().map(str::to_owned))
+    })
+}
+
+pub(super) fn source_with_token(
+    docker: &mut impl Docker,
+    facts: &Facts,
+    credential: impl FnOnce() -> Result<Option<String>, crate::credentials::CredentialError>,
+) -> Result<[bool; 4], String> {
     if facts.auth != Some(true) {
         return Err("the source does not report bearer authentication; configure a bearer on the source daemon, then retry move --dry-run".into());
     }
@@ -65,13 +77,10 @@ pub(super) fn source(docker: &mut impl Docker, facts: &Facts) -> Result<[bool; 4
     }
     const BEARER: &str = "the stored-principal source needs an active bearer; set PSEUDOLIFE_MCP_TOKEN_FILE to its private file, then retry move --dry-run";
     use sha2::{Digest, Sha256};
-    let token = crate::credentials::CredentialProvider::from_environment()
-        .and_then(|provider| provider.snapshot())
-        .map_err(|_| BEARER)?;
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(token.token().ok_or(BEARER)?.as_bytes())
-    );
+    let token = credential()
+        .map_err(|_| "the source client could not read its configured bearer; repair the credential settings and retry move --dry-run")?
+        .ok_or(BEARER)?;
+    let digest = format!("{:x}", Sha256::digest(token.as_bytes()));
     let mut bank = super::super::bank::Bank {
         docker,
         pg: facts.pg.clone(),
@@ -86,7 +95,7 @@ pub(super) fn source(docker: &mut impl Docker, facts: &Facts) -> Result<[bool; 4
         .lines()
         .any(|hash| hash == digest)
         .then_some(shape)
-        .ok_or_else(|| BEARER.into())
+        .ok_or_else(|| "the configured bearer does not match an active source principal; select a bearer for an active principal and retry move --dry-run".into())
 }
 
 fn has_mapped_bearer(raw: &str) -> bool {
@@ -113,27 +122,30 @@ fn shape(values: &[String; 4]) -> Result<[bool; 4], String> {
 }
 
 fn private_env(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        use rustix::fs::{Mode, OFlags};
+        use std::os::unix::fs::MetadataExt;
         crate::private_path::check_ancestors(path).map_err(|_| ENV)?;
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .append(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(path)
-            .map_err(|_| ENV)?;
-        let meta = file.metadata().map_err(|_| ENV)?;
+        // O_PATH obtains an identity for fstat without opening the file for
+        // I/O, even if the path unexpectedly names a FIFO or device.
+        let fd = rustix::fs::open(
+            path,
+            OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| ENV)?;
+        let meta = std::fs::File::from(fd).metadata().map_err(|_| ENV)?;
         if meta.is_file()
-            && meta.mode() & 0o077 == 0
+            && meta.mode() & 0o677 == 0o600
             && meta.nlink() == 1
             && meta.uid() == rustix::process::geteuid().as_raw()
         {
             return Ok(());
         }
     }
-    #[cfg(not(unix))]
-    let _ = (path, fs::OpenOptions::new());
+    #[cfg(not(target_os = "linux"))]
+    let _ = path;
     Err(ENV.into())
 }
 
@@ -277,6 +289,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn target_data_mount_must_name_the_installed_volume() {
+        let config = serde_json::json!({
+            "services": {"daemon": {"volumes": [{"type":"volume","target":"/data","source":"data"}]}},
+            "volumes": {"data": {"name":"fixture-data"}}
+        });
+        let matches = |name: &str| {
+            mounts_match(
+                &config,
+                "daemon",
+                &serde_json::json!({
+                    "Mounts": [{"Type":"volume","Destination":"/data","Name":name}]
+                }),
+                |path| path == "/data",
+            )
+        };
+        assert!(matches("fixture-data"));
+        assert!(!matches("other-data"));
+    }
+
+    #[test]
     fn a_mapped_bearer_requires_a_token_and_a_non_reserved_principal() {
         assert!(has_mapped_bearer("left:right:fixture"));
         assert!(!has_mapped_bearer(
@@ -297,10 +329,13 @@ mod tests {
         assert!(shape(&values).is_err_and(|why| !why.contains("fixture'unsafe")));
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn target_environment_must_be_private_and_unaliased() {
-        use std::os::unix::fs::{PermissionsExt, symlink};
+        use std::{
+            fs,
+            os::unix::fs::{PermissionsExt, symlink},
+        };
         let dir = std::env::temp_dir().join(format!("pl-carry-{}", uuid::Uuid::new_v4()));
         crate::board::state::private_dir(&dir).unwrap();
         let env = dir.join("env");
@@ -314,6 +349,8 @@ mod tests {
         assert!(private_env(&env).is_err());
         fs::remove_file(&alias).unwrap();
         fs::set_permissions(&env, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(private_env(&env).is_err());
+        fs::set_permissions(&env, fs::Permissions::from_mode(0o400)).unwrap();
         assert!(private_env(&env).is_err());
         fs::remove_file(&env).unwrap();
         fs::remove_dir(&dir).unwrap();

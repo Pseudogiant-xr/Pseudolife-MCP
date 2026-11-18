@@ -78,9 +78,6 @@ trait World {
     fn local_health(&mut self, url: &str) -> Option<Value>;
     /// `GET <url>` from this host, http or https, no redirects.
     fn reach(&mut self, url: &str) -> Result<Value, String>;
-    fn identity_shape(&mut self, source: &Facts) -> Result<[bool; 4], String> {
-        carry::source(self.docker()?, source)
-    }
 }
 
 /// What a dry run found.
@@ -189,11 +186,13 @@ fn last_line(bytes: &[u8]) -> String {
         .to_owned()
 }
 
+const CARRY_CHECK_UNAVAILABLE: &str = "the target client cannot check carried identities; update the target client to the same native release, then retry move --dry-run";
+
 fn check_carry<W: World>(world: &mut W, request: &Request, source: &Facts) -> Result<bool, String> {
     if request.no_keep_tokens {
         return Ok(false);
     }
-    let populated = world.identity_shape(source)?;
+    let populated = carry::source(world.docker()?, source)?;
     let check = protocol::Request {
         protocol: protocol::PROTOCOL,
         move_id: String::new(),
@@ -218,9 +217,10 @@ fn check_carry<W: World>(world: &mut W, request: &Request, source: &Facts) -> Re
         .filter(|answer| answer.protocol == protocol::PROTOCOL);
     match answer {
         Some(answer) if answer.ok => Ok(true),
-        Some(answer) => Err(answer.error),
+        Some(answer) if !answer.error.trim().is_empty() => Err(answer.error),
+        Some(_) => Err(CARRY_CHECK_UNAVAILABLE.into()),
         _ if ran.lost() => Err("SSH lost the target during the identity check; restore SSH access and retry move --dry-run".into()),
-        _ => Err("the target client cannot check carried identities; update it to the same native client release, then retry move --dry-run".into()),
+        _ => Err(CARRY_CHECK_UNAVAILABLE.into()),
     }
 }
 
@@ -332,8 +332,12 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     if reply.protocol != PROTOCOL {
         return Err(skew(&reply.version, reply.protocol));
     }
-    if !request.no_keep_tokens && reply.supports_carry != Some(true) {
-        return Err("the target client cannot check carried identities; update it to the same native client release on the target's Linux Docker host, then retry move --dry-run".into());
+    if !request.no_keep_tokens {
+        match reply.supports_carry {
+            Some(true) => {}
+            Some(false) => return Err("checking carried identities requires a Linux Docker target; pass --no-keep-tokens to check a move using the target's bearer settings".into()),
+            None => return Err(CARRY_CHECK_UNAVAILABLE.into()),
+        }
     }
     if !reply.refusals.is_empty() {
         return Err(reply.refusals.join("; "));
@@ -397,6 +401,8 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     })
 }
 
+const CARRY_RESULT: &str = "Carried bearer settings were verified. Native handover of these settings is pending. To run the move with this client, use an authenticated target, remove --dry-run, and add --no-keep-tokens.";
+
 /// The plan as text.
 fn render(plan: &Plan, dry_run: bool) -> String {
     let s = &plan.source;
@@ -444,6 +450,11 @@ fn render(plan: &Plan, dry_run: bool) -> String {
         plan.target.work_dir,
         sized(plan.target.free_bytes)
     ));
+    if plan.checked_carry {
+        out.push_str(CARRY_RESULT);
+        out.push('\n');
+        return out;
+    }
     out.push_str(if dry_run {
         "The move would, in this order:\n"
     } else {
@@ -465,10 +476,7 @@ fn render(plan: &Plan, dry_run: bool) -> String {
 /// The steps a move would take, as the plan prints them.
 fn steps(plan: &Plan) -> Vec<String> {
     if plan.checked_carry {
-        return vec![
-            "the source has bearer authentication and the target's installed Compose files resolve the required identity settings".into(),
-            "carrying identities is available for preflight only; to run a move with this client, use --no-keep-tokens and an authenticated target".into(),
-        ];
+        return Vec::new();
     }
     let t = plan.target.facts.clone().unwrap_or_default();
     let timer = match plan.target.update_timer.as_str() {
@@ -533,7 +541,7 @@ fn steps(plan: &Plan) -> Vec<String> {
 
 /// The plan as one JSON document.
 fn document(plan: &Plan) -> Value {
-    json!({
+    let mut value = json!({
         "dry_run": true,
         "changed": false,
         "to": plan.to,
@@ -542,7 +550,11 @@ fn document(plan: &Plan) -> Value {
         "source": plan.source,
         "target": plan.target,
         "steps": steps(plan),
-    })
+    });
+    if plan.checked_carry {
+        value["carried_identities"] = json!(CARRY_RESULT);
+    }
+    value
 }
 
 /// The real hosts.
