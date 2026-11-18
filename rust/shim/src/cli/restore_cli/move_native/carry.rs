@@ -192,7 +192,7 @@ pub(super) fn target(docker: &mut docker::Real, shape: [bool; 4]) -> Result<(), 
         let (code, output) = seams::run_cli(&argv, Some(env), 120, false);
         (code == 0).then_some(output).ok_or(STACK)
     };
-    let hashes = run(&["config", "--hash"], &env)?;
+    let hashes = run(&["config", "--hash", "*"], &env)?;
     for (service, labels) in [(DAEMON_SERVICE, labels), (PG_SERVICE, pg_labels)] {
         let hash = labels["com.docker.compose.config-hash"]
             .as_str()
