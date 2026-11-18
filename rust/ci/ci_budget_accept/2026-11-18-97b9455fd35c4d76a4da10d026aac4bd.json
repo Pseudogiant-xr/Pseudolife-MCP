@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "c00c23b8bbba9df4",
+  "fingerprint": "edf7c89844208f89",
+  "reason": "Only the job timeout changes. The same steps ran in 29m35s and 29m31s on batches 44235130748 and 44249447299. Batch 44273357010 was cancelled after pytest printed its passing summary. The 40-minute cutoff gives about 10 minutes of headroom, and the 29.6-minute estimate comes from the two completed runs."
+}
