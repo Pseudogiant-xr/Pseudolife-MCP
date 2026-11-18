@@ -5,15 +5,6 @@
 use super::browser::NO_DISPLAY;
 use super::*;
 
-fn context() -> Context {
-    Context {
-        columns_80: true,
-        colour_stdout: false,
-        colour_stderr: false,
-        utf8_argv: true,
-    }
-}
-
 fn argv(items: &[&str]) -> Vec<String> {
     items.iter().map(|item| (*item).to_owned()).collect()
 }
@@ -70,19 +61,10 @@ fn origins_normalize_as_the_oracle_does() {
         ("//h:1", None),
         ("", None),
     ] {
-        assert_eq!(
-            normalize_origin(value).unwrap().as_deref(),
-            want,
-            "{value:?}"
-        );
+        assert_eq!(normalize_origin(value).as_deref(), want, "{value:?}");
     }
-    assert!(
-        normalize_origin(&format!("http://{}", "a".repeat(250)))
-            .unwrap()
-            .is_none()
-    );
-    // Non-ASCII reaches urlsplit's NFKC checks: not reproduced.
-    assert!(normalize_origin("http://h:\u{ff11}").is_err());
+    assert!(normalize_origin(&format!("http://{}", "a".repeat(250))).is_none());
+    assert!(normalize_origin("http://h:\u{ff11}").is_none());
 }
 
 #[test]
@@ -118,7 +100,7 @@ fn argument_answers_match_the_oracle() {
             &["--json=1"],
             Out::stderr(
                 format!(
-                    "{usage}pseudolife-mcp console: error: argument --json: ignored explicit argument '1'\n"
+                    "{usage}pseudolife-mcp console: error: argument --json: pass this flag without a value\n"
                 ),
                 2,
             ),
@@ -126,7 +108,7 @@ fn argument_answers_match_the_oracle() {
         (
             &["zz"],
             Out::stderr(
-                format!("{usage}pseudolife-mcp console: error: unrecognized arguments: zz\n"),
+                format!("{usage}pseudolife-mcp console: error: unrecognized argument; see --help for supported options\n"),
                 2,
             ),
         ),
@@ -140,47 +122,23 @@ fn argument_answers_match_the_oracle() {
         (
             &["--no-open", "--to", "Bad"],
             Out::stderr(
-                "--to takes a Console page id such as board, not 'Bad'\n".into(),
+                "--to takes a Console page id such as board; use lowercase letters, digits or hyphens\n".into(),
                 2,
             ),
         ),
         (&["-h"], Out::stdout(args::HELP.into(), 0)),
     ];
     for (items, want) in cases {
-        match plan(&argv(items), &context()) {
-            Ok(Ok(out)) => assert_eq!(out, want, "{items:?}"),
+        match plan(&argv(items)) {
+            Err(out) => assert_eq!(out, want, "{items:?}"),
             _ => panic!("{items:?} did not answer"),
         }
     }
 }
 
 #[test]
-fn help_and_usage_need_the_reproduced_width_and_no_colour() {
-    for (columns_80, colour) in [(false, false), (true, true)] {
-        let context = Context {
-            columns_80,
-            colour_stdout: colour,
-            colour_stderr: colour,
-            utf8_argv: true,
-        };
-        assert!(plan(&argv(&["--help"]), &context).is_err());
-        assert!(plan(&argv(&["--to"]), &context).is_err());
-        // main's own checks print plainly.
-        assert!(matches!(
-            plan(&argv(&["--list", "--revoke", "x"]), &context),
-            Ok(Ok(_))
-        ));
-    }
-    let latin = Context {
-        utf8_argv: false,
-        ..context()
-    };
-    assert!(plan(&argv(&["--revoke", "é"]), &latin).is_err());
-}
-
-#[test]
 fn every_sign_in_shape_makes_its_call() {
-    let calls: [(&[&str], &str); 8] = [
+    let calls: [(&[&str], &str); 9] = [
         (&[], "link open"),
         (&["--to", "board"], "link board open"),
         (&["--json"], "link open json"),
@@ -189,10 +147,11 @@ fn every_sign_in_shape_makes_its_call() {
         (&["--no-open", "--unless-signed-in"], "link unless"),
         (&["--unless-signed-in"], "link open unless"),
         (&["--revoke", "s-1", "--to", "board"], "revoke s-1"),
+        (&["--revoke=s-é", "--"], "revoke s-é"),
     ];
     for (items, want) in calls {
-        let (call, json) = match plan(&argv(items), &context()) {
-            Ok(Err(call)) => call,
+        let (call, json) = match plan(&argv(items)) {
+            Ok(call) => call,
             _ => panic!("{items:?} made no call"),
         };
         let mut shown = match call {
@@ -217,8 +176,8 @@ fn every_sign_in_shape_makes_its_call() {
         }
         assert_eq!(shown, want, "{items:?}");
     }
-    let (call, _) = match plan(&argv(&["--list", "--unless-signed-in"]), &context()) {
-        Ok(Err(call)) => call,
+    let (call, _) = match plan(&argv(&["--list", "--unless-signed-in"])) {
+        Ok(call) => call,
         _ => panic!("no call"),
     };
     assert!(matches!(call, Call::List));
@@ -228,7 +187,7 @@ fn every_sign_in_shape_makes_its_call() {
 fn refusals_read_as_the_oracle_reads_them() {
     let text = |status, body: Option<&str>| {
         let payload = body.map(read);
-        String::from_utf16(&refusal(status, payload.as_ref()).unwrap().py_str_units()).unwrap()
+        String::from_utf16(&refusal(status, payload.as_ref()).py_str_units()).unwrap()
     };
     assert_eq!(
         text(403, Some(r#"{"error": "zz", "hint": ""}"#)),
@@ -274,7 +233,7 @@ fn refusals_read_as_the_oracle_reads_them() {
     );
     // The JSON detail keeps the hint's type.
     assert_eq!(
-        refusal(403, Some(&read(r#"{"hint": 7}"#))).unwrap(),
+        refusal(403, Some(&read(r#"{"hint": 7}"#))),
         J::Int("7".into())
     );
 }
@@ -292,12 +251,9 @@ fn the_session_list_renders_as_the_oracle_prints_it() {
         "                                                -                 -                 [1, 'a']\n",
         "(Only your own sign-ins are shown: this machine's token is a paired one.)\n",
     );
+    assert_eq!(listed(&payload, false), Out::stdout(want.into(), 0));
     assert_eq!(
-        listed(&payload, false).unwrap(),
-        Out::stdout(want.into(), 0)
-    );
-    assert_eq!(
-        listed(&read(r#"{"sessions": {}}"#), false).unwrap().text,
+        listed(&read(r#"{"sessions": {}}"#), false).text,
         "No browsers are signed in. `pseudolife-mcp console` signs one in.\n"
     );
     assert_eq!(
@@ -305,7 +261,6 @@ fn the_session_list_renders_as_the_oracle_prints_it() {
             &read(r#"{"sessions": [{"x": NaN}], "operator": true}"#),
             true
         )
-        .unwrap()
         .text,
         "{\"state\": \"listed\", \"sessions\": [{\"x\": NaN}], \"operator\": true}\n"
     );
@@ -344,11 +299,7 @@ fn the_session_list_renders_as_the_oracle_prints_it() {
             "created_at",
         ),
     ] {
-        assert_eq!(
-            listed(&read(body), false).unwrap(),
-            unshowable(field),
-            "{body}"
-        );
+        assert_eq!(listed(&read(body), false), unshowable(field), "{body}");
     }
     // A lone surrogate the list would print is its refusal too.
     for body in [
@@ -356,21 +307,21 @@ fn the_session_list_renders_as_the_oracle_prints_it() {
         r#"{"sessions": [{"session_id": "a"}, {"principal": "x\ud800"}]}"#,
     ] {
         assert_eq!(
-            listed(&read(body), false).unwrap(),
+            listed(&read(body), false),
             Out::stderr(format!("pseudolife-mcp console: {LIST_TEXT}\n"), 4),
             "{body}"
         );
     }
-    // A time localtime converts past the formatted range defers.
-    assert!(
+    // A time localtime converts past the formatted range is a refusal too.
+    assert_eq!(
         listed(
             &read(r#"{"sessions": [{"created_at": 32510000000}]}"#),
             false
-        )
-        .is_err()
+        ),
+        unshowable("created_at")
     );
     // Windows' CRT refuses a negative time; glibc converts it.
-    let negative = listed(&read(r#"{"sessions": [{"created_at": -5}]}"#), false).unwrap();
+    let negative = listed(&read(r#"{"sessions": [{"created_at": -5}]}"#), false);
     if cfg!(windows) {
         assert_eq!(negative, unshowable("created_at"));
     } else {
@@ -532,10 +483,7 @@ fn a_link_holds_nothing_but_the_origin_the_code_and_the_page_asked_for() {
         let raw = format!("http://{host}");
         // A zone id does not normalize here (the oracle's does, then
         // refuses its host): unsafe either way.
-        let normal = normalize_origin(&raw)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| raw.clone());
+        let normal = normalize_origin(&raw).unwrap_or_else(|| raw.clone());
         let url = J::from(format!("{normal}/ui/#/signin?code=ABCD").as_str());
         assert!(
             !link_is_safe(Some(&url), Some(&J::from(raw.as_str())), None),
@@ -643,18 +591,59 @@ fn a_code_other_than_the_links_is_refused_in_both_modes() {
 #[test]
 fn connect_failures_read_as_cpython_prints_them() {
     let code = if cfg!(windows) { 10061 } else { 111 };
-    let text = reason(Some(&io::Error::from_raw_os_error(code))).unwrap();
+    let text = reason(Some(&io::Error::from_raw_os_error(code)));
     if cfg!(windows) {
         assert!(text.starts_with("[WinError 10061] "), "{text}");
         assert!(!text.ends_with('.'), "{text}");
     } else {
         assert_eq!(text, "[Errno 111] Connection refused");
     }
-    // Only a refused connect is compared; a timeout or any other error defers.
-    assert!(reason(None).is_err());
-    let other = if cfg!(windows) { 10060 } else { 110 };
-    assert!(reason(Some(&io::Error::from_raw_os_error(other))).is_err());
-    assert!(reason(Some(&io::Error::other("no code"))).is_err());
+    assert_eq!(reason(None), "the connection timed out");
+    let error = io::Error::new(io::ErrorKind::NetworkUnreachable, "fixture-secret");
+    assert_eq!(reason(Some(&error)), "the network is unreachable");
+    let error = io::Error::other("fixture-secret");
+    assert_eq!(reason(Some(&error)), "could not establish a connection");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unusable_session_replies_stop_before_sign_in() {
+    let deep = format!(
+        "{{\"fixture-secret\":{}}}",
+        "[".repeat(DEPTH) + "0" + &"]".repeat(DEPTH)
+    );
+    let nested = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{deep}",
+        deep.len()
+    );
+    for (reply, code, cause) in [
+        (&b"fixture-secret\r\n"[..], EXIT_NO_DAEMON, "no usable HTTP reply"),
+        (
+            &b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n20\r\nfixture-secret"[..],
+            EXIT_REFUSED,
+            "the daemon's response body could not be read",
+        ),
+        (
+            &*Box::leak(nested.into_bytes().into_boxed_slice()),
+            EXIT_REFUSED,
+            "the daemon's response is nested too deeply",
+        ),
+    ] {
+        let (origin, task) = serve_once(reply).await;
+        let out = answer(
+            Call::Link { to: None, open: true, unless: true },
+            &origin, "fixture-secret", true, &no_browser, &no_launch,
+        ).await;
+        let request = task.await.unwrap();
+        assert!(request.starts_with(b"GET /api/console/sessions HTTP/1.1\r\n"));
+        assert_eq!(out.code, code);
+        assert!(out.text.contains(cause));
+        if code == EXIT_NO_DAEMON {
+            assert!(out.text.contains(&origin));
+            assert!(out.text.contains("pseudolife-mcp doctor"));
+        }
+        assert!(!out.text.contains("fixture-secret"));
+        assert!(!out.text.contains("/ui/#/signin"));
+    }
 }
 
 /// Accepts one connection, returns its request bytes after answering `reply`.
@@ -708,8 +697,7 @@ async fn a_list_request_carries_the_oracle_headers() {
         &no_browser,
         &no_launch,
     )
-    .await
-    .unwrap();
+    .await;
     let request = String::from_utf8(task.await.unwrap()).unwrap();
     assert!(
         request.starts_with("GET /api/console/sessions HTTP/1.1\r\n"),
@@ -744,9 +732,7 @@ async fn a_link_request_posts_the_oracle_body_and_reads_a_refusal() {
         open: false,
         unless: false,
     };
-    let out = answer(link, &origin, "t", true, &no_browser, &no_launch)
-        .await
-        .unwrap();
+    let out = answer(link, &origin, "t", true, &no_browser, &no_launch).await;
     let request = String::from_utf8(task.await.unwrap()).unwrap();
     assert!(
         request.starts_with("POST /api/console/link HTTP/1.1\r\n"),
@@ -803,9 +789,7 @@ async fn a_launcher_that_fails_leaves_the_link_and_its_cause_after_one_mint() {
                 "launcher failed (exit status: 3); try BROWSER".to_owned(),
             ))
         };
-        let out = answer(link, &origin, "t", as_json, &choose, &fail)
-            .await
-            .unwrap();
+        let out = answer(link, &origin, "t", as_json, &choose, &fail).await;
         let request = String::from_utf8(task.await.unwrap()).unwrap();
         assert!(request.starts_with("POST /api/console/link HTTP/1.1\r\n"));
         assert_eq!(chosen.get(), 1);
@@ -844,9 +828,7 @@ async fn no_open_chooses_nothing_starts_nothing_and_prints_no_cause() {
         open: false,
         unless: false,
     };
-    let out = answer(link, &origin, "t", false, &no_browser, &no_launch)
-        .await
-        .unwrap();
+    let out = answer(link, &origin, "t", false, &no_browser, &no_launch).await;
     task.await.unwrap();
     assert_eq!(out, Out::stdout(PRINTED.into(), 0));
 }
@@ -862,9 +844,7 @@ async fn a_refused_plan_prints_its_cause_through_the_real_launcher() {
         unless: false,
     };
     let refused = || browser::Plan::Refused(Some(NO_DISPLAY.to_owned()));
-    let out = answer(link, &origin, "t", false, &refused, &launch::open)
-        .await
-        .unwrap();
+    let out = answer(link, &origin, "t", false, &refused, &launch::open).await;
     task.await.unwrap();
     let mut want = Out::stdout(PRINTED.into(), 0);
     want.note = format!("pseudolife-mcp console: no browser opened: {NO_DISPLAY}\n");

@@ -17,6 +17,13 @@ def test_every_console_case_keeps_program_lookup_in_its_home():
         assert case.env.get("PATH") == console.BIN, case.id
 
 
+def test_fixture_tokens_are_hidden_in_repr():
+    secret = "fixture-token-do-not-print"
+    case = console.case("secret-fixture", ["--list"], env={"PSEUDOLIFE_MCP_TOKEN": secret})
+    assert bool(case.env["PSEUDOLIFE_MCP_TOKEN"] == secret)
+    assert bool(secret not in repr(case))
+
+
 def test_browser_guard_rejects_real_program_even_without_a_daemon():
     with pytest.raises(AssertionError, match="stand-in"):
         console.case("wrong-signin", ["--list"], env={
@@ -68,7 +75,7 @@ def test_console_goldens_with_standin_browsers(tmp_path):
     for value in ["0", "640", "4300", "invalid"]:
         env = {key: str(tmp_path) for key in ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"]}
         env.update(BROWSER=console.NO_BROWSER.replace("{HOME}", str(tmp_path)),
-                   PATH=str(tmp_path), COLUMNS="80", PYTHONINTMAXSTRDIGITS=value,
+                   PATH=str(tmp_path), COLUMNS="100", FORCE_COLOR="1", PYTHONINTMAXSTRDIGITS=value,
                    PSEUDOLIFE_MCP_DAEMON_URL="http://127.0.0.1:1")
         if "SystemRoot" in os.environ:
             env["SystemRoot"] = os.environ["SystemRoot"]

@@ -1,18 +1,8 @@
-//! `console`: `pseudolife-mcp console`, every shape the oracle answers.
+//! Native Console sign-in, session listing and revocation.
 //!
-//! Oracle: `pseudolife_memory/console_cli.py` (`main`, `credentials`,
-//! `request`, `_refusal`, `_list`, `_opened`, `open_browser`,
-//! `has_display`). Browser selection follows native rules (`browser.rs`). Answered natively: help
-//! and argparse's errors (at `COLUMNS=80`), `--list [--json]`, `--revoke ID
-//! [--json]`, the sign-in (`[--no-open] [--to PAGE] [--json]
-//! [--unless-signed-in]`), the empty `--revoke` usage error and every
-//! refusal those reach. Which browser the sign-in would start is decided before the
-//! code is minted (`browser.rs`), with refusals naming their cause and fix;
-//! once the daemon answers the sign-in with a 200 object the command answers every branch itself, each
-//! malformed answer's refusal included.
-//! Anything else outside the reproduced domain that can be decided before a
-//! request defers before it
-//! (`rust/cli_harness/rows/console.md`).
+//! Arguments and credentials are checked before any request. A browser is
+//! selected before minting a link, and started only after validating the reply.
+//! Every result is reported here, including transport and output failures.
 mod args;
 mod browser;
 mod launch;
@@ -26,11 +16,6 @@ use super::hook_http::{self, NoReply};
 use super::pyjson::{self, Dict, J};
 use std::{ffi::OsString, io, process::ExitCode, time::Duration};
 
-/// Outside the reproduced domain: the dispatcher's deferral line.
-#[derive(Debug)]
-struct Defer;
-type Res<T> = Result<T, Defer>;
-
 const EXIT_OK: u8 = 0;
 const EXIT_USAGE: u8 = 2;
 const EXIT_NO_DAEMON: u8 = 3;
@@ -39,7 +24,7 @@ const EXIT_REFUSED: u8 = 4;
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// `console_cli.MAX_RESPONSE_BYTES`: `response.read(n)` and `exc.read(n)`.
 const MAX_RESPONSE_BYTES: usize = 262_144;
-/// Answers nested deeper defer. The pairing commands' read paths, measured
+/// Answers nested deeper are refused. The pairing commands' read paths, measured
 /// on CPython 3.11.9 through the oracle CLI, raise RecursionError past 987
 /// and 985 levels (`pyjson::PAIR_DEPTH`, `INVITE_DEPTH`); console's was not
 /// measured, and the answer is later re-dumped or `repr`-ed, so this stays
@@ -54,7 +39,7 @@ const BAD_URL: &str =
     "PSEUDOLIFE_MCP_DAEMON_URL is not an http(s) address (scheme, host and optional port only)";
 const NO_TOKEN: &str = "no token found: set PSEUDOLIFE_MCP_TOKEN_FILE (or PSEUDOLIFE_MCP_TOKEN), or run this on a machine where Claude Code or Codex already uses Pseudolife";
 /// `CredentialError` texts whose Rust and Python raising conditions the
-/// harness row compares; any other credential failure defers.
+/// harness row compares.
 const CREDENTIAL_ERRORS: [&str; 3] = [
     "configured credential file is missing",
     "configured credential file path is empty",
@@ -88,31 +73,25 @@ const EMPTY_REVOKE: &str = "--revoke takes a session id from --list, not an empt
 /// (`principals.PAIRING_CODE_ALPHABET`) and the group separator.
 const CODE_CHARS: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ-";
 
-/// Python `repr()` of a str.
-fn py_repr(text: &str) -> String {
-    pyjson::py_value_repr(&J::Str(text.to_owned()))
-}
-
-/// What the oracle's argument handling depends on besides argv.
-struct Context {
-    /// argparse wraps help and usage at `COLUMNS - 2`; only 80 is reproduced.
-    columns_80: bool,
-    /// argparse could colour what it writes (newer CPython).
-    colour_stdout: bool,
-    colour_stderr: bool,
-    /// CPython decodes this argv as UTF-8.
-    utf8_argv: bool,
-}
-
 /// One answer: the text one `print` (or several) writes, and the exit code.
 /// `note` goes to stderr before it (empty: nothing); only a printed sign-in
 /// link carries one, the reason no browser opened.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 struct Out {
     stdout: bool,
     text: String,
     code: u8,
     note: String,
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for Out {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Out")
+            .field("stdout", &self.stdout)
+            .field("code", &self.code)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Out {
@@ -135,17 +114,6 @@ impl Out {
     }
 }
 
-/// `print(text, file=stdout)`: strict UTF-8 refuses a lone surrogate (the
-/// oracle raises), so that answer defers.
-fn stdout_text(units: &[u16]) -> Res<String> {
-    String::from_utf16(units).map_err(|_| Defer)
-}
-
-/// `print(text, file=sys.stderr)`: stderr writes a lone surrogate as `\uXXXX`.
-fn stderr_text(units: &[u16]) -> String {
-    pyjson::backslashreplace(units)
-}
-
 fn units(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
 }
@@ -161,15 +129,17 @@ fn dict(items: Vec<(&str, J)>) -> J {
 
 /// `_emit`: one JSON object on stdout, else the text on stdout (exit 0) or
 /// stderr.
-fn emit(out: J, as_json: bool, text: &[u16], code: u8) -> Res<Out> {
+fn emit(out: J, as_json: bool, text: &[u16], code: u8) -> Out {
     if as_json {
-        return Ok(Out::stdout(pyjson::dumps_line(&out) + "\n", code));
+        return Out::stdout(pyjson::dumps_line(&out) + "\n", code);
     }
-    Ok(if code == 0 {
-        Out::stdout(stdout_text(text)? + "\n", code)
-    } else {
-        Out::stderr(stderr_text(text) + "\n", code)
-    })
+    if code != EXIT_OK {
+        return Out::stderr(pyjson::backslashreplace(text) + "\n", code);
+    }
+    match String::from_utf16(text) {
+        Ok(text) => Out::stdout(text + "\n", code),
+        Err(_) => bad_answer("the daemon's answer had text that cannot be printed", false),
+    }
 }
 
 /// `_bad_answer(detail, as_json)`: an answer this command cannot use,
@@ -212,46 +182,39 @@ fn valid_route_id(value: &str) -> bool {
 }
 
 /// `console_sessions.normalize_origin` for a str.
-fn normalize_origin(value: &str) -> Res<Option<String>> {
+fn normalize_origin(value: &str) -> Option<String> {
     if value.is_empty() || value.chars().count() > 255 {
-        return Ok(None);
+        return None;
     }
     if value.chars().any(|c| (c as u32) < 33 || c as u32 == 127) {
-        return Ok(None);
+        return None;
     }
-    let parts = match url::urlsplit(value).map_err(|_| Defer)? {
-        Ok(parts) => parts,
-        Err(()) => return Ok(None),
-    };
-    let Ok(port) = parts.port() else {
-        return Ok(None);
-    };
+    let parts = url::urlsplit(value).ok()?.ok()?;
+    let port = parts.port().ok()?;
     let scheme = parts.scheme.as_str();
     if !matches!(scheme, "http" | "https") {
-        return Ok(None);
+        return None;
     }
     // `parts.username` is not None exactly when the netloc holds an '@'.
     if parts.netloc.contains('@') {
-        return Ok(None);
+        return None;
     }
     if !matches!(parts.path.as_str(), "" | "/")
         || !parts.query.is_empty()
         || !parts.fragment.is_empty()
         || value.contains('#')
     {
-        return Ok(None);
+        return None;
     }
-    let Some(mut host) = parts.hostname() else {
-        return Ok(None);
-    };
+    let mut host = parts.hostname()?;
     if host.contains(':') {
         host = format!("[{host}]");
     }
     let default = if scheme == "http" { 80 } else { 443 };
-    Ok(Some(match port.filter(|port| *port != default) {
+    Some(match port.filter(|port| *port != default) {
         Some(port) => format!("{scheme}://{host}:{port}"),
         None => format!("{scheme}://{host}"),
-    }))
+    })
 }
 
 /// A bearer every platform sends alike (doctor's rule): printable ASCII.
@@ -259,48 +222,80 @@ fn sendable(token: &str) -> bool {
     token.bytes().all(|byte| (0x20..0x7f).contains(&byte))
 }
 
-/// `credentials()`: `Ok(Ok((origin, token)))`, or `Ok(Err(why))` for the
-/// `no_credentials` answer.
-fn credentials() -> Res<Result<(String, String), String>> {
-    let (overrides, _label) = super::doctor::registration_credentials().ok_or(Defer)?;
-    let lookup = |key: &str| -> Res<Option<String>> {
-        if let Some((_, value)) = overrides.iter().find(|(name, _)| name == key) {
-            return Ok(Some(value.clone()));
-        }
-        match std::env::var_os(key) {
-            None => Ok(None),
-            Some(value) => value.into_string().map(Some).map_err(|_| Defer),
-        }
+/// Caller-supplied credential settings are validated before loading a saved registration.
+fn setting(key: &str) -> Result<Option<String>, String> {
+    std::env::var_os(key)
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| format!("{key} is not valid Unicode; set a Unicode value"))
+        })
+        .transpose()
+}
+
+fn credentials() -> Result<(String, String), String> {
+    let address = setting(URL_KEY)?;
+    let file = setting(FILE_KEY)?;
+    let token = setting(TOKEN_KEY)?;
+    let (overrides, _label) = super::doctor::registration_credentials().ok_or_else(|| {
+        "could not read the saved client registration; check it with pseudolife-mcp doctor"
+            .to_owned()
+    })?;
+    let lookup = |key: &str, environment: Option<String>| {
+        overrides
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.clone())
+            .or(environment)
     };
-    let address = lookup(URL_KEY)?
+    let address = lookup(URL_KEY, address)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| crate::daemon_url::DEFAULT_URL.to_owned());
-    let Some(origin) = normalize_origin(&address)? else {
-        return Ok(Err(BAD_URL.to_owned()));
-    };
-    let unusable = |error: crate::credentials::CredentialError| -> Res<String> {
-        if CREDENTIAL_ERRORS.contains(&error.0) {
-            Ok(format!("this machine's token is unusable ({error})"))
+    let origin = normalize_origin(&address).ok_or_else(|| {
+        if address.is_ascii() {
+            BAD_URL.to_owned()
         } else {
-            Err(Defer)
+            format!("{BAD_URL}; use the hostname's ASCII spelling and a numeric port")
         }
-    };
-    let provider = match lookup(FILE_KEY)? {
-        Some(path) => crate::credentials::CredentialProvider::new(None, Some(path.into())),
-        None => crate::credentials::CredentialProvider::new(
-            lookup(TOKEN_KEY)?.filter(|value| !value.is_empty()),
-            None,
+    })?;
+    let file = lookup(FILE_KEY, file);
+    let (provider, key) = match file {
+        Some(path) => (
+            crate::credentials::CredentialProvider::new(None, Some(path.into())),
+            FILE_KEY,
+        ),
+        None => (
+            crate::credentials::CredentialProvider::new(
+                lookup(TOKEN_KEY, token).filter(|value| !value.is_empty()),
+                None,
+            ),
+            TOKEN_KEY,
         ),
     };
-    let snapshot = match provider.and_then(|provider| provider.snapshot()) {
-        Ok(snapshot) => snapshot,
-        Err(error) => return Ok(Err(unusable(error)?)),
-    };
-    match snapshot.token().filter(|token| !token.is_empty()) {
-        None => Ok(Err(NO_TOKEN.to_owned())),
-        Some(token) if sendable(token) => Ok(Ok((origin, token.to_owned()))),
-        Some(_) => Err(Defer),
+    let snapshot = provider
+        .and_then(|provider| provider.snapshot())
+        .map_err(|error| {
+            if CREDENTIAL_ERRORS.contains(&error.0) {
+                format!("this machine's token is unusable ({error})")
+            } else {
+                format!("{key}: {error}; set {FILE_KEY} to a readable private token file")
+            }
+        })?;
+    let token = snapshot
+        .token()
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| NO_TOKEN.to_owned())?;
+    if !sendable(token) {
+        let fix = if key == FILE_KEY {
+            "point it at a private file containing this machine's token"
+        } else {
+            "set it to this machine's token"
+        };
+        return Err(format!(
+            "{key} does not contain a printable ASCII bearer token; {fix}"
+        ));
     }
+    Ok((origin, token.to_owned()))
 }
 
 /// Which daemon call `main` makes.
@@ -327,53 +322,31 @@ enum Step {
     },
 }
 
-/// argparse and `main`'s argument checks: an answer, or the call to make
-/// and whether `--json` was given. Reads only argv and `context`.
-fn plan(argv: &[String], context: &Context) -> Res<Result<Out, (Call, bool)>> {
-    if !context.utf8_argv && !argv.iter().all(|argument| argument.is_ascii()) {
-        return Err(Defer);
-    }
+/// Help and usage errors are answered before reading any credentials.
+fn plan(argv: &[String]) -> Result<(Call, bool), Out> {
     let args = match args::parse(argv) {
-        args::Parsed::Defer => return Err(Defer),
-        args::Parsed::Help if context.columns_80 && !context.colour_stdout => {
-            return Ok(Ok(Out::stdout(args::HELP.to_owned(), EXIT_OK)));
-        }
-        args::Parsed::Error(message) if context.columns_80 && !context.colour_stderr => {
-            return Ok(Ok(Out::stderr(
-                format!(
-                    "{}pseudolife-mcp console: error: {message}\n",
-                    args::usage()
-                ),
-                EXIT_USAGE,
-            )));
-        }
-        args::Parsed::Help | args::Parsed::Error(_) => return Err(Defer),
+        args::Parsed::Help => return Err(Out::stdout(args::HELP.to_owned(), EXIT_OK)),
+        args::Parsed::Error(message) => return Err(usage_error(&message)),
         args::Parsed::Args(args) => args,
     };
     if args.revoke.as_deref() == Some("") {
-        return Ok(Ok(Out::stderr(EMPTY_REVOKE.to_owned(), EXIT_USAGE)));
+        return Err(Out::stderr(EMPTY_REVOKE.to_owned(), EXIT_USAGE));
     }
-    let revoke = args.revoke.clone();
-    if args.list && revoke.is_some() {
-        return Ok(Ok(Out::stderr(
+    if args.list && args.revoke.is_some() {
+        return Err(Out::stderr(
             "--list and --revoke are separate commands; give one\n".to_owned(),
             EXIT_USAGE,
-        )));
+        ));
     }
-    if let Some(to) = &args.to
-        && !valid_route_id(to)
-    {
-        return Ok(Ok(Out::stderr(
-            format!(
-                "--to takes a Console page id such as board, not {}\n",
-                py_repr(to)
-            ),
+    if args.to.as_deref().is_some_and(|to| !valid_route_id(to)) {
+        return Err(Out::stderr(
+            "--to takes a Console page id such as board; use lowercase letters, digits or hyphens\n".to_owned(),
             EXIT_USAGE,
-        )));
+        ));
     }
     let call = if args.list {
         Call::List
-    } else if let Some(id) = revoke {
+    } else if let Some(id) = args.revoke {
         Call::Revoke(id)
     } else {
         Call::Link {
@@ -382,16 +355,25 @@ fn plan(argv: &[String], context: &Context) -> Res<Result<Out, (Call, bool)>> {
             unless: args.unless_signed_in,
         }
     };
-    Ok(Err((call, args.json)))
+    Ok((call, args.json))
 }
 
-/// [`plan`], then `credentials()`.
-fn prepare(argv: &[String], context: &Context) -> Res<Step> {
-    let (call, json) = match plan(argv, context)? {
-        Ok(out) => return Ok(Step::Done(out)),
-        Err(call) => call,
+fn usage_error(message: &str) -> Out {
+    Out::stderr(
+        format!(
+            "{}pseudolife-mcp console: error: {message}\n",
+            args::usage()
+        ),
+        EXIT_USAGE,
+    )
+}
+
+fn prepare(argv: &[String]) -> Step {
+    let (call, json) = match plan(argv) {
+        Ok(call) => call,
+        Err(out) => return Step::Done(out),
     };
-    Ok(match credentials()? {
+    match credentials() {
         Err(why) => Step::Done(emit(
             dict(vec![
                 ("state", J::from("no_credentials")),
@@ -400,14 +382,14 @@ fn prepare(argv: &[String], context: &Context) -> Res<Step> {
             json,
             &units(&format!("pseudolife-mcp console: {why}")),
             EXIT_NO_DAEMON,
-        )?),
+        )),
         Ok((origin, token)) => Step::Call {
             call,
             origin,
             token,
             json,
         },
-    })
+    }
 }
 
 /// The refused connect's error code (`ConnectionRefusedError`): the one
@@ -417,36 +399,55 @@ const REFUSED: i32 = 10061;
 #[cfg(not(windows))]
 const REFUSED: i32 = libc::ECONNREFUSED;
 
-/// `str(exc.reason)` for a refused connect: CPython's `OSError` text. Any
-/// other connect failure (a timeout, an unreachable network) is not
-/// compared, so it defers; no request was sent.
-fn reason(error: Option<&io::Error>) -> Res<String> {
-    let error = error.ok_or(Defer)?;
-    let code = error
-        .raw_os_error()
-        .filter(|code| *code == REFUSED)
-        .ok_or(Defer)?;
-    let text = io::Error::from_raw_os_error(code).to_string();
-    let message = text
-        .strip_suffix(&format!(" (os error {code})"))
-        .ok_or(Defer)?;
-    Ok(if cfg!(windows) {
-        // PyErr_SetFromWindowsErr drops trailing whitespace and full stops.
-        let message = message.trim_end_matches(|c: char| c <= ' ' || c == '.');
-        format!("[WinError {code}] {message}")
-    } else {
-        format!("[Errno {code}] {message}")
-    })
+/// Preserve the familiar refused-connection message. Other connection
+/// failures are described by kind without printing transport internals.
+fn reason(error: Option<&io::Error>) -> String {
+    let Some(error) = error else {
+        return "the connection timed out".to_owned();
+    };
+    if error.raw_os_error() == Some(REFUSED) {
+        let text = io::Error::from_raw_os_error(REFUSED).to_string();
+        let message = text
+            .strip_suffix(&format!(" (os error {REFUSED})"))
+            .unwrap_or(&text);
+        return if cfg!(windows) {
+            let message = message.trim_end_matches(|c: char| c <= ' ' || c == '.');
+            format!("[WinError {REFUSED}] {message}")
+        } else {
+            format!("[Errno {REFUSED}] {message}")
+        };
+    }
+    match error.kind() {
+        io::ErrorKind::TimedOut => "the connection timed out",
+        io::ErrorKind::ConnectionRefused => "the connection was refused",
+        io::ErrorKind::NetworkUnreachable => "the network is unreachable",
+        io::ErrorKind::HostUnreachable => "the host is unreachable",
+        io::ErrorKind::PermissionDenied => "the system denied the connection",
+        _ => "could not establish a connection",
+    }
+    .to_owned()
 }
 
-/// `request()`: `Ok(Ok((status, payload)))`, or `Ok(Err(reason))` when no
-/// HTTP answer arrived.
+enum RequestError {
+    NoReply(String),
+    BadReply(&'static str),
+}
+
+impl RequestError {
+    fn report(self, origin: &str, as_json: bool) -> Out {
+        match self {
+            Self::NoReply(reason) => no_daemon(origin, &reason, as_json),
+            Self::BadReply(cause) => bad_answer(cause, as_json),
+        }
+    }
+}
+
 async fn request(
     origin: &str,
     target: &str,
     token: &str,
     body: Option<&J>,
-) -> Res<Result<(u16, Option<Dict>), String>> {
+) -> Result<(u16, Option<Dict>), RequestError> {
     let data = body.map(pyjson::dumps_line);
     let authorization = format!("Bearer {token}");
     let reply = match hook_http::call_json(
@@ -460,14 +461,19 @@ async fn request(
     .await
     {
         Ok(reply) => reply,
-        Err(NoReply::Connect(error)) => return Ok(Err(reason(error.as_ref())?)),
-        Err(NoReply::Other) => return Err(Defer),
+        Err(NoReply::Connect(error)) => return Err(RequestError::NoReply(reason(error.as_ref()))),
+        // The transport does not distinguish DNS, TLS and HTTP failures here.
+        Err(NoReply::Other) => {
+            return Err(RequestError::NoReply("no usable HTTP reply".to_owned()));
+        }
     };
     let success = (200..300).contains(&reply.status);
-    // A 2xx body that fails to read raises out of `request`; an HTTPError's
-    // `exc.read` failure is caught and reads as no body.
+    // An unreadable successful reply is a protocol error. For an HTTP
+    // error the response status can still explain the refusal.
     if success && reply.body_failed {
-        return Err(Defer);
+        return Err(RequestError::BadReply(
+            "the daemon's response body could not be read; check the daemon with pseudolife-mcp doctor",
+        ));
     }
     let body = if reply.body_failed {
         Vec::new()
@@ -479,15 +485,19 @@ async fn request(
         Ok(text) => match pyjson::loads(text, DEPTH) {
             Ok(J::Dict(dict)) => Some(dict),
             Ok(_) | Err(pyjson::Refused::NotJson) => None,
-            Err(pyjson::Refused::TooDeep) => return Err(Defer),
+            Err(pyjson::Refused::TooDeep) => {
+                return Err(RequestError::BadReply(
+                    "the daemon's response is nested too deeply; check the daemon with pseudolife-mcp doctor",
+                ));
+            }
         },
     };
-    Ok(Ok((reply.status, payload)))
+    Ok((reply.status, payload))
 }
 
 /// `_refusal(status, payload)`, as the value `_emit` writes (`detail` keeps
 /// a hint's JSON type; the text is its `str()`).
-fn refusal(status: u16, payload: Option<&Dict>) -> Res<J> {
+fn refusal(status: u16, payload: Option<&Dict>) -> J {
     let code = payload.and_then(|payload| pyjson::get(payload, "error"));
     let hint = payload.and_then(|payload| pyjson::get(payload, "hint"));
     // Only a str is looked up: a list or dict reads as an unknown code.
@@ -495,18 +505,18 @@ fn refusal(status: u16, payload: Option<&Dict>) -> Res<J> {
     if let Some(name) = code.and_then(J::as_str)
         && let Some((_, message)) = REFUSALS.iter().find(|(key, _)| *key == name)
     {
-        return Ok(match message {
+        return match message {
             Some(message) => J::from(*message),
             None => truthy(hint).unwrap_or_else(|| code.cloned().unwrap_or(J::Null)),
-        });
+        };
     }
     if matches!(status, 404 | 405) {
-        return Ok(J::Str(format!(
+        return J::Str(format!(
             "this daemon does not offer Console sign-in yet (HTTP {status}): update it with `pseudolife-mcp update`, or open the Console and paste a token under Advanced"
-        )));
+        ));
     }
     if let Some(hint) = truthy(hint) {
-        return Ok(hint);
+        return hint;
     }
     let mut text = units(&format!("the daemon answered HTTP {status}"));
     if let Some(code) = truthy(code) {
@@ -514,7 +524,7 @@ fn refusal(status: u16, payload: Option<&Dict>) -> Res<J> {
         text.extend(code.py_str_units());
         text.extend(units(")"));
     }
-    Ok(pyjson::text(text))
+    pyjson::text(text)
 }
 
 /// `str(value)` padded as `format(value, "<width")` pads: by code point.
@@ -529,13 +539,13 @@ fn padded(mut text: Vec<u16>, width: usize) -> Vec<u16> {
 
 /// `_stamp(value)`: the cell, or `Ok(None)` where `time.localtime` raises
 /// (the list's refusal).
-fn stamp_cell(value: Option<&J>) -> Res<Option<String>> {
+fn stamp_cell(value: Option<&J>) -> Option<String> {
     let seconds = match value {
         Some(J::Bool(flag)) => i64::from(*flag),
         // Past time_t: OverflowError.
         Some(J::Int(text)) => match text.parse::<i64>() {
             Ok(seconds) => seconds,
-            Err(_) => return Ok(None),
+            Err(_) => return None,
         },
         Some(J::Float(value)) => {
             // `_PyTime_ObjectToTime_t` floors a float; NaN raises ValueError,
@@ -545,21 +555,17 @@ fn stamp_cell(value: Option<&J>) -> Res<Option<String>> {
             if !floor.is_finite()
                 || !(-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&floor)
             {
-                return Ok(None);
+                return None;
             }
             floor as i64
         }
-        _ => return Ok(Some("-".to_owned())),
+        _ => return Some("-".to_owned()),
     };
-    match stamp::minute(seconds) {
-        stamp::Minute::Shown(text) => Ok(Some(text)),
-        stamp::Minute::Refused => Ok(None),
-        stamp::Minute::Unreproduced => Err(Defer),
-    }
+    stamp::minute(seconds)
 }
 
 /// `_list(payload, as_json)`.
-fn listed(payload: &Dict, as_json: bool) -> Res<Out> {
+fn listed(payload: &Dict, as_json: bool) -> Out {
     let rows = match raw(payload, "sessions") {
         Some(J::List(rows)) => rows.clone(),
         _ => Vec::new(),
@@ -570,13 +576,13 @@ fn listed(payload: &Dict, as_json: bool) -> Res<Out> {
             ("sessions", J::List(rows)),
             ("operator", or_null(pyjson::get(payload, "operator"))),
         ]);
-        return Ok(Out::stdout(pyjson::dumps_line(&out) + "\n", EXIT_OK));
+        return Out::stdout(pyjson::dumps_line(&out) + "\n", EXIT_OK);
     }
     if rows.is_empty() {
-        return Ok(Out::stdout(
+        return Out::stdout(
             "No browsers are signed in. `pseudolife-mcp console` signs one in.\n".to_owned(),
             EXIT_OK,
-        ));
+        );
     }
     let mut text = units(&format!(
         "{:<17} {:<20} {:<8} {:<17} {:<17} BROWSER\n",
@@ -587,31 +593,28 @@ fn listed(payload: &Dict, as_json: bool) -> Res<Out> {
             continue;
         };
         let cell = |key: &str| raw(row, key).map(J::py_str_units).unwrap_or_default();
-        let mut stamps = Vec::new();
-        for field in ["created_at", "last_used_at"] {
-            match stamp_cell(raw(row, field))? {
-                Some(text) => stamps.push(units(&text)),
-                None => {
-                    return Ok(bad_answer(
-                        &format!(
-                            "the daemon's session list had a time this machine cannot show ({field})"
-                        ),
-                        false,
-                    ));
-                }
-            }
-        }
+        let [since, last] = ["created_at", "last_used_at"].map(|field| stamp_cell(raw(row, field)));
+        let (Some(since), Some(last)) = (since.as_deref(), last.as_deref()) else {
+            let field = if since.is_none() {
+                "created_at"
+            } else {
+                "last_used_at"
+            };
+            return bad_answer(
+                &format!("the daemon's session list had a time this machine cannot show ({field})"),
+                false,
+            );
+        };
         let label = match raw(row, "label") {
             Some(value) if value.truthy() => value.py_str_units(),
             _ => units("-"),
         };
-        let [since, last] = <[Vec<u16>; 2]>::try_from(stamps).map_err(|_| Defer)?;
         for (piece, width) in [
             (cell("session_id"), 17),
             (cell("principal"), 20),
             (cell("method"), 8),
-            (since, 17),
-            (last, 17),
+            (units(since), 17),
+            (units(last), 17),
         ] {
             text.extend(padded(piece, width));
             text.push(u16::from(b' '));
@@ -624,10 +627,10 @@ fn listed(payload: &Dict, as_json: bool) -> Res<Out> {
             "(Only your own sign-ins are shown: this machine's token is a paired one.)\n",
         ));
     }
-    Ok(match String::from_utf16(&text) {
+    match String::from_utf16(&text) {
         Ok(text) => Out::stdout(text, EXIT_OK),
         Err(_) => bad_answer(LIST_TEXT, false),
-    })
+    }
 }
 
 /// `_ORIGIN.fullmatch(origin)`: `https?://` then a host of `[a-z0-9._~-]`
@@ -676,7 +679,7 @@ fn origin_is_plain(origin: &str) -> bool {
 /// URL holding a lone surrogate.
 fn link_is_safe(url: Option<&J>, origin: Option<&J>, to: Option<&str>) -> bool {
     let origin = match origin {
-        Some(J::Str(origin)) => normalize_origin(origin).ok().flatten(),
+        Some(J::Str(origin)) => normalize_origin(origin),
         _ => None,
     };
     let (Some(origin), Some(J::Str(url))) = (origin, url) else {
@@ -759,16 +762,19 @@ fn opened(
     out
 }
 
-/// The `no_daemon` answer: no HTTP answer arrived.
-fn no_daemon(origin: &str, reason: &str, as_json: bool) -> Res<Out> {
+/// The configured origin is already stripped of credentials, paths and queries.
+fn no_daemon(origin: &str, reason: &str, as_json: bool) -> Out {
+    const RECOVERY: &str = "check the daemon address and connection with pseudolife-mcp doctor";
     emit(
         dict(vec![
             ("state", J::from("no_daemon")),
-            ("error", J::Str(reason.to_owned())),
+            ("error", J::from(reason)),
+            ("origin", J::from(origin)),
+            ("recovery", J::from(RECOVERY)),
         ]),
         as_json,
         &units(&format!(
-            "pseudolife-mcp console: no daemon answered at {origin} ({reason}); check it runs (`pseudolife-mcp doctor`)"
+            "pseudolife-mcp console: no daemon answered at {origin} ({reason}); {RECOVERY}"
         )),
         EXIT_NO_DAEMON,
     )
@@ -787,7 +793,7 @@ async fn answer(
     as_json: bool,
     browser: Chooser<'_>,
     launcher: Launcher<'_>,
-) -> Res<Out> {
+) -> Out {
     let mut plan = None;
     let (target, body) = match &call {
         Call::List => ("/api/console/sessions", None),
@@ -797,9 +803,9 @@ async fn answer(
         ),
         Call::Link { to, open, unless } => {
             if *unless {
-                // A read: whatever defers here comes before any code is minted.
-                match request(origin, "/api/console/sessions", token, None).await? {
-                    Err(reason) => return no_daemon(origin, &reason, as_json),
+                // A transport failure here stops before minting a code.
+                match request(origin, "/api/console/sessions", token, None).await {
+                    Err(error) => return error.report(origin, as_json),
                     Ok((200, Some(listed)))
                         if matches!(
                             pyjson::get(&listed, "sessions"),
@@ -828,14 +834,14 @@ async fn answer(
             ("/api/console/link", Some(dict(body)))
         }
     };
-    let (status, payload) = match request(origin, target, token, body.as_ref()).await? {
+    let (status, payload) = match request(origin, target, token, body.as_ref()).await {
         Ok(answer) => answer,
-        Err(reason) => return no_daemon(origin, &reason, as_json),
+        Err(error) => return error.report(origin, as_json),
     };
     let payload = match payload {
         Some(payload) if status == 200 => payload,
         payload => {
-            let detail = refusal(status, payload.as_ref())?;
+            let detail = refusal(status, payload.as_ref());
             let mut text = units("pseudolife-mcp console: ");
             text.extend(detail.py_str_units());
             let error = or_null(
@@ -876,7 +882,7 @@ async fn answer(
                 code,
             )
         }
-        Call::Link { to, .. } => Ok(match plan {
+        Call::Link { to, .. } => match plan {
             // `--no-open`: nothing is chosen, nothing starts.
             None => opened(&payload, as_json, to.as_deref(), None),
             Some(plan) => opened(
@@ -885,50 +891,55 @@ async fn answer(
                 to.as_deref(),
                 Some(&mut |url: &str| launcher(&plan, url)),
             ),
-        }),
+        },
     }
 }
 
-fn decide(argv: &[String], context: &Context) -> Res<Out> {
-    match prepare(argv, context)? {
-        Step::Done(out) => Ok(out),
+fn decide(argv: &[String]) -> Out {
+    match prepare(argv) {
+        Step::Done(out) => out,
         Step::Call {
             call,
             origin,
             token,
             json,
-        } => tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|_| Defer)?
-            .block_on(answer(
+        } => {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    return Out::stderr(
+                        format!(
+                            "pseudolife-mcp console: could not start the I/O runtime ({:?}); free operating-system resources and retry\n",
+                            error.kind()
+                        ),
+                        1,
+                    );
+                }
+            };
+            runtime.block_on(answer(
                 call,
                 &origin,
                 &token,
                 json,
                 &|| browser::choose(&launch::Machine, browser::Platform::HERE),
                 &launch::open,
-            )),
+            ))
+        }
     }
 }
 
-/// `None` defers to the dispatcher.
-pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
-    use std::io::IsTerminal;
-    // PYTHONINTMAXSTRDIGITS is a Python setting, not a native-client option.
+pub(super) fn run(values: Vec<OsString>) -> ExitCode {
     let argv = values
         .into_iter()
         .map(OsString::into_string)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    let colour = super::move_cli::colour_env(|name| std::env::var_os(name).is_some());
-    let context = Context {
-        columns_80: std::env::var_os("COLUMNS").is_some_and(|value| value == "80"),
-        colour_stdout: colour || io::stdout().is_terminal(),
-        colour_stderr: colour || io::stderr().is_terminal(),
-        utf8_argv: super::move_cli::utf8_argv(),
+        .collect::<Result<Vec<_>, _>>();
+    let out = match argv {
+        Ok(argv) => decide(&argv),
+        Err(_) => usage_error("an argument is not valid Unicode; supply Unicode arguments"),
     };
-    let out = decide(&argv, &context).ok()?;
     if !out.note.is_empty() {
         // Best effort: the link on stdout is what the user needs.
         let _ = super::move_cli::emit(&mut io::stderr().lock(), &super::text_bytes(&out.note));
@@ -939,7 +950,17 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     } else {
         super::move_cli::emit(&mut io::stderr().lock(), &bytes)
     };
-    super::move_cli::settle(out.code, written).map(ExitCode::from)
+    if written.is_ok() {
+        return ExitCode::from(out.code);
+    }
+    if out.stdout {
+        let text = "pseudolife-mcp console: stdout could not be written; restore stdout before running console again\n";
+        let _ = super::move_cli::emit(&mut io::stderr().lock(), &super::text_bytes(text));
+        if written == Err(0) {
+            return ExitCode::from(120);
+        }
+    }
+    ExitCode::FAILURE
 }
 
 #[cfg(test)]

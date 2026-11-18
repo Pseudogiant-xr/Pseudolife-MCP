@@ -25,16 +25,15 @@ branch itself. Since issue #1497's fixes the oracle refuses each malformed
 answer it used to die on (a traceback, exit 1), so no case is a declared
 crash any more.
 
-## What runs, in the oracle's order (checked)
+## What runs
 
 1. `cli.main` dispatches `console` with `sys.argv[2:]`.
-2. `_parser().parse_args`: help exits there; a missing value or an explicit
-   argument to a flag errors there; words collect as extras and error once
-   every option is consumed (`unrecognized arguments: a b`).
-3. `main`: an empty `--revoke` (`--revoke takes a session id from --list,
-   not an empty one`, exit 2, ahead of the next two); `--list` with
-   `--revoke` (exit 2); a `--to` that is not a route id
-   (`[a-z][a-z0-9-]{0,31}`, its `repr` in the message, exit 2).
+2. The native parser answers help at any width and in a terminal. Value
+   options accept either spelling and use the last value. A trailing
+   double dash ends options. Invalid argv produces a usage error without
+   echoing its values.
+3. An empty `--revoke` is checked first, then `--list` with `--revoke`,
+   then `--to` against `[a-z][a-z0-9-]{0,31}`. Each is a usage error.
 4. `credentials()`: the registration search runs first (`doctor`'s, with the
    environment's token keys winning); the daemon URL (`or` the default) must
    normalize to an origin; then the token file or token. Each failure is
@@ -155,8 +154,8 @@ legitimate `&to=<page>` still splits the command line.
 
 | Item | Python source |
 |---|---|
-| Help at `COLUMNS=80`, stdout, exit 0; usage + `pseudolife-mcp console: error: ...` on stderr, exit 2 | `_parser`, argparse 3.11 |
-| `--list and --revoke are separate commands; give one`; `--to takes a Console page id such as board, not 'X'`, stderr, exit 2 | `main` |
+| Help on stdout, exit 0. Usage errors on stderr, exit 2 | Native parser in `args.rs` |
+| `--list` and `--revoke` are mutually exclusive. `--to` requires a Console page id and the error omits the supplied value | Native checks in `mod.rs` |
 | `no_credentials` text and JSON for: a URL that is no origin, a missing token file, an empty token-file path, an invalid token, no token | `credentials` |
 | A token from `~/.claude.json`'s `pseudolife-memory` env block when the environment has none | `doctor_cli.registration_credentials` |
 | Connection refused: `[WinError 10061] ...` (Windows, trailing full stop dropped) / `[Errno 111] Connection refused` (Linux) | `request`, CPython `OSError.__str__` |
@@ -174,38 +173,27 @@ legitimate `&to=<page>` still splits the command line.
 | The empty `--revoke` usage error | `main` |
 | Streams: Python text streams, CRLF on Windows; stderr writes a lone surrogate as `\udXXX` | `print` |
 
-## Deferred before any request (the dispatcher's `mode 'console' is deferred` line, exit 1)
+## Native failure replies
 
-- argparse corners: abbreviations, `--`, a value starting with `-`, any
-  other token starting with `-`, `--help=x`; help or usage at a width other
-  than `COLUMNS=80` or with `FORCE_COLOR` / `PYTHON_COLORS` / `NO_COLOR` set
-  or a terminal; non-UTF-8 argv (POSIX locale decoding as `move` reads it).
-- Credentials: any `CredentialError` other than the three compared texts; a
-  non-UTF-8 environment value; a registration doctor's port does not read;
-  a non-ASCII daemon URL (urlsplit's NFKC checks); a token outside printable
-  ASCII (urllib would send Latin-1 or raise).
-- Connection: a name that does not resolve or resolves to nothing; any
-  connect failure but a refused one (a timeout, an unreachable network:
-  their text is not compared); a TLS handshake failure (case
-  `defer-https-untrusted`).
-
-`PYTHONINTMAXSTRDIGITS` is ignored by the native Console; the retained
-`defer-int-digits` case now checks a successful session list.
-
-## Deferred after a request
-
-Each is an answer this port does not reproduce; the native candidate prints
-its deferral line (exit 1) after sending the same request. None is cased.
-
-- A reset, timeout or malformed reply once connected (Python's
-  `RemoteDisconnected` and `timed out` are `no_daemon`, `BadStatusLine` and
-  `IncompleteRead` the `bad_reply` refusal); a 2xx body that fails to read;
-  nesting past 500 (the oracle reads nesting past its parser's recursion
-  limit as no JSON; the pairing read paths' measured limits are 985 and 987,
-  console's is unmeasured); a stamp `localtime` converts past 2999, or
-  before 1019 on Linux, where the oracle prints one; a write to stdout or
-  stderr that fails before its first byte. On the sign-in POST these come
-  after a code may have been minted: see "Declared divergences".
+- Unknown or abbreviated options, a missing value, a value on a flag and
+  invalid Unicode argv exit 2 before reading credentials. The sign-in
+  options `--to PAGE` and `--to=PAGE` both work. Python-only interpreter and
+  colour settings do not affect the native parser.
+- Credential setup fails before any request and exits 3 with the
+  relevant setting or registration and what to check. Diagnostics omit
+  supplied values. The token-file privacy and bearer-header checks still
+  apply.
+- A failed daemon connection exits 3. Plain text names the origin and the
+  reported connection failure. JSON includes `origin` and `recovery`
+  alongside `state: no_daemon` and `error`. The shared transport reports
+  DNS, TLS and failures before the HTTP headers as no usable HTTP reply.
+- An unreadable successful body, a reply nested past 500 levels, or a
+  session timestamp outside the local display range exits 4. A failed
+  session-list check of these kinds under `--unless-signed-in` stops
+  before minting a link.
+- A failed stdout write goes to stderr when available and exits 120 if
+  stdout accepted zero bytes. Partial writes and refused stderr exit 1.
+  The command makes no second request after a transport or output failure.
 
 ## Implemented, not compared by the harness
 
@@ -232,12 +220,9 @@ its deferral line (exit 1) after sending the same request. None is cased.
 
 ## Declared divergences
 
-- The deferrals after a request leave the request made: a revoke, or on the
-  sign-in POST a code the daemon may already have minted (a transport
-  failure once connected, an unreadable 2xx body, nesting past 500, a
-  stdout that refuses its first byte); the dispatcher's Python then asks
-  for a second code. The candidate is not installed as `pseudolife-mcp`,
-  so this is the candidate's answer only.
+- A transport failure once connected, an unusable reply or a failed
+  output write can occur after a revoke or a sign-in code was issued.
+  The CLI reports that failure once without retrying the operation.
 - On macOS and Linux the browser follows the native rules above, not
   `webbrowser`'s: a `BROWSER` without `%s` or `&` starts in the background
   where the oracle prints the link or defers; a terminal browser prints the
