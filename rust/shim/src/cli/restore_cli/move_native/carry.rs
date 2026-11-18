@@ -60,8 +60,7 @@ pub(super) fn source(docker: &mut impl Docker, facts: &Facts) -> Result<[bool; 4
         .ok_or("the source daemon's identity settings cannot be read; check Docker access and retry move --dry-run")?;
     let values = source_values(&container);
     let shape = shape(&values)?;
-    let mapped = crate::cli::installer::credentials::parse_token_map(&values[1]);
-    if !values[0].is_empty() || !mapped.is_empty() {
+    if !values[0].is_empty() || has_mapped_bearer(&values[1]) {
         return Ok(shape);
     }
     const BEARER: &str = "the stored-principal source needs an active bearer; set PSEUDOLIFE_MCP_TOKEN_FILE to its private file, then retry move --dry-run";
@@ -88,6 +87,18 @@ pub(super) fn source(docker: &mut impl Docker, facts: &Facts) -> Result<[bool; 4
         .any(|hash| hash == digest)
         .then_some(shape)
         .ok_or_else(|| BEARER.into())
+}
+
+fn has_mapped_bearer(raw: &str) -> bool {
+    raw.split(',')
+        .filter_map(|entry| entry.rsplit_once(':'))
+        .any(|(token, principal)| {
+            let principal = principal.trim();
+            !token.trim().is_empty()
+                && !principal.is_empty()
+                && !principal.eq_ignore_ascii_case("default")
+                && !principal.eq_ignore_ascii_case("maintainer")
+        })
 }
 
 fn shape(values: &[String; 4]) -> Result<[bool; 4], String> {
@@ -264,6 +275,14 @@ fn mounts_match(config: &Value, service: &str, container: &Value, data: fn(&str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mapped_bearer_requires_a_token_and_a_non_reserved_principal() {
+        assert!(has_mapped_bearer("left:right:fixture"));
+        assert!(!has_mapped_bearer(
+            "bad, :fixture, some: , other: DEFAULT, last: maintainer"
+        ));
+    }
 
     #[test]
     fn only_the_shape_of_the_source_credentials_is_needed_for_preflight() {
