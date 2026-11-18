@@ -7,6 +7,9 @@ pub mod credentials;
 pub mod daemon_url;
 mod errors;
 pub mod extractor_shim;
+#[cfg(test)]
+#[path = "../../shared/entropy_source_tests.rs"]
+mod entropy_source_tests;
 #[path = "../../shared/float_repr.rs"]
 mod float_repr;
 pub mod lifecycle;

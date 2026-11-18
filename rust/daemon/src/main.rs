@@ -5,6 +5,9 @@
 
 #![deny(unsafe_code)]
 
+#[cfg(test)]
+#[path = "../../shared/entropy_source_tests.rs"]
+mod entropy_source_tests;
 mod auth;
 mod background;
 mod background_sessions;
