@@ -72,6 +72,7 @@ LABEL = "ready-to-batch"
 BASE = "master"
 REMOTE = "origin"
 PREFIX = "integrate/"
+STACKED_PREFIX = "stacked/"
 # A batch of one is allowed: a pull request's own CI runs only the fast lanes,
 # so a lone ready one (an urgent fix, a revert, a release cut) gets its full
 # CI as a batch of one instead of merging directly.
@@ -85,6 +86,7 @@ MIN_MEMBERS = 1
 CHANGELOG_FRAGMENTS = "changelog.d"
 VERSION_LINE_RE = re.compile(r'version\s*=\s*"([^"]*)"\s*$')
 BATCH_RE = re.compile(r"^integrate/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
+STACKED_RE = re.compile(r"^stacked/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
 MARKER_RE = r"^(<<<<<<<|>>>>>>>)( |$)"
 CENSUS = "rust/producer_census.py"
 CENSUS_JSON = "rust/producer-census.json"
@@ -291,6 +293,21 @@ class Dropped:
 
 
 @dataclass
+class StackParent:
+    number: int
+    branch: str
+    master: str  # Published bundle prerequisite; the parent head is Plan.base_sha.
+
+
+@dataclass
+class StackSource:
+    branch: str
+    head: str
+    tree: str
+    compile_carried: bool = False
+
+
+@dataclass
 class Plan:
     branch: str
     base_sha: str
@@ -321,19 +338,30 @@ class Plan:
     # the closed batch this one repeats without its culprit, and the file
     # lists that let it skip the suite and carry the closed batch's passes.
     after_drop: dict = field(default_factory=dict)
+    stacked_parent: StackParent | None = None
+    stacked_source: StackSource | None = None
+    rust_check_recipe: str = ""
 
     @property
     def title(self) -> str:
-        date, n = BATCH_RE.match(self.branch).groups()
+        date, n = (BATCH_RE.fullmatch(self.branch) or STACKED_RE.fullmatch(self.branch)).groups()
         numbers = ", ".join(f"#{m.number}" for m in self.merged)
         return f"integrate: {date} batch {n} ({numbers})"
 
+    @property
+    def bundle_base(self) -> str:
+        # Ship the open parent's objects too. A far clone might only have
+        # origin/master, or the parent branch might disappear during transit.
+        return self.stacked_parent.master if self.stacked_parent else self.base_sha
+
     @staticmethod
-    def path(branch: str) -> Path:
+    def path(branch: str, directory: Path | None = None) -> Path:
         """Where `build` leaves the plan for `open`: inside this worktree's
         git directory, so it is never tracked or shared between worktrees."""
         name = branch.removeprefix(PREFIX) + ".json"
-        return Path(_out("rev-parse", "--git-path", f"integrate-plans/{name}"))
+        if directory is None:
+            directory = Path(_out("rev-parse", "--git-path", "integrate-plans"))
+        return directory / name
 
     def save(self) -> None:
         path = Plan.path(self.branch)
@@ -350,11 +378,14 @@ class Plan:
             del data["after_drop"]
         if not data["census_conflicts"]:
             del data["census_conflicts"]
+        for key in ("stacked_parent", "stacked_source", "rust_check_recipe"):
+            if not data[key]:
+                del data[key]
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @staticmethod
-    def load(branch: str) -> Plan | None:
-        path = Plan.path(branch)
+    def load(branch: str, directory: Path | None = None) -> Plan | None:
+        path = Plan.path(branch, directory)
         if not path.is_file():
             return None
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -366,6 +397,9 @@ class Plan:
             return {k: v for k, v in row.items() if k in names}
 
         raw = known(Plan, raw)
+        for key, cls in (("stacked_parent", StackParent), ("stacked_source", StackSource)):
+            if raw.get(key) is not None:
+                raw[key] = cls(**known(cls, raw[key]))
         raw["merged"] = [Member(**known(Member, m)) for m in raw["merged"]]
         dropped = []
         for entry in raw["dropped"]:
@@ -1017,11 +1051,13 @@ def _labeled_at(number: int, label: str) -> str | None:
     return max(times) if times else None
 
 
-def ready(label: str, base_sha: str | None = None) -> list[Member]:
+def ready(label: str, base_sha: str | None = None, *, exclude: set[int] | None = None) -> list[Member]:
     """Open labelled pull requests on master, in label-applied order."""
     fields = "number,title,headRefOid,url,isDraft,reviewDecision,statusCheckRollup,labels"
     rows = json.loads(gh("pr", "list", "--state", "open", "--label", label,
                          "--base", BASE, "--limit", "100", "--json", fields) or "[]")
+    if exclude:
+        rows = [row for row in rows if row["number"] not in exclude]
     members = []
     for r in rows:
         checks, why = _checks_why(r.get("statusCheckRollup"))
@@ -1082,7 +1118,7 @@ def _open_batches() -> list[tuple[int, str, str, str]]:
             and not r.get("isCrossRepository", False)]
 
 
-def _used_numbers(date: str) -> set[int]:
+def _used_numbers(date: str, *, stacked: bool = False) -> set[int]:
     """Batch numbers taken on `date`: by earlier batch pull requests (whose
     branches GitHub deletes on merge), remote branches and local branches."""
     rows = json.loads(gh("pr", "list", "--state", "all", "--limit", "300",
@@ -1094,15 +1130,18 @@ def _used_numbers(date: str) -> set[int]:
               for line in remote.splitlines() if "refs/heads/" in line]
     names += _out("for-each-ref", "--format=%(refname:short)",
                   f"refs/heads/{PREFIX}").splitlines()
+    if stacked:
+        names += _out("for-each-ref", "--format=%(refname:short)",
+                      f"refs/heads/{STACKED_PREFIX}").splitlines()
     used = set()
     for name in names:
-        match = BATCH_RE.match(name)
+        match = BATCH_RE.match(name) or STACKED_RE.match(name)
         if match and match.group(1) == date:
             used.add(int(match.group(2)))
     return used
 
 
-def _preflight() -> tuple[str, str]:
+def _preflight(*, require_master: bool = True) -> tuple[str, str]:
     """Refuse unless the checkout is clean and at origin/master.
 
     Returns (what to switch back to, origin/master's sha)."""
@@ -1111,7 +1150,7 @@ def _preflight() -> tuple[str, str]:
                       "commit or discard them, or run from a fresh worktree")
     git("fetch", "-q", REMOTE, BASE)
     base_sha = _out("rev-parse", f"{REMOTE}/{BASE}")
-    if _out("rev-parse", "HEAD") != base_sha:
+    if require_master and _out("rev-parse", "HEAD") != base_sha:
         raise Refusal(f"HEAD is not {REMOTE}/{BASE} ({base_sha[:12]}); run "
                       f"`git switch --detach {REMOTE}/{BASE}` (or use a fresh "
                       "worktree) and try again")
@@ -2094,7 +2133,10 @@ def _census_ci_fails(root: Path, plan: Plan) -> bool:
     request? Runs the step CI runs, `rust/producer_census.py --ci-check`,
     with the event of a pull request from the batch branch on its base,
     which CI gates on census currency whatever the diff."""
-    event = {"pull_request": {"base": {"sha": plan.base_sha}, "head": {"ref": plan.branch}}}
+    # A stacked head must pass the same strict currency check as the real
+    # batch. Only the simulated event uses the eventual integration prefix.
+    ref = PREFIX + plan.branch.removeprefix(STACKED_PREFIX) if plan.stacked_parent else plan.branch
+    event = {"pull_request": {"base": {"sha": plan.base_sha}, "head": {"ref": ref}}}
     proc = _census_run(root, "--ci-check", event=event)
     if proc.returncode == 1 and "producer census is stale" in proc.stderr:
         return True
@@ -2375,7 +2417,7 @@ def _remote_far(plan: Plan, cfg: dict[str, str], script_text: str, name: str,
     with tempfile.TemporaryDirectory() as tmp:
         bundle = Path(tmp) / "batch.bundle"
         try:
-            git("bundle", "create", "-q", str(bundle), ref, f"^{plan.base_sha}")
+            git("bundle", "create", "-q", str(bundle), ref, f"^{plan.bundle_base}")
             data = base64.b64encode(bundle.read_bytes()).decode("ascii")
         except (Refusal, OSError) as exc:
             return None, f"the batch bundle could not be made: {exc}", []
@@ -2384,12 +2426,12 @@ def _remote_far(plan: Plan, cfg: dict[str, str], script_text: str, name: str,
     # agree with the verdict, so member output alone cannot make a pass.
     nonce = secrets.token_hex(16)
     script = ("& {\n" + script_text + "\n} -Repo " + _ps_literal(cfg["repo"])
-              + " -Base " + _ps_literal(plan.base_sha) + " -Head " + _ps_literal(plan.head)
+              + " -Base " + _ps_literal(plan.bundle_base) + " -Head " + _ps_literal(plan.head)
               + " -Ref " + _ps_literal(ref) + params + " -Nonce " + _ps_literal(nonce))
     if shell == "bash":
         import shlex
         script = "set -- " + " ".join(shlex.quote(x) for x in
-            (cfg["repo"], plan.base_sha, plan.head, ref, nonce, params)) + "\n" + script_text
+            (cfg["repo"], plan.bundle_base, plan.head, ref, nonce, params)) + "\n" + script_text
     # stdin carries the script (its first line) and then the bundle; the
     # command line carries only RUST_CHECK_BOOTSTRAP, since an encoded
     # command past about 8 KB is refused through Windows' ssh.exe.
@@ -2492,7 +2534,7 @@ def _remote_rust_check(plan: Plan, cfg: dict[str, str]) -> tuple[str, str]:
     with tempfile.TemporaryDirectory() as tmp:
         bundle = Path(tmp) / "batch.bundle"
         try:
-            git("bundle", "create", "-q", str(bundle), ref, f"^{plan.base_sha}")
+            git("bundle", "create", "-q", str(bundle), ref, f"^{plan.bundle_base}")
             data = base64.b64encode(bundle.read_bytes()).decode("ascii")
         except (Refusal, OSError) as exc:
             return f"not run: the batch bundle could not be made: {exc}", ""
@@ -2501,7 +2543,7 @@ def _remote_rust_check(plan: Plan, cfg: dict[str, str]) -> tuple[str, str]:
     nonce = secrets.token_hex(16)
     try:
         script = ("& {\n" + RUST_CHECK_REMOTE_SCRIPT + "\n} -Repo " + _ps_literal(cfg["repo"])
-                  + " -Base " + _ps_literal(plan.base_sha) + " -Head " + _ps_literal(plan.head)
+                  + " -Base " + _ps_literal(plan.bundle_base) + " -Head " + _ps_literal(plan.head)
                   + " -Ref " + _ps_literal(ref) + " -Nonce " + _ps_literal(nonce))
     except Refusal as exc:
         return f"not run: {exc}", ""
@@ -2577,6 +2619,10 @@ def _rust_check_machine(plan: Plan) -> str:
 RUST_CHECK_OK = ("passed", "not needed")
 
 
+def _rust_check_recipe() -> str:
+    return f"{RUST_CHECK_COMMAND} in {RUST_CHECK_DIR}/"
+
+
 def _rust_check_refusal(plan: Plan) -> str:
     """Why `open` refuses this plan's Rust compile check result."""
     again = (f"switch back with `git switch --detach {REMOTE}/{BASE}`, remove the "
@@ -2625,6 +2671,9 @@ def _rust_check_cell(plan: Plan) -> str:
     if plan.rust_check == "passed":
         where = {"": "", "local": " on the maintainer's host"}.get(
             plan.rust_check_where, f" on the {plan.rust_check_where}")
+        if plan.stacked_source and plan.stacked_source.compile_carried:
+            record = plan.stacked_source
+            return f"passed at `{record.head}`{where}, same tree `{record.tree}`"
         return f"passed at `{plan.head}`{where}, run by `build`"
     if plan.rust_check == "not needed":
         return (f"not needed, the batch changes nothing under `{RUST_CHECK_DIR}/` "
@@ -3190,6 +3239,11 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None,
                   "for `test` on this head, carrying the closed batch's other passes. "
                   "What it relied on, checked by the tool:", "",
                   *_after_drop_lines(plan.after_drop)]
+    if plan.stacked_source:
+        source = plan.stacked_source
+        lines += ["", "## Stacked build", "",
+                  f"Rebuilt from current master. Stacked source `{source.head}` has the "
+                  f"same tree `{source.tree}` as this batch."]
     if plan.markers:
         lines += ["", "## Warning: conflict markers", "",
                   "These files carry conflict markers that master does not; "
@@ -3217,16 +3271,177 @@ def _switch_back(restore: str, base_sha: str) -> None:
     git("switch", "-q", *([restore] if restore != base_sha else ["--detach", base_sha]))
 
 
+def _worktree_plan_dirs() -> list[tuple[Path, Path]]:
+    entries = git("worktree", "list", "--porcelain", "-z").stdout.split("\0")
+    directories = []
+    for entry in entries:
+        if not entry.startswith("worktree "):
+            continue
+        checkout = Path(entry.removeprefix("worktree ")).resolve()
+        result = git("-C", str(checkout), "rev-parse", "--path-format=absolute",
+                     "--git-path", "integrate-plans", check=False)
+        if result.returncode == 0:
+            directories.append((checkout, Path(result.stdout.strip())))
+    return directories
+
+
+def _worktree_plan(branch: str) -> tuple[Plan, Path]:
+    matches = [(checkout, directory) for checkout, directory in _worktree_plan_dirs()
+               if Plan.path(branch, directory).is_file()]
+    if len(matches) != 1:
+        raise Refusal(f"expected one local plan for {branch}, found {len(matches)}; keep the "
+                      "original build worktree and its plan, or build without stacked reuse")
+    checkout, directory = matches[0]
+    try:
+        plan = Plan.load(branch, directory)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        plan = None
+    if plan is None or plan.branch != branch or not _has_commit(plan.head):
+        raise Refusal(f"the local plan for {branch} is invalid; build without stacked reuse")
+    return plan, checkout
+
+
+def _branch_head(branch: str) -> str:
+    result = git("show-ref", "--verify", "--hash", f"refs/heads/{branch}", check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _require_clean_stack(checkout: Path) -> None:
+    if _out("-C", str(checkout), "status", "--porcelain", "--untracked-files=normal"):
+        raise Refusal(f"{checkout} has uncommitted changes; clean the checkout or build without stacked reuse")
+
+
+def _stack_parent_view(number: int) -> dict:
+    return json.loads(gh("pr", "view", str(number), "--json",
+                         "state,headRefName,headRefOid,baseRefName,isCrossRepository,mergeCommit"))
+
+
+def _check_stack_parent_view(number: int, branch: str, head: str, view: dict) -> None:
+    if view.get("headRefName") != branch or view.get("headRefOid") != head:
+        raise Refusal(f"parent batch #{number}'s branch or head moved; build without stacked reuse")
+    if view.get("baseRefName") != BASE or view.get("isCrossRepository") is not False:
+        raise Refusal(f"parent batch #{number} is not from this repository into {BASE}; "
+                      "build without stacked reuse")
+
+
+def _open_stack_parent(open_prs: list[tuple[int, str, str, str]], master: str) -> Plan:
+    if len(open_prs) != 1:
+        raise Refusal(f"--stacked needs exactly one open batch, found {len(open_prs)}; "
+                      "use ordinary build if none is open, or resolve the extra open batches first")
+    number, branch, _, head = open_prs[0]
+    if not BATCH_RE.fullmatch(branch):
+        raise Refusal(f"#{number} has an unexpected batch branch {branch}; use the original published batch")
+    plan, checkout = _worktree_plan(branch)
+    if checkout == Path(_out("rev-parse", "--show-toplevel")).resolve():
+        raise Refusal(f"#{number}'s plan is in this checkout; run --stacked from a second worktree at {REMOTE}/{BASE}")
+    if plan.pr != number or plan.head != head or _branch_head(branch) != head:
+        raise Refusal(f"#{number}'s head moved or its plan names another PR; restore the verified "
+                      "parent checkout or build after the parent merges")
+    _require_clean_stack(checkout)
+    if _out("ls-remote", "--heads", REMOTE, f"refs/heads/{branch}") != f"{head}\trefs/heads/{branch}":
+        raise Refusal(f"#{number}'s branch on origin does not match its plan; restore the verified "
+                      "parent head or build after the parent merges")
+    view = _stack_parent_view(number)
+    _check_stack_parent_view(number, branch, head, view)
+    if view.get("state") != "OPEN":
+        raise Refusal(f"#{number} is no longer open; fetch master and build again")
+    if not _is_ancestor(master, head):
+        raise Refusal(f"#{number} does not contain current {REMOTE}/{BASE}; wait for it to merge "
+                      "and build from the new master")
+    if frozen := _batch_freeze_refusal(plan):
+        raise Refusal(f"parent batch #{number}: {frozen}")
+    return plan
+
+
+def _load_stack_source(branch: str) -> Plan:
+    if not STACKED_RE.fullmatch(branch):
+        raise Refusal("--from-stacked needs a local stacked/<date>-batch-N branch from build --stacked")
+    source, checkout = _worktree_plan(branch)
+    if _branch_head(branch) != source.head:
+        raise Refusal(f"{branch}'s head moved or its branch was deleted; restore the built source "
+                      "branch or build and gate normally")
+    _require_clean_stack(checkout)
+    if not source.stacked_parent or not _is_ancestor(source.base_sha, source.head):
+        raise Refusal(f"{branch} has no valid parent in its plan; build and gate normally")
+    return source
+
+
+def _require_merged_stack_parent(source: Plan, master: str, view: dict) -> None:
+    parent = source.stacked_parent
+    if view.get("state") == "CLOSED":
+        raise Refusal(f"parent batch #{parent.number} closed without merging; build and gate normally")
+    _check_stack_parent_view(parent.number, parent.branch, source.base_sha, view)
+    if view.get("state") != "MERGED":
+        raise Refusal(f"parent batch #{parent.number} is still open; wait for it to merge, then retry")
+    local = _branch_head(parent.branch)
+    if local and local != source.base_sha:
+        raise Refusal(f"parent batch #{parent.number}'s local head moved; restore that head or build and gate normally")
+    merged = (view.get("mergeCommit") or {}).get("oid", "")
+    parents = git("rev-list", "--parents", "-n", "1", merged, check=False).stdout.split()
+    if len(parents) != 3 or parents[2] != source.base_sha or not _is_ancestor(merged, master):
+        raise Refusal(f"{REMOTE}/{BASE} does not contain the recorded merge of parent batch "
+                      f"#{parent.number}; fetch master and build and gate normally if it still differs")
+
+
+def _tree(head: str) -> str:
+    return _out("rev-parse", f"{head}^{{tree}}")
+
+
+def _same_stack_tree(source: Plan, head: str) -> str:
+    tree = _tree(source.head)
+    rebuilt = _tree(head)
+    if rebuilt != tree:
+        raise Refusal(f"{source.branch} has a different tree ({tree}) from the rebuilt batch "
+                      f"({rebuilt}); build normally and run fresh gates")
+    return tree
+
+
+def _check_stack_reuse(plan: Plan) -> StackSource | None:
+    record = plan.stacked_source
+    if record is None:
+        return None
+    source = _load_stack_source(record.branch)
+    if source.head != record.head:
+        raise Refusal(f"{record.branch}'s source head moved since the rebuild; build and gate normally")
+    parent = source.stacked_parent
+    _require_merged_stack_parent(source, plan.base_sha, _stack_parent_view(parent.number))
+    if _same_stack_tree(source, plan.head) != record.tree:
+        raise Refusal("the stacked reuse plan records another tree; build and gate normally")
+    if record.compile_carried and (source.rust_check != "passed"
+                                    or source.rust_check_recipe != _rust_check_recipe()
+                                    or source.rust_check_where != plan.rust_check_where):
+        raise Refusal("the stacked compile check is missing or ran another recipe; build and gate normally")
+    return record
+
+
 def build(args: argparse.Namespace) -> int:
-    restore, base_sha = _preflight()
+    if args.stacked or args.from_stacked:
+        _require_clean_stack(Path.cwd())
+    restore, base_sha = _preflight(require_master=not args.stacked)
+    master = base_sha
     # First, so a closed batch that is in fact still open is named as such.
     closed = _after_drop_closed(args.after_drop, base_sha) if args.after_drop else None
+    source = _load_stack_source(args.from_stacked) if args.from_stacked else None
+    if source:
+        _require_merged_stack_parent(source, master, _stack_parent_view(source.stacked_parent.number))
     open_prs = _open_batches()
-    if open_prs:
+    parent = _open_stack_parent(open_prs, master) if args.stacked else None
+    if parent:
+        if _out("rev-parse", "HEAD") != master:
+            raise Refusal(f"HEAD is not {REMOTE}/{BASE}; switch the second worktree to "
+                          f"`git switch --detach {REMOTE}/{BASE}` and retry --stacked")
+        base_sha = parent.head
+    elif open_prs:
         raise Refusal("a batch is already open: " + ", ".join(
             f"#{n} ({name})" for n, name, _, _ in open_prs)
             + "; merge or close it before building the next one")
-    members = ready(args.label, base_sha)
+    members = (ready(args.label, base_sha, exclude={m.number for m in parent.merged})
+               if parent else ready(args.label, base_sha))
+    if source:
+        previous = {m.number: m.sha for m in source.merged}
+        for m in members:
+            if m.number in previous and m.sha != previous[m.number]:
+                raise Refusal(f"#{m.number}'s head moved since the stacked build; build and gate normally")
     waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
     if len(members) - len(waiting) < MIN_MEMBERS:
         print(f"{len(members) - len(waiting)} of {len(members)} pull request(s) "
@@ -3247,11 +3462,13 @@ def build(args: argparse.Namespace) -> int:
             else:
                 _report_once_ready(base_sha, waiting, freeze, prepass)
         return 0
-    n = max(_used_numbers(args.date), default=0) + 1
-    plan = Plan(branch=f"{PREFIX}{args.date}-batch-{n}", base_sha=base_sha,
-                label=args.label)
+    n = max(_used_numbers(args.date, stacked=bool(parent)), default=0) + 1
+    prefix = STACKED_PREFIX if parent else PREFIX
+    plan = Plan(branch=f"{prefix}{args.date}-batch-{n}", base_sha=base_sha, label=args.label)
+    if parent:
+        plan.stacked_parent = StackParent(parent.pr, parent.branch, master)
     print(f"{'[dry run] ' if args.dry_run else ''}building {plan.branch} "
-          f"from {REMOTE}/{BASE} {base_sha[:12]}")
+          f"from {parent.branch if parent else f'{REMOTE}/{BASE}'} {base_sha[:12]}")
     if args.dry_run:
         git("switch", "-q", "--detach", base_sha)
     else:
@@ -3265,6 +3482,13 @@ def build(args: argparse.Namespace) -> int:
         _harness_recipe(plan.head)  # Recheck after the generated metadata commit.
         if closed is not None:
             plan.after_drop = _after_drop_record(plan, closed)
+        if source is not None:
+            if _branch_head(source.branch) != source.head:
+                raise Refusal(f"{source.branch}'s head moved during the rebuild; build and gate normally")
+            tree = _same_stack_tree(source, plan.head)
+            carry = (source.rust_check == "passed" and source.rust_check_recipe == _rust_check_recipe()
+                     and _touches_rust(base_sha, plan.head))
+            plan.stacked_source = StackSource(source.branch, source.head, tree, carry)
         done = True
     finally:
         if git("rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode == 0:
@@ -3272,7 +3496,7 @@ def build(args: argparse.Namespace) -> int:
         # Stay on the branch only when `open` will publish it; otherwise it
         # was created by this run, never pushed, and goes.
         if not (done and not args.dry_run and len(plan.merged) >= MIN_MEMBERS):
-            _switch_back(restore, base_sha)
+            _switch_back(restore, master)
             if not args.dry_run:
                 git("branch", "-q", "-D", plan.branch)
 
@@ -3284,7 +3508,8 @@ def build(args: argparse.Namespace) -> int:
         merged = ", ".join(f"#{m.number}" for m in plan.merged) or "none"
         print(f"{merged} merged cleanly; no batch built.")
         # No `open` follows, so the collisions are reported now.
-        _report_drops(plan, None, args.dry_run)
+        if not parent and not source:
+            _report_drops(plan, None, args.dry_run)
         return 0
     if args.dry_run:
         cfg, cause = _rust_check_remote()
@@ -3294,7 +3519,10 @@ def build(args: argparse.Namespace) -> int:
                 if _touches_rust(base_sha, plan.head) else
                 f"no Rust compile check: the batch changes nothing under {RUST_CHECK_DIR}/ "
                 "but the census")
-        print(f"\n{rust}\nwould build {plan.branch}, then after the suite open:\n"
+        if plan.stacked_source and plan.stacked_source.compile_carried:
+            rust = f"would carry the Rust compile check from {source.head[:12]}"
+        next_step = "for local gates" if parent else "then after the suite open"
+        print(f"\n{rust}\nwould build {plan.branch}, {next_step}:\n"
               f"  {plan.title}\n\n{body(plan)}")
         _report_drops(plan, None, True)
         return 0
@@ -3302,8 +3530,14 @@ def build(args: argparse.Namespace) -> int:
     # keeps the branch for bisecting, and `open` refuses the plan. Saved
     # first, so a check that is interrupted still leaves a plan to refuse.
     plan.rust_check = "not run: `build` stopped during the check"
+    if parent:
+        plan.rust_check_recipe = _rust_check_recipe()
     plan.save()
-    plan.rust_check, errors = _rust_check(plan)
+    if plan.stacked_source and plan.stacked_source.compile_carried:
+        plan.rust_check, plan.rust_check_where = "passed", source.rust_check_where
+        errors = ""
+    else:
+        plan.rust_check, errors = _rust_check(plan)
     plan.save()
     if plan.rust_check not in RUST_CHECK_OK:
         if errors:
@@ -3312,17 +3546,25 @@ def build(args: argparse.Namespace) -> int:
               f"integrate: {_rust_check_refusal(plan)}. Skip the suite on this head.",
               file=sys.stderr)
         return 1
-    rust = (f"passed at {plan.head[:8]}"
+    checked = source.head if plan.stacked_source and plan.stacked_source.compile_carried else plan.head
+    rust = (f"passed at {checked[:8]}"
             + (f" on the {plan.rust_check_where}" if plan.rust_check_where not in ("", "local")
                else "") if plan.rust_check == "passed" else
             f"not needed, nothing under {RUST_CHECK_DIR}/ but the census changed")
     print(f"\nRust compile check (`{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/): {rust}.")
+    if plan.stacked_source:
+        print(f"verified stacked head {source.head} has the same tree {plan.stacked_source.tree}")
     if plan.after_drop:
         print(f"built {plan.branch} at {plan.head[:12]} after a drop, relying on:\n"
               + "\n".join(_after_drop_lines(plan.after_drop))
               + f"\nNo local suite, harness or shim run is needed ({AFTER_DROP_DOC}). Next, on "
               "this checkout: python ops/integrate.py open; then `merge` once `test` "
               "passes on the new head.")
+        return 0
+    if parent:
+        print(f"built {plan.branch} at {plan.head[:12]} for local gates only. Run `suite`, `harness` "
+              f"and `shim-tests` here. After #{parent.pr} merges, switch a clean worktree to "
+              f"{REMOTE}/{BASE} and run `build --from-stacked {plan.branch}`.")
         return 0
     print(f"built {plan.branch} at {plan.head[:12]}; nothing is pushed, so no CI "
           "has started. Next, on this checkout:\n"
@@ -3343,9 +3585,9 @@ def build(args: argparse.Namespace) -> int:
 # passed and then failed 18 of them hosted (#1634), and "this batch cannot
 # break them" is not something a tool can judge, so there is no escape
 # (conductor ruling, 16 November 2026). ops/remote-suite.ps1 turns the
-# build on by itself on an integrate/* branch and records it in the result.
+# build on by itself on an integrate/* or stacked/* branch and records it.
 SUITE_COMMAND = "python ops/integrate.py suite"
-REAL_CLIENT_NOTE = ("on this integrate/* branch it also builds the native client there "
+REAL_CLIENT_NOTE = ("on this batch branch it also builds the native client there "
                     "(cargo build --locked -p pseudolife-stdio, the dev profile, as the "
                     "hosted test lane does; needs 8 GB free there) and runs the "
                     "real-client tests, which `open` requires")
@@ -3388,19 +3630,7 @@ def suite(args: argparse.Namespace) -> int:
     """Run the built batch's full suite on the remote machine (its head
     travels there as a bundle; nothing is pushed) and name the result for
     `open --suite`."""
-    if _out("status", "--porcelain", "--untracked-files=no"):
-        raise Refusal("the checkout has uncommitted changes to tracked files; "
-                      "nothing is fixed inside a batch")
-    branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
-    plan = Plan.load(branch) if BATCH_RE.match(branch) else None
-    if plan is None:
-        raise Refusal(f"this checkout is not on a batch `build` left here "
-                      f"({branch or 'detached HEAD'}); run `python ops/integrate.py "
-                      "build` first")
-    head = _out("rev-parse", "HEAD")
-    if head != plan.head:
-        raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
-                      "build; nothing is fixed inside a batch, so rebuild it")
+    branch, plan, head = _built_batch()
     # A head that did not pass the compile check never opens, so a full suite
     # on it would only spend the remote machine's half hour.
     if plan.rust_check not in RUST_CHECK_OK:
@@ -3419,12 +3649,21 @@ def suite(args: argparse.Namespace) -> int:
         return code or 1
     print(f"integrate: suite exit {code}; its result is {results[-1]}")
     if code == 0:
-        print(f"next: python ops/integrate.py open --suite {results[-1]} "
-              f"--harness <harness.json> --shim-tests <shim-tests.json>")
+        if plan.stacked_parent:
+            print(f"keep the result for `build --from-stacked {branch}` after the parent merges")
+        else:
+            print(f"next: python ops/integrate.py open --suite {results[-1]} "
+                  f"--harness <harness.json> --shim-tests <shim-tests.json>")
     return code
 
 
-def _suite_line(args: argparse.Namespace, head: str) -> str:
+def _same_tree_note(note: str, head: str, source: StackSource | None) -> str:
+    if source and head == source.head:
+        return f"{note} (same tree `{source.tree}`)"
+    return note
+
+
+def _suite_line(args: argparse.Namespace, head: str, source: StackSource | None = None) -> str:
     """The "Local full suite" line, from a passing result for exactly `head`
     that ran the real native client built from it."""
     if args.suite_note:
@@ -3448,6 +3687,10 @@ def _suite_line(args: argparse.Namespace, head: str) -> str:
         result = json.loads(Path(args.suite).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         raise Refusal(f"cannot read the suite result {args.suite}: {exc}") from None
+    if not isinstance(result, dict):
+        raise Refusal("the suite result is not a JSON object; give the result `suite` wrote")
+    if source and result.get("commit") == source.head:
+        head = source.head
     if result.get("commit") != head:
         raise Refusal(f"the suite result tested {str(result.get('commit'))[:12]}, "
                       f"not this batch head {head[:12]}; run the suite on this "
@@ -3473,11 +3716,12 @@ def _suite_line(args: argparse.Namespace, head: str) -> str:
             f"the suite result's native client was built from "
             f"{str(result.get('real_client_commit'))[:12]}, not this batch head "
             f"{head[:12]}", head)
-    return (f"passed at `{head}` on {result.get('machine', 'an unnamed machine')}, "
+    note = (f"passed at `{head}` on {result.get('machine', 'an unnamed machine')}, "
             f"with the real native client built from it: {result.get('summary', '')}")
+    return _same_tree_note(note, head, source)
 
 
-def _gate_result_line(path: str | None, head: str, kind: str) -> str:
+def _gate_result_line(path: str | None, head: str, kind: str, source: StackSource | None = None) -> str:
     """Accept a completed run of the entire required selection at this head."""
     harness = kind == HARNESS_RESULT_KIND
     name = "harness" if harness else "shim-tests"
@@ -3494,6 +3738,8 @@ def _gate_result_line(path: str | None, head: str, kind: str) -> str:
         raise Refusal(f"cannot read the {name} result: {exc}; {again}") from None
     if not isinstance(result, dict) or result.get("kind") != kind:
         raise Refusal(f"this is not a result `{name}` wrote; {again}")
+    if source and result.get("commit") == source.head:
+        head = source.head
     if result.get("commit") != head:
         raise Refusal(f"the {name} result tested {result.get('commit')}, not this batch head; {again}")
     if result.get("command") != command or result.get("selection") != selection:
@@ -3513,7 +3759,7 @@ def _gate_result_line(path: str | None, head: str, kind: str) -> str:
     if (type(result.get("exit_code")) is not int or result["exit_code"] != 0 or not passed
             or result.get("not_run") or re.search(r"\b0*[1-9]\d*\s+(failed|errors?)\b", summary)):
         raise Refusal(f"the {name} failed at {head[:12]} (exit {result.get('exit_code')}: {summary}); bisect and drop the culprit")
-    return f"passed at `{head}` on the {role}: {summary}"
+    return _same_tree_note(f"passed at `{head}` on the {role}: {summary}", head, source)
 
 
 def _refuse_red_members(plan: Plan) -> None:
@@ -3532,6 +3778,8 @@ def _refuse_red_members(plan: Plan) -> None:
         view = json.loads(gh("pr", "view", str(m.number), "--json",
                              "headRefOid,statusCheckRollup"))
         if view["headRefOid"] != m.sha:
+            if plan.stacked_source:
+                raise Refusal(f"#{m.number}'s head moved since the stacked rebuild; build and gate normally")
             if m.snapshot_required:
                 raise Refusal(f"#{m.number}'s head moved since snapshot admission; rebuild the batch")
             continue
@@ -3559,7 +3807,8 @@ def _built_batch() -> tuple[str, Plan, str]:
         raise Refusal("the checkout has uncommitted changes to tracked files; "
                       "nothing is fixed inside a batch")
     branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
-    plan = Plan.load(branch) if BATCH_RE.match(branch) else None
+    stacked = STACKED_RE.fullmatch(branch)
+    plan = Plan.load(branch) if BATCH_RE.fullmatch(branch) or stacked else None
     if plan is None:
         raise Refusal(f"this checkout is not on a batch `build` left here "
                       f"({branch or 'detached HEAD'}); run `python ops/integrate.py "
@@ -3568,6 +3817,10 @@ def _built_batch() -> tuple[str, Plan, str]:
     if head != plan.head:
         raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
                       "build; nothing is fixed inside a batch, so rebuild it")
+    if stacked:
+        _require_clean_stack(Path.cwd())
+        if not plan.stacked_parent or not _is_ancestor(plan.bundle_base, plan.base_sha):
+            raise Refusal(f"{branch}'s plan lacks its published bundle base; rebuild with --stacked")
     return branch, plan, head
 
 def harness(args: argparse.Namespace) -> int:
@@ -3637,6 +3890,9 @@ def open_(args: argparse.Namespace) -> int:
         raise Refusal("the checkout has uncommitted changes to tracked files; "
                       "nothing is fixed inside a batch")
     branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
+    if branch.startswith(STACKED_PREFIX):
+        raise Refusal(f"{branch} is for local gates only; after its parent merges, run "
+                      f"`build --from-stacked {branch}` from current master")
     plan = Plan.load(branch) if BATCH_RE.match(branch) else None
     if plan is None:
         raise Refusal(f"this checkout is not on a batch `build` left here "
@@ -3665,15 +3921,18 @@ def open_(args: argparse.Namespace) -> int:
     # resumes, as one opened from a plan that predates the check must.
     if not own and plan.rust_check not in RUST_CHECK_OK:
         raise Refusal(_rust_check_refusal(plan))
+    if plan.stacked_source:
+        _require_clean_stack(Path.cwd())
+    source = _check_stack_reuse(plan)
     _, _, waived = _after_drop_rulings(None, None, [], plan)
     skipped = waived[0] if waived else ""
     # The fast path waives absent evidence, never evidence of a known failure.
     suite = (skipped if skipped and args.suite is None and args.suite_note is None
-             else _suite_line(args, head))
+             else _suite_line(args, head, source))
     harness = (skipped if skipped and args.harness is None
-               else _gate_result_line(args.harness, head, HARNESS_RESULT_KIND))
+               else _gate_result_line(args.harness, head, HARNESS_RESULT_KIND, source))
     shim = (skipped if skipped and args.shim_tests is None
-            else _gate_result_line(args.shim_tests, head, "shim-tests"))
+            else _gate_result_line(args.shim_tests, head, "shim-tests", source))
     if plan.after_drop:
         print(f"integrate: opening {plan.branch} after a drop, relying on:\n"
               + "\n".join(_after_drop_lines(plan.after_drop)))
@@ -4069,6 +4328,29 @@ def merge(args: argparse.Namespace) -> int:
     return 0
 
 
+def _stacked_status(master: str) -> None:
+    prefix = f"refs/heads/{STACKED_PREFIX}"
+    branches = {ref.removeprefix("refs/heads/") for ref in
+                _out("for-each-ref", "--format=%(refname)", prefix).splitlines()}
+    for _, directory in _worktree_plan_dirs():
+        branches.update(STACKED_PREFIX + path.stem
+                        for path in (directory / STACKED_PREFIX).glob("*.json"))
+    for branch in sorted(branches):
+        try:
+            source = _load_stack_source(branch)
+            parent = source.stacked_parent
+            view = _stack_parent_view(parent.number)
+            if view.get("state") == "OPEN":
+                _check_stack_parent_view(parent.number, parent.branch, source.base_sha, view)
+                verdict = f"waiting for parent #{parent.number} to merge"
+            else:
+                _require_merged_stack_parent(source, master, view)
+                verdict = f"parent #{parent.number} merged, try build --from-stacked {branch}"
+            print(f"stacked plan {branch} at {source.head[:12]}: {verdict}; compile {source.rust_check}")
+        except Refusal as error:
+            print(f"invalid stacked plan {branch}: {error}")
+
+
 def status(args: argparse.Namespace) -> int:
     branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
     plan = Plan.load(branch) if branch.startswith(PREFIX) else None
@@ -4077,6 +4359,7 @@ def status(args: argparse.Namespace) -> int:
             print(f"Regenerated census conflict for #{number} on {plan.head[:12]}")
     git("fetch", "-q", REMOTE, BASE)
     base_sha = _out("rev-parse", f"{REMOTE}/{BASE}")
+    _stacked_status(base_sha)
     members = ready(args.label)
     if not members:
         print(f"no open pull request carries `{args.label}`")
@@ -4118,7 +4401,12 @@ def main(argv: list[str] | None = None) -> int:
                         "creates, pushes and comments on nothing")
     b.add_argument("--date", default=dt.date.today().isoformat(),
                    help="batch date (default: today)")
-    b.add_argument("--after-drop", type=int, metavar="PR",
+    modes = b.add_mutually_exclusive_group()
+    modes.add_argument("--stacked", action="store_true",
+                       help="build a local-only batch on the sole open batch in a second worktree")
+    modes.add_argument("--from-stacked", metavar="BRANCH",
+                       help="rebuild on current master after the parent merges and verify the stacked tree")
+    modes.add_argument("--after-drop", type=int, metavar="PR",
                    help="build the closed red batch PR again without its dropped "
                         "culprit, skipping the local suite and carrying its passes "
                         f"({AFTER_DROP_DOC})")

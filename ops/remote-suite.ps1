@@ -78,7 +78,7 @@
 # The real native client: PSEUDOLIFE_SUITE_NATIVE_CLIENT=1 makes the run
 # build it there (ops/wsl-suite.sh, native_client: `cargo build --locked -p
 # pseudolife-stdio`, the dev profile, as the hosted `test` lane does) and run
-# the tests that need it. On an integrate/* branch (an integration batch,
+# the tests that need it. On an integrate/* or stacked/* branch (a batch,
 # ops/integrate.py build) it is on unless the variable is set, because a
 # batch's local gate that used the tests' stand-in passed and then failed 18
 # tests in the hosted `test` lane (#1634); `ops/integrate.py open` refuses a
@@ -105,7 +105,7 @@ $sha = (git -C $root rev-parse HEAD).Trim()
 
 $nativeClient = $env:PSEUDOLIFE_SUITE_NATIVE_CLIENT
 $branch = (git -C $root symbolic-ref -q --short HEAD 2>$null)
-if (-not $nativeClient -and $branch -like 'integrate/*') {
+if (-not $nativeClient -and ($branch -like 'integrate/*' -or $branch -like 'stacked/*')) {
     $nativeClient = '1'
     Write-Host ("remote-suite: $branch is an integration batch, so the run builds the native client " +
         "and runs the real-client tests as the hosted test lane does " +
