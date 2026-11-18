@@ -40,6 +40,8 @@ import sys
 import time
 from pathlib import Path
 
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 ROOT = HARNESS.parents[2]
@@ -1439,6 +1441,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="scenarios run side by side, each on its own worker (default 1: one "
                          "at a time, as every run before; the maintainer picks N for the box)")
     args = ap.parse_args(argv)
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[4])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     if args.jobs < 1:
         print(f"forced.py: --jobs {args.jobs}: run at least one scenario at a time", file=sys.stderr)
         return 2

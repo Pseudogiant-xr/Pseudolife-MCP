@@ -14,6 +14,8 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 import socket
 import subprocess
 import tempfile
@@ -213,6 +215,16 @@ def main():
     parser.add_argument("--oracle-only",action="store_true")
     parser.add_argument("--out",type=Path,required=True)
     args=parser.parse_args()
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     args.out.mkdir(parents=True,exist_ok=True)
     docker=["sudo","-n","docker"] if args.sudo else ["docker"]
     with tempfile.TemporaryDirectory(prefix="pl-tls-") as directory:

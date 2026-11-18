@@ -20,6 +20,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import daemons
@@ -463,6 +465,16 @@ def main() -> int:
         refusal = candidate_record.refuse_mutant_environment()
         if refusal:
             parser.error(refusal)
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     valid_host = pg.HOST_PORT == "127.0.0.1:5433"
     if args.ci_fixture:
         host, _, port = pg.HOST_PORT.rpartition(":")

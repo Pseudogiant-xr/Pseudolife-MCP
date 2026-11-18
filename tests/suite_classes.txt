@@ -272,7 +272,10 @@ live test_graph_review.py
 frozen test_graph_store.py
 frozen test_graph_write_gating.py
 live test_hang_diagnostics.py
+live test_harness_database_turn.py
+live test_harness_database_turn_native.py
 live test_harness_names.py
+live test_harness_selection.py
 frozen test_health_bank_fingerprint.py
 live test_health_build_stamp.py
 frozen test_health_last_backup.py

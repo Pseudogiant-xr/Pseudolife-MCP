@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import psycopg
 from psycopg import sql
 from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
+from rust.harness_support.database_turn import require_turn
 from rust.cli_harness.pg_create import create_from_default_template
 from rust.cli_harness.run_names import RunNames
 
@@ -172,6 +173,7 @@ def _check(name: str, space: Slice | None = None) -> str:
 
 
 def _admin():
+    require_turn(holder="disposable database harness")
     NAMES.require_process()
     user, password = _login()
     host, port = HOST_PORT.rsplit(":", 1)
@@ -216,6 +218,7 @@ def _name(space, label: str) -> str:
 
 
 def _dsn(space, name: str) -> str:
+    require_turn(holder="disposable database harness")
     space.NAMES.require_process()
     user, password = space._login()
     host, port = space.HOST_PORT.rsplit(":", 1)

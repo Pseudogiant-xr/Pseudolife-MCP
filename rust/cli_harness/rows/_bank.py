@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from pathlib import Path
 from urllib.parse import quote
 
 from ..pg_create import create_from_default_template
@@ -24,6 +25,7 @@ from ..run_names import RunNames
 
 _NAME = re.compile(r"^pl_cf_[a-z0-9_]{1,40}$")
 NAMES = RunNames()
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 
 
 def name(label: str) -> str:
@@ -33,6 +35,9 @@ def name(label: str) -> str:
 
 
 def _login() -> tuple[str, str]:
+    if _DATABASE_TURN_MARKER.exists():
+        from rust.harness_support.database_turn import require_turn  # noqa: PLC0415
+        require_turn(holder="CLI database harness")
     from tests.pg_defaults import default_login  # noqa: PLC0415 (oracle checkout)
     user, password = default_login()[:2]
     if user != "pseudolife_test":

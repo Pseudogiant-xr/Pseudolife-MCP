@@ -37,6 +37,12 @@ def _load():
 
 
 integrate = _load()
+_REAL_HARNESS_RECIPE = integrate._harness_recipe
+
+
+def _model_harness_recipe(paths=None):
+    reader = integrate._harness_reader()
+    return reader.Recipe((reader.Command("pytest", tuple(paths or integrate.RUST_HARNESS)),))
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -331,7 +337,7 @@ def world_without_guard(tmp_path, monkeypatch):
     return _make_world(tmp_path, monkeypatch, guard=False)
 
 
-def _make_world(tmp_path, monkeypatch, *, guard=True):
+def _make_world(tmp_path, monkeypatch, *, guard=True, harness_guard=False):
     origin = tmp_path / "origin.git"
     seed = tmp_path / "seed"
     work = tmp_path / "work"
@@ -344,6 +350,23 @@ def _make_world(tmp_path, monkeypatch, *, guard=True):
     # does not scan it).
     (seed / "rust").mkdir()
     (seed / "rust" / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+    if harness_guard:
+        for name, text in {
+            "ops/integrate.py": 'RUST_HARNESS = ("rust/test_base.py",)\n',
+            ".github/workflows/rust.yml": json.dumps({"jobs": {
+                "rust": {"steps": [{"run": "python -m pytest rust/test_base.py"}]},
+                "parity-checks": {"steps": []}}}),
+            "rust/ci/harness-test-selections.json": '{"schema": 1, "files": {}}\n',
+            "rust/test_base.py": "def test_base(): pass\n",
+        }.items():
+            (seed / name).parent.mkdir(parents=True, exist_ok=True)
+            (seed / name).write_text(text, encoding="utf-8")
+        monkeypatch.setattr(integrate, "_harness_recipe", _REAL_HARNESS_RECIPE)
+        _REAL_HARNESS_RECIPE.cache_clear()
+    else:
+        # This fixture models Git and admission, with no actual workflow/test
+        # tree. Coverage-specific tests opt into the real batch-head reader.
+        monkeypatch.setattr(integrate, "_harness_recipe", lambda head: _model_harness_recipe())
     _git(seed, "add", "-A")
     _git(seed, "commit", "-q", "-m", "base")
     _git(seed, "remote", "add", "origin", str(origin))
@@ -479,9 +502,11 @@ def _suite_result(world, *, commit: str | None = None, exit_code: int = 0,
 
 def _gate_result(world, gate_kind="rust-harness", **edit) -> Path:
     harness = gate_kind == "rust-harness"
-    result = {"kind": gate_kind, "commit": _git(world.work, "rev-parse", "HEAD"),
-              "command": integrate.RUST_HARNESS_COMMAND if harness else integrate.SHIM_TESTS_COMMAND,
-              "selection": list(integrate.RUST_HARNESS if harness else integrate.SHIM_TESTS_ARGS),
+    head = _git(world.work, "rev-parse", "HEAD")
+    recipe = integrate._harness_recipe(head) if harness else None
+    result = {"kind": gate_kind, "commit": head,
+              "command": recipe.display() if harness else integrate.SHIM_TESTS_COMMAND,
+              "selection": recipe.record() if harness else list(integrate.SHIM_TESTS_ARGS),
               "machine": "Windows dev VM" if harness else "second Linux dev box",
               "exit_code": 0, "summary": "767 passed in 1.0s", "not_run": None,
               "started": "2026-11-17T01:00:00+00:00", "ended": "2026-11-17T01:00:01+00:00"}
@@ -553,6 +578,32 @@ def test_old_builder_plan_opens_with_the_new_batch_script(world):
     assert saved.merged[0].snapshot_required is True
     assert saved.merged[0].snapshot == "satisfied"
     assert _git(world.origin, "rev-parse", branch) == plan.head
+
+
+def test_plan_load_ignores_unknown_fields_at_every_dataclass_level(tmp_path, monkeypatch):
+    member = integrate.Member(10, "member", "b" * 40, "https://github.example/pr/10", "APPROVED", "passing")
+    dropped = integrate.Dropped(member, "left out", comment=False)
+    plan = integrate.Plan(f"integrate/{DATE}-batch-1", "a" * 40, head="c" * 40,
+                          merged=[member], dropped=[dropped])
+    raw = integrate.asdict(plan)
+    raw["future_plan_field"] = "from a newer builder"
+    raw["merged"][0]["future_member_field"] = True
+    raw["dropped"][0]["future_drop_field"] = ["new metadata"]
+    raw["dropped"][0]["member"]["future_member_field"] = True
+    raw["dropped"][0]["waiting"] = True  # The historical census-waiter field.
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(integrate.Plan, "path", staticmethod(lambda branch: path))
+
+    loaded = integrate.Plan.load(plan.branch)
+
+    assert loaded.head == plan.head and loaded.base_sha == plan.base_sha
+    assert loaded.merged[0].number == member.number and loaded.merged[0].sha == member.sha
+    assert loaded.dropped[0].member.sha == member.sha
+    assert loaded.dropped[0].reason == dropped.reason and loaded.dropped[0].comment is False
+    assert not hasattr(loaded, "future_plan_field")
+    assert not hasattr(loaded.merged[0], "future_member_field")
+    assert not hasattr(loaded.dropped[0], "future_drop_field")
 
 
 def _second_parents(origin: Path, branch: str) -> list[str]:
@@ -2130,7 +2181,115 @@ def test_build_names_the_rust_harness_run_the_suite_does_not_cover(world, capsys
     out = capsys.readouterr().out
 
     assert integrate.RUST_HARNESS_COMMAND in out and "--harness" in out and "shim-tests" in out
+
+
+def _coverage_workflow(*paths):
+    return json.dumps({"jobs": {
+        "rust": {"steps": [{"run": "python -m pytest " + " ".join(paths)}]},
+        "parity-checks": {"steps": []}}})
+
+
+def test_build_drops_a_member_with_an_unlisted_batch_head_test_before_gating(tmp_path, monkeypatch, capsys):
+    world = _make_world(tmp_path, monkeypatch, harness_guard=True)
+    world.gh.add(11, world.pr(11, {"README.md": "independent change\n"}))
+    world.gh.add(12, world.pr(12, {
+        ".github/workflows/rust.yml": _coverage_workflow("rust/test_base.py", "rust/test_new.py"),
+        "rust/test_new.py": "def test_new(): pass\n",
+    }))
+    assert _build() == 0, capsys.readouterr()
+    plan = _plan(world)
+    assert [member["number"] for member in plan["merged"]] == [11]
+    assert len(plan["dropped"]) == 1 and plan["dropped"][0]["member"]["number"] == 12
+    assert "RUST_HARNESS omits" in plan["dropped"][0]["reason"]
+    assert world.cargo_calls() == []  # The admitted README change needs no build.
+    assert "rust/test_base.py" in integrate._harness_recipe(plan["head"]).display()
+    assert integrate.main(["open", "--suite", str(_suite_result(world)), *_gate_args(world)]) == 0, capsys.readouterr()
+    assert any("RUST_HARNESS omits" in body for _, body in world.gh.bodies("comment"))
+
+
+def test_build_accepts_a_workflow_and_its_matching_literal_list_together(tmp_path, monkeypatch, capsys):
+    world = _make_world(tmp_path, monkeypatch, harness_guard=True)
+    world.gh.add(12, world.pr(12, {
+        ".github/workflows/rust.yml": _coverage_workflow("rust/test_base.py", "rust/test_new.py"),
+        "ops/integrate.py": 'RUST_HARNESS = ("rust/test_base.py", "rust/test_new.py")\n',
+        "rust/test_new.py": "def test_new(): pass\n",
+    }))
+    assert _build() == 0, capsys.readouterr()
+    assert [member["number"] for member in _plan(world)["merged"]] == [12]
+    assert "rust/test_new.py" in integrate._harness_recipe(_plan(world)["head"]).commands[0].paths
+
+
+def test_an_unreadable_base_workflow_refuses_without_blaming_a_member(tmp_path, monkeypatch, capsys):
+    world = _make_world(tmp_path, monkeypatch, harness_guard=True)
+    world.advance_master({".github/workflows/rust.yml": "jobs: ["})
+    world.gh.add(11, world.pr(11, {"README.md": "independent change\n"}))
+    assert _build() == 2
+    assert "batch-head harness coverage refused" in capsys.readouterr().err
+    assert world.cargo_calls() == [] and world.remote_branches() == []
+    assert not world.gh.bodies("comment")
     assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_an_unreadable_base_can_be_repaired_by_a_readable_batch_head(tmp_path, monkeypatch, capsys):
+    world = _make_world(tmp_path, monkeypatch, harness_guard=True)
+    world.advance_master({".github/workflows/rust.yml": "jobs: ["})
+    world.gh.add(11, world.pr(11, {"README.md": "independent change\n"}))
+    world.gh.add(12, world.pr(12, {".github/workflows/rust.yml": _coverage_workflow("rust/test_base.py")}))
+    assert _build() == 0, capsys.readouterr()
+    output = capsys.readouterr()
+    assert "warning" in output.err.lower() and "base" in output.err.lower()
+    assert "cannot read batch-head rust.yml" in output.err
+    plan = _plan(world)
+    assert [member["number"] for member in plan["merged"]] == [11, 12]
+    assert not plan["dropped"]
+    assert integrate._harness_recipe(plan["head"]).commands
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_census_conflict_resolution_still_checks_the_tentative_harness_selection(monkeypatch, invalid):
+    from types import SimpleNamespace
+
+    member = integrate.Member(12, "new test", "a" * 40, "https://github.example/pr/12", "NONE", "passing")
+    plan = integrate.Plan("integrate/2026-11-17-batch-1", "b" * 40)
+    before, merged = "c" * 40, "d" * 40
+    current = [before]
+    calls = []
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: member.sha)
+    monkeypatch.setattr(integrate, "_budget_member_evidence", lambda *args: [])
+    monkeypatch.setattr(integrate, "_undo_merge_if_frozen", lambda *args: False)
+
+    def out(*args):
+        return current[0] if args == ("rev-parse", "HEAD") else integrate.CENSUS_JSON
+    def git(*args, **kwargs):
+        if args[:2] == ("reset", "--hard"):
+            assert args[2] == before
+            current[0] = before
+            return subprocess.CompletedProcess(args, 0, "", "")
+        assert "merge" in args
+        return subprocess.CompletedProcess(args, 1, "", "")
+    def resolve(*args):
+        current[0] = merged
+        return True
+    def recipe(head):
+        calls.append(head)
+        if head == merged and invalid:
+            raise integrate.Refusal("RUST_HARNESS omits the new test")
+    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", git)
+    monkeypatch.setattr(integrate, "_merge_census_conflict", resolve)
+    monkeypatch.setattr(integrate, "_harness_recipe", recipe)
+
+    integrate._merge_members(plan, [member], freeze=object(), prepass=SimpleNamespace(refused={}))
+
+    if invalid:
+        assert not plan.merged and not plan.census_conflicts
+        assert len(plan.dropped) == 1 and plan.dropped[0].member == member
+        assert "RUST_HARNESS omits" in plan.dropped[0].reason
+        assert current[0] == before
+    else:
+        assert plan.merged == [member] and plan.census_conflicts == [member.number]
+        assert not plan.dropped and current[0] == merged
+    assert calls == [before, merged]
 
 
 def test_open_refuses_without_the_rust_harness_result_for_this_head(world, capsys):
@@ -3378,8 +3537,13 @@ if os.environ.get("FAKE_UV_ENV_LOG"):
 if sys.argv[1] == "venv":
     import glob, site
     target = sys.argv[-1]
-    code = subprocess.run([sys.executable, "-m", "venv", target]).returncode
+    code = subprocess.run([sys.executable, "-m", "venv", "--copies", target]).returncode
     if code == 0:
+        # Match the Windows environment's regular-file layout so the far
+        # half's no-reparse cleanup is exercised on Linux too.
+        compatibility = os.path.join(target, "lib64")
+        if os.path.islink(compatibility):
+            os.unlink(compatibility)
         # The new environment sees this interpreter's packages (pytest),
         # also when this interpreter is itself a virtual environment.
         # lib64 is a link to lib on some Linux venvs: one is enough.
@@ -3416,6 +3580,8 @@ def test_the_services_are_up(request):
 class HarnessFar(Far):
     def __init__(self, tmp_path, monkeypatch):
         super().__init__(tmp_path, monkeypatch)
+        self.turn_marker = tmp_path / "test-postgres.turn-enabled"
+        self.turn_marker.touch()
         bin_dir = tmp_path / "bin"
         (bin_dir / "fake_uv.py").write_text(_FAKE_UV, encoding="utf-8")
         if os.name == "nt":
@@ -3435,7 +3601,8 @@ class HarnessFar(Far):
         monkeypatch.delenv("FAKE_HOOK_FAIL", raising=False)
         monkeypatch.delenv("FAKE_SERVICE", raising=False)
 
-    def batch(self, body: str = _GATE_TEST) -> tuple[str, str, str]:
+    def batch(self, body: str = _GATE_TEST, *, unit_body: str | None = None,
+              unit_name: str = "unit_gate.py") -> tuple[str, str, str]:
         self.n += 1
         branch = f"integrate/{DATE}-batch-{self.n}"
         _git(self.seed, "switch", "-q", "-C", branch, self.base)
@@ -3443,6 +3610,8 @@ class HarnessFar(Far):
         gate_tests.mkdir(exist_ok=True)
         (gate_tests / "conftest.py").write_text(_GATE_CONFTEST, encoding="utf-8", newline="\n")
         (gate_tests / "test_gate.py").write_text(body, encoding="utf-8", newline="\n")
+        if unit_body is not None:
+            (gate_tests / unit_name).write_text(unit_body, encoding="utf-8", newline="\n")
         _git(self.seed, "add", "-A")
         _git(self.seed, "commit", "-q", "-m", f"batch {self.n}")
         head = _git(self.seed, "rev-parse", "HEAD")
@@ -3452,13 +3621,14 @@ class HarnessFar(Far):
         return head, f"refs/heads/{branch}", base64.b64encode(bundle.read_bytes()).decode()
 
     def run_harness(self, head: str, ref: str, data: str, *, hook: Path | None = None,
-                    extra: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
+                    extra: tuple[str, ...] = (), pytest_path: str = "gate_tests") -> subprocess.CompletedProcess:
         return subprocess.run(
             [_PWSH, "-NoProfile", "-NonInteractive", "-File",
              str(ROOT / "ops" / "rust-harness-remote.ps1"), "-Repo", str(self.repo),
              "-Base", self.base, "-Head", head, "-Ref", ref,
              "-ServicesHook", str(hook or self.hook), "-DatabaseLockPath", str(self.tmp / "own-database.lock"),
-             "-PytestArgs", "gate_tests", *extra],
+             "-TurnMarkerPath", str(self.turn_marker),
+             "-PytestArgs", pytest_path, *extra],
             input=data, capture_output=True, text=True, encoding="utf-8", timeout=600)
 
     def hook_calls(self) -> list[str]:
@@ -3475,10 +3645,12 @@ def harness_far(tmp_path, monkeypatch):
 
 
 @needs_pwsh
-def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_far):
+@pytest.mark.parametrize("requirements", [(), ("onnx==1.22.0",)])
+def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_far, requirements):
     head, ref, data = harness_far.batch()
 
-    proc = harness_far.run_harness(head, ref, data)
+    encoded = base64.b64encode(json.dumps(requirements).encode()).decode()
+    proc = harness_far.run_harness(head, ref, data, extra=("-ExtraRequirements", encoded))
 
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
     assert _verdict(proc) == "rust-harness: pytest exit 0"
@@ -3487,8 +3659,12 @@ def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_
     gate = Path(f"{harness_far.repo}.rust-harness")
     assert _git(gate, "rev-parse", "HEAD") == head
     installs = [json.loads(line) for line in harness_far.uv_log.read_text(encoding="utf-8").splitlines()]
-    assert installs[0][0] == "venv" and Path(installs[0][-1]) == Path(f"{harness_far.repo}.rust-harness-venv")
-    assert installs[1][:2] == ["pip", "install"] and installs[1][-1] == f"{gate}[dev]"
+    assert installs[0][0] == "venv"
+    environment = Path(installs[0][-1])
+    assert environment.name.startswith(harness_far.repo.name + ".rust-harness-env-")
+    assert not environment.exists()
+    assert installs[1][:2] == ["pip", "install"]
+    assert installs[1][installs[1].index("-e") + 1:] == [f"{gate}[dev]", *requirements]
     assert harness_far.harness_leftovers() == []
 
 
@@ -3546,6 +3722,49 @@ def test_the_harness_far_half_tags_its_verdict_with_the_runs_nonce(harness_far):
     proc = harness_far.run_harness(head, ref, data, extra=("-Nonce", nonce))
 
     assert _verdict(proc) == f"rust-harness {nonce}: pytest exit 0", proc.stderr[-2000:]
+
+
+@needs_pwsh
+@pytest.mark.parametrize("outcome", ["pass", "fail", "empty"])
+@pytest.mark.parametrize("runner", ["unittest-file", "unittest-discover"])
+def test_harness_far_half_requires_every_unittest_command_to_execute_and_pass(harness_far, outcome, runner):
+    body = "import unittest\n"
+    if outcome != "empty":
+        body += "class UnitCase(unittest.TestCase):\n    def test_unit(self):\n        self.assertTrue(" + str(outcome == "pass") + ")\n"
+    body += "if __name__ == '__main__': unittest.main()\n"
+    unit_name = "test_unit.py" if runner == "unittest-discover" else "unit_gate.py"
+    head, ref, data = harness_far.batch(unit_body=body, unit_name=unit_name)
+    units = [{"runner": runner, "paths": ["gate_tests/" + unit_name],
+              "start": "gate_tests" if runner == "unittest-discover" else "",
+              "pattern": "test_unit.py" if runner == "unittest-discover" else ""}]
+    encoded = base64.b64encode(json.dumps(units).encode()).decode()
+    proc = harness_far.run_harness(head, ref, data, extra=("-UnitCommands", encoded),
+                                   pytest_path="gate_tests/test_gate.py")
+    assert "1 passed" in proc.stdout and harness_far.hook_calls() == ["start", "stop"]
+    assert proc.returncode == {"pass": 0, "fail": 1, "empty": 3}[outcome], proc.stdout + proc.stderr
+    if outcome == "pass":
+        assert "(unittest)" in proc.stdout and "Ran 1 test" in proc.stdout
+    elif outcome == "empty":
+        assert "no executed cases" in proc.stderr
+
+
+@needs_pwsh
+def test_harness_far_half_refuses_an_unknown_unit_runner_before_services(harness_far):
+    head, ref, data = harness_far.batch()
+    encoded = base64.b64encode(json.dumps([{"runner": "unknown", "paths": ["gate_tests/unit_gate.py"]}]).encode()).decode()
+    proc = harness_far.run_harness(head, ref, data, extra=("-UnitCommands", encoded))
+    assert proc.returncode == 3 and "unknown or empty unittest selection" in proc.stderr
+    assert harness_far.hook_calls() == [] and not harness_far.uv_log.exists()
+
+
+@needs_pwsh
+@pytest.mark.parametrize("requirement", ["onnx>=1.22", "--index-url=https://packages.invalid"])
+def test_harness_far_half_refuses_an_unpinned_fixture_requirement_before_services(harness_far, requirement):
+    head, ref, data = harness_far.batch()
+    encoded = base64.b64encode(json.dumps([requirement]).encode()).decode()
+    proc = harness_far.run_harness(head, ref, data, extra=("-ExtraRequirements", encoded))
+    assert proc.returncode == 3 and "literal package==version pins" in proc.stderr
+    assert harness_far.hook_calls() == [] and not harness_far.uv_log.exists()
 
 
 @needs_pwsh
@@ -3626,6 +3845,156 @@ def test_harness_far_half_cleans_an_ordinary_untracked_file(harness_far):
     assert not file.exists()
 
 
+def _environment_cleanup_probe(tmp_path, environment, *, created=True, expected=None, run_id="a" * 32):
+    """Exercise the real cleanup function without running a gate or its services."""
+    script = tmp_path / "cleanup-probe.ps1"
+    script.write_text('''
+param($source, $path, $expected, $created, $id, $repo)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'source parse failed' }
+foreach ($name in @('Assert-HarnessWorktreeHasNoReparsePoint', 'Get-HarnessLongPath', 'Remove-OwnedHarnessEnvironment')) {
+    $definition = $ast.Find({ param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+    }, $true)
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+Remove-OwnedHarnessEnvironment -EnvironmentPath $path -ExpectedPath ([IO.Path]::GetFullPath($expected)) -Created ($created -eq 'yes') -RunId $id -Repository $repo
+''', encoding="utf-8")
+    return subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
+                           str(ROOT / "ops/rust-harness-remote.ps1"), str(environment),
+                           str(expected or environment), "yes" if created else "no", run_id,
+                           str(tmp_path / "repo")], capture_output=True, text=True, timeout=45)
+
+
+@needs_pwsh
+@pytest.mark.parametrize("case", ["not-created", "wrong-run-name", "wrong-path", "ordinary"])
+def test_harness_environment_cleanup_removes_only_its_own_created_path(tmp_path, case):
+    environment = tmp_path / ("repo.rust-harness-env-" + "a" * 32)
+    environment.mkdir()
+    (environment / "ordinary-file").write_text("owned", encoding="utf-8")
+    run = _environment_cleanup_probe(tmp_path, environment, created=case != "not-created",
+        expected=tmp_path / "another-path" if case == "wrong-path" else environment,
+        run_id="b" * 32 if case == "wrong-run-name" else "a" * 32)
+    if case in ("wrong-run-name", "wrong-path"):
+        assert run.returncode != 0 and "path this run created" in run.stderr
+    else:
+        assert run.returncode == 0, run.stdout + run.stderr
+    assert environment.exists() == (case != "ordinary")
+
+
+@needs_pwsh
+def test_harness_environment_cleanup_refuses_a_link_without_touching_its_target(tmp_path):
+    environment = tmp_path / ("repo.rust-harness-env-" + "a" * 32)
+    environment.mkdir()
+    target = tmp_path / "outside"
+    target.mkdir()
+    content = target / "must-stay"
+    content.write_text("outside data", encoding="utf-8")
+    link = environment / "link"
+    if os.name == "nt":
+        script = tmp_path / "junction.ps1"
+        script.write_text("param($path,$target)\nNew-Item -ItemType Junction -Path $path -Target $target -ErrorAction Stop | Out-Null\n", encoding="utf-8")
+        made = subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
+                               str(link), str(target)], capture_output=True, text=True, timeout=30)
+        assert made.returncode == 0, made.stderr
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    try:
+        run = _environment_cleanup_probe(tmp_path, environment)
+        assert run.returncode != 0 and "reparse point" in run.stderr, run.stdout + run.stderr
+        assert content.read_text(encoding="utf-8") == "outside data"
+        assert environment.exists()
+    finally:
+        if os.path.lexists(link):
+            os.rmdir(link) if os.name == "nt" else link.unlink()
+
+
+@needs_pwsh
+@pytest.mark.parametrize("alias", [False, True])
+def test_harness_environment_cleanup_refuses_an_active_process(tmp_path, alias):
+    import psutil
+
+    environment = tmp_path / ("repo.rust-harness-env-" + "a" * 32)
+    environment.mkdir()
+    argument = str(environment)
+    if alias:
+        if os.name != "nt":
+            pytest.skip("Windows 8.3 path aliases")
+        import ctypes
+        from ctypes import wintypes
+        short_path = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+        short_path.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+        short_path.restype = wintypes.DWORD
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = short_path(str(environment.parent), buffer, len(buffer))
+        assert 0 < length < len(buffer), ctypes.get_last_error()
+        assert "~" in buffer.value and os.path.samefile(environment.parent, buffer.value)
+        # The cleaner receives the short spelling, while the process names
+        # the long spelling of this same directory.
+        environment = Path(buffer.value) / environment.name
+    # Use the base executable so this Popen owns the sleeper itself, rather
+    # than a Windows venv launcher whose child would outlive terminate().
+    process = subprocess.Popen([sys._base_executable, "-c", "import time; time.sleep(90)", argument],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    identity = psutil.Process(process.pid).create_time()
+    try:
+        run = _environment_cleanup_probe(tmp_path, environment)
+        assert run.returncode != 0 and "process still uses" in run.stderr, run.stdout + run.stderr
+        assert environment.exists()
+    finally:
+        if process.poll() is None:
+            assert psutil.Process(process.pid).create_time() == identity
+            process.terminate()
+        process.wait(timeout=15)
+
+
+@needs_pwsh
+@pytest.mark.skipif(os.name != "nt", reason="Windows owned-job cleanup")
+def test_harness_environment_cleanup_refuses_an_owned_child_without_an_argv_path(harness_far, monkeypatch):
+    import psutil
+
+    marker = harness_far.tmp / "indirect-child.json"
+    monkeypatch.setenv("FAKE_INDIRECT_READY", str(marker))
+    child_code = '''import json,os,psutil,time
+from pathlib import Path
+os.chdir(os.environ['FAKE_GATE_ENVIRONMENT'])
+ready = Path(os.environ['FAKE_INDIRECT_READY'])
+pending = ready.with_suffix('.writing')
+pending.write_text(json.dumps({'pid':os.getpid(),'started':psutil.Process().create_time()}))
+pending.replace(ready)
+time.sleep(90)
+'''
+    body = _GATE_TEST + f'''
+    import runpy, subprocess, sys, time
+    runpy.run_path({str(ROOT / "tests/windowless_children.py")!r})['install']()
+    env = dict(os.environ, FAKE_GATE_ENVIRONMENT=sys.prefix, PYTHONPATH=os.pathsep.join(sys.path))
+    child = subprocess.Popen([sys._base_executable, '-c', {child_code!r}], env=env,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 20
+    while not os.path.exists(os.environ['FAKE_INDIRECT_READY']) and child.poll() is None and time.monotonic() < deadline:
+        time.sleep(.05)
+    assert os.path.exists(os.environ['FAKE_INDIRECT_READY'])
+'''
+    head, ref, data = harness_far.batch(body)
+    proc = harness_far.run_harness(head, ref, data)
+    assert proc.returncode == 3 and "owned run process remains" in proc.stderr, proc.stdout + proc.stderr
+    # Refuse before deleting even the first file, then the owned job ends
+    # the leaked child when its launcher exits. No name-based cleanup.
+    environment = Path(json.loads(harness_far.uv_log.read_text().splitlines()[0])[-1])
+    assert (environment / "pyvenv.cfg").is_file()
+    assert (environment / "Scripts/python.exe").is_file()
+    identity = json.loads(marker.read_text())
+    try:
+        child = psutil.Process(identity["pid"])
+        assert child.create_time() == identity["started"]
+        child.wait(timeout=15)
+    except psutil.NoSuchProcess:
+        pass
+
+
 @needs_pwsh
 def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkeypatch, tmp_path, capsys):
     head, ref, _ = harness_far.batch()
@@ -3640,15 +4009,53 @@ def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkey
     monkeypatch.setattr(integrate, "_remote_config", lambda *args: (cfg, ""))
     script = integrate.RUST_HARNESS_REMOTE_SCRIPT.replace("$ServicesHook = ''", "$ServicesHook = " + integrate._ps_literal(str(harness_far.hook)))
     script = script.replace("$DatabaseLockPath = ''", "$DatabaseLockPath = " + integrate._ps_literal(str(tmp_path / "own-database.lock")))
+    script = script.replace("$TurnMarkerPath = ''", "$TurnMarkerPath = " + integrate._ps_literal(str(harness_far.turn_marker)))
     monkeypatch.setattr(integrate, "RUST_HARNESS_REMOTE_SCRIPT", script)
     monkeypatch.setattr(integrate, "RUST_HARNESS", ("gate_tests",))
     monkeypatch.setattr(integrate, "RUST_HARNESS_COMMAND", "python -m pytest -q -p no:cacheprovider --require-databases gate_tests")
+    monkeypatch.setattr(integrate, "_harness_recipe", lambda head: _model_harness_recipe(("gate_tests",)))
     monkeypatch.setattr(integrate, "SUITE_RESULTS", tmp_path / "results")
     assert integrate.main(["harness", "--lock-wait-seconds", "0"]) == 0, capsys.readouterr()
     result, = integrate.SUITE_RESULTS.glob("*.json")
     assert "passed" in integrate._gate_result_line(str(result), head, "rust-harness")
     assert harness_far.hook_calls() == ["start", "stop"]
     assert harness_far.harness_leftovers() == []
+    environments = [json.loads(line)[-1] for line in harness_far.uv_log.read_text(encoding="utf-8").splitlines()
+                    if json.loads(line)[0] == "venv"]
+    assert environments and all(not Path(path).exists() for path in environments)
+
+
+@needs_pwsh
+def test_harness_environment_cannot_retain_a_removed_dependency(harness_far):
+    first, first_ref, first_bundle = harness_far.batch("""
+def test_install_old_dependency():
+    from pathlib import Path
+    import site
+    (Path(site.getsitepackages()[0]) / 'removed_gate_dependency.py').write_text('old = True\\n')
+""")
+    old = harness_far.run_harness(first, first_ref, first_bundle)
+    assert old.returncode == 0, old.stdout[-2000:] + old.stderr[-2000:]
+    second, second_ref, second_bundle = harness_far.batch("""
+def test_removed_dependency_is_not_available():
+    import importlib.util
+    assert importlib.util.find_spec('removed_gate_dependency') is None
+""")
+    new = harness_far.run_harness(second, second_ref, second_bundle)
+    assert new.returncode == 0, new.stdout[-2000:] + new.stderr[-2000:]
+    environments = [Path(row[-1]) for row in map(json.loads, harness_far.uv_log.read_text(encoding="utf-8").splitlines())
+                    if row[0] == "venv"]
+    assert len(environments) == len(set(environments)) == 2
+    assert all(not path.exists() for path in environments)
+
+
+@needs_pwsh
+def test_service_managing_harness_refuses_a_missing_turn_marker(harness_far):
+    head, ref, data = harness_far.batch()
+    harness_far.turn_marker.unlink()
+    proc = harness_far.run_harness(head, ref, data)
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+    assert "marker is missing" in proc.stderr and "New-Item -ItemType File" in proc.stderr
+    assert harness_far.hook_calls() == [] and not harness_far.uv_log.exists()
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
@@ -3729,7 +4136,8 @@ def test_harness_waiting_for_worker_database_turn_leaves_suite_lock_free(harness
                str(ROOT / "ops/rust-harness-remote.ps1"), "-Repo", str(harness_far.repo),
                "-Base", harness_far.base, "-Head", head, "-Ref", ref,
                "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock),
-               "-LockWaitSeconds", "60", "-PytestArgs", "gate_tests"]
+               "-TurnMarkerPath", str(harness_far.turn_marker),
+               "-LockWaitSeconds", "60", "-DatabaseTurnWaitSeconds", "60", "-PytestArgs", "gate_tests"]
     gate = None
     output = tmp_path / "gate.log"
     with (tmp_path / "worker.log").open("w", encoding="utf-8") as worker_log, output.open("w", encoding="utf-8") as gate_log:
@@ -3827,7 +4235,8 @@ def test_database_lock_owner_death_stops_its_child_before_reuse(harness_far, tmp
         head, ref, data = harness_far.batch("def test_child():\n" + "\n".join("    " + line for line in child_code.splitlines()) + "\n")
         command = [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(ROOT / "ops/rust-harness-remote.ps1"),
                    "-Repo", str(harness_far.repo), "-Base", harness_far.base, "-Head", head, "-Ref", ref,
-                   "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock), "-PytestArgs", "gate_tests"]
+                   "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock),
+                   "-TurnMarkerPath", str(harness_far.turn_marker), "-PytestArgs", "gate_tests"]
     child = None
     identity = None
     with (tmp_path / "owner.log").open("w", encoding="utf-8") as log:
@@ -3870,7 +4279,7 @@ def test_database_lock_owner_death_stops_its_child_before_reuse(harness_far, tmp
 
 @needs_pwsh
 @pytest.mark.parametrize("state", ["alive", "reused", "unreadable"])
-def test_database_lock_reclaims_only_proven_stale_identity(tmp_path, state):
+def test_database_lock_free_handle_overwrites_old_metadata(tmp_path, state):
     lock = tmp_path / "own-database.lock"
     script = tmp_path / "identity.ps1"
     script.write_text("""
@@ -3889,11 +4298,8 @@ try {
     run = subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
                           str(ROOT / "ops/dev-database-lock.ps1"), str(lock), state],
                          capture_output=True, text=True, timeout=30)
-    assert run.returncode == (0 if state == "reused" else 3), run.stderr
-    if state == "unreadable":
-        assert "identity" in run.stderr and "cannot" in run.stderr
-    if state == "alive":
-        assert "previous worker" in run.stderr
+    assert run.returncode == 0, run.stderr
+    assert lock.read_bytes() == b""
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
@@ -3940,6 +4346,24 @@ def test_shim_far_half_refuses_unavailable_resources(far, monkeypatch, cause):
         if held:
             held.close()
     _hold_suite_lock(far.locks / "full-suite.lock").close()
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+def test_shim_far_half_refuses_loaded_tmpfs_before_running_member_code(far):
+    head, ref, data = far.batch()
+    for name, body in {"stat": "printf 'tmpfs\\n'\n",
+                       "df": "printf 'Used\\n5368709120\\n'\n"}.items():
+        path = far.tmp / "bin" / name
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+    proc = subprocess.run(["bash", str(ROOT / "ops/shim-tests-remote.sh"), str(far.repo), far.base,
+                           head, ref, "ab" * 16, "0"], input=data, capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+    assert "memory-backed" in proc.stderr and "above 4 GiB" in proc.stderr
+    assert "remove only your owned" in proc.stderr and "retry" in proc.stderr
+    assert far.cargo_calls() == []
+    assert not Path(str(far.repo) + ".shim-tests").exists()
+    assert not list(far.tmp.glob("shim-tests-*.bundle"))
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")

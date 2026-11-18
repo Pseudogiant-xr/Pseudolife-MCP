@@ -13,6 +13,8 @@ import sys
 import time
 from pathlib import Path
 
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+
 from . import compare, core, normalize, producers, rows
 
 HERE = Path(__file__).resolve().parent
@@ -660,6 +662,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixture", action="store_true", help="use the offline CPU embedder for real daemon fixtures")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[2])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     if (args.write or args.allow_deferral) and not args.record_candidate:
         parser.error("--write and --allow-deferral need --record-candidate")
     if args.record or args.golden or args.record_candidate:

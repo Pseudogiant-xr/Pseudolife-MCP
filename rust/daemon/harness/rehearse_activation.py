@@ -48,6 +48,8 @@ import sys
 import time
 from pathlib import Path
 
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+
 import w2e as h
 
 REPO = h.w1a.REPO
@@ -567,6 +569,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--leg", choices=("launcher", "bank", "all"), default="all")
     args = parser.parse_args(argv)
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     for key in ("PSEUDOLIFE_MCP_DATABASE_URL",):
         if os.environ.get(key):
             print(f"rehearsal: unset {key}; this run creates its own disposable bank",

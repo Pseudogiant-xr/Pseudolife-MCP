@@ -652,11 +652,65 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
      (#1556, #1560).
 2. `python ops/integrate.py harness` runs the Rust harness Python tests on
    the Windows dev VM at that same head. The full suite collects only
-   `tests/`, never these tests under `rust/`. `RUST_HARNESS` lists every
-   pytest path of rust.yml's Rust job plus `rust/ci`; a test keeps that list
-   complete. The command sends the head as a git bundle, runs the controller's
+   `tests/`, never these tests under `rust/`. Before any compile or suite,
+   `build` reads rust.yml and the literal `RUST_HARNESS` from each tentative
+   batch head without importing its Python. A member that makes the list
+   omit a Rust-job pytest path is left out with a comment. An unreadable
+   base produces a warning naming the offending workflow lines; members
+   may repair it, and the completed head must read cleanly. While the base
+   is unreadable, coverage failures cannot be attributed to individual
+   members: an unrepaired final head refuses the whole batch instead of
+   dropping a member. The warning identifies the base SHA, even though its
+   quoted reader diagnostic uses the generic "batch-head" wording.
+   The selection also includes the
+   parity-checks job's candidate-free pytest cases and delegated unittest
+   discovery, classified in `rust/ci/harness-test-selections.json`. Mixed
+   files contribute their unit selectors; candidate-required cases stay in
+   their lanes. Unknown commands, options or classifications fail closed.
+   Of the workflow files, only `.github/workflows/rust.yml` is read.
+   `ci.yml`'s `rust/ci` tests are covered by `RUST_HARNESS`;
+   `python-freeze.yml` and `release.yml` run no Rust tests. Those three
+   workflow files are not parsed by this reader.
+   Every job and `uses:` step in rust.yml is audited. Fixed test selections
+   come from `rust`, `parity-checks` and its mirrored `parity-selfhosted` job.
+   The fixture job may invoke the schema wrapper only in build-only mode.
+   The scope/pool jobs have explicitly classified routing helpers, and the
+   Rust job's other Python helpers generate/check metadata or replay selected
+   PR goldens. The daemon-image job's explicitly classified image tests and
+   probes stay in that hosted image lane. Stress jobs have explicitly
+   classified manual-dispatch drivers, not another fixed batch selection.
+   Other jobs cannot introduce a Rust test command without a classification:
+   any line carrying a Rust Python path, pytest or unittest must use a
+   recognised launcher in its classified job. A refusal names the job, step
+   and run-line number. Unknown actions/reusable jobs and executable action
+   inputs refuse too; recognised actions only check out, provision tools,
+   cache or transfer artifacts. Tests pin these boundaries, including a
+   new test-bearing line in another job.
+   The reader classifies literal command lines. Python test/helper scripts
+   must run from a repository-root step (`.` or `${{ github.workspace }}`),
+   overriding a job's `working-directory: rust` where needed. It refuses
+   script/test calls from other directories, non-literal selections and tests after an in-step
+   `cd`/`Set-Location`; move them to a separate root-directory step.
+   Test-bearing compound lines refuse, including glued `;`, `&&`, `||`,
+   `|` and bash `&`. The leading PowerShell call operator and the known
+   report redirection `2>&1` remain supported. Comments are removed before
+   joining continued lines. Unknown shell script invocations refuse; the
+   current rust.yml invokes no `.sh`/`.ps1` wrappers. Python wrapper entry
+   points have explicit classifications. Inline bodies in other languages
+   are not interpreted: a shell-lexer failure on a line with no Rust script,
+   pytest or unittest token is a classified skip. The test that reads the
+   real rust.yml pins the existing commands and its `shell: python` step.
+   Candidate-free fixtures can declare optional package names in that file;
+   their exact version pins come from the batch head's parity job and are
+   installed into the fresh environment. Missing or conflicting pins refuse
+   before gating, and the result binds those pins beside its test selection.
+   `harness` rechecks the final head and `open` requires that exact command
+   and runner selection in its result.
+   The command sends the head as a git bundle, runs the controller's
    `ops/rust-harness-remote.ps1`, and records its result and live log beside
    the suite results. No push or private gate kit is needed.
+   The candidate-free parity phase adds about 5.4 minutes to every gate,
+   measured including its fresh environment, service startup and cleanup.
    - The VM is configured through `rust-check.remote`, with role `Windows
      dev VM`. Its private `rust-harness-services.ps1` provides
      `Start-HarnessServices` and `Stop-HarnessServices`: start and prove the
@@ -665,8 +719,15 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    - The run takes the machine's shared database lock, its full-suite lock,
      then its clone lock, keeping all through service shutdown. Worker
      database commands take that same database lock (dev-machines.md,
-     "Sharing"). The bounded wait reports the holder and elapsed hold time;
-     `--lock-wait-seconds` changes its default 1200 seconds.
+     "Sharing"). The database turn refuses fast, naming the holder and elapsed
+     hold time; `--database-turn-wait-seconds` requests a bounded wait. Suite
+     and clone locks retain their configurable `--lock-wait-seconds` default
+     of 1200. Bare Rust pytest and standalone database harness launchers take
+     the turn on marker-enabled machines too.
+     Only the Windows dev VM currently carries the marker, because its gate
+     starts and stops PostgreSQL. Do not mark the Linux dev boxes yet: their
+     PostgreSQL stays up for concurrent targeted runs, and there is no
+     containment off Windows. Their no-marker path remains unchanged.
    - `--require-databases` remains mandatory: missing login or Docker fails
      database cases instead of silently skipping them. Hosted runs without
      that option retain their existing platform/login skips.

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "74c4e1638858f288",
+  "fingerprint": "af168ac1178ab8a3",
+  "reason": "Adds the opt-in turn policy/native probes and workflow-selection tests to the Rust-only live-tests step. On the first Linux dev box the initial three-file selection passed 49 cases with one Windows-only skip in 2.34 s; the later policy/parser selection passed 60 in-process cases in 0.52 s. Existing tree-wide guards passed 520 cases with 10 platform skips in 55.62 s at fd8a4be4a. The 9.3-minute guards estimate holds; no setup, matrix, runner or limit changes."
+}
