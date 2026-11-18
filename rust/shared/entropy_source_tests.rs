@@ -28,8 +28,8 @@ const OPERATING_SYSTEM_SEEDED: i32 = 2;
 
 #[test]
 fn secure_random_is_seeded_by_the_operating_system_not_cpu_jitter() {
-    // Reads the configured source only; it draws nothing and starts no
-    // collector.
+    // SAFETY: a C function with no arguments that returns the id of the
+    // configured entropy source; it draws nothing and starts no collector.
     let source = unsafe { aws_lc_0_45_0_get_entropy_source_method_id_FOR_TESTING() };
     assert_eq!(
         source, OPERATING_SYSTEM_SEEDED,

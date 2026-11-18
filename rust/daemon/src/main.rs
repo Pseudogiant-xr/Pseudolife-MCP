@@ -5,9 +5,6 @@
 
 #![deny(unsafe_code)]
 
-#[cfg(test)]
-#[path = "../../shared/entropy_source_tests.rs"]
-mod entropy_source_tests;
 mod auth;
 mod background;
 mod background_sessions;
@@ -26,6 +23,9 @@ mod documents;
 mod dream;
 mod embed;
 mod embedding_math;
+#[cfg(test)]
+#[path = "../../shared/entropy_source_tests.rs"]
+mod entropy_source_tests;
 mod episode_tools;
 #[cfg_attr(not(feature = "harness"), allow(dead_code))]
 mod episodes;

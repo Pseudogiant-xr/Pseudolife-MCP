@@ -403,6 +403,28 @@ pub(crate) fn activate_launcher(layout: &Layout, binary: &Path) -> Result<Activa
     result
 }
 
+/// The checkout build's cargo command. It runs from the checkout root because
+/// Cargo finds `.cargo/config.toml` from its working directory, never from
+/// `--manifest-path`, and that file builds aws-lc without the CPU-jitter
+/// entropy source that aborts the process on some machines (#1688).
+pub(super) fn checkout_build_command(cargo: &Path, repo: &Path, target: &Path) -> Command {
+    let mut command = Command::new(cargo);
+    command
+        .args([
+            "build",
+            "--release",
+            "--package",
+            "pseudolife-stdio",
+            "--manifest-path",
+        ])
+        .arg(repo.join("rust/Cargo.toml"))
+        .env("CARGO_TARGET_DIR", target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    command
+}
+
 pub fn install_source(source: &str, repo: Option<&Path>, layout: &Layout) -> Result<Runtime> {
     if let Some(repo) = repo.or_else(|| Path::new(source).is_dir().then(|| Path::new(source))) {
         let manifest = repo.join("rust/shim/Cargo.toml");
@@ -422,19 +444,7 @@ pub fn install_source(source: &str, repo: Option<&Path>, layout: &Layout) -> Res
         ensure_build_space(repo)?;
         ensure_build_space(scratch.parent().ok_or("build directory has no parent")?)?;
         let result = (|| {
-            let output = Command::new(cargo)
-                .args([
-                    "build",
-                    "--release",
-                    "--package",
-                    "pseudolife-stdio",
-                    "--manifest-path",
-                ])
-                .arg(repo.join("rust/Cargo.toml"))
-                .env("CARGO_TARGET_DIR", &scratch)
-                .stdin(Stdio::null())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
+            let output = checkout_build_command(&cargo, repo, &scratch)
                 .status()
                 .map_err(io_error)?;
             if !output.success() {
