@@ -355,13 +355,14 @@ class Plan:
         return self.stacked_parent.master if self.stacked_parent else self.base_sha
 
     @staticmethod
-    def path(branch: str, directory: Path | None = None) -> Path:
+    def filename(branch: str) -> str:
+        return branch.removeprefix(PREFIX) + ".json"
+
+    @staticmethod
+    def path(branch: str) -> Path:
         """Where `build` leaves the plan for `open`: inside this worktree's
         git directory, so it is never tracked or shared between worktrees."""
-        name = branch.removeprefix(PREFIX) + ".json"
-        if directory is None:
-            directory = Path(_out("rev-parse", "--git-path", "integrate-plans"))
-        return directory / name
+        return Path(_out("rev-parse", "--git-path", f"integrate-plans/{Plan.filename(branch)}"))
 
     def save(self) -> None:
         path = Plan.path(self.branch)
@@ -384,8 +385,8 @@ class Plan:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @staticmethod
-    def load(branch: str, directory: Path | None = None) -> Plan | None:
-        path = Plan.path(branch, directory)
+    def load(branch: str, path: Path | None = None) -> Plan | None:
+        path = path or Plan.path(branch)
         if not path.is_file():
             return None
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -3286,14 +3287,14 @@ def _worktree_plan_dirs() -> list[tuple[Path, Path]]:
 
 
 def _worktree_plan(branch: str) -> tuple[Plan, Path]:
-    matches = [(checkout, directory) for checkout, directory in _worktree_plan_dirs()
-               if Plan.path(branch, directory).is_file()]
+    matches = [(checkout, path) for checkout, directory in _worktree_plan_dirs()
+               if (path := directory / Plan.filename(branch)).is_file()]
     if len(matches) != 1:
         raise Refusal(f"expected one local plan for {branch}, found {len(matches)}; keep the "
                       "original build worktree and its plan, or build without stacked reuse")
-    checkout, directory = matches[0]
+    checkout, path = matches[0]
     try:
-        plan = Plan.load(branch, directory)
+        plan = Plan.load(branch, path)
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         plan = None
     if plan is None or plan.branch != branch or not _has_commit(plan.head):
