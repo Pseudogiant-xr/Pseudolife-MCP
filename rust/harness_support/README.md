@@ -5,8 +5,10 @@ the Rust binaries. Disposable-bank guards and HTTP readiness interpretation
 belong here; product implementations, scenario expectations, schema ownership
 and process lifecycle belong with their respective owners.
 
-Modules: `database_guard.py` (disposable-bank refusal), `readiness.py` (HTTP
-readiness), and `schema.py` (execution of the daemon's committed schema plan).
+`database_guard.py` owns disposable-bank refusal, `readiness.py` interprets
+HTTP readiness, and `schema.py` executes the daemon's committed schema plan.
+`bank_fixture.py` uses that plan and seeds the built-in relations and writer
+epoch for the dream, graph and principal harnesses.
 The schema executor contains no DDL and imports no product code. It runs in
 one transaction, or a savepoint inside a caller-owned transaction, and refuses
 unknown operations. On Linux the `cli-startup` schema step compares its complete

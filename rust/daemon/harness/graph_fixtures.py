@@ -7,23 +7,9 @@ import copy
 
 import psycopg
 
+from rust.harness_support.bank_fixture import initialize_bank
 from rust.harness_support.database_guard import assert_disposable_database, dsn_database_name, refuse_production_database
 from rust.harness_support.schema import ensure_schema
-
-
-RELATIONS = [
-    ("depends-on", "src requires dst to function", True, None),
-    ("part-of", "src is a component of dst", True, None),
-    ("hosts", "src is the host/platform for dst", False, None),
-    ("runs-on", "src executes on host/platform dst", False, "hosts"),
-    ("uses", "src makes use of dst", False, None),
-    ("configures", "src sets configuration for dst", False, None),
-    ("stores-data-in", "src persists its data in dst", False, None),
-    ("implements", "src (a source file) realizes concept/role dst", False, None),
-    ("related-to", "untyped catch-all association", False, None),
-    ("prefers", "src (a task-type) prefers approach/tool dst (positive lesson)", False, None),
-    ("avoids", "src (a task-type) should avoid dead-end dst (negative lesson)", False, None),
-]
 
 
 def connect(url):
@@ -39,11 +25,7 @@ def connect(url):
 
 def seed(url):
     with connect(url) as conn, conn.transaction():
-        ensure_schema(conn)
-        for name, description, transitive, inverse in RELATIONS:
-            conn.execute("INSERT INTO relations (name, description, transitive, inverse_of, builtin, created_at) "
-                         "VALUES (%s, %s, %s, %s, true, 1.0)", (name, description, transitive, inverse))
-        conn.execute("INSERT INTO meta (key, value) VALUES ('writer_lease_epoch', '1'::jsonb)")
+        initialize_bank(conn, fresh=True)
         for canonical, display, etype in [("node-a", "Node A", None),
                                           ("node-b", "Node B", "runtime"), ("node-c", "Node C", None)]:
             conn.execute("INSERT INTO entities (canonical, display, etype, created_at) VALUES (%s,%s,%s,1.0)",

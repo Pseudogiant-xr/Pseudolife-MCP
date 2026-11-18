@@ -1,53 +1,24 @@
 """Readiness clients and harness imports need no product Python package."""
 import importlib
-import importlib.abc
 import io
-from pathlib import Path
-import sys
 import urllib.error
 
 import pytest
 
-
-class BlockPackage(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == "pseudolife_memory" or fullname.startswith("pseudolife_memory."):
-            raise AssertionError(f"unexpected product package import: {fullname}")
+from rust.harness_support.import_blocker import cold_harness_imports
 
 
 @pytest.mark.parametrize("module", ["pgdisposable", "daemons", "dbstate", "board.run"])
 def test_harness_imports_without_product_package(module, monkeypatch):
     """Evict cached harness/package modules so transitive imports cannot hide."""
-    harness = Path(__file__).resolve().parents[1] / "daemon" / "harness"
-    support = Path(__file__).resolve().parent
-
-    def owned(name, value):
-        filename = getattr(value, "__file__", None)
-        return (name == "pseudolife_memory" or name.startswith("pseudolife_memory.")
-                or filename is not None and (
-                    Path(filename).resolve().is_relative_to(harness)
-                    or Path(filename).resolve().parent == support
-                    and not Path(filename).name.startswith("test_")))
-
-    with monkeypatch.context() as patch:
-        for name, value in list(sys.modules.items()):
-            if owned(name, value):
-                patch.delitem(sys.modules, name)
-        patch.syspath_prepend(str(harness.parents[2]))
-        patch.syspath_prepend(str(harness))
-        patch.setattr(sys, "meta_path", [BlockPackage(), *sys.meta_path])
-        try:
-            loaded = importlib.import_module(module)
-            if module == "dbstate":
-                patch.setenv("PL_HARNESS_BASE_DATABASE", "pseudolife_memory")
-                patch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
-                patch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
-                with pytest.raises(RuntimeError, match="production bank"):
-                    loaded._base_hashes("dbname=unused")
-        finally:
-            for name, value in list(sys.modules.items()):
-                if owned(name, value):
-                    del sys.modules[name]
+    with cold_harness_imports():
+        loaded = importlib.import_module(module)
+        if module == "dbstate":
+            monkeypatch.setenv("PL_HARNESS_BASE_DATABASE", "pseudolife_memory")
+            monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+            monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+            with pytest.raises(RuntimeError, match="production bank"):
+                loaded._base_hashes("dbname=unused")
 
 
 @pytest.mark.parametrize("status,body,want", [

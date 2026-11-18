@@ -26,11 +26,11 @@ def register(harness):
             return super().prepare_home(home)
 
         def prepare_template(self, dsn):
-            import psycopg
-            from dream_fixtures import connection, initialize
+            from dream_fixtures import connection
+            from rust.harness_support.bank_fixture import initialize_bank
             with connection(dsn) as conn:
                 harness.assert_disposable(conn)
-                initialize(conn)
+                initialize_bank(conn)
                 self.first_run = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM dream_runs").fetchone()[0]
                 conn.execute("INSERT INTO meta (key,value) VALUES ('cortex_dream_cursor','42') "
                              "ON CONFLICT (key) DO UPDATE SET value=excluded.value")
