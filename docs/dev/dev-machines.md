@@ -18,9 +18,10 @@ in the memory bank (search "dev machines homelab"), never in this tree.
   suite here overloads the desktop he is using; never natively, because a
   native Windows full suite's hook-script tests start Git Bash processes in
   bursts that stall mouse input.
-- **The controller** (a guest of the same hypervisor). The only homelab
-  machine that hosts agent sessions; it sends work to the machines below
-  and runs none of their suites itself.
+- **The agent controller** (a guest of the same hypervisor). The only
+  homelab machine that hosts agent sessions; it sends work to the machines
+  below and runs none of their suites itself. Further down this page "the
+  controller" means whichever host runs the command being described.
 - **Linux dev boxes** (the homelab "box" and its sibling, guests of one
   hypervisor). Linux full suites, Rust builds and tests on Linux, and long
   or CPU-heavy Linux work that would otherwise load the Windows host.
@@ -67,7 +68,7 @@ it dispatches to.
   scope, since the box also serves the live daemon; that needs
   password-free sudo that may preserve the environment (`NOPASSWD:SETENV:`
   for `systemd-run`, or `NOPASSWD: ALL`). No agent session runs on a box:
-  the controller hosts them and dispatches work here; a run started on the
+  the agent controller hosts them and dispatches work here; a run started on the
   box by hand (`python -m pytest tests/`) takes the same one-suite lock.
 - **The Windows VM** uses the `[lite]` extra's embedded PostgreSQL on
   loopback inside the VM, started for each test run by a wrapper kept in

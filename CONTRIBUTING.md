@@ -231,10 +231,11 @@ selects it, and `--shadow` runs it read-only beside the Python daemon
 [rust/README.md](rust/README.md) has the rest.
 
 A docs-only change can skip the full run locally. That means Markdown
-anywhere, `llms.txt` / `llms-full.txt`, and non-code files under `docs/`
-(such as `docs/atlas/atlas.json`), with nothing under `tests/`, `ops/`,
-plugin hooks, workflows or packaging, and no code or `.json` outside
-`docs/`. Run the doc guards instead (`tests/test_release_ux.py`,
+outside the code directories (`rust/`, `evals/`, `pseudolife_memory/`,
+`plugin/`, `ops/`, `tests/`, `.github/`), `llms.txt` / `llms-full.txt`,
+and non-code files under `docs/` (such as `docs/atlas/atlas.json`), with
+no packaging change; `is_docs` in `rust/ci/parity_scope.py` is the test CI
+applies. Run the doc guards instead (`tests/test_release_ux.py`,
 `tests/test_llms_txt.py`, `tests/test_atlas_currency.py`,
 `tests/test_eval_evidence.py`, `tests/test_i18n_readme.py`), plus every
 test file that names a file you touched (`git grep -l <file basename>

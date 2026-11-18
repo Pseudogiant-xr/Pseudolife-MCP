@@ -192,8 +192,8 @@ Who merges: the maintainer, or a session the maintainer delegated merges to
 in their own words. A policy change (any change to a rule that governs how
 agents work on the project, in `CLAUDE.md` or any other file) is docs-only
 by this definition when it touches only docs; the maintainer approves the
-text it merges with first, and then only the maintainer or the conductor
-merges it.
+text it merges with first, and then only the maintainer merges it, or the
+conductor under the maintainer's standing delegation (19 November 2026).
 
 ## Joining a batch
 

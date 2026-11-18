@@ -65,7 +65,8 @@ each exists because it was violated at least once.
    `docker compose down -v`.
    - Release mode targets `--tag` or the newest release (the daemon's on a
      client-only host) and moves clients with a daemon update unless
-     `--daemon-only`; `--clients-only` moves them alone.
+     `--daemon-only`; `--clients-only` moves them alone (`--tag <daemon
+     version>` for an older daemon).
    - Merged but unreleased master needs checkout mode (`ops/update.ps1` /
      `ops/update.sh`), because a checkout-built daemon reports the last
      release's version, so release mode's "nothing to do" there proves
@@ -82,7 +83,7 @@ each exists because it was violated at least once.
 9. **A CI change pays for its slots:** one that adds a hosted job, shard or
    setup cost records its prices and acceptances with
    `rust/ci/ci_budget.py` as `docs/dev/ci-budget.md` says (read it before
-   pricing one) and raises a limit only with its reason
+   adding a job or shard) and raises a limit only with its reason
    (`rust/ci/test_ci_budget.py`), because every job shares the account's 20
    hosted slots.
 10. **Python is frozen since 14 November 2026:** a change under
@@ -178,8 +179,7 @@ touched, with no retrofit sweep.
   `--lf` / `--co` never replace that analysis or a passing run.
 - Document dynamic-import, subprocess and fixture gaps, and take the
   full-suite path when they cannot be bounded.
-- **Never split a broad selection to dodge the suite lock**, because
-  targeted runs never lock.
+- **Never split a broad selection to dodge the suite lock**.
 - **A local full suite before the PR is required only for** schema, DDL and
   migration changes, shared test infrastructure (conftest, fixtures,
   imported helpers, the suite lock), changes whose coverage cannot be
@@ -230,8 +230,8 @@ touched, with no retrofit sweep.
   the suite never collects `rust/`.
 - Nothing is fixed inside a batch except the one generated census commit (a
   conflicting member or a red batch's culprit is dropped with a comment,
-  and a census-only conflict or a compatible budget-only one is
-  regenerated, not a drop), and it merges with a merge commit, never
+  and a census-only conflict is regenerated and a compatible budget-only
+  one normalized, not a drop), and it merges with a merge commit, never
   squash, so GitHub marks its members merged.
 - **A batch built again after a drop** (`build --after-drop`) skips the
   suite, harness and shim-tests gates, never the compile check, under the
@@ -278,8 +278,7 @@ touched, with no retrofit sweep.
   (`full-suite@<name>` on a dev machine) and notifies peers whose status
   shows `suite=running|queued` or `gpu=` or who parked with
   `park_clear_by:` that lease.
-- A mirrored run needs no hand-written SUITE-START/END; without a bearer
-  the mirror says so once and the lock alone rules.
+- A mirrored run needs no hand-written SUITE-START/END.
 - A run the mirror does not cover (a lock-off or bearer-less run, a GPU
   launch outside `Start-Qwen`, any saturating window) is announced by a
   `memory_message` SUITE-START to every peer whose status shows the
@@ -291,7 +290,8 @@ touched, with no retrofit sweep.
   starting, ending or stopped, an acknowledgement), because mail wakes a
   parked session to re-read its context; mail it only for a ruling you
   need, an answer it asked for, a credential or data-safety event, a pushed
-  head, a finished PR and this section's SUITE-START/END.
+  head, a finished PR and this section's SUITE-START/END if its status
+  shows the resource.
 - **CPU- or memory-saturating work never overlaps a full suite** (stress
   repros, benchmark sweeps, a model server, a large in-memory eval), since
   overlap causes timing flakes and os error 1455.
@@ -333,8 +333,8 @@ touched, with no retrofit sweep.
 - **Never the live bank:** every dev machine tests against its own test
   PostgreSQL, never the live bank's server or the Windows host's bench.
 - One full suite per machine under its own lock and `full-suite@<name>`
-  lease, two heavy runs (suite or gate) per hypervisor, never three, and
-  your board status says which you hold.
+  lease, two heavy runs (suite, `harness` or `shim-tests`) per hypervisor,
+  never three, and your board status says which you hold.
 - **A Windows-only hosted CI failure gets one rerun** on the current merge
   ref naming the test and its flake issue (open one if none exists), unless
   its signature is deterministic; a second failure, or a deterministic one,
