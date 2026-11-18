@@ -121,7 +121,7 @@ only the machine it dispatches to.
   (`~/.cache/pseudolife-suite/cargo-target`, or
   `PSEUDOLIFE_SUITE_CARGO_TARGET_DIR` set there; a general
   `CARGO_TARGET_DIR` is not used). `ops/remote-suite.ps1` turns it on by
-  itself for an `integrate/*` branch. Every run prints `wsl-suite: real
+  itself for an `integrate/*` or `stacked/*` branch. Every run prints `wsl-suite: real
   client: yes|no` before pytest starts.
 
 ## Batch compile check
@@ -213,6 +213,14 @@ unreachable machine, missing dependency or service, failed cleanup or low
 disk is not a passing gate. Resolve the named cause and rerun the command;
 never substitute a note or another head's result. An interrupted worktree
 without `.git` is refused for inspection, never silently overwritten.
+
+The compile check, harness, and shim tests accept the literal `integrate/*`
+or `stacked/*` branch ref in the bundle. For a stacked branch, the bundle
+includes the open parent's commits since the published master base, so a
+dev clone can run the gate even if it has fetched only master. The gate
+records the stacked commit and uses the same machine locks and recipes as
+an integration branch. See [Stacked local gates](merge-batches.md#stacked-local-gates)
+for when the results can carry to an integration batch.
 
 ## Sharing
 

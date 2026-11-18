@@ -46,7 +46,7 @@ os.execvpe("cargo", ["cargo", *sys.argv[1:]], clean)
 ' "$@"
 }
 [[ "$head" =~ ^[0-9a-f]{40}$ && "$base" =~ ^[0-9a-f]{40}$ && "$nonce" =~ ^[0-9a-f]{32}$ ]] || refuse 'invalid head, base or nonce'
-[[ "$ref" =~ ^refs/heads/integrate/[0-9A-Za-z._-]+$ ]] || refuse 'the bundle ref must be an integrate/* branch'
+[[ "$ref" =~ ^refs/heads/(integrate|stacked)/[0-9A-Za-z._-]+$ ]] || refuse 'the bundle ref must be an integrate/* branch or a stacked/* branch'
 [[ "$wait_seconds" =~ ^[0-9]+$ ]] || refuse 'invalid lock wait'
 if [[ "$repo" == '~/'* ]]; then repo="$HOME/${repo:2}"; fi
 [[ "$repo" == /* && -d "$repo/.git" ]] || refuse 'repo= must name an existing absolute clone path'
