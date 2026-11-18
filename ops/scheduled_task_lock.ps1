@@ -46,16 +46,26 @@ function Get-AccountSid([string]$Account) {
     try { (New-Object Security.Principal.NTAccount $Account).Translate([Security.Principal.SecurityIdentifier]).Value }
     catch { '' }
 }
+function Read-RootScheduledTask([string]$TaskName, [datetime]$Deadline = (Get-Date).AddSeconds(15)) {
+    # The scheduler provider can report file-not-found for a task that still
+    # exists. Retry only that provider error, within the caller's deadline.
+    while ($true) {
+        try { return Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop }
+        catch {
+            if ($_.FullyQualifiedErrorId -ne 'HRESULT 0x80070002,Get-ScheduledTask' -or (Get-Date) -ge $Deadline) { throw }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+}
 function Get-TaskPrincipalSid([string]$TaskName) {
     # The account the task runs as, as a SID, or '' when it names none
     # (a group principal) or the name does not resolve.
-    $task = Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop
-    Get-AccountSid "$($task.Principal.UserId)"
+    Get-AccountSid (Get-TaskPrincipalName $TaskName)
 }
 function Get-TaskPrincipalName([string]$TaskName) {
     # The account name the task runs as, exactly as stored ('' for a group
     # principal). Read only when it did not resolve to a SID.
-    "$((Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop).Principal.UserId)"
+    "$((Read-RootScheduledTask $TaskName).Principal.UserId)"
 }
 function Get-TaskLogonMismatch($task) {
     # '' when an enabled logon trigger fires at this user's logon (one for

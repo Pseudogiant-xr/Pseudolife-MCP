@@ -282,16 +282,26 @@ function Get-AccountSid([string]$Account) {
     try { (New-Object Security.Principal.NTAccount $Account).Translate([Security.Principal.SecurityIdentifier]).Value }
     catch { '' }
 }
+function Read-RootScheduledTask([string]$TaskName, [datetime]$Deadline = (Get-Date).AddSeconds(15)) {
+    # The scheduler provider can report file-not-found for a task that still
+    # exists. Retry only that provider error, within the caller's deadline.
+    while ($true) {
+        try { return Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop }
+        catch {
+            if ($_.FullyQualifiedErrorId -ne 'HRESULT 0x80070002,Get-ScheduledTask' -or (Get-Date) -ge $Deadline) { throw }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+}
 function Get-TaskPrincipalSid([string]$TaskName) {
     # The account the task runs as, as a SID, or '' when it names none
     # (a group principal) or the name does not resolve.
-    $task = Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop
-    Get-AccountSid "$($task.Principal.UserId)"
+    Get-AccountSid (Get-TaskPrincipalName $TaskName)
 }
 function Get-TaskPrincipalName([string]$TaskName) {
     # The account name the task runs as, exactly as stored ('' for a group
     # principal). Read only when it did not resolve to a SID.
-    "$((Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop).Principal.UserId)"
+    "$((Read-RootScheduledTask $TaskName).Principal.UserId)"
 }
 function Get-TaskLogonMismatch($task) {
     # '' when an enabled logon trigger fires at this user's logon (one for
@@ -440,21 +450,11 @@ function Get-CanonicalPath([string]$Path) {
 }
 # <<< task lock <<<
 function Get-TaskRegistration([string]$taskName, [datetime]$deadline = (Get-Date).AddSeconds(15)) {
-    # The 2026-11-03 VM trace saw four intermittent provider file-not-found
-    # errors in 80 autostart proofs. They are not the named-task absence result.
-    # One-shot reads get a 15-second retry budget. Stop/delete polling passes
-    # its existing deadline so a read cannot restart that settlement budget.
-    # Persistent failures and all other errors remain visible to callers.
-    while ($true) {
-        try { return Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop }
-        catch {
-            # Named absence. With -TaskPath the query is composite and the
-            # id drops its _TaskName suffix (measured on the Windows dev VM,
-            # 16 November 2026, Windows PowerShell 5.1 and PowerShell 7).
-            if ($_.FullyQualifiedErrorId -in @('CmdletizationQuery_NotFound,Get-ScheduledTask', 'CmdletizationQuery_NotFound_TaskName,Get-ScheduledTask')) { return }
-            if ($_.FullyQualifiedErrorId -ne 'HRESULT 0x80070002,Get-ScheduledTask' -or (Get-Date) -ge $deadline) { throw }
-        }
-        Start-Sleep -Milliseconds 200
+    try { return Read-RootScheduledTask $taskName $deadline }
+    catch {
+        # With -TaskPath the named absence ID can omit its _TaskName suffix.
+        if ($_.FullyQualifiedErrorId -in @('CmdletizationQuery_NotFound,Get-ScheduledTask', 'CmdletizationQuery_NotFound_TaskName,Get-ScheduledTask')) { return }
+        throw
     }
 }
 function Get-TaskOwnership($task) {
