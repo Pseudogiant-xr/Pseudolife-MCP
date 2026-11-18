@@ -173,6 +173,37 @@ Each change waits for hosted CI once, on its batch:
   batches, master and its weekly run needs the maintainer to switch the
   repository to an advanced-setup workflow.
 
+## Docs-only pull requests
+
+A docs-only pull request may be merged straight onto master without a
+batch. "Docs-only" is the definition in `CLAUDE.md` ("Running tests"): the
+diff lists only `*.md`, `llms.txt` / `llms-full.txt` and non-code files
+under `docs/`. All of these hold first:
+
+- It is independent: nothing it says depends on a pull request that is
+  still open. One that documents unmerged work joins the batch that carries
+  that work, and is dropped with it.
+- No batch is built or open. `merge` refuses a batch when master moved after
+  its `build` ("Merging it"), and a stacked gate result carries only on an
+  identical tree ("Stacked local gates"), so a direct merge at that point
+  costs the open batch a rebuild and a fresh gate. Wait for the batch to
+  merge, or add the pull request to the next one.
+- Its review pass is recorded, the doc guards passed at its head, and every
+  check at its head was read and is green on the current merge ref.
+- It is merged with a merge commit (`gh pr merge <n> --merge`), never
+  squash.
+
+What it costs: the push to master runs the whole push matrix, because the
+push workflows do not skip a docs-only diff. Measured on 18 November 2026 on
+the first such merge (#1741): `test`, both lite lanes and the Rust jobs all
+started. Until they skip it, each direct merge spends about one hosted run
+on the account's 20 slots, so do not merge one shortly before a batch opens.
+
+Who merges: the maintainer, or a session the maintainer delegated merges to
+in their own words. A change to `CLAUDE.md` or another policy page is
+docs-only by this definition, and the maintainer still approves its text
+first.
+
 ## Joining a batch
 
 A pull request is ready when it has its reviews and its own local targeted
