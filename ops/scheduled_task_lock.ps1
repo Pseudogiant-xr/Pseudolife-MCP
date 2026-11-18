@@ -47,8 +47,11 @@ function Get-AccountSid([string]$Account) {
     catch { '' }
 }
 function Read-RootScheduledTask([string]$TaskName, [datetime]$Deadline = (Get-Date).AddSeconds(15)) {
-    # The scheduler provider can report file-not-found for a task that still
-    # exists. Retry only that provider error, within the caller's deadline.
+    # The Windows dev VM trace on 3 November 2026 recorded four intermittent
+    # provider file-not-found errors in 80 autostart proofs. A follow-up probe
+    # on 19 November 2026 saw the error in 3 of 107 Get-ScheduledTask reads.
+    # Retry that provider error every 200 ms within the existing 15 s budget.
+    # Stop/delete polling shares its deadline with the read.
     while ($true) {
         try { return Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop }
         catch {
