@@ -1,18 +1,31 @@
 //! Save a fresh profile for an explicitly selected daemon connection.
 use std::{
+    collections::HashMap,
     fs,
     io::{self, Write},
     path::Path,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Duration,
 };
 
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
-use rmcp::{ServiceExt, transport::StreamableHttpClientTransport};
+use futures::{StreamExt, TryStreamExt, stream::BoxStream};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
+use rmcp::{
+    ServiceExt,
+    model::ClientJsonRpcMessage,
+    transport::{
+        StreamableHttpClientTransport,
+        streamable_http_client::{
+            SseError, StreamableHttpClient, StreamableHttpClientTransportConfig,
+            StreamableHttpError, StreamableHttpPostResponse,
+        },
+    },
+};
 use serde_json::{Map, Value};
+use sse_stream::{Sse, SseStream};
 
 use super::{Fail, Options, Output, record, store};
-use crate::{board::state, credentials::CredentialProvider, raw_http::ObservedHttp};
+use crate::{board::state, credentials::CredentialProvider};
 
 const CONSENT: &str = "This tunnel makes the daemon available to the selected OpenAI organization and associated ChatGPT workspace. Rerun with --accept-access to consent to that access.";
 const CREDENTIAL: &str =
@@ -27,6 +40,7 @@ const WRITE: &str =
 const SYNC: &str = "the profile was saved but the tunnel directory could not be synced; check the filesystem and rerun setup to confirm the profile";
 const DEADLINE: Duration = Duration::from_secs(20);
 const PROFILE_LIMIT: usize = 65536;
+const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
 
 pub(super) fn save(
     options: &Options,
@@ -113,14 +127,8 @@ async fn handshake(url: &str, token: &str) -> bool {
     };
     let endpoint = format!("{}/mcp", url.trim_end_matches('/'));
     let transport = StreamableHttpClientTransport::with_client(
-        ObservedHttp {
-            client,
-            observation: Arc::new(Mutex::new(Default::default())),
-        },
-        rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
-            endpoint,
-        )
-        .reinit_on_expired_session(false),
+        ProbeHttp(client),
+        StreamableHttpClientTransportConfig::with_uri(endpoint).reinit_on_expired_session(false),
     );
     let Ok(client) = ().serve(transport).await else {
         return false;
@@ -136,6 +144,115 @@ async fn handshake(url: &str, token: &str) -> bool {
         .is_ok_and(|list| !list.tools.is_empty());
     let _ = client.cancel().await;
     has_instructions && has_tools
+}
+
+/// Setup needs two finite MCP answers. Cap the HTTP body before the SDK
+/// parses either JSON or SSE, including chunked responses without a length.
+#[derive(Clone)]
+struct ProbeHttp(reqwest::Client);
+
+type TransportError = StreamableHttpError<reqwest::Error>;
+
+impl StreamableHttpClient for ProbeHttp {
+    type Error = reqwest::Error;
+
+    async fn post_message(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session: Option<Arc<str>>,
+        auth: Option<String>,
+        headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<StreamableHttpPostResponse, TransportError> {
+        let mut request = self
+            .0
+            .post(uri.as_ref())
+            .header(ACCEPT, "application/json, text/event-stream")
+            .headers(headers.into_iter().collect())
+            .json(&message);
+        if let Some(session) = session {
+            request = request.header("Mcp-Session-Id", session.as_ref());
+        }
+        if let Some(auth) = auth {
+            request = request.bearer_auth(auth);
+        }
+        let response = request.send().await.map_err(TransportError::Client)?;
+        if !response.status().is_success() {
+            return Err(TransportError::UnexpectedServerResponse(
+                "MCP request refused".into(),
+            ));
+        }
+        if !matches!(message, ClientJsonRpcMessage::Request(_))
+            || matches!(response.status().as_u16(), 202 | 204)
+        {
+            return Ok(StreamableHttpPostResponse::Accepted);
+        }
+        let session_id = response
+            .headers()
+            .get("Mcp-Session-Id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let mut remaining = RESPONSE_LIMIT;
+        let chunks = response.bytes_stream().map(move |chunk| {
+            let chunk = chunk.map_err(io::Error::other)?;
+            remaining = remaining
+                .checked_sub(chunk.len())
+                .ok_or_else(|| io::Error::other("MCP response is too large"))?;
+            Ok(chunk)
+        });
+        match content_type.split(';').next().unwrap_or_default().trim() {
+            "application/json" => {
+                let body = chunks
+                    .try_fold(Vec::new(), |mut body, chunk| async move {
+                        body.extend_from_slice(&chunk);
+                        Ok(body)
+                    })
+                    .await
+                    .map_err(|_: io::Error| {
+                        TransportError::UnexpectedServerResponse(
+                            "could not read the bounded MCP response".into(),
+                        )
+                    })?;
+                Ok(StreamableHttpPostResponse::Json(
+                    serde_json::from_slice(&body)?,
+                    session_id,
+                ))
+            }
+            "text/event-stream" => Ok(StreamableHttpPostResponse::Sse(
+                SseStream::from_bytes_stream(chunks).boxed(),
+                session_id,
+            )),
+            _ => Err(TransportError::UnexpectedContentType(None)),
+        }
+    }
+
+    async fn delete_session(
+        &self,
+        uri: Arc<str>,
+        session: Arc<str>,
+        auth: Option<String>,
+        headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<(), TransportError> {
+        self.0.delete_session(uri, session, auth, headers).await
+    }
+
+    async fn get_stream(
+        &self,
+        _uri: Arc<str>,
+        _session: Option<Arc<str>>,
+        _last_event: Option<String>,
+        _auth: Option<String>,
+        _headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<BoxStream<'static, Result<Sse, SseError>>, TransportError> {
+        // POST carries the answers. Setup does not subscribe to notifications.
+        Err(TransportError::ServerDoesNotSupportSse)
+    }
 }
 
 fn check_unused_name(root: &Path, name: &str) -> Result<(), Fail> {

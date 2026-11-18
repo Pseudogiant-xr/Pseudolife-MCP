@@ -238,7 +238,12 @@ fn setup_home() -> Home {
 #[test]
 fn setup_saves_an_authenticated_private_profile_and_reuses_it_unchanged() {
     let home = setup_home();
-    let daemon = common::Fixture::start();
+    let daemon = common::Fixture::start_with(common::Setup {
+        lists: vec![common::Reply::Sse(serde_json::json!({
+            "tools": [{"name": "fixture", "inputSchema": {"type": "object"}}],
+        }))],
+        ..Default::default()
+    });
     let output = setup_against(&home, &daemon.url, true);
     assert_eq!(
         output.status.code(),
@@ -299,6 +304,24 @@ fn setup_requires_consent_and_refuses_a_redirect_without_saving() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("MCP handshake failed"));
     redirected.assert_untouched();
+    assert!(!home.path("tunnels").exists());
+}
+
+#[test]
+fn setup_refuses_an_oversized_daemon_response_without_saving() {
+    let home = setup_home();
+    let daemon = common::Fixture::start_with(common::Setup {
+        initialize: vec![common::Reply::Result(serde_json::json!({
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "fixture", "version": "1"},
+            "instructions": "x".repeat(4 * 1024 * 1024),
+        }))],
+        ..Default::default()
+    });
+    let output = setup_against(&home, &daemon.url, true);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("MCP handshake failed"));
     assert!(!home.path("tunnels").exists());
 }
 
