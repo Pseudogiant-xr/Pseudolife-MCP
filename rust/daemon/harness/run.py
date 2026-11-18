@@ -43,6 +43,8 @@ import traceback
 import urllib.parse
 from pathlib import Path
 
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 # On Windows, console children of a run that has no console open no window
@@ -2665,6 +2667,16 @@ def main() -> int:
                          "shows the difference unless --write is given)")
     ap.add_argument("--write", action="store_true", help="with --record-candidate: write")
     args = ap.parse_args()
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     if args.record_candidate and args.mode != "golden":
         ap.error("--record-candidate belongs to golden mode")
     if args.write and not args.record_candidate:

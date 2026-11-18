@@ -454,6 +454,13 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
     # python_freeze.py: `build` refuses a master without the guard.
     for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py", "rust/ci/python_freeze.py"):
         write(path, (ROOT / path).read_text(encoding="utf-8"))
+    # The real member-merge path also validates the combined harness recipe.
+    write("ops/integrate.py", 'RUST_HARNESS = ("rust/test_fixture.py",)\n')
+    write(".github/workflows/rust.yml", json.dumps({"jobs": {
+        "rust": {"steps": [{"run": "python -m pytest rust/test_fixture.py"}]},
+        "parity-checks": {"steps": []}}}))
+    write("rust/ci/harness-test-selections.json", '{"schema": 1, "files": {}}\n')
+    write("rust/test_fixture.py", "def test_fixture(): pass\n")
     write("pseudolife_memory/doctor_cli.py", "old\n")
     write(remainder, "old\n")
     def budget(version):

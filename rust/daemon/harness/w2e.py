@@ -222,6 +222,8 @@ import tempfile
 import time
 from pathlib import Path
 
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import candidate_record  # noqa: E402
@@ -7039,6 +7041,16 @@ def main() -> int:
                     help="golden: re-record each scenario from the candidate (a dry run that "
                          "shows the difference unless --write is given)")
     ap.add_argument("--write", action="store_true", help="with --record-candidate: write")
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     args = ap.parse_args()
     if (args.record_candidate or args.write or args.mutant) and args.mode != "golden":
         ap.error("--record-candidate, --write and --mutant belong to golden mode")

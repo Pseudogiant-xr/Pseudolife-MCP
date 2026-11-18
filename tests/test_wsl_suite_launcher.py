@@ -1498,7 +1498,7 @@ def _remote_suite(tmp_path: Path, branch: str, *, origin: bool = False,
     stand-in; returns the run, the result JSON it wrote and the commit."""
     repo = tmp_path / "repo"
     (repo / "ops").mkdir(parents=True)
-    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1"):
+    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1", "dev-tmp-space.sh"):
         shutil.copy(ROOT / "ops" / name, repo / "ops" / name)
     for argv in (["init", "-q", "-b", branch], ["add", "-A"],
                  ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "x"]):
@@ -1917,6 +1917,9 @@ HOME="$REMOTE_HOME" PATH="$FAKE_BIN:$PATH" PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.
 '''
 _FAKE_SUDO = r'''#!/bin/bash
 # The dispatch's last step: report what the remote clone now holds.
+for arg in "$@"; do
+    case "$arg" in TMPDIR=*) printf '%s\n' "${arg#TMPDIR=}" > "$TMP_SEEN" ;; esac
+done
 repo="${PSEUDOLIFE_SUITE_GIT_COMMON%/.git}"
 got="$(git -C "$repo" rev-parse --verify --quiet "refs/heads/suite/$PSEUDOLIFE_SUITE_COMMIT" || echo missing)"
 echo "ran $PSEUDOLIFE_SUITE_COMMIT $got" >> "$SSH_CALLS"
@@ -1927,10 +1930,11 @@ echo "3 passed in 0.1s"
 '''
 
 
-def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, to_master: bool = False):
+def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, to_master: bool = False,
+                  tmp_used: int | None = None):
     repo, bare = tmp_path / "repo", tmp_path / "origin.git"
     (repo / "ops").mkdir(parents=True)
-    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1", "wsl-suite.sh"):
+    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1", "wsl-suite.sh", "dev-tmp-space.sh"):
         shutil.copy(ROOT / "ops" / name, repo / "ops" / name)
     def git(cwd, *argv):
         return subprocess.run(["git", "-C", str(cwd), "-c", "user.email=t@example.com",
@@ -1960,11 +1964,18 @@ def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, t
                        (fake_bin / "sudo", _FAKE_SUDO)):
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
+    if tmp_used is not None:
+        for name, body in {"stat": "printf 'tmpfs\\n'\n",
+                           "df": f"printf 'Used\\n{tmp_used}\\n'\n"}.items():
+            path = fake_bin / name
+            path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+            path.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
     env = {"HOME": str(home), "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
            "REMOTE_HOME": str(remote_home), "FAKE_BIN": str(fake_bin),
            "SSH_CALLS": str(tmp_path / "ssh-calls"), "WSL_CALLS": str(tmp_path / "wsl-calls"),
+           "TMP_SEEN": str(tmp_path / "tmp-seen"),
            "PSEUDOLIFE_SUITE_REMOTE": "box", "PSEUDOLIFE_SUITE_WHERE": "remote",
            "PSEUDOLIFE_SUITE_NATIVE_CLIENT": None, "PSEUDOLIFE_MCP_TOKEN": None,
            "PSEUDOLIFE_WSL_DISTRO": None, "WSLENV": None, "PSEUDOLIFE_SUITE_POLL_SECONDS": "0",
@@ -1988,6 +1999,54 @@ def test_the_remote_machine_gets_the_commit_and_an_unpushed_one_is_never_pushed(
     assert _read(tmp_path / "ssh-calls") == [f"ran {head} {head}"]
     assert on_origin is push_head          # a bundle pushes nothing
     assert ("travels as a bundle" in proc.stdout) is (not to_master)
+    dispatch = tmp_path / "remote-home/.cache/pseudolife-suite/dispatch"
+    assert dispatch.is_dir() and not list(dispatch.iterdir())
+    assert (tmp_path / "remote-home/.cache/pseudolife-suite/tmp").is_dir()
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_the_remote_suite_passes_its_disk_temporary_path_across_the_scope_boundary(tmp_path):
+    proc, _, _ = _bundle_world(tmp_path, push_head=False)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    # sudo/systemd-run drops ambient TMPDIR on the dev boxes; the final env
+    # command must supply it explicitly to the suite, as it does HOME/PATH.
+    assert _read(tmp_path / "tmp-seen") == [str(tmp_path / "remote-home/.cache/pseudolife-suite/tmp")]
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_the_remote_suite_refuses_loaded_tmpfs_before_creating_artifacts(tmp_path):
+    proc, head, on_origin = _bundle_world(tmp_path, push_head=False, tmp_used=4 * 1024**3 + 1)
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+    assert "memory-backed" in proc.stdout and "above 4 GiB" in proc.stdout
+    assert "remove only your owned" in proc.stdout and "retry" in proc.stdout
+    assert not (tmp_path / "remote-home/.cache/pseudolife-suite/dispatch").exists()
+    assert not on_origin and not (tmp_path / "ssh-calls").exists()
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("kind,used,code", [
+    ("tmpfs", 4 * 1024**3, 0), ("tmpfs", 4 * 1024**3 + 1, 3),
+    ("ramfs", 5 * 1024**3, 3), ("ext2/ext3", 20 * 1024**3, 0),
+    ("tmpfs", "unknown", 3),
+])
+def test_dev_tmp_preflight_refuses_only_loaded_memory_backed_filesystems(tmp_path, kind, used, code):
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    for name, body in {"stat": f"printf '%s\\n' '{kind}'\n",
+                       "df": f"printf 'Used\\n%s\\n' '{used}'\n"}.items():
+        path = stubs / name
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+    result = subprocess.run([BASH, "-c", 'source "$1"; dev_tmp_preflight gate', "_",
+                             str(ROOT / "ops/dev-tmp-space.sh")], capture_output=True, text=True,
+                            env=hermetic_env(PATH=str(stubs) + os.pathsep + os.environ["PATH"]), timeout=15)
+    assert result.returncode == code, result.stdout + result.stderr
+    if code:
+        assert "/tmp" in result.stdout and "retry" in result.stdout
 
 
 @_LINUX_ONLY

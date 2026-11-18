@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "files": {
+    "rust/cli_harness/test_audit_native.py": {
+      "kind": "native",
+      "reason": "Every test consumes the parity lane's built native candidate, including file-only and mocked container cases."
+    },
+    "rust/cli_harness/test_audit_stats.py": {
+      "kind": "unit",
+      "reason": "Harness comparison and transport fixtures use mocks or owned Python stand-ins, not a Rust candidate."
+    },
+    "rust/cli_harness/test_backup.py": {
+      "kind": "mixed",
+      "reason": "Only the listed unit selectors (or all except the listed native selectors) need no built candidate; candidate proofs remain in their parity lane.",
+      "unit_tests": [
+        "test_discovery_traceback_only_removes_interpreter_frames",
+        "test_pg_dump_missing_rule_retires_only_the_oracles_lite_extra",
+        "test_native_proofs_use_the_explicit_candidate",
+        "test_required_native_proofs_cannot_skip_a_missing_candidate",
+        "test_required_linux_nss_proofs_cannot_skip_a_missing_compiler"
+      ]
+    },
+    "rust/cli_harness/test_bank.py": {
+      "kind": "unit",
+      "reason": "Harness comparison and transport fixtures use mocks or owned Python stand-ins, not a Rust candidate."
+    },
+    "rust/cli_harness/test_lease.py": {
+      "kind": "unit",
+      "reason": "Harness comparison and transport fixtures use mocks or owned Python stand-ins, not a Rust candidate."
+    },
+    "rust/cli_harness/test_lease_operator.py": {
+      "kind": "unit",
+      "reason": "Harness comparison and transport fixtures use mocks or owned Python stand-ins, not a Rust candidate."
+    },
+    "rust/cli_harness/test_lease_transport.py": {
+      "kind": "unit",
+      "reason": "Harness comparison and transport fixtures use mocks or owned Python stand-ins, not a Rust candidate."
+    },
+    "rust/cli_harness/test_maintainer_setup_native.py": {
+      "kind": "mixed",
+      "reason": "Only the listed unit selectors (or all except the listed native selectors) need no built candidate; candidate proofs remain in their parity lane.",
+      "unit_tests": [
+        "test_rust_image_host_helpers_use_the_installed_native_cli",
+        "test_rust_image_enrolment_keeps_the_same_native_environment",
+        "test_python_image_retains_the_oracle_helper_command",
+        "test_write_keeps_unrelated_values_and_original_backup",
+        "test_restart_failure_does_not_discard_the_saved_name",
+        "test_native_image_harness_seam_executes_the_real_oracle",
+        "test_setup_rejects_invalid_retained_rate_limit_before_backup",
+        "test_invalid_rate_limit_harness_case_uses_the_real_oracle"
+      ]
+    },
+    "rust/cli_harness/test_maintainer_setup_terminal.py": {
+      "kind": "native",
+      "reason": "The same parametrized terminal scenario runs Python and a built native candidate; retain the complete scenario in its parity lane."
+    },
+    "rust/cli_harness/test_operator_transport.py": {
+      "kind": "unit",
+      "reason": "Harness comparison and transport fixtures use mocks or owned Python stand-ins, not a Rust candidate."
+    },
+    "rust/cli_harness/test_pair_terminal.py": {
+      "kind": "native",
+      "reason": "The same parametrized terminal scenario runs Python and a built native candidate; retain the complete scenario in its parity lane."
+    },
+    "rust/cli_harness/test_pairing_native.py": {
+      "kind": "mixed",
+      "reason": "Only the listed unit selectors (or all except the listed native selectors) need no built candidate; candidate proofs remain in their parity lane.",
+      "unit_tests": [
+        "test_cleanup_fixture_recording_redacts_only_proven_file_token"
+      ]
+    },
+    "rust/cli_harness/test_transfer_native.py": {
+      "kind": "mixed",
+      "reason": "Only the listed unit selectors (or all except the listed native selectors) need no built candidate; candidate proofs remain in their parity lane.",
+      "unit_tests": [
+        "test_ci_provisions_database_before_native_transfer_tests"
+      ]
+    },
+    "rust/cli_harness/test_update_transactions.py": {
+      "kind": "mixed",
+      "reason": "Only the listed unit selectors (or all except the listed native selectors) need no built candidate; candidate proofs remain in their parity lane.",
+      "unit_tests": [
+        "test_native_transactions_use_the_standard_lane_candidate",
+        "test_fixture_df_emits_one_terminated_filesystem_record",
+        "test_fixture_running_format_preserves_pre_recreate_state",
+        "test_fixture_backup_finds_bash_when_powershell_is_in_a_separate_directory"
+      ]
+    },
+    "rust/cli_harness/test_update_wrappers_native.py": {
+      "kind": "unit",
+      "reason": "Runtime selection uses generated Python and shell stand-ins for both runtimes, including the deliberately skipped Windows stable-exe fixture."
+    },
+    "rust/daemon/harness/test_body_cases.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_config_knobs_golden.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_dream_cursor_cancel.py": {
+      "kind": "native",
+      "reason": "Requires the parity lane supplied sent-YAML or dream-contract executable."
+    },
+    "rust/daemon/harness/test_dream_cursors.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_embedding.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_graph_read_compare.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_graph_store_harness.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_principals_settle.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_schema_executor.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_security_cases.py": {
+      "kind": "mixed",
+      "reason": "Only the listed unit selectors (or all except the listed native selectors) need no built candidate; candidate proofs remain in their parity lane.",
+      "native_tests": [
+        "test_release_artifacts_have_no_loopback_bind_override"
+      ]
+    },
+    "rust/daemon/harness/test_sent_yaml.py": {
+      "kind": "native",
+      "reason": "Requires the parity lane supplied sent-YAML or dream-contract executable."
+    },
+    "rust/daemon/harness/test_sent_yaml_mutants.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_startup_fidelity.py": {
+      "kind": "unit",
+      "requirements": ["onnx"],
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_static.py": {
+      "kind": "mixed",
+      "reason": "Only the listed unit selectors (or all except the listed native selectors) need no built candidate; candidate proofs remain in their parity lane.",
+      "native_tests": [
+        "test_production_capability_switch_does_not_replace_startup"
+      ]
+    },
+    "rust/daemon/harness/test_w2d_namespace.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_w2d_recent.py": {
+      "kind": "unit",
+      "reason": "Harness unit and rejecting controls use fixtures or mocked native processes; no built release candidate is needed."
+    },
+    "rust/daemon/harness/test_w2d_seed_base.py": {
+      "kind": "unit",
+      "reason": "Uses the test PostgreSQL login but no built Rust candidate; the gate requires databases."
+    }
+  }
+}

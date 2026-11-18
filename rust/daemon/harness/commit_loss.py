@@ -65,6 +65,8 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 from urllib.parse import urlsplit, urlunsplit
 
 HERE = Path(__file__).resolve().parent
@@ -1262,6 +1264,16 @@ def main() -> int:
     ap.add_argument("--min-free-gb", type=float, default=8.0)
     ap.add_argument("--smoke", action="store_true")
     a = ap.parse_args()
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     if a.smoke:
         return smoke()
     engines = [e.strip() for e in a.engines.split(",") if e.strip()]

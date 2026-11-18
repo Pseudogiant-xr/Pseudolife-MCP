@@ -130,9 +130,17 @@ def test_the_option_turns_database_skips_into_failures(monkeypatch):
         "rust_conftest", Path(__file__).resolve().parents[2] / "conftest.py")
     conftest = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(conftest)
-    conftest.pytest_configure(SimpleNamespace(getoption=lambda name: False))
+    def config(required):
+        # Model both option types on a turn-enabled machine. The enclosing
+        # pytest session owns its turn cleanup; this direct hook call must
+        # not release that shared session lease during the unit test.
+        return SimpleNamespace(
+            getoption=lambda name: required if name == "--require-databases" else 0,
+            add_cleanup=lambda callback: None)
+
+    conftest.pytest_configure(config(False))
     assert gate.REQUIRE_DATABASES_ENV not in __import__("os").environ
-    conftest.pytest_configure(SimpleNamespace(getoption=lambda name: name == "--require-databases"))
+    conftest.pytest_configure(config(True))
     assert __import__("os").environ[gate.REQUIRE_DATABASES_ENV] == "1"
 
 

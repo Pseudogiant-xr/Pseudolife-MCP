@@ -33,6 +33,8 @@ import sys
 import time
 from pathlib import Path
 
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 REPO = HARNESS.parents[2]
@@ -626,6 +628,16 @@ def main() -> int:
     ap.add_argument("--out", type=Path)
     ap.add_argument("--record", action="store_true")
     args = ap.parse_args()
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[4])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     names = args.only or list(S.SCENARIOS) + ["mixed"]
     if args.mode == "golden" and not any(n in S.SCENARIOS for n in names):
         ap.error("golden mode requires at least one recorded scenario")

@@ -7,6 +7,8 @@ import ipaddress
 import os
 import re
 from pathlib import Path
+
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 import sys
 import tempfile
 from urllib.parse import quote
@@ -32,6 +34,16 @@ def diagnostic(exc, dsn=""):
 
 
 def main() -> int:
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[2])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
     from pseudolife_memory.storage.embedded_pg import attach_or_start
     from pseudolife_memory.test_login_cli import main as test_login_main

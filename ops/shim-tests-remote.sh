@@ -2,6 +2,10 @@
 # Far half of integrate.py shim-tests. Arguments and bundle arrive over SSH;
 # the controller ships this script before the remote checkout is changed.
 set -u
+# LOAD_TMP_GUARD
+if ! declare -F dev_tmp_preflight >/dev/null; then
+    source "$(dirname "${BASH_SOURCE[0]}")/dev-tmp-space.sh"
+fi
 repo=$1 base=$2 head=$3 ref=$4 nonce=$5 wait_seconds=$6
 export PATH="$PATH:$HOME/.cargo/bin" GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=Never
 export CARGO_TERM_COLOR=never NEXTEST_COLOR=never
@@ -49,7 +53,13 @@ if [[ "$repo" == '~/'* ]]; then repo="$HOME/${repo:2}"; fi
 repo=$(realpath -e "$repo") || refuse 'cannot resolve clone path'
 no_hooks="$repo.shim-tests-no-hooks"
 [[ ! -e "$no_hooks" && ! -L "$no_hooks" ]] || refuse 'the no-hooks path exists; remove it before retrying'
-for tool in git flock cargo python3 base64; do command -v "$tool" >/dev/null || refuse "$tool is missing; install it on the second Linux dev box"; done
+for tool in git flock cargo python3 base64 stat df realpath; do command -v "$tool" >/dev/null || refuse "$tool is missing; install it on the second Linux dev box"; done
+problem=$(dev_tmp_preflight shim-tests) || refuse "$problem"
+export TMPDIR="$repo.shim-tests-tmp"
+for location in "$repo" "$TMPDIR"; do
+    problem=$(dev_tmp_disk_path shim-tests "$location") || refuse "$problem"
+done
+mkdir -p "$TMPDIR" || refuse 'cannot create disk-backed temporary directory under home; fix its permissions and retry'
 run_cargo nextest --version >/dev/null 2>&1 || refuse 'cargo-nextest is missing; install it on the second Linux dev box'
 locks="${PSEUDOLIFE_SUITE_LOCK_DIR:-$HOME/.pseudolife-mcp/locks}"
 mkdir -p "$locks" || refuse 'cannot open machine lock folder'

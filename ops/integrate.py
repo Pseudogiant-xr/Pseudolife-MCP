@@ -200,6 +200,8 @@ SHIM_TESTS_ARGS = ("nextest", "run", "--locked", "-p", "pseudolife-stdio", "--li
 SHIM_TESTS_COMMAND = "cargo " + " ".join(SHIM_TESTS_ARGS)
 try:
     SHIM_TESTS_REMOTE_SCRIPT = Path(__file__).with_name("shim-tests-remote.sh").read_text(encoding="utf-8")
+    TMP_SPACE_SCRIPT = Path(__file__).with_name("dev-tmp-space.sh").read_text(encoding="utf-8")
+    SHIM_TESTS_REMOTE_SCRIPT = SHIM_TESTS_REMOTE_SCRIPT.replace('# LOAD_TMP_GUARD', TMP_SPACE_SCRIPT)
     DATABASE_LOCK_SCRIPT = Path(__file__).with_name("dev-database-lock.ps1").read_text(encoding="utf-8")
 except OSError:
     SHIM_TESTS_REMOTE_SCRIPT = DATABASE_LOCK_SCRIPT = None
@@ -359,12 +361,18 @@ class Plan:
         # A field this loader does not know (one a newer or reverted tool
         # wrote) is dropped, so a plan crosses tool versions; a missing one
         # takes its default.
-        known = {f.name for f in fields(Plan)}
-        raw = {k: v for k, v in raw.items() if k in known}
-        raw["merged"] = [Member(**m) for m in raw["merged"]]
-        for d in raw["dropped"]:
-            d.pop("waiting", None)   # census waiters, from plans built before 2026-10-27
-        raw["dropped"] = [Dropped(Member(**d.pop("member")), **d) for d in raw["dropped"]]
+        def known(cls, row):
+            names = {f.name for f in fields(cls)}
+            return {k: v for k, v in row.items() if k in names}
+
+        raw = known(Plan, raw)
+        raw["merged"] = [Member(**known(Member, m)) for m in raw["merged"]]
+        dropped = []
+        for entry in raw["dropped"]:
+            row = known(Dropped, entry)
+            row["member"] = Member(**known(Member, row["member"]))
+            dropped.append(Dropped(**row))
+        raw["dropped"] = dropped
         return Plan(**raw)
 
 
@@ -1241,6 +1249,38 @@ def _budget_text(rev: str, path: str) -> str | None:
     return shown.stdout if shown.returncode == 0 else None
 
 
+@functools.lru_cache(maxsize=1)
+def _harness_reader():
+    # Load this controller's parser, never Python from the candidate head.
+    name = "_integrate_harness_selection"
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("harness_selection.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@functools.lru_cache(maxsize=128)
+def _harness_recipe(head: str):
+    """The immutable head's workflow, literal list and classified parity units."""
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise Refusal("harness selection needs a full batch-head commit id; rebuild the batch")
+    reader = _harness_reader()
+
+    def read(path):
+        source = _budget_text(head, path)
+        if source is None:
+            raise reader.SelectionError(f"cannot read {path} at {head[:12]}")
+        return source
+
+    try:
+        paths = _out("ls-tree", "-r", "--name-only", head).splitlines()
+        return reader.recipe(read, paths)
+    except (reader.SelectionError, OSError) as error:
+        raise Refusal(f"batch-head harness coverage refused at {head[:12]}: {error}; "
+                      "fix the workflow selection or its classification before gating") from None
+
+
 def _budget_json(rev: str, path: str):
     text = _budget_text(rev, path)
     return None if text is None else json.loads(text)
@@ -1929,6 +1969,8 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
         if proc.returncode == 0:
             if _undo_merge_if_frozen(plan, m, freeze):
                 continue
+            if _undo_merge_if_harness_incomplete(plan, m, before):
+                continue
             plan.merged.append(m)
             print(f"  merged #{m.number} {m.sha[:12]} {m.title}")
             continue
@@ -1936,12 +1978,16 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
         if _merge_census_conflict(plan.base_sha, conflicted):
             if _undo_merge_if_frozen(plan, m, freeze):
                 continue
+            if _undo_merge_if_harness_incomplete(plan, m, before):
+                continue
             plan.merged.append(m)
             plan.census_conflicts.append(m.number)
             print(f"  merged #{m.number} {m.sha[:12]}; census conflict awaits regeneration")
             continue
         if _merge_budget_conflict(plan.base_sha, conflicted):
             if _undo_merge_if_frozen(plan, m, freeze):
+                continue
+            if _undo_merge_if_harness_incomplete(plan, m, before):
                 continue
             plan.merged.append(m)
             print(f"  merged #{m.number} {m.sha[:12]} after normalizing derived CI budget metadata")
@@ -1954,6 +2000,27 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
         reason = _collision(m, conflicted, plan.merged, plan.base_sha)
         plan.dropped.append(Dropped(m, reason))
         print(f"  dropped #{m.number}: {reason}")
+
+
+def _undo_merge_if_harness_incomplete(plan: Plan, member: Member, before: str) -> bool:
+    # A refusal is attributable only when the preceding combined tree was
+    # readable. Judge each tentative merge before any compile or full suite.
+    try:
+        _harness_recipe(before)
+    except Refusal:
+        # A repair can span members. An inherited unreadable tree cannot be
+        # blamed on this member; the completed head is still checked strictly.
+        return False
+    head = _out("rev-parse", "HEAD")
+    try:
+        _harness_recipe(head)
+    except Refusal as error:
+        git("reset", "--hard", before)
+        reason = str(error)
+        plan.dropped.append(Dropped(member, reason))
+        print(f"  dropped #{member.number}: {reason}")
+        return True
+    return False
 
 
 # The census script is member code, so it runs without the operator's tokens
@@ -2143,6 +2210,11 @@ def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
     merge again from the base. Nothing else is added inside a batch."""
     # The freeze judges the whole listing (and the open pull requests it
     # carries) before the cut search narrows it to one member.
+    try:
+        _harness_recipe(plan.base_sha)
+    except Refusal as error:
+        print(f"warning: base {plan.base_sha[:12]} has unreadable harness coverage: {error}; "
+              "members may repair it, but the completed head must read cleanly", file=sys.stderr)
     _fetch_listed(members)       # the first landing reads the guard the members carry
     freeze = _freeze_module(plan.base_sha, members)
     prepass = _freeze_prepass(plan, freeze, members)
@@ -2150,6 +2222,7 @@ def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
     members = _release_cut_alone(plan, members, prepass.refused)
     cut_drops = list(plan.dropped)
     _merge_members(plan, members, freeze, prepass)
+    _harness_recipe(_out("rev-parse", "HEAD"))
     _record_carried(plan, prepass)
     _refuse_a_cut_beside_others(plan)
     inputs = _census_inputs(plan.base_sha)
@@ -2306,9 +2379,9 @@ def _remote_far(plan: Plan, cfg: dict[str, str], script_text: str, name: str,
             data = base64.b64encode(bundle.read_bytes()).decode("ascii")
         except (Refusal, OSError) as exc:
             return None, f"the batch bundle could not be made: {exc}", []
-    # The verdict line carries a nonce no member code sees (it travels on
-    # stdin, not argv), so a line cargo or pytest passes through cannot stand
-    # in for it.
+    # The nonce associates a verdict with this dispatch; it is not a secret
+    # (Bash exposes its script text in -c argv). The SSH exit code must also
+    # agree with the verdict, so member output alone cannot make a pass.
     nonce = secrets.token_hex(16)
     script = ("& {\n" + script_text + "\n} -Repo " + _ps_literal(cfg["repo"])
               + " -Base " + _ps_literal(plan.base_sha) + " -Head " + _ps_literal(plan.head)
@@ -2423,8 +2496,8 @@ def _remote_rust_check(plan: Plan, cfg: dict[str, str]) -> tuple[str, str]:
             data = base64.b64encode(bundle.read_bytes()).decode("ascii")
         except (Refusal, OSError) as exc:
             return f"not run: the batch bundle could not be made: {exc}", ""
-    # The verdict line carries a nonce no member code sees (it travels on
-    # stdin, not argv), so a line cargo passes through cannot stand in for it.
+    # The nonce associates a verdict with this dispatch. The verdict must
+    # also agree with the SSH exit code; tagged stdout alone is not a pass.
     nonce = secrets.token_hex(16)
     try:
         script = ("& {\n" + RUST_CHECK_REMOTE_SCRIPT + "\n} -Repo " + _ps_literal(cfg["repo"])
@@ -3125,7 +3198,7 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None,
     lines += [
         "", "## Validation", "",
         f"- Local full suite: {suite or '<filled in by `open`>'}",
-        f"- Rust harness Python tests (`{RUST_HARNESS_COMMAND}`, which the full "
+        f"- Rust harness Python tests (`{_harness_recipe(plan.head).display()}`, which the full "
         f"suite does not collect): {harness or '<filled in by `open`>'}",
         f"- Rust compile check (`{RUST_CHECK_COMMAND}` in `{RUST_CHECK_DIR}/`, which "
         f"checks all workspace targets): {_rust_check_cell(plan)}",
@@ -3189,6 +3262,7 @@ def build(args: argparse.Namespace) -> int:
         judged = _merge_batch(plan, members)
         plan.markers = _new_markers(base_sha)
         plan.head = _out("rev-parse", "HEAD")
+        _harness_recipe(plan.head)  # Recheck after the generated metadata commit.
         if closed is not None:
             plan.after_drop = _after_drop_record(plan, closed)
         done = True
@@ -3255,7 +3329,7 @@ def build(args: argparse.Namespace) -> int:
           f"  1. {SUITE_COMMAND}   (the full suite on the remote machine, the batch "
           "head carried as a bundle; writes ~/.pseudolife-mcp/suite-results/*.json;\n"
           f"     {REAL_CLIENT_NOTE}; {SUITE_LOCAL_NOTE})\n"
-          f"  2. python ops/integrate.py harness   ({RUST_HARNESS_COMMAND} on the Windows dev VM)\n"
+          f"  2. python ops/integrate.py harness   ({_harness_recipe(plan.head).display()} on the Windows dev VM)\n"
           f"  3. python ops/integrate.py shim-tests   ({SHIM_TESTS_COMMAND} on the second Linux dev box)\n"
           "  4. python ops/integrate.py open --suite <suite.json> --harness <harness.json> --shim-tests <shim.json>\n"
           "A red suite: bisect locally, drop the culprit, switch back with "
@@ -3408,8 +3482,9 @@ def _gate_result_line(path: str | None, head: str, kind: str) -> str:
     harness = kind == HARNESS_RESULT_KIND
     name = "harness" if harness else "shim-tests"
     role = "Windows dev VM" if harness else "second Linux dev box"
-    command = RUST_HARNESS_COMMAND if harness else SHIM_TESTS_COMMAND
-    selection = list(RUST_HARNESS if harness else SHIM_TESTS_ARGS)
+    recipe = _harness_recipe(head) if harness else None
+    command = recipe.display() if harness else SHIM_TESTS_COMMAND
+    selection = recipe.record() if harness else list(SHIM_TESTS_ARGS)
     again = f"run `python ops/integrate.py {name}` and give `open --{name} <result.json>` for {head[:8]}"
     if not path:
         raise Refusal(f"give the {name} result: {again}")
@@ -3511,8 +3586,9 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
     name = "harness" if harness else "shim-tests"
     config = RUST_CHECK_REMOTE if harness else SHIM_TESTS_REMOTE
     role = "Windows dev VM" if harness else "second Linux dev box"
-    command = RUST_HARNESS_COMMAND if harness else SHIM_TESTS_COMMAND
-    selection = list(RUST_HARNESS if harness else SHIM_TESTS_ARGS)
+    recipe = _harness_recipe(head) if harness else None
+    command = recipe.display() if harness else SHIM_TESTS_COMMAND
+    selection = recipe.record() if harness else list(SHIM_TESTS_ARGS)
     cfg, cause = _remote_config(config, (role,), role)
     if not cfg:
         raise Refusal(f"{cause or 'no dev machine configured'}; configure {config.name} (docs/dev/dev-machines.md); no local fallback")
@@ -3525,8 +3601,13 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
         helper = base64.b64encode(DATABASE_LOCK_SCRIPT.encode("utf-8")).decode("ascii")
         script = script.replace('# LOAD_DATABASE_LOCK',
             f". ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{helper}'))))")
-        params = " -PytestArgs @(" + ", ".join(_ps_literal(p) for p in selection) + ")"
+        params = " -PytestArgs @(" + ", ".join(_ps_literal(p) for p in recipe.commands[0].paths) + ")"
+        unit_commands = base64.b64encode(json.dumps(selection[1:]).encode("utf-8")).decode("ascii")
+        params += " -UnitCommands " + _ps_literal(unit_commands)
+        requirements = base64.b64encode(json.dumps(recipe.requirements).encode("utf-8")).decode("ascii")
+        params += " -ExtraRequirements " + _ps_literal(requirements)
         params += f" -LockWaitSeconds {args.lock_wait_seconds}"
+        params += f" -DatabaseTurnWaitSeconds {args.database_turn_wait_seconds}"
     else:
         params = str(args.lock_wait_seconds)
     started = dt.datetime.now().astimezone()
@@ -3539,7 +3620,7 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
                                    RUST_HARNESS_REMOTE_TIMEOUT, shell="pwsh" if harness else "bash", log_path=log)
     summaries = ([m.group(1) for m in map(PYTEST_SUMMARY_RE.match, lines) if m] if harness else
                  [line.strip() for line in lines if "Summary [" in line])
-    summary = summaries[-1] if summaries else ""
+    summary = "; ".join(summaries) if harness else summaries[-1] if summaries else ""
     log.write_text("\n".join(lines) + "\n", encoding="utf-8")
     result = {"kind": kind, "machine": role, "commit": head, "branch": branch,
               "command": command, "selection": selection, "exit_code": code,
@@ -4052,6 +4133,9 @@ def main(argv: list[str] | None = None) -> int:
         gate = sub.add_parser(name, help=f"run the built batch's {name} gate on its dev machine")
         gate.add_argument("--lock-wait-seconds", type=int, default=1200,
                           help="maximum wait for the machine's locks (default 1200)")
+        if name == "harness":
+            gate.add_argument("--database-turn-wait-seconds", type=int, default=0,
+                              help="explicit bounded wait for a held database turn (default: refuse immediately)")
     sub.add_parser("suite", help="run the built batch's full suite on the remote "
                                  "machine (its head travels as a bundle)")
     sub.add_parser("merge", help="merge the published batch pull request once every "
@@ -4060,6 +4144,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if hasattr(args, "lock_wait_seconds") and args.lock_wait_seconds < 0:
         parser.error("--lock-wait-seconds must be nonnegative")
+    if hasattr(args, "database_turn_wait_seconds") and not 0 <= args.database_turn_wait_seconds <= 86400:
+        parser.error("--database-turn-wait-seconds must be between 0 and 86400")
     commands = {"status": status, "build": build, "suite": suite, "open": open_, "merge": merge,
                 "harness": harness, "shim-tests": shim_tests}
     try:

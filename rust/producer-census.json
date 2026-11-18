@@ -11,10 +11,10 @@
     "docs/atlas/atlas.json": "58525c896dae613c9a9c4bfc98bc33c291b2ac8f0c87377877f4803340fbf19e",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
-    "docs/dev/dev-machines.md": "c7205f15c41b428661b5adf232fa49ae1b2b9ee8d08e5efcc11a8927d11f3bab",
+    "docs/dev/dev-machines.md": "84f66a4276f9d00b65ae2f8222da3092b6d0a52ee96802bce8b5c5fc144217d3",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
-    "docs/dev/merge-batches.md": "abeac0315b54c95f1d43aad8e120ccffa28eb7dcd8c106aad03aded0c3be3dc7",
+    "docs/dev/merge-batches.md": "f4f058b86ec126115b461c208893599529b06e5d88aeb5c0df67f5323926e527",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "02104e3aaac74c9b578e007f6b37b16e59a163d4ff9adafd920844e805bec3f7",
     "docs/dev/python-retirement.md": "59a9cc1c2f8f8e394afd5f34cb54899f97637da60ce4654a1f507ac58a5b9d1d",
@@ -241,7 +241,8 @@
     "ops/compact-docker-vhdx.ps1": "3aa564ef7824cec3f08b785322df2bc65e4fafed6339926bb21299c56bcc6257",
     "ops/coordination_probe.py": "9fb8b31f002694021b5ad0aaaa4d8528187e833c8c7dac27812f9bd2a630df26",
     "ops/dedup_cortex.py": "483aa26a4edaa5e75dc41b6133f7e663e0d826dbf61ebd83a20a9b3b29ac2727",
-    "ops/dev-database-lock.ps1": "5b386e5d5c0d9e4fe32e72e8dbf785310ef86bda5148fe8ced51a2ae7e1cbab5",
+    "ops/dev-database-lock.ps1": "259a5c310babeeab2ede9252cf3c67875fa629c4e4e1097f4262cdc1759881c2",
+    "ops/dev-tmp-space.sh": "0efb4077dc2866309d19e7957abf5797fa6b126610458b8fb5482b83a880d19e",
     "ops/docker-compose.ghcr.yml": "a64059a8d81e18ccb441bedd3510c366e90172e3d70681ce7a91e8aa58d174de",
     "ops/docker-compose.rust-daemon.yml": "06b6163bd041cfe0f1e7a2f6eb62daf9311ec233f61ed53f3dd663ccb19a1dcd",
     "ops/docker-compose.rust-ghcr.yml": "4692b7641015dd66c98964fc05795862370554e09e91e6468380b66f319709a8",
@@ -252,6 +253,7 @@
     "ops/docker-compose.stack.yml": "e03dd1386234809ee8ce8e4c6d9efaa56fe66b20c61025626591b40a0dab997b",
     "ops/docker-compose.yml": "c1649e5d48a7ec67b384baa3caa136de184e8c3b0cb5d7e4d855132939d0e707",
     "ops/gen_llms_txt.py": "b3e88325c54345808e8895ed439c73b1158eca5f031fbdd1be6abcb33f1ff2f2",
+    "ops/harness_selection.py": "93e1e1ab63c8b783998f3a1d75325182881e68d8bfa384d7b24877e4cd297233",
     "ops/install-autostart.ps1": "ba472020c721c6b0d45dbbc7813be9ea06088fa9e0f99b6138a434383f05ff0e",
     "ops/install-backup-task.ps1": "5fa15b92ff18a616d3165436cc283ea32c3790590e6e4b969ca22461ae85830f",
     "ops/install-cache-retention.ps1": "be1a6185015777fbe8852e32b4618dfc42b8321f2a949802d9cc481fcf34fda8",
@@ -269,7 +271,7 @@
     "ops/install.sh": "b0b5bd48a03c71719aebf0fb729759d9fc06f6a8b540c23e031e9b797d7672e1",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "ef835df43b83a4533248833afa34243034d10dbb4e193e5eccff20ba6468ce28",
+    "ops/integrate.py": "ef00881f25a0455155e38a4d1e96bfaa4cad8199b3f9e82002a912629a65156e",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -291,14 +293,14 @@
     "ops/pytest_failure_lines.py": "e95e13a47e8f12bb4ddf15246f7da2920aedd2fd38018307894c184155a48ec6",
     "ops/pytest_retry_once.py": "213f6297068459a9296bbba26fc7e4d19fbce78b85819e61b70349b7e86b5e2a",
     "ops/register_claude_desktop.py": "a653438874cb1af0ec859083239ba35adc5e74747d3aceae055640f80ee37534",
-    "ops/remote-suite.ps1": "657367b4b4fdb6302006e7b2588cfe49080011895c026bd3b841cd268c140d39",
+    "ops/remote-suite.ps1": "030ae7fb667159ec3572e1c46ba2c59aa964294dcfb29fe831bd1df39a681f0b",
     "ops/requirements.lock.txt": "25788335cc3785d37a955f62ef88e0aff5097591ac3c7e557c4800db726fcf27",
     "ops/restore.ps1": "b4707f940b476e8561d146ab24242599df045e06e7131f26896d8f8a3ec7857b",
     "ops/restore.sh": "f1751a385f4cccb52480f7aed6422a8fde939d1ed91f2499b6bc5ebb52e523b3",
     "ops/restore_from_pt.py": "bceaeb79d8ff9a537ab41d2a8ac783a167cd370e75786275211ba5baa30c213e",
     "ops/retire_by_writer.py": "5fb2b8152e3fa249a00295714f88f5fbcb6c7d61bdd6d22ef6ad6cfb9a6ee801",
     "ops/rust-check-remote.ps1": "0c7edc70f4ee437c461b2004a17ddcde34da58c9ce11cb8eee09aa778c7eda7c",
-    "ops/rust-harness-remote.ps1": "6af61f41451adf27f2822699e12752642b09322efbc122048cfa79265599e6f8",
+    "ops/rust-harness-remote.ps1": "5aed72daa00da5316a1ca139420268b8cc4dd359ade44b63cd6d940f48039dc8",
     "ops/scheduled_task_lock.ps1": "ed18db50c63e049c4220da567946afdf8363ca980eb8e8529dd5953cb4301f8e",
     "ops/selfhosted/linux_pool_health.py": "669fff24c3bd59be9cac2211da42a1a0c693b6ea520a59bf360d8befea4e22b3",
     "ops/selfhosted/runner_cleanup.py": "9725b580f842094359d185ac6e4740d6871ebb75312bbddf351311a07b0e5213",
@@ -312,7 +314,7 @@
     "ops/selfhosted/windows-job-started.ps1": "34bb407c8f93ffe2f87cce3e3c334bde1bc8ffa695ebcd7e448f3b2f776bc84c",
     "ops/setup-codex-coordination.py": "7d2f4d6e0bbbdc098046d2f488a626a397a0bdc933f8ba22a32c3d90c16a02e3",
     "ops/setup-codex-hooks.py": "07bd89e00c4efe322ab5d6a524d4bd23a756a0e02ba7ad6cf4d39bc80d2bae39",
-    "ops/shim-tests-remote.sh": "fc5bc239597a9ec0302d5e7654d25471757b033da302559b6ca140edd17a1170",
+    "ops/shim-tests-remote.sh": "85ab4f45ba687ea306b8db1fa64410555f9d941cc2a08ca64b1631f5b5f66d9b",
     "ops/shim_autostart.py": "c046460aea32c80311fd9575bc55e672c3e259d10ae8d216e0d94ac1dbcfa3d4",
     "ops/shim_cutover.py": "8dd7c95e3e49bbba5400218f368eb6b46e8b30adc7bfd109574bf55847fe9b40",
     "ops/shim_python.py": "87d96c8f470278059f89818910cc2eaf11126cac439c1caea9c190a39f88de54",
@@ -5733,7 +5735,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/dev-machines.md:272",
+          "location": "docs/dev/dev-machines.md:314",
           "shape": {
             "argv_source": "lease check <lease> --",
             "channel": "argv",
@@ -41838,7 +41840,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:267",
+          "location": "ops/remote-suite.ps1:270",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -49267,7 +49269,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:266",
+          "location": "ops/remote-suite.ps1:269",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -57974,7 +57976,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:335",
+          "location": "ops/remote-suite.ps1:346",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58011,7 +58013,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:319",
+          "location": "ops/remote-suite.ps1:327",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58064,7 +58066,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:326",
+          "location": "ops/remote-suite.ps1:334",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58225,7 +58227,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:335",
+          "location": "ops/remote-suite.ps1:346",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58360,7 +58362,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/dev-machines.md:264",
+          "location": "docs/dev/dev-machines.md:306",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58375,7 +58377,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/dev-machines.md:268",
+          "location": "docs/dev/dev-machines.md:310",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58498,7 +58500,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/rust-harness-remote.ps1:145",
+          "location": "ops/rust-harness-remote.ps1:263",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58511,7 +58513,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/shim-tests-remote.sh:54",
+          "location": "ops/shim-tests-remote.sh:64",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58648,7 +58650,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:335",
+          "location": "ops/remote-suite.ps1:346",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58818,7 +58820,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/dev-machines.md:266",
+          "location": "docs/dev/dev-machines.md:308",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58862,6 +58864,19 @@
       "name": "PSEUDOLIFE_SUITE_VENV",
       "optional_parameters": null,
       "producers": [
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/remote-suite.ps1:344",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-$HOME/.venvs/pseudolife}\" \"${PSEUDOLIFE_SUITE_CARGO_TARGET_DIR:-$HOME/.cache/pseudolife-suite/cargo-target}\" \"${PSEUDOLIFE_SUITE_PROFILE_DIR:-$HOME/.pseudolife-mcp/suite-profiles}\"; do dev_tmp_disk_path remote-suite \"$artifact\" || exit 3; done')",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
         {
           "dynamic": "unresolved",
           "evidence": "static",
@@ -59070,7 +59085,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:3279",
+          "location": "ops/integrate.py:3353",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59085,7 +59100,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:3304",
+          "location": "ops/integrate.py:3378",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59166,7 +59181,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/dev-machines.md:267",
+          "location": "docs/dev/dev-machines.md:309",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59517,7 +59532,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:324",
+          "location": "ops/remote-suite.ps1:332",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59530,7 +59545,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:325",
+          "location": "ops/remote-suite.ps1:333",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -83879,7 +83894,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:3291",
+      "location": "ops/integrate.py:3365",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -84103,7 +84118,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:303",
+      "location": "ops/remote-suite.ps1:311",
       "name": "PSEUDOLIFE_SUITE_BUNDLE",
       "shape": {
         "channel": "environment",
@@ -84117,7 +84132,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:305",
+      "location": "ops/remote-suite.ps1:313",
       "name": "PSEUDOLIFE_SUITE_BUNDLE",
       "shape": {
         "channel": "environment",
@@ -84131,7 +84146,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:328",
+      "location": "ops/remote-suite.ps1:336",
       "name": "PSEUDOLIFE_SUITE_KEEP",
       "shape": {
         "channel": "environment",
@@ -84145,7 +84160,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:328",
+      "location": "ops/remote-suite.ps1:336",
       "name": "PSEUDOLIFE_SUITE_PRUNE",
       "shape": {
         "channel": "environment",
@@ -84159,7 +84174,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:328",
+      "location": "ops/remote-suite.ps1:336",
       "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
       "shape": {
         "channel": "environment",
@@ -84173,7 +84188,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:329",
+      "location": "ops/remote-suite.ps1:337",
       "name": "PSEUDOLIFE_SUITE_PROFILE",
       "shape": {
         "channel": "environment",
@@ -84187,7 +84202,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:329",
+      "location": "ops/remote-suite.ps1:337",
       "name": "PSEUDOLIFE_SUITE_WORKERS",
       "shape": {
         "channel": "environment",
@@ -84201,7 +84216,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:330",
+      "location": "ops/remote-suite.ps1:338",
       "name": "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
       "shape": {
         "channel": "environment",
@@ -84215,7 +84230,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:330",
+      "location": "ops/remote-suite.ps1:338",
       "name": "PSEUDOLIFE_SUITE_PROFILE_INTERVAL",
       "shape": {
         "channel": "environment",
@@ -84229,12 +84244,40 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:334",
+      "location": "ops/remote-suite.ps1:342",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
         "complete": false,
         "expression": "' + (Quote $nativeClient)) }",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/remote-suite.ps1:344",
+      "name": "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-$HOME/.cache/pseudolife-suite/cargo-target}\" \"${PSEUDOLIFE_SUITE_PROFILE_DIR:-$HOME/.pseudolife-mcp/suite-profiles}\"; do dev_tmp_disk_path remote-suite \"$artifact\" || exit 3; done')",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/remote-suite.ps1:344",
+      "name": "PSEUDOLIFE_SUITE_PROFILE_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-$HOME/.pseudolife-mcp/suite-profiles}\"; do dev_tmp_disk_path remote-suite \"$artifact\" || exit 3; done')",
         "parameters": {}
       },
       "usage": "assignment-candidate"
@@ -96067,7 +96110,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:3305",
+      "location": "ops/integrate.py:3379",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -97598,13 +97641,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/dev-machines.md:266",
+      "location": "docs/dev/dev-machines.md:308",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_SLOTS"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/dev-machines.md:272",
+      "location": "docs/dev/dev-machines.md:314",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:lease"
     },
@@ -97683,12 +97726,12 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:827",
+      "location": "docs/dev/merge-batches.md:87",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:87",
+      "location": "docs/dev/merge-batches.md:888",
       "reason": "forwarded parameters"
     },
     {
@@ -118582,7 +118625,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/integrate.py:3291",
+      "location": "ops/integrate.py:3365",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_NATIVE_CLIENT"
     },
@@ -119045,7 +119088,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:266",
+      "location": "ops/remote-suite.ps1:269",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
@@ -119057,81 +119100,99 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:303",
+      "location": "ops/remote-suite.ps1:311",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_BUNDLE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:305",
+      "location": "ops/remote-suite.ps1:313",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_BUNDLE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:319",
+      "location": "ops/remote-suite.ps1:327",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_DISPATCHED"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:324",
+      "location": "ops/remote-suite.ps1:332",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:325",
+      "location": "ops/remote-suite.ps1:333",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:328",
+      "location": "ops/remote-suite.ps1:336",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:328",
+      "location": "ops/remote-suite.ps1:336",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:328",
+      "location": "ops/remote-suite.ps1:336",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:329",
+      "location": "ops/remote-suite.ps1:337",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:329",
+      "location": "ops/remote-suite.ps1:337",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:330",
+      "location": "ops/remote-suite.ps1:338",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_CARGO_TARGET_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:330",
+      "location": "ops/remote-suite.ps1:338",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE_INTERVAL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:334",
+      "location": "ops/remote-suite.ps1:342",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_NATIVE_CLIENT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/remote-suite.ps1:344",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_VENV"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/remote-suite.ps1:344",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_CARGO_TARGET_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/remote-suite.ps1:344",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE_DIR"
     },
     {
       "dynamic": "unresolved",
@@ -119253,7 +119314,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/rust-harness-remote.ps1:145",
+      "location": "ops/rust-harness-remote.ps1:263",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_LOCK_DIR"
     },
@@ -119683,7 +119744,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/shim-tests-remote.sh:54",
+      "location": "ops/shim-tests-remote.sh:64",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_LOCK_DIR"
     },

@@ -9,8 +9,8 @@
 #      branch into a private ref that must name exactly the batch head;
 #   2. one harness worktree beside the clone (<repo>.rust-harness) is forced
 #      to that head and cleaned;
-#   3. a uv environment kept beside the clone (<repo>.rust-harness-venv) gets
-#      the head's own dev dependencies;
+#   3. a fresh run-named uv environment beside the clone gets the head's
+#      own dev dependencies and is removed safely after that run;
 #   4. the machine's private services hook (~/.pseudolife-mcp/
 #      rust-harness-services.ps1) starts its test PostgreSQL and a Linux
 #      Docker engine and must prove both answer (Start-HarnessServices throws
@@ -28,11 +28,18 @@ param(
     [Parameter(Mandatory)] [string] $Head,
     [Parameter(Mandatory)] [string] $Ref,
     [Parameter(Mandatory)] [string[]] $PytestArgs,
+    # Base64 JSON of the controller's batch-head unittest selections.
+    [string] $UnitCommands = '',
+    # Optional fixture dependencies pinned by the batch-head parity workflow.
+    [string] $ExtraRequirements = '',
     [string] $Nonce = '',
     # Tests point this at a stand-in; integrate.py never passes it.
     [string] $ServicesHook = '',
     [ValidateRange(0, 86400)] [int] $LockWaitSeconds = 1200,
+    [ValidateRange(0, 86400)] [int] $DatabaseTurnWaitSeconds = 0,
     [string] $DatabaseLockPath = '',
+    # Tests use private marker files; the controller never overrides this.
+    [string] $TurnMarkerPath = '',
     [double] $MinFreeGB = 8
 )
 
@@ -110,6 +117,41 @@ function Assert-HarnessWorktreeHasNoReparsePoint([string] $Path) {
 if ($Head -notmatch '^[0-9a-f]{40}$' -or $Base -notmatch '^[0-9a-f]{40}$') { Stop-Run "the head and base must be full commit ids" }
 if ($Ref -notmatch '^refs/heads/integrate/[0-9A-Za-z._-]+$') { Stop-Run "the bundle's ref must be an integrate/* branch, not '$Ref'" }
 if ($Nonce -and $Nonce -notmatch '^[0-9a-f]{16,64}$') { Stop-Run "the nonce must be hex" }
+$units = @()
+try {
+    if ($UnitCommands) {
+        $unitJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($UnitCommands))
+        if (-not $unitJson.TrimStart().StartsWith('[')) { throw 'the unittest selections must be an array' }
+        $units = @(ConvertFrom-Json -InputObject $unitJson)
+        foreach ($unit in $units) {
+            if ($unit.runner -notin @('unittest-discover', 'unittest-file') -or -not $unit.paths.Count) {
+                throw 'unknown or empty unittest selection'
+            }
+            foreach ($path in $unit.paths) {
+                if ($path -notmatch '^[A-Za-z0-9_./-]+\.py$' -or '..' -in $path.Split('/')) {
+                    throw 'a unittest file is not a literal relative Python path'
+                }
+            }
+            if ($unit.runner -eq 'unittest-discover') {
+                if ($unit.start -notmatch '^[A-Za-z0-9_./-]+$' -or '..' -in $unit.start.Split('/') -or
+                    $unit.pattern -notmatch '^test_[A-Za-z0-9_.*?-]+\.py$') { throw 'unsupported unittest discovery selection' }
+            } elseif ($unit.paths.Count -ne 1) { throw 'a direct unittest command must name one file' }
+        }
+    }
+} catch { Stop-Run "cannot read the unittest selections: $($_.Exception.Message)" }
+$requirements = @()
+try {
+    if ($ExtraRequirements) {
+        $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ExtraRequirements))
+        if (-not $json.TrimStart().StartsWith('[')) { throw 'fixture requirements must be an array' }
+        $requirements = @(ConvertFrom-Json -InputObject $json)
+        foreach ($requirement in $requirements) {
+            if ($requirement -isnot [string] -or $requirement -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9.+!-]*$') {
+                throw 'fixture requirements must be literal package==version pins'
+            }
+        }
+    }
+} catch { Stop-Run "cannot read fixture requirements: $($_.Exception.Message)" }
 if (-not (Test-Path -LiteralPath (Join-Path $Repo '.git'))) { Stop-Run "no git clone at the configured repo= path" }
 $Repo = (Resolve-Path -LiteralPath $Repo).ProviderPath.TrimEnd([char]92, [char]47)
 $noHooks = "$Repo.rust-harness-no-hooks"
@@ -118,13 +160,20 @@ $hook = if ($ServicesHook) { $ServicesHook } else { Join-Path $HOME '.pseudolife
 if (-not (Test-Path -LiteralPath $hook)) {
     Stop-Run "this machine has no services hook (~/.pseudolife-mcp/rust-harness-services.ps1) to start its test PostgreSQL and Linux Docker engine; docs/dev/dev-machines.md says what it must do"
 }
+if (-not $TurnMarkerPath) { $TurnMarkerPath = Join-Path $HOME '.pseudolife-mcp/locks/test-postgres.turn-enabled' }
+if (-not (Test-Path -LiteralPath $TurnMarkerPath -PathType Leaf)) {
+    Stop-Run 'database turn marker is missing; configure this service-managing machine with: New-Item -ItemType File -Force -Path "$HOME/.pseudolife-mcp/locks/test-postgres.turn-enabled"'
+}
 
 $data = [Console]::In.ReadToEnd()
 try { $bytes = [Convert]::FromBase64String($data) } catch { Stop-Run "the bundle on stdin is not base64" }
 if ($bytes.Length -eq 0) { Stop-Run "no bundle arrived on stdin" }
 
 $gate = "$Repo.rust-harness"
-$venv = "$Repo.rust-harness-venv"
+$environmentId = [guid]::NewGuid().ToString('N')
+$venv = "$Repo.rust-harness-env-$environmentId"
+$expectedVenv = [IO.Path]::GetFullPath($venv)
+$environmentCreated = $false
 $lockPath = "$Repo.rust-harness.lock"
 $bundle = "$Repo.rust-harness-$($Head.Substring(0, 12)).bundle"
 $private = "refs/rust-harness/$Head"
@@ -137,11 +186,80 @@ function Remaining-Wait { return [math]::Max(0, [int]($deadline - [DateTimeOffse
 $verdict = $null
 $failure = $null
 $started = $false
+
+function Get-HarnessLongPath([string] $Path) {
+    if (-not ('HarnessPathSpelling' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class HarnessPathSpelling {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern uint GetLongPathName(string path, StringBuilder output, uint length);
+    public static string Expand(string path) {
+        var output = new StringBuilder(32768);
+        uint length = GetLongPathName(path, output, (uint)output.Capacity);
+        if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (length >= output.Capacity) throw new InvalidOperationException("path is too long");
+        return output.ToString();
+    }
+}
+'@
+    }
+    [HarnessPathSpelling]::Expand($Path)
+}
+
+function Remove-OwnedHarnessEnvironment {
+    param([string] $EnvironmentPath, [string] $ExpectedPath, [bool] $Created,
+          [string] $RunId, [string] $Repository)
+    if (-not $Created) { return }
+    if ([IO.Path]::GetFullPath($EnvironmentPath) -cne $ExpectedPath -or
+        [IO.Path]::GetFileName($EnvironmentPath) -cne "$(Split-Path -Leaf $Repository).rust-harness-env-$RunId") {
+        throw 'the harness environment no longer names the path this run created; inspect it before retrying'
+    }
+    Assert-HarnessWorktreeHasNoReparsePoint $EnvironmentPath
+    if ($IsWindows) {
+        # A child can use the environment through cwd or its own environment
+        # variables without naming it in argv. The owned job covers those
+        # children even after an intermediate launcher has exited.
+        if ('DevDatabaseProcessTree' -as [type]) {
+            $remaining = @([DevDatabaseProcessTree]::RemainingChildren())
+            if ($remaining.Count) {
+                throw "an owned run process remains (PID $($remaining -join ', ')); inspect it before removing the environment"
+            }
+        }
+        $longEnvironment = Get-HarnessLongPath $EnvironmentPath
+        $users = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+            $_.ProcessId -ne $PID -and (
+                ($_.CommandLine -and $_.CommandLine.IndexOf($EnvironmentPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+                ($_.CommandLine -and $_.CommandLine.IndexOf($longEnvironment, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+                ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($EnvironmentPath + '\', [StringComparison]::OrdinalIgnoreCase) -or
+                                        $_.ExecutablePath.StartsWith($longEnvironment + '\', [StringComparison]::OrdinalIgnoreCase))))
+        })
+        if ($users.Count) { throw 'a process still uses this run''s harness environment; inspect the owned process before retrying' }
+    } else {
+        foreach ($processDir in [IO.Directory]::EnumerateDirectories('/proc')) {
+            $processNumber = [IO.Path]::GetFileName($processDir)
+            if ($processNumber -notmatch '^\d+$' -or [int]$processNumber -eq $PID) { continue }
+            try { $command = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("$processDir/cmdline")) }
+            catch [IO.FileNotFoundException] { continue }
+            catch [IO.DirectoryNotFoundException] { continue }
+            catch [UnauthorizedAccessException] { continue }
+            if ($command.Contains($EnvironmentPath)) { throw 'a process still uses this run''s harness environment; inspect it before retrying' }
+        }
+    }
+    # This exact fresh path was created under the clone lock. No link is
+    # followed and no active process may reference it when it is removed.
+    Remove-Item -LiteralPath $EnvironmentPath -Recurse -Force -ErrorAction Stop
+}
+
 try {
     do {
+        Initialize-DevDatabaseProcessTree
         # A worker wrapper holds the database turn before its pytest child
         # takes the suite lock. Match that order so neither waits on the other.
-        $databaseHold = Enter-DevDatabaseLock -Path $DatabaseLockPath -Holder "batch harness $Head" -WaitSeconds (Remaining-Wait)
+        $databaseHold = Enter-DevDatabaseLock -Path $DatabaseLockPath -Holder "batch harness $Head" -WaitSeconds $DatabaseTurnWaitSeconds
         $locks = if ($env:PSEUDOLIFE_SUITE_LOCK_DIR) { $env:PSEUDOLIFE_SUITE_LOCK_DIR } else { Join-Path $HOME '.pseudolife-mcp/locks' }
         $null = [IO.Directory]::CreateDirectory($locks)
         $suitePath = Join-Path $locks 'full-suite.lock'
@@ -219,20 +337,21 @@ try {
             }
         }
         if (-not (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)) { $failure = "uv is not on PATH"; break }
+        $environmentClock = [Diagnostics.Stopwatch]::StartNew()
+        if (Test-Path -LiteralPath $venv) { $failure = 'the new run environment path already exists; inspect it before retrying'; break }
+        $null = New-Item -ItemType Directory -Path $venv -ErrorAction Stop
+        $environmentCreated = $true
+        & uv venv --quiet --seed --python 3.11 $venv
+        if ($LASTEXITCODE -ne 0) { $failure = "uv could not make the environment (exit $LASTEXITCODE)"; break }
         $py = $null
         foreach ($candidate in (Join-Path $venv 'Scripts/python.exe'), (Join-Path $venv 'bin/python')) {
             if (Test-Path -LiteralPath $candidate) { $py = $candidate; break }
         }
-        if (-not $py) {
-            & uv venv --quiet --seed --python 3.11 $venv
-            if ($LASTEXITCODE -ne 0) { $failure = "uv could not make the environment (exit $LASTEXITCODE)"; break }
-            foreach ($candidate in (Join-Path $venv 'Scripts/python.exe'), (Join-Path $venv 'bin/python')) {
-                if (Test-Path -LiteralPath $candidate) { $py = $candidate; break }
-            }
-            if (-not $py) { $failure = "uv made no Python in $([IO.Path]::GetFileName($venv))"; break }
-        }
-        & uv pip install --quiet --python $py --torch-backend cpu -e "$gate[dev]"
+        if (-not $py) { $failure = "uv made no Python in $([IO.Path]::GetFileName($venv))"; break }
+        & uv pip install --quiet --python $py --torch-backend cpu -e "$gate[dev]" @requirements
         if ($LASTEXITCODE -ne 0) { $failure = "the head's dev dependencies did not install (uv exit $LASTEXITCODE)"; break }
+        $environmentClock.Stop()
+        [Console]::Out.WriteLine("rust-harness: fresh environment creation and install: $([math]::Round($environmentClock.Elapsed.TotalSeconds, 3)) s")
 
         . $hook
         try {
@@ -251,6 +370,31 @@ try {
         try {
             & $py -m pytest -q -p no:cacheprovider --require-databases @PytestArgs
             $verdict = $LASTEXITCODE
+            if ($verdict -eq 0) {
+                foreach ($unit in $units) {
+                    $unitPaths = @($unit.paths)
+                    if ($unit.runner -eq 'unittest-discover') {
+                        $unitArgs = @('-m', 'unittest', 'discover', '-s', $unit.start, '-p', $unit.pattern)
+                    } else { $unitArgs = @($unitPaths[0]) }
+                    $unitClock = [Diagnostics.Stopwatch]::StartNew()
+                    $unitOutput = [Collections.Generic.List[string]]::new()
+                    & $py @unitArgs 2>&1 | ForEach-Object {
+                        $unitOutput.Add("$_")
+                        [Console]::Out.WriteLine("$_")
+                    }
+                    $verdict = $LASTEXITCODE
+                    $unitClock.Stop()
+                    if ($verdict -ne 0) { break }
+                    $text = $unitOutput -join "`n"
+                    $ran = [regex]::Match($text, '(?m)^Ran ([1-9][0-9]*) tests? in ')
+                    if (-not $ran.Success) { throw 'the unittest runner reported no executed cases; inspect its selection before retrying' }
+                    $skip = [regex]::Match($text, '(?m)^OK \(skipped=([0-9]+)\)')
+                    $skipped = if ($skip.Success) { [int]$skip.Groups[1].Value } else { 0 }
+                    $passed = [int]$ran.Groups[1].Value - $skipped
+                    if ($passed -lt 1) { throw 'the unittest selection skipped every case; fix its prerequisites before retrying' }
+                    [Console]::Out.WriteLine("$passed passed, $skipped skipped in $([math]::Round($unitClock.Elapsed.TotalSeconds, 3))s (unittest)")
+                }
+            }
         } finally {
             Pop-Location
         }
@@ -261,6 +405,10 @@ try {
     if ($started) {
         try { Stop-HarnessServices } catch { $failure = "stopping the services failed: $($_.Exception.Message); verify services before retrying" }
     }
+    try {
+        Remove-OwnedHarnessEnvironment -EnvironmentPath $venv -ExpectedPath $expectedVenv -Created $environmentCreated -RunId $environmentId -Repository $Repo
+        $environmentCreated = $false
+    } catch { $failure = "the owned environment was not removed safely: $($_.Exception.Message)" }
     if ($lock) {
         $null = Invoke-Git -C $Repo update-ref -d $private
         Remove-Item -LiteralPath $bundle -Force -ErrorAction SilentlyContinue

@@ -19,6 +19,8 @@ import time
 import types
 from pathlib import Path
 
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO))
@@ -203,6 +205,16 @@ def main(argv=None):
     ap.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args(argv)
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     if pg.SLICE != "pgs":
         ap.error("schema cells require PL_HARNESS_SLICE=pgs")
     if args.write and not args.record_candidate:

@@ -263,6 +263,9 @@ if ($target -eq 'local') {
     # did here (the whole block arrived as one line, 2026-10-02).
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add('set -euo pipefail')
+    # The controller's preflight also protects a dispatched older head.
+    $lines.Add((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'dev-tmp-space.sh') -Raw))
+    $lines.Add('dev_tmp_preflight remote-suite || exit 3')
     if ($env:PSEUDOLIFE_MCP_TOKEN) { $lines.Add('export PSEUDOLIFE_MCP_TOKEN=' + (Quote $env:PSEUDOLIFE_MCP_TOKEN)) }
     if ($cfg['daemon_url']) { $lines.Add('export PSEUDOLIFE_MCP_DAEMON_URL=' + (Quote $cfg['daemon_url'])) }
     $lines.Add('repo="' + $cfg['repo'].Replace('~', '$HOME') + '"')
@@ -270,6 +273,10 @@ if ($target -eq 'local') {
     $lines.Add('name=' + (Quote $name))
     $lines.Add('memory=' + (Quote $cfg['memory']))
     $lines.Add('envfile="' + $(if ($cfg['env']) { $cfg['env'].Replace('~', '$HOME') } else { '' }) + '"')
+    $lines.Add('dispatch="$HOME/.cache/pseudolife-suite/dispatch"')
+    $lines.Add('dev_tmp_disk_path remote-suite "$repo" && dev_tmp_disk_path remote-suite "$dispatch" || exit 3')
+    $lines.Add('mkdir -p "$dispatch"')
+    $lines.Add('bundle=""; script=""; trap ''rm -f -- "$bundle" "$script"'' EXIT')
     if ($onMaster) {
         $lines.Add('git -C "$repo" fetch --quiet origin "$sha"')
     } else {
@@ -279,7 +286,9 @@ if ($target -eq 'local') {
         # The commit chosen at the start, not whatever HEAD is now: the
         # checkout may have moved while the run waited (Codex review). A
         # bundle names refs, so a private one points at it for the moment.
-        $bundleFile = Join-Path ([IO.Path]::GetTempPath()) "pseudolife-suite-$short-$PID.bundle"
+        $controllerDispatch = Join-Path $HOME '.cache/pseudolife-suite/dispatch'
+        $null = New-Item -ItemType Directory -Path $controllerDispatch -Force
+        $bundleFile = Join-Path $controllerDispatch "pseudolife-suite-$short-$PID.bundle"
         $bundleRef = "refs/pseudolife-suite-bundle/$sha-$PID"
         try {
             $said = git -C $root update-ref $bundleRef $sha 2>&1
@@ -296,10 +305,9 @@ if ($target -eq 'local') {
             git -C $root update-ref -d $bundleRef *> $null
             Remove-Item -LiteralPath $bundleFile -ErrorAction SilentlyContinue
         }
-        $lines.Add('bundle="$(mktemp)"')
+        $lines.Add('bundle="$(mktemp "$dispatch/bundle-XXXXXXXX")"')
         # Gone on any failure below; the exec at the end runs no EXIT trap,
         # and by then it is removed.
-        $lines.Add('trap ''rm -f -- "$bundle"'' EXIT')
         $lines.Add("base64 -d > `"`$bundle`" <<'PSEUDOLIFE_SUITE_BUNDLE'")
         foreach ($chunk in ($encoded -split "`r?`n")) { $lines.Add($chunk) }
         $lines.Add('PSEUDOLIFE_SUITE_BUNDLE')
@@ -307,13 +315,13 @@ if ($target -eq 'local') {
         # clone may hold them already, and the bundle fetch says if not.
         $lines.Add('git -C "$repo" fetch --quiet origin || echo "remote-suite: could not fetch origin there; trying the bundle with what the clone holds" >&2')
         $lines.Add('git -C "$repo" fetch --quiet "$bundle" ' + (Quote "+${bundleRef}:refs/heads/suite/$sha"))
-        $lines.Add('rm -f -- "$bundle"; trap - EXIT')
+        $lines.Add('rm -f -- "$bundle"; bundle=""')
         $lines.Add('test "$(git -C "$repo" rev-parse --verify --quiet "refs/heads/suite/$sha")" = "$sha"')
     }
     # Named by commit, not checkout: every Codex worktree shares one name,
     # and two dispatches of different commits raced on one ref.
     $lines.Add('git -C "$repo" update-ref "refs/heads/suite/$sha" "$sha"')
-    $lines.Add('script="$(mktemp)"')
+    $lines.Add('script="$(mktemp "$dispatch/suite-XXXXXXXX.sh")"')
     $lines.Add('git -C "$repo" show "$sha:ops/wsl-suite.sh" > "$script"')
     $lines.Add('if [ -n "$envfile" ] && [ -f "$envfile" ]; then set -a; . "$envfile"; set +a; fi')
     # The same rule ops/wsl-suite.sh enforces under PSEUDOLIFE_SUITE_DISPATCHED
@@ -332,12 +340,15 @@ if ($target -eq 'local') {
         if ($v) { $lines.Add("export $k=" + (Quote $v)) }
     }
     if ($nativeClient) { $lines.Add('export PSEUDOLIFE_SUITE_NATIVE_CLIENT=' + (Quote $nativeClient)) }
+    $lines.Add('export TMPDIR="$HOME/.cache/pseudolife-suite/tmp"')
+    $lines.Add('for artifact in "$TMPDIR" "${PSEUDOLIFE_SUITE_VENV:-$HOME/.venvs/pseudolife}" "${PSEUDOLIFE_SUITE_CARGO_TARGET_DIR:-$HOME/.cache/pseudolife-suite/cargo-target}" "${PSEUDOLIFE_SUITE_PROFILE_DIR:-$HOME/.pseudolife-mcp/suite-profiles}"; do dev_tmp_disk_path remote-suite "$artifact" || exit 3; done')
+    $lines.Add('mkdir -p "$TMPDIR"')
     $lines.Add('export PSEUDOLIFE_SUITE_COMMIT="$sha" PSEUDOLIFE_SUITE_GIT_COMMON="$repo/.git" PSEUDOLIFE_SUITE_NAME="$name"')
     $lines.Add('export PATH="$PATH:$HOME/.local/bin" TERM=dumb')
     # exec: PowerShell ends piped stdin with CRLF, and bash must never read
     # on past the run (a stray "\r" line would replace pytest's exit code).
     # The inner shell deletes the script copy and keeps pytest's code.
-    $lines.Add('exec sudo --preserve-env systemd-run --quiet --scope -p MemoryMax="$memory" --uid="$(id -u)" --gid="$(id -g)" -- env HOME="$HOME" PATH="$PATH" bash -c ''bash "$1" "${@:2}"; code=$?; rm -f -- "$1"; exit $code'' _ "$script" "$@"')
+    $lines.Add('exec sudo --preserve-env systemd-run --quiet --scope -p MemoryMax="$memory" --uid="$(id -u)" --gid="$(id -g)" -- env HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" bash -c ''bash "$1" "${@:2}"; code=$?; rm -f -- "$1"; exit $code'' _ "$script" "$@"')
     $body = ($lines -join "`n") + "`n"
     $quotedArgs = ($args | ForEach-Object { Quote ([string]$_) }) -join ' '
     # Keepalives: a silently dropped link ends the run's ssh in ~2 min
