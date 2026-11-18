@@ -3135,10 +3135,10 @@ class Far:
         monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(self.locks))
         self.n = 0
 
-    def batch(self) -> tuple[str, str, str]:
-        """A new integrate/* commit on the base: (head, ref, base64 bundle)."""
+    def batch(self, branch: str | None = None) -> tuple[str, str, str]:
+        """A new commit on the base: (head, ref, base64 bundle)."""
         self.n += 1
-        branch = f"integrate/{DATE}-batch-{self.n}"
+        branch = branch or f"integrate/{DATE}-batch-{self.n}"
         _git(self.seed, "switch", "-q", "-C", branch, self.base)
         (self.seed / "rust" / f"f{self.n}.rs").write_text("fn f() {}\n", encoding="utf-8",
                                                           newline="\n")
@@ -3469,13 +3469,21 @@ def test_no_usable_bundle_is_refused(far, data, cause):
     assert far.cargo_calls() == []
 
 
+_GATE_REF_CASES = [("integrate/x", True), ("stacked/x", True),
+                   ("Integrate/x", False), ("stacked", False), ("topic/x", False)]
+
+
 @needs_pwsh
-def test_only_an_integrate_ref_is_taken(far):
-    head, _, data = far.batch()
+@pytest.mark.parametrize("branch,taken", _GATE_REF_CASES)
+def test_only_an_integrate_ref_is_taken(far, branch, taken):
+    head, ref, data = far.batch(branch)
+    proc = far.run(head, ref, data)
 
-    proc = far.run(head, "refs/heads/master", data)
-
-    assert proc.returncode == 3 and "integrate/*" in _verdict(proc), proc.stderr
+    if taken:
+        assert proc.returncode == 0 and far.cargo_calls(), proc.stderr
+    else:
+        assert proc.returncode == 3 and "ref must be an integrate/*" in _verdict(proc), proc.stderr
+        assert far.cargo_calls() == []
 
 
 @needs_pwsh
@@ -3602,9 +3610,9 @@ class HarnessFar(Far):
         monkeypatch.delenv("FAKE_SERVICE", raising=False)
 
     def batch(self, body: str = _GATE_TEST, *, unit_body: str | None = None,
-              unit_name: str = "unit_gate.py") -> tuple[str, str, str]:
+              unit_name: str = "unit_gate.py", branch: str | None = None) -> tuple[str, str, str]:
         self.n += 1
-        branch = f"integrate/{DATE}-batch-{self.n}"
+        branch = branch or f"integrate/{DATE}-batch-{self.n}"
         _git(self.seed, "switch", "-q", "-C", branch, self.base)
         gate_tests = self.seed / "gate_tests"
         gate_tests.mkdir(exist_ok=True)
@@ -3666,6 +3674,20 @@ def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_
     assert installs[1][:2] == ["pip", "install"]
     assert installs[1][installs[1].index("-e") + 1:] == [f"{gate}[dev]", *requirements]
     assert harness_far.harness_leftovers() == []
+
+
+@needs_pwsh
+@pytest.mark.parametrize("branch,taken", _GATE_REF_CASES)
+def test_harness_far_half_takes_only_batch_refs(harness_far, branch, taken):
+    head, ref, data = harness_far.batch(branch=branch)
+    proc = harness_far.run_harness(head, ref, data)
+
+    if taken:
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert harness_far.hook_calls() == ["start", "stop"]
+    else:
+        assert proc.returncode == 3 and "ref must be an integrate/*" in _verdict(proc)
+        assert harness_far.hook_calls() == []
 
 
 @needs_pwsh
@@ -4323,6 +4345,21 @@ def test_shim_far_half_checks_head_and_holds_the_suite_lock(far, mismatch):
         assert "Summary [" in proc.stderr
         assert _verdict(proc) == "shim-tests " + "ab" * 16 + ": nextest exit 0"
     assert not list(far.tmp.glob("shim-tests-*.bundle"))
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+@pytest.mark.parametrize("branch,taken", _GATE_REF_CASES)
+def test_shim_far_half_takes_only_batch_refs(far, branch, taken):
+    head, ref, data = far.batch(branch)
+    proc = subprocess.run(["bash", str(ROOT / "ops/shim-tests-remote.sh"), str(far.repo), far.base,
+                           head, ref, "ab" * 16, "0"], input=data, capture_output=True,
+                          text=True, timeout=60)
+
+    if taken:
+        assert proc.returncode == 0 and far.cargo_calls(), proc.stderr
+    else:
+        assert proc.returncode == 3 and "ref must be an integrate/*" in _verdict(proc)
+        assert far.cargo_calls() == []
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
@@ -6457,35 +6494,70 @@ def _land_stack_parent(world, parent):
 
 
 @pytest.mark.parametrize("case, reason", [
-    ("no-parent", "exactly one open"),
-    ("two-parents", "exactly one open"),
-    ("same-worktree", "plan is in this checkout"),
-    ("missing-plan", "plan"),
-    ("local-head-moved", "head moved"),
-    ("remote-head-moved", "origin"),
-    ("dirty", "uncommitted changes"),
+    ("no-parent", "--stacked needs exactly one open batch, found 0"),
+    ("two-parents", "--stacked needs exactly one open batch, found 2"),
+    ("same-worktree", "#900's plan is in this checkout"),
+    ("missing-plan", "expected one local plan for {parent_branch}, found 0"),
+    ("duplicate-plan", "found duplicate local plans for {parent_branch}; remove the stale duplicate"),
+    ("local-head-moved", "#900's head moved or its plan names another PR"),
+    ("remote-head-moved", "#900's branch on origin does not match its plan"),
+    ("dirty", "{stack_checkout} has uncommitted changes"),
+    ("dirty-parent", "{parent_checkout} has uncommitted changes"),
+    ("master-advanced", "#900 does not contain current origin/master"),
+    ("cross-repository", "parent batch #900 is not from this repository into master"),
+    ("other-base", "parent batch #900 is not from this repository into master"),
+    ("parent-branch-name", "#900 has an unexpected batch branch integrate/unexpected"),
 ])
 def test_stacked_build_refuses_an_unverified_parent(world, stack_parent, monkeypatch, capsys,
                                                     case, reason):
     parent, work = stack_parent
-    original_refs = _origin_refs(world)
     if case == "no-parent":
         parent["state"] = "CLOSED"
     elif case == "two-parents":
         world.gh.history.append({**parent, "number": 999})
-    elif case == "missing-plan":
-        integrate.Plan.path(parent["headRefName"]).unlink()
+    elif case in ("missing-plan", "duplicate-plan"):
+        path = integrate.Plan.path(parent["headRefName"])
+        if case == "missing-plan":
+            path.unlink()
+        else:
+            contents = path.read_bytes()
+            with monkeypatch.context() as checkout:
+                checkout.chdir(work)
+                duplicate = integrate.Plan.path(parent["headRefName"])
+                duplicate.parent.mkdir()
+                duplicate.write_bytes(contents)
     elif case == "local-head-moved":
         _git(world.work, "commit", "--allow-empty", "-qm", "moves local head")
     elif case == "remote-head-moved":
         _git(world.origin, "update-ref", f"refs/heads/{parent['headRefName']}", "master")
     elif case == "dirty":
-        (work / "a.txt").write_text("dirty", encoding="utf-8")
+        (work / "untracked.txt").write_text("dirty", encoding="utf-8")
+    elif case == "dirty-parent":
+        (world.work / "untracked.txt").write_text("dirty", encoding="utf-8")
+    elif case == "master-advanced":
+        _git(world.work, "switch", "-q", "--detach", "origin/master")
+        world.advance_master({"new-master.txt": "new master\n"})
+        _git(work, "switch", "-q", "--detach", "origin/master")
+    elif case == "cross-repository":
+        read = integrate._stack_parent_view
+        monkeypatch.setattr(integrate, "_stack_parent_view",
+                            lambda n: {**read(n), "isCrossRepository": True})
+    elif case == "other-base":
+        parent["baseRefName"] = "next"
+    elif case == "parent-branch-name":
+        plan = integrate.Plan.load(parent["headRefName"])
+        plan.branch = "integrate/unexpected"
+        _git(world.work, "branch", "-m", plan.branch)
+        _git(world.origin, "update-ref", f"refs/heads/{plan.branch}", plan.head)
+        parent["headRefName"] = plan.branch
+        plan.save()
     if case != "same-worktree":
         monkeypatch.chdir(work)
 
+    original_refs = _origin_refs(world)
     assert _build("--stacked") == 2
-    assert reason in capsys.readouterr().err
+    assert reason.format(parent_branch=parent["headRefName"], stack_checkout=work.resolve(),
+                         parent_checkout=world.work.resolve()) in capsys.readouterr().err
     assert _origin_refs(world) == original_refs
     assert len(world.gh.mutations()) == 1  # only the fixture's parent open
 
@@ -6509,18 +6581,22 @@ def stacked(world, stack_parent, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("case, reason", [
-    ("closed", "closed without merging"),
-    ("missing-plan", "plan"),
-    ("source-moved", "head moved or its branch was deleted"),
-    ("parent-moved", "head moved"),
-    ("member-moved", "head moved"),
-    ("dirty", "uncommitted changes"),
-    ("different-tree", "different tree"),
+    ("closed", "parent batch #900 closed without merging"),
+    ("open", "parent batch #900 is still open"),
+    ("missing-plan", "expected one local plan for {branch}, found 0"),
+    ("source-moved", "{branch}'s head moved or its branch was deleted"),
+    ("parent-moved", "parent batch #900's branch or head moved"),
+    ("member-moved", "#11's head moved since the stacked build"),
+    ("local-parent-moved", "parent batch #900's local head moved"),
+    ("wrong-merge-parent", "recorded merge of parent batch #900 does not have the verified parent head as its second parent"),
+    ("merge-not-on-master", "origin/master does not contain the recorded merge of parent batch #900"),
+    ("dirty", "{stack_checkout} has uncommitted changes"),
+    ("different-tree", "{branch} has a different tree"),
 ])
 def test_from_stacked_refuses_invalid_source(world, stacked, monkeypatch, capsys, case, reason):
     parent, work, branch, head = stacked
-    if case == "closed":
-        parent["state"] = "CLOSED"
+    if case in ("open", "closed"):
+        parent["state"] = case.upper()
         _git(world.work, "switch", "-q", "--detach", "origin/master")
     else:
         _land_stack_parent(world, parent)
@@ -6534,6 +6610,23 @@ def test_from_stacked_refuses_invalid_source(world, stacked, monkeypatch, capsys
         parent["headRefOid"] = head
     elif case == "member-moved":
         world.gh.pr(11)["headRefOid"] = head
+    elif case == "local-parent-moved":
+        _git(world.work, "branch", "-f", parent["headRefName"], "origin/master")
+    elif case in ("wrong-merge-parent", "merge-not-on-master"):
+        merged = parent["mergeCommit"]["oid"]
+        tree = _git(world.work, "rev-parse", f"{merged}^{{tree}}")
+        first = _git(world.work, "rev-parse", f"{merged}^1")
+        second = parent["headRefOid"]
+        if case == "wrong-merge-parent":
+            second = _git(world.work, "commit-tree", tree, "-p", second, "-m", "extra commit")
+            first = merged  # The synthetic merge can fast-forward the fixture's master.
+        reported = _git(world.work, "commit-tree", tree, "-p", first, "-p", second,
+                        "-m", "different merge")
+        parent["mergeCommit"]["oid"] = reported
+        if case == "wrong-merge-parent":
+            _git(world.work, "push", "-q", "origin", f"{reported}:refs/heads/master")
+            _git(world.work, "fetch", "-q", "origin", "master")
+            _git(world.work, "switch", "-q", "--detach", "origin/master")
     elif case == "dirty":
         (work / "next.txt").write_text("dirty", encoding="utf-8")
     elif case == "different-tree":
@@ -6541,7 +6634,7 @@ def test_from_stacked_refuses_invalid_source(world, stacked, monkeypatch, capsys
     original = _git(world.work, "rev-parse", "HEAD")
 
     assert _build("--from-stacked", branch) == 2
-    assert reason in capsys.readouterr().err
+    assert reason.format(branch=branch, stack_checkout=work.resolve()) in capsys.readouterr().err
     assert _git(world.work, "rev-parse", "HEAD") == original
     assert len(world.cargo_calls()) == 1
 
@@ -6599,11 +6692,13 @@ def test_stacked_open_refuses_and_suite_still_runs(world, stacked, monkeypatch, 
     assert "--from-stacked" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("case, reason", [("source-moved", "head moved"),
-                                          ("member-moved", "head moved"),
-                                          ("wrong-tree", "another tree"),
+@pytest.mark.parametrize("case, reason", [("source-moved", "{branch}'s head moved or its branch was deleted"),
+                                          ("member-moved", "#11's head moved since the stacked rebuild"),
+                                          ("wrong-tree", "the stacked reuse plan records another tree"),
                                           ("compile-recipe", "another recipe"),
-                                          ("client-head", "native client was built from")])
+                                          ("client-head", "native client was built from"),
+                                          ("suite-head", "or the verified stacked head {source}"),
+                                          ("dirty", "{checkout} has uncommitted changes")])
 def test_open_rechecks_the_stacked_proof(world, stacked, monkeypatch, capsys, case, reason):
     parent, work, branch, source = stacked
     _land_stack_parent(world, parent)
@@ -6619,12 +6714,59 @@ def test_open_rechecks_the_stacked_proof(world, stacked, monkeypatch, capsys, ca
         plan.save()
     elif case == "compile-recipe":
         monkeypatch.setattr(integrate, "RUST_CHECK_COMMAND", "cargo check --locked")
-    suite = _suite_result(world, commit=source,
+    elif case == "dirty":
+        (world.work / "untracked.txt").write_text("dirty", encoding="utf-8")
+    suite = _suite_result(world, commit="0" * 40 if case == "suite-head" else source,
                           real_client_commit="f" * 40 if case == "client-head" else source)
 
     assert integrate.main(["open", "--suite", str(suite), *_gate_args(world)]) == 2
-    assert reason in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert reason.format(branch=branch, source=source[:12], checkout=world.work.resolve()) in err
+    if case == "client-head":
+        rebuilt = _git(world.work, "rev-parse", "HEAD")
+        assert f"expected the suite's tested head {source[:12]}" in err
+        assert f"rerun on this checkout at {rebuilt[:8]}" in err
     assert len(world.gh.bodies("create")) == 1
+
+
+@pytest.mark.parametrize("case", ["missing-parent", "unrelated-base"])
+def test_stacked_suite_refuses_a_missing_bundle_base(world, stacked, monkeypatch, tmp_path, capsys, case):
+    _, work, branch, _ = stacked
+    monkeypatch.chdir(work)
+    plan = integrate.Plan.load(branch)
+    if case == "missing-parent":
+        plan.stacked_parent = None
+    else:
+        plan.stacked_parent.master = _git(work, "rev-parse", "HEAD")
+    plan.save()
+    seen, _ = _fake_remote_suite(world, monkeypatch, tmp_path)
+
+    assert integrate.main(["suite"]) == 2
+    assert f"{branch}'s plan lacks its published bundle base" in capsys.readouterr().err
+    assert seen == []
+
+
+@pytest.mark.parametrize("altered", [False, True])
+def test_open_checks_the_plan_names_the_checked_out_branch(world, capsys, altered):
+    world.gh.add(10, world.pr(10, {"next.txt": "proposed batch\n"}))
+    assert _build() == 0, capsys.readouterr()
+    branch = _git(world.work, "branch", "--show-current")
+    other = f"integrate/{DATE}-batch-99"
+    _git(world.work, "branch", other, "origin/master")
+    if altered:
+        path = integrate.Plan.path(branch)
+        plan = json.loads(path.read_text(encoding="utf-8"))
+        plan["branch"] = other
+        path.write_text(json.dumps(plan), encoding="utf-8")
+
+    result = _open(world)
+    if altered:
+        assert result == 2
+        assert f"the plan for {branch} names {other}; rebuild" in capsys.readouterr().err
+        assert world.remote_branches() == [] and world.gh.mutations() == []
+    else:
+        assert result == 0, capsys.readouterr()
+        assert world.remote_branches() == [branch]
 
 
 def test_status_lists_stacked_plans_after_their_branch_is_deleted(world, stacked, capsys):
@@ -6673,23 +6815,6 @@ def test_stacked_shim_gate_bundles_the_literal_ref_and_unmerged_parent(world, st
 def test_stacked_build_modes_are_mutually_exclusive(extra):
     with pytest.raises(SystemExit, match="2"):
         _build("--stacked", *extra)
-
-
-@pytest.mark.parametrize("path, marker", [
-    ("rust-check-remote.ps1", r"\$Ref -cnotmatch '([^']+)'"),
-    ("rust-harness-remote.ps1", r"\$Ref -cnotmatch '([^']+)'"),
-    ("shim-tests-remote.sh", r'"\$ref" =~ (\S+) \]\]'),
-])
-def test_far_half_ref_pattern(path, marker):
-    # Exercise just the literal ERE used by the argument check, without a
-    # real PowerShell process, clone, or lock on the hosted Windows runner.
-    script = (ROOT / "ops" / path).read_text(encoding="utf-8")
-    pattern = re.search(marker, script)[1]
-    for ref in ("refs/heads/integrate/x", "refs/heads/stacked/x"):
-        assert re.fullmatch(pattern, ref)
-    for ref in ("refs/heads/master", "refs/tags/stacked/x", "refs/heads/stacked/x/y",
-                "refs/heads/Stacked/x", "refs/heads/stacked/", "stacked/x"):
-        assert not re.fullmatch(pattern, ref)
 
 
 def test_the_remote_run_is_asked_for_the_remote_and_the_real_client(world, monkeypatch):

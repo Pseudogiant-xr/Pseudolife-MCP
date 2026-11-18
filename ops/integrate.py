@@ -1339,7 +1339,10 @@ def _data_module(source: str, name: str):
 
 @functools.lru_cache(maxsize=None)
 def _budget_tools(base_sha: str):
-    """Master's budget reader/resolver, frozen by immutable commit ID."""
+    """The base commit's budget reader/resolver, frozen by immutable commit ID.
+
+    A stacked build uses the open parent's head. Its rebuild uses merged master.
+    """
     source = _budget_text(base_sha, CI_BUDGET_CODE)
     if source is None:
         return None
@@ -1558,12 +1561,14 @@ def _guard_text(rev: str) -> str | None:
 
 
 def _freeze_module(base_sha: str, members: list[Member] = (), head: str = ""):
-    """Master's copy of the Python freeze guard, loaded in this process
-    (master's code, never a member's: an earlier member merged into this
-    checkout must not decide a later one's admission).
+    """The base commit's copy of the Python freeze guard, loaded in this process.
 
-    Master without it refuses, with one exception told apart by history,
-    not presence: when no commit on master's history ever touched the
+    A stacked build uses the open parent's head, which includes unmerged code.
+    Its rebuild judges admission again with merged master. An earlier member
+    merged into the batch being built cannot decide a later one's admission.
+
+    A base without it refuses, with one exception told apart by history,
+    not presence: when no commit in the base's history ever touched the
     guard, this is the batch that introduces it (the guard and this check
     land together, so `open` and `merge` run this code against a master
     that has never had it). Its members are then judged with the one copy
@@ -2072,8 +2077,10 @@ CENSUS_ENV = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC
 
 
 def _census_module(base_sha: str):
-    """Master's copy of the census module, loaded in this process (master's
-    code, never a member's). None when master has none."""
+    """Load the census module from the base commit, or return None.
+
+    A stacked build uses the open parent's head. Its rebuild uses merged master.
+    """
     shown = git("show", f"{base_sha}:{CENSUS}", check=False)
     if shown.returncode != 0:
         return None
@@ -2092,9 +2099,11 @@ def _census_module(base_sha: str):
 
 
 def _census_inputs(base_sha: str) -> set[str] | None:
-    """The census module's own CURRENCY_INPUTS, read from master's copy of
-    it, so no member code runs in this process (a member changing the script
-    is still caught: the script is one of them). None when master has none."""
+    """Read CURRENCY_INPUTS from the base commit's census module, when present.
+
+    This includes the open parent's code during a stacked build. The script
+    itself is an input, so edits by members of the batch being built are caught.
+    """
     module = _census_module(base_sha)
     return None if module is None else set(module.CURRENCY_INPUTS)
 
@@ -3289,9 +3298,12 @@ def _worktree_plan_dirs() -> list[tuple[Path, Path]]:
 def _worktree_plan(branch: str) -> tuple[Plan, Path]:
     matches = [(checkout, path) for checkout, directory in _worktree_plan_dirs()
                if (path := directory / Plan.filename(branch)).is_file()]
-    if len(matches) != 1:
-        raise Refusal(f"expected one local plan for {branch}, found {len(matches)}; keep the "
+    if not matches:
+        raise Refusal(f"expected one local plan for {branch}, found 0; keep the "
                       "original build worktree and its plan, or build without stacked reuse")
+    if len(matches) > 1:
+        raise Refusal(f"found duplicate local plans for {branch}; remove the stale duplicate "
+                      "and retry, keeping the original build plan")
     checkout, path = matches[0]
     try:
         plan = Plan.load(branch, path)
@@ -3379,7 +3391,10 @@ def _require_merged_stack_parent(source: Plan, master: str, view: dict) -> None:
         raise Refusal(f"parent batch #{parent.number}'s local head moved; restore that head or build and gate normally")
     merged = (view.get("mergeCommit") or {}).get("oid", "")
     parents = git("rev-list", "--parents", "-n", "1", merged, check=False).stdout.split()
-    if len(parents) != 3 or parents[2] != source.base_sha or not _is_ancestor(merged, master):
+    if len(parents) != 3 or parents[2] != source.base_sha:
+        raise Refusal(f"the recorded merge of parent batch #{parent.number} does not have the verified "
+                      "parent head as its second parent; build and gate normally")
+    if not _is_ancestor(merged, master):
         raise Refusal(f"{REMOTE}/{BASE} does not contain the recorded merge of parent batch "
                       f"#{parent.number}; fetch master and build and gate normally if it still differs")
 
@@ -3601,14 +3616,10 @@ REAL_CLIENT_SAID = "real client: yes"
 
 
 def _real_client_refusal(why: str, head: str) -> Refusal:
-    return Refusal(f"{why}, so the tests that need the native client used their "
-                   "stand-in or skipped, which the hosted `test` lane does not "
-                   f"(#1634); rerun on this checkout: `{SUITE_COMMAND}` (it builds "
-                   f"the client from {head[:8]}; a run by hand needs "
-                   "PSEUDOLIFE_SUITE_NATIVE_CLIENT unset or 1 on this integrate/* "
-                   "branch), then `open` with its new result. A build that cannot run "
-                   "(under 8 GB free, cargo failing) is fixed first: the batch does "
-                   "not open without it")
+    return Refusal(f"{why}. The suite needs the native client built from its tested head "
+                   f"(#1634); rerun on this checkout at {head[:8]} with `{SUITE_COMMAND}`, "
+                   "then pass its new result to `open --suite`. The command sets "
+                   "PSEUDOLIFE_SUITE_NATIVE_CLIENT=1 and needs at least 8 GB free on the build machine")
 
 
 def _suite_results_dir() -> Path:
@@ -3690,12 +3701,13 @@ def _suite_line(args: argparse.Namespace, head: str, source: StackSource | None 
         raise Refusal(f"cannot read the suite result {args.suite}: {exc}") from None
     if not isinstance(result, dict):
         raise Refusal("the suite result is not a JSON object; give the result `suite` wrote")
+    batch_head = head
     if source and result.get("commit") == source.head:
         head = source.head
     if result.get("commit") != head:
+        alternative = f" or the verified stacked head {source.head[:12]}" if source else ""
         raise Refusal(f"the suite result tested {str(result.get('commit'))[:12]}, "
-                      f"not this batch head {head[:12]}; run the suite on this "
-                      "checkout")
+                      f"not this batch head {head[:12]}{alternative}; run the suite on this checkout")
     if "args" not in result:
         raise Refusal("the suite result does not record its pytest arguments "
                       "(written by an older ops/remote-suite.ps1), so it cannot "
@@ -3711,12 +3723,12 @@ def _suite_line(args: argparse.Namespace, head: str, source: StackSource | None 
     if real is not True:
         raise _real_client_refusal(
             "the suite result does not record the real native client"
-            if real is None else "the suite result ran without the real native client", head)
+            if real is None else "the suite result ran without the real native client", batch_head)
     if result.get("real_client_commit") != head:
         raise _real_client_refusal(
             f"the suite result's native client was built from "
-            f"{str(result.get('real_client_commit'))[:12]}, not this batch head "
-            f"{head[:12]}", head)
+            f"{str(result.get('real_client_commit'))[:12]}; expected the suite's tested head "
+            f"{head[:12]}", batch_head)
     note = (f"passed at `{head}` on {result.get('machine', 'an unnamed machine')}, "
             f"with the real native client built from it: {result.get('summary', '')}")
     return _same_tree_note(note, head, source)
@@ -3899,6 +3911,8 @@ def open_(args: argparse.Namespace) -> int:
         raise Refusal(f"this checkout is not on a batch `build` left here "
                       f"({branch or 'detached HEAD'}); run `python ops/integrate.py "
                       "build` first")
+    if plan.branch != branch:
+        raise Refusal(f"the plan for {branch} names {plan.branch}; rebuild from {REMOTE}/{BASE}")
     head = _out("rev-parse", "HEAD")
     if head != plan.head:
         raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "

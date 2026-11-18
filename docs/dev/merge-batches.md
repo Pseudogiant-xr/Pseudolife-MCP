@@ -791,7 +791,9 @@ python ops/integrate.py shim-tests
 
 `build --stacked` verifies the sole open batch's plan, local branch, and
 published head. It starts from that head and uses the normal admission and
-build checks, excluding members already in the parent batch. The resulting
+build checks, excluding members already in the parent batch. During this
+build the freeze, census, and budget tools come from the open parent's head,
+which includes code that has yet to merge. The resulting
 `stacked/<date>-batch-N` branch stays local and `open` refuses it. The gates
 run on that commit with the usual recipes, including the native client in
 the full suite. Keep the source worktree, branch, plan, and result files.
@@ -804,9 +806,10 @@ python ops/integrate.py build --from-stacked stacked/<date>-batch-N
 python ops/integrate.py open --suite <suite.json> --harness <harness.json> --shim-tests <shim.json>
 ```
 
-The first command rebuilds the integration batch on current master and
-compares the complete Git trees, including generated files. A different tree
-needs an ordinary build and fresh gates. A closed unmerged parent, a moved
+The first command rebuilds the integration batch on current master. It
+judges admission again with the freeze, census, and budget tools from merged
+master, then compares the complete Git trees, including generated files.
+A different tree needs an ordinary build and fresh gates. A closed unmerged parent, a moved
 head, a missing plan, or a dirty checkout also prevents reuse. A successful
 compile result carries only when its recipe matches and the trees are
 identical. At `open`, the tool checks the source and tree again. Supply a
@@ -814,6 +817,13 @@ successful JSON result from either the verified stacked commit or the rebuilt
 commit for each gate. Every supplied result must pass its ordinary checks.
 The batch body names the stacked source commit and the matching tree. The
 normal hosted CI and merge checks apply to the rebuilt batch.
+
+Keep the stacked branch, plan, and source worktree until the rebuilt batch
+merges so that `open` can be retried. Then switch the source worktree away
+from the stacked branch, delete the branch, and remove its plan from the
+source worktree's Git directory. Locate it there with
+`git rev-parse --git-path integrate-plans/stacked/<date>-batch-N.json`.
+If the source worktree has already been pruned, build normally and run fresh gates.
 
 `status` lists stacked plans and flags invalid ones. `--stacked`,
 `--from-stacked`, and `--after-drop` are mutually exclusive.
