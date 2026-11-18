@@ -104,8 +104,8 @@ Each change waits for hosted CI once, on its batch:
   ordinary documentation-only pull request. CI runs `scope`, `guards`,
   `lock-resolve` and `frontend`; Rust shim runs `Scope` and both
   `Parity` gates. Both workflows use the Rust documentation predicate over
-  the push's before and after trees. A single merge uses its first parent
-  as the before tree. A multi-commit push includes its entire net change.
+  the push event's `before` and `after` trees. The same range covers the
+  entire net change on a multi-commit push.
   A missing, empty or unreadable range, a force push, or an ambiguous
   API result keeps the full lanes. The generated producer census is
   eligible alongside docs on pull requests and merge groups only.
@@ -196,8 +196,9 @@ under `docs/`. All of these hold first:
 What it costs: a direct master push that matches the workflows' conservative
 documentation predicate runs the fast lanes listed in "What CI runs where".
 This predicate excludes some Markdown paths admitted by the rule above.
-Pushes outside the predicate use the existing push lanes and can still
-occupy the account's hosted runners before a batch opens.
+A push outside the predicate still runs the whole push matrix and spends
+about one hosted run on the account's 20 slots, so do not merge one shortly
+before a batch opens.
 
 Who merges: the maintainer, or a session the maintainer delegated merges to
 in their own words. A change to `CLAUDE.md` or another policy page is

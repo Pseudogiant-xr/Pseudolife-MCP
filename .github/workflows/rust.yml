@@ -86,10 +86,10 @@ jobs:
     # Decides whether this run needs the Rust, candidate, parity and image
     # jobs. A documentation-only pull request, merge group or direct
     # master push skips them (CLAUDE.md "Docs-only changes", rust/ci/docs_scope.py).
-    # An empty or unreadable diff runs everything. A failed scope job runs
-    # the Rust and candidate jobs, but
-    # the parity matrix comes from scope's parity output, so parity-checks
-    # and the Parity gate then fail (closed) and the run needs a rerun. On
+    # An empty or unreadable diff runs everything. On a push a classifier
+    # crash leaves empty scope outputs and the other scope steps still run,
+    # so the docs shortcut stays off. A failure of the scope job itself
+    # can still leave the parity matrix unavailable. On
     # 2026-10-16 a CLAUDE.md-only PR
     # (#782) queued the whole ~33-job matrix behind the account's 20-job cap.
     # No hosted step here reads docs outside rust/, and the W2-D docs seed

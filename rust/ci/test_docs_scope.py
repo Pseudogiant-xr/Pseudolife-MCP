@@ -33,6 +33,22 @@ def test_scope_uses_the_shared_documentation_classifier(name):
                for step in workflow(name)["jobs"]["scope"]["steps"])
 
 
+@pytest.mark.parametrize("reader", [
+    "tests/test_release_ux.py", "tests/test_llms_txt.py", "tests/test_atlas_currency.py",
+    "tests/test_eval_evidence.py", "tests/test_i18n_readme.py", "tests/test_claude_md_citations.py",
+    "tests/test_extractor_model_lists.py", "rust/ci/test_docs_scope.py",
+    "tests/test_batch_timeline.py::test_committed_artifact_backs_the_findings",
+    "rust/ci/test_parity_scope.py::test_the_plan_pages_counted_as_docs_are_read_by_no_code",
+    "rust/test_producer_census.py::test_current_tree_census_has_real_producer_floors",
+    "rust/test_producer_census.py::test_snapshot_is_independent_of_source_commit_history",
+])
+def test_fast_ci_runs_doc_readers_and_the_scope_tests(reader):
+    steps = workflow("ci.yml")["jobs"]["guards"]["steps"]
+    tree_guards = next(step for step in steps if step.get("name") == "Tree-wide guards")
+    assert "if" not in tree_guards
+    assert reader in shlex.split(tree_guards["run"])
+
+
 class ScopeOutputs(Evaluator):
     def __init__(self, event, outputs):
         super().__init__(event, ["scope"], set())
@@ -83,21 +99,36 @@ def repo(tmp_path, monkeypatch):
     return root, base, commit
 
 
-def ci_outputs(root, tmp_path, env, before, push_scope=None, weekly=""):
-    steps = workflow("ci.yml")["jobs"]["scope"]["steps"]
-    scope = next(step for step in steps if step.get("id") == "scope")
+def ci_outputs(root, tmp_path, env, before, weekly=""):
+    job = workflow("ci.yml")["jobs"]["scope"]
     output = tmp_path / "ci-output"
-    subprocess.run(["bash", "-eo", "pipefail", "-c", scope["run"]], cwd=root,
-                   env={**os.environ, **env, "BEFORE": before, "WEEKLY_FROZEN": weekly,
-                        "DOCS_PUSH_SCOPE": push_scope or "", "GITHUB_OUTPUT": str(output)},
-                   check=True, capture_output=True, text=True)
-    return dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+    step_outputs = {}
+    for step in job["steps"]:
+        if step.get("id") == "scope":
+            subprocess.run(["bash", "-eo", "pipefail", "-c", step["run"]], cwd=root,
+                           env={**os.environ, **env, "BEFORE": before, "WEEKLY_FROZEN": weekly,
+                                "GITHUB_OUTPUT": str(output)}, check=True, capture_output=True, text=True)
+            step_outputs["scope"] = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        if step.get("id") == "docs" and env["EVENT_NAME"] == "push":
+            step_outputs["docs"] = {"decision": docs_scope.push_scope(env)}
+
+    class JobOutputs(ScopeOutputs):
+        def lookup(self, path):
+            if path[0] == "steps":
+                return step_outputs.get(path[1], {}).get(path[3], "")
+            return super().lookup(path)
+
+    evaluator = JobOutputs(env["EVENT_NAME"], {})
+    resolved = {name: evaluator.run(condition_text(job["outputs"][name]))
+                for name in ("python", "rust_only", "include_frozen")}
+    return {name: value for name, value in resolved.items() if value}, step_outputs.get("docs", {}).get("decision")
 
 
 @pytest.mark.parametrize("case, expected", [
     ("merge", "docs"),
     ("direct", "docs"),
     ("multiple-shallow", "docs"),
+    ("rust-multiple-shallow", "other"),
     ("python", "other"),
     ("workflow", "other"),
     ("census", "other"),
@@ -105,23 +136,35 @@ def ci_outputs(root, tmp_path, env, before, push_scope=None, weekly=""):
     ("batch-passed", "other"),
     ("batch-different-tree", "other"),
     ("merge-api-empty", "unknown"),
+    ("multiple-associated-prs", "unknown"),
+    ("wrong-pr-base", "unknown"),
+    ("wrong-pr-merge", "unknown"),
+    ("unmerged-pr", "unknown"),
     ("api-failure", "unknown"),
     ("bad-api-shape", "unknown"),
     ("missing-before", "unknown"),
     ("equal-endpoints", "unknown"),
+    ("wrong-github-sha", "unknown"),
     ("force-zero-commits", "unknown"),
     ("missing-shallow-base", "unknown"),
+    ("symlink-added", "other"),
+    ("symlink-deleted", "other"),
+    ("gitlink-added", "other"),
 ])
 def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
     root, before, commit = repo
-    paths = ["docs/guide/example.md"]
+    paths = ["docs/example.md"]
     mixed = {"python": "helper.py", "workflow": ".github/workflows/rust.yml",
              "census": "rust/producer-census.json"}
     if case in mixed:
         paths.append(mixed[case])
     if case in ("multiple-shallow", "earlier-code"):
-        commit("README.md" if case == "multiple-shallow" else "helper.py")
-    merge = case in ("merge", "batch-passed", "batch-different-tree", "merge-api-empty")
+        commit("docs/overview.md" if case == "multiple-shallow" else "helper.py")
+    if case == "rust-multiple-shallow":
+        commit("rust/first.rs")
+        paths = ["rust/second.rs"]
+    merge = case in ("merge", "batch-passed", "batch-different-tree", "merge-api-empty",
+                     "multiple-associated-prs", "wrong-pr-base", "wrong-pr-merge", "unmerged-pr")
     if merge:
         docs_scope.git("switch", "-q", "-c", "docs-topic")
         commit(*paths)
@@ -132,10 +175,25 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
         docs_scope.git("merge", "-q", "--no-ff", "-m", "merge docs", "docs-topic")
         after = docs_scope.git("rev-parse", "HEAD").strip()
         assert docs_scope.git("rev-parse", "HEAD^1").strip() == before
+    elif case.startswith("symlink-"):
+        doc = root / paths[0]
+        doc.parent.mkdir()
+        doc.symlink_to("../initial.txt")
+        docs_scope.git("add", "--", paths[0])
+        docs_scope.git("commit", "-qm", "add docs symlink")
+        if case == "symlink-deleted":
+            before = docs_scope.git("rev-parse", "HEAD").strip()
+            docs_scope.git("rm", "--", paths[0])
+            docs_scope.git("commit", "-qm", "remove docs symlink")
+        after = docs_scope.git("rev-parse", "HEAD").strip()
+    elif case == "gitlink-added":
+        docs_scope.git("update-index", "--add", "--cacheinfo", f"160000,{before},{paths[0]}")
+        docs_scope.git("commit", "-qm", "add docs gitlink")
+        after = docs_scope.git("rev-parse", "HEAD").strip()
     else:
         after = commit(*paths)
 
-    if case == "multiple-shallow":
+    if case in ("multiple-shallow", "rust-multiple-shallow"):
         shallow = tmp_path / "shallow"
         docs_scope.git("clone", "-q", "--depth=2", root.as_uri(), str(shallow))
         monkeypatch.setattr(docs_scope, "ROOT", shallow)
@@ -154,8 +212,10 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
     if case == "missing-shallow-base":
         payload["before"] = "2" * 40
     event.write_text(json.dumps(payload), encoding="utf-8")
-    env = {"EVENT_NAME": "push", "GITHUB_EVENT_NAME": "push", "GITHUB_REF": MASTER,
-           "GITHUB_SHA": after, "GITHUB_EVENT_PATH": str(event), "GITHUB_TOKEN": "fixture",
+    env = {"EVENT_NAME": "push", "HEAD_REF": "docs/topic",
+           "GITHUB_EVENT_NAME": "push", "GITHUB_REF": MASTER,
+           "GITHUB_SHA": before if case == "wrong-github-sha" else after,
+           "GITHUB_EVENT_PATH": str(event), "GITHUB_TOKEN": "fixture",
            "GITHUB_API_URL": "https://api.example.com", "GITHUB_REPOSITORY": "example/repo"}
 
     batch_head = "a" * 40
@@ -164,6 +224,14 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
     pulls = [{"number": 1, "base": {"ref": "master"}, "merged_at": "2026-11-18T00:00:00Z",
               "merge_commit_sha": after, "head": {"ref": batch_ref if case.startswith("batch-") else "docs-topic",
                                                 "sha": batch_head, "repo": {"full_name": "example/repo"}}}] if merge else []
+    if case == "multiple-associated-prs":
+        pulls.append({**pulls[0], "number": 2})
+    if case == "wrong-pr-base":
+        pulls[0]["base"]["ref"] = "topic"
+    if case == "wrong-pr-merge":
+        pulls[0]["merge_commit_sha"] = before
+    if case == "unmerged-pr":
+        pulls[0]["merged_at"] = None
 
     def get(path):
         if path.endswith("/pulls"):
@@ -187,11 +255,10 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
     reports = []
     monkeypatch.setattr(docs_scope, "github_get", lambda token, url: get)
     monkeypatch.setattr(docs_scope, "report_census", reports.append)
-    push = docs_scope.push_scope(env)
+    ci, push = ci_outputs(root, tmp_path, env, payload.get("before", ""))
     assert push == expected
     passed, _ = ci_batch_passed.decide(get, repo="example/repo", event="push",
                                        ref=MASTER, sha=after, workflow=workflow_path)
-    ci = ci_outputs(root, tmp_path, env, payload.get("before", ""), push)
     ci["batch_passed"] = json.dumps(passed)
     full, rust = docs_scope.rust_scope(env)
     rust_outputs = {"full": str(full).lower(), "rust": str(rust).lower()}
@@ -205,7 +272,7 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
     assert selected_lanes("rust.yml", RUST_JOBS, "push", rust_outputs) == (
         set() if expected == "docs" else set(RUST_JOBS))
     assert reports == ([env] if expected == "docs" else [])
-    if expected == "unknown":
+    if case in ("missing-shallow-base", "rust-multiple-shallow"):
         assert ci["include_frozen"] == "true"
 
 
@@ -213,18 +280,22 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
 def test_scheduled_scope_keeps_the_full_lanes(repo, tmp_path, weekly):
     root, before, _ = repo
     env = {"EVENT_NAME": "schedule"}
-    ci = ci_outputs(root, tmp_path, env, before, weekly=weekly)
+    ci, _ = ci_outputs(root, tmp_path, env, before, weekly=weekly)
     assert ci == ({"python": "true", "include_frozen": "true"} if weekly else {"python": "true"})
     assert selected_lanes("ci.yml", CI_JOBS, "schedule", ci) == set(CI_JOBS) - {"guards"}
     assert docs_scope.rust_scope(env) == (True, True)
     assert selected_lanes("rust.yml", RUST_JOBS, "schedule", {"full": "true", "rust": "true"}) == set(RUST_JOBS)
 
 
-def test_ordinary_docs_pull_request_keeps_the_fast_lanes(repo, tmp_path):
+@pytest.mark.parametrize("generated_census", [False, True])
+def test_ordinary_docs_pull_request_keeps_the_fast_lanes(repo, tmp_path, generated_census):
     root, before, commit = repo
-    commit("docs/guide/example.md")
+    paths = ["docs/example.md"]
+    if generated_census:
+        paths.append(docs_scope.CENSUS)
+    commit(*paths)
     env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example"}
-    ci = ci_outputs(root, tmp_path, env, before)
+    ci, _ = ci_outputs(root, tmp_path, env, before)
     assert selected_lanes("ci.yml", CI_JOBS, "pull_request", ci) == {"guards", "lock-resolve", "frontend"}
     full, rust = docs_scope.rust_scope(env)
     assert (full, rust) == (False, False)

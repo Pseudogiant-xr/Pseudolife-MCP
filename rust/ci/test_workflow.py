@@ -749,10 +749,10 @@ def run_scope(monkeypatch, event, files, git_exit=0, base_ref="refs/heads/master
             return ""
         base = "FETCH_HEAD" if event == "merge_group" else "HEAD^1"
         # Renames must list both paths or a move from code to docs looks safe.
-        assert args == ("-c", "core.quotePath=true", "diff", "--no-renames", "--name-only", base, "HEAD", "--")
+        assert args == ("diff", "--raw", "-z", "--no-renames", base, "HEAD", "--")
         if git_exit:
             raise subprocess.CalledProcessError(git_exit, args)
-        return "\n".join(files)
+        return "".join(f":100644 100644 1111111 2222222 M\0{path}\0" for path in files)
 
     monkeypatch.setattr(docs_scope, "git", git)
     full, rust = docs_scope.rust_scope({"EVENT_NAME": event, "HEAD_REF": head_ref,
@@ -761,14 +761,13 @@ def run_scope(monkeypatch, event, files, git_exit=0, base_ref="refs/heads/master
 
 
 DOCS_ONLY_CHANGES = [
-    ["CLAUDE.md"],
-    ["README.md", "CHANGELOG.md", "changelog.d/2026-10-17-x.md"],
-    ["docs/guide/configuration.md", "docs/atlas/atlas.json", "llms.txt", "llms-full.txt"],
-    ["examples/CLAUDE.memory.md", "frontend/README.md", "README.zh-CN.md"],
-    ["docs/images/diagram.svg"],
+    ["docs/note.md"],
+    ["docs/i18n/README.source.md"],
+    ["docs/runbooks/note.MD", "llms.txt", "llms-full.txt"],
+    ["docs/images/diagram.PNG"],
     # The port's plan pages no Rust or parity job reads (parity_scope.RUST_PLAN_DOCS).
     ["rust/CUTOVER.md"],
-    ["rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md", "CLAUDE.md"],
+    ["rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md", "docs/note.md"],
 ]
 CODE_CHANGES = [
     ["CLAUDE.md", "rust/README.md"],
@@ -788,6 +787,10 @@ CODE_CHANGES = [
     ["docs/atlas/atlas.js"],
     ["docs/run.ps1"],
     ["docs/setup.sh"],
+    ["docs/atlas/atlas.json"],
+    ["docs/guide/configuration.md"],
+    ["docs/dev/merge-batches.md"],
+    ["docs/specs/example.md"],
     ["notes.txt"],
     ["src.md.py"],
     ["RUST/README.md"],
@@ -833,9 +836,9 @@ def test_scope_runs_everything_without_a_fetched_master_tip(monkeypatch, base_re
                      fetch_exit=fetch_exit) == ["full=true", "rust=true"]
 
 
-@pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
-def test_scope_never_skips_without_a_recognized_change(monkeypatch, event):
-    assert run_scope(monkeypatch, event, ["CLAUDE.md"]) == ["full=true", "rust=true"]
+@pytest.mark.parametrize("event", ["schedule", "workflow_dispatch"])
+def test_scope_does_not_shortcut_events_without_a_diff(monkeypatch, event):
+    assert run_scope(monkeypatch, event, ["docs/note.md"]) == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])

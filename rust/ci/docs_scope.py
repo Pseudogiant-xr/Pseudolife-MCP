@@ -34,11 +34,24 @@ def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=ROOT, timeout=45).decode("utf-8")
 
 
-def changed_paths(base: str, head: str = "HEAD") -> list[str]:
-    # Keep both sides of renames and preserve the conservative quoting of
-    # paths used by Rust scope on pull requests and merge groups.
-    return git("-c", "core.quotePath=true", "diff", "--no-renames", "--name-only",
-               base, head, "--").splitlines()
+def changed_paths(base: str, head: str = "HEAD") -> tuple[list[str], bool]:
+    # Keep both sides of renames and inspect both tree modes. A type change
+    # or deletion can otherwise hide a symlink or gitlink behind a docs path.
+    raw = git("diff", "--raw", "-z", "--no-renames", base, head, "--")
+    if not raw:
+        return [], True
+    if not raw.endswith("\0"):
+        raise ValueError("incomplete raw Git diff")
+    records = iter(raw[:-1].split("\0"))
+    paths = []
+    regular = True
+    for metadata, path in zip(records, records, strict=True):
+        if not metadata.startswith(":") or not path:
+            raise ValueError("malformed raw Git diff record")
+        old_mode, new_mode, _, _, _ = metadata[1:].split()
+        regular &= {old_mode, new_mode} <= {"000000", "100644", "100755"}
+        paths.append(path)
+    return paths, regular
 
 
 def is_direct_push(env: Mapping[str, str], after: str) -> bool:
@@ -89,10 +102,10 @@ def push_scope(env: Mapping[str, str]) -> str:
             # A multi-commit push can start beyond checkout's depth of two.
             # Fetch the event's exact tip, which may have moved again since.
             git("fetch", "--no-tags", "--depth=1", "origin", before)
-        paths = changed_paths(before, after)
+        paths, regular = changed_paths(before, after)
         if not paths:
             raise ValueError("empty changed-file range")
-        if documentation_only(paths) and is_direct_push(env, after):
+        if regular and documentation_only(paths) and is_direct_push(env, after):
             return "docs"
         return "other"
     except (ApiError, OSError, subprocess.SubprocessError, ValueError, KeyError, AttributeError) as error:
@@ -126,11 +139,11 @@ def rust_scope(env: Mapping[str, str]) -> tuple[bool, bool]:
             base = "FETCH_HEAD"
         else:
             return True, True
-        paths = changed_paths(base)
+        paths, regular = changed_paths(base)
         if paths:
             head_ref = env.get("HEAD_REF")
             ordinary = event == "pull_request" and head_ref and not head_ref.startswith(BATCH_PREFIX)
-            return not ordinary, not documentation_only(paths, allow_generated_census=True)
+            return not ordinary, not (regular and documentation_only(paths, allow_generated_census=True))
     except (OSError, subprocess.SubprocessError, ValueError, KeyError) as error:
         print(f"Rust scope unavailable: {error}", file=sys.stderr)
     return True, True

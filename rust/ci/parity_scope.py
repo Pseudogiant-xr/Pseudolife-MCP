@@ -174,8 +174,9 @@ SHIM_COMMANDS = {
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }
 # The documentation-only rule shared by workflow scope and parity selection.
-CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
-CODE_SUFFIX = re.compile(r"\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)$")
+DOCS_SUFFIXES = frozenset({".md", ".png"})
+# These trees contain inputs to tests that run outside the fast lanes.
+DOCS_FULL_CI_DIRS = ("docs/dev/", "docs/guide/", "docs/specs/")
 # The port's plan pages under rust/ that no Rust or parity job reads; the
 # scope job names them too. A page a job reads (PARITY.md) or one an evidence
 # file hashes (PORTING.md, PORT-STATE.md, PHASE3-READ-PATH.md) stays code.
@@ -183,14 +184,15 @@ RUST_PLAN_DOCS = frozenset({"rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CH
 
 
 def is_docs(path: str) -> bool:
-    """A file no Rust or parity job reads (CLAUDE.md "Docs-only changes")."""
-    if path in RUST_PLAN_DOCS:
-        return True
-    if CODE_DIRS.match(path):
+    """A documentation path whose readers are covered by the fast lanes."""
+    if not path.isascii() or any(c in '"\\' or ord(c) < 32 or ord(c) == 127 for c in path):
         return False
-    if re.fullmatch(r'[^/"].*\.md', path) or re.fullmatch(r"llms(-full)?\.txt", path):
+    if path in RUST_PLAN_DOCS or path in ("CLAUDE.md", "CHANGELOG.md", "llms.txt", "llms-full.txt"):
         return True
-    return path.startswith("docs/") and not CODE_SUFFIX.search(path)
+    if path.startswith("changelog.d/"):
+        return PurePosixPath(path).suffix == ".md"
+    return (path.startswith("docs/") and not path.lower().startswith(DOCS_FULL_CI_DIRS)
+            and PurePosixPath(path).suffix.lower() in DOCS_SUFFIXES)
 
 
 def reached(path: str) -> tuple[str, ...]:

@@ -227,12 +227,23 @@ def test_code_matches_the_scope_job(files):
     assert not all(parity_scope.is_docs(path) for path in files)
 
 
+@pytest.mark.parametrize("path", [
+    "docs/x.PY", "docs/x.Sh", "docs/x.sql", "docs/x.ipynb", "docs/x.psd1",
+    "docs/x.zsh", "docs/x.tsx", "docs/Makefile", "docs/Dockerfile",
+    "Docs/x.md", "TESTS/a.md", "llms2.txt",
+    "README.md", "examples/CLAUDE.memory.md", "examples/hook-instructions.md",
+    "examples/commands/dream.md", ".claude/skills/sample/SKILL.md",
+])
+def test_fast_docs_paths_exclude_code_and_files_read_outside_the_guards(path):
+    assert not parity_scope.is_docs(path)
+
+
 @pytest.mark.parametrize("files, push_docs, pr_docs", [
-    (["docs/guide/x.md"], True, True),
-    (["docs/guide/x.md", "rust/producer-census.json"], False, True),
+    (["docs/x.md"], True, True),
+    (["docs/x.md", "rust/producer-census.json"], False, True),
     (["rust/producer-census.json"], False, False),
-    (["docs/guide/x.md", "rust/producer-census.json", "rust/shim/src/main.rs"], False, False),
-    (["docs/guide/x.md", "rust/contract-inventory.json"], False, False),
+    (["docs/x.md", "rust/producer-census.json", "rust/shim/src/main.rs"], False, False),
+    (["docs/x.md", "rust/contract-inventory.json"], False, False),
     ([], False, False),
 ])
 def test_only_prs_or_merge_groups_count_the_regenerated_census_as_docs(files, push_docs, pr_docs):
