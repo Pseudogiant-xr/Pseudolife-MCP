@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "80749dd59844bee1",
+  "fingerprint": "e3799ac5656e30db",
+  "reason": "Only the timeout changes. Run 44305939387 attempt 2 hit 25 minutes with 69% reported after 18m01s of tests, 2m57s of setup, and a 4m13s build. Extrapolating gives about 26 minutes of tests and a 33-minute job. Ten percent above that estimate, rounded up, gives a 37-minute limit. The four preceding successful jobs took 13m42s to 20m46s, so keep the 21.3 runner-minute budget estimate."
+}
