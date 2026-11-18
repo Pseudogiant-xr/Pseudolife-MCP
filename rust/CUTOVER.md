@@ -78,7 +78,7 @@ The command exits at that point without starting the Python client.
 | `expose` | Status, consent, Tailscale serve changes and read-back run natively. Malformed arguments get an actionable usage error before host access. (#1636, #1725) | — |
 | `test-login` | Help, argument checks, admin-URL and container setup, and private credential staging run natively. Preflight refusals name the failed condition. (#1727) | — |
 | `maintainer` | Guided setup and administration (`enrol-code`, `confirm`, `revoke`, `reset`, `list`) run natively. Invalid arguments and database settings receive named refusals. (#1730) | — |
-| `move` | The read-only preflight checks both bearer modes. The Docker move with `--no-keep-tokens`, rollback and target release run natively. | Carry bearer settings during the move and finish the remaining exposure and configuration shapes. Prove those and the final recovery paths on disposable hosts. |
+| `move` | The read-only preflight, supported Docker move transaction, rollback and target release run natively. | Remaining token, exposure and configuration shapes. Prove those and the final recovery paths on disposable hosts. |
 | `tunnel` | Status, read-only update reporting, the native bridge and some preflight refusals in `verify` and `setup`. | Finish setup, verification and the running tunnel lifecycle, including refresh. |
 | `embedded` | A plain refusal: retired with file mode. | Nothing. |
 | `backup`, `restore`, `export`, `import`, `invite`, `maintainer`, `lease`, `board-audit` on a lite bank | One refusal that names the Docker install and the 0.23.x pip release that still opens the bank (`cli/retired.rs`). | Nothing. |
