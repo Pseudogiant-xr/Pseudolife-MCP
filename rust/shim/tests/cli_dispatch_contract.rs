@@ -59,21 +59,16 @@ fn unknown_mode_uses_python_quotes_and_exit_two() {
 
 #[test]
 fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
-    // `console` answers every bare form itself now (with this machine's own
-    // registration it would ask the daemon for a sign-in link and open a
-    // browser), so it gets the one argv that defers before it reads a
-    // credential: help at a width other than 80 columns. The emptied home, the
-    // closed daemon address and the browser that is no program fence a mode
-    // that stops deferring off the machine's real daemon and browser.
+    // Both commands still decline help before attempting a move or a tunnel
+    // operation. The empty home and closed address isolate either command
+    // if its dispatch behavior changes.
     let home = std::env::temp_dir().join(format!("pl-dispatch-home-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    let cases: [(&str, &[&str]); 1] = [("console", &["--help"])];
-    for (mode, args) in cases {
+    for mode in ["move", "tunnel"] {
         let output = common::cli::cleared_command(std::path::Path::new(env!(
             "CARGO_BIN_EXE_pseudolife-stdio"
         )))
-        .arg(mode)
-        .args(args)
+        .args([mode, "--help"])
         .env("COLUMNS", "100")
         .env("HOME", &home)
         .env("USERPROFILE", &home)
@@ -95,6 +90,7 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
         ));
         assert_eq!(output.stderr, expected);
     }
+    std::fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
@@ -118,6 +114,7 @@ fn completed_modes_answer_help_and_argument_errors_without_deferring() {
         "expose",
         "test-login",
         "maintainer",
+        "console",
     ] {
         for (argument, code) in [("--help", 0), ("--bad-dispatch-fixture-option", 2)] {
             let output = common::cli::cleared_command(std::path::Path::new(env!(

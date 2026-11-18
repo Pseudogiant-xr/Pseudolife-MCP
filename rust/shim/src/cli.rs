@@ -41,12 +41,9 @@ pub(crate) fn process_table() -> Result<Option<connect::ProcessTable>, ()> {
 }
 
 const HELP: &str = include_str!("cli_help.txt");
-// Modes whose own arm returns `None` for shapes it does not handle yet; the
-// generic line names them. `serve`, `embedded` and `board-audit` answer every
-// shape themselves (main.rs, the arm below, main.rs), so none is listed.
 const DEFERRED_MODES: &[&str] = &[
-    "doctor", "connect", "invite", "pair", "tunnel", "move", "backup", "export", "import",
-    "console",
+    "tunnel", // The parser and some profile/store operations still decline unsupported inputs.
+    "move",   // The native parsers still decline argv outside their supported forms.
 ];
 
 fn text_bytes(text: &str) -> Vec<u8> {
@@ -133,10 +130,12 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
             std::env::args_os().skip(2).collect(),
         )));
     }
-    if mode == "backup"
-        && let Some(code) = backup::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(ExitCode::from(code));
+    if mode == "backup" {
+        return Some(
+            backup::run(std::env::args_os().skip(2).collect())
+                .map(ExitCode::from)
+                .expect("native backup dispatch answers every invocation"),
+        );
     }
     if mode == "wait-mail" {
         return Some(ExitCode::from(wait_mail::run(
@@ -174,30 +173,31 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     if mode == "doorbell-prompt-seen" {
         return Some(doorbell_seen::run());
     }
-    if mode == "doctor"
-        && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(code);
+    if mode == "doctor" {
+        return Some(
+            doctor::run(std::env::args_os().skip(2).collect())
+                .expect("native doctor dispatch answers every invocation"),
+        );
     }
-    if matches!(mode, "export" | "import")
-        && let Some(code) = transfer::run(mode, std::env::args_os().skip(2).collect())
-    {
-        return Some(code);
+    if matches!(mode, "export" | "import") {
+        return Some(
+            transfer::run(mode, std::env::args_os().skip(2).collect())
+                .expect("native transfer dispatch answers export and import"),
+        );
     }
     if mode == "test-login"
         && let Some(code) = test_login::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
-    if mode == "connect"
-        && let Some(code) = connect::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(code);
+    if mode == "connect" {
+        return Some(
+            connect::run(std::env::args_os().skip(2).collect())
+                .expect("native connect dispatch answers every invocation"),
+        );
     }
-    if matches!(mode, "invite" | "pair")
-        && let Some(code) = pairing::run(mode)
-    {
-        return Some(code);
+    if matches!(mode, "invite" | "pair") {
+        return Some(pairing::run(mode).expect("native pairing dispatch answers invite and pair"));
     }
     if mode == "move" {
         let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
@@ -232,10 +232,8 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     {
         return Some(code);
     }
-    if mode == "console"
-        && let Some(code) = console::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(code);
+    if mode == "console" {
+        return Some(console::run(std::env::args_os().skip(2).collect()));
     }
     if mode == "embedded" {
         crate::stderrln!("{}", retired::embedded_message());
