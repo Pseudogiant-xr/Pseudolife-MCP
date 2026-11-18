@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! `tunnel`: file-only answers, refusals before any effect, and deferrals
+//! `tunnel`: authenticated profile setup, read-only answers, and deferrals
 //! that change nothing and open no connection. Seeded profiles need
 //! owner-only files: the `seeded` cells run on Unix (chmod); the bridge's
 //! `serve()` cell seeds through the native client's own private-file
@@ -155,7 +155,7 @@ fn unported_commands_and_argv_shapes_defer_without_effect() {
 }
 
 #[test]
-fn a_setup_that_validates_defers_before_the_daemon_handshake() {
+fn explicit_setup_with_a_missing_credential_refuses_and_discovery_defers() {
     let home = Home::new();
     let dir = home.dir();
     let token = home.path("token");
@@ -186,7 +186,12 @@ fn a_setup_that_validates_defers_before_the_daemon_handshake() {
             token,
         ];
         args.extend_from_slice(extra);
-        assert_deferred(&home, &args, &[]);
+        assert_refused(
+            &home,
+            &args,
+            &[],
+            "daemon credential file is unavailable or unsafe; repair its owner-only access and retry setup\n",
+        );
     }
     // A token file from the environment, with the listener as the daemon URL.
     assert_deferred(
@@ -202,6 +207,94 @@ fn a_setup_that_validates_defers_before_the_daemon_handshake() {
     // A Claude Code registration exists.
     std::fs::write(home.path(".claude.json"), b"{}").unwrap();
     assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
+}
+
+const SETUP_BEARER: &str = "fixture-setup-bearer";
+
+fn setup_against(home: &Home, url: &str, accept: bool) -> Output {
+    let ambient = Listener::new();
+    let mut setup = command(home, &ambient);
+    setup.args(["setup", "--profile-dir", &home.dir(), "--daemon-url", url]);
+    setup.arg("--token-file").arg(home.path("token"));
+    if accept {
+        setup.arg("--accept-access");
+    }
+    let output = setup.output().unwrap();
+    ambient.assert_untouched();
+    for bytes in [&output.stdout, &output.stderr] {
+        assert!(!String::from_utf8_lossy(bytes).contains(SETUP_BEARER));
+    }
+    output
+}
+
+fn setup_home() -> Home {
+    let home = Home::new();
+    pseudolife_stdio::board::state::private_dir(&home.0).unwrap();
+    pseudolife_stdio::board::state::atomic_create(&home.path("token"), SETUP_BEARER.as_bytes())
+        .unwrap();
+    home
+}
+
+#[test]
+fn setup_saves_an_authenticated_private_profile_and_reuses_it_unchanged() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    let output = setup_against(&home, &daemon.url, true);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let path = home.path("tunnels/dot.profile.json");
+    let saved = pseudolife_stdio::board::state::read(&path, 65536).unwrap();
+    let profile: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(profile["name"], "dot");
+    assert_eq!(profile["state"], "pending");
+    assert_eq!(profile["daemon_url"], daemon.url);
+    assert_eq!(profile["consent"], true);
+    assert!(!String::from_utf8_lossy(&saved).contains(SETUP_BEARER));
+
+    let requests = daemon.records.lock().unwrap().clone();
+    let auth = format!("Bearer {SETUP_BEARER}");
+    for method in ["initialize", "tools/list"] {
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.message["method"] == method
+                    && request.headers.get("authorization") == Some(&auth))
+        );
+    }
+    let before = tree(&home.0);
+    let output = setup_against(&home, &daemon.url, true);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("already configured"));
+    assert_eq!(tree(&home.0), before);
+    assert_eq!(daemon.records.lock().unwrap().len(), requests.len());
+
+    let contender = Listener::new();
+    let output = setup_against(&home, &contender.url(), true);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("already occupies this name"));
+    contender.assert_untouched();
+    assert_eq!(tree(&home.0), before);
+}
+
+#[test]
+fn setup_requires_consent_and_refuses_a_redirect_without_saving() {
+    let home = setup_home();
+    let redirected = Listener::new();
+    let daemon = common::Fixture::start_with(common::Setup {
+        initialize: vec![common::Reply::Redirect(format!("{}/mcp", redirected.url()))],
+        ..Default::default()
+    });
+    let output = setup_against(&home, &daemon.url, false);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--accept-access"));
+    assert!(daemon.records.lock().unwrap().is_empty());
+    assert!(!home.path("tunnels").exists());
+
+    let output = setup_against(&home, &daemon.url, true);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("MCP handshake failed"));
+    redirected.assert_untouched();
+    assert!(!home.path("tunnels").exists());
 }
 
 #[test]

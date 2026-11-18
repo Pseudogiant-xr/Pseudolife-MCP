@@ -53,6 +53,12 @@ reproduced (item 4 of the scope is deferred).
 
 ## Native departures (after the freeze)
 
+Explicit `setup` with a daemon URL and token file can save a fresh profile
+after consent and an MCP handshake. An identical profile is reused without
+writing it or contacting the daemon. These effects are covered in
+`shim/tests/cli_tunnel_contract.rs` against a disposable daemon fixture.
+The setup cases in this row exercise preflight refusals and deferrals.
+
 Process records are read natively (`shim/src/cli/tunnel/record.rs`), and
 these cases are recorded from the candidate, not the oracle:
 

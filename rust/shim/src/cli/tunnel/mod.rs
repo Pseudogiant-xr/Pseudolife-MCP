@@ -1,6 +1,5 @@
-//! `pseudolife-mcp tunnel`: the read-only subset (`tunnel_cli.py`). Saved
-//! profiles are read, never written; every path that would write, start a
-//! process, open a socket or decrypt a Windows key defers before any effect.
+//! `pseudolife-mcp tunnel`: profile setup, status, and read-only checks of
+//! the saved tunnel runtime, plus the vendor client's stdio bridge.
 use std::{
     ffi::OsString,
     io::{self, Write},
@@ -18,6 +17,7 @@ mod doctor_section;
 #[cfg(windows)]
 mod dpapi;
 mod record;
+mod setup;
 mod store;
 mod syntax;
 mod vendor;
@@ -62,6 +62,7 @@ enum Command {
 
 #[derive(Default)]
 struct Setup {
+    accept_access: bool,
     daemon_url: Option<String>,
     token_file: Option<String>,
     tunnel_id: Option<String>,
@@ -106,7 +107,7 @@ fn parse(values: &[OsString]) -> Option<Options> {
         seen.push(option);
         match (*option, command) {
             ("--json", Command::Status) => options.json = true,
-            ("--accept-access", Command::Setup) => {}
+            ("--accept-access", Command::Setup) => options.setup.accept_access = true,
             _ => {
                 let value = rest.next().filter(|value| !value.starts_with('-'))?;
                 let value = Some((*value).to_owned());
@@ -756,11 +757,11 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
     Ok((selected, token))
 }
 
-/// `_setup` up to `profile.validate()`: its refusals. A profile that
-/// validates would run the daemon handshake next, so it defers.
 fn setup(options: &Options, root: &Path) -> Output {
     let path = store::profile_path(root, &options.profile)?;
-    if occupied(&path)? {
+    let explicit =
+        truthy(&options.setup.daemon_url).is_some() && truthy(&options.setup.token_file).is_some();
+    if occupied(&path)? && !explicit {
         return Err(Fail::Defer);
     }
     let (url, token) = discover(&options.setup)?;
@@ -779,8 +780,12 @@ fn setup(options: &Options, root: &Path) -> Output {
             payload.insert(key.into(), Value::String(value.clone()));
         }
     }
-    store::validate(&payload)?;
-    Err(Fail::Defer)
+    if explicit {
+        setup::save(options, root, &path, payload)
+    } else {
+        store::validate(&payload)?;
+        Err(Fail::Defer)
+    }
 }
 
 #[cfg(test)]
