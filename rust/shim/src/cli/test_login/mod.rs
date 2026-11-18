@@ -1,13 +1,8 @@
 //! `test-login create`: the test suite's own PostgreSQL login, which creates
 //! and drops its own databases and cannot connect to the bank.
 //!
-//! Oracle: `pseudolife_memory/test_login_cli.py`. Canonical argv only:
-//! `create` followed by `--rotate`, `--json`, `--role R`, `--file P`,
-//! `--admin-url URL`, `--container NAME` (each at most once, the value a
-//! separate argument) and `--bank DB` (repeatable). Every other spelling,
-//! an unprintable home or file path, a daemon DSN or admin URL outside the
-//! shared client's grammar, and an ambient libpq control that client refuses
-//! defer before any connection or file change.
+//! Supported command lines run natively. Invalid arguments and unsupported
+//! connection or file settings are refused before a connection or role change.
 mod exec;
 mod file;
 mod scram;
@@ -216,9 +211,6 @@ struct Report {
     json: bool,
     lines: Vec<String>,
     data: Vec<(&'static str, Value)>,
-    /// Set just before the login file is staged: from here on the run has
-    /// changed something, so it can no longer defer.
-    effects: bool,
     /// A stdout write or flush failed.
     stdout_failed: Cell<bool>,
 }
@@ -248,18 +240,13 @@ impl Report {
         Ok(())
     }
 
-    /// The process exit for a run that ended with `code`. A refused stdout
-    /// makes the oracle's print raise and its handler's print raise again:
-    /// a traceback and CPython's exit 120. Before any change that traceback
-    /// is the oracle's own to print, so the run defers; after one it cannot
-    /// be undone, so the run ends with 120 and nothing on stderr.
+    /// A broken output stream is a failure even before the first change.
     fn exit(&self, code: u8) -> Option<ExitCode> {
-        if !self.stdout_failed.get() {
-            Some(ExitCode::from(code))
-        } else if self.effects {
+        if self.stdout_failed.get() {
+            eprintln!("test-login: stdout could not be written; restore stdout and retry");
             Some(ExitCode::from(EXIT_STDOUT_REFUSED))
         } else {
-            None
+            Some(ExitCode::from(code))
         }
     }
 
@@ -299,10 +286,10 @@ struct Args {
     json: bool,
 }
 
-fn parse(values: &[OsString]) -> Option<Args> {
+fn parse(values: &[OsString]) -> Result<Args, String> {
     let mut values = values.iter();
-    if values.next()?.to_str()? != "create" {
-        return None;
+    if values.next().and_then(|v| v.to_str()) != Some("create") {
+        return Err("expected create; run test-login --help for usage".into());
     }
     let mut args = Args {
         role: DEFAULT_ROLE.into(),
@@ -313,42 +300,88 @@ fn parse(values: &[OsString]) -> Option<Args> {
         container: None,
         json: false,
     };
-    let mut role_seen = false;
-    while let Some(option) = values.next() {
-        let option = option.to_str()?;
-        match option {
-            "--rotate" if !args.rotate => {
+    const OPTIONS: &[&str] = &[
+        "--role",
+        "--file",
+        "--admin-url",
+        "--container",
+        "--bank",
+        "--rotate",
+        "--json",
+    ];
+    let mut seen = Vec::new();
+    while let Some(raw) = values.next() {
+        let raw = raw
+            .to_str()
+            .ok_or("arguments must be UTF-8; use Unicode arguments")?;
+        if raw == "--" && values.len() == 0 {
+            break;
+        }
+        let (option, inline) = raw
+            .split_once('=')
+            .map_or((raw, None), |(o, v)| (o, Some(v)));
+        if !OPTIONS.contains(&option) {
+            let suggestions: Vec<_> = OPTIONS
+                .iter()
+                .filter(|known| {
+                    option.starts_with("--") && option.len() > 2 && known.starts_with(option)
+                })
+                .copied()
+                .collect();
+            return Err(match suggestions.as_slice() {
+                [full] => format!("abbreviated option is unsupported; use {full}"),
+                [] => {
+                    "unexpected argument; run test-login create --help for supported options".into()
+                }
+                _ => format!(
+                    "ambiguous option abbreviation; use {}",
+                    suggestions.join(" or ")
+                ),
+            });
+        }
+        if option != "--bank" && seen.contains(&option) {
+            return Err(format!("{option} was repeated; supply it once"));
+        }
+        seen.push(option);
+        if matches!(option, "--rotate" | "--json") {
+            if inline.is_some() {
+                return Err(format!("{option} takes no value; use {option} alone"));
+            }
+            if option == "--rotate" {
                 args.rotate = true;
-                continue;
-            }
-            "--json" if !args.json => {
+            } else {
                 args.json = true;
-                continue;
             }
-            "--role" | "--file" | "--admin-url" | "--container" | "--bank" => {}
-            _ => return None,
+            continue;
         }
-        let value = values.next()?.to_str()?;
-        // argparse reads a leading '-' as an option; an empty value is a
-        // shape no producer writes (except the role, whose check answers it).
-        if value.starts_with('-') || (value.is_empty() && option != "--role") {
-            return None;
+        let value = match inline {
+            Some(value) => value,
+            None => values
+                .next()
+                .ok_or_else(|| format!("{option} requires a value; supply {option}=VALUE"))?
+                .to_str()
+                .ok_or_else(|| format!("{option} value must be UTF-8; supply {option}=VALUE"))?,
+        };
+        if value.starts_with('-') {
+            return Err(format!(
+                "{option} value must not start with '-'; supply a non-option value"
+            ));
+        }
+        if value.is_empty() && option != "--role" {
+            return Err(format!(
+                "{option} requires a nonempty value; supply {option}=VALUE"
+            ));
         }
         match option {
-            "--role" if !role_seen => {
-                role_seen = true;
-                args.role = value.into();
-            }
-            "--file" if args.file.is_none() && file::canonical(value) => {
-                args.file = Some(value.into());
-            }
-            "--admin-url" if args.admin_url.is_none() => args.admin_url = Some(value.into()),
-            "--container" if args.container.is_none() => args.container = Some(value.into()),
+            "--role" => args.role = value.into(),
+            "--file" => args.file = Some(value.into()),
+            "--admin-url" => args.admin_url = Some(value.into()),
+            "--container" => args.container = Some(value.into()),
             "--bank" => args.banks.push(value.into()),
-            _ => return None,
+            _ => unreachable!(),
         }
     }
-    Some(args)
+    Ok(args)
 }
 
 fn role_name_ok(role: &str) -> bool {
@@ -398,7 +431,7 @@ fn stdlib_dsn_parts(dsn: &str) -> HashMap<&'static str, String> {
     parts
 }
 
-/// `_dsn_parts`: the daemon DSN's `user` and `dbname`. `None` defers: a DSN
+/// The daemon DSN's `user` and `dbname`. `None` refuses a DSN
 /// the shared client cannot read, or one that psycopg's and the standard
 /// library's readings (the oracle uses whichever is installed) would answer
 /// differently.
@@ -425,7 +458,7 @@ fn dsn_parts(dsn: Option<&str>) -> Option<HashMap<&'static str, String>> {
     Some(parts)
 }
 
-/// `shutil.which("docker")` as Python 3.11 answers it. `None` defers.
+/// Docker lookup. An absent or non-Unicode PATH is refused by the caller.
 fn docker_on_path() -> Option<bool> {
     let path = std::env::var_os("PATH")?.into_string().ok()?;
     if path.is_empty() {
@@ -481,31 +514,47 @@ fn docker_on_path() -> Option<bool> {
     Some(false)
 }
 
-/// `None` defers to the dispatcher before any effect.
+/// Always answers the mode; failures never fall through to the dispatcher.
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
-    // The oracle resolves the home at import, before parsing.
-    let home = file::home()?;
-    if values
-        .iter()
-        .take_while(|arg| *arg != "--")
-        .any(|arg| arg == "--help" || arg == "-h")
+    if values.is_empty()
+        || values
+            .iter()
+            .take_while(|arg| *arg != "--")
+            .any(|arg| arg == "--help" || arg == "-h")
     {
-        use std::io::Write;
         let text = if values.first().is_some_and(|arg| arg == "create") {
             include_str!("create_help.txt")
         } else {
             include_str!("test_login_help.txt")
         };
-        let _ = std::io::stdout().write_all(&super::text_bytes(&text.replace("\r\n", "\n")));
-        return Some(ExitCode::SUCCESS);
+        return Some(
+            match io::stdout()
+                .write_all(&super::text_bytes(&text.replace("\r\n", "\n")))
+                .and_then(|()| io::stdout().flush())
+            {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(_) => {
+                    eprintln!("test-login: stdout could not be written; restore stdout and retry");
+                    ExitCode::from(EXIT_STDOUT_REFUSED)
+                }
+            },
+        );
     }
-    let args = parse(&values)?;
+    let args = match parse(&values) {
+        Ok(args) => args,
+        Err(error) => {
+            eprintln!("test-login: {error}");
+            return Some(ExitCode::from(EXIT_USAGE));
+        }
+    };
     let mut report = Report {
         json: args.json,
         lines: Vec::new(),
         data: Vec::new(),
-        effects: false,
         stdout_failed: Cell::new(false),
+    };
+    let Some(home) = file::home() else {
+        return report.exit(report.finish(EXIT_REFUSED, Some("HOME/USERPROFILE is missing, non-Unicode or non-canonical; set an absolute canonical home directory")));
     };
     if !role_name_ok(&args.role) {
         return report.exit(report.finish(
@@ -530,20 +579,37 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         Some(value) => PathBuf::from(value),
         None => match std::env::var_os(FILE_ENV).filter(|value| !value.is_empty()) {
             Some(value) => {
-                let value = value.into_string().ok()?;
+                let Ok(value) = value.into_string() else {
+                    return report.exit(report.finish(EXIT_REFUSED, Some("PSEUDOLIFE_TEST_PG_LOGIN_FILE is not Unicode; set it to a canonical Unicode file path")));
+                };
                 if !file::canonical(&value) {
-                    return None;
+                    return report.exit(report.finish(EXIT_REFUSED, Some("PSEUDOLIFE_TEST_PG_LOGIN_FILE is non-canonical; use a path without dot components, repeated or trailing separators")));
                 }
                 PathBuf::from(value)
             }
             None => home.join(".pseudolife-mcp").join("test-pg.env"),
         },
     };
-    if !file::writable_shape(&path) {
-        return None;
+    if !file::canonical(path.to_str().unwrap_or(""))
+        || path
+            .to_str()
+            .is_none_or(|text| text.chars().any(char::is_control))
+    {
+        return report.exit(report.finish(EXIT_REFUSED, Some("--file/PSEUDOLIFE_TEST_PG_LOGIN_FILE is non-canonical or contains control characters; use a canonical printable file path")));
     }
-    let shown_path = file::shown(&path, &home)?;
-    let path_text = path.to_str()?.to_owned();
+    if let Err(cause) = file::writable_shape(&path) {
+        return report.exit(report.finish(
+            EXIT_REFUSED,
+            Some(&format!("--file/PSEUDOLIFE_TEST_PG_LOGIN_FILE {cause}")),
+        ));
+    }
+    let Some(shown_path) = file::shown(&path, &home) else {
+        return report.exit(report.finish(
+            EXIT_REFUSED,
+            Some("--file cannot be displayed as Unicode; use a printable Unicode file path"),
+        ));
+    };
+    let path_text = path.to_string_lossy().into_owned();
     let mut banks: Vec<String> = Vec::new();
     for bank in DEFAULT_BANKS
         .iter()
@@ -555,23 +621,34 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         }
     }
     let daemon_env = match std::env::var_os(DAEMON_DSN_ENV) {
-        Some(value) => Some(value.into_string().ok()?),
+        Some(value) => match value.into_string() {
+            Ok(value) => Some(value),
+            Err(_) => return report.exit(report.finish(
+                EXIT_REFUSED,
+                Some("PSEUDOLIFE_MCP_DATABASE_URL is not Unicode; set a supported PostgreSQL DSN"),
+            )),
+        },
         None => None,
     };
-    let daemon = dsn_parts(daemon_env.as_deref())?;
+    let Some(daemon) = dsn_parts(daemon_env.as_deref()) else {
+        return report.exit(report.finish(EXIT_REFUSED, Some("PSEUDOLIFE_MCP_DATABASE_URL cannot be read unambiguously; use a supported PostgreSQL DSN with user and database in the authority and path")));
+    };
     let container = args
         .container
         .clone()
         .unwrap_or_else(|| POSTGRES_CONTAINER.into());
     let executor = if let Some(url) = &args.admin_url {
-        if !exec::admin_url_admitted(url) {
-            return None;
+        if let Err(cause) = exec::admin_url_admitted(url) {
+            return report.exit(report.finish(EXIT_REFUSED, Some(&cause)));
         }
         if let Some(dbname) = daemon.get("dbname") {
             banks.push(dbname.clone());
         }
         Executor::Admin { url: url.clone() }
-    } else if docker_on_path()? {
+    } else if match docker_on_path() {
+        Some(found) => found,
+        None => return report.exit(report.finish(EXIT_REFUSED, Some("PATH is missing or not Unicode; set a Unicode PATH containing Docker or supply --admin-url"))),
+    } {
         Executor::Container { name: container }
     } else {
         return report.exit(report.finish(
@@ -582,10 +659,19 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
             )),
         ));
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .ok()?;
+    let runtime =
+        match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => return report.exit(report.finish(
+                EXIT_FAILED,
+                Some(&format!(
+                    "could not create async runtime: {error}; restore system resources and retry"
+                )),
+            )),
+        };
     let context = Context {
         args: &args,
         executor: &executor,
@@ -870,7 +956,6 @@ async fn create(
         py_str(who.get("who"))
     ))?;
 
-    report.effects = true;
     let staged = file::write_private(
         path,
         &format!("{FILE_HEADER}{USER_KEY}={role_name}\n{PASSWORD_KEY}={password}\n"),
@@ -1099,30 +1184,29 @@ fn verify(state: &Value, role: &str, banks: &[String]) -> Vec<String> {
 mod tests {
     use super::*;
 
-    fn args(values: &[&str]) -> Option<Args> {
+    fn args(values: &[&str]) -> Result<Args, String> {
         parse(&values.iter().map(OsString::from).collect::<Vec<_>>())
     }
 
     #[test]
-    fn only_canonical_argv_is_admitted() {
-        assert!(args(&["create"]).is_some());
-        assert!(args(&["create", "--rotate", "--json", "--bank", "a", "--bank", "b"]).is_some());
-        assert!(args(&["create", "--role", ""]).is_some());
+    fn native_argv_is_admitted() {
+        assert!(args(&["create"]).is_ok());
+        assert!(args(&["create", "--rotate", "--json", "--bank", "a", "--bank", "b"]).is_ok());
+        assert!(args(&["create", "--role", ""]).is_ok());
+        assert!(args(&["create", "--role=x"]).is_ok());
         for refused in [
             &[][..],
             &["--json", "create"],
             &["create", "--rotate", "--rotate"],
-            &["create", "--role=x"],
             &["create", "--rol", "x"],
             &["create", "--role", "a", "--role", "b"],
             &["create", "--role"],
             &["create", "--bank", "-x"],
             &["create", "--admin-url", ""],
-            &["create", "--file", "a/../b"],
             &["create", "extra"],
             &["create", "--help"],
         ] {
-            assert!(args(refused).is_none(), "{refused:?}");
+            assert!(args(refused).is_err(), "{refused:?}");
         }
     }
 
@@ -1193,7 +1277,7 @@ mod tests {
     }
 
     #[test]
-    fn daemon_dsns_defer_where_the_two_readings_differ() {
+    fn ambiguous_daemon_dsns_are_not_admitted() {
         let parts = dsn_parts(Some(
             "postgresql://pseudolife:pw@postgres:5432/pseudolife_memory",
         ))
@@ -1212,7 +1296,7 @@ mod tests {
     }
 
     #[test]
-    fn daemon_dsn_connection_options_keep_deferring() {
+    fn daemon_dsn_connection_options_are_not_admitted() {
         for dsn in [
             "host=h user=fixture dbname=fixture application_name=x",
             "host=h user=fixture dbname=fixture application_name=''",
