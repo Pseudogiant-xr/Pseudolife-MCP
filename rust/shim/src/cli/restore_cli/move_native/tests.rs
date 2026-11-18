@@ -235,6 +235,7 @@ struct Wire {
     runs: Vec<(String, String, Vec<u8>)>,
     /// What the helper answers a `state` request (a resume's preflight).
     state: Option<protocol::State>,
+    supports_carry: Option<bool>,
 }
 
 impl Remote for Wire {
@@ -261,12 +262,25 @@ impl Remote for Wire {
             Link::Helper => {
                 let request: protocol::Request = serde_json::from_slice(stdin).unwrap();
                 let answer = match request.op {
-                    protocol::Op::Check { ask } => protocol::Answer {
-                        protocol: protocol::PROTOCOL,
-                        ok: true,
-                        check: Some(target::answer(&mut self.far, &ask)),
-                        ..protocol::Answer::default()
-                    },
+                    protocol::Op::Check { ask } => {
+                        let mut check = target::answer(&mut self.far, &ask);
+                        check.supports_carry = self.supports_carry;
+                        protocol::Answer {
+                            protocol: protocol::PROTOCOL,
+                            ok: true,
+                            check: Some(check),
+                            ..protocol::Answer::default()
+                        }
+                    }
+                    protocol::Op::CarryCheck { populated } => {
+                        assert_eq!(populated, [true, true, false, true]);
+                        assert!(request.move_id.is_empty());
+                        protocol::Answer {
+                            protocol: protocol::PROTOCOL,
+                            ok: true,
+                            ..protocol::Answer::default()
+                        }
+                    }
                     // Only a resume's preflight reads the target's state.
                     protocol::Op::State { .. } => protocol::Answer {
                         protocol: protocol::PROTOCOL,
@@ -315,6 +329,9 @@ impl World for Both {
         self.gets.push(url.to_owned());
         self.reached.clone()
     }
+    fn identity_shape(&mut self, _: &Facts) -> Result<[bool; 4], String> {
+        Ok([true, true, false, true])
+    }
 }
 
 fn health(bank: &str, schema: i64) -> Value {
@@ -343,6 +360,7 @@ fn world() -> Both {
             helper_exit: 0,
             runs: Vec::new(),
             state: None,
+            supports_carry: None,
         },
         local_health: Some(health(SOURCE_ID, 60)),
         reached: Ok(health(TARGET_ID, 60)),
@@ -961,6 +979,38 @@ fn the_helper_answers_a_protocol_it_does_not_speak_with_3_never_255() {
 }
 
 #[test]
+fn default_dry_run_admits_a_plan_for_carried_identities() {
+    let mut request = argv::parse(&words(&[
+        "--to",
+        "u@box",
+        "--target-url",
+        "https://box.example.com",
+        "--dry-run",
+    ]))
+    .expect("canonical move arguments");
+    assert!(!request.no_keep_tokens);
+    assert_eq!(argv::refusal(&request), None);
+    request.dry_run = false;
+    assert!(argv::refusal(&request).is_some());
+}
+
+#[test]
+fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
+    let request = Request {
+        no_keep_tokens: false,
+        ..request()
+    };
+    let mut current = world();
+    current.wire.supports_carry = Some(true);
+    assert!(preflight(&mut current, &request).unwrap().checked_carry);
+    assert_read_only(&current);
+    assert_eq!(current.wire.runs.len(), 2);
+    let mut old = world();
+    assert!(preflight(&mut old, &request).is_err());
+    assert_eq!(old.wire.runs.len(), 1);
+}
+
+#[test]
 fn argv_refusals_come_before_any_effect_in_order() {
     let refused = |items: &[&str]| argv::refusal(&argv::parse(&words(items)).unwrap());
     let base = [
@@ -1009,10 +1059,7 @@ fn argv_refusals_come_before_any_effect_in_order() {
         "--target-env-file and --target-compose-file are not available in the native client yet",
     );
     starts(&without("--target-url"), "--target-url is required");
-    starts(
-        &without("--no-keep-tokens"),
-        "carrying the source's tokens to the target is not available",
-    );
+    assert_eq!(refused(&without("--no-keep-tokens")), None);
     starts(
         &[&base[..], &["--target-work-dir", "rel/dir"]].concat(),
         "--target-work-dir must be an absolute path",

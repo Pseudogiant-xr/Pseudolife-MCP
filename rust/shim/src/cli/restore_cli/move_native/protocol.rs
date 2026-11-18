@@ -25,6 +25,10 @@ pub(in crate::cli) enum Op {
     Check {
         ask: Ask,
     },
+    /// Check target Compose interpolation without sending source bearer values.
+    CarryCheck {
+        populated: [bool; 4],
+    },
     /// Claim the target for this move: refused while another move holds it.
     Claim {
         source_bank: String,
@@ -86,12 +90,16 @@ impl Op {
     /// Whether the operation changes the target (and so needs the claim
     /// and the update lock, and is journalled).
     pub(in crate::cli) fn changes(&self) -> bool {
-        !matches!(self, Self::Check { .. } | Self::State { .. })
+        !matches!(
+            self,
+            Self::Check { .. } | Self::CarryCheck { .. } | Self::State { .. }
+        )
     }
 
     pub(in crate::cli) fn name(&self) -> &'static str {
         match self {
             Self::Check { .. } => "check",
+            Self::CarryCheck { .. } => "carry-check",
             Self::Claim { .. } => "claim",
             Self::State { .. } => "state",
             Self::TimerPause => "timer-pause",

@@ -39,6 +39,8 @@ pub(in crate::cli) struct Ask {
     /// bank behind its gate.
     #[serde(default)]
     pub resume_move: String,
+    #[serde(default)]
+    pub carry: bool,
 }
 
 /// What the target answers.
@@ -54,6 +56,9 @@ pub(in crate::cli) struct Reply {
     pub free_bytes: Option<u64>,
     /// `systemctl --user is-enabled pseudolife-update.timer`'s answer.
     pub update_timer: String,
+    /// Protocol 2 helpers predating carried identities omit this capability.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_carry: Option<bool>,
 }
 
 /// What the target host offers the helper: its docker, a health GET, the
@@ -201,7 +206,7 @@ pub(super) fn answer<P: Place>(place: &mut P, ask: &Ask) -> Reply {
                 )),
                 _ => {}
             }
-            if facts.auth == Some(false) {
+            if facts.auth == Some(false) && !ask.carry {
                 refuse.push(format!(
                     "the target daemon at {}/health does not require authentication (auth false); move keeps the target's own tokens, so it would serve the moved bank to anyone who reaches it; turn authentication on there (set PSEUDOLIFE_MCP_TOKEN), then retry",
                     facts.health_url
@@ -523,6 +528,19 @@ fn run_ops() -> u8 {
         return 0;
     }
     let mut site = Site2 { docker, missing };
+    if let Op::CarryCheck { populated } = &request.op {
+        use super::ops::Site;
+        let mut answer = refuse(String::new());
+        match site
+            .docker()
+            .and_then(|docker| super::carry::target(docker, *populated))
+        {
+            Ok(()) => answer.ok = true,
+            Err(why) => answer.error = why,
+        }
+        print_answer(&answer);
+        return 0;
+    }
     let needs_lock = takes_lock(&request.op);
     let answer = if needs_lock {
         let Some(directory) = super::super::data_dir() else {
@@ -578,7 +596,9 @@ fn takes_lock(op: &super::protocol::Op) -> bool {
 }
 
 fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
-    answer(here, ask)
+    let mut reply = answer(here, ask);
+    reply.supports_carry = ask.carry.then_some(cfg!(unix));
+    reply
 }
 
 #[cfg(test)]

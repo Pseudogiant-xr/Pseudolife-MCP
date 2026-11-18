@@ -419,7 +419,7 @@ impl Model {
                     }
                 }
             },
-            Op::State { .. } | Op::Check { .. } | Op::Snapshot => {}
+            Op::State { .. } | Op::Check { .. } | Op::CarryCheck { .. } | Op::Snapshot => {}
             Op::TimerPause => h.target_timer = false,
             Op::TimerResume => h.target_timer = true,
             Op::PolicyNo => {
