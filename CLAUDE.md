@@ -49,7 +49,7 @@ each exists because it was violated at least once.
    ops/integrate.py merge` once the batch's own CI passed at its built head,
    because a PR from any branch but `integrate/*` runs only the fast lanes
    (workflow and lock-file edits included).
-   - The `merge-forward` skill is the only exception.
+   - Exceptions: the `merge-forward` skill and independent docs-only PRs.
    - Read `docs/dev/merge-batches.md` before building, opening or merging a
      batch.
 5. **Rust-only batches skip the Python suite lanes**, on their master push
