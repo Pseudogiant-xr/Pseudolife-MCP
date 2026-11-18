@@ -376,6 +376,51 @@ def test_the_logon_and_principal_checks_read_the_measured_task_shapes() -> None:
                 assert line == f"CASE {name}=", (shell, name, line)
 
 
+def test_principal_reads_retry_only_the_transient_scheduler_error() -> None:
+    script = _read(LOCK) + r"""
+$ErrorActionPreference = 'Stop'
+function Get-Date { $script:now }
+function Start-Sleep { param($Milliseconds) $script:now = $script:now.AddMilliseconds($Milliseconds) }
+function Get-ScheduledTask {
+    [CmdletBinding()]
+    param($TaskPath, $TaskName)
+    if ($TaskPath -ne '\' -or $TaskName -ne 'fixture') { throw 'wrong task lookup' }
+    $script:queries++
+    if ($script:queries -le $case.Failures) {
+        $record = [Management.Automation.ErrorRecord]::new(
+            [InvalidOperationException]::new('simulated scheduler error'), $case.Id,
+            [Management.Automation.ErrorCategory]::NotSpecified, $TaskName)
+        $PSCmdlet.WriteError($record)
+        return
+    }
+    [pscustomobject]@{ Principal = [pscustomobject]@{ UserId = '__SID__' } }
+}
+$cases = @(
+    @{ Id = 'HRESULT 0x80070002'; Failures = 2; Queries = 3; Returns = $true },
+    @{ Id = 'HRESULT 0x80070002'; Failures = 100; Queries = 76; Returns = $false },
+    @{ Id = 'HRESULT 0x80070005'; Failures = 1; Queries = 1; Returns = $false },
+    @{ Id = 'CmdletizationQuery_NotFound'; Failures = 1; Queries = 1; Returns = $false }
+)
+foreach ($read in 'Get-TaskPrincipalSid', 'Get-TaskPrincipalName') {
+    foreach ($case in $cases) {
+        $script:now = [datetime]'2026-01-01'
+        $script:queries = 0
+        $value = $null
+        $id = ''
+        try { $value = & $read 'fixture' } catch { $id = $_.FullyQualifiedErrorId }
+        $expectedId = if (-not $case.Returns) { "$($case.Id),Get-ScheduledTask" } else { '' }
+        $expectedValue = if ($case.Returns) { '__SID__' } else { $null }
+        if ($id -ne $expectedId -or $value -ne $expectedValue -or $queries -ne $case.Queries) {
+            throw "$read $($case.Id): value=$value error=$id queries=$queries"
+        }
+    }
+}
+""".replace("__SID__", ME)
+    for shell in _shells():
+        proc = _run(script, shell)
+        assert proc.returncode == 0, (shell, proc.stdout, proc.stderr)
+
+
 def _sandboxed_lock(tmp_path: Path, sddl_by_task: dict[str, str], runs_as: str = ME) -> Path:
     """A scheduled_task_lock.ps1 beside a copied script: the real functions,
     then readers that answer per task name."""
