@@ -181,6 +181,10 @@ touched, with no retrofit sweep.
   imported helpers, the suite lock), changes whose coverage cannot be
   bounded, and a hand-resolved code conflict in a merge forward, because the
   batch runs the full suite on every head anyway.
+- A conflict resolved by hand only in files under `rust/` takes that code's
+  affected test binaries and harness slices instead (on the Windows dev VM
+  too when it is Windows-sensitive), because the suite never collects
+  `rust/`.
 - Every other PR writes "local full suite: not required under the
   ordinary-code rule", and daemon lifecycle changes count as ordinary code
   on Linux.
