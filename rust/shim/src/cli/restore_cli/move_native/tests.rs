@@ -1010,14 +1010,22 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
         ..request()
     };
     let mut current = world();
-    current.here.docs.get_mut("pseudolife-mcp-daemon").unwrap()["Config"]["Env"]
+    let bearer = current.here.docs.get_mut("pseudolife-mcp-daemon").unwrap()["Config"]["Env"]
         .as_array_mut()
         .unwrap()
-        .push(json!(format!("PSEUDOLIFE_MCP_TOKEN={SENTINEL}")));
+        .iter_mut()
+        .find(|entry| {
+            entry
+                .as_str()
+                .is_some_and(|value| value.starts_with("PSEUDOLIFE_MCP_TOKEN="))
+        })
+        .expect("the inspected daemon has a bearer setting");
+    *bearer = json!(format!("PSEUDOLIFE_MCP_TOKEN={SENTINEL}"));
     current.wire.supports_carry = Some(true);
-    let plan = preflight(&mut current, &request).unwrap();
+    let plan = preflight(&mut current, &request)
+        .ok()
+        .expect("a carried-bearer preflight plan");
     assert!(plan.checked_carry);
-    assert_read_only(&current);
     assert_eq!(current.wire.runs.len(), 2);
     assert!(
         current
@@ -1054,6 +1062,7 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
     );
     let output = render(&plan, true);
     assert!(!output.contains(SENTINEL) && !document(&plan).to_string().contains(SENTINEL));
+    assert_read_only(&current);
     assert!(output.contains("add --no-keep-tokens"));
     assert!(!output.contains("The move would, in this order"));
     assert!(!output.contains("run it without --dry-run to move"));
