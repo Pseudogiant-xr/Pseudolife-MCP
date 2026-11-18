@@ -193,11 +193,11 @@ under `docs/`. All of these hold first:
 - It is merged with a merge commit (`gh pr merge <n> --merge`), never
   squash.
 
-What it costs: the push to master runs the whole push matrix, because the
-push workflows do not skip a docs-only diff. Measured on 18 November 2026 on
-the first such merge (#1741): `test`, both lite lanes and the Rust jobs all
-started. Until they skip it, each direct merge spends about one hosted run
-on the account's 20 slots, so do not merge one shortly before a batch opens.
+What it costs: a direct master push that matches the workflows' conservative
+documentation predicate runs the fast lanes listed in "What CI runs where".
+This predicate excludes some Markdown paths admitted by the rule above.
+Pushes outside the predicate use the existing push lanes and can still
+occupy the account's hosted runners before a batch opens.
 
 Who merges: the maintainer, or a session the maintainer delegated merges to
 in their own words. A change to `CLAUDE.md` or another policy page is
