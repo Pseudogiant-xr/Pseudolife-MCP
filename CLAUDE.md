@@ -234,6 +234,9 @@ touched, with no retrofit sweep.
   local gates only when the dropped pull request shares no code with the
   rest, because the closed batch already paid for them
   (`docs/dev/merge-batches.md` "After a drop", read before using it).
+- **The next batch may be built and gated on an open batch's head**, and
+  its local passes carry to the rebuild only when both heads have the same
+  Git tree (`docs/dev/merge-batches.md`).
 - **A batch is built when none is open and two or more PRs are ready, or a
   lone PR has waited about one hosted-run cycle or is urgent or a release
   cut**, because a batch of one pays a full hour of hosted CI for one

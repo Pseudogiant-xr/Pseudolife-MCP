@@ -1537,8 +1537,9 @@ _NEEDS_PWSH = pytest.mark.skipif(PWSH is None, reason="needs pwsh")
 @_LINUX_ONLY
 @_NEEDS_PWSH
 @_NEEDS_GIT
-def test_a_batch_branch_runs_the_real_client_and_records_it(tmp_path):
-    proc, result, head = _remote_suite(tmp_path, "integrate/2026-11-16-batch-9")
+@pytest.mark.parametrize("prefix", ["integrate", "stacked"])
+def test_a_batch_branch_runs_the_real_client_and_records_it(tmp_path, prefix):
+    proc, result, head = _remote_suite(tmp_path, f"{prefix}/2026-11-16-batch-9")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "is an integration batch, so the run builds the native client" in proc.stdout
     switch, wslenv = _read(tmp_path / "wsl-calls")[:2]

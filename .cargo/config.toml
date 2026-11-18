@@ -1,0 +1,16 @@
+# Cargo reads this file for any build started inside the repository, including
+# `cargo --manifest-path rust/Cargo.toml` from the root (release and Docker
+# builds) and builds from `rust/` (CI).
+
+[env]
+# Build aws-lc without its CPU-jitter entropy collector, so the secure random
+# generator seeds from the operating system (ProcessPrng, getrandom,
+# getentropy). The collector times loops with the raw cycle counter; where
+# cores' counters disagree, its start-up self-test fails and aws-lc calls
+# abort() on the first random draw (#1688). Measured on a Windows dev VM on
+# 18 November 2026: 29 of 400 processes drawing eight at a time aborted, 0 of
+# 200 drawing one at a time; the self-test failed 17 of 200 times unpinned and
+# 0 of 200 with each process pinned to one CPU; with this setting 0 of 800
+# aborted.
+# `rust/shared/entropy_source_tests.rs` fails if this stops reaching aws-lc-sys.
+AWS_LC_SYS_NO_JITTER_ENTROPY = "1"

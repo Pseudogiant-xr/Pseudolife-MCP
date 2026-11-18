@@ -591,20 +591,16 @@ jobs:
     # empty scope runs the suite instead of skipping it.
     if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-windows') }}
     runs-on: windows-latest
-    # Needs no embedding model (torch installs as a core dep but never loads
-    # weights here). Measured 2026-10-20 on the maintainer's Windows host,
-    # serially, against embedded PG: this selection's 377 cases took 75 s
-    # (85 s wall; 187 s while another session saturated loopback sockets); the 30-file, 1,865-case lane it replaced took 1,383 s
-    # there and 862 s on windows-latest (18 of its 25 minutes). Setup and the
-    # PG start take ~3.5 min, and a hung test must still reach pyproject's
-    # 600 s faulthandler dump before the job timeout. 30, about twice the
-    # 14.6-minute estimate (rust/ci/ci_budget.json), because the native
-    # client build's 1.3-1.8 minutes are warm: the Rust cache key rolls with
-    # the UTC ISO week, so from Monday 00:00 UTC until master's first Rust
-    # run that week this build is cold, and no cold Windows debug build of
-    # it has been measured yet. Measure it from the first batch run that
-    # builds cold, then set this from that figure.
-    timeout-minutes: 30
+    # No embedding model is loaded. On 2026-11-18 batches #1735 and #1737
+    # finished in 29m35s and 29m31s. Both #1742 attempts hit 30 minutes
+    # before the 1,784-test selection finished (1,732 and 1,664 passed,
+    # 23 skipped each). The restored cache lacked the aws-lc-sys build
+    # made with AWS_LC_SYS_NO_JITTER_ENTROPY in .cargo/config.toml. Native
+    # builds took 2m53s and 3m07s, up to about 2 minutes over a warm build.
+    # The time to finish that head is still unknown. Allow 10 minutes
+    # beyond the old cutoff for the run, including pytest's 600s
+    # faulthandler dump if a test hangs late.
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4

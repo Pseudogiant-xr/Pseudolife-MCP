@@ -4,6 +4,8 @@
 FROM rust:1.94-bookworm AS builder
 WORKDIR /build
 COPY rust /build/rust
+# Build settings for aws-lc (operating-system seeded random source, #1688).
+COPY .cargo /build/.cargo
 COPY evals/prompts/assistant_facts_provenance.txt /build/evals/prompts/assistant_facts_provenance.txt
 COPY evals/prompts/sonnet_extractor_v5.md /build/evals/prompts/sonnet_extractor_v5.md
 RUN --mount=type=cache,id=w3j-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
