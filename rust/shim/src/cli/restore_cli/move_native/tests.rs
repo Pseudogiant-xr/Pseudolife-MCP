@@ -1022,9 +1022,9 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
         .expect("the inspected daemon has a bearer setting");
     *bearer = json!(format!("PSEUDOLIFE_MCP_TOKEN={SENTINEL}"));
     current.wire.supports_carry = Some(true);
-    let plan = preflight(&mut current, &request)
-        .ok()
-        .expect("a carried-bearer preflight plan");
+    let Ok(plan) = preflight(&mut current, &request) else {
+        panic!("expected a carried-bearer preflight plan");
+    };
     assert!(plan.checked_carry);
     assert_eq!(current.wire.runs.len(), 2);
     assert!(
