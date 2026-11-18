@@ -6459,7 +6459,7 @@ def _land_stack_parent(world, parent):
 @pytest.mark.parametrize("case, reason", [
     ("no-parent", "exactly one open"),
     ("two-parents", "exactly one open"),
-    ("same-worktree", "second worktree"),
+    ("same-worktree", "plan is in this checkout"),
     ("missing-plan", "plan"),
     ("local-head-moved", "head moved"),
     ("remote-head-moved", "origin"),
@@ -6511,7 +6511,7 @@ def stacked(world, stack_parent, monkeypatch, capsys):
 @pytest.mark.parametrize("case, reason", [
     ("closed", "closed without merging"),
     ("missing-plan", "plan"),
-    ("source-moved", "head moved"),
+    ("source-moved", "head moved or its branch was deleted"),
     ("parent-moved", "head moved"),
     ("member-moved", "head moved"),
     ("dirty", "uncommitted changes"),
@@ -6568,7 +6568,8 @@ def test_open_checks_stacked_results_against_their_source(world, stacked, capsys
     harness = _gate_result(world, commit=source)
     if bad_result:
         record = json.loads(harness.read_text(encoding="utf-8"))
-        record[bad_result] = {"commit": "0" * 40, "exit_code": 1}.get(bad_result)
+        record[bad_result] = {"commit": "0" * 40, "exit_code": 1,
+                              "summary": "0 passed in 1.0s"}.get(bad_result)
         harness.write_text(json.dumps(record), encoding="utf-8")
     suite = _suite_result(world, commit=source)
     shim = _gate_result(world, "shim-tests", commit=source)
