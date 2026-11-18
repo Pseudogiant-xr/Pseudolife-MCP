@@ -418,6 +418,7 @@ pub(super) fn checkout_build_command(cargo: &Path, repo: &Path, target: &Path) -
             "--manifest-path",
         ])
         .arg(repo.join("rust/Cargo.toml"))
+        .current_dir(repo)
         .env("CARGO_TARGET_DIR", target)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
