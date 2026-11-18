@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "scope",
+  "before": "fea2d407b8bf12cd",
+  "fingerprint": "9628f098e30c96f8",
+  "reason": "Adds a local changed-path check on master pushes and one read of associated pull requests on docs candidates. The scope runner, shallow checkout, PR and batch setup and limits stay the same. A qualified push skips all three suite jobs and uses the existing guards lane."
+}

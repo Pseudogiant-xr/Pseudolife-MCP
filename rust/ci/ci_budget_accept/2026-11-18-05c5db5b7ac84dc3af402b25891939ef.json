@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "e870c1b9a74bdfee",
+  "fingerprint": "ae3a4b48e312c62d",
+  "reason": "Only the shared documentation predicate comment changes its parity_scope.py fingerprint. The parity job definition, matrix and work for each shard are identical."
+}

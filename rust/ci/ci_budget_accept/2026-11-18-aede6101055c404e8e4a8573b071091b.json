@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "scope",
+  "before": "58e9c623d9cdbae6",
+  "fingerprint": "4e3a79bb91d6bbf0",
+  "reason": "Replaces the inline classifier with a standard-library script on the same checkout and runner. A qualifying docs push runs the existing report-only producer census once in scope and skips the Rust build and candidate matrix. Scheduled runs verify previously completed Rust jobs before reusing push coverage."
+}
