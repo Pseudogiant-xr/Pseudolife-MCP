@@ -369,7 +369,7 @@
     "rust/shim/src/board/state.rs": "dc8c8205e49953d098ee5386a8876562fd5584ee8eee6359f0aae5d53bcb0e05",
     "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
     "rust/shim/src/cache.rs": "266bb3545eb3f2cabc10c84c1d1ace7c9a300db588d32b40fc0eb2dbb0c38502",
-    "rust/shim/src/cli.rs": "398531f9f4708d5bd27cbcc7bc02cf15656aaa911f207da0d3ec0a984d56431c",
+    "rust/shim/src/cli.rs": "bd76ba79791129546aefc358af48e1ff1bd0baecc989b0bc553915808ee91386",
     "rust/shim/src/cli/backup/archive.rs": "2bc8fff38e08d8b0e90012e827b175c45dadbcf6527258b16c911dd4ea1aa1fd",
     "rust/shim/src/cli/backup/args.rs": "ed12e2e6a3dd45fe6c656ae29d8d7c52f039d31ca33562522e279ef6f467db2b",
     "rust/shim/src/cli/backup/dump.rs": "a0b8e15d7e91c5c10ddabdb62f4bfa959c1d85b32d136e41c83f42946b5aafc0",
@@ -413,15 +413,15 @@
     "rust/shim/src/cli/connect/terminal.rs": "12f1e9bf1b78f708a441cbea8d8ae3fd20d737db5efd8b7e09d654c05510a0a0",
     "rust/shim/src/cli/connect/url.rs": "e8a1891d7c2a2d86b6d73628452e119f76f3ef181a3c7e0667bffb44aaab6aca",
     "rust/shim/src/cli/connect/user_env.rs": "f72616eda206ddd518b21ce46e88c92ccf52985541c8eafdb2d5b405725b0bad",
-    "rust/shim/src/cli/console/args.rs": "f05a52c1811d288596a7990da70ae4923ba945aacb4f7e6f9e55db03aa6fdb5a",
+    "rust/shim/src/cli/console/args.rs": "891129c41787d8eaf922f56f854eae244a14d9f4827f1fd75a5506421b876f9d",
     "rust/shim/src/cli/console/browser.rs": "f5452b308a80a00e665a06687bd0a0f033c3a16a80216ccea94b70d6b7b0327a",
     "rust/shim/src/cli/console/launch.rs": "33f6427538c4c4a631006507462439332e77e54a97a9fab3568676acbeb7ce08",
-    "rust/shim/src/cli/console/mod.rs": "2f256bcdc8c1053691c7ccdb7394bbaf3012167b66517398821c959ff1192d37",
+    "rust/shim/src/cli/console/mod.rs": "e62c88b9655c0f6a9737a1d2a9f429209df20a1240984c558e86ae447cd756c7",
     "rust/shim/src/cli/console/pyint.rs": "fb57ceb0309532ecc933aec9caae8c5e8cc1cf9e0f9da3ad422fd513a019f321",
     "rust/shim/src/cli/console/pyint_cases.json": "421cbb50a3559aaeb3cb6aa5c2d5ebe77830b8dc8346706ebc40f0aca66d0d46",
     "rust/shim/src/cli/console/shlex_cases.json": "669c587054ee58fc1425e293e9fdaa08eb452827d9171c512a97ac147f319d8b",
-    "rust/shim/src/cli/console/stamp.rs": "9fa876e986d58f3919a640a54b7d19cf08f0f854b5163ba778d57edb1d6bf6f7",
-    "rust/shim/src/cli/console/tests.rs": "10c9445fcebc4dc2e67224e4330c6dee4cb9aaf7dfd25f2ed20e7ce6b28e31e9",
+    "rust/shim/src/cli/console/stamp.rs": "97de9022ecce22d046ea63939136fc920a5f031f57348feb9910ef48bfc55cba",
+    "rust/shim/src/cli/console/tests.rs": "b3c29cfa5511c61fc1b8d34826fa027b4fb548a5d881852ce2d1d3e0b64b73ce",
     "rust/shim/src/cli/coordination_recovery/help.txt": "a7c5af87cafc5865595dac3bf7c384bb02b47ace5cc8789912635f1429d40c8c",
     "rust/shim/src/cli/coordination_recovery/mod.rs": "f599c1ac1e271c7dbecc396f32286bc2b2bcea7c560232aa082a73d41344c0f0",
     "rust/shim/src/cli/doctor/agent.rs": "9a572ca4b2fd938fb5d2edb5d790eaaf7a1e285cac9a6218ff4654861dbd2f7f",
@@ -3094,6 +3094,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "rust/shim/src/cli/console/tests.rs:642",
+          "shape": {
+            "argv_source": "doctor \"));",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\"));",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/doctor/mod.rs:151",
           "shape": {
             "argv_source": "doctor : {cause}\");",
@@ -4730,7 +4743,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli.rs:265",
+          "location": "rust/shim/src/cli.rs:263",
           "shape": {
             "argv_source": "--help \\n\",",
             "channel": "argv",
@@ -7422,7 +7435,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:71",
+          "location": "rust/shim/src/cli/console/mod.rs:56",
           "shape": {
             "argv_source": "pair `\",",
             "channel": "argv",
@@ -10534,19 +10547,6 @@
             "channel": "argv",
             "complete": false,
             "expression": "--clients-only`, or `python ops/shim_runtime.py migrate` from a checkout, moves it)\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:505",
-          "shape": {
-            "argv_source": "update `, or open the Console and paste a token under Advanced\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "`, or open the Console and paste a token under Advanced\"",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -40622,7 +40622,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:49",
+          "location": "rust/shim/src/cli/console/mod.rs:34",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40635,7 +40635,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:54",
+          "location": "rust/shim/src/cli/console/mod.rs:39",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49555,7 +49555,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:51",
+          "location": "rust/shim/src/cli/console/mod.rs:36",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49568,7 +49568,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:55",
+          "location": "rust/shim/src/cli/console/mod.rs:40",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49581,7 +49581,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:71",
+          "location": "rust/shim/src/cli/console/mod.rs:56",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53752,7 +53752,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:50",
+          "location": "rust/shim/src/cli/console/mod.rs:35",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53765,7 +53765,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:55",
+          "location": "rust/shim/src/cli/console/mod.rs:40",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53778,7 +53778,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/console/mod.rs:71",
+          "location": "rust/shim/src/cli/console/mod.rs:56",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -81064,7 +81064,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/args.rs:13",
+      "location": "rust/shim/src/cli/console/args.rs:5",
       "name": "console",
       "shape": {
         "argv_source": "console [-h] [--no-open] [--to PAGE] [--list]\\n\",",
@@ -81082,13 +81082,13 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/mod.rs:186",
+      "location": "rust/shim/src/cli/console/tests.rs:103",
       "name": "console",
       "shape": {
-        "argv_source": "console : {detail}\\n\"), EXIT_REFUSED)",
+        "argv_source": "console : error: argument --json: pass this flag without a value\\n\"",
         "channel": "argv",
         "complete": false,
-        "expression": ": {detail}\\n\"), EXIT_REFUSED)",
+        "expression": ": error: argument --json: pass this flag without a value\\n\"",
         "parameters": {}
       }
     },
@@ -81096,147 +81096,25 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/mod.rs:344",
+      "location": "rust/shim/src/cli/console/tests.rs:111",
       "name": "console",
       "shape": {
-        "argv_source": "console : error: {message}\\n\",",
+        "argv_source": "console : error: unrecognized argument; see --help for supported options\\n\"),",
         "channel": "argv",
         "complete": false,
-        "expression": ": error: {message}\\n\",",
-        "parameters": {}
+        "expression": ": error: unrecognized argument; see --help for supported options\\n\"),",
+        "parameters": {
+          "--help": {
+            "expression": "for"
+          }
+        }
       }
     },
     {
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/mod.rs:401",
-      "name": "console",
-      "shape": {
-        "argv_source": "console : {why}\")),",
-        "channel": "argv",
-        "complete": false,
-        "expression": ": {why}\")),",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/mod.rs:577",
-      "name": "console",
-      "shape": {
-        "argv_source": "console ` signs one in.\\n\".to_owned(),",
-        "channel": "argv",
-        "complete": false,
-        "expression": "` signs one in.\\n\".to_owned(),",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/mod.rs:757",
-      "name": "console",
-      "shape": {
-        "argv_source": "console : no browser opened: {cause}\\n\");",
-        "channel": "argv",
-        "complete": false,
-        "expression": ": no browser opened: {cause}\\n\");",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/mod.rs:771",
-      "name": "console",
-      "shape": {
-        "argv_source": "console : no daemon answered at {origin} ({reason}); check it runs (`pseudolife-mcp doctor`)\"",
-        "channel": "argv",
-        "complete": false,
-        "expression": ": no daemon answered at {origin} ({reason}); check it runs (`pseudolife-mcp doctor`)\"",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/mod.rs:813",
-      "name": "console",
-      "shape": {
-        "argv_source": "console ).\",",
-        "channel": "argv",
-        "complete": false,
-        "expression": ").\",",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/mod.rs:839",
-      "name": "console",
-      "shape": {
-        "argv_source": "console : \");",
-        "channel": "argv",
-        "complete": false,
-        "expression": ": \");",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:112",
-      "name": "console",
-      "shape": {
-        "argv_source": "console : error: argument --to: expected one argument\\n\"",
-        "channel": "argv",
-        "complete": false,
-        "expression": ": error: argument --to: expected one argument\\n\"",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:121",
-      "name": "console",
-      "shape": {
-        "argv_source": "console : error: argument --json: ignored explicit argument '1'\\n\"",
-        "channel": "argv",
-        "complete": false,
-        "expression": ": error: argument --json: ignored explicit argument '1'\\n\"",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:129",
-      "name": "console",
-      "shape": {
-        "argv_source": "console : error: unrecognized arguments: zz\\n\"),",
-        "channel": "argv",
-        "complete": false,
-        "expression": ": error: unrecognized arguments: zz\\n\"),",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:301",
+      "location": "rust/shim/src/cli/console/tests.rs:257",
       "name": "console",
       "shape": {
         "argv_source": "console ` signs one in.\\n\"",
@@ -81250,7 +81128,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:316",
+      "location": "rust/shim/src/cli/console/tests.rs:271",
       "name": "console",
       "shape": {
         "argv_source": "console : the daemon's session list had a time this machine cannot show ({field})\\n\"",
@@ -81264,7 +81142,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:360",
+      "location": "rust/shim/src/cli/console/tests.rs:311",
       "name": "console",
       "shape": {
         "argv_source": "console : {LIST_TEXT}\\n\"), 4),",
@@ -81278,7 +81156,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:429",
+      "location": "rust/shim/src/cli/console/tests.rs:380",
       "name": "console",
       "shape": {
         "argv_source": "console : {BAD_EXPIRY}\\n\"), 4),",
@@ -81292,7 +81170,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:443",
+      "location": "rust/shim/src/cli/console/tests.rs:394",
       "name": "console",
       "shape": {
         "argv_source": "console : {NO_LINK}\\n\"), 4);",
@@ -81306,7 +81184,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:636",
+      "location": "rust/shim/src/cli/console/tests.rs:584",
       "name": "console",
       "shape": {
         "argv_source": "console : {MISMATCH}\\n\"), 4),",
@@ -81320,13 +81198,27 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/console/tests.rs:870",
+      "location": "rust/shim/src/cli/console/tests.rs:850",
       "name": "console",
       "shape": {
         "argv_source": "console : no browser opened: {NO_DISPLAY}\\n\");",
         "channel": "argv",
         "complete": false,
         "expression": ": no browser opened: {NO_DISPLAY}\\n\");",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/cli/console/tests.rs:94",
+      "name": "console",
+      "shape": {
+        "argv_source": "console : error: argument --to: expected one argument\\n\"",
+        "channel": "argv",
+        "complete": false,
+        "expression": ": error: argument --to: expected one argument\\n\"",
         "parameters": {}
       }
     },
@@ -86847,7 +86739,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/console/tests.rs:715",
+      "location": "rust/shim/src/cli/console/tests.rs:637",
       "method": "GET",
       "name": "/api/console/sessions",
       "shape": {
@@ -86861,7 +86753,21 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/console/tests.rs:752",
+      "location": "rust/shim/src/cli/console/tests.rs:703",
+      "method": "GET",
+      "name": "/api/console/sessions",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/console/tests.rs:738",
       "method": "POST",
       "name": "/api/console/link",
       "shape": {
@@ -86875,7 +86781,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/console/tests.rs:810",
+      "location": "rust/shim/src/cli/console/tests.rs:794",
       "method": "POST",
       "name": "/api/console/link",
       "shape": {
@@ -91062,62 +90968,6 @@
       "location": "rust/shim/src/cli/connect/net.rs:40",
       "method": null,
       "name": "/health",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
-      "location": "rust/shim/src/cli/console/mod.rs:793",
-      "method": null,
-      "name": "/api/console/sessions",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
-      "location": "rust/shim/src/cli/console/mod.rs:795",
-      "method": null,
-      "name": "/api/console/sessions/revoke",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
-      "location": "rust/shim/src/cli/console/mod.rs:801",
-      "method": null,
-      "name": "/api/console/sessions",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
-      "location": "rust/shim/src/cli/console/mod.rs:828",
-      "method": null,
-      "name": "/api/console/link",
       "shape": {
         "channel": "body",
         "complete": false,
@@ -122120,7 +121970,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli.rs:265",
+      "location": "rust/shim/src/cli.rs:263",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:help"
     },
@@ -122694,217 +122544,151 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/args.rs:13",
+      "location": "rust/shim/src/cli/console/args.rs:5",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:console"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:186",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:344",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:401",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:49",
+      "location": "rust/shim/src/cli/console/mod.rs:34",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:50",
+      "location": "rust/shim/src/cli/console/mod.rs:35",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:505",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:update"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:51",
+      "location": "rust/shim/src/cli/console/mod.rs:36",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:54",
+      "location": "rust/shim/src/cli/console/mod.rs:39",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:55",
+      "location": "rust/shim/src/cli/console/mod.rs:40",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:55",
+      "location": "rust/shim/src/cli/console/mod.rs:40",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:577",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:71",
+      "location": "rust/shim/src/cli/console/mod.rs:56",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:pair"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:71",
+      "location": "rust/shim/src/cli/console/mod.rs:56",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:71",
+      "location": "rust/shim/src/cli/console/mod.rs:56",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:757",
+      "location": "rust/shim/src/cli/console/tests.rs:103",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:console"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:771",
+      "location": "rust/shim/src/cli/console/tests.rs:111",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:console"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:793",
+      "location": "rust/shim/src/cli/console/tests.rs:257",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/console/tests.rs:271",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/console/tests.rs:311",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/console/tests.rs:380",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/console/tests.rs:394",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/console/tests.rs:584",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/console/tests.rs:637",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/console/sessions"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:795",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/console/sessions/revoke"
+      "location": "rust/shim/src/cli/console/tests.rs:642",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:doctor"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:801",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/console/sessions"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:813",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:828",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/console/link"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/mod.rs:839",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:112",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:121",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:129",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:301",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:316",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:360",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:429",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:443",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:636",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:console"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:715",
+      "location": "rust/shim/src/cli/console/tests.rs:703",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/console/sessions"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:752",
+      "location": "rust/shim/src/cli/console/tests.rs:738",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/console/link"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:810",
+      "location": "rust/shim/src/cli/console/tests.rs:794",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/console/link"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/console/tests.rs:870",
+      "location": "rust/shim/src/cli/console/tests.rs:850",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:console"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/console/tests.rs:94",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:console"
     },

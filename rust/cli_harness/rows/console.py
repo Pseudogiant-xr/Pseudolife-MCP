@@ -16,7 +16,7 @@ loads), so neither arm falls back to ``os.startfile``, ``/usr/bin/open`` or
 ``xdg-open``; the stand-in's argv is compared. Every other case runs with
 BROWSER naming no program (``NO_BROWSER``), so a candidate that wrongly
 takes the sign-in path prints the link instead of reaching a default
-launcher (#1509). Scope and deferrals: ``rows/console.md``.
+launcher (#1509). Native behavior is documented in ``rows/console.md``.
 """
 
 from __future__ import annotations
@@ -31,11 +31,16 @@ import sys
 import time
 from pathlib import Path
 
-from .. import core, normalize
+from .. import core
 from ..core import Case
 from ..fixture_daemon import TLS_CA, factory, json_body, redirect, text
 
-DEFERRAL = "pseudolife-stdio: mode 'console' is deferred in this candidate\n"
+
+class _Secret(str):
+    def __repr__(self):
+        return "'<credential>'"
+
+
 TOKEN = {"PSEUDOLIFE_MCP_TOKEN": "console-fixture-token"}
 NO_TOKEN = {"PSEUDOLIFE_MCP_TOKEN": None, "PSEUDOLIFE_MCP_TOKEN_FILE": None}
 # A fixed zone without daylight saving that glibc and the UCRT both read
@@ -43,27 +48,6 @@ NO_TOKEN = {"PSEUDOLIFE_MCP_TOKEN": None, "PSEUDOLIFE_MCP_TOKEN_FILE": None}
 ZONE = {"TZ": "XYZ-10"}
 CODE = "ABCD-1234"
 FILE = "shim/src/cli/console/mod.rs"
-
-
-def _native(value: str) -> bytes:
-    return (value.replace("\n", "\r\n") if core.WINDOWS else value).encode()
-
-
-# --- rules ---------------------------------------------------------------------
-
-@normalize.rule("console-deferral")
-def console_deferral(obs: dict) -> None:
-    """A declared deferral case: the candidate must print the dispatcher's
-    deferral line, exit 1, and send nothing. The oracle answers on its own
-    path (against the closed port, so no link and no browser); its
-    observation is replaced by that expectation."""
-    if obs.get("arm") != "python":
-        return
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-    if "requests" in obs:
-        obs["requests"] = []
 
 
 def _arm(arm, obs):
@@ -302,6 +286,8 @@ def case(case_id: str, argv: list[str], *, routes=None, env=None, rules=(), setu
     full = ["console", *argv]
     own = env or {}
     env = {**TOKEN, "BROWSER": NO_BROWSER, "PATH": BIN, **own}
+    if env.get("PSEUDOLIFE_MCP_TOKEN") is not None:
+        env["PSEUDOLIFE_MCP_TOKEN"] = _Secret(env["PSEUDOLIFE_MCP_TOKEN"])
     _check_browser_env(case_id, env)
     return Case(case_id, full, env=env, rules=rules, setup=setup, during=during,
                 after=after, platforms=platforms, timeout=timeout,
@@ -322,11 +308,6 @@ def browser_case(case_id: str, argv: list[str], *, browser: str | None = None,
     return case(case_id, argv, env={**own, **(env or {})}, setup=_standin_setup,
                 during=_release, after=functools.partial(_settle, launches=launches),
                 programs=PROGRAMS, **kwargs)
-
-
-def deferred(case_id: str, argv: list[str], **kwargs) -> Case:
-    # Never a daemon: the oracle answers these on its own path.
-    return case(case_id, argv, rules=("console-deferral",), **kwargs)
 
 
 def _claude_registration(env: dict):
@@ -369,12 +350,12 @@ def cases() -> list[Case]:
     add(case("to-quote", ["--no-open", "--to", "it's"]))
     add(case("to-unicode", ["--list", "--to", "café\t"]))
 
-    # Declared deferrals before any request.
-    add(deferred("defer-abbreviation", ["--li"]))
-    add(deferred("defer-dash-value", ["--to", "-x"]))
-    add(deferred("defer-double-dash", ["--"]))
-    add(deferred("defer-help-explicit", ["--help=x"]))
-    add(deferred("defer-help-width", ["--help"], env={"COLUMNS": "100"}))
+    # Keep the old case IDs so that the new native replies replace the old goldens.
+    add(case("defer-abbreviation", ["--li"]))
+    add(case("defer-dash-value", ["--to", "-x"]))
+    add(case("defer-double-dash", ["--"]))
+    add(case("defer-help-explicit", ["--help=x"]))
+    add(case("defer-help-width", ["--help"], env={"COLUMNS": "100"}))
     # The native command ignores Python-only interpreter settings.
     add(case("defer-int-digits", ["--list"], routes=sessions([]), env={"PYTHONINTMAXSTRDIGITS": "640"}))
 
@@ -520,16 +501,13 @@ def cases() -> list[Case]:
 
     # https: the fixture serves the pg_tls test certificate; both arms trust
     # its CA through SSL_CERT_FILE (CPython's default verify paths,
-    # rustls-native-certs). Untrusted, the oracle prints the TLS error text,
-    # which is not reproduced: a declared deferral (the handshake fails
-    # before any request).
+    # rustls-native-certs). The untrusted handshake fails before any request.
     trusted = {"SSL_CERT_FILE": str(TLS_CA)}
     add(case("list-https", ["--list"], env={**ZONE, **trusted}, routes=sessions(), tls=True,
              expect_output=True))
     add(case("link-https", ["--no-open", "--json"], env=trusted, tls=True, expect_output=True,
              routes={"/api/console/link": link()}))
-    add(case("defer-https-untrusted", ["--list"], routes=sessions(), tls=True,
-             rules=("console-deferral",)))
+    add(case("defer-https-untrusted", ["--list"], routes=sessions(), tls=True))
 
     # An expiry int() refuses, and a code other than the link's (a lone
     # surrogate included), are the answer's refusals, in both modes.

@@ -1,12 +1,4 @@
-//! `console_cli._parser().parse_args` for the argv this port answers.
-//!
-//! Admitted tokens: the six options spelled in full, `-h`, `--help`,
-//! `--to=V` / `--revoke=V`, `--opt=V` on a flag (argparse's "ignored
-//! explicit argument" error), a value as the next argument when it does not
-//! start with `-`, and positional words (argparse's "unrecognized
-//! arguments" error). Repeats are argparse's: the last value wins. An
-//! abbreviation, any other token starting with `-`, `--`, and a value
-//! starting with `-` are argparse's own business and defer.
+//! Native Console options. Value options accept either spelling and the last wins.
 
 /// `_parser().format_help()` at `COLUMNS=80` (argparse wraps at 78).
 pub(super) const HELP: &str = concat!(
@@ -49,9 +41,8 @@ pub(super) enum Parsed {
     Args(Args),
     /// `-h` / `--help`: the help on stdout, exit 0.
     Help,
-    /// argparse's error message (after `prog: error: `), exit 2.
+    /// A usage error (exit 2).
     Error(String),
-    Defer,
 }
 
 const FLAGS: [&str; 4] = ["--no-open", "--list", "--unless-signed-in", "--json"];
@@ -73,17 +64,21 @@ fn set_value(args: &mut Args, option: &str, value: &str) {
     }
 }
 
-/// argparse's consumption order: options act as they are met (help exits
-/// there, a missing or explicit argument errors there); words collect as
-/// extras, reported once every option has been consumed.
+const UNRECOGNIZED: &str = "unrecognized argument; see --help for supported options";
+
+/// Options act in order. Report unexpected positional arguments after options.
 pub(super) fn parse(argv: &[String]) -> Parsed {
     let mut args = Args::default();
-    let mut extras: Vec<&str> = Vec::new();
+    let mut extra = false;
     let mut tokens = argv.iter().peekable();
     while let Some(token) = tokens.next() {
         let token = token.as_str();
-        if !token.starts_with('-') {
-            extras.push(token);
+        if token == "--" {
+            extra |= tokens.next().is_some();
+            break;
+        }
+        if !token.starts_with('-') || token == "-" {
+            extra = true;
             continue;
         }
         if matches!(token, "-h" | "--help") {
@@ -99,27 +94,23 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
                     set_value(&mut args, token, value);
                     tokens.next();
                 }
-                None => return Parsed::Error(format!("argument {token}: expected one argument")),
-                Some(_) => return Parsed::Defer,
+                _ => return Parsed::Error(format!("argument {token}: expected one argument")),
             }
             continue;
         }
         let Some((option, value)) = token.split_once('=') else {
-            return Parsed::Defer;
+            return Parsed::Error(UNRECOGNIZED.into());
         };
         if matches!(option, "--to" | "--revoke") {
             set_value(&mut args, option, value);
-        } else if FLAGS.contains(&option) {
-            return Parsed::Error(format!(
-                "argument {option}: ignored explicit argument {}",
-                super::py_repr(value)
-            ));
+        } else if FLAGS.contains(&option) || matches!(option, "-h" | "--help") {
+            return Parsed::Error(format!("argument {option}: pass this flag without a value"));
         } else {
-            return Parsed::Defer;
+            return Parsed::Error(UNRECOGNIZED.into());
         }
     }
-    if !extras.is_empty() {
-        return Parsed::Error(format!("unrecognized arguments: {}", extras.join(" ")));
+    if extra {
+        return Parsed::Error(UNRECOGNIZED.into());
     }
     Parsed::Args(args)
 }
@@ -174,35 +165,69 @@ mod tests {
         );
         assert_eq!(
             run(&["a", "--list", "b"]),
-            Parsed::Error("unrecognized arguments: a b".into())
+            Parsed::Error(UNRECOGNIZED.into())
         );
         assert_eq!(run(&["zz", "--help"]), Parsed::Help);
         assert_eq!(
             run(&["--json=1"]),
-            Parsed::Error("argument --json: ignored explicit argument '1'".into())
+            Parsed::Error("argument --json: pass this flag without a value".into())
         );
         assert_eq!(
             run(&["--no-open="]),
-            Parsed::Error("argument --no-open: ignored explicit argument ''".into())
+            Parsed::Error("argument --no-open: pass this flag without a value".into())
         );
     }
 
     #[test]
-    fn argparse_corners_defer() {
-        for argv in [
-            &["--li"][..],
-            &["--to", "-x"],
-            &["--to", "-5"],
-            &["--revoke", "--list"],
-            &["--"],
-            &["-x"],
-            &["--help=x"],
-            &["--zz"],
-            &["--zz=1"],
-            &["-"],
+    fn malformed_options_name_the_fix_without_echoing_values() {
+        let secret = "fixture-password-do-not-print";
+        for (argv, expected) in [
+            (
+                &["--li"][..],
+                "unrecognized argument; see --help for supported options",
+            ),
+            (
+                &["-x"][..],
+                "unrecognized argument; see --help for supported options",
+            ),
+            (
+                &["--unknown=fixture-password-do-not-print"][..],
+                "unrecognized argument; see --help for supported options",
+            ),
+            (
+                &[secret][..],
+                "unrecognized argument; see --help for supported options",
+            ),
+            (&["--to", "-x"][..], "argument --to: expected one argument"),
+            (
+                &["--revoke", "--list"][..],
+                "argument --revoke: expected one argument",
+            ),
+            (
+                &["--help=fixture-password-do-not-print"][..],
+                "argument --help: pass this flag without a value",
+            ),
         ] {
-            assert_eq!(run(argv), Parsed::Defer, "{argv:?}");
+            let result = run(argv);
+            assert!(
+                result == Parsed::Error(expected.into()),
+                "expected {expected}"
+            );
         }
+        assert_eq!(
+            run(&["--list", "--"]),
+            Parsed::Args(Args {
+                list: true,
+                ..Args::default()
+            })
+        );
+        assert_eq!(
+            run(&["--to=board"]),
+            Parsed::Args(Args {
+                to: Some("board".into()),
+                ..Args::default()
+            })
+        );
     }
 
     #[test]
