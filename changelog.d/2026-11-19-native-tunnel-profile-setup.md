@@ -1,2 +1,2 @@
 ### Added (2026-11-19 — Native tunnel profile setup)
-- The native `tunnel setup` command can save a new profile when given the daemon URL, an owner-only credential file and explicit consent. It verifies the daemon's MCP connection first and leaves an identical profile untouched on rerun.
+- The native `tunnel setup` command saves a new profile after explicit consent and an MCP handshake with the supplied daemon URL and owner-only credential file. Rerunning with equivalent settings reuses a profile saved by either client. Changes to a saved profile still follow the existing deferral.

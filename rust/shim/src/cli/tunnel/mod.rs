@@ -761,10 +761,12 @@ fn setup(options: &Options, root: &Path) -> Output {
     let path = store::profile_path(root, &options.profile)?;
     let explicit =
         truthy(&options.setup.daemon_url).is_some() && truthy(&options.setup.token_file).is_some();
-    if occupied(&path)? && !explicit {
+    let saved = occupied(&path)?;
+    if saved && !explicit {
         return Err(Fail::Defer);
     }
-    let (url, token) = discover(&options.setup)?;
+    let (url, token) =
+        discover(&options.setup).map_err(|error| if saved { Fail::Defer } else { error })?;
     let mut payload = Map::new();
     payload.insert("name".into(), Value::String(options.profile.clone()));
     payload.insert("daemon_url".into(), Value::String(url));

@@ -27,15 +27,20 @@ use sse_stream::{Sse, SseStream};
 use super::{Fail, Options, Output, record, store};
 use crate::{board::state, credentials::CredentialProvider};
 
-const CONSENT: &str = "This tunnel makes the daemon available to the selected OpenAI organization and associated ChatGPT workspace. Rerun with --accept-access to consent to that access.";
+const ACCESS: &str = "This tunnel makes the daemon available to the selected OpenAI organization and associated ChatGPT workspace. The host and daemon must stay running for tunnel access.";
+const FULL_CATALOG: &str = "The full catalog also expands tool discovery for the daemon principal's other sessions. Authentication permissions stay the same.";
+const CONSENT: &str = "This tunnel makes the daemon available to the selected OpenAI organization and associated ChatGPT workspace. The host and daemon must stay running for tunnel access. Rerun with --accept-access to consent to that access.";
+const FULL_CONSENT: &str = "This tunnel makes the daemon available to the selected OpenAI organization and associated ChatGPT workspace. The host and daemon must stay running for tunnel access. The full catalog also expands tool discovery for the daemon principal's other sessions. Authentication permissions stay the same. Rerun with --accept-access to consent to that access.";
 const CREDENTIAL: &str =
     "daemon credential file is unavailable or unsafe; repair its owner-only access and retry setup";
 const HANDSHAKE: &str = "existing daemon MCP handshake failed; check the URL and credential with pseudolife-mcp doctor, then retry setup";
-const CONFLICT: &str = "a different or unreadable tunnel profile already occupies this name; check tunnel status or choose another --profile";
-const ORPHAN: &str = "this profile name has a saved key or process record without a profile; check tunnel status or choose another --profile";
+const CONFLICT: &str = "a profile appeared at this name during setup; check tunnel status and rerun setup with the intended profile";
+const ORPHAN: &str = "this profile name has a saved key or process record without a profile; recover the saved profile before retrying";
 const DIRECTORY: &str = "cannot use the tunnel directory; pass --profile-dir pointing to a plain directory your account owns, then retry";
 const WRITE: &str =
     "could not save the tunnel profile; check the tunnel directory permissions and retry setup";
+#[cfg(unix)]
+const UNSUPPORTED_MOVE: &str = "the filesystem refused an atomic no-replace move for the tunnel profile; use --profile-dir on a filesystem that supports it";
 #[cfg(unix)]
 const SYNC: &str = "the profile was saved but the tunnel directory could not be synced; check the filesystem and rerun setup to confirm the profile";
 const DEADLINE: Duration = Duration::from_secs(20);
@@ -56,6 +61,15 @@ pub(super) fn save(
     };
     payload.insert("state".into(), Value::String(state.to_owned()));
     payload.insert("consent".into(), Value::Bool(true));
+    if store::occupied(path)? {
+        check_directory(root).map_err(|_| Fail::Defer)?;
+        store::validate(&payload).map_err(|_| Fail::Defer)?;
+        return if equivalent_saved_profile(path, payload) {
+            Ok((format!("Profile {name} is already configured.\n"), 0))
+        } else {
+            Err(Fail::Defer)
+        };
+    }
     let profile = store::validate(&payload)?;
     let bytes = serde_json::to_vec(&payload).map_err(|_| Fail::Tunnel(WRITE))?;
     if bytes.len() > PROFILE_LIMIT {
@@ -64,16 +78,13 @@ pub(super) fn save(
         ));
     }
     check_directory(root)?;
-    if store::occupied(path)? {
-        let saved = store::private_read(path, PROFILE_LIMIT).map_err(|_| Fail::Tunnel(CONFLICT))?;
-        if serde_json::from_slice::<Map<String, Value>>(&saved).is_ok_and(|saved| saved == payload)
-        {
-            return Ok((format!("Profile {name} is already configured.\n"), 0));
-        }
-        return Err(Fail::Tunnel(CONFLICT));
-    }
+    let full_catalog = profile.catalog == "full";
     if !options.setup.accept_access {
-        return Err(Fail::Tunnel(CONSENT));
+        return Err(Fail::Tunnel(if full_catalog {
+            FULL_CONSENT
+        } else {
+            CONSENT
+        }));
     }
     check_unused_name(root, name)?;
 
@@ -81,32 +92,97 @@ pub(super) fn save(
         .map_err(|_| Fail::Tunnel(CREDENTIAL))?;
     let snapshot = provider.snapshot().map_err(|_| Fail::Tunnel(CREDENTIAL))?;
     let token = snapshot.token().ok_or(Fail::Tunnel(CREDENTIAL))?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|_| Fail::Tunnel(HANDSHAKE))?;
-    runtime.block_on(async {
-        tokio::time::timeout(DEADLINE, handshake(&profile.daemon_url, token))
-            .await
-            .ok()
-            .filter(|verified| *verified)
-            .ok_or(Fail::Tunnel(HANDSHAKE))
-    })?;
+    run_handshake(handshake(&profile.daemon_url, token), DEADLINE)?;
     provider.require_current(&snapshot).map_err(|_| {
         Fail::Tunnel(
             "daemon credential changed during setup; retry with the current credential file",
         )
     })?;
 
+    let notice = if full_catalog {
+        format!("{ACCESS}\n{FULL_CATALOG}\n")
+    } else {
+        format!("{ACCESS}\n")
+    };
+    let mut stdout = io::stdout().lock();
+    if stdout
+        .write_all(&super::super::text_bytes(&notice))
+        .and_then(|()| stdout.flush())
+        .is_err()
+    {
+        return Ok((String::new(), super::STDOUT_REFUSED));
+    }
+    drop(stdout);
     prepare_directory(root)?;
     check_unused_name(root, name)?;
-    publish_profile(path, &bytes)?;
-    let next = if profile.tunnel_id.is_some() {
-        "Add the private runtime key for the same organization before starting the tunnel."
+    publish_profile(path, |file| file.write_all(&bytes))?;
+    let directory = options.profile_dir.as_ref().map_or_else(String::new, |_| {
+        format!(
+            " --profile-dir {}",
+            crate::cli::update::seams::quote(&root.display().to_string())
+        )
+    });
+    let (next, flag) = if profile.tunnel_id.is_some() {
+        (
+            "Add the private runtime key for the same organization before starting the tunnel.",
+            "--read-key",
+        )
     } else {
-        "Choose a tunnel in the intended organization at https://platform.openai.com/settings/organization/tunnels."
+        (
+            "Choose a tunnel in the intended organization at https://platform.openai.com/settings/organization/tunnels.",
+            "--tunnel-id <tunnel_id>",
+        )
     };
-    Ok((format!("Profile {name} saved. {next}\n"), 0))
+    Ok((
+        format!(
+            "Profile {name} saved. {next}\nResume: pseudolife-mcp tunnel setup --profile {name}{directory} {flag}\n"
+        ),
+        0,
+    ))
+}
+
+fn equivalent_saved_profile(path: &Path, mut desired: Map<String, Value>) -> bool {
+    let Ok(data) = store::private_read(path, PROFILE_LIMIT) else {
+        return false;
+    };
+    let Ok(mut saved) = serde_json::from_slice::<Map<String, Value>>(&data) else {
+        return false;
+    };
+    // Python writes all the optional fields, including their defaults. Keep
+    // non-default values and unknown fields in the comparison so any actual
+    // edit, including a runtime setting, still goes through the old path.
+    for (key, default) in [
+        ("tunnel_id", Value::Null),
+        ("organization_id", Value::Null),
+        ("state", Value::from("pending")),
+        ("consent", Value::Bool(false)),
+        ("autostart_consent", Value::Bool(false)),
+        ("runtime_version", Value::Null),
+        ("minimum_catalog", Value::from("current")),
+        ("runtime_key_expires_at", Value::Null),
+        ("cloud_verification_file", Value::Null),
+    ] {
+        saved.entry(key).or_insert_with(|| default.clone());
+        desired.entry(key).or_insert(default);
+    }
+    saved == desired
+}
+
+fn run_handshake(probe: impl Future<Output = bool>, deadline: Duration) -> Result<(), Fail> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| Fail::Tunnel(HANDSHAKE))?;
+    if matches!(
+        runtime.block_on(async { tokio::time::timeout(deadline, probe).await }),
+        Ok(true)
+    ) {
+        return Ok(());
+    }
+    // DNS resolution can still be in a blocking worker when the async
+    // deadline expires. Dropping the runtime would wait for that worker.
+    runtime.shutdown_background();
+    Err(Fail::Tunnel(HANDSHAKE))
 }
 
 async fn handshake(url: &str, token: &str) -> bool {
@@ -300,24 +376,19 @@ fn prepare_directory(root: &Path) -> Result<(), Fail> {
     check_directory(root)
 }
 
-fn publish_profile(path: &Path, bytes: &[u8]) -> Result<(), Fail> {
+fn publish_profile(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> Result<(), Fail> {
     let parent = path.parent().ok_or(Fail::Tunnel(DIRECTORY))?;
     let stage = parent.join(format!(".tunnel-setup-{}", uuid::Uuid::new_v4().simple()));
     let result = (|| {
         let mut opened = state::create(&stage).map_err(|_| Fail::Tunnel(WRITE))?;
-        opened
-            .file
-            .write_all(bytes)
+        write(&mut opened.file)
             .and_then(|()| opened.file.sync_all())
             .map_err(|_| Fail::Tunnel(WRITE))?;
         drop(opened);
-        rename_new(&stage, path).map_err(|error| {
-            if error.kind() == io::ErrorKind::AlreadyExists {
-                Fail::Tunnel(CONFLICT)
-            } else {
-                Fail::Tunnel(WRITE)
-            }
-        })?;
+        rename_new(&stage, path).map_err(publication_error)?;
         #[cfg(unix)]
         fs::File::open(parent)
             .and_then(|dir| dir.sync_all())
@@ -326,6 +397,15 @@ fn publish_profile(path: &Path, bytes: &[u8]) -> Result<(), Fail> {
     })();
     let _ = fs::remove_file(stage);
     result
+}
+
+fn publication_error(error: io::Error) -> Fail {
+    Fail::Tunnel(match error.kind() {
+        io::ErrorKind::AlreadyExists => CONFLICT,
+        #[cfg(unix)]
+        io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported => UNSUPPORTED_MOVE,
+        _ => WRITE,
+    })
 }
 
 #[cfg(unix)]
@@ -354,11 +434,13 @@ fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
     let to = wide(to)?;
     // SAFETY: both NUL-terminated buffers live through the call. The source
     // and destination are siblings, and MoveFileW refuses replacement.
-    if unsafe { MoveFileW(from.as_ptr(), to.as_ptr()) } == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+    store::sharing_retry(|| {
+        if unsafe { MoveFileW(from.as_ptr(), to.as_ptr()) } == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    })
 }
 
 #[cfg(test)]
@@ -371,12 +453,90 @@ mod tests {
         state::private_dir(&root).unwrap();
         let path = root.join("dot.profile.json");
         state::atomic_create(&path, b"competing profile").unwrap();
-        let result = publish_profile(&path, b"new profile");
+        let result = publish_profile(&path, |file| file.write_all(b"new profile"));
         let contents = state::read(&path, 65536).unwrap();
         let entries = fs::read_dir(&root).unwrap().count();
         fs::remove_dir_all(root).unwrap();
         assert_eq!(result, Err(Fail::Tunnel(CONFLICT)));
         assert_eq!(contents, b"competing profile");
         assert_eq!(entries, 1);
+    }
+
+    #[test]
+    fn profile_publication_cleans_up_after_a_partial_write_fails() {
+        let root = std::env::temp_dir().join(format!("tunnel-publish-{}", uuid::Uuid::new_v4()));
+        state::private_dir(&root).unwrap();
+        let result = publish_profile(&root.join("dot.profile.json"), |file| {
+            file.write_all(b"partial fixture")?;
+            Err(io::Error::other("fixture write failure"))
+        });
+        let entries = fs::read_dir(&root).unwrap().count();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(result, Err(Fail::Tunnel(WRITE)));
+        assert_eq!(entries, 0);
+    }
+
+    #[test]
+    fn handshake_deadline_does_not_wait_for_a_blocking_worker() {
+        use std::sync::mpsc;
+        let (started, ready) = mpsc::channel();
+        let (release, blocked) = mpsc::channel::<()>();
+        let (done, result) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let output = run_handshake(
+                async {
+                    tokio::task::spawn_blocking(move || {
+                        let _ = started.send(());
+                        let _ = blocked.recv_timeout(Duration::from_secs(10));
+                    });
+                    std::future::pending().await
+                },
+                Duration::from_millis(25),
+            );
+            let _ = done.send(output);
+        });
+        let started = ready.recv_timeout(Duration::from_secs(3));
+        let observed = result.recv_timeout(Duration::from_secs(2));
+        let _ = release.send(());
+        worker.join().unwrap();
+        assert!(started.is_ok());
+        assert_eq!(observed.unwrap(), Err(Fail::Tunnel(HANDSHAKE)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_rejects_a_shared_directory_or_a_redirect() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root = std::env::temp_dir().join(format!("tunnel-dir-{}", uuid::Uuid::new_v4()));
+        let shared = root.join("shared");
+        let private = root.join("private");
+        let redirect = root.join("redirect");
+        state::private_dir(&shared).unwrap();
+        state::private_dir(&private).unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o755)).unwrap();
+        symlink(&private, &redirect).unwrap();
+        let shared_result = check_directory(&shared);
+        let private_result = check_directory(&private);
+        let redirect_result = check_directory(&redirect);
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(private_result, Ok(()));
+        assert_eq!(shared_result, Err(Fail::Tunnel(DIRECTORY)));
+        assert_eq!(redirect_result, Err(Fail::Tunnel(DIRECTORY)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publication_names_the_atomic_move_refusal() {
+        use rustix::io::Errno;
+        for error in [Errno::INVAL, Errno::NOTSUP] {
+            assert_eq!(
+                publication_error(error.into()),
+                Fail::Tunnel(UNSUPPORTED_MOVE)
+            );
+        }
+        assert_eq!(
+            publication_error(io::ErrorKind::PermissionDenied.into()),
+            Fail::Tunnel(WRITE)
+        );
     }
 }
