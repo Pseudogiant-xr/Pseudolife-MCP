@@ -134,6 +134,8 @@ touched, with no retrofit sweep.
   errors, plugin hooks, CLI output, the Console, the served instructions)
   **is a product bug**, also in our own sessions; host friction (Claude
   Code, Codex, the OS) is out of scope.
+- **Before proposing a feature or change, think through the new or updating
+  user's experience**, and find existing friction to fix.
 - Fix a non-security bug in its own PR with a regression test when the fix
   is small, otherwise open an issue with the repro and the regression test
   it needs, because folding it into other work hides it.
@@ -212,10 +214,9 @@ touched, with no retrofit sweep.
   unbounded Windows change takes the Windows dev VM's native full suite,
   and macOS has only CI.
 - **Docs-only changes** (every path `git diff --no-renames --name-only
-  origin/master...` lists passes `is_docs` in `rust/ci/parity_scope.py`:
-  Markdown outside the code directories, `llms.txt` / `llms-full.txt` and
-  non-code files under `docs/`) skip the local full suite and run the doc
-  guards (`tests/test_release_ux.py`, `test_llms_txt.py`,
+  origin/master...` lists passes `is_docs` in `rust/ci/parity_scope.py`)
+  skip the local full suite and run the doc guards
+  (`tests/test_release_ux.py`, `test_llms_txt.py`,
   `test_atlas_currency.py`, `test_eval_evidence.py`, `test_i18n_readme.py`)
   plus every test naming a touched path (`git grep -l <basename> tests/
   rust/ evals/`); packaging is never docs-only.
@@ -340,9 +341,9 @@ touched, with no retrofit sweep.
   its signature is deterministic; a second failure, or a deterministic one,
   goes to the VM.
 - On the VM, loop the failing test or slice as `docs/dev/dev-machines.md`
-  "Sharing" says (read it before the first loop): a reproduction gets a fix
-  PR, a confirmed flake a deflake PR, and an unreproduced failure a deflake
-  PR or an issue naming the hosted run once it recurs.
+  "Sharing" says: a reproduction gets a fix PR, a confirmed flake a deflake
+  PR, and an unreproduced failure a deflake PR or an issue naming the
+  hosted run once it recurs.
 - **A PR that adds a `windows-latest` test resting on real process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
   timeouts (a harness `run.py` scenario included; a test that only mocks
