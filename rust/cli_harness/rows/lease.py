@@ -214,7 +214,7 @@ def _setup_lock(arm, path, state):
 def _local(state="absent", name=NAME):
     def setup(arm):
         directory = arm.home / "locks"
-        producers.write_private(directory / "instance.id", "abcdef123456\n")
+        producers.write_private(directory / "instance.id", "abcdef123456\n", root=arm.home)
         holder = _setup_lock(arm, directory / lease_fixture.lock_file_name(name), state)
         if holder is not None:
             arm.state["holder"] = holder
@@ -224,7 +224,7 @@ def _local(state="absent", name=NAME):
 def _suite(state="absent", slot=0):
     def setup(arm):
         directory = arm.home / "suite"
-        producers.write_private(directory / "instance.id", "abcdef123456\n")
+        producers.write_private(directory / "instance.id", "abcdef123456\n", root=arm.home)
         path = directory / (f"full-suite.{slot}.lock" if slot else "full-suite.lock")
         _setup_lock(arm, path, state)
     return setup
@@ -373,7 +373,7 @@ def cases():
             _suite("held")(arm)
             write_private(arm.home / "suite" / "full-suite.holder.json", json.dumps(
                 {"pid": 1, "worktree": {"$serde_json::private::Number": value},
-                 "started": "fixture"}))
+                 "started": "fixture"}), root=arm.home)
         add(f"check-suite-private-number-{suffix}", ["check", "full-suite", "--json"],
             setup=private_holder, golden=False)
     for scenario in ("free", "claim", "other-mirror", "same-mirror"):
