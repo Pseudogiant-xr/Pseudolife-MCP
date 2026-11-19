@@ -124,8 +124,6 @@ fn assert_refused(home: &Home, args: &[&str], env: &[(&str, &str)], message: &st
 fn unported_commands_and_argv_shapes_defer_without_effect() {
     let home = Home::new();
     let dir = home.dir();
-    let token = home.path("token");
-    let token = token.to_str().unwrap();
     for args in [
         &[][..],
         &["doctor"],
@@ -144,8 +142,6 @@ fn unported_commands_and_argv_shapes_defer_without_effect() {
         &["status", "--profile-dir", ""],
         &["update", "--json", "--profile-dir", &dir],
         &["verify", "--accept-access", "--profile-dir", &dir],
-        &["setup", "--read-key", "--profile-dir", &dir],
-        &["setup", "--key-file", token, "--profile-dir", &dir],
         &["setup", "--start", "--profile-dir", &dir],
         &["setup", "--open-browser", "keys", "--profile-dir", &dir],
         &["setup", "--catalog", "all", "--profile-dir", &dir],
@@ -290,9 +286,9 @@ fn setup_saves_an_authenticated_private_profile_and_reuses_it_unchanged() {
     assert_eq!(daemon.records.lock().unwrap().len(), requests.len());
 
     let contender = Listener::new();
-    let output = setup_against(&home, &contender.url(), true);
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, native_text(DEFERRED));
+    let output = setup_against(&home, &contender.url(), false);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--accept-access"));
     contender.assert_untouched();
     assert_eq!(tree(&home.0), before);
 }
@@ -325,7 +321,10 @@ fn setup_reuses_an_equivalent_python_profile() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
         output.stdout,
-        native_text("Profile dot is already configured.\n")
+        native_text(&format!(
+            "Profile dot is already configured. Check it with `pseudolife-mcp tunnel status --profile dot --profile-dir {}`.\n",
+            shell_quoted(&home.dir())
+        ))
     );
     assert!(output.stderr.is_empty());
     daemon.assert_untouched();
@@ -343,64 +342,198 @@ fn pending_setup_profile(home: &Home, url: &str) {
 }
 
 #[test]
-fn setup_defers_when_a_tunnel_id_is_added() {
+fn setup_repoints_a_moved_credential_after_explicit_consent() {
     let home = setup_home();
-    let daemon = Listener::new();
-    let url = daemon.url();
-    pending_setup_profile(&home, &url);
-    let dir = home.dir();
-    let token = home.path("token");
-    assert_deferred(
-        &home,
-        &[
-            "setup",
-            "--profile-dir",
-            &dir,
-            "--daemon-url",
-            &url,
-            "--token-file",
-            token.to_str().unwrap(),
-            "--tunnel-id",
-            "tunnel_abc123",
-        ],
-        &[],
+    let daemon = common::Fixture::start();
+    pending_setup_profile(&home, &daemon.url);
+    let moved = home.path("moved-token");
+    std::fs::rename(home.path("token"), &moved).unwrap();
+    let path = home.path("tunnels/dot.profile.json");
+    let before = std::fs::read(&path).unwrap();
+    let (mut cmd, ambient) = setup_command(&home, &daemon.url, &moved);
+    let refused = cmd.output().unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--accept-access"));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(daemon.records.lock().unwrap().is_empty());
+    assert_eq!(
+        cmd.arg("--accept-access").output().unwrap().status.code(),
+        Some(0)
     );
-    assert_deferred(
-        &home,
-        &[
-            "setup",
-            "--profile",
-            "dot",
-            "--profile-dir",
-            &dir,
-            "--tunnel-id",
-            "tunnel_abc123",
-        ],
-        &[],
-    );
-    daemon.assert_untouched();
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(saved["token_file"], moved.to_str().unwrap());
+    ambient.assert_untouched();
 }
 
 #[test]
-fn setup_defers_when_a_daemon_credential_file_moves() {
+fn setup_resumes_a_pending_profile_with_its_saved_connection() {
     let home = setup_home();
-    let daemon = Listener::new();
-    let url = daemon.url();
-    pending_setup_profile(&home, &url);
-    let moved = home.path("moved-token");
-    std::fs::rename(home.path("token"), &moved).unwrap();
-    assert_deferred(
+    let daemon = common::Fixture::start();
+    pending_setup_profile(&home, &daemon.url);
+    let ambient = Listener::new();
+    let output = command(&home, &ambient)
+        .args([
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--tunnel-id",
+            "tunnel_abcd",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let saved = pseudolife_stdio::board::state::read(&home.path("tunnels/dot.profile.json"), 65536)
+        .unwrap();
+    let profile: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(profile["tunnel_id"], "tunnel_abcd");
+    assert_eq!(profile["state"], "ready");
+    assert_eq!(profile["daemon_url"], daemon.url);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--read-key"));
+    ambient.assert_untouched();
+}
+
+#[test]
+fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+        }),
+    );
+    let input = home.path("key-input");
+    let synthetic = b"fixture-runtime-key";
+    pseudolife_stdio::board::state::atomic_create(&input, synthetic).unwrap();
+    let profile = home.path("tunnels/dot.profile.json");
+    let original = std::fs::read(&profile).unwrap();
+    assert_refused(
         &home,
         &[
             "setup",
             "--profile-dir",
             &home.dir(),
-            "--daemon-url",
-            &url,
-            "--token-file",
-            moved.to_str().unwrap(),
+            "--key-file",
+            input.to_str().unwrap(),
+            "--tunnel-id",
+            "tunnel_1111",
         ],
         &[],
+        "save profile settings first, then use --read-key or --key-file in a separate setup invocation\n",
+    );
+    let ambient = Listener::new();
+    let mut setup = command(&home, &ambient);
+    setup
+        .args(["setup", "--profile-dir", &home.dir(), "--key-file"])
+        .arg(&input);
+    let output = setup.output().unwrap();
+    let key = home.path("tunnels/dot.key");
+    #[cfg(windows)]
+    if output.status.code() == Some(2)
+        && std::env::var_os("SSH_CONNECTION").is_some()
+        && std::env::var_os("GITHUB_ACTIONS").is_none()
+        && String::from_utf8_lossy(&output.stderr).contains("Windows could not protect")
+    {
+        assert!(!key.exists());
+        assert_eq!(std::fs::read(&profile).unwrap(), original);
+        ambient.assert_untouched();
+        eprintln!(
+            "Native DPAPI refusal verified in the key-based SSH logon. Hosted CI must save and read back the key."
+        );
+        return;
+    }
+    assert_eq!(output.status.code(), Some(0));
+    let stored = std::fs::read(&key).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert!(stored.strip_prefix(b"PLAIN\0") == Some(synthetic));
+        assert_eq!(key.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    #[cfg(windows)]
+    {
+        assert!(stored.starts_with(b"DPAPI\0"));
+        assert!(
+            !stored
+                .windows(synthetic.len())
+                .any(|bytes| bytes == synthetic)
+        );
+    }
+    let status = run(
+        &home,
+        &["status", "--json", "--profile-dir", &home.dir()],
+        &[],
+    );
+    assert_eq!(status.status.code(), Some(0));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&status.stdout).unwrap()["private_key_present"],
+        true
+    );
+    assert_eq!(std::fs::read(&profile).unwrap(), original);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("fixture-runtime-key"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("fixture-runtime-key"));
+    let request_count = daemon.records.lock().unwrap().len();
+    let repeat = setup.output().unwrap();
+    assert_eq!(repeat.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&repeat.stderr).contains("dot.key already exists"));
+    assert_eq!(daemon.records.lock().unwrap().len(), request_count);
+    assert!(std::fs::read(&key).unwrap() == stored);
+    ambient.assert_untouched();
+}
+
+#[test]
+fn setup_refuses_to_import_the_daemon_bearer_as_a_runtime_key() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+        }),
+    );
+    assert_refused(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-file",
+            home.path("token").to_str().unwrap(),
+        ],
+        &[],
+        "the runtime key matches the daemon credential; supply the separate tunnel runtime key\n",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_refuses_a_runtime_key_file_that_other_users_can_read() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = setup_home();
+    let daemon = Listener::new();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+        }),
+    );
+    let input = home.path("shared-input");
+    pseudolife_stdio::board::state::atomic_create(&input, b"fixture-runtime-key").unwrap();
+    std::fs::set_permissions(&input, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_refused(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-file",
+            input.to_str().unwrap(),
+        ],
+        &[],
+        "could not read a private runtime key; supply --key-file with an owner-only file or use --read-key at a terminal\n",
     );
     daemon.assert_untouched();
 }
@@ -426,7 +559,7 @@ fn setup_full_catalog_describes_consent_and_hands_off_private_key_intake() {
     assert!(stdout[..saved].contains("other sessions"));
     assert!(stdout.contains("tunnel setup --profile dot"));
     assert!(stdout.contains("--read-key"));
-    assert_deferred(
+    assert_refused(
         &home,
         &[
             "setup",
@@ -437,6 +570,7 @@ fn setup_full_catalog_describes_consent_and_hands_off_private_key_intake() {
             "--read-key",
         ],
         &[],
+        "--read-key needs a terminal; use --key-file with an owner-only file for unattended setup\n",
     );
 }
 
@@ -520,7 +654,12 @@ fn setup_refuses_orphan_keys_and_process_records_before_handshake() {
         let before = tree(&home.0);
         let output = setup_against(&home, &daemon.url(), true);
         assert_eq!(output.status.code(), Some(2));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("without a profile"));
+        let message = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            message.contains(file)
+                && message.contains("dot.profile.json")
+                && message.contains("from a backup")
+        );
         daemon.assert_untouched();
         assert_eq!(tree(&home.0), before);
     }

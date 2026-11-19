@@ -19,11 +19,13 @@ once, each value as the next argument and never `-`-led
 - `setup [--profile N] [--profile-dir D] [--daemon-url U] [--token-file F]
   [--tunnel-id T] [--organization-id O] [--catalog current|full]
   [--key-expires-at E] [--accept-access]`
+- `setup [--profile N] [--profile-dir D] (--read-key | --key-file F)`
+  imports the first runtime key for a profile with a saved tunnel ID.
 
 Every other shape defers: other commands (`doctor`, `run`, `start`, `stop`,
 `shim`, `service ...`), no command, `-h`/`--help`, abbreviations,
 `--opt=value`, repeated options, `-`-led values, `--catalog` outside its
-choices, `setup --read-key / --key-file / --open-browser / --start`, an empty
+choices, `setup --open-browser / --start`, an empty
 `--profile-dir`, non-Unicode argv. argparse usage and error text are not
 reproduced (item 4 of the scope is deferred).
 
@@ -56,10 +58,20 @@ reproduced (item 4 of the scope is deferred).
 Explicit `setup` with a daemon URL and token file can save a fresh profile
 after consent and an MCP handshake. An identical profile is reused without
 writing it or contacting the daemon. An equivalent Python-written profile
-also counts as an unchanged rerun. Changes to a saved profile and unreadable
-profiles still defer. These effects are covered in
+also counts as an unchanged rerun. The response points to `tunnel status`
+for checking the saved configuration. A stopped tunnel can resume profile
+setup before its first key is imported. Changing the daemon connection or
+expanding access requires explicit consent. A profile with autostart, a
+process record, or a saved key is left alone by this setup path. Malformed
+saved profiles still defer. These effects are covered in
 `shim/tests/cli_tunnel_contract.rs` against a disposable daemon fixture.
 The setup cases in this row exercise preflight refusals and deferrals.
+
+Save the profile and import the first runtime key in separate invocations.
+The key is read from an owner-only file or from a terminal without echo.
+Unix saves it in an owner-only file. Windows protects it with user-scoped
+DPAPI. The setup lock serializes native writes to the store. An interrupted
+write cannot publish a partial profile or key.
 
 Process records are read natively (`shim/src/cli/tunnel/record.rs`), and
 these cases are recorded from the candidate, not the oracle:

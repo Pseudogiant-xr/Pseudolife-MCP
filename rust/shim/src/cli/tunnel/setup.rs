@@ -25,7 +25,13 @@ use serde_json::{Map, Value};
 use sse_stream::{Sse, SseStream};
 
 use super::{Fail, Options, Output, record, store};
-use crate::{board::state, credentials::CredentialProvider};
+use crate::{
+    board::state,
+    credentials::{CredentialProvider, CredentialSnapshot},
+};
+
+mod resume;
+pub(super) use resume::resume;
 
 const ACCESS: &str = "This tunnel makes the daemon available to the selected OpenAI organization and associated ChatGPT workspace. The host and daemon must stay running for tunnel access.";
 const FULL_CATALOG: &str = "The full catalog also expands tool discovery for the daemon principal's other sessions. Authentication permissions stay the same.";
@@ -34,16 +40,14 @@ const FULL_CONSENT: &str = "This tunnel makes the daemon available to the select
 const CREDENTIAL: &str =
     "daemon credential file is unavailable or unsafe; repair its owner-only access and retry setup";
 const HANDSHAKE: &str = "existing daemon MCP handshake failed; check the URL and credential with pseudolife-mcp doctor, then retry setup";
-const CONFLICT: &str = "a profile appeared at this name during setup; check tunnel status and rerun setup with the intended profile";
-const ORPHAN: &str = "this profile name has a saved key or process record without a profile; recover the saved profile before retrying";
+const CONFLICT: &str = "a tunnel file appeared at this name during setup; check tunnel status and rerun setup with the intended profile";
 const DIRECTORY: &str = "cannot use the tunnel directory; pass --profile-dir pointing to a plain directory your account owns, then retry";
-const WRITE: &str =
-    "could not save the tunnel profile; check the tunnel directory permissions and retry setup";
-const CLEANUP: &str = "could not remove the private tunnel staging file; close programs using the tunnel directory and remove the leftover .tunnel-setup-* file before retrying";
+const WRITE: &str = "could not save the private tunnel file; check the tunnel directory permissions and retry setup";
+const CLEANUP: &str = "could not remove the private tunnel staging file";
 #[cfg(unix)]
-const UNSUPPORTED_MOVE: &str = "the filesystem refused an atomic no-replace move for the tunnel profile; use --profile-dir on a filesystem that supports it";
+const UNSUPPORTED_MOVE: &str = "the filesystem refused an atomic no-replace move for the tunnel file; use --profile-dir on a filesystem that supports it";
 #[cfg(unix)]
-const SYNC: &str = "the profile was saved but the tunnel directory could not be synced; check the filesystem and rerun setup to confirm the profile";
+const SYNC: &str = "the tunnel file was saved but its directory could not be synced; check the filesystem and run tunnel status";
 const DEADLINE: Duration = Duration::from_secs(20);
 const PROFILE_LIMIT: usize = 65536;
 const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
@@ -63,33 +67,27 @@ pub(super) fn save(
     payload.insert("state".into(), Value::String(state.to_owned()));
     payload.insert("consent".into(), Value::Bool(true));
     if store::occupied(path)? {
-        check_directory(root).map_err(|_| Fail::Defer)?;
-        store::validate(&payload).map_err(|_| Fail::Defer)?;
-        return if equivalent_saved_profile(path, payload) {
-            Ok((format!("Profile {name} is already configured.\n"), 0))
-        } else {
-            Err(Fail::Defer)
-        };
+        return Err(Fail::Tunnel(CONFLICT));
     }
     let profile = store::validate(&payload)?;
-    let bytes = serde_json::to_vec(&payload).map_err(|_| Fail::Tunnel(WRITE))?;
-    if bytes.len() > PROFILE_LIMIT {
-        return Err(Fail::Tunnel(
-            "the tunnel profile would exceed 64 KiB; shorten the setup values and retry",
-        ));
-    }
+    let bytes = profile_bytes(&payload)?;
     check_directory(root)?;
-    let full_catalog = profile.catalog == "full";
     if !options.setup.accept_access {
-        return Err(Fail::Tunnel(if full_catalog {
-            FULL_CONSENT
-        } else {
-            CONSENT
-        }));
+        return Err(consent_required(&profile));
     }
     check_unused_name(root, name)?;
+    verify_connection(&profile)?;
+    if disclose(&profile).is_err() {
+        return Ok((String::new(), super::STDOUT_REFUSED));
+    }
+    prepare_directory(root)?;
+    check_unused_name(root, name)?;
+    publish_new(path, |file| file.write_all(&bytes))?;
+    Ok(saved_message(options, root, &profile))
+}
 
-    let provider = CredentialProvider::new(None, Some(profile.token_file.into()))
+fn verify_connection(profile: &store::Profile) -> Result<CredentialSnapshot, Fail> {
+    let provider = CredentialProvider::new(None, Some((&profile.token_file).into()))
         .map_err(|_| Fail::Tunnel(CREDENTIAL))?;
     let snapshot = provider.snapshot().map_err(|_| Fail::Tunnel(CREDENTIAL))?;
     let token = snapshot.token().ok_or(Fail::Tunnel(CREDENTIAL))?;
@@ -99,24 +97,40 @@ pub(super) fn save(
             "daemon credential changed during setup; retry with the current credential file",
         )
     })?;
+    Ok(snapshot)
+}
 
-    let notice = if full_catalog {
+fn profile_bytes(payload: &Map<String, Value>) -> Result<Vec<u8>, Fail> {
+    let bytes = serde_json::to_vec(payload).map_err(|_| Fail::Tunnel(WRITE))?;
+    if bytes.len() > PROFILE_LIMIT {
+        return Err(Fail::Tunnel(
+            "the tunnel profile would exceed 64 KiB; shorten the setup values and retry",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn consent_required(profile: &store::Profile) -> Fail {
+    Fail::Tunnel(if profile.catalog == "full" {
+        FULL_CONSENT
+    } else {
+        CONSENT
+    })
+}
+
+fn disclose(profile: &store::Profile) -> io::Result<()> {
+    let notice = if profile.catalog == "full" {
         format!("{ACCESS}\n{FULL_CATALOG}\n")
     } else {
         format!("{ACCESS}\n")
     };
     let mut stdout = io::stdout().lock();
-    if stdout
-        .write_all(&super::super::text_bytes(&notice))
-        .and_then(|()| stdout.flush())
-        .is_err()
-    {
-        return Ok((String::new(), super::STDOUT_REFUSED));
-    }
-    drop(stdout);
-    prepare_directory(root)?;
-    check_unused_name(root, name)?;
-    publish_profile(path, |file| file.write_all(&bytes))?;
+    stdout.write_all(&super::super::text_bytes(&notice))?;
+    stdout.flush()
+}
+
+fn saved_message(options: &Options, root: &Path, profile: &store::Profile) -> (String, u8) {
+    let name = &options.profile;
     let directory = options.profile_dir.as_ref().map_or_else(String::new, |_| {
         format!(
             " --profile-dir {}",
@@ -134,24 +148,15 @@ pub(super) fn save(
             "--tunnel-id <tunnel_id>",
         )
     };
-    Ok((
+    (
         format!(
             "Profile {name} saved. {next}\nResume: pseudolife-mcp tunnel setup --profile {name}{directory} {flag}\n"
         ),
         0,
-    ))
+    )
 }
 
-fn equivalent_saved_profile(path: &Path, mut desired: Map<String, Value>) -> bool {
-    let Ok(data) = store::private_read(path, PROFILE_LIMIT) else {
-        return false;
-    };
-    let Ok(mut saved) = serde_json::from_slice::<Map<String, Value>>(&data) else {
-        return false;
-    };
-    // Python writes all the optional fields, including their defaults. Keep
-    // non-default values and unknown fields in the comparison so any actual
-    // edit, including a runtime setting, still goes through the old path.
+fn fill_profile_defaults(payload: &mut Map<String, Value>) {
     for (key, default) in [
         ("tunnel_id", Value::Null),
         ("organization_id", Value::Null),
@@ -163,10 +168,8 @@ fn equivalent_saved_profile(path: &Path, mut desired: Map<String, Value>) -> boo
         ("runtime_key_expires_at", Value::Null),
         ("cloud_verification_file", Value::Null),
     ] {
-        saved.entry(key).or_insert_with(|| default.clone());
-        desired.entry(key).or_insert(default);
+        payload.entry(key).or_insert(default);
     }
-    saved == desired
 }
 
 fn run_handshake(probe: impl Future<Output = bool>, deadline: Duration) -> Result<(), Fail> {
@@ -333,9 +336,14 @@ impl StreamableHttpClient for ProbeHttp {
 }
 
 fn check_unused_name(root: &Path, name: &str) -> Result<(), Fail> {
-    if store::occupied(&store::key_path(root, name))? || store::occupied(&record::path(root, name))?
-    {
-        return Err(Fail::Tunnel(ORPHAN));
+    for path in [store::key_path(root, name), record::path(root, name)] {
+        if store::occupied(&path)? {
+            return Err(Fail::Detail(format!(
+                "{} exists without a profile; restore its matching profile at {} from a backup before retrying",
+                path.display(),
+                store::profile_file(root, name).display()
+            )));
+        }
     }
     Ok(())
 }
@@ -377,7 +385,7 @@ fn prepare_directory(root: &Path) -> Result<(), Fail> {
     check_directory(root)
 }
 
-fn publish_profile(
+fn publish_new(
     path: &Path,
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> Result<(), Fail> {
@@ -396,17 +404,28 @@ fn publish_profile(
             .map_err(|_| Fail::Tunnel(SYNC))?;
         Ok(())
     })();
-    finish_publication(result, || fs::remove_file(&stage))
+    finish_publication(result, &stage, || fs::remove_file(&stage))
 }
 
 fn finish_publication(
     result: Result<(), Fail>,
+    stage: &Path,
     remove: impl FnMut() -> io::Result<()>,
 ) -> Result<(), Fail> {
     match store::sharing_retry(remove) {
         Ok(()) => result,
         Err(error) if error.kind() == io::ErrorKind::NotFound => result,
-        Err(_) => Err(Fail::Tunnel(CLEANUP)),
+        Err(_) => {
+            let remedy = if cfg!(windows) {
+                "close programs using that file, then remove it before retrying"
+            } else {
+                "check write access to its parent directory, then remove it before retrying"
+            };
+            Err(Fail::Detail(format!(
+                "{CLEANUP} {}; {remedy}",
+                stage.display()
+            )))
+        }
     }
 }
 
@@ -464,7 +483,7 @@ mod tests {
         state::private_dir(&root).unwrap();
         let path = root.join("dot.profile.json");
         state::atomic_create(&path, b"competing profile").unwrap();
-        let result = publish_profile(&path, |file| file.write_all(b"new profile"));
+        let result = publish_new(&path, |file| file.write_all(b"new profile"));
         let contents = state::read(&path, 65536).unwrap();
         let entries = fs::read_dir(&root).unwrap().count();
         fs::remove_dir_all(root).unwrap();
@@ -477,7 +496,7 @@ mod tests {
     fn profile_publication_cleans_up_after_a_partial_write_fails() {
         let root = std::env::temp_dir().join(format!("tunnel-publish-{}", uuid::Uuid::new_v4()));
         state::private_dir(&root).unwrap();
-        let result = publish_profile(&root.join("dot.profile.json"), |file| {
+        let result = publish_new(&root.join("dot.profile.json"), |file| {
             file.write_all(b"partial fixture")?;
             Err(io::Error::other("fixture write failure"))
         });
@@ -489,24 +508,28 @@ mod tests {
 
     #[test]
     fn profile_publication_reports_if_staging_cleanup_fails() {
-        let result = finish_publication(Err(Fail::Tunnel(WRITE)), || {
+        let stage = Path::new("fixture/.tunnel-setup-dangling");
+        let result = finish_publication(Err(Fail::Tunnel(WRITE)), stage, || {
             Err(io::Error::other("fixture cleanup failure"))
         });
-        assert_eq!(result, Err(Fail::Tunnel(CLEANUP)));
+        assert!(
+            matches!(result, Err(Fail::Detail(message)) if message.contains(CLEANUP) && message.contains(&stage.display().to_string()))
+        );
     }
 
     #[cfg(windows)]
     #[test]
     fn profile_publication_retries_a_sharing_violation_during_cleanup() {
         let mut attempts = 0;
-        let result = finish_publication(Err(Fail::Tunnel(WRITE)), || {
-            attempts += 1;
-            if attempts == 1 {
-                Err(io::Error::from_raw_os_error(32))
-            } else {
-                Ok(())
-            }
-        });
+        let result =
+            finish_publication(Err(Fail::Tunnel(WRITE)), Path::new("fixture-stage"), || {
+                attempts += 1;
+                if attempts == 1 {
+                    Err(io::Error::from_raw_os_error(32))
+                } else {
+                    Ok(())
+                }
+            });
         assert_eq!(result, Err(Fail::Tunnel(WRITE)));
         assert_eq!(attempts, 2);
     }

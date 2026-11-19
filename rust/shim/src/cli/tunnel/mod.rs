@@ -32,6 +32,7 @@ use syntax::{Admit, json_loads, refresh_id};
 #[derive(Debug, PartialEq)]
 pub(super) enum Fail {
     Tunnel(&'static str),
+    Detail(String),
     Defer,
 }
 
@@ -43,6 +44,7 @@ fn answer(output: Output) -> Option<Answer> {
     match output {
         Ok(printed) => Some(Ok(printed)),
         Err(Fail::Tunnel(message)) => Some(Err(message.to_owned())),
+        Err(Fail::Detail(message)) => Some(Err(message)),
         Err(Fail::Defer) => None,
     }
 }
@@ -63,12 +65,46 @@ enum Command {
 #[derive(Default)]
 struct Setup {
     accept_access: bool,
+    read_key: bool,
+    key_file: Option<String>,
     daemon_url: Option<String>,
     token_file: Option<String>,
     tunnel_id: Option<String>,
     organization_id: Option<String>,
     catalog: Option<String>,
     key_expires_at: Option<String>,
+}
+
+impl Setup {
+    fn profile_fields(&self) -> [(&'static str, &Option<String>); 4] {
+        [
+            ("tunnel_id", &self.tunnel_id),
+            ("organization_id", &self.organization_id),
+            ("minimum_catalog", &self.catalog),
+            ("runtime_key_expires_at", &self.key_expires_at),
+        ]
+    }
+
+    fn edit(&self, payload: &mut Map<String, Value>) {
+        for (field, value) in self.profile_fields() {
+            if let Some(value) = value {
+                payload.insert(field.into(), Value::String(value.clone()));
+            }
+        }
+    }
+
+    fn has_profile_settings(&self) -> bool {
+        self.daemon_url.is_some()
+            || self.token_file.is_some()
+            || self
+                .profile_fields()
+                .iter()
+                .any(|(_, value)| value.is_some())
+    }
+
+    fn has_key_input(&self) -> bool {
+        self.read_key || self.key_file.is_some()
+    }
 }
 
 struct Options {
@@ -108,6 +144,7 @@ fn parse(values: &[OsString]) -> Option<Options> {
         match (*option, command) {
             ("--json", Command::Status) => options.json = true,
             ("--accept-access", Command::Setup) => options.setup.accept_access = true,
+            ("--read-key", Command::Setup) => options.setup.read_key = true,
             _ => {
                 let value = rest.next().filter(|value| !value.starts_with('-'))?;
                 let value = Some((*value).to_owned());
@@ -117,6 +154,7 @@ fn parse(values: &[OsString]) -> Option<Options> {
                     ("--profile-dir", _) => options.profile_dir = value,
                     ("--daemon-url", Command::Setup) => s.daemon_url = value,
                     ("--token-file", Command::Setup) => s.token_file = value,
+                    ("--key-file", Command::Setup) => s.key_file = value,
                     ("--tunnel-id", Command::Setup) => s.tunnel_id = value,
                     ("--organization-id", Command::Setup) => s.organization_id = value,
                     ("--key-expires-at", Command::Setup) => s.key_expires_at = value,
@@ -229,7 +267,7 @@ impl Refresh {
 fn private_object(path: &Path) -> Result<Option<Map<String, Value>>, Fail> {
     match store::private_read(path, 65536) {
         Err(Fail::Defer) => Err(Fail::Defer),
-        Err(Fail::Tunnel(_)) => Ok(None),
+        Err(Fail::Tunnel(_) | Fail::Detail(_)) => Ok(None),
         Ok(data) => match json_loads(&data) {
             Admit::Yes(Value::Object(map)) => Ok(Some(map)),
             Admit::Yes(_) | Admit::No => Ok(None),
@@ -291,7 +329,7 @@ fn challenge_issue(root: &Path, name: &str) -> Option<ChallengeIssue> {
         Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 100 => {
             Some(ChallengeIssue::Deep)
         }
-        Ok(_) | Err(Fail::Tunnel(_)) => None,
+        Ok(_) | Err(Fail::Tunnel(_) | Fail::Detail(_)) => None,
         Err(Fail::Defer) => Some(ChallengeIssue::Form),
     }
 }
@@ -514,6 +552,7 @@ fn update(root: &Path) -> Answer {
             "{message} (tunnel directory {}); fix that, then retry",
             root.display()
         ),
+        Fail::Detail(message) => message,
         Fail::Defer => store::list_refusal(root),
     };
     let present = exists(root).map_err(unreadable)?;
@@ -550,6 +589,7 @@ fn update(root: &Path) -> Answer {
                 store::profile_file(root, name).display(),
                 store::unread_reason(root, name)
             )),
+            Err(Fail::Detail(message)) => return Err(message),
             Err(Fail::Tunnel(reason)) => {
                 return Err(format!(
                     "{reason}: {}; fix that file or move it out of the tunnel directory, then retry",
@@ -759,29 +799,36 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
 
 fn setup(options: &Options, root: &Path) -> Output {
     let path = store::profile_path(root, &options.profile)?;
-    let explicit =
-        truthy(&options.setup.daemon_url).is_some() && truthy(&options.setup.token_file).is_some();
-    let saved = occupied(&path)?;
-    if saved && !explicit {
-        return Err(Fail::Defer);
+    let settings = &options.setup;
+    if settings.read_key && settings.key_file.is_some() {
+        return Err(Fail::Tunnel(
+            "use either --read-key or --key-file for private key intake",
+        ));
     }
-    let (url, token) =
-        discover(&options.setup).map_err(|error| if saved { Fail::Defer } else { error })?;
+    if settings.has_key_input() && (settings.has_profile_settings() || settings.accept_access) {
+        return Err(Fail::Tunnel(
+            "save profile settings first, then use --read-key or --key-file in a separate setup invocation",
+        ));
+    }
+    if occupied(&path)? {
+        if !settings.has_profile_settings() && !settings.has_key_input() && !settings.accept_access
+        {
+            return Err(Fail::Defer);
+        }
+        return setup::resume(options, root, &path);
+    }
+    if settings.has_key_input() {
+        return Err(Fail::Tunnel(
+            "save a tunnel profile with a tunnel ID before importing its private runtime key",
+        ));
+    }
+    let explicit = truthy(&settings.daemon_url).is_some() && truthy(&settings.token_file).is_some();
+    let (url, token) = discover(settings)?;
     let mut payload = Map::new();
     payload.insert("name".into(), Value::String(options.profile.clone()));
     payload.insert("daemon_url".into(), Value::String(url));
     payload.insert("token_file".into(), Value::String(token));
-    let s = &options.setup;
-    for (key, value) in [
-        ("tunnel_id", &s.tunnel_id),
-        ("organization_id", &s.organization_id),
-        ("minimum_catalog", &s.catalog),
-        ("runtime_key_expires_at", &s.key_expires_at),
-    ] {
-        if let Some(value) = value {
-            payload.insert(key.into(), Value::String(value.clone()));
-        }
-    }
+    settings.edit(&mut payload);
     if explicit {
         setup::save(options, root, &path, payload)
     } else {
@@ -1315,6 +1362,20 @@ mod tests {
         ]));
         assert!(ok(&["update", "--profile-dir", "d"]));
         assert!(ok(&["verify", "--profile", ""]));
+        assert!(
+            parse(&argv(&["setup", "--read-key"]))
+                .unwrap()
+                .setup
+                .read_key
+        );
+        assert_eq!(
+            parse(&argv(&["setup", "--key-file", "k"]))
+                .unwrap()
+                .setup
+                .key_file
+                .as_deref(),
+            Some("k")
+        );
         assert!(ok(&[
             "setup",
             "--accept-access",
@@ -1335,8 +1396,8 @@ mod tests {
             &["update", "--json"],
             &["verify", "--accept-access"],
             &["setup", "--catalog", "all"],
-            &["setup", "--read-key"],
-            &["setup", "--key-file", "k"],
+            &["setup", "--read-key", "--read-key"],
+            &["setup", "--key-file"],
             &["setup", "--start"],
             &["setup", "--open-browser", "keys"],
             &["status", "-h"],
