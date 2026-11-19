@@ -348,6 +348,20 @@ def test_code_paths_cannot_use_the_docs_selection(repo, code):
     assert docs_scope.docs_selection(env) == ("other", [])
 
 
+def test_unreadable_reader_selection_keeps_legacy_pr_lanes(repo, tmp_path, monkeypatch):
+    root, before, commit = repo
+    head = commit("docs/status.md")
+    env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example", "GITHUB_SHA": head}
+
+    def refuse(_):
+        raise ValueError("unreadable reader")
+
+    monkeypatch.setattr(docs_scope, "doc_tests", refuse)
+    ci, decision = ci_outputs(root, tmp_path, env, before)
+    assert decision == "unknown"
+    assert selected_lanes("ci.yml", CI_JOBS, "pull_request", ci) == {"guards", "lock-resolve", "frontend"}
+
+
 @pytest.mark.parametrize("event", ["push", "pull_request"])
 def test_docs_verdict_skips_both_static_required_parity_contexts(event):
     jobs = workflow("rust.yml")["jobs"]

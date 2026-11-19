@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity",
-  "before": "1fe2f405b77eded3",
-  "fingerprint": "294c5b7b8b80f792",
-  "reason": "Allows the existing successful-scope docs skip on direct master pushes. The two gate jobs run the same PowerShell verdict on their existing runners with no additional setup."
-}

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "e870c1b9a74bdfee",
+  "fingerprint": "d5f1543830f3c995",
+  "reason": "The parity scope helper fingerprint changes. Non-doc parity shard selection and execution remain the same; the documentation fast path is decided before the shard jobs."
+}

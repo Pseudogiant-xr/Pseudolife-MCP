@@ -182,12 +182,10 @@ under `docs/`. All of these hold first:
 - It is merged with a merge commit (`gh pr merge <n> --merge`), never
   squash.
 
-What it costs: a direct master push that matches the workflows' conservative
-documentation predicate runs the fast lanes listed in "What CI runs where".
-This predicate excludes some Markdown paths admitted by the rule above.
-A push outside the predicate still runs the whole push matrix and spends
-about one hosted run on the account's 20 slots, so do not merge one shortly
-before a batch opens.
+What it costs: a few hosted minutes for the doc guards. A push the workflows
+cannot classify as docs-only keeps the lanes it had before this shortcut,
+which can be the whole push matrix and about one hosted run on the account's
+20 slots, so do not merge one of those shortly before a batch opens.
 
 Who merges: the maintainer, or a session the maintainer delegated merges to
 in their own words. A change to `CLAUDE.md` or another policy page is

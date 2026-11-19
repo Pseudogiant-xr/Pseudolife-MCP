@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "ci.yml",
-  "job": "scope",
-  "before": "fea2d407b8bf12cd",
-  "fingerprint": "d18cf2d0d7518933",
-  "reason": "Records the legacy verdict before the push classifier can fetch an older tree. The same runner, checkout and scope processes remain, and a verified docs push changes only the emitted verdict."
-}
