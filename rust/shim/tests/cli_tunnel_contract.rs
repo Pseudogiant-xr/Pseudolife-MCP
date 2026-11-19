@@ -392,6 +392,42 @@ fn setup_repoints_a_moved_credential_after_explicit_consent() {
 }
 
 #[test]
+fn setup_points_first_key_with_expiry_to_two_native_steps() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+        }),
+    );
+    let dir = home.dir();
+    let expires = "2099-12-01T00:00:00Z";
+    for key_args in [&["--read-key"][..], &["--key-file", "unused-fixture"]] {
+        let mut args = vec!["setup", "--profile-dir", &dir, "--key-expires-at", expires];
+        args.extend_from_slice(key_args);
+        assert_refused(
+            &home,
+            &args,
+            &[],
+            "save the expiry with tunnel setup --key-expires-at first, then import the private key with --read-key or --key-file in a separate invocation\n",
+        );
+    }
+    assert!(daemon.records.lock().unwrap().is_empty());
+    let output = run(
+        &home,
+        &["setup", "--profile-dir", &dir, "--key-expires-at", expires],
+        &[],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let profile = std::fs::read(home.path("tunnels/dot.profile.json")).unwrap();
+    let profile: serde_json::Value = serde_json::from_slice(&profile).unwrap();
+    assert_eq!(profile["runtime_key_expires_at"], expires);
+    assert!(!home.path("tunnels/dot.key").exists());
+}
+
+#[test]
 fn setup_refuses_native_renewal_and_status_points_to_python() {
     let home = setup_home();
     let daemon = Listener::new();

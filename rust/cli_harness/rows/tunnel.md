@@ -72,7 +72,8 @@ These effects are covered in
 `shim/tests/cli_tunnel_contract.rs` against a disposable daemon fixture.
 The setup cases in this row exercise preflight refusals and deferrals.
 
-Save the profile and import the first runtime key in separate invocations.
+Save the profile settings, including any key expiry, and import the first
+runtime key in separate invocations.
 The key is read from an owner-only file or from a terminal without echo.
 Unix saves it in an owner-only file. Windows protects it with user-scoped
 DPAPI. The setup lock serializes native writes to the store. An interrupted

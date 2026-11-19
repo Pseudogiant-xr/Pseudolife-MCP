@@ -811,7 +811,13 @@ fn setup(options: &Options, root: &Path) -> Output {
     }
     let saved = occupied(&path)?;
     if saved && settings.has_key_input() && settings.key_expires_at.is_some() {
-        return Err(Fail::Tunnel(KEY_RENEWAL));
+        return Err(Fail::Tunnel(
+            if occupied(&store::key_path(root, &options.profile))? {
+                KEY_RENEWAL
+            } else {
+                "save the expiry with tunnel setup --key-expires-at first, then import the private key with --read-key or --key-file in a separate invocation"
+            },
+        ));
     }
     if settings.has_key_input() && (settings.has_profile_settings() || settings.accept_access) {
         return Err(if saved {
