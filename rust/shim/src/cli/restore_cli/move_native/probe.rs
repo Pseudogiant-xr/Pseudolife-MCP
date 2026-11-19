@@ -314,6 +314,16 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
     Ok(facts)
 }
 
+impl Facts {
+    pub(super) fn daemon_selector(&self) -> &str {
+        if self.daemon_id.is_empty() {
+            &self.daemon
+        } else {
+            &self.daemon_id
+        }
+    }
+}
+
 pub(super) fn container_id(id: &str) -> bool {
     id.len() == 64
         && id

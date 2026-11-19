@@ -117,15 +117,20 @@ impl Docker for Host {
         self.calls.push(args.to_vec());
         let a: Vec<&str> = args.iter().map(String::as_str).collect();
         match a.as_slice() {
-            ["inspect", name] | ["inspect", "--type=container", name] => match self.docs.get(*name)
-            {
-                Some(doc) => ok(&json!([doc]).to_string()),
-                None => Ran {
-                    code: 1,
-                    stderr: format!("Error: No such object: {name}").into_bytes(),
-                    ..Ran::default()
-                },
-            },
+            ["inspect", name] | ["inspect", "--type=container", name] => {
+                match self.docs.get(*name).or_else(|| {
+                    self.docs
+                        .values()
+                        .find(|doc| doc["Id"].as_str() == Some(*name))
+                }) {
+                    Some(doc) => ok(&json!([doc]).to_string()),
+                    None => Ran {
+                        code: 1,
+                        stderr: format!("Error: No such object: {name}").into_bytes(),
+                        ..Ran::default()
+                    },
+                }
+            }
             ["exec", _, "du", "-sk", "/data"] => ok(&self.du),
             ["version", ..] if self.engine.is_some() => Ran {
                 code: 1,
@@ -1033,7 +1038,7 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
             .here
             .calls
             .iter()
-            .any(|args| args == &["inspect", "--type=container", "pseudolife-mcp-daemon"])
+            .any(|args| args == &["inspect", "--type=container", &"1".repeat(64)])
     );
     for (target, argv, stdin) in &current.wire.runs {
         assert!(!target.contains(SENTINEL) && !argv.contains(SENTINEL));

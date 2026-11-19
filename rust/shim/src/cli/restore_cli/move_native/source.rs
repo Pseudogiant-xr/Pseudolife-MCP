@@ -181,11 +181,7 @@ pub(super) struct Live {
 
 impl Live {
     fn daemon(&self) -> &str {
-        if self.source.daemon_id.is_empty() {
-            &self.source.daemon
-        } else {
-            &self.source.daemon_id
-        }
+        self.source.daemon_selector()
     }
 
     fn bank(&mut self) -> Bank<'_, docker::Real> {
