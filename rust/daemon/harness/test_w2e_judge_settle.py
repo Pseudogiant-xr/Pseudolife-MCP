@@ -43,7 +43,6 @@ def bank():
             with cold_harness_imports():
                 from rust.harness_support.schema import ensure_schema
 
-                conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
                 ensure_schema(conn)  # every migration: the judge columns are among them
             conn.execute("INSERT INTO entities (canonical, display, created_at) VALUES "
                          "('alpha-node', 'Alpha Node', 1.0), ('alpha-service', 'Alpha Service', 1.0), "

@@ -107,7 +107,6 @@ def bank():
             with cold_harness_imports():
                 from rust.harness_support.schema import ensure_schema
 
-                conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
                 ensure_schema(conn)
             yield conn
     finally:
