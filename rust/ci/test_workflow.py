@@ -819,6 +819,12 @@ def test_scope_skips_a_documentation_only_pull_request(monkeypatch, files, event
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+def test_legacy_scope_keeps_census_companion_when_docs_plan_is_unavailable(monkeypatch, event):
+    assert run_scope(monkeypatch, event, ["docs/status.md", "rust/producer-census.json"]) == [
+        "full=true", "rust=false"]
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", CODE_CHANGES)
 def test_scope_runs_everything_for_any_other_change(monkeypatch, files, event):
     assert run_scope(monkeypatch, event, files) == ["full=true", "rust=true"]
