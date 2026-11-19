@@ -70,6 +70,7 @@ pub(super) fn source_with_token(
         return Err("the source does not report bearer authentication; configure a bearer on the source daemon, then retry move --dry-run".into());
     }
     let container = inspect(docker, facts.daemon_selector())
+        .filter(|container| facts.daemon_id.is_empty() || container["Id"] == facts.daemon_id)
         .ok_or("the source daemon's identity settings cannot be read; check Docker access and retry move --dry-run")?;
     let values = source_values(&container);
     let shape = shape(&values)?;
@@ -84,7 +85,7 @@ pub(super) fn source_with_token(
     let digest = format!("{:x}", Sha256::digest(token.as_bytes()));
     let mut bank = super::super::bank::Bank {
         docker,
-        pg: facts.pg.clone(),
+        pg: facts.pg_selector().to_owned(),
         daemon: facts.daemon_selector().to_owned(),
     };
     // An authenticated HTTP read can update a principal's last-seen time.

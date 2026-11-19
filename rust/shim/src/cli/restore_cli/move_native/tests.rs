@@ -69,6 +69,7 @@ fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
 
 fn pg_doc(project: &str) -> Value {
     json!({
+        "Id": "2".repeat(64),
         "Name": "/pseudolife-mcp-postgres",
         "State": {"Running": true},
         "Config": {"Labels": {"com.docker.compose.project": project}},
@@ -405,15 +406,15 @@ fn read_only(argv: &[String]) -> bool {
     match a.as_slice() {
         ["inspect", _] | ["inspect", "--type=container", _] => true,
         ["version", "--format", "{{.Server.Version}}"] => true,
-        ["exec", "pseudolife-mcp-daemon", "du", "-sk", "/data"] => true,
-        [
-            "exec",
-            "-e",
-            options,
-            "pseudolife-mcp-postgres",
-            "env",
-            rest @ ..,
-        ] if *options == READ_ONLY => {
+        ["exec", selector, "du", "-sk", "/data"]
+            if *selector == "pseudolife-mcp-daemon" || probe::container_id(selector) =>
+        {
+            true
+        }
+        ["exec", "-e", options, selector, "env", rest @ ..]
+            if *options == READ_ONLY
+                && (*selector == "pseudolife-mcp-postgres" || probe::container_id(selector)) =>
+        {
             let Some(at) = rest.iter().position(|w| *w == "psql") else {
                 return false;
             };
@@ -534,6 +535,7 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
         );
     }
     assert_eq!(document_of(&plan)["changed"], json!(false));
+    assert_eq!(document_of(&plan)["executable"], json!(true));
     assert_eq!(document_of(&plan)["target_url_tied"], json!(true));
 }
 
@@ -552,6 +554,26 @@ type Change<T> = Box<dyn Fn(&mut T)>;
 
 fn document_of(plan: &Plan) -> Value {
     document(plan)
+}
+
+#[test]
+fn source_requires_both_immutable_container_ids() {
+    for (name, role) in [
+        ("pseudolife-mcp-daemon", "daemon"),
+        ("pseudolife-mcp-postgres", "PostgreSQL"),
+    ] {
+        for bad_id in ["", "not-an-immutable-id"] {
+            let mut world = world();
+            world.here.docs.get_mut(name).unwrap()["Id"] = json!(bad_id);
+            let why = preflight(&mut world, &request()).unwrap_err();
+            assert!(
+                why.contains(role) && why.contains("immutable Docker container ID"),
+                "{why}"
+            );
+            assert!(world.wire.runs.is_empty());
+            assert!(world.here.calls.iter().all(|call| read_only(call)));
+        }
+    }
 }
 
 #[test]
@@ -1455,6 +1477,7 @@ fn a_daemon_the_gate_cannot_stop_and_an_unauthenticated_target_are_refused() {
     let facts = |dir: &str| Facts {
         daemon: "pseudolife-mcp-daemon".into(),
         daemon_id: "1".repeat(64),
+        pg_id: "2".repeat(64),
         data_dir: dir.into(),
         ..Facts::default()
     };
