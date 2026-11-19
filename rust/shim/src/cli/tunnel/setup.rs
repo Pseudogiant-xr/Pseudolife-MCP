@@ -389,6 +389,16 @@ fn publish_new(
     path: &Path,
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> Result<(), Fail> {
+    stage_and_publish(path, write, |stage| {
+        rename_new(stage, path).map_err(publication_error)
+    })
+}
+
+fn stage_and_publish(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+    publish: impl FnOnce(&Path) -> Result<(), Fail>,
+) -> Result<(), Fail> {
     let parent = path.parent().ok_or(Fail::Tunnel(DIRECTORY))?;
     let stage = parent.join(format!(".tunnel-setup-{}", uuid::Uuid::new_v4().simple()));
     let result = (|| {
@@ -397,7 +407,7 @@ fn publish_new(
             .and_then(|()| opened.file.sync_all())
             .map_err(|_| Fail::Tunnel(WRITE))?;
         drop(opened);
-        rename_new(&stage, path).map_err(publication_error)?;
+        publish(&stage)?;
         #[cfg(unix)]
         fs::File::open(parent)
             .and_then(|dir| dir.sync_all())
@@ -514,6 +524,32 @@ mod tests {
         });
         assert!(
             matches!(result, Err(Fail::Detail(message)) if message.contains(CLEANUP) && message.contains(&stage.display().to_string()))
+        );
+    }
+
+    #[test]
+    fn failed_replacement_names_the_leftover_stage_and_preserves_the_profile() {
+        let root = std::env::temp_dir().join(format!("tunnel-publish-{}", uuid::Uuid::new_v4()));
+        state::private_dir(&root).unwrap();
+        let profile = root.join("dot.profile.json");
+        state::atomic_create(&profile, b"saved fixture").unwrap();
+        let mut residue = std::path::PathBuf::new();
+        let result = stage_and_publish(
+            &profile,
+            |file| file.write_all(b"updated fixture"),
+            |stage| {
+                // Inject promotion failure and an entry that remove_file cannot unlink.
+                fs::remove_file(stage).unwrap();
+                fs::create_dir(stage).unwrap();
+                residue = stage.to_owned();
+                Err(Fail::Tunnel(WRITE))
+            },
+        );
+        let saved = state::read(&profile, 65536).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(saved, b"saved fixture");
+        assert!(
+            matches!(result, Err(Fail::Detail(message)) if message.contains(CLEANUP) && message.contains(&residue.display().to_string()))
         );
     }
 

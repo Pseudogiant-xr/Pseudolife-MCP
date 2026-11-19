@@ -2,7 +2,7 @@
 //! invocation publishes one file, so interruption cannot separate a key from
 //! the profile it belongs to.
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{IsTerminal, Write},
     path::Path,
 };
@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use super::{
     PROFILE_LIMIT, check_directory, consent_required, disclose, fill_profile_defaults,
-    profile_bytes, publish_new, saved_message, verify_connection,
+    profile_bytes, publish_new, saved_message, stage_and_publish, verify_connection,
 };
 use crate::{
     board::state,
@@ -123,12 +123,24 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     }
     let (_lock, expected) = commit_lock(root, path, &original)?;
     require_inactive(root, &updated.name, &status)?;
-    state::atomic_write(path, &bytes, Some(&expected)).map_err(|_| {
-        Fail::Detail(format!(
-            "could not update {}; check whether it changed or is writable before retrying",
-            path.display(),
-        ))
-    })?;
+    stage_and_publish(
+        path,
+        |file| file.write_all(&bytes),
+        |stage| {
+            if !state::open(path).is_ok_and(|current| current.identity == expected)
+                || !store::private_read(path, PROFILE_LIMIT)
+                    .is_ok_and(|current| current == original)
+            {
+                return Err(Fail::Tunnel(CHANGED));
+            }
+            store::sharing_retry(|| fs::rename(stage, path)).map_err(|_| {
+            Fail::Detail(format!(
+                "could not replace {}; check write access to the tunnel directory before retrying",
+                path.display(),
+            ))
+        })
+        },
+    )?;
     Ok(saved_message(options, root, &updated))
 }
 
