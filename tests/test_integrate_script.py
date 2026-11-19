@@ -1312,6 +1312,25 @@ def test_static_parity_siblings_share_a_verdict_only_while_their_definitions_mat
     assert integrate._static_parity_peer("parity", jobs) is None
 
 
+@pytest.mark.parametrize("job", GATES, ids=["windows", "ubuntu"])
+@pytest.mark.parametrize("sibling_conclusion", ["success", "cancelled", "failure"],
+                         ids=["own-failure", "cancelled-sibling", "cancel-step-sibling"])
+def test_a_static_parity_verdict_failure_keeps_a_member_out(world, capsys, job, sibling_conclusion):
+    sibling = next(gate for gate in GATES if gate != job)
+    # Report one verdict at a time. The run attempt is the only source for a
+    # second failure when the rollup shows the cancellation-shaped sibling.
+    rollup = [sibling] if sibling_conclusion == "failure" else [job]
+    _gate_world(world, _with(_RUN_1059, **{f"j{sibling}": sibling_conclusion}), rollup=rollup)
+    world.gh.actions_jobs[job]["steps"] = _steps([
+        ("Set up job", "success"), (CANCEL_STEP, "skipped"),
+        (VERDICT_STEP, "failure"), ("Complete job", "success"),
+    ])
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("run, rollup", [
     # A needed shard failed: a real failure, though the gate's rollup row is
     # all that names it here (and a cancel stopped the other shard).
