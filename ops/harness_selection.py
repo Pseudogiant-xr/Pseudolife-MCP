@@ -41,7 +41,7 @@ JOB_PROGRAMS = {
     "stress": {"rust/ci/stress.py", "rust/cli_harness/lease_ci.py"},
     "stress-report": {"rust/ci/stress.py", "rust/ci/stress_history.py"},
 }
-JOB_MODULES = {"scope": {"ops.ci_push_passed"}, "stress": {"evals.rust_port.oracle_selection"}}
+JOB_MODULES = {"scope": {"ops.ci_push_passed", "rust.ci.docs_scope"}, "stress": {"evals.rust_port.oracle_selection"}}
 
 
 class SelectionError(ValueError):

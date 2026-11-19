@@ -2120,6 +2120,37 @@ def test_digest_removal_waits_out_a_reader_holding_the_file(tmp_path):
     assert not digest.exists()
 
 
+def test_mail_payload_is_available_with_frozen_imports_blocked():
+    from cli_harness.rows import mail
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    with cold_harness_imports():
+        body = mail._body()
+    assert "m-0001 from reviewer (01234567, 22:53)" in body
+    assert "merged — ünïcödé ✓ and  nbsp" in body
+
+
+def test_doorbell_payloads_supply_matching_prompt_and_record_without_python(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from cli_harness.rows import hook
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    writes = []
+    monkeypatch.setattr(hook.p, "write_private", lambda path, text: writes.append(text))
+    expected = {"doorbell-positive": 2, "doorbell-positive-maintainer": 3,
+                "doorbell-legacy-record": None}
+    with cold_harness_imports():
+        cases = {case.id: case for case in hook._finish(hook._doorbell_cases())}
+        for name, version in expected.items():
+            case = cases[name]
+            case.setup(SimpleNamespace(home=tmp_path))
+            record = json.loads(writes[-1])
+            assert record.get("version") == version
+            assert json.loads(case.stdin)["prompt"] == record["text"]
+
+
 @pytest.mark.parametrize("held", ["digest", "ring"])
 def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatch, held):
     """digest-advances-later replaces the digest and ring while the Python
