@@ -336,7 +336,7 @@ jobs:
           tests/test_integrate_snapshot_admission.py tests/test_move_cli.py tests/test_operator_engine_transport.py
           tests/test_harness_database_turn.py tests/test_harness_database_turn_native.py tests/test_harness_selection.py
           tests/test_pdfium_pin.py tests/test_prune_worktrees.py tests/test_rehearse_activation.py
-          tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_schema_version_guard.py
+          tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_rust_release_image.py tests/test_schema_version_guard.py
           tests/test_update_engine.py tests/test_suite_classes.py
           tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
           tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
