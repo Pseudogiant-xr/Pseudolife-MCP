@@ -24,14 +24,13 @@ fn prepared(root: &Path) -> Prepared<'_> {
     });
     let profile_bytes = serde_json::to_vec(&payload).unwrap();
     let (_, profile) = store::decode_profile(&profile_bytes, "dot").unwrap();
-    let lock = run_lock(root, "dot").unwrap();
-    lock.try_lock().unwrap();
+    let locks = launch_locks(root, "dot").unwrap();
     Prepared {
         root,
         profile,
         profile_bytes,
         key: key::Key::fixture(),
-        _lock: lock,
+        _locks: locks,
     }
 }
 
@@ -54,6 +53,12 @@ fn vendor_fixture() {
     let Some(path) = std::env::var_os(CONFIG_ENV) else {
         return;
     };
+    let mode = std::env::var("PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE").unwrap();
+    if mode == "legacy-lock" {
+        let file = state::open_with_write(Path::new(&path), true).unwrap().file;
+        assert!(legacy_lock(&file));
+        return;
+    }
     let config: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     let reference = config["control_plane"]["api_key"].as_str().unwrap();
     let mut bytes = Vec::new();
@@ -66,7 +71,6 @@ fn vendor_fixture() {
     assert!(
         std::env::vars_os().all(|(_, val)| !val.to_string_lossy().contains("fixture-runtime-key"))
     );
-    let mode = std::env::var("PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE").unwrap();
     if mode == "early-exit" {
         return;
     }
@@ -115,7 +119,7 @@ fn foreground_launch_owns_one_child_and_stop_waits_for_cleanup() {
         let Some(ready) = ready else {
             panic!("fixture did not become ready: {:?}", run.join().unwrap());
         };
-        let lock = run_lock(&home.0, "dot").unwrap();
+        let lock = open_lock(&home.0, "dot", &lock_path(&home.0, "dot")).unwrap();
         let busy = matches!(lock.try_lock(), Err(fs::TryLockError::WouldBlock));
         let stage = stage_path(&home.0, launch_id(&ready.native_launch).unwrap());
         let wrong = Uuid::new_v4().simple().to_string();
@@ -153,8 +157,8 @@ fn early_exit_and_readiness_timeout_release_the_launch_files() {
         });
         assert_eq!(result, Err(NOT_READY));
         assert!(started.elapsed() < Duration::from_secs(10));
-        assert_eq!(fs::read_dir(&home.0).unwrap().count(), 1);
-        assert!(run_lock(&home.0, "dot").unwrap().try_lock().is_ok());
+        assert_eq!(fs::read_dir(&home.0).unwrap().count(), 2);
+        assert!(launch_locks(&home.0, "dot").is_ok());
     }
 }
 
@@ -179,7 +183,7 @@ fn the_runtime_key_must_differ_from_the_private_daemon_credential() {
 #[test]
 fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
     let home = Home::new();
-    let lock = run_lock(&home.0, "dot").unwrap();
+    let lock = open_lock(&home.0, "dot", &lock_path(&home.0, "dot")).unwrap();
     lock.try_lock().unwrap();
     assert!(stop(&home.0, "dot").is_err());
     drop(lock);
@@ -201,7 +205,7 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
         ready: true,
     };
     state::atomic_write(&path, &serde_json::to_vec(&owner).unwrap(), None).unwrap();
-    let _lock = run_lock(&home.0, "dot").unwrap();
+    let _lock = open_lock(&home.0, "dot", &lock_path(&home.0, "dot")).unwrap();
     assert!(
         matches!(stop(&home.0, "dot"), Err(Fail::Detail(message)) if message.contains("cannot be verified"))
     );
@@ -227,4 +231,46 @@ fn readiness_accepts_only_the_bounded_literal_loopback_port() {
         health_url(&file).as_deref(),
         Some("http://127.0.0.1:1776/readyz")
     );
+}
+
+#[test]
+fn native_and_legacy_launch_locks_exclude_each_other() {
+    let home = Home::new();
+    let legacy_path = home.0.join("dot.lock");
+    state::atomic_create(&legacy_path, b"0").unwrap();
+    let probe = || {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", FIXTURE])
+            .env(CONFIG_ENV, &legacy_path)
+            .env("PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE", "legacy-lock")
+            .output()
+            .unwrap();
+        output.status.success()
+    };
+    let locks = launch_locks(&home.0, "dot").unwrap();
+    assert!(!probe());
+    drop(locks);
+    assert!(probe());
+
+    let legacy = state::open_with_write(&legacy_path, true).unwrap().file;
+    assert!(legacy_lock(&legacy));
+    assert!(launch_locks(&home.0, "dot").is_err());
+    assert!(stop(&home.0, "dot").is_err());
+    drop(legacy);
+    assert!(launch_locks(&home.0, "dot").is_ok());
+}
+
+#[cfg(unix)]
+fn legacy_lock(file: &File) -> bool {
+    rustix::fs::flock(file, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_ok()
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn legacy_lock(file: &File) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    // Like msvcrt.locking(fd, LK_NBLCK, 1) at offset zero.
+    unsafe {
+        windows_sys::Win32::Storage::FileSystem::LockFile(file.as_raw_handle(), 0, 0, 1, 0) != 0
+    }
 }

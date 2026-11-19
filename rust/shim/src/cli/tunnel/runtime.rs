@@ -89,7 +89,7 @@ struct Prepared<'a> {
     profile: Profile,
     profile_bytes: Vec<u8>,
     key: key::Key,
-    _lock: File,
+    _locks: (File, File),
 }
 
 fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
@@ -121,8 +121,7 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
         ));
     }
     let key = key::Key::load(root, name)?;
-    let lock = run_lock(root, name)?;
-    lock.try_lock().map_err(|_| conflict(root, name))?;
+    let locks = launch_locks(root, name)?;
     let record = record::path(root, name);
     if store::occupied(&record).map_err(|_| conflict(root, name))? {
         return Err(conflict(root, name));
@@ -138,7 +137,7 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
         profile,
         profile_bytes: bytes,
         key,
-        _lock: lock,
+        _locks: locks,
     })
 }
 
@@ -167,14 +166,28 @@ fn lock_path(root: &Path, name: &str) -> PathBuf {
     root.join(format!("{name}.native-run.lock"))
 }
 
-fn run_lock(root: &Path, name: &str) -> Result<File, Fail> {
-    let path = store::checked_path(&lock_path(root, name)).map_err(|_| conflict(root, name))?;
+fn legacy_lock_path(root: &Path, name: &str) -> PathBuf {
+    root.join(format!("{name}.lock"))
+}
+
+fn open_lock(root: &Path, name: &str, path: &Path) -> Result<File, Fail> {
+    let path = store::checked_path(path).map_err(|_| conflict(root, name))?;
     if !store::occupied(&path).map_err(|_| conflict(root, name))? {
         drop(state::create(&path));
     }
     state::open_with_write(&path, true)
         .map(|opened| opened.file)
         .map_err(|_| conflict(root, name))
+}
+
+fn launch_locks(root: &Path, name: &str) -> Result<(File, File), Fail> {
+    let native = open_lock(root, name, &lock_path(root, name))?;
+    native.try_lock().map_err(|_| conflict(root, name))?;
+    // The retained Python client flocks this file on Unix and locks its
+    // first byte on Windows. Rust's Windows whole-file lock overlaps it.
+    let legacy = open_lock(root, name, &legacy_lock_path(root, name))?;
+    legacy.try_lock().map_err(|_| conflict(root, name))?;
+    Ok((native, legacy))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -471,10 +484,11 @@ pub(super) fn stop(root: &Path, name: &str) -> Output {
     let record_path = record::path(root, name);
     let stopped = || Ok((format!("Tunnel {name} is stopped.\n"), 0));
     if !store::occupied(&record_path).map_err(|_| conflict(root, name))? {
-        let path = lock_path(root, name);
-        if store::occupied(&path).map_err(|_| conflict(root, name))? {
-            let lock = state::open_with_write(&path, true).map_err(|_| conflict(root, name))?;
-            lock.file.try_lock().map_err(|_| conflict(root, name))?;
+        for path in [lock_path(root, name), legacy_lock_path(root, name)] {
+            if store::occupied(&path).map_err(|_| conflict(root, name))? {
+                let lock = state::open_with_write(&path, true).map_err(|_| conflict(root, name))?;
+                lock.file.try_lock().map_err(|_| conflict(root, name))?;
+            }
         }
         return stopped();
     }
