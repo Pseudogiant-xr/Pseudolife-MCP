@@ -1067,6 +1067,7 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
     assert!(!output.contains("The move would, in this order"));
     assert!(!output.contains("run it without --dry-run to move"));
     assert!(steps(&plan).is_empty());
+    assert_eq!(document(&plan)["executable"], false);
     let mut old = world();
     assert!(
         preflight(&mut old, &request)

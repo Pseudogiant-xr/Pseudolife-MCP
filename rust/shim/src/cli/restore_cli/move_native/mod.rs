@@ -552,6 +552,7 @@ fn document(plan: &Plan) -> Value {
         "steps": steps(plan),
     });
     if plan.checked_carry {
+        value["executable"] = json!(false);
         value["carried_identities"] = json!(CARRY_RESULT);
     }
     value

@@ -26,6 +26,7 @@ const STACK: &str = "the target's running Docker stack cannot be reproduced from
 const ENV: &str = "the target's Compose environment is not a private writable file owned by the SSH account; restore the original file and make it owner-only, then retry move --dry-run";
 const DAEMON_SERVICE: &str = "pseudolife-daemon";
 const PG_SERVICE: &str = "pseudolife-pg";
+const INTERPOLATION: &str = "the target's Compose files do not apply the carried identity settings without changing other settings; restore its original identity interpolation and retry move --dry-run";
 
 fn docker_run(docker: &mut impl Docker, args: &[&str]) -> docker::Ran {
     let args: Vec<String> = args.iter().map(|&arg| arg.to_owned()).collect();
@@ -150,6 +151,47 @@ fn private_env(path: &Path) -> Result<(), String> {
 }
 
 pub(super) fn target(docker: &mut docker::Real, shape: [bool; 4]) -> Result<(), String> {
+    let program = docker.program.clone();
+    target_with(docker, shape, |deployment, args, env| {
+        deployment.compose(&program, args, env)
+    })
+}
+
+struct Deployment {
+    args: Vec<String>,
+    tag: String,
+    daemon_hash: String,
+    pg_hash: String,
+}
+
+impl Deployment {
+    fn compose(
+        &self,
+        program: &Path,
+        suffix: &[&str],
+        overrides: &seams::Environment,
+    ) -> Result<String, String> {
+        let argv = std::iter::once(program.to_str().ok_or(STACK)?.to_owned())
+            .chain(self.args.iter().cloned())
+            .chain(suffix.iter().map(|&arg| arg.to_owned()))
+            .collect::<Vec<_>>();
+        let mut env: seams::Environment = std::env::vars_os()
+            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+            .filter(|(key, _)| !key.starts_with("PSEUDOLIFE_") && !key.starts_with("COMPOSE_"))
+            .collect();
+        env.insert("PSEUDOLIFE_IMAGE_TAG".into(), self.tag.clone());
+        env.extend(overrides.clone());
+        let (code, output) = seams::run_cli(&argv, Some(&env), 120, false);
+        // Compose can print environment values even on failure.
+        (code == 0).then_some(output).ok_or_else(|| STACK.into())
+    }
+}
+
+fn target_with(
+    docker: &mut impl Docker,
+    shape: [bool; 4],
+    mut run: impl FnMut(&Deployment, &[&str], &seams::Environment) -> Result<String, String>,
+) -> Result<(), String> {
     use super::super::bank::{DAEMON_CONTAINER, PG_CONTAINER};
     let daemon = inspect(docker, DAEMON_CONTAINER).ok_or(STACK)?;
     let pg = inspect(docker, PG_CONTAINER).ok_or(STACK)?;
@@ -182,11 +224,14 @@ pub(super) fn target(docker: &mut docker::Real, shape: [bool; 4]) -> Result<(), 
         docker,
         &["image", "inspect", "--format", "{{.Id}}", reference],
     );
-    if !local.ok() || daemon["Image"] != String::from_utf8_lossy(&local.stdout).trim() {
+    let image_id = daemon["Image"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or(STACK)?;
+    if !local.ok() || image_id != String::from_utf8_lossy(&local.stdout).trim() {
         return Err("the target's installed daemon tag no longer names its running image; restore that image tag, then retry move --dry-run".into());
     }
     let args = [
-        docker.program.to_str().ok_or(STACK)?,
         "compose",
         "--project-name",
         project,
@@ -202,37 +247,23 @@ pub(super) fn target(docker: &mut docker::Real, shape: [bool; 4]) -> Result<(), 
         }
         args.extend(["-f".into(), file.into()]);
     }
-    let mut env: seams::Environment = std::env::vars()
-        .filter(|(key, _)| !key.starts_with("PSEUDOLIFE_") && !key.starts_with("COMPOSE_"))
-        .collect();
-    env.insert("PSEUDOLIFE_IMAGE_TAG".into(), tag.into());
-    let run = |suffix: &[&str], env: &seams::Environment| {
-        let argv: Vec<String> = args
-            .iter()
-            .cloned()
-            .chain(suffix.iter().map(|&arg| arg.to_owned()))
-            .collect();
-        let (code, output) = seams::run_cli(&argv, Some(env), 120, false);
-        (code == 0).then_some(output).ok_or(STACK)
-    };
-    let hashes = run(&["config", "--hash", "*"], &env)?;
-    for (service, labels) in [(DAEMON_SERVICE, labels), (PG_SERVICE, pg_labels)] {
-        let hash = labels["com.docker.compose.config-hash"]
+    let deployment = Deployment {
+        args,
+        tag: tag.into(),
+        daemon_hash: label("com.docker.compose.config-hash")?.into(),
+        pg_hash: pg_labels["com.docker.compose.config-hash"]
             .as_str()
             .filter(|s| !s.is_empty())
-            .ok_or(STACK)?;
-        if !hashes
-            .lines()
-            .any(|line| line.split_ascii_whitespace().eq([service, hash]))
-        {
-            return Err(STACK.into());
-        }
-    }
-    let render = |env: &seams::Environment| -> Result<Value, String> {
-        let out = run(&["config", "--format", "json"], env)?;
+            .ok_or(STACK)?
+            .into(),
+    };
+    let mut env = seams::Environment::new();
+    deployment.check_hashes(&run(&deployment, &["config", "--hash", "*"], &env)?)?;
+    let mut render = |env: &seams::Environment| -> Result<Value, String> {
+        let out = run(&deployment, &["config", "--format", "json"], env)?;
         serde_json::from_str(&out).map_err(|_| STACK.into())
     };
-    let mut original = render(&env)?;
+    let original = render(&env)?;
     if !mounts_match(&original, DAEMON_SERVICE, &daemon, |path| path == "/data")
         || !mounts_match(&original, PG_SERVICE, &pg, |path| {
             path.starts_with("/var/lib/postgresql")
@@ -240,21 +271,55 @@ pub(super) fn target(docker: &mut docker::Real, shape: [bool; 4]) -> Result<(), 
     {
         return Err(STACK.into());
     }
-    let daemon_env = original["services"][DAEMON_SERVICE]["environment"]
-        .as_object_mut()
-        .ok_or(STACK)?;
     for (index, key) in KEYS.into_iter().enumerate() {
         if index == 3 && !shape[index] {
             continue;
         }
         let sample = if shape[index] { SAMPLE[index] } else { "" };
-        daemon_env.insert(key.into(), sample.into());
         env.insert(key.into(), sample.into());
     }
-    if render(&env)? != original {
-        return Err("the target's Compose files do not apply the carried identity settings without changing other settings; restore its original identity interpolation and retry move --dry-run".into());
+    if render(&env)?
+        != with_identities(
+            original.clone(),
+            env.iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        )?
+    {
+        return Err(INTERPOLATION.into());
     }
     Ok(())
+}
+
+impl Deployment {
+    fn check_hashes(&self, hashes: &str) -> Result<(), String> {
+        for (service, hash) in [
+            (DAEMON_SERVICE, &self.daemon_hash),
+            (PG_SERVICE, &self.pg_hash),
+        ] {
+            if !hashes
+                .lines()
+                .any(|line| line.split_ascii_whitespace().eq([service, hash.as_str()]))
+            {
+                return Err(STACK.into());
+            }
+        }
+        Ok(())
+    }
+}
+
+fn with_identities<'key, 'value>(
+    mut config: Value,
+    settings: impl IntoIterator<Item = (&'key str, &'value str)>,
+) -> Result<Value, String> {
+    let env = config["services"][DAEMON_SERVICE]["environment"]
+        .as_object_mut()
+        .ok_or(STACK)?;
+    env.extend(
+        settings
+            .into_iter()
+            .map(|(key, value)| (key.into(), value.into())),
+    );
+    Ok(config)
 }
 
 fn mounts_match(config: &Value, service: &str, container: &Value, data: fn(&str) -> bool) -> bool {
@@ -287,6 +352,142 @@ fn mounts_match(config: &Value, service: &str, container: &Value, data: fn(&str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn target_refuses_inconsistent_installed_compose_identity() {
+        use crate::cli::restore_cli::bank::{DAEMON_CONTAINER, PG_CONTAINER};
+        use serde_json::json;
+        use std::fs;
+
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        struct Inspect {
+            daemon: Value,
+            pg: Value,
+            image: &'static str,
+        }
+        impl Docker for Inspect {
+            fn run_io(
+                &mut self,
+                args: &[String],
+                _: Duration,
+                _: docker::Input<'_>,
+                _: docker::Output<'_>,
+            ) -> docker::Ran {
+                let argv: Vec<_> = args.iter().map(String::as_str).collect();
+                let output = match argv.as_slice() {
+                    ["inspect", "--type=container", DAEMON_CONTAINER] => {
+                        json!([self.daemon]).to_string()
+                    }
+                    ["inspect", "--type=container", PG_CONTAINER] => json!([self.pg]).to_string(),
+                    ["image", "inspect", "--format", "{{.Id}}", _] => self.image.into(),
+                    _ => panic!("unexpected Docker command"),
+                };
+                docker::Ran {
+                    stdout: output.into_bytes(),
+                    ..docker::Ran::default()
+                }
+            }
+        }
+        let path = std::env::temp_dir().join(format!("pl-carry-target-{}", uuid::Uuid::new_v4()));
+        crate::board::state::private_dir(&path).unwrap();
+        let scratch = Scratch(path);
+        docker::private_file(&scratch.0.join(".env")).unwrap();
+        let compose = scratch.0.join("compose.yml");
+        fs::write(&compose, "").unwrap();
+        let daemon = json!({
+            "Image": "sha256:fixture",
+            "Config": {
+                "Image":"ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.25.0",
+                "Labels": {
+                    "com.docker.compose.project": "fixture",
+                    "com.docker.compose.project.working_dir": scratch.0,
+                    "com.docker.compose.project.config_files": compose,
+                    "com.docker.compose.service": DAEMON_SERVICE,
+                    "com.docker.compose.config-hash":"daemon-hash",
+                },
+            },
+            "Mounts":[{"Destination":"/data","Type":"volume","Name":"fixture-data"}],
+        });
+        let pg = json!({
+            "Config":{"Labels":{
+                "com.docker.compose.project":"fixture",
+                "com.docker.compose.service":PG_SERVICE,
+                "com.docker.compose.config-hash":"pg-hash",
+            }},
+            "Mounts":[{"Destination":"/var/lib/postgresql","Type":"volume","Name":"fixture-bank"}],
+        });
+        let original = json!({
+            "services": {
+                DAEMON_SERVICE: {"environment":{},"volumes":[{"target":"/data","type":"volume","source":"data"}]},
+                PG_SERVICE: {"volumes":[{"target":"/var/lib/postgresql","type":"volume","source":"bank"}]},
+            },
+            "volumes":{"data":{"name":"fixture-data"},"bank":{"name":"fixture-bank"}},
+        });
+        for case in [
+            "valid",
+            "project",
+            "daemon service",
+            "pg service",
+            "tag",
+            "image",
+            "daemon hash",
+            "pg hash",
+            "interpolation",
+        ] {
+            let mut docker = Inspect {
+                daemon: daemon.clone(),
+                pg: pg.clone(),
+                image: "sha256:fixture",
+            };
+            match case {
+                "project" => {
+                    docker.pg["Config"]["Labels"]["com.docker.compose.project"] = json!("other")
+                }
+                "daemon service" => {
+                    docker.daemon["Config"]["Labels"]["com.docker.compose.service"] = json!("other")
+                }
+                "pg service" => {
+                    docker.pg["Config"]["Labels"]["com.docker.compose.service"] = json!("other")
+                }
+                "tag" => {
+                    docker.daemon["Config"]["Image"] =
+                        json!("ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:latest")
+                }
+                "image" => docker.image = "sha256:other",
+                _ => {}
+            }
+            let result = target_with(&mut docker, [true, false, false, false], |_, args, env| {
+                if args == ["config", "--hash", "*"] {
+                    let daemon = if case == "daemon hash" {
+                        "other"
+                    } else {
+                        "daemon-hash"
+                    };
+                    let pg = if case == "pg hash" {
+                        "other"
+                    } else {
+                        "pg-hash"
+                    };
+                    return Ok(format!("{DAEMON_SERVICE} {daemon}\n{PG_SERVICE} {pg}\n"));
+                }
+                assert_eq!(args, ["config", "--format", "json"]);
+                let mut rendered = original.clone();
+                if case != "interpolation" {
+                    for (key, value) in env {
+                        rendered["services"][DAEMON_SERVICE]["environment"][key] = json!(value);
+                    }
+                }
+                Ok(rendered.to_string())
+            });
+            assert_eq!(result.is_ok(), case == "valid", "{case}");
+        }
+    }
 
     #[test]
     fn target_data_mount_must_name_the_installed_volume() {
