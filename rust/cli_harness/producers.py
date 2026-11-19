@@ -1,18 +1,14 @@
-"""Seed state through the oracle's own writers, not hand-built bytes.
-
-The harness imports the oracle checkout's modules (``use_oracle`` puts its
-source first on ``sys.path``) and calls the functions that write these files
-in production: the coordination adapter's private atomic writer and its
-digest renderer.
-"""
+"""Load captured CLI payloads and seed them through the private writer."""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from pathlib import Path
 
 _SOURCE: Path | None = None
+_PAYLOADS = json.loads(Path(__file__).with_name("producer_payloads.json").read_text(encoding="utf-8"))
 
 
 def use_oracle(source: Path) -> None:
@@ -48,17 +44,12 @@ def write_private(path: Path, body: str) -> None:
         raise RuntimeError(f"producer could not write {path}")
 
 
-def render(count: int, preview: list[dict], maintainer: int = 0) -> str:
-    """The real renderer with its clock read in UTC, so the seeded bytes (and
-    the goldens recorded from them) are the same in every timezone."""
-    import time  # noqa: PLC0415
-    module = _adapter_module()
-    original = module.time.localtime
-    module.time.localtime = time.gmtime
-    try:
-        return module.render_digest(count, preview, maintainer)
-    finally:
-        module.time.localtime = original
+def wait_mail_digest() -> str:
+    return _PAYLOADS["wait_mail_digest"]
+
+
+def doorbell_record(kind: str) -> str:
+    return _PAYLOADS["doorbell_records"][kind]
 
 
 def write_digest(path: Path, watermark: int, text: str) -> None:
@@ -74,9 +65,3 @@ def write_ring(path: Path, watermark: int, decision: str, reason: str) -> None:
 def write_seen(path: Path, watermark: int) -> None:
     # ``CoordinationAdapter._mark_seen``'s body.
     write_private(path, f"{watermark}\n")
-
-
-def preview(message_id: str, sender: str, excerpt: str, created_at: float = 1_791_500_000.0,
-            agent: str = "0123456789abcdef0123456789abcdef") -> dict:
-    return {"message_id": message_id, "sender_label": sender, "created_at": created_at,
-            "sender_agent_id": agent, "excerpt": excerpt}

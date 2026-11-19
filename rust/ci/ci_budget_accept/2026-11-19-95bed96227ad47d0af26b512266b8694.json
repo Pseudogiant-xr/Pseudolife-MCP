@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "af168ac1178ab8a3",
+  "fingerprint": "52869779b5c29f68",
+  "reason": "The existing Rust-only guards step adds one file of in-process release workflow assertions. It shares the current runner and dependencies, adds no setup or subprocesses, and keeps the existing job budget."
+}
