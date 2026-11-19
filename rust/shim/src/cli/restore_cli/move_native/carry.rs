@@ -4,6 +4,7 @@
 //! bearer from a dry run.
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::super::docker::{self, Docker};
@@ -27,6 +28,33 @@ const ENV: &str = "the target's Compose environment is not a private writable fi
 const DAEMON_SERVICE: &str = "pseudolife-daemon";
 const PG_SERVICE: &str = "pseudolife-pg";
 const INTERPOLATION: &str = "the target's Compose files do not apply the carried identity settings without changing other settings; restore its original identity interpolation and retry move --dry-run";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::cli) struct TargetPins {
+    pub(super) daemon: String,
+    pub(super) postgres: String,
+}
+
+impl TargetPins {
+    pub(super) fn from_facts(facts: &Facts) -> Option<Self> {
+        (super::probe::container_id(&facts.daemon_id) && super::probe::container_id(&facts.pg_id))
+            .then(|| Self {
+                daemon: facts.daemon_id.clone(),
+                postgres: facts.pg_id.clone(),
+            })
+    }
+
+    pub(super) fn inspect(docker: &mut impl Docker, id: &str) -> Result<Value, String> {
+        if !super::probe::container_id(id) {
+            return Err(TARGET_PIN.into());
+        }
+        inspect(docker, id)
+            .filter(|container| container["Id"] == id)
+            .ok_or_else(|| TARGET_PIN.into())
+    }
+}
+
+const TARGET_PIN: &str = "the target's selected Docker containers could not be verified by immutable ID; restore the original Compose stack and retry move --dry-run";
 
 fn docker_run(docker: &mut impl Docker, args: &[&str]) -> docker::Ran {
     let args: Vec<String> = args.iter().map(|&arg| arg.to_owned()).collect();
@@ -151,9 +179,13 @@ fn private_env(path: &Path) -> Result<(), String> {
     Err(ENV.into())
 }
 
-pub(super) fn target(docker: &mut docker::Real, shape: [bool; 4]) -> Result<(), String> {
+pub(super) fn target(
+    docker: &mut docker::Real,
+    shape: [bool; 4],
+    pins: Option<&TargetPins>,
+) -> Result<(), String> {
     let program = docker.program.clone();
-    target_with(docker, shape, |deployment, args, env| {
+    target_with(docker, shape, pins, |deployment, args, env| {
         deployment.compose(&program, args, env)
     })
 }
@@ -191,11 +223,21 @@ impl Deployment {
 fn target_with(
     docker: &mut impl Docker,
     shape: [bool; 4],
+    pins: Option<&TargetPins>,
     mut run: impl FnMut(&Deployment, &[&str], &seams::Environment) -> Result<String, String>,
 ) -> Result<(), String> {
     use super::super::bank::{DAEMON_CONTAINER, PG_CONTAINER};
-    let daemon = inspect(docker, DAEMON_CONTAINER).ok_or(STACK)?;
-    let pg = inspect(docker, PG_CONTAINER).ok_or(STACK)?;
+    let (daemon, pg) = if let Some(pins) = pins {
+        (
+            TargetPins::inspect(docker, &pins.daemon)?,
+            TargetPins::inspect(docker, &pins.postgres)?,
+        )
+    } else {
+        (
+            inspect(docker, DAEMON_CONTAINER).ok_or(STACK)?,
+            inspect(docker, PG_CONTAINER).ok_or(STACK)?,
+        )
+    };
     let labels = &daemon["Config"]["Labels"];
     let pg_labels = &pg["Config"]["Labels"];
     let label = |key: &str| labels[key].as_str().filter(|s| !s.is_empty()).ok_or(STACK);
@@ -354,6 +396,39 @@ fn mounts_match(config: &Value, service: &str, container: &Value, data: fn(&str)
 mod tests {
     use super::*;
 
+    #[test]
+    fn carried_settings_reject_a_substitute_at_the_pinned_target_id() {
+        struct Replaced {
+            selector: String,
+            returned: String,
+        }
+        impl Docker for Replaced {
+            fn run_io(
+                &mut self,
+                argv: &[String],
+                _: Duration,
+                _: docker::Input<'_>,
+                _: docker::Output<'_>,
+            ) -> docker::Ran {
+                assert_eq!(argv, ["inspect", "--type=container", &self.selector]);
+                docker::Ran {
+                    stdout: serde_json::to_vec(&serde_json::json!([{"Id": self.returned}]))
+                        .unwrap(),
+                    ..docker::Ran::default()
+                }
+            }
+        }
+
+        let id = "1".repeat(64);
+        let mut docker = Replaced {
+            selector: id.clone(),
+            returned: "2".repeat(64),
+        };
+        assert!(TargetPins::inspect(&mut docker, &id).is_err());
+        docker.returned = id.clone();
+        assert!(TargetPins::inspect(&mut docker, &id).is_ok());
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn target_refuses_inconsistent_installed_compose_identity() {
@@ -463,29 +538,34 @@ mod tests {
                 "image" => docker.image = "sha256:other",
                 _ => {}
             }
-            let result = target_with(&mut docker, [true, false, false, false], |_, args, env| {
-                if args == ["config", "--hash", "*"] {
-                    let daemon = if case == "daemon hash" {
-                        "other"
-                    } else {
-                        "daemon-hash"
-                    };
-                    let pg = if case == "pg hash" {
-                        "other"
-                    } else {
-                        "pg-hash"
-                    };
-                    return Ok(format!("{DAEMON_SERVICE} {daemon}\n{PG_SERVICE} {pg}\n"));
-                }
-                assert_eq!(args, ["config", "--format", "json"]);
-                let mut rendered = original.clone();
-                if case != "interpolation" {
-                    for (key, value) in env {
-                        rendered["services"][DAEMON_SERVICE]["environment"][key] = json!(value);
+            let result = target_with(
+                &mut docker,
+                [true, false, false, false],
+                None,
+                |_, args, env| {
+                    if args == ["config", "--hash", "*"] {
+                        let daemon = if case == "daemon hash" {
+                            "other"
+                        } else {
+                            "daemon-hash"
+                        };
+                        let pg = if case == "pg hash" {
+                            "other"
+                        } else {
+                            "pg-hash"
+                        };
+                        return Ok(format!("{DAEMON_SERVICE} {daemon}\n{PG_SERVICE} {pg}\n"));
                     }
-                }
-                Ok(rendered.to_string())
-            });
+                    assert_eq!(args, ["config", "--format", "json"]);
+                    let mut rendered = original.clone();
+                    if case != "interpolation" {
+                        for (key, value) in env {
+                            rendered["services"][DAEMON_SERVICE]["environment"][key] = json!(value);
+                        }
+                    }
+                    Ok(rendered.to_string())
+                },
+            );
             assert_eq!(result.is_ok(), case == "valid", "{case}");
         }
     }

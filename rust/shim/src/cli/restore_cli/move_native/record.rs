@@ -166,6 +166,8 @@ pub(super) struct Record {
     pub source: super::probe::Facts,
     /// The target daemon's image, for the manual rollback's gate command.
     pub target_image: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_pins: Option<super::carry::TargetPins>,
     /// The move's folder on the target, and what its files took at the last
     /// reading.
     pub remote_folder: String,

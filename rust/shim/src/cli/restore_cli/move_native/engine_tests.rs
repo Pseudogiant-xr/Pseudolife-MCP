@@ -773,6 +773,7 @@ fn plan() -> Plan {
             ..Default::default()
         },
         target_image: "pseudolife-daemon:test".into(),
+        target_pins: None,
         target_url: "http://100.64.0.2:8765".into(),
         work_dir: String::new(),
         source_bank: BANK.into(),
@@ -3249,4 +3250,36 @@ fn a_target_is_given_up_only_after_three_attempts_get_no_answer() {
         outcome.message
     );
     assert!(!outcome.message.contains("asked of"), "{}", outcome.message);
+}
+
+#[test]
+fn manual_rollback_uses_target_pins_and_guides_replacement_postgres_recovery() {
+    let pg = "3".repeat(64);
+    let target_daemon = "4".repeat(64);
+    let mut record = Record {
+        target: "target".into(),
+        target_pins: Some(super::carry::TargetPins {
+            daemon: target_daemon.clone(),
+            postgres: "5".repeat(64),
+        }),
+        source: super::probe::Facts {
+            pg_id: pg.clone(),
+            pg_sources: vec!["original-pg-volume".into()],
+            pg_compose_project: "original-source".into(),
+            port: 5439,
+            ..super::probe::Facts::default()
+        },
+        ..Record::default()
+    };
+    record.flags.target_quiesced = true;
+    record.flags.fenced = true;
+    let commands = engine::manual_rollback(&record).join("\n");
+    assert!(commands.contains(&format!("ssh target docker start {target_daemon}")));
+    assert!(commands.contains("original-pg-volume"));
+    assert!(
+        commands.contains(
+            "docker exec <verified-source-postgres-id> psql -h /var/run/postgresql -p 5439"
+        )
+    );
+    assert!(!commands.contains(&format!("docker exec {pg}")));
 }

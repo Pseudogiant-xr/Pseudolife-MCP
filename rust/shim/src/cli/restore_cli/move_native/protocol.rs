@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::target::Ask;
+use super::{carry::TargetPins, target::Ask};
 
 /// The protocol this client's source speaks for a move's transaction.
 pub(in crate::cli) const PROTOCOL: u32 = 2;
@@ -133,6 +133,8 @@ pub(in crate::cli) struct Request {
     /// Sent by the rollback: allowed after the move's abort.
     #[serde(default)]
     pub rollback: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins: Option<TargetPins>,
     #[serde(flatten)]
     pub op: Op,
 }

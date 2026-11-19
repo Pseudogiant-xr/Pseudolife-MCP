@@ -577,6 +577,34 @@ fn source_requires_both_immutable_container_ids() {
 }
 
 #[test]
+fn carried_execution_refuses_missing_or_invalid_source_ids_before_ssh() {
+    let mut request = request();
+    request.no_keep_tokens = false;
+    request.dry_run = false;
+    for name in ["pseudolife-mcp-daemon", "pseudolife-mcp-postgres"] {
+        for id in ["", &"z".repeat(64)] {
+            let mut world = world();
+            world.here.docs.get_mut(name).unwrap()["Id"] = json!(id);
+            assert!(
+                preflight(&mut world, &request)
+                    .unwrap_err()
+                    .contains("immutable Docker container ID")
+            );
+            assert!(world.wire.runs.is_empty());
+        }
+    }
+}
+
+#[test]
+fn keeping_target_tokens_produces_an_executable_plan_on_a_carry_capable_target() {
+    let mut world = world();
+    world.wire.supports_carry = Some(true);
+    let plan = preflight(&mut world, &request()).unwrap();
+    assert_eq!(document(&plan)["executable"], true);
+    assert_eq!(world.wire.runs.len(), 1);
+}
+
+#[test]
 fn the_source_must_be_running_healthy_and_identified() {
     let cases: Vec<(Change<Both>, &str)> = vec![
         (
@@ -1143,7 +1171,7 @@ fn carry_check_rejects_bad_replies_and_names_the_fix() {
         let mut world = world();
         world.wire.link = Link::Prints(reply, 0);
         assert!(
-            check_carry(&mut world, &request, &source)
+            check_carry(&mut world, &request, &source, None)
                 .unwrap_err()
                 .contains(expected),
             "{reply}"
@@ -1517,6 +1545,13 @@ impl Docker for OpsHost {
             ["inspect", "-f", "{{.State.Running}}", _] => {
                 ok(if self.running { "true" } else { "false" })
             }
+            [
+                "inspect",
+                "--type=container",
+                "-f",
+                "{{.Id}} {{.State.Running}}",
+                id,
+            ] => ok(&format!("{id} {}", self.running)),
             [.., "-c", "test -e /data/move.json"] => Ran {
                 code: if self.gated { 0 } else { 1 },
                 ..Ran::default()
@@ -1574,6 +1609,7 @@ impl OpsSite {
             move_id: MOVE.into(),
             work_dir: String::new(),
             rollback: true,
+            pins: None,
             op,
         };
         super::ops::perform(self, &request, &mut std::io::empty())
@@ -1609,6 +1645,65 @@ impl Drop for OpsSite {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.home);
     }
+}
+
+#[test]
+fn target_operation_stays_on_the_pinned_daemon_after_name_substitution() {
+    use protocol::{Op, PROTOCOL, Request};
+    let mut site = OpsSite::new(TARGET_ID);
+    assert!(
+        site.act(Op::Claim {
+            source_bank: fp(SOURCE_ID),
+            resume: false
+        })
+        .ok
+    );
+    let expected = "1".repeat(64);
+    let original = site.docker.host.docs["pseudolife-mcp-daemon"].clone();
+    site.docker
+        .host
+        .docs
+        .insert("original-daemon".into(), original);
+    site.docker
+        .host
+        .docs
+        .get_mut("pseudolife-mcp-daemon")
+        .unwrap()["Id"] = json!("3".repeat(64));
+    let request = Request {
+        protocol: PROTOCOL,
+        move_id: MOVE.into(),
+        work_dir: String::new(),
+        rollback: true,
+        pins: Some(carry::TargetPins {
+            daemon: expected.clone(),
+            postgres: "2".repeat(64),
+        }),
+        op: Op::Stop,
+    };
+    let answer = super::ops::perform(&mut site, &request, &mut std::io::empty());
+    assert!(answer.ok, "{}", answer.error);
+    assert!(
+        site.docker
+            .host
+            .calls
+            .iter()
+            .any(|args| args == &["stop", "-t", "120", &expected])
+    );
+    assert!(
+        !site
+            .docker
+            .host
+            .calls
+            .iter()
+            .any(|args| args == &["stop", "-t", "120", "pseudolife-mcp-daemon"])
+    );
+
+    let substitute = site.docker.host.docs["pseudolife-mcp-daemon"].clone();
+    site.docker.host.docs.insert(expected, substitute);
+    site.docker.host.calls.clear();
+    let answer = super::ops::perform(&mut site, &request, &mut std::io::empty());
+    assert!(!answer.ok);
+    assert!(site.docker.host.calls.iter().all(|args| args[0] != "stop"));
 }
 
 impl super::ops::Site for OpsSite {
@@ -1777,12 +1872,12 @@ fn a_resume_is_refused_before_any_change_when_the_gated_bank_took_writes() {
     // As the rollback left it: the resume goes ahead.
     let mut both = world();
     both.wire.state = Some(reading(3, true));
-    assert_eq!(resume_check(&mut both, &request), Ok(()));
+    assert_eq!(resume_check(&mut both, &request, None), Ok(()));
     // A write in place since, or the gate gone: refused, naming the way out.
     for state in [reading(4, true), reading(3, false)] {
         let mut both = world();
         both.wire.state = Some(state.clone());
-        let why = resume_check(&mut both, &request).unwrap_err();
+        let why = resume_check(&mut both, &request, None).unwrap_err();
         assert!(
             why.contains(&format!("pseudolife-mcp move --release-target {MOVE}")),
             "{state:?}: {why}"
@@ -1792,7 +1887,7 @@ fn a_resume_is_refused_before_any_change_when_the_gated_bank_took_writes() {
     request.resume_baseline = None;
     let mut both = world();
     both.wire.state = Some(reading(3, true));
-    assert!(resume_check(&mut both, &request).is_err());
+    assert!(resume_check(&mut both, &request, None).is_err());
 }
 
 #[test]

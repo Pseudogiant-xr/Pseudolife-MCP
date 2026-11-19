@@ -549,7 +549,7 @@ fn answer_op(
         let mut answer = refuse(String::new());
         match site
             .docker()
-            .and_then(|docker| super::carry::target(docker, *populated))
+            .and_then(|docker| super::carry::target(docker, *populated, request.pins.as_ref()))
         {
             Ok(()) => answer.ok = true,
             Err(why) => answer.error = why,
@@ -627,6 +627,7 @@ mod lock_tests {
             move_id: String::new(),
             work_dir: String::new(),
             rollback: false,
+            pins: None,
         };
         // The transaction's perform rejects the empty move id before it
         // looks for Docker. Only the read-only dispatcher returns this error.

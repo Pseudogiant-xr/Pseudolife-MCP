@@ -197,7 +197,12 @@ fn last_line(bytes: &[u8]) -> String {
 
 const CARRY_CHECK_UNAVAILABLE: &str = "the target client cannot check carried identities; update the target client to the same native release, then retry move --dry-run";
 
-fn check_carry<W: World>(world: &mut W, request: &Request, source: &Facts) -> Result<bool, String> {
+fn check_carry<W: World>(
+    world: &mut W,
+    request: &Request,
+    source: &Facts,
+    pins: Option<carry::TargetPins>,
+) -> Result<bool, String> {
     if request.no_keep_tokens {
         return Ok(false);
     }
@@ -207,6 +212,7 @@ fn check_carry<W: World>(world: &mut W, request: &Request, source: &Facts) -> Re
         move_id: String::new(),
         work_dir: String::new(),
         rollback: false,
+        pins,
         op: protocol::Op::CarryCheck { populated },
     };
     let mut body =
@@ -273,6 +279,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         move_id: String::new(),
         work_dir: ask.work_dir.clone(),
         rollback: false,
+        pins: None,
         op: protocol::Op::Check { ask },
     };
     let mut body = serde_json::to_vec(&ask).map_err(|e| e.to_string())?;
@@ -356,15 +363,16 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
             "the native move helper on {to} sent no facts about its bank; update both clients so they match, then retry"
         ));
     };
+    let target_pins = carry::TargetPins::from_facts(target);
     // A resumed move's target is stopped behind its gate: its URL answers
     // only once the move starts it, and the move checks it then (before the
     // commit point).
     if !request.resume_move.is_empty() {
-        resume_check(world, request)?;
+        resume_check(world, request, target_pins.clone())?;
         return Ok(Plan {
             to,
             target_url,
-            checked_carry: check_carry(world, request, &source)?,
+            checked_carry: check_carry(world, request, &source, target_pins)?,
             source,
             target: reply.clone(),
             url_tied: false,
@@ -403,7 +411,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     Ok(Plan {
         to,
         target_url,
-        checked_carry: check_carry(world, request, &source)?,
+        checked_carry: check_carry(world, request, &source, target_pins)?,
         source,
         target: reply,
         url_tied,
@@ -629,7 +637,11 @@ fn say(stdout: bool, text: &str) -> bool {
 /// Before a resume changes anything: the target's gated bank must still be
 /// as the move's last rollback left it (gated, with no write since), or the
 /// resume would replace writes that exist nowhere else.
-fn resume_check<W: World>(world: &mut W, request: &Request) -> Result<(), String> {
+fn resume_check<W: World>(
+    world: &mut W,
+    request: &Request,
+    pins: Option<carry::TargetPins>,
+) -> Result<(), String> {
     let mut tables: Vec<String> = request
         .resume_baseline
         .as_ref()
@@ -641,6 +653,7 @@ fn resume_check<W: World>(world: &mut W, request: &Request) -> Result<(), String
         move_id: request.resume_move.clone(),
         work_dir: request.target_work_dir.clone().unwrap_or_default(),
         rollback: false,
+        pins,
         op: protocol::Op::State { tables },
     };
     let mut body = serde_json::to_vec(&ask).map_err(|e| e.to_string())?;

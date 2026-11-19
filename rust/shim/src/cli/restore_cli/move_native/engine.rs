@@ -143,6 +143,7 @@ pub(super) struct Plan {
     /// The source bank as the preflight found it (kept in the record).
     pub source: super::probe::Facts,
     pub target_image: String,
+    pub target_pins: Option<super::carry::TargetPins>,
     pub target_url: String,
     pub work_dir: String,
     pub source_bank: String,
@@ -225,6 +226,7 @@ impl<H: Hosts> Run<'_, H> {
             move_id: self.record.move_id.clone(),
             work_dir: self.plan.work_dir.clone(),
             rollback: false,
+            pins: self.record.target_pins.clone(),
             op,
         }
     }
@@ -785,6 +787,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
         schedule_enable: plan.schedule_enable.clone(),
         source: plan.source.clone(),
         target_image: plan.target_image.clone(),
+        target_pins: plan.target_pins.clone(),
         // Kept as the earlier record had it, so a resume refused before it
         // changed anything leaves the record as resumable as it was.
         gated_baseline: plan.resume_baseline.clone(),
@@ -1020,6 +1023,7 @@ impl<H: Hosts> Back<'_, H> {
             move_id: self.record.move_id.clone(),
             work_dir: self.record.work_dir.clone(),
             rollback: true,
+            pins: self.record.target_pins.clone(),
             op,
         };
         let answer = self.hosts.target(&request, None)?;
@@ -1046,6 +1050,7 @@ impl<H: Hosts> Back<'_, H> {
             move_id: self.record.move_id.clone(),
             work_dir: self.record.work_dir.clone(),
             rollback: true,
+            pins: self.record.target_pins.clone(),
             op: Op::Abort,
         };
         let mut lost = 0;
@@ -1619,6 +1624,7 @@ impl<H: Hosts> Back<'_, H> {
             move_id: id.clone(),
             work_dir: self.record.work_dir.clone(),
             rollback: true,
+            pins: self.record.target_pins.clone(),
             op: Op::GiveBack,
         };
         let mut waited = Duration::ZERO;
@@ -2092,6 +2098,7 @@ pub(super) fn give_up<H: Hosts>(
         move_id: id.clone(),
         work_dir: record.work_dir.clone(),
         rollback: true,
+        pins: record.target_pins.clone(),
         op: Op::State { tables: Vec::new() },
     };
     // Any answer, a refusal included, means the target is there. A give-up
@@ -2164,9 +2171,26 @@ fn remote_folder(record: &Record) -> String {
 /// The command that removes the move's gate on the target, for a person.
 fn gate_removal(record: &Record) -> String {
     format!(
-        "ssh {} docker run --rm --entrypoint rm --volumes-from pseudolife-mcp-daemon {} -f /data/move.json",
-        record.target, record.target_image
+        "ssh {} docker run --rm --entrypoint rm --volumes-from {} {} -f /data/move.json",
+        record.target,
+        manual_target_daemon(record),
+        record.target_image
     )
+}
+
+fn manual_target_daemon(record: &Record) -> &str {
+    record
+        .target_pins
+        .as_ref()
+        .map_or("pseudolife-mcp-daemon", |pins| pins.daemon.as_str())
+}
+
+fn manual_target_selection(record: &Record) -> Option<String> {
+    let pins = record.target_pins.as_ref()?;
+    Some(format!(
+        "On the target, verify that Docker returns the selected daemon's full ID {} before running these commands.",
+        pins.daemon
+    ))
 }
 
 /// The last way to close a record whose target keeps refusing: on this
@@ -2189,7 +2213,7 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
     let to = &record.target;
     let at = &record.updated_at;
     let folder = remote_folder(record);
-    let start = format!("ssh {to} docker start pseudolife-mcp-daemon");
+    let start = format!("ssh {to} docker start {}", manual_target_daemon(record));
     let claim = format!("ssh {to} rm -f {}", claim_path());
     let hands = if record.given_back || !record.kept.is_empty() {
         format!(
@@ -2219,8 +2243,10 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
             }
         )
     });
+    let selection =
+        manual_target_selection(record).map_or_else(String::new, |line| format!(" {line}"));
     format!(
-        "This host gave {to} up at {at} (--target-gone), and that is final here: nothing is sent to {to} from this host for move {} again, and --release-target and --resume refuse it.{newer} The steps below describe {to} as it was at {at}, for whoever runs it. Check first: look at what {to} holds now, and if its daemon serves a bank, or a newer move has put one there, do none of this. Otherwise, in this order: {hands}",
+        "This host gave {to} up at {at} (--target-gone), and that is final here: nothing is sent to {to} from this host for move {} again, and --release-target and --resume refuse it.{newer} The steps below describe {to} as it was at {at}, for whoever runs it. Check first: look at what {to} holds now, and if its daemon serves a bank, or a newer move has put one there, do none of this.{selection} Otherwise, in this order: {hands}",
         record.move_id
     )
 }
@@ -2264,12 +2290,22 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
     let f = &record.flags;
     let to = &record.target;
     let mut lines = Vec::new();
+    let daemon = manual_target_daemon(record);
+    if (f.gate_lifting
+        || f.target_started
+        || f.target_restored
+        || f.target_policy_paused
+        || f.target_quiesced)
+        && let Some(selection) = manual_target_selection(record)
+    {
+        lines.push(selection);
+    }
     if f.gate_lifting || f.target_started {
-        lines.push(format!("ssh {to} docker stop pseudolife-mcp-daemon"));
+        lines.push(format!("ssh {to} docker stop {daemon}"));
     }
     if f.target_restored || f.gate_lifting {
         lines.push(format!(
-            "ssh {to} docker run --rm --entrypoint touch --volumes-from pseudolife-mcp-daemon {} /data/move.json",
+            "ssh {to} docker run --rm --entrypoint touch --volumes-from {daemon} {} /data/move.json",
             record.target_image
         ));
     }
@@ -2280,22 +2316,31 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
     }
     if f.target_policy_paused {
         lines.push(format!(
-            "ssh {to} docker update --restart={} pseudolife-mcp-daemon",
+            "ssh {to} docker update --restart={} {daemon}",
             record.target_policy
         ));
     }
+    let pg = if record.source.pg_id.is_empty() {
+        record.source.pg.as_str()
+    } else {
+        if f.fenced || f.read_only {
+            lines.push(format!(
+                "Before changing the source database, verify the target is stopped and gated. Find the PostgreSQL container mounting the original source bank's volumes ({}) in Compose project {}. If the original container was replaced, verify the replacement mounts those same volumes. Substitute its current full ID for <verified-source-postgres-id>.",
+                record.source.pg_sources.join(", "), record.source.pg_compose_project
+            ));
+        }
+        "<verified-source-postgres-id>"
+    };
     if f.fenced {
-        lines.push(
-            format!(
-                "docker exec {} psql -U {} -d postgres -c \"ALTER DATABASE {} WITH ALLOW_CONNECTIONS true\"",
-                record.source.pg_selector(), record.source.user, record.source.db
-            ),
-        );
+        lines.push(format!(
+            "docker exec {pg} psql -h /var/run/postgresql -p {} -U {} -d postgres -c \"ALTER DATABASE {} WITH ALLOW_CONNECTIONS true\"",
+            record.source.port, record.source.user, record.source.db
+        ));
     }
     if f.read_only {
         lines.push(format!(
-            r#"docker exec {} psql -U {} -d postgres -c "ALTER DATABASE {} RESET default_transaction_read_only""#,
-            record.source.pg_selector(), record.source.user, record.source.db
+            r#"docker exec {pg} psql -h /var/run/postgresql -p {} -U {} -d postgres -c "ALTER DATABASE {} RESET default_transaction_read_only""#,
+            record.source.port, record.source.user, record.source.db
         ));
     }
     if f.moved_written {
@@ -2319,7 +2364,7 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
         lines.push(format!("docker start {}", record.source.daemon_selector()));
     }
     if f.target_quiesced && !f.target_restored {
-        lines.push(format!("ssh {to} docker start pseudolife-mcp-daemon"));
+        lines.push(format!("ssh {to} docker start {daemon}"));
     }
     lines
 }
