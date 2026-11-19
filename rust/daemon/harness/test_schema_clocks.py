@@ -1,7 +1,9 @@
 """Clock normalization admits only values produced during this arm's open."""
+import builtins
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -23,6 +25,22 @@ class SchemaClocks(unittest.TestCase):
         self.assertEqual(expected, schema_cases.golden_state(state("vector", "0.8.3", "public")))
         self.assertNotEqual(expected, schema_cases.golden_state(state("other", "0.8.2", "public")))
         self.assertNotEqual(expected, schema_cases.golden_state(state("vector", "0.8.2", "other")))
+
+    def test_golden_catalog_scrubbing_runs_with_frozen_imports_blocked(self):
+        original_import = builtins.__import__
+
+        def guarded_import(name, *args, **kwargs):
+            if name == "pseudolife_memory" or name.startswith("pseudolife_memory."):
+                raise ImportError(f"frozen package import blocked: {name}")
+            return original_import(name, *args, **kwargs)
+
+        state = {"rows": {}, "catalog": {"extensions": [["vector", "0.8.2", "public"]]}}
+        with patch("builtins.__import__", side_effect=guarded_import), \
+                patch.dict(sys.modules, {"run": None}):
+            golden = schema_cases.golden_state(state)
+        self.assertEqual(golden["catalog"]["extensions"]["rows"], 1)
+        self.assertEqual(len(golden["catalog"]["extensions"]["sha256"]), 24)
+
     def test_zero_or_outside_window_is_not_normalized(self):
         for clock in [0.0, 99.0, 102.0, float("nan"), float("inf"), True]:
             state = {"rows": {"public.relations": {"columns": ["name", "created_at"],

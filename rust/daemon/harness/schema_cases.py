@@ -27,6 +27,8 @@ sys.path.insert(0, str(REPO))
 import dbstate
 import pgdisposable
 import psycopg
+from golden_values import golden_scrub
+from rust.harness_support.bank_fixture import initialize_bank
 from rust.harness_support.database_guard import assert_disposable_database
 
 pg = pgdisposable.Slice.from_env("pgs")
@@ -34,7 +36,6 @@ GOLDEN_FILE = HERE / "goldens" / "schema-startup.json"
 
 
 def golden_state(state):
-    from run import golden_scrub
     state = json.loads(json.dumps(state))
     # The schema installs the server's available extension version, so the
     # golden binds only the DDL-controlled names and namespaces. A recording
@@ -82,6 +83,8 @@ def rust_open(binary, dsn, refusal=None):
 
 
 def historical_schema(commit):
+    # The plan's upgrade preimages come from recorded Git objects, independent
+    # of the frozen package directory in this checkout.
     source = subprocess.run(["git", "show", f"{commit}:pseudolife_memory/storage/schema.py"],
                             cwd=REPO, check=True, capture_output=True).stdout
     module = types.ModuleType("historical_schema")
@@ -93,10 +96,8 @@ def refusal_cell(binary, number, version):
     name = pg.name(f"{pg.PREFIX}{number}")
     dsn = pg.create(name)
     try:
-        from pseudolife_memory.storage.postgres import PostgresStorage
-        PostgresStorage(dsn).close()
-        with psycopg.connect(dsn, autocommit=True) as conn:
-            assert_disposable_database(conn)
+        with psycopg.connect(dsn) as conn:
+            initialize_bank(conn)
             conn.execute("UPDATE meta SET value=%s::jsonb WHERE key='schema_version'", (version,))
         before = dbstate.dump(dsn)
         expected = "newer than" if version == "99" else "positive integer"
@@ -345,4 +346,7 @@ def record_candidate(args):
 
 
 if __name__ == "__main__":
+    import runpy
+
+    runpy.run_path(str(REPO / "tests" / "windowless_children.py"))["install"]()
     raise SystemExit(main())
