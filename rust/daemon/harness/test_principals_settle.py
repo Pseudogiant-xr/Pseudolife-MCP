@@ -37,8 +37,17 @@ from test_principal_fixtures import (  # noqa: F401
     test_runner_guard_keeps_slice_restriction_without_package,
     test_seed_paths_without_package_or_connections,
     test_signer_vectors_and_bad_signature_control,
+    test_principal_seed_refuses_bench_before_writing,
     test_static_contract_is_package_independent_and_detects_wrong_headers,
 )
+
+
+def test_readiness_controls_are_imported_for_parity():
+    from rust.harness_support import test_readiness
+
+    tests = {name: test for name, test in vars(test_readiness).items() if name.startswith("test_")}
+    missing = [name for name, test in tests.items() if globals().get(name) is not test]
+    assert not missing, f"import readiness tests in the principal parity module: {', '.join(sorted(missing))}"
 
 
 def store_bearers(scn) -> list[str]:

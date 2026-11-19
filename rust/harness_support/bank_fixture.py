@@ -1,8 +1,12 @@
 """Constructor-equivalent bank setup for disposable Rust harness fixtures."""
+import re
 import time
 
+from .database_guard import assert_disposable_database
 from .schema import ensure_schema
 
+
+_FIXTURE_DATABASE = re.compile(r"pl_cf_(?:w[0-9][a-z]|http|pgs|prn|mir)_[a-z0-9_]{1,40}")
 
 # Captured from the Python constructor at 7f2e6eacf. The fixture lanes compared
 # full database catalogs and rows, including the relation clock and writer epoch.
@@ -21,6 +25,17 @@ RELATIONS = (
 )
 
 
+def require_fixture_database(name):
+    """Refuse database names outside the disposable harness slices."""
+    if not _FIXTURE_DATABASE.fullmatch(name):
+        raise ValueError("bank fixtures require a disposable harness database (pl_cf_<slice>_<name>)")
+
+
+def assert_fixture_database(conn):
+    """Check both production identity and the server's disposable name."""
+    require_fixture_database(assert_disposable_database(conn))
+
+
 def initialize_bank(conn, *, fresh=False):
     """Seed built-in relations and start or advance the writer epoch.
 
@@ -28,7 +43,8 @@ def initialize_bank(conn, *, fresh=False):
     Dream and principal fixtures can open templates with an existing epoch.
     The caller owns the transaction and the slice-specific DSN guard.
     """
-    ensure_schema(conn)  # Checks the server's database name before the first write.
+    assert_fixture_database(conn)
+    ensure_schema(conn)
     relation_insert = ("INSERT INTO public.relations "
                        "(name,description,transitive,inverse_of,builtin,created_at) "
                        "VALUES (%s,%s,%s,%s,TRUE,%s)")
