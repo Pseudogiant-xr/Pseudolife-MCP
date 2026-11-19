@@ -808,6 +808,36 @@ mod tests {
         }
 
         #[test]
+        fn explicit_compose_file_errors_name_the_missing_or_nonfile_path() {
+            let f = Fixture::new();
+            let directory = f.root.join("directory instead of overlay");
+            fs::create_dir(&directory).unwrap();
+            let pins = f.pins();
+            for path in [f.root.join("missing overlay.yml"), directory] {
+                let files = TargetFiles {
+                    env: None,
+                    compose: vec![
+                        f.root.join("compose.yaml").to_string_lossy().into_owned(),
+                        path.to_string_lossy().into_owned(),
+                    ],
+                };
+                let message = target_with(
+                    &mut Engine(&f),
+                    [true, false, false, true],
+                    Some(&pins),
+                    &files,
+                    |_, _, _| {
+                        panic!("an unreadable explicit Compose file must refuse before rendering")
+                    },
+                )
+                .err()
+                .unwrap();
+                assert!(message.contains(path.to_str().unwrap()));
+                assert!(message.contains("missing or not a regular file"));
+            }
+        }
+
+        #[test]
         fn explicit_target_files_drive_apply_and_undo_in_order() {
             let f = Fixture::new();
             let export = f.root.join("export");

@@ -446,10 +446,15 @@ fn target_with(
     } else {
         overrides.compose.clone()
     };
-    if files
+    if let Some(file) = files
         .iter()
-        .any(|file| !Path::new(file).is_absolute() || !Path::new(file).is_file())
+        .find(|file| !Path::new(file).is_absolute() || !Path::new(file).is_file())
     {
+        if !overrides.compose.is_empty() {
+            return Err(format!(
+                "--target-compose-file {file:?} is missing or not a regular file on the target; supply that original Compose file and retry move --dry-run"
+            ));
+        }
         return Err("the target's Compose files are not accessible; pass --target-compose-file for each original file in order".into());
     }
     let installed_dir = label("com.docker.compose.project.working_dir")

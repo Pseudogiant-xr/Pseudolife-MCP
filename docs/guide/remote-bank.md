@@ -870,8 +870,10 @@ accepts a key itself. `ssh` and `docker` are found only in absolute `PATH`
 directories.
 
 **Carried settings on an installed Linux target.** Use
-`--target-env-file <file>` to select the target's original private environment
-and repeat `--target-compose-file <file>` for its original Compose files in
+`--target-env-file <file>` to select the target's original private environment.
+An env file inside a Git checkout can be committed later with the carried
+settings in it. Choose a private file outside the checkout. Repeat
+`--target-compose-file <file>` for its original Compose files in
 overlay order. The paths are absolute or start with `~/` on the target. The
 native helper verifies that those files render the installed deployment
 before changing either bank. If the original project directory is
