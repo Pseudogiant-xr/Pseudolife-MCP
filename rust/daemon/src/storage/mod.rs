@@ -530,9 +530,8 @@ async fn take_writer_lease(client: &Client) -> Result<(), LeaseError> {
     Ok(())
 }
 
-/// `ensure_schema` (schema.py:1145-1664): one explicit transaction. A
-/// failure rolls back before the session is dropped, as psycopg's
-/// `conn.transaction()` does on the way out.
+/// Run the native schema plan in one transaction and roll back on failure
+/// before dropping the session.
 async fn ensure_schema(client: &Client) -> Result<(), OpenError> {
     client.batch_execute("BEGIN").await?;
     match schema::ensure_schema_in_transaction(client).await {

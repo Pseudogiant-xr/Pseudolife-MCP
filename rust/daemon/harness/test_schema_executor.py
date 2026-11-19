@@ -24,7 +24,7 @@ from rust.harness_support.database_guard import assert_disposable_database
 from rust.harness_support import schema
 from rust.harness_support.schema import ensure_schema
 
-PLAN_SHA256 = "21fe09e91cf0494b6d7dd667cd27fa04211defd21efc8ef65da9cff0323ba882"
+PLAN_SHA256 = "541ace8f10c8df08cfaf89c1c6814bf1b02b811e59059861e624099d949f4124"
 
 
 def plan_fingerprint():

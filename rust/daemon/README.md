@@ -64,9 +64,9 @@ the same moment and are live-only. It checks bank state only where the bank
 starts empty, since a seeded template carries run-specific values.
 `run.py golden --record-candidate` and `w2e.py golden --record-candidate`
 re-record goldens from the Rust candidate through that same replay path
-(a dry run unless `--write`; see [`rust/DEV.md`](../DEV.md)). `gen_schema_sql.py --check` and
-`record_routes.py --check` keep the embedded schema DDL and route table equal
-to the Python source.
+(a dry run unless `--write`; see [`rust/DEV.md`](../DEV.md)).
+`gen_schema_sql.py --check` validates the native schema inputs and
+`record_routes.py --check` compares the route table with the Python source.
 
 Dream cursor snapshots use `python rust/daemon/harness/dream_cursors.py golden
 --rust-bin <dream-contract> --record-candidate [--write] [--only <scenario>]`.
@@ -141,25 +141,26 @@ future/malformed-version refusal without durable writes, and catches five
 compiled source mutants. It reuses the harness's disposable database and full
 catalog/row helpers, with `pl_cf_pgs_` fixture names. CI supplies its existing
 isolated test login. No embedding model is loaded by these storage cells.
-`gen_schema_sql.py --check` checks the base DDL, the entire ordered migration
-plan, dimension refusal text and generated metadata against `schema.py`.
+`src/storage/schema.sql` holds the base DDL. `src/storage/schema_plan.json`
+holds the ordered migrations, schema version and embedding dimension.
+`gen_schema_sql.py --check` checks the version header, final version stamp,
+DDL embedding dimensions and derived `schema_meta.rs` against the plan.
 The same run compares Rust post-state with the committed oracle captures in
 `harness/goldens/schema-startup.json`, using the existing golden catalog
 digests and full row values. New relation times must first fit their own arm's
 captured constructor window; existing row times remain exact.
 
-To regenerate schema data and oracle post-state fixtures after an upstream
-change, use one command with the isolated test login configured:
+To derive the Rust metadata after editing the native inputs, run:
 
 ```bash
-python rust/daemon/harness/gen_schema_sql.py --record-goldens schema-capture.json
+python rust/daemon/harness/gen_schema_sql.py
+python rust/daemon/harness/gen_schema_sql.py --check
 ```
 
-That records the frozen Python oracle, so since the Python freeze it can only
-reproduce the committed golden. A deliberate Rust change re-records the schema
-golden from the candidate instead: `python rust/daemon/harness/schema_ci.py
---record-candidate --out <scratch>/schema.json`, then `--write`
-(`harness/candidate_record.py`).
+For a deliberate change that moves the startup golden, use the isolated test
+login and run `python rust/daemon/harness/schema_ci.py --record-candidate
+--out <scratch>/schema.json`, review the differences, then rerun with
+`--write` (`harness/candidate_record.py`).
 
 The graph-store boundary uses the same disposable-bank and state helpers:
 
