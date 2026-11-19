@@ -420,6 +420,9 @@ impl Model {
                 }
             },
             Op::State { .. } | Op::Check { .. } | Op::CarryCheck { .. } | Op::Snapshot => {}
+            Op::CarryApply { .. } | Op::CarryVerify { .. } | Op::CarryUndo => {
+                panic!("the source does not yet issue carried identity operations");
+            }
             Op::TimerPause => h.target_timer = false,
             Op::TimerResume => h.target_timer = true,
             Op::PolicyNo => {

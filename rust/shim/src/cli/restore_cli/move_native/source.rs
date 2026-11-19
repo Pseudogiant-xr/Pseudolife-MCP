@@ -619,10 +619,27 @@ impl<D: Docker> Hosts for Live<D> {
         let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
         // The helper's answer counts even if ssh then failed.
         if let Some(framed) = stdout.lines().find_map(|line| line.strip_prefix(FRAME)) {
-            return serde_json::from_str(framed)
-                .map_err(|_| format!("the helper on {to} answered something unreadable"));
+            let answer: Answer = serde_json::from_str(framed)
+                .map_err(|_| format!("the helper on {to} answered something unreadable"))?;
+            if request.op.carries_secret() {
+                // A malformed or modified helper could echo its input.
+                // Accept its verdict without displaying or recording its text.
+                return Ok(Answer {
+                    ok: answer.protocol == super::protocol::PROTOCOL && answer.ok,
+                    busy: answer.busy,
+                    error: "the target could not apply or verify the carried settings; check its installed Compose deployment and rerun move --rollback".into(),
+                    ..Answer::default()
+                });
+            }
+            return Ok(answer);
         }
         if ran.lost() {
+            if request.op.carries_secret() {
+                return Err(
+                    "SSH lost the identity request; restore SSH access and rerun move --rollback"
+                        .into(),
+                );
+            }
             return Err(remote::lost(&to, &ran));
         }
         Err(format!(

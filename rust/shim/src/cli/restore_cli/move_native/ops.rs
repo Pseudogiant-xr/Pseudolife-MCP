@@ -15,7 +15,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::carry::TargetPins;
+use super::carry::{self, TargetPins};
 use super::probe::{self, Facts};
 use super::protocol::{Answer, Op, PROTOCOL, Request, State};
 use super::record::valid_id;
@@ -63,6 +63,9 @@ pub(super) trait Site {
     /// (which it reads under its own update lock; `None` for the release,
     /// which runs after the abort): its exit code and output.
     fn restore(&mut self, args: &[String], abort_file: Option<&Path>) -> (i32, String);
+    fn carry(&mut self, _: &Op, _: &Path, _: &str) -> Result<(), String> {
+        Err("this target cannot apply carried identities".into())
+    }
 }
 
 /// The claim a move holds on the target.
@@ -144,6 +147,19 @@ fn gather(docker: &mut impl Docker, pins: Option<&TargetPins>) -> Result<Facts, 
         Some(pins) => probe::gather_at(docker, &pins.daemon, &pins.postgres),
         None => probe::gather(docker),
     }
+}
+
+fn operating_pins(
+    folder: &Path,
+    supplied: Option<&TargetPins>,
+) -> Result<Option<TargetPins>, String> {
+    let recorded = carry::recorded_pins(folder)?;
+    if let (Some(previous), Some(supplied)) = (&recorded, supplied)
+        && previous.postgres != supplied.postgres
+    {
+        return Err("the target PostgreSQL ID no longer matches the move's journal".into());
+    }
+    Ok(recorded.or_else(|| supplied.cloned()))
 }
 
 fn inspect<D: Docker>(docker: &mut D, selector: &str, format: &str) -> Result<String, String> {
@@ -1113,7 +1129,11 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
             &serde_json::json!({"at": site.now(), "op": op.name(), "phase": "begun"}),
         );
     }
-    let pins = request.pins.as_ref();
+    let selected = match operating_pins(&folder, request.pins.as_ref()) {
+        Ok(pins) => pins,
+        Err(why) => return failed(why),
+    };
+    let pins = selected.as_ref();
     let daemon = daemon(pins);
     if let Some(pins) = pins
         && matches!(
@@ -1142,6 +1162,28 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
     }
     let mut answer = match op {
         Op::Check { .. } | Op::CarryCheck { .. } => failed("preflight checks are read separately"),
+        Op::CarryApply { pins: expected, .. } => {
+            let daemon = &expected.daemon;
+            let safe = site.docker().is_ok_and(|docker| {
+                pins.is_none_or(|pins| pins == expected)
+                    && TargetPins::inspect(docker, &expected.postgres).is_ok()
+                    && running(docker, daemon) == Some(false)
+                    && image(docker, daemon)
+                        .is_ok_and(|image| gated(docker, daemon, &image) == Some(true))
+            });
+            if !safe {
+                failed("the target could not be proved stopped and gated; rerun move --rollback")
+            } else {
+                site.carry(op, &folder, &request.move_id)
+                    .map_or_else(failed, |()| done())
+            }
+        }
+        Op::CarryUndo if !request.rollback || !folder.join(ABORTED).is_file() => {
+            failed("the move has not begun rollback on the target")
+        }
+        Op::CarryUndo | Op::CarryVerify { .. } => site
+            .carry(op, &folder, &request.move_id)
+            .map_or_else(failed, |()| done()),
         Op::State { tables } => {
             let mut answer = done();
             answer.state = Some(state(site, &claims, &folder, tables, pins));
@@ -1254,8 +1296,9 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
         if !matches!(
             op,
             Op::Receive { .. } | Op::Claim { .. } | Op::Release | Op::Abort
-        ) {
-            answer.state = Some(state(site, &claims, &folder, &[], pins));
+        ) && let Ok(updated) = operating_pins(&folder, request.pins.as_ref())
+        {
+            answer.state = Some(state(site, &claims, &folder, &[], updated.as_ref()));
         }
         journal(
             &folder,

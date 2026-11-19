@@ -12,7 +12,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{carry::TargetPins, target::Ask};
+use super::{
+    carry::{Identities, TargetPins},
+    target::Ask,
+};
 
 /// The protocol this client's source speaks for a move's transaction.
 pub(in crate::cli) const PROTOCOL: u32 = 2;
@@ -29,6 +32,14 @@ pub(in crate::cli) enum Op {
     CarryCheck {
         populated: [bool; 4],
     },
+    CarryApply {
+        identities: Identities,
+        pins: TargetPins,
+    },
+    CarryVerify {
+        identities: Identities,
+    },
+    CarryUndo,
     /// Claim the target for this move: refused while another move holds it.
     Claim {
         source_bank: String,
@@ -87,6 +98,9 @@ pub(in crate::cli) enum Op {
 }
 
 impl Op {
+    pub(super) fn carries_secret(&self) -> bool {
+        matches!(self, Self::CarryApply { .. } | Self::CarryVerify { .. })
+    }
     /// Whether the operation changes the target (and so needs the claim
     /// and the update lock, and is journalled).
     pub(in crate::cli) fn changes(&self) -> bool {
@@ -100,6 +114,9 @@ impl Op {
         match self {
             Self::Check { .. } => "check",
             Self::CarryCheck { .. } => "carry-check",
+            Self::CarryApply { .. } => "carry-apply",
+            Self::CarryVerify { .. } => "carry-verify",
+            Self::CarryUndo => "carry-undo",
             Self::Claim { .. } => "claim",
             Self::State { .. } => "state",
             Self::TimerPause => "timer-pause",
@@ -133,6 +150,7 @@ pub(in crate::cli) struct Request {
     /// Sent by the rollback: allowed after the move's abort.
     #[serde(default)]
     pub rollback: bool,
+    /// The selected target of a new move. Older sources omit these.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pins: Option<TargetPins>,
     #[serde(flatten)]
