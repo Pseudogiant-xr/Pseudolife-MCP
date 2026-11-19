@@ -355,6 +355,9 @@ pub(in crate::cli) fn run(arguments: &[std::ffi::OsString]) -> u8 {
         .and_then(|a| a.to_str())
         .unwrap_or_default()
         .to_owned();
+    if asked == "recovery-commands" {
+        return print_recovery_commands(arguments);
+    }
     let print = |reply: &Reply| {
         let line = format!(
             "{FRAME}{}\n",
@@ -405,6 +408,41 @@ pub(in crate::cli) fn run(arguments: &[std::ffi::OsString]) -> u8 {
     };
     print(&answer(&mut here, &ask));
     0
+}
+
+fn print_recovery_commands(arguments: &[std::ffi::OsString]) -> u8 {
+    let [_, file] = arguments else {
+        eprintln!("usage: pseudolife-mcp move-target recovery-commands <carry.json>");
+        return 2;
+    };
+    let Some(file) = file
+        .to_str()
+        .filter(|name| super::carry::TargetFiles::valid(name))
+    else {
+        eprintln!("move-target: name the carry journal with an absolute path or ~/ on this host");
+        return 2;
+    };
+    let path = if let Some(rest) = file.strip_prefix("~/") {
+        let Some(home) = super::command::home() else {
+            eprintln!(
+                "move-target: use the journal's absolute path because this host has no home directory"
+            );
+            return 2;
+        };
+        home.join(rest.trim_start_matches('/'))
+    } else {
+        PathBuf::from(file)
+    };
+    match super::carry::recovery_commands(&path) {
+        Ok(commands) => {
+            println!("{commands}");
+            0
+        }
+        Err(error) => {
+            eprintln!("move-target: {error}");
+            4
+        }
+    }
 }
 
 /// The real target host, for protocol 2's operations.

@@ -3390,6 +3390,12 @@ fn given_up_carried_move_restores_target_environment_before_the_daemon_starts() 
         let remove_gate = steps.find("--entrypoint rm").unwrap();
         assert!(restore < remove_gate);
         assert!(steps.contains("original_bytes and original_digest"));
+        assert!(steps.contains("pseudolife-mcp move-target recovery-commands"));
+        assert!(steps.contains("head -c"));
+        assert!(steps.contains("sha256sum"));
+        assert!(steps.contains(
+            "up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon"
+        ));
         assert!(steps.contains("fill in its new verified container ID"));
         assert!(!steps.contains(&format!("--volumes-from {}", "6".repeat(64))));
         if !given_back {

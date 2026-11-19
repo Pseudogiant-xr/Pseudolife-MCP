@@ -835,11 +835,16 @@ target daemon stopped and gated while restoring its original environment.
 The target move folder's `carry.json` names the file in `deployment.env_file`.
 Remove only the block beginning `# Pseudolife move <move id>`. Use the
 journal's `original_bytes` to recover the original prefix only after checking
-its `original_digest` and checking for later edits. If the env file is already
-restored, verify its original settings. Recreate the selected daemon stopped
-with the verified environment. Use its newly verified container ID in the
-remaining commands, with the gate in place until the target has its own bank
-back.
+its digest and checking for later edits. Run
+`pseudolife-mcp move-target recovery-commands <carry.json>` on the target,
+filling in the journal path. It prints the exact `head -c … | sha256sum`
+check, converts the journal's digest array to the expected hex checksum,
+and prints the recorded `docker compose … up --no-start --no-deps --no-build
+--pull never --force-recreate pseudolife-daemon` command. If the env file is
+already restored, verify its original settings. After restoring the
+environment, use the printed Compose command to recreate the selected
+daemon stopped. Use its newly verified container ID in the remaining
+commands, with the gate in place until the target has its own bank back.
 
 Restore the target's own bank from the safety backup named in the move
 folder's `own-bank.json` using `pseudolife-mcp restore --backup-file …

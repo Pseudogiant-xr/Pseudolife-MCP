@@ -2303,9 +2303,10 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
     let at = &record.updated_at;
     let folder = remote_folder(record);
     let (environment, daemon) = if record.flags.identities_applied {
+        let recovery = crate::cli::restore_cli::bank::sh_quote(&format!("{folder}/carry.json"));
         (
             format!(
-                "Keep the target daemon stopped and gated while restoring its configuration. Remove only this move's appended # Pseudolife move {} block from the target's environment file. In {folder}/carry.json, deployment.env_file names the file and original_bytes and original_digest identify the original prefix. Use that prefix only after verifying its digest and checking for later edits. If the file is already restored, verify its original settings. Recreate the selected daemon stopped with the verified environment, and fill in its new verified container ID before running later Docker commands. ",
+                "Keep the target daemon stopped and gated while restoring its configuration. Remove only this move's appended # Pseudolife move {} block from the target's environment file. On the target, print the exact head -c and sha256sum check (original_bytes and original_digest in the journal) and the exact recorded docker compose command ending in up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon:\n  pseudolife-mcp move-target recovery-commands {recovery}\nCompare the checksum before using the original prefix. Check for later edits and preserve them. If the file is already restored, verify its original settings. Run the printed Compose command only after restoring the environment, and fill in its new verified container ID before running later Docker commands. ",
                 record.move_id
             ),
             "<verified-target-daemon-id>",

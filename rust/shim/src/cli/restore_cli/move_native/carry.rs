@@ -15,7 +15,7 @@ use super::probe::Facts;
 use crate::cli::update::seams;
 
 mod runtime;
-pub(super) use runtime::{apply, loopback, recorded_pins, undo, verify};
+pub(super) use runtime::{apply, loopback, recorded_pins, recovery_commands, undo, verify};
 
 const KEYS: [&str; 4] = [
     "PSEUDOLIFE_MCP_TOKEN",

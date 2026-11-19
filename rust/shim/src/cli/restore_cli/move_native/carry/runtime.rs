@@ -72,6 +72,71 @@ fn read_journal(path: &Path) -> Result<Option<Journal>, String> {
     }
 }
 
+/// Render the target's manual commands without reading its env file or running Docker.
+pub(in crate::cli::restore_cli::move_native) fn recovery_commands(
+    path: &Path,
+) -> Result<String, String> {
+    let journal = read_journal(path).ok().flatten().ok_or(
+        "cannot read the target carry journal; locate the move's carry.json before continuing",
+    )?;
+    render_recovery_commands(&journal)
+}
+
+fn render_recovery_commands(journal: &Journal) -> Result<String, String> {
+    use crate::cli::restore_cli::bank::sh_quote;
+
+    let deployment = &journal.deployment;
+    let invalid =
+        "the carry journal's deployment could not be verified; keep the daemon stopped and gated";
+    deployment
+        .check_binding(&journal.original_pins)
+        .map_err(|_| invalid)?;
+    let args: Vec<_> = deployment.args.iter().map(String::as_str).collect();
+    let [
+        "compose",
+        "--project-name",
+        project,
+        "--project-directory",
+        dir,
+        "--env-file",
+        env,
+        files @ ..,
+    ] = args.as_slice()
+    else {
+        return Err(invalid.into());
+    };
+    let absolute = |path: &str| path.starts_with('/') && TargetFiles::valid(path);
+    if *project != deployment.project
+        || *env != deployment.env_file
+        || !absolute(dir)
+        || !absolute(env)
+        || files.is_empty()
+        || !files
+            .chunks(2)
+            .all(|pair| matches!(pair, ["-f", file] if absolute(file)))
+        || journal.original_bytes > MAX_ENV as usize
+        || !crate::cli::update::plain_release(&deployment.tag)
+    {
+        return Err(invalid.into());
+    }
+    let expected = journal
+        .original_digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let compose = args
+        .iter()
+        .map(|arg| sh_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(format!(
+        "Verify the original prefix (expected SHA-256 {expected}):\n  head -c {} {} | sha256sum\nAfter restoring the original env, use a shell with no Compose or Pseudolife setting overrides and recreate the selected daemon stopped:\n  PSEUDOLIFE_IMAGE_TAG={} docker {compose} up --no-start --no-deps --no-build --pull never --force-recreate {DAEMON_SERVICE}",
+        journal.original_bytes,
+        sh_quote(env),
+        sh_quote(&deployment.tag)
+    ))
+}
+
 fn digest(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
@@ -520,6 +585,60 @@ fn container_matches(container: &Value, identities: &Identities) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_recovery_commands_render_the_hex_digest_and_ordered_deployment() {
+        let deployment = Deployment {
+            args: [
+                "compose",
+                "--project-name",
+                "fixture",
+                "--project-directory",
+                "/srv/recovery",
+                "--env-file",
+                "/srv/recovery/private env",
+                "-f",
+                "/srv/recovery/base.yml",
+                "-f",
+                "/srv/recovery/overlay.yml",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            project: "fixture".into(),
+            env_file: "/srv/recovery/private env".into(),
+            tag: "0.25.0".into(),
+            image_id: "fixture-image".into(),
+            daemon_hash: "fixture-daemon-hash".into(),
+            pg_hash: "fixture-pg-hash".into(),
+        };
+        let mut pins = TargetPins {
+            project: deployment.project.clone(),
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            ..Default::default()
+        };
+        pins.deployment_digest = Some(deployment.digest(&pins).unwrap());
+        let mut journal = Journal {
+            deployment,
+            original_pins: pins.clone(),
+            pins,
+            running_shape: [0; 32],
+            original_bytes: 17,
+            original_digest: [0xa7; 32],
+            appended_bytes: 0,
+            appended_digest: [0; 32],
+            restored: false,
+        };
+        let lines = render_recovery_commands(&journal).unwrap();
+        assert!(lines.contains(&format!("expected SHA-256 {}", "a7".repeat(32))));
+        assert!(lines.contains("head -c 17 '/srv/recovery/private env' | sha256sum"));
+        assert!(lines.contains("PSEUDOLIFE_IMAGE_TAG=0.25.0 docker compose --project-name fixture --project-directory /srv/recovery --env-file '/srv/recovery/private env' -f /srv/recovery/base.yml -f /srv/recovery/overlay.yml up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon"));
+
+        journal.deployment.args.push("--profile".into());
+        journal.original_pins.deployment_digest =
+            Some(journal.deployment.digest(&journal.original_pins).unwrap());
+        assert!(render_recovery_commands(&journal).is_err());
+    }
 
     #[cfg(target_os = "linux")]
     mod transaction {
