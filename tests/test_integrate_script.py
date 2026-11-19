@@ -1304,6 +1304,14 @@ def test_the_gates_of_one_run_read_the_run_once(world, capsys):
     assert len(reads) == 2, reads
 
 
+def test_static_parity_siblings_share_a_verdict_only_while_their_definitions_match():
+    jobs = integrate._workflow(WORKFLOW, "fixture workflow")["jobs"]
+    assert integrate._static_parity_peer("parity", jobs) == "parity-windows"
+    assert integrate._static_parity_peer("parity-windows", jobs) == "parity"
+    jobs["parity-windows"]["timeout-minutes"] += 1
+    assert integrate._static_parity_peer("parity", jobs) is None
+
+
 @pytest.mark.parametrize("run, rollup", [
     # A needed shard failed: a real failure, though the gate's rollup row is
     # all that names it here (and a cancel stopped the other shard).
