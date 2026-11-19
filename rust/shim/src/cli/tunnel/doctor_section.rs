@@ -91,6 +91,7 @@ pub(in crate::cli) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
         Ok(names) if names.is_empty() => return None,
         Ok(names) => names,
         Err(Fail::Tunnel(reason)) => return Some(vec![unavailable(None, reason, store_recovery)]),
+        Err(Fail::Detail(reason)) => return Some(vec![unavailable(None, &reason, store_recovery)]),
         Err(Fail::Defer) => {
             return Some(vec![unavailable(
                 None,
@@ -109,6 +110,7 @@ pub(in crate::cli) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
             let profile = match store::load(root, name) {
                 Ok(profile) => profile,
                 Err(Fail::Tunnel(reason)) => return unavailable(Some(name), reason, recovery),
+                Err(Fail::Detail(reason)) => return unavailable(Some(name), &reason, recovery),
                 Err(Fail::Defer) => {
                     return unavailable(
                         Some(name),

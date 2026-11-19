@@ -124,22 +124,94 @@ fn op_time(op: &Op) -> Duration {
     }
 }
 
+fn write_moved_marker(
+    docker: &mut impl Docker,
+    daemon_id: &str,
+    local: &Path,
+    body: &str,
+) -> Result<(), String> {
+    if !probe::container_id(daemon_id) {
+        return Err(
+            "the source daemon was not pinned to a Docker container ID; rerun move --dry-run"
+                .into(),
+        );
+    }
+    let state =
+        probe::inspect_container_field(docker, daemon_id, daemon_id, "{{.State.Running}}", SHORT);
+    if state.as_deref() != Some("false") {
+        return Err("the selected source daemon is not provably stopped; restore its original container and rerun move --rollback".into());
+    }
+    let _ = std::fs::remove_file(local);
+    std::fs::write(local, format!("{body}\n"))
+        .map_err(|error| format!("cannot write {}: {error}", local.display()))?;
+    let copied = docker.run(
+        &[
+            "cp".into(),
+            local.to_string_lossy().into_owned(),
+            format!("{daemon_id}:/data/moved.json"),
+        ],
+        SHORT,
+    );
+    let _ = std::fs::remove_file(local);
+    if copied.ok() {
+        Ok(())
+    } else {
+        Err(format!(
+            "docker cp of moved.json failed ({})",
+            probe::why(&copied)
+        ))
+    }
+}
+
 /// The real hosts.
-pub(super) struct Live {
-    pub docker: docker::Real,
+pub(super) struct Live<D: Docker = docker::Real> {
+    pub docker: D,
     pub ssh: remote::Ssh,
     pub source: Facts,
     pub to: String,
     pub store: Files,
 }
 
-impl Live {
-    fn bank(&mut self) -> Bank<'_, docker::Real> {
+impl<D: Docker> Live<D> {
+    fn daemon(&self) -> &str {
+        self.source.daemon_selector()
+    }
+
+    fn bank(&mut self) -> Bank<'_, D> {
+        let daemon = self.daemon().to_owned();
         Bank {
             docker: &mut self.docker,
-            pg: self.source.pg.clone(),
-            daemon: self.source.daemon.clone(),
+            pg: self.source.pg_selector().to_owned(),
+            daemon,
         }
+    }
+
+    /// Confirmation can take time. Check both original containers under the
+    /// source update lock, before creating a record or claiming the target.
+    pub(super) fn verify_pins(&mut self) -> Result<(), String> {
+        if self.inspect_running() != Some(true) {
+            return Err("the selected source daemon is no longer provably running; restore the original Docker stack and retry move --dry-run".into());
+        }
+        self.require_postgres()
+    }
+
+    fn require_daemon(&mut self) -> Result<(), String> {
+        if !self.source.daemon_id.is_empty() && self.inspect_running().is_none() {
+            return Err("the selected source daemon could not be verified by container ID".into());
+        }
+        Ok(())
+    }
+
+    fn require_postgres(&mut self) -> Result<(), String> {
+        let id = &self.source.pg_id;
+        if !id.is_empty()
+            && probe::inspect_container_field(&mut self.docker, id, id, "{{.State.Running}}", SHORT)
+                .as_deref()
+                != Some("true")
+        {
+            return Err("the selected source PostgreSQL is no longer provably running; restore the original Docker stack and retry".into());
+        }
+        Ok(())
     }
 
     fn run(&mut self, args: &[&str], timeout: Duration) -> docker::Ran {
@@ -149,6 +221,7 @@ impl Live {
 
     /// One SQL statement as the bank's role, against `database`.
     fn sql(&mut self, database: &str, statement: &str) -> Result<String, String> {
+        self.require_postgres()?;
         let (user, port) = (self.source.user.clone(), self.source.port);
         let bank = self.bank();
         let argv = bank.psql_argv(
@@ -188,33 +261,38 @@ impl Live {
 
     /// The source daemon container's image, by ID.
     fn image_id(&mut self) -> Result<String, String> {
-        let daemon = self.source.daemon.clone();
-        let ran = self.run(&["inspect", "-f", "{{.Image}}", &daemon], SHORT);
-        let image = String::from_utf8_lossy(&ran.stdout).trim().to_owned();
-        if ran.ok() && !image.is_empty() {
-            Ok(image)
-        } else {
-            Err(format!(
-                "docker inspect {daemon} failed ({})",
-                probe::why(&ran)
-            ))
-        }
+        let daemon = self.daemon().to_owned();
+        probe::inspect_container_field(
+            &mut self.docker,
+            &daemon,
+            &self.source.daemon_id,
+            "{{.Image}}",
+            SHORT,
+        )
+        .ok_or_else(|| format!("cannot read the selected source daemon {daemon}'s image"))
     }
 
     fn inspect_running(&mut self) -> Option<bool> {
-        let daemon = self.source.daemon.clone();
-        let ran = self.run(&["inspect", "-f", "{{.State.Running}}", &daemon], SHORT);
-        match String::from_utf8_lossy(&ran.stdout).trim() {
-            "true" if ran.ok() => Some(true),
-            "false" if ran.ok() => Some(false),
+        let daemon = self.daemon().to_owned();
+        let state = probe::inspect_container_field(
+            &mut self.docker,
+            &daemon,
+            &self.source.daemon_id,
+            "{{.State.Running}}",
+            SHORT,
+        );
+        match state.as_deref() {
+            Some("true") => Some(true),
+            Some("false") => Some(false),
             _ => None,
         }
     }
 }
 
-impl Hosts for Live {
+impl<D: Docker> Hosts for Live<D> {
     fn source_stop(&mut self) -> Result<(), String> {
-        let daemon = self.source.daemon.clone();
+        self.require_daemon()?;
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["stop", "-t", "120", &daemon], STOP);
         match self.inspect_running() {
             Some(false) => Ok(()),
@@ -226,7 +304,8 @@ impl Hosts for Live {
     }
 
     fn source_start(&mut self) -> Result<(), String> {
-        let daemon = self.source.daemon.clone();
+        self.require_daemon()?;
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["start", &daemon], SHORT);
         if ran.ok() {
             Ok(())
@@ -268,7 +347,8 @@ impl Hosts for Live {
     }
 
     fn source_policy(&mut self, policy: &str) -> Result<(), String> {
-        let daemon = self.source.daemon.clone();
+        self.require_daemon()?;
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["update", &format!("--restart={policy}"), &daemon], SHORT);
         if ran.ok() {
             Ok(())
@@ -329,11 +409,12 @@ impl Hosts for Live {
         let path = dir.join("pseudolife_memory.sql.gz");
         let part = dir.join("pseudolife_memory.sql.gz.part");
         let _ = std::fs::remove_file(&part);
+        self.require_postgres()?;
         let port = self.source.port.to_string();
         let target = crate::cli::restore_cli::conn::database_arg(&self.source.db);
         let argv: Vec<String> = [
             "exec",
-            &self.source.pg,
+            self.source.pg_selector(),
             "sh",
             "-c",
             safety::DUMP,
@@ -358,7 +439,7 @@ impl Hosts for Live {
             let _ = std::fs::remove_file(&part);
             return Err(format!(
                 "the final dump is incomplete; check docker logs {} and the free space on {}",
-                self.source.pg,
+                self.source.pg_selector(),
                 dir.display()
             ));
         }
@@ -417,7 +498,7 @@ impl Hosts for Live {
 
     fn archive(&mut self, dir: &Path) -> Result<Artifact, String> {
         let plan = safety::Target {
-            pg: self.source.pg.clone(),
+            pg: self.source.pg_selector().to_owned(),
             port: self.source.port,
             user: self.source.user.clone(),
             db: self.source.db.clone(),
@@ -455,15 +536,8 @@ impl Hosts for Live {
     }
 
     fn moved_marker(&mut self) -> Result<Marker, String> {
-        let daemon = self.source.daemon.clone();
-        let ran = self.run(&["inspect", "-f", "{{.Image}}", &daemon], SHORT);
-        let image = String::from_utf8_lossy(&ran.stdout).trim().to_owned();
-        if !ran.ok() || image.is_empty() {
-            return Err(format!(
-                "docker inspect {daemon} failed ({})",
-                probe::why(&ran)
-            ));
-        }
+        let daemon = self.daemon().to_owned();
+        let image = self.image_id()?;
         let ran = self.run(
             &[
                 "run",
@@ -497,31 +571,15 @@ impl Hosts for Live {
     }
 
     fn moved(&mut self, body: Option<&str>) -> Result<(), String> {
-        let daemon = self.source.daemon.clone();
-        // By ID: a helper over the daemon's volumes never pulls a tag.
-        let image = self.image_id()?;
         match body {
             Some(body) => {
                 let local = self.store.moves.join("moved.json.part");
-                let _ = std::fs::remove_file(&local);
-                std::fs::write(&local, format!("{body}\n"))
-                    .map_err(|error| format!("cannot write {}: {error}", local.display()))?;
-                let local_text = local.to_string_lossy().into_owned();
-                let ran = self.run(
-                    &["cp", &local_text, &format!("{daemon}:/data/moved.json")],
-                    SHORT,
-                );
-                let _ = std::fs::remove_file(&local);
-                if ran.ok() {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "docker cp of moved.json failed ({})",
-                        probe::why(&ran)
-                    ))
-                }
+                write_moved_marker(&mut self.docker, &self.source.daemon_id, &local, body)
             }
             None => {
+                let daemon = self.daemon().to_owned();
+                // By ID: a helper over the daemon's volumes never pulls a tag.
+                let image = self.image_id()?;
                 let ran = self.run(
                     &[
                         "run",
@@ -630,6 +688,231 @@ pub(super) fn local_dir(store: &Files, id: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct RecordingDocker {
+        calls: Vec<Vec<String>>,
+        inspected_id: String,
+        running: bool,
+    }
+
+    impl Docker for RecordingDocker {
+        fn run_io(
+            &mut self,
+            args: &[String],
+            _: Duration,
+            _: docker::Input<'_>,
+            _: docker::Output<'_>,
+        ) -> docker::Ran {
+            self.calls.push(args.to_vec());
+            let words: Vec<_> = args.iter().map(String::as_str).collect();
+            let stdout = match words.as_slice() {
+                ["inspect", "-f", "{{.State.Running}}", _] => format!("{}\n", self.running),
+                ["inspect", "-f", "{{.Image}}", _] => "sha256:fixture\n".into(),
+                ["inspect", "--type=container", "-f", format, selector] => {
+                    let id = if self.inspected_id.is_empty() {
+                        *selector
+                    } else {
+                        self.inspected_id.as_str()
+                    };
+                    let value = if format.contains("{{.Image}}") {
+                        "sha256:fixture"
+                    } else if self.running {
+                        "true"
+                    } else {
+                        "false"
+                    };
+                    format!("{id} {value}\n")
+                }
+                ["exec", _, "env", ..] => "0\n".into(),
+                ["exec", _, "sh", ..] | ["create", ..] => {
+                    return docker::Ran {
+                        code: 1,
+                        ..docker::Ran::default()
+                    };
+                }
+                _ => String::new(),
+            };
+            docker::Ran {
+                stdout: stdout.into_bytes(),
+                ..docker::Ran::default()
+            }
+        }
+    }
+
+    fn marker_refusal(actual: &str, running: bool) {
+        let id = "1".repeat(64);
+        let mut docker = RecordingDocker {
+            inspected_id: actual.into(),
+            running,
+            ..RecordingDocker::default()
+        };
+        let path = std::env::temp_dir().join(format!("pl-move-marker-{}", uuid::Uuid::new_v4()));
+        assert!(write_moved_marker(&mut docker, &id, &path, "{}").is_err());
+        assert!(docker.calls.iter().all(|args| args[0] == "inspect"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn marker_refuses_a_different_container_using_the_pinned_id_as_its_name() {
+        marker_refusal(&"2".repeat(64), false);
+    }
+
+    #[test]
+    fn marker_refuses_when_the_pinned_container_is_still_running() {
+        marker_refusal(&"1".repeat(64), true);
+    }
+
+    #[test]
+    fn source_database_actions_and_archive_use_the_pinned_containers() {
+        let daemon_id = "1".repeat(64);
+        let pg_id = "2".repeat(64);
+        let mut serialized = serde_json::to_value(Facts {
+            daemon: "pseudolife-mcp-daemon".into(),
+            daemon_id: daemon_id.clone(),
+            pg: "pseudolife-mcp-postgres".into(),
+            db: "bank".into(),
+            port: 5432,
+            ..Facts::default()
+        })
+        .unwrap();
+        serialized["pg_id"] = serde_json::json!(pg_id);
+        let source = serde_json::from_value(serialized).unwrap();
+        let dir = std::env::temp_dir().join(format!("pl-move-pg-{}", uuid::Uuid::new_v4()));
+        let mut live = Live {
+            docker: RecordingDocker {
+                running: true,
+                ..RecordingDocker::default()
+            },
+            ssh: remote::Ssh {
+                program: PathBuf::new(),
+            },
+            source,
+            to: String::new(),
+            store: Files::under_home(&dir),
+        };
+        live.verify_pins().unwrap();
+        assert_eq!(live.docker.calls[0].last().unwrap(), &daemon_id);
+        assert_eq!(live.docker.calls[1].last().unwrap(), &pg_id);
+        live.fence(true).unwrap();
+        live.fence(false).unwrap();
+        live.read_only(true).unwrap();
+        live.read_only(false).unwrap();
+        assert!(live.dump(&dir).is_err());
+        assert!(live.archive(&dir).is_err());
+        std::fs::remove_dir(dir).unwrap();
+        let execs: Vec<_> = live
+            .docker
+            .calls
+            .iter()
+            .filter(|args| args[0] == "exec")
+            .collect();
+        assert_eq!(execs.len(), 9);
+        assert!(execs.iter().all(|args| args[1] == pg_id));
+        let archive = live
+            .docker
+            .calls
+            .iter()
+            .find(|args| args[0] == "create")
+            .unwrap();
+        assert!(
+            archive
+                .windows(2)
+                .any(|pair| pair == ["--volumes-from", &format!("{daemon_id}:ro")])
+        );
+        let before = live.docker.calls.len();
+        live.docker.inspected_id = daemon_id;
+        assert!(live.fence(false).is_err());
+        assert_eq!(live.docker.calls.len(), before + 1);
+        assert_eq!(live.docker.calls[before][0], "inspect");
+        let before = live.docker.calls.len();
+        live.docker.inspected_id = "3".repeat(64);
+        assert!(live.source_stop().is_err());
+        assert!(live.source_start().is_err());
+        assert!(live.source_policy("no").is_err());
+        assert!(
+            live.docker.calls[before..]
+                .iter()
+                .all(|args| args[0] == "inspect")
+        );
+    }
+
+    #[test]
+    fn moved_marker_only_targets_the_pinned_source_container() {
+        struct TwoStacks {
+            original: String,
+            replacement: String,
+            original_exists: bool,
+            calls: Vec<Vec<String>>,
+        }
+
+        impl Docker for TwoStacks {
+            fn run_io(
+                &mut self,
+                args: &[String],
+                _: Duration,
+                _: docker::Input<'_>,
+                _: docker::Output<'_>,
+            ) -> docker::Ran {
+                self.calls.push(args.to_vec());
+                let args: Vec<_> = args.iter().map(String::as_str).collect();
+                match args.as_slice() {
+                    [
+                        "inspect",
+                        "--type=container",
+                        "-f",
+                        "{{.Id}} {{.State.Running}}",
+                        id,
+                    ] if *id == self.original && self.original_exists => docker::Ran {
+                        stdout: format!("{} false\n", self.original).into_bytes(),
+                        ..docker::Ran::default()
+                    },
+                    [
+                        "inspect",
+                        "--type=container",
+                        "-f",
+                        "{{.Id}} {{.State.Running}}",
+                        id,
+                    ] if *id == self.replacement
+                        || *id == super::super::super::bank::DAEMON_CONTAINER =>
+                    {
+                        docker::Ran {
+                            stdout: format!("{} true\n", self.replacement).into_bytes(),
+                            ..docker::Ran::default()
+                        }
+                    }
+                    ["cp", _, _] => docker::Ran::default(),
+                    _ => docker::Ran {
+                        code: 1,
+                        ..docker::Ran::default()
+                    },
+                }
+            }
+        }
+
+        let mut docker = TwoStacks {
+            original: "1".repeat(64),
+            replacement: "2".repeat(64),
+            original_exists: true,
+            calls: vec![],
+        };
+        let dir = std::env::temp_dir().join(format!("pl-move-marker-{}", uuid::Uuid::new_v4()));
+        crate::board::state::private_dir(&dir).unwrap();
+        let part = dir.join("moved.json.part");
+        let original = docker.original.clone();
+        write_moved_marker(&mut docker, &original, &part, "{}").unwrap();
+        assert_eq!(docker.calls[1][0], "cp");
+        assert_eq!(docker.calls[1][2], format!("{original}:/data/moved.json"));
+        assert!(!part.exists());
+
+        docker.calls.clear();
+        docker.original_exists = false;
+        assert!(write_moved_marker(&mut docker, &original, &part, "{}").is_err());
+        assert_eq!(docker.calls.len(), 1);
+        assert_eq!(docker.calls[0].last().unwrap(), &original);
+        assert!(!part.exists());
+        std::fs::remove_dir(dir).unwrap();
+    }
 
     #[test]
     fn a_disabled_task_reads_as_disabled_in_utf16_or_utf8() {

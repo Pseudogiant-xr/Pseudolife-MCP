@@ -2003,7 +2003,8 @@ pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome
             code: EXIT_REFUSED,
             message: format!(
                 "this host's daemon is not serving its bank, and move {id} no longer holds it stopped: your bank is this host's ({}), so {to}'s copy is not released while nothing serves it. Start this host's daemon (docker start {}) and check that its /health names that bank, then rerun. Nothing was changed",
-                record.source_bank, record.source.daemon
+                record.source_bank,
+                record.source.daemon_selector()
             ),
         };
     }
@@ -2081,7 +2082,8 @@ pub(super) fn give_up<H: Hosts>(
             code: EXIT_REFUSED,
             message: format!(
                 "this host's daemon is not serving its bank, so {to} is not given up: your bank is this host's ({}), and the other copy is not given up while nothing serves it. Start this host's daemon (docker start {}) and check that its /health names that bank, then rerun. Nothing was changed",
-                record.source_bank, record.source.daemon
+                record.source_bank,
+                record.source.daemon_selector()
             ),
         });
     }
@@ -2286,33 +2288,35 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
         lines.push(
             format!(
                 "docker exec {} psql -U {} -d postgres -c \"ALTER DATABASE {} WITH ALLOW_CONNECTIONS true\"",
-                record.source.pg, record.source.user, record.source.db
+                record.source.pg_selector(), record.source.user, record.source.db
             ),
         );
     }
     if f.read_only {
         lines.push(format!(
             r#"docker exec {} psql -U {} -d postgres -c "ALTER DATABASE {} RESET default_transaction_read_only""#,
-            record.source.pg, record.source.user, record.source.db
+            record.source.pg_selector(), record.source.user, record.source.db
         ));
     }
     if f.moved_written {
         lines.push(format!(
             "docker run --rm --entrypoint rm --volumes-from {} {} -f /data/moved.json",
-            record.source.daemon, record.source.image
+            record.source.daemon_selector(),
+            record.source.image
         ));
     }
     if f.source_policy_changed {
         lines.push(format!(
-            "docker update --restart={} pseudolife-mcp-daemon",
-            record.source_policy
+            "docker update --restart={} {}",
+            record.source_policy,
+            record.source.daemon_selector()
         ));
     }
     if f.schedule_paused {
         lines.push(record.schedule_enable.clone());
     }
     if f.source_stopped {
-        lines.push("docker start pseudolife-mcp-daemon".to_owned());
+        lines.push(format!("docker start {}", record.source.daemon_selector()));
     }
     if f.target_quiesced && !f.target_restored {
         lines.push(format!("ssh {to} docker start pseudolife-mcp-daemon"));

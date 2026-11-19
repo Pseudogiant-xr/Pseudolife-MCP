@@ -116,7 +116,7 @@ class Proof:
 
     def run(self) -> dict:
         import psycopg
-        from pseudolife_memory.storage.schema import ensure_schema
+        from rust.harness_support.schema import ensure_schema
 
         pg = self.container("--tmpfs", "/var/lib/postgresql",
             # The image entrypoint chowns /var/run/postgresql. Use a dedicated

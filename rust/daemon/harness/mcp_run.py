@@ -57,9 +57,11 @@ def seed_stored(dsn):
     read already holds them."""
     import psycopg
     from principal_fixtures import check_target, seed_principal
+    from rust.harness_support.bank_fixture import assert_fixture_database
     from rust.harness_support.schema import ensure_schema
     check_target(dsn)
     with psycopg.connect(dsn) as conn:
+        assert_fixture_database(conn)
         conn.execute("SET search_path TO public")
         ensure_schema(conn)
         conn.commit()

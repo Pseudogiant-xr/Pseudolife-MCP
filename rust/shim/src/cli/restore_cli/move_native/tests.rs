@@ -52,6 +52,7 @@ struct Host {
 
 fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
     json!({
+        "Id": "1".repeat(64),
         "Image": "sha256:0123456789abcdef",
         "State": {"Running": running},
         "Config": {
@@ -68,6 +69,7 @@ fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
 
 fn pg_doc(project: &str) -> Value {
     json!({
+        "Id": "2".repeat(64),
         "Name": "/pseudolife-mcp-postgres",
         "State": {"Running": true},
         "Config": {"Labels": {"com.docker.compose.project": project}},
@@ -116,15 +118,20 @@ impl Docker for Host {
         self.calls.push(args.to_vec());
         let a: Vec<&str> = args.iter().map(String::as_str).collect();
         match a.as_slice() {
-            ["inspect", name] | ["inspect", "--type=container", name] => match self.docs.get(*name)
-            {
-                Some(doc) => ok(&json!([doc]).to_string()),
-                None => Ran {
-                    code: 1,
-                    stderr: format!("Error: No such object: {name}").into_bytes(),
-                    ..Ran::default()
-                },
-            },
+            ["inspect", name] | ["inspect", "--type=container", name] => {
+                match self.docs.get(*name).or_else(|| {
+                    self.docs
+                        .values()
+                        .find(|doc| doc["Id"].as_str() == Some(*name))
+                }) {
+                    Some(doc) => ok(&json!([doc]).to_string()),
+                    None => Ran {
+                        code: 1,
+                        stderr: format!("Error: No such object: {name}").into_bytes(),
+                        ..Ran::default()
+                    },
+                }
+            }
             ["exec", _, "du", "-sk", "/data"] => ok(&self.du),
             ["version", ..] if self.engine.is_some() => Ran {
                 code: 1,
@@ -399,15 +406,15 @@ fn read_only(argv: &[String]) -> bool {
     match a.as_slice() {
         ["inspect", _] | ["inspect", "--type=container", _] => true,
         ["version", "--format", "{{.Server.Version}}"] => true,
-        ["exec", "pseudolife-mcp-daemon", "du", "-sk", "/data"] => true,
-        [
-            "exec",
-            "-e",
-            options,
-            "pseudolife-mcp-postgres",
-            "env",
-            rest @ ..,
-        ] if *options == READ_ONLY => {
+        ["exec", selector, "du", "-sk", "/data"]
+            if *selector == "pseudolife-mcp-daemon" || probe::container_id(selector) =>
+        {
+            true
+        }
+        ["exec", "-e", options, selector, "env", rest @ ..]
+            if *options == READ_ONLY
+                && (*selector == "pseudolife-mcp-postgres" || probe::container_id(selector)) =>
+        {
             let Some(at) = rest.iter().position(|w| *w == "psql") else {
                 return false;
             };
@@ -528,6 +535,7 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
         );
     }
     assert_eq!(document_of(&plan)["changed"], json!(false));
+    assert_eq!(document_of(&plan)["executable"], json!(true));
     assert_eq!(document_of(&plan)["target_url_tied"], json!(true));
 }
 
@@ -546,6 +554,26 @@ type Change<T> = Box<dyn Fn(&mut T)>;
 
 fn document_of(plan: &Plan) -> Value {
     document(plan)
+}
+
+#[test]
+fn source_requires_both_immutable_container_ids() {
+    for (name, role) in [
+        ("pseudolife-mcp-daemon", "daemon"),
+        ("pseudolife-mcp-postgres", "PostgreSQL"),
+    ] {
+        for bad_id in ["", "not-an-immutable-id"] {
+            let mut world = world();
+            world.here.docs.get_mut(name).unwrap()["Id"] = json!(bad_id);
+            let why = preflight(&mut world, &request()).unwrap_err();
+            assert!(
+                why.contains(role) && why.contains("immutable Docker container ID"),
+                "{why}"
+            );
+            assert!(world.wire.runs.is_empty());
+            assert!(world.here.calls.iter().all(|call| read_only(call)));
+        }
+    }
 }
 
 #[test]
@@ -1032,7 +1060,7 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
             .here
             .calls
             .iter()
-            .any(|args| args == &["inspect", "--type=container", "pseudolife-mcp-daemon"])
+            .any(|args| args == &["inspect", "--type=container", &"1".repeat(64)])
     );
     for (target, argv, stdin) in &current.wire.runs {
         assert!(!target.contains(SENTINEL) && !argv.contains(SENTINEL));
@@ -1067,6 +1095,7 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
     assert!(!output.contains("The move would, in this order"));
     assert!(!output.contains("run it without --dry-run to move"));
     assert!(steps(&plan).is_empty());
+    assert_eq!(document(&plan)["executable"], false);
     let mut old = world();
     assert!(
         preflight(&mut old, &request)
@@ -1434,9 +1463,21 @@ fn an_ssh_timeout_ends_the_run_even_when_a_child_keeps_its_pipes_open() {
 }
 
 #[test]
+fn source_daemon_and_postgres_must_be_from_the_same_project() {
+    let mut world = world();
+    world.here.docs.get_mut("pseudolife-mcp-postgres").unwrap()["Config"]["Labels"]["com.docker.compose.project"] =
+        json!("other-stack");
+    let error = preflight(&mut world, &request()).unwrap_err();
+    assert!(error.contains("different Compose projects"));
+    assert!(world.wire.runs.is_empty());
+}
+
+#[test]
 fn a_daemon_the_gate_cannot_stop_and_an_unauthenticated_target_are_refused() {
     let facts = |dir: &str| Facts {
         daemon: "pseudolife-mcp-daemon".into(),
+        daemon_id: "1".repeat(64),
+        pg_id: "2".repeat(64),
         data_dir: dir.into(),
         ..Facts::default()
     };

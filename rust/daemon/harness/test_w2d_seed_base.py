@@ -27,7 +27,7 @@ def bank(monkeypatch):
                                   "create it once on the daemon host with `pseudolife-mcp test-login "
                                   "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     import psycopg
-    from pseudolife_memory.storage.schema import ensure_schema
+    from rust.harness_support.schema import ensure_schema
     # An empty bank of its own, never a copy of a mirror's base.
     monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
     pg = pgdisposable.Slice("w2d")

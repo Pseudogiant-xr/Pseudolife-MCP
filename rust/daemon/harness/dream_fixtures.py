@@ -1,12 +1,11 @@
 """SQL fixtures for dream cursor and rollback probes, with no product imports."""
 from contextlib import contextmanager
-import re
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 from psycopg.types.json import Jsonb
 
-from rust.harness_support.bank_fixture import initialize_bank
+from rust.harness_support.bank_fixture import initialize_bank, require_fixture_database
 from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
 from dream_fixture_data import RECOVERY
 
@@ -14,8 +13,7 @@ from dream_fixture_data import RECOVERY
 def check_target(dsn):
     name = conninfo_to_dict(dsn).get("dbname", "")
     refuse_production_database(name)
-    if not re.fullmatch(r"pl_cf_(?:w[0-9][a-z]|http|pgs|prn|mir)_[a-z0-9_]{1,40}", name):
-        raise ValueError("dream fixtures require a disposable harness database")
+    require_fixture_database(name)
     return name
 
 
