@@ -124,6 +124,52 @@ fn op_time(op: &Op) -> Duration {
     }
 }
 
+fn write_moved_marker(
+    docker: &mut impl Docker,
+    daemon_id: &str,
+    local: &Path,
+    body: &str,
+) -> Result<(), String> {
+    if !probe::container_id(daemon_id) {
+        return Err(
+            "the source daemon was not pinned to a Docker container ID; rerun move --dry-run"
+                .into(),
+        );
+    }
+    let state = docker.run(
+        &[
+            "inspect".into(),
+            "-f".into(),
+            "{{.State.Running}}".into(),
+            daemon_id.into(),
+        ],
+        SHORT,
+    );
+    if !state.ok() || String::from_utf8_lossy(&state.stdout).trim() != "false" {
+        return Err("the selected source daemon is not provably stopped; restore its original container and rerun move --rollback".into());
+    }
+    let _ = std::fs::remove_file(local);
+    std::fs::write(local, format!("{body}\n"))
+        .map_err(|error| format!("cannot write {}: {error}", local.display()))?;
+    let copied = docker.run(
+        &[
+            "cp".into(),
+            local.to_string_lossy().into_owned(),
+            format!("{daemon_id}:/data/moved.json"),
+        ],
+        SHORT,
+    );
+    let _ = std::fs::remove_file(local);
+    if copied.ok() {
+        Ok(())
+    } else {
+        Err(format!(
+            "docker cp of moved.json failed ({})",
+            probe::why(&copied)
+        ))
+    }
+}
+
 /// The real hosts.
 pub(super) struct Live {
     pub docker: docker::Real,
@@ -134,11 +180,20 @@ pub(super) struct Live {
 }
 
 impl Live {
+    fn daemon(&self) -> &str {
+        if self.source.daemon_id.is_empty() {
+            &self.source.daemon
+        } else {
+            &self.source.daemon_id
+        }
+    }
+
     fn bank(&mut self) -> Bank<'_, docker::Real> {
+        let daemon = self.daemon().to_owned();
         Bank {
             docker: &mut self.docker,
             pg: self.source.pg.clone(),
-            daemon: self.source.daemon.clone(),
+            daemon,
         }
     }
 
@@ -188,7 +243,7 @@ impl Live {
 
     /// The source daemon container's image, by ID.
     fn image_id(&mut self) -> Result<String, String> {
-        let daemon = self.source.daemon.clone();
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["inspect", "-f", "{{.Image}}", &daemon], SHORT);
         let image = String::from_utf8_lossy(&ran.stdout).trim().to_owned();
         if ran.ok() && !image.is_empty() {
@@ -202,7 +257,7 @@ impl Live {
     }
 
     fn inspect_running(&mut self) -> Option<bool> {
-        let daemon = self.source.daemon.clone();
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["inspect", "-f", "{{.State.Running}}", &daemon], SHORT);
         match String::from_utf8_lossy(&ran.stdout).trim() {
             "true" if ran.ok() => Some(true),
@@ -214,7 +269,7 @@ impl Live {
 
 impl Hosts for Live {
     fn source_stop(&mut self) -> Result<(), String> {
-        let daemon = self.source.daemon.clone();
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["stop", "-t", "120", &daemon], STOP);
         match self.inspect_running() {
             Some(false) => Ok(()),
@@ -226,7 +281,7 @@ impl Hosts for Live {
     }
 
     fn source_start(&mut self) -> Result<(), String> {
-        let daemon = self.source.daemon.clone();
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["start", &daemon], SHORT);
         if ran.ok() {
             Ok(())
@@ -268,7 +323,7 @@ impl Hosts for Live {
     }
 
     fn source_policy(&mut self, policy: &str) -> Result<(), String> {
-        let daemon = self.source.daemon.clone();
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["update", &format!("--restart={policy}"), &daemon], SHORT);
         if ran.ok() {
             Ok(())
@@ -455,7 +510,7 @@ impl Hosts for Live {
     }
 
     fn moved_marker(&mut self) -> Result<Marker, String> {
-        let daemon = self.source.daemon.clone();
+        let daemon = self.daemon().to_owned();
         let ran = self.run(&["inspect", "-f", "{{.Image}}", &daemon], SHORT);
         let image = String::from_utf8_lossy(&ran.stdout).trim().to_owned();
         if !ran.ok() || image.is_empty() {
@@ -497,31 +552,15 @@ impl Hosts for Live {
     }
 
     fn moved(&mut self, body: Option<&str>) -> Result<(), String> {
-        let daemon = self.source.daemon.clone();
-        // By ID: a helper over the daemon's volumes never pulls a tag.
-        let image = self.image_id()?;
         match body {
             Some(body) => {
                 let local = self.store.moves.join("moved.json.part");
-                let _ = std::fs::remove_file(&local);
-                std::fs::write(&local, format!("{body}\n"))
-                    .map_err(|error| format!("cannot write {}: {error}", local.display()))?;
-                let local_text = local.to_string_lossy().into_owned();
-                let ran = self.run(
-                    &["cp", &local_text, &format!("{daemon}:/data/moved.json")],
-                    SHORT,
-                );
-                let _ = std::fs::remove_file(&local);
-                if ran.ok() {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "docker cp of moved.json failed ({})",
-                        probe::why(&ran)
-                    ))
-                }
+                write_moved_marker(&mut self.docker, &self.source.daemon_id, &local, body)
             }
             None => {
+                let daemon = self.daemon().to_owned();
+                // By ID: a helper over the daemon's volumes never pulls a tag.
+                let image = self.image_id()?;
                 let ran = self.run(
                     &[
                         "run",
@@ -630,6 +669,76 @@ pub(super) fn local_dir(store: &Files, id: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moved_marker_only_targets_the_pinned_source_container() {
+        struct TwoStacks {
+            original: String,
+            replacement: String,
+            original_exists: bool,
+            calls: Vec<Vec<String>>,
+        }
+
+        impl Docker for TwoStacks {
+            fn run_io(
+                &mut self,
+                args: &[String],
+                _: Duration,
+                _: docker::Input<'_>,
+                _: docker::Output<'_>,
+            ) -> docker::Ran {
+                self.calls.push(args.to_vec());
+                let args: Vec<_> = args.iter().map(String::as_str).collect();
+                match args.as_slice() {
+                    ["inspect", "-f", "{{.State.Running}}", id]
+                        if *id == self.original && self.original_exists =>
+                    {
+                        docker::Ran {
+                            stdout: b"false\n".to_vec(),
+                            ..docker::Ran::default()
+                        }
+                    }
+                    ["inspect", "-f", "{{.State.Running}}", id]
+                        if *id == self.replacement
+                            || *id == super::super::super::bank::DAEMON_CONTAINER =>
+                    {
+                        docker::Ran {
+                            stdout: b"true\n".to_vec(),
+                            ..docker::Ran::default()
+                        }
+                    }
+                    ["cp", _, _] => docker::Ran::default(),
+                    _ => docker::Ran {
+                        code: 1,
+                        ..docker::Ran::default()
+                    },
+                }
+            }
+        }
+
+        let mut docker = TwoStacks {
+            original: "1".repeat(64),
+            replacement: "2".repeat(64),
+            original_exists: true,
+            calls: vec![],
+        };
+        let dir = std::env::temp_dir().join(format!("pl-move-marker-{}", uuid::Uuid::new_v4()));
+        crate::board::state::private_dir(&dir).unwrap();
+        let part = dir.join("moved.json.part");
+        let original = docker.original.clone();
+        write_moved_marker(&mut docker, &original, &part, "{}").unwrap();
+        assert_eq!(docker.calls[1][0], "cp");
+        assert_eq!(docker.calls[1][2], format!("{original}:/data/moved.json"));
+        assert!(!part.exists());
+
+        docker.calls.clear();
+        docker.original_exists = false;
+        assert!(write_moved_marker(&mut docker, &original, &part, "{}").is_err());
+        assert_eq!(docker.calls.len(), 1);
+        assert_eq!(docker.calls[0].last().unwrap(), &original);
+        assert!(!part.exists());
+        std::fs::remove_dir(dir).unwrap();
+    }
 
     #[test]
     fn a_disabled_task_reads_as_disabled_in_utf16_or_utf8() {

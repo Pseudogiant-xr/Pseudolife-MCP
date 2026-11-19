@@ -52,6 +52,7 @@ struct Host {
 
 fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
     json!({
+        "Id": "1".repeat(64),
         "Image": "sha256:0123456789abcdef",
         "State": {"Running": running},
         "Config": {
@@ -1435,9 +1436,20 @@ fn an_ssh_timeout_ends_the_run_even_when_a_child_keeps_its_pipes_open() {
 }
 
 #[test]
+fn source_daemon_and_postgres_must_be_from_the_same_project() {
+    let mut world = world();
+    world.here.docs.get_mut("pseudolife-mcp-postgres").unwrap()["Config"]["Labels"]["com.docker.compose.project"] =
+        json!("other-stack");
+    let error = preflight(&mut world, &request()).unwrap_err();
+    assert!(error.contains("different Compose projects"));
+    assert!(world.wire.runs.is_empty());
+}
+
+#[test]
 fn a_daemon_the_gate_cannot_stop_and_an_unauthenticated_target_are_refused() {
     let facts = |dir: &str| Facts {
         daemon: "pseudolife-mcp-daemon".into(),
+        daemon_id: "1".repeat(64),
         data_dir: dir.into(),
         ..Facts::default()
     };

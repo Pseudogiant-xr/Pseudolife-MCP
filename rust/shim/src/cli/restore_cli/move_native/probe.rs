@@ -36,6 +36,10 @@ pub(super) const EMPTY_TARGET_META_KEYS: [&str; 8] = [
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::cli) struct Facts {
     pub daemon: String,
+    /// Immutable identity of the inspected daemon. Older recovery records
+    /// predate this field and retain their original name-based path.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub daemon_id: String,
     pub pg: String,
     pub image: String,
     pub running: bool,
@@ -235,6 +239,11 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
     };
     let mut facts = Facts {
         daemon: chosen.daemon.clone(),
+        daemon_id: bank::get(&chosen.running, "Id")
+            .and_then(Value::as_str)
+            .filter(|id| container_id(id))
+            .unwrap_or_default()
+            .to_owned(),
         pg: chosen.pg.clone(),
         // The image as it was named (`Config.Image`); the inspect `Image`
         // restore uses is its id.
@@ -303,6 +312,13 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
         }
     }
     Ok(facts)
+}
+
+pub(super) fn container_id(id: &str) -> bool {
+    id.len() == 64
+        && id
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// The last value of `key` in a container's environment, trimmed.
