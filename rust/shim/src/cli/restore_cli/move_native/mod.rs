@@ -819,12 +819,9 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
                     if earlier.carried_identities && request.no_keep_tokens {
                         return Some(finish(&request, Err("the previous attempt carried bearer settings; resume it without --no-keep-tokens".into())));
                     }
-                    if !request.target_files.is_empty()
-                        && request.target_files != earlier.target_files
-                    {
-                        return Some(finish(&request, Err("resume uses the original target files; drop --target-env-file and --target-compose-file or repeat the original paths".into())));
+                    if let Err(why) = request.target_files.resume_from(&earlier.target_files) {
+                        return Some(finish(&request, Err(why)));
                     }
-                    request.target_files.clone_from(&earlier.target_files);
                     request.no_keep_tokens |= !earlier.carried_identities;
                     request.resume_baseline = earlier.gated_baseline.clone();
                     request.resume_target_was_running = earlier.target_was_running;

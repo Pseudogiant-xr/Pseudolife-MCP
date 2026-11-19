@@ -53,6 +53,32 @@ impl TargetFiles {
             && !path.split('/').any(|part| part == "..")
     }
 
+    pub(super) fn resume_from(&mut self, recorded: &Self) -> Result<(), String> {
+        if self.is_empty() || self == recorded {
+            self.clone_from(recorded);
+            return Ok(());
+        }
+        let selection = if recorded.is_empty() {
+            "installed labels (no explicit file flags)".to_owned()
+        } else {
+            recorded
+                .env
+                .iter()
+                .map(|path| format!("--target-env-file {path:?}"))
+                .chain(
+                    recorded
+                        .compose
+                        .iter()
+                        .map(|path| format!("--target-compose-file {path:?}")),
+                )
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        Err(format!(
+            "resume uses the recorded target file selection: {selection}. Omit the file flags to reuse it, or repeat the recorded paths with exactly the same spelling and order"
+        ))
+    }
+
     fn resolve(&self, home: Option<&Path>) -> Result<Self, String> {
         let resolve = |value: &String| -> Result<String, String> {
             let path = if let Some(rest) = value.strip_prefix("~/") {
@@ -609,6 +635,40 @@ fn mounts_match(config: &Value, service: &str, container: &Value, data: fn(&str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_refuses_different_files_and_alternate_spellings_of_the_same_path() {
+        let recorded = TargetFiles {
+            env: Some("~/deployment/private.env".into()),
+            compose: vec![
+                "/srv/deployment/base.yml".into(),
+                "/srv/deployment/override.yml".into(),
+            ],
+        };
+        let mut omitted = TargetFiles::default();
+        omitted.resume_from(&recorded).unwrap();
+        assert_eq!(omitted, recorded);
+        omitted.resume_from(&recorded).unwrap();
+
+        for mut requested in [
+            TargetFiles {
+                env: Some("~/deployment/other.env".into()),
+                ..recorded.clone()
+            },
+            TargetFiles {
+                compose: vec![
+                    "/srv/deployment/./base.yml".into(),
+                    recorded.compose[1].clone(),
+                ],
+                ..recorded.clone()
+            },
+        ] {
+            let message = requested.resume_from(&recorded).unwrap_err();
+            assert!(message.contains(r#"--target-env-file "~/deployment/private.env""#));
+            assert!(message.contains(r#"--target-compose-file "/srv/deployment/base.yml""#));
+            assert!(message.contains("exactly the same spelling and order"));
+        }
+    }
 
     #[test]
     fn carried_settings_reject_a_substitute_at_the_pinned_target_id() {
