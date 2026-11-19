@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "ci.yml",
-  "job": "guards",
-  "before": "af168ac1178ab8a3",
-  "fingerprint": "7c95be97d61e129c",
-  "reason": "Non-doc selections and setup remain at the master budget. Docs-only runs the named doc guards and touched readers in the same job, with no extra runner, build or install. Measure the docs-only event separately when a hosted docs-only run is available."
-}
