@@ -1,5 +1,5 @@
 use super::*;
-use std::{net::TcpListener, thread, time::Instant};
+use std::{io::BufRead, net::TcpListener, thread, time::Instant};
 
 struct Home(PathBuf);
 
@@ -41,6 +41,25 @@ fn launch_fixture(root: &Path) -> Prepared<'_> {
 
 const FIXTURE: &str = "cli::tunnel::runtime::tests::vendor_fixture";
 const CONFIG_ENV: &str = "PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG";
+const FIXTURE_WATCHDOG: Duration = Duration::from_secs(90);
+
+fn wait_for_ready(path: &Path, mut finished: impl FnMut() -> bool) -> Option<LaunchRecord> {
+    // Hashing and staging are outside the supervisor's readiness deadline.
+    // Wait for the published state or exit. This bound only limits a hung
+    // test fixture, it does not measure startup performance.
+    let watchdog = Instant::now() + FIXTURE_WATCHDOG;
+    loop {
+        if let Ok(record) = read_record(path)
+            && record.ready
+        {
+            return Some(record);
+        }
+        if finished() || Instant::now() >= watchdog {
+            return None;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
 
 fn fixture_command(exe: &Path, config: &Path, mode: &str) -> Command {
     let mut command = Command::new(exe);
@@ -63,12 +82,9 @@ fn vendor_fixture() {
     if mode == "supervisor" {
         let root = PathBuf::from(path);
         let exe = std::env::current_exe().unwrap();
-        let launched = launch(
-            launch_fixture(&root),
-            &exe,
-            Duration::from_secs(8),
-            |config| fixture_command(&exe, config, "ready"),
-        );
+        let launched = launch(launch_fixture(&root), &exe, STARTUP, |config| {
+            fixture_command(&exe, config, "ready")
+        });
         assert!(launched.is_ok());
         return;
     }
@@ -98,18 +114,37 @@ fn vendor_fixture() {
     }
     if mode == "ready" {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
         let health = config["health"]["url_file"].as_str().unwrap();
         fs::write(health, format!("http://{}", listener.local_addr().unwrap())).unwrap();
-        let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        let mut request = [0; 512];
-        let count = stream.read(&mut request).unwrap();
-        assert!(request[..count].starts_with(b"GET /readyz HTTP/1.1"));
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-            .unwrap();
+        let watchdog = Instant::now() + FIXTURE_WATCHDOG;
+        while Instant::now() < watchdog {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(1)))
+                        .unwrap();
+                    let mut request = String::new();
+                    if std::io::BufReader::new(&mut stream)
+                        .read_line(&mut request)
+                        .is_ok()
+                        && request.starts_with("GET /readyz HTTP/1.1")
+                    {
+                        // A probe may have timed out while the fixture was
+                        // descheduled. The next probe can still get a reply.
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("fixture health accept failed: {error}"),
+            }
+        }
+        return;
     }
     // Bounds a fixture even if a mutation causes the supervisor to lose it.
     thread::sleep(Duration::from_secs(20));
@@ -122,25 +157,11 @@ fn foreground_launch_owns_one_child_and_stop_waits_for_cleanup() {
     let record_path = record::path(&home.0, "dot");
     let (run, stopped, busy) = thread::scope(|scope| {
         let run = scope.spawn(|| {
-            launch(
-                launch_fixture(&home.0),
-                &exe,
-                Duration::from_secs(8),
-                |config| fixture_command(&exe, config, "ready"),
-            )
+            launch(launch_fixture(&home.0), &exe, STARTUP, |config| {
+                fixture_command(&exe, config, "ready")
+            })
         });
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let ready = loop {
-            if let Ok(record) = read_record(&record_path)
-                && record.ready
-            {
-                break Some(record);
-            }
-            if Instant::now() >= deadline || run.is_finished() {
-                break None;
-            }
-            thread::sleep(Duration::from_millis(20));
-        };
+        let ready = wait_for_ready(&record_path, || run.is_finished());
         let Some(ready) = ready else {
             panic!("fixture did not become ready: {:?}", run.join().unwrap());
         };
@@ -277,18 +298,7 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
         .spawn()
         .unwrap();
     let path = record::path(&home.0, "dot");
-    let deadline = Instant::now() + Duration::from_secs(12);
-    let live = loop {
-        if let Ok(record) = read_record(&path)
-            && record.ready
-        {
-            break Some(record);
-        }
-        if Instant::now() >= deadline || supervisor.try_wait().unwrap().is_some() {
-            break None;
-        }
-        thread::sleep(Duration::from_millis(20));
-    };
+    let live = wait_for_ready(&path, || supervisor.try_wait().unwrap().is_some());
     let evidence = live.map(|record| {
         let stage = stage_path(&home.0, launch_id(&record.native_launch).unwrap());
         let refused = prepare(&home.0, "dot").is_err();
