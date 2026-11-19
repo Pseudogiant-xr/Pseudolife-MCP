@@ -137,12 +137,16 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    version fields == tag (issue #185 moved the server.json guard here, from
    the `registry` job below, so a mismatch fails before anything builds or
    uploads — it used to run after the irreversible PyPI publish and burn a
-   release number), then builds and twine-checks. The five native
-   archives are then built, verified and attached to the GitHub release
-   (with `SHA256SUMS`) before the `publish` job waits for the user's
-   one-click approval on the `pypi` environment: the updaters learn a
-   release exists from PyPI and then download its archives, so a failed
-   native build stops the release before PyPI. Manual `twine upload
+   release number), then builds and twine-checks. The workflow verifies
+   and attaches the five native CLI archives, Compose bundle and
+   `SHA256SUMS` before the `publish` job waits for approval in the
+   `pypi` environment. Existing PyPI-based updaters can obtain the archives
+   once the wheel becomes visible. Native GitHub discovery waits for
+   `RELEASE-READY.json`, which the workflow attaches only after the approved
+   `publish` job and both image jobs succeed, so the daemon, PostgreSQL and
+   Rust daemon images are all published. A manual wheel upload does not
+   create the readiness marker.
+   Manual `twine upload
    dist/*` remains the fallback. PyPI never accepts a same-version
    re-upload — metadata-only fixes are a `.postN`.
 4. **MCP registry — automated.** The `registry` job in `release.yml` runs
@@ -190,8 +194,20 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    The five native CLI archives, `SHA256SUMS` and
    `pseudolife-compose-<version>.tar.gz` publish with every release before
    `publish` (no variable), once `build`'s guards passed; the installers download the archive
-   for their host, so check after the run that all seven assets are on
-   the release (`gh release view v<version> --json assets`). Verify a published image with
+   for their host.
+
+   After the run, use `gh release view v<version> --json assets` to check that
+   the five native CLI archives, Compose bundle, `SHA256SUMS` and
+   `RELEASE-READY.json` each appear once with state `uploaded` and a positive
+   size. Use `gh release download v<version> --pattern RELEASE-READY.json` to
+   verify the marker's version and commit match the tag and its digests match
+   the published daemon, PostgreSQL and Rust images.
+   `PSEUDOLIFE_PUBLISH_RUST_DAEMON` must be `true`: with it off the Rust image
+   job is skipped, no marker is attached, and native clients and daemons never
+   learn of the release. The build-only dispatch verifies the archive bundle
+   and skips the marker job.
+
+   Verify a published image with
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
    and flip its GHCR package to public after the first release that runs
    the job, as for the Python image.
@@ -211,13 +227,17 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    exact file set and checksums, downloads and verifies already published
    assets (including `SHA256SUMS`), and uploads only missing ones. It never
    replaces existing bytes; investigate a mismatch before publication.
-   Rerun a failed release with "Re-run failed jobs", never "Re-run all
-   jobs": rebuilt archives need not be byte-identical, so the attachment
-   would refuse the new `SHA256SUMS` and PyPI could not follow until the
-   attached assets are deleted. The archives are attached before the PyPI
-   approval, so to abandon a version after rejecting that approval, delete
-   the GitHub release (or its assets): otherwise a checkout of that tag
-   installs its native client although PyPI never got it.
+   Use "Re-run failed jobs" to reuse the successful build outputs. Asset and
+   marker publication verifies any existing intended bytes and uploads only
+   missing assets. A differing existing marker requires a maintainer decision
+   before any removal. If the marker job fails in a way a re-run cannot clear
+   (it runs the tagged commit's own script, so a fault in it repeats), the
+   maintainer chooses between attaching a hand-built `RELEASE-READY.json` with
+   `gh release upload` after checking the three images by hand, and cutting a
+   patch release. If approval is declined, the marker stays absent and native
+   GitHub discovery withholds the release. Older consumers and explicit tags
+   still use their existing routes. The maintainer decides what to do with
+   abandoned release artifacts.
    Missing opt-in assets are a failed native publication, not permission
    to enable a fallback or change the default engine; keep installation
    and update readiness as release prerequisites.

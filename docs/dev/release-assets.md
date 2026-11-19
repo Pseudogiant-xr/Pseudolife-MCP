@@ -227,11 +227,13 @@ bundle, the attachment (only missing assets) and PyPI's approval; a
 failure after the attachment leaves the assets in place. When the marker
 job is retried, it uses the successful jobs' image digests and verifies any
 existing marker byte for byte. It uploads the marker only if absent.
-A partial or different existing marker stops the job for investigation.
-Use "Re-run
-failed jobs", never "Re-run all jobs": a rebuild need not be byte-identical,
-so its `SHA256SUMS` would differ from the attached one and the attachment
-would refuse, which blocks PyPI until the attached assets are deleted.
+A differing existing marker requires a maintainer decision before removal.
+Use "Re-run failed jobs" to reuse successful build outputs. If a rerun
+cannot clear a marker failure, the tagged commit's script still runs on
+each attempt. The maintainer chooses between checking the three published
+images and attaching a hand-built `RELEASE-READY.json` with
+`gh release upload`, or cutting a patch release. If approval is declined,
+the marker stays absent and native GitHub discovery withholds the release.
 Packaging fixes
 gzip/tar timestamps at the Unix epoch and ZIP timestamps at 1980-01-01;
 identical input bytes produce identical archives with the same packager.
