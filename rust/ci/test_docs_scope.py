@@ -358,6 +358,11 @@ def test_divergence_ledger_selection_checks_the_committed_index(repo):
     assert "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory" in targets
 
 
+def test_docs_image_does_not_select_census_source_readers(repo):
+    targets = docs_scope.doc_tests(["docs/images/example.png"])
+    assert not any(target.startswith("rust/test_producer_census.py") for target in targets)
+
+
 def test_unreadable_reader_selection_keeps_legacy_pr_lanes(repo, tmp_path, monkeypatch):
     root, before, commit = repo
     head = commit("docs/status.md")

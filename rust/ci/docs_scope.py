@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 from ops.ci_batch_passed import BATCH_PREFIX, MASTER, ApiError, github_get
+from rust.producer_census import EXTENSIONS as CENSUS_EXTENSIONS
 
 from .parity_scope import RUST_PLAN_DOCS, is_docs, is_documentation_path
 
@@ -189,7 +190,9 @@ def doc_tests(paths: list[str]) -> list[str]:
     for prefix, tests in DIRECTORY_READERS.items():
         if any(path.startswith(prefix) for path in paths):
             readers.update(tests)
-    if CENSUS in paths or any(path.startswith(("docs/", "examples/")) for path in paths):
+    if CENSUS in paths or any(
+            path.startswith(("docs/", "examples/")) and PurePosixPath(path).suffix in CENSUS_EXTENSIONS
+            for path in paths):
         readers.update(CENSUS_READERS)
     if RUST_PLAN_DOCS.intersection(paths):
         readers.add(PLAN_READER)
