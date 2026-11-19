@@ -199,7 +199,9 @@ def prefix_mutant_control():
     original = "if not DISPOSABLE_NAME.fullmatch(name):"
     if source.count(original) != 1:
         raise AssertionError("disposable admission mutant anchor changed")
-    for predicate in ("name.startswith(PREFIX[:-2])", "name.startswith(PREFIX)"):
+    # Read the prefix from the same slice that supplies the admission pattern.
+    for predicate in ("name.startswith((space or current()).PREFIX[:-2])",
+                      "name.startswith((space or current()).PREFIX)"):
         mutant = source.replace(original, "if not " + predicate + ":")
         namespace = {"__file__": pgdisposable.__file__}
         exec(compile(mutant, "<disposable-admission-mutant>", "exec"), namespace)
