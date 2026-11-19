@@ -36,7 +36,14 @@ pub(super) const EMPTY_TARGET_META_KEYS: [&str; 8] = [
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::cli) struct Facts {
     pub daemon: String,
+    /// Immutable identity of the inspected daemon. Older recovery records
+    /// predate this field and retain their original name-based path.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub daemon_id: String,
     pub pg: String,
+    /// Older recovery records resolve the original name when this is absent.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pg_id: String,
     pub image: String,
     pub running: bool,
     pub restart_policy: String,
@@ -235,7 +242,17 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
     };
     let mut facts = Facts {
         daemon: chosen.daemon.clone(),
+        daemon_id: bank::get(&chosen.running, "Id")
+            .and_then(Value::as_str)
+            .filter(|id| container_id(id))
+            .unwrap_or_default()
+            .to_owned(),
         pg: chosen.pg.clone(),
+        pg_id: bank::get(&pg_doc, "Id")
+            .and_then(Value::as_str)
+            .filter(|id| container_id(id))
+            .unwrap_or_default()
+            .to_owned(),
         // The image as it was named (`Config.Image`); the inspect `Image`
         // restore uses is its id.
         image: bank::get(&chosen.running, "Config")
@@ -258,6 +275,7 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
         pg_sources: sources(&pg_doc, |_| true),
         ..Facts::default()
     };
+    bank.pg = facts.pg_selector().to_owned();
     let (user, port, db) = (chosen.user.clone(), chosen.port, chosen.db.clone());
     let meta = query(
         &mut bank,
@@ -294,7 +312,10 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
     .ok()
     .and_then(|v| v.parse().ok());
     if running {
-        let ran = bank.run(&["exec", &chosen.daemon, "du", "-sk", "/data"], QUERY_TIME);
+        let ran = bank.run(
+            &["exec", facts.daemon_selector(), "du", "-sk", "/data"],
+            QUERY_TIME,
+        );
         if ran.ok() {
             facts.data_kb = String::from_utf8_lossy(&ran.stdout)
                 .split_whitespace()
@@ -303,6 +324,57 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
         }
     }
     Ok(facts)
+}
+
+impl Facts {
+    pub(super) fn daemon_selector(&self) -> &str {
+        if self.daemon_id.is_empty() {
+            &self.daemon
+        } else {
+            &self.daemon_id
+        }
+    }
+
+    pub(super) fn pg_selector(&self) -> &str {
+        if self.pg_id.is_empty() {
+            &self.pg
+        } else {
+            &self.pg_id
+        }
+    }
+}
+
+pub(super) fn container_id(id: &str) -> bool {
+    id.len() == 64
+        && id
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// An exact hexadecimal selector can also be a container name. Validate the
+/// actual ID in the same typed inspection before accepting another field.
+pub(super) fn inspect_container_field(
+    docker: &mut impl Docker,
+    selector: &str,
+    expected_id: &str,
+    field: &str,
+    timeout: std::time::Duration,
+) -> Option<String> {
+    let argv = [
+        "inspect".to_owned(),
+        "--type=container".to_owned(),
+        "-f".to_owned(),
+        format!("{{{{.Id}}}} {field}"),
+        selector.to_owned(),
+    ];
+    let ran = docker.run(&argv, timeout);
+    let text = std::str::from_utf8(&ran.stdout).ok()?;
+    let (actual_id, value) = text.trim().split_once(' ')?;
+    (ran.ok()
+        && container_id(actual_id)
+        && (expected_id.is_empty() || actual_id == expected_id)
+        && !value.is_empty())
+    .then(|| value.to_owned())
 }
 
 /// The last value of `key` in a container's environment, trimmed.
