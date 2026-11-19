@@ -31,6 +31,9 @@ const RECORD_LIMIT: usize = 64 * 1024;
 const NOT_READY: Fail = Fail::Tunnel(
     "the tunnel did not become ready. Check the daemon, tunnel ID and runtime key before retrying",
 );
+const READINESS_TIMEOUT: Fail = Fail::Tunnel(
+    "the tunnel readiness deadline elapsed. Check the daemon, tunnel ID and runtime key before retrying",
+);
 const CHILD_ERROR: Fail = Fail::Tunnel(
     "the tunnel runtime could not be started or reaped. Check tunnel status before retrying",
 );
@@ -500,7 +503,7 @@ async fn supervise(
             }
             if !record.ready {
                 if tokio::time::Instant::now() >= limit {
-                    return Err(NOT_READY);
+                    return Err(READINESS_TIMEOUT);
                 }
                 if let Some(url) = health_url(&health) {
                     let probe = client.get(url).send();
@@ -538,14 +541,23 @@ async fn supervise(
         }
     }
     if notes != 0
-        && (result == Err(NOT_READY) || result.as_ref().is_ok_and(|(_, code)| *code != 0))
+        && (result == Err(NOT_READY)
+            || result == Err(READINESS_TIMEOUT)
+            || result.as_ref().is_ok_and(|(_, code)| *code != 0))
         && let Some(log) = diagnostics::save(prepared.root, name, notes)
     {
         return match result {
-            Err(_) => Err(Fail::Detail(format!(
-                "the tunnel did not become ready. Check the runtime diagnostics at {}",
-                log.display()
-            ))),
+            Err(error) => {
+                let cause = if error == READINESS_TIMEOUT {
+                    "the tunnel readiness deadline elapsed"
+                } else {
+                    "the tunnel did not become ready"
+                };
+                Err(Fail::Detail(format!(
+                    "{cause}. Check the runtime diagnostics at {}",
+                    log.display()
+                )))
+            }
             Ok((output, code)) => Ok((
                 format!("{output}Runtime diagnostics: {}\n", log.display()),
                 code,

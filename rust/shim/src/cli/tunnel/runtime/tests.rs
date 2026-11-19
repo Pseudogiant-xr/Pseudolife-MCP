@@ -171,17 +171,15 @@ fn foreground_launch_owns_one_child_and_stop_waits_for_cleanup() {
 #[test]
 fn early_exit_and_readiness_timeout_release_the_launch_files() {
     let exe = std::env::current_exe().unwrap();
-    for (mode, timeout) in [
-        ("early-exit", Duration::from_secs(6)),
-        ("never-ready", Duration::from_millis(350)),
+    for (mode, timeout, expected) in [
+        ("early-exit", Duration::from_secs(60), NOT_READY),
+        ("never-ready", Duration::from_millis(350), READINESS_TIMEOUT),
     ] {
         let home = Home::new();
-        let started = Instant::now();
         let result = launch(launch_fixture(&home.0), &exe, timeout, |config| {
             fixture_command(&exe, config, mode)
         });
-        assert_eq!(result, Err(NOT_READY));
-        assert!(started.elapsed() < Duration::from_secs(14));
+        assert_eq!(result, Err(expected));
         let mut names: Vec<_> = fs::read_dir(&home.0)
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
