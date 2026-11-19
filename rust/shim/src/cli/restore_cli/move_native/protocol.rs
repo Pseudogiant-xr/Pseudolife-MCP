@@ -34,7 +34,9 @@ pub(in crate::cli) enum Op {
     },
     CarryApply {
         identities: Identities,
-        pins: TargetPins,
+        /// The restore's expected selection. Keep it distinct from the
+        /// request's pins because the operation is flattened on the wire.
+        expected_pins: TargetPins,
     },
     CarryVerify {
         identities: Identities,
@@ -218,4 +220,31 @@ pub(in crate::cli) struct Answer {
     /// For `give-back`: the files that now hold the moved bank as it stood
     /// on the target, with any writes it took (the restore's safety backup).
     pub kept: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn carry_apply_request_round_trips_with_request_and_apply_pins() {
+        let pins = TargetPins {
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+        };
+        let request = Request {
+            protocol: PROTOCOL,
+            move_id: "20261119-000000-aabbccdd".into(),
+            work_dir: String::new(),
+            rollback: false,
+            pins: Some(pins.clone()),
+            op: Op::CarryApply {
+                identities: super::super::carry::fixture(),
+                expected_pins: pins,
+            },
+        };
+        let wire = serde_json::to_vec(&request).unwrap();
+        let decoded = serde_json::from_slice::<Request>(&wire).expect("carry-apply request parses");
+        assert_eq!(decoded, request);
+    }
 }

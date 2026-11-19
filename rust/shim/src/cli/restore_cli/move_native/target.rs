@@ -416,9 +416,10 @@ impl super::ops::Site for Site2 {
         use super::{carry, protocol::Op};
         let docker = self.docker()?;
         match op {
-            Op::CarryApply { identities, pins } => {
-                carry::apply(docker, folder, id, identities, pins)
-            }
+            Op::CarryApply {
+                identities,
+                expected_pins,
+            } => carry::apply(docker, folder, id, identities, expected_pins),
             Op::CarryVerify { identities } => carry::verify(docker, folder, identities),
             Op::CarryUndo => carry::undo(docker, folder, id),
             _ => Err("unrecognized carried identity operation".into()),

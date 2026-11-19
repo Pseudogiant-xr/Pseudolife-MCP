@@ -536,7 +536,7 @@ impl<H: Hosts> Run<'_, H> {
             self.target(
                 Op::CarryApply {
                     identities: identities.settings(),
-                    pins: pins.clone(),
+                    expected_pins: pins.clone(),
                 },
                 None,
             )?;

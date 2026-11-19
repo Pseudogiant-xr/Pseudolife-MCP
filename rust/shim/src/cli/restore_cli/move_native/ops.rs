@@ -1162,7 +1162,10 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
     }
     let mut answer = match op {
         Op::Check { .. } | Op::CarryCheck { .. } => failed("preflight checks are read separately"),
-        Op::CarryApply { pins: expected, .. } => {
+        Op::CarryApply {
+            expected_pins: expected,
+            ..
+        } => {
             let daemon = &expected.daemon;
             let safe = site.docker().is_ok_and(|docker| {
                 pins.is_none_or(|pins| pins == expected)
