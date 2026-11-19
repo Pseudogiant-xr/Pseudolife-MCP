@@ -61,8 +61,9 @@ writing it or contacting the daemon. An equivalent Python-written profile
 also counts as an unchanged rerun. The response points to `tunnel status`
 for checking the saved configuration. A stopped tunnel can resume profile
 setup before its first key is imported. Changing the daemon connection or
-expanding access requires explicit consent. Key renewal is refused with
-instructions for the Python client, which also appear in expired-key status.
+expanding access requires explicit consent. Key input alone and an expiry
+change alone on a keyed profile show the same Python renewal instructions
+as expired-key status. An unchanged expiry remains a no-op.
 Setup requires a saved tunnel ID before first-key intake and both connection
 flags when repointing the daemon. A key or process record that appears during
 setup gets a refusal naming its path. Edits to a profile with autostart,

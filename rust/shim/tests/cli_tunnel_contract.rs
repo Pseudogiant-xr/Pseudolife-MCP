@@ -459,8 +459,21 @@ fn setup_refuses_native_renewal_and_status_points_to_python() {
         assert_refused(&home, &args, &[], &format!("{guidance}\n"));
     }
     assert!(output.lines().any(|line| line == guidance));
-    assert_deferred(&home, &["setup", "--key-expires-at", expires], &[]);
-    assert_deferred(&home, &["setup", "--read-key"], &[]);
+    for args in [
+        &["setup", "--key-expires-at", expires][..],
+        &["setup", "--read-key"],
+        &["setup", "--key-file", "unused-fixture"],
+    ] {
+        assert_refused(&home, args, &[], &format!("{guidance}\n"));
+    }
+    let before = tree(&home.0);
+    let same_expiry = run(
+        &home,
+        &["setup", "--key-expires-at", "2020-01-01T00:00:00Z"],
+        &[],
+    );
+    assert_eq!(same_expiry.status.code(), Some(0));
+    assert_eq!(tree(&home.0), before);
     daemon.assert_untouched();
 }
 
@@ -691,8 +704,11 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fixture-runtime-key"));
     let request_count = daemon.records.lock().unwrap().len();
     let repeat = setup.output().unwrap();
-    assert_eq!(repeat.status.code(), Some(1));
-    assert_eq!(repeat.stderr, native_text(DEFERRED));
+    assert_eq!(repeat.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&repeat.stderr)
+            .contains("Runtime key renewal requires the Python client.")
+    );
     assert_eq!(daemon.records.lock().unwrap().len(), request_count);
     assert!(std::fs::read(&key).unwrap() == stored);
     ambient.assert_untouched();
