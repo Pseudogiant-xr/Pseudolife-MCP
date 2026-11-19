@@ -2139,10 +2139,10 @@ def test_failed_provision_after_import_reports_the_bridge_and_can_retry(tmp_path
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
-        state.update(target_schema=59, provision_exit=47)
+        state.update(target_schema=59, target_version="0.24.0", provision_exit=47)
         state["provision_stderr"] = "read-only file system\n" + "x" * 8192 + "\n" + detail + "\n"
         state_path.write_text(json.dumps(state))
-        args = ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+        args = ["--engine", "rust", "--tag", "0.24.0", "--daemon-only", "--json", "--health-retries", "1",
                 "--rollback-tag", "pre-stuck"]
         result = run_arm(repo, env, binary, args)
         assert result.returncode == 1, result.stdout + result.stderr
