@@ -27,7 +27,7 @@ def bank(monkeypatch):
                                   "create it once on the daemon host with `pseudolife-mcp test-login "
                                   "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     import psycopg
-    from rust.harness_support.schema import ensure_schema
+    from rust.harness_support.import_blocker import cold_harness_imports
     # An empty bank of its own, never a copy of a mirror's base.
     monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
     pg = pgdisposable.Slice("w2d")
@@ -35,8 +35,11 @@ def bank(monkeypatch):
     dsn = pg.create(name)
     try:
         with psycopg.connect(dsn, autocommit=True) as conn:
-            conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            ensure_schema(conn)
+            with cold_harness_imports():
+                from rust.harness_support.schema import ensure_schema
+
+                conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                ensure_schema(conn)
             monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
             yield conn
     finally:
