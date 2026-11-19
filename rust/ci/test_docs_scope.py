@@ -336,7 +336,8 @@ def test_docs_guard_selection_keeps_the_named_guards_and_touched_readers(repo, t
         "tests/test_release_ux.py", "tests/test_llms_txt.py", "tests/test_atlas_currency.py",
         "tests/test_eval_evidence.py", "tests/test_i18n_readme.py", "tests/test_claude_md_citations.py",
         "tests/test_extractor_model_lists.py", "tests/test_reader.py::test_doc", "tests/test_plugin_packaging.py",
-        "rust/test_producer_census.py",
+        "rust/test_producer_census.py::test_current_tree_census_has_real_producer_floors",
+        "rust/test_producer_census.py::test_snapshot_is_independent_of_source_commit_history",
     }
 
 

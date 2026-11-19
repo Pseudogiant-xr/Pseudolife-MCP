@@ -13,7 +13,7 @@ import sys
 
 from ops.ci_batch_passed import BATCH_PREFIX, MASTER, ApiError, github_get
 
-from .parity_scope import is_docs, is_documentation_path
+from .parity_scope import RUST_PLAN_DOCS, is_docs, is_documentation_path
 
 ROOT = Path(__file__).resolve().parents[2]
 CENSUS = "rust/producer-census.json"
@@ -29,9 +29,18 @@ DIRECTORY_READERS = {
     "docs/i18n/": ("tests/test_plugin_packaging.py",),
     "docs/guide/": ("tests/test_plugin_packaging.py",),
     "examples/": ("tests/test_plugin_packaging.py",),
+    "rust/daemon/divergences/": (
+        "rust/ci/test_divergences_ledger.py::test_the_committed_index_carries_no_count_table",
+        "rust/ci/test_divergences_ledger.py::test_counts_of_the_committed_ledger_cover_every_entry",
+    ),
 }
-READER_FILE = re.compile(r"(?:tests/(?:[a-zA-Z0-9_-]+/)*test_[a-zA-Z0-9_]+\.py|rust/test_producer_census\.py)")
-TEST_TARGET = re.compile(READER_FILE.pattern + r"(?:::test_[A-Za-z0-9_]+)?")
+CENSUS_READERS = (
+    "rust/test_producer_census.py::test_current_tree_census_has_real_producer_floors",
+    "rust/test_producer_census.py::test_snapshot_is_independent_of_source_commit_history",
+)
+PLAN_READER = "rust/ci/test_parity_scope.py::test_the_plan_pages_counted_as_docs_are_read_by_no_code"
+READER_FILE = re.compile(r"tests/(?:[a-zA-Z0-9_-]+/)*test_[a-zA-Z0-9_]+\.py")
+TEST_TARGET = re.compile(rf"(?:{READER_FILE.pattern}|rust/(?:ci/)?test_[A-Za-z0-9_]+\.py)(?:::test_[A-Za-z0-9_]+)?")
 
 
 def reader_targets(file: str, names: list[str]) -> set[str]:
@@ -175,7 +184,9 @@ def doc_tests(paths: list[str]) -> list[str]:
         if any(path.startswith(prefix) for path in paths):
             readers.update(tests)
     if CENSUS in paths or any(path.startswith(("docs/", "examples/")) for path in paths):
-        readers.add("rust/test_producer_census.py")
+        readers.update(CENSUS_READERS)
+    if RUST_PLAN_DOCS.intersection(paths):
+        readers.add(PLAN_READER)
     for file in sorted(files - readers):
         readers.update(reader_targets(file, names))
     return sorted(readers)
