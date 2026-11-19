@@ -22,33 +22,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from .. import core, normalize
+from .. import core, lease_fixture, normalize, producers
 from . import _bank
 
 NAME = "fixture"
 TOKEN = "lease-fixture-bearer"
 T0 = 1_700_000_000.0
 
-_LOCK_CHILD = """
-import sys
-from pathlib import Path
-from pseudolife_memory.os_lock import OsLock
-lock = OsLock(Path(sys.argv[1]))
-print('HELD' if lock.acquire() else 'BUSY', flush=True)
-sys.stdin.readline()
-lock.release()
-"""
-
-
 class _Holder:
     """Owned fixture process; retain PID and OS start time at launch."""
 
     def __init__(self, path):
         import psutil
-        from .. import producers
         env = {key: os.environ[key] for key in core._INHERIT if key in os.environ}
-        env.update(PYTHONPATH=str(producers._SOURCE), PYTHONUTF8="1")
-        self.proc = subprocess.Popen([sys.executable, "-c", _LOCK_CHILD, str(path)], env=env,
+        self.proc = subprocess.Popen([sys.executable, "-I", "-S", "-X", "utf8",
+                                      str(Path(lease_fixture.__file__).resolve()), str(path)], env=env,
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -94,7 +82,6 @@ class Board:
     """Loopback HTTP boundary backed by the oracle CoordinationStore."""
 
     def __init__(self, scenario="free", bank=True):
-        from pseudolife_memory.storage.coordination import CoordinationStore
         self.name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}") if bank else None
         self.conn = None
         self.records = []
@@ -103,6 +90,8 @@ class Board:
         if not bank:
             self.url = core.DEAD_DAEMON_URL
             return
+        from pseudolife_memory.storage.coordination import CoordinationStore
+
         with _bank._admin() as conn:
             if conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (self.name,)).fetchone():
                 raise RuntimeError("disposable name collision")
@@ -209,38 +198,35 @@ class Board:
         _bank.teardown(self.name)
 
 
+def _setup_lock(arm, path, state):
+    if state == "free":
+        handle = lease_fixture.take(path)
+        assert handle is not None
+        lease_fixture.release(handle)
+    elif state == "held":
+        holder = _Holder(path)
+        arm.daemon.locals.append(holder)
+        assert holder.line() == "HELD"
+        return holder
+    return None
+
+
 def _local(state="absent", name=NAME):
     def setup(arm):
-        from pseudolife_memory.os_lock import OsLock, lock_file_name
-        from ..producers import write_private
-        write_private(arm.home / "locks" / "instance.id", "abcdef123456\n")
-        path = arm.home / "locks" / lock_file_name(name)
-        if state == "free":
-            lock = OsLock(path)
-            assert lock.acquire()
-            lock.release()
-        elif state == "held":
-            holder = _Holder(path)
-            assert holder.line() == "HELD"
+        directory = arm.home / "locks"
+        producers.write_private(directory / "instance.id", "abcdef123456\n")
+        holder = _setup_lock(arm, directory / lease_fixture.lock_file_name(name), state)
+        if holder is not None:
             arm.state["holder"] = holder
-            arm.daemon.locals.append(holder)
     return setup
 
 
 def _suite(state="absent", slot=0):
     def setup(arm):
-        from ..producers import write_private
-        from pseudolife_memory.os_lock import OsLock
-        write_private(arm.home / "suite" / "instance.id", "abcdef123456\n")
-        path = arm.home / "suite" / (f"full-suite.{slot}.lock" if slot else "full-suite.lock")
-        if state == "free":
-            lock = OsLock(path)
-            assert lock.acquire()
-            lock.release()
-        elif state == "held":
-            holder = _Holder(path)
-            assert holder.line() == "HELD"
-            arm.daemon.locals.append(holder)
+        directory = arm.home / "suite"
+        producers.write_private(directory / "instance.id", "abcdef123456\n")
+        path = directory / (f"full-suite.{slot}.lock" if slot else "full-suite.lock")
+        _setup_lock(arm, path, state)
     return setup
 
 
@@ -301,16 +287,26 @@ def _command_path(obs):
             del headers["connection"]
 
 
+def _held_age(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+    return f"{seconds // 86400}d{seconds % 86400 // 3600:02d}h"
+
+
 @normalize.rule("lease-seeded-clock")
 def _seeded_clock(obs):
     """Validate displays against this arm's clock and the fixed seed clock."""
-    from pseudolife_memory.lease_cli import _span
     # The fixture clock is injected only into the board writer; the CLI
     # still reads its actual local clock. Keep every surrounding byte.
     for field in ("stdout", "stderr"):
         raw = base64.b64decode(obs[field])
         for seconds in range(int(obs["window"][0]), int(obs["window"][1]) + 2):
-            age = _span(seconds - T0).encode()
+            age = _held_age(seconds - T0).encode()
             raw = raw.replace(b" for " + age + b", purpose", b" for <held-age>, purpose")
         for stamp in (T0, T0 + 60):
             offset = obs["seed_offsets"][str(stamp)]
@@ -363,14 +359,11 @@ def cases():
     # reads either as held (a reproduction loop reserving the machine).
     for where in ("locks", "suite"):
         def reserved(arm, where=where):
-            from pseudolife_memory.os_lock import lock_file_name
             _suite("free")(arm)
             if where == "locks":
                 _local("held", name="full-suite")(arm)
             else:
-                holder = _Holder(arm.home / "suite" / lock_file_name("full-suite"))
-                assert holder.line() == "HELD"
-                arm.daemon.locals.append(holder)
+                _setup_lock(arm, arm.home / "suite" / lease_fixture.lock_file_name("full-suite"), "held")
         add(f"check-suite-reserved-in-{where}", ["check", "full-suite", "--json"],
             setup=reserved, golden=False)
     # lease_cli.py:1391 copies these holder fields after json.loads.
