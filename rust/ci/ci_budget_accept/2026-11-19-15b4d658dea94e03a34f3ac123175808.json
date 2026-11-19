@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity",
+  "before": "1fe2f405b77eded3",
+  "fingerprint": "de052eb5add188d9",
+  "reason": "Retains the Ubuntu Parity check with the same steps, runner and timeout. A static name lets GitHub report the required check as skipped when docs-only scope proves the job is unnecessary."
+}

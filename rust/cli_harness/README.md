@@ -135,10 +135,16 @@ the rows already finished; `complete` is true only once every row ran.
 ## Seeding
 
 The wait-mail digest and Codex pending notices use the payloads in
-`producer_payloads.json`. The file names the capture baseline. The digest was
+`producer_payloads.json`, a one-time capture at `d81bba3a2`. The digest was
 captured with its clock read in UTC, and the notice capture pinned its nonce
-and expiry inputs. The coordination adapter's private atomic writer places
-the files in each disposable home.
+and expiry inputs. The shared fixture writer places the files in each
+disposable home with a private temporary file and atomic replace.
+
+The capture command ran from a disposable checkout of `d81bba3a2`.
+
+```bash
+python -X utf8 -c 'import json; from rust.cli_harness.rows import hook, mail; print(json.dumps({"capture":"one-time capture at d81bba3a2","baseline":"d81bba3a233724c008e866a66f308ed0712c5745","wait_mail_digest":mail._body(),"doorbell_records":{"regular":hook.pending_text(hook.THREAD),"maintainer":hook.pending_text(hook.THREAD,count=3,maintainer=1),"legacy":hook.pending_text(hook.THREAD,legacy=True)}},ensure_ascii=False,indent=2))'
+```
 
 ## Retired source mutants
 

@@ -14,7 +14,7 @@
     "docs/dev/dev-machines.md": "0083269f909fda4a7fad6e4663d84129e228788d8d28233cbbf4cfd52a321754",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
-    "docs/dev/merge-batches.md": "6de2ef7640835a405a80590c981c9c81991fe03df69c21a5cfea740e81012dd1",
+    "docs/dev/merge-batches.md": "37440c179e852fd5d25fa0929b90ab5be3b965322c1cc56e20875a9f2f4c32cc",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "02104e3aaac74c9b578e007f6b37b16e59a163d4ff9adafd920844e805bec3f7",
     "docs/dev/python-retirement.md": "c2034d261f0db10d2577de4ddaac5522a7041199516f28ec047f8f50e56e0dea",
@@ -235,7 +235,7 @@
     "ops/batch_timeline.py": "dc8140968be897f9db79287355f41eb5ab6a017b0a6372c0927dacbc210968be",
     "ops/check_lock_resolves.py": "5fd39ee5a66b551c3a12404981a203ce6b9f28ae75681511c89f0b22904e97a5",
     "ops/ci_batch_passed.py": "51f906f48a83659604757ad1160f6a6dc33cc74386884f0270ced5c93e5696a8",
-    "ops/ci_push_passed.py": "57c6604a865e56170286f2a2cac0d5dcf34af54598141f7fab33366a82fdf71d",
+    "ops/ci_push_passed.py": "14b3c2338e35a66da1bcc6725812f491a03798a46f0011df66be3651f1d0ad55",
     "ops/ci_tests.sh": "8f7d59674fae93807eb590f355b5a7943b88f156132cd54434eeffd2d1ab2183",
     "ops/client_credentials.py": "19a32a636e5a9d9d9e3bb254cab0199e46d7571312f5e9fb4430ccd5567fe7c1",
     "ops/compact-docker-vhdx.ps1": "3aa564ef7824cec3f08b785322df2bc65e4fafed6339926bb21299c56bcc6257",
@@ -271,7 +271,7 @@
     "ops/install.sh": "b0b5bd48a03c71719aebf0fb729759d9fc06f6a8b540c23e031e9b797d7672e1",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "4b00f2672fed7b9f930b398647336bd60c63b3a0fff738458e9208feefe34121",
+    "ops/integrate.py": "5945cfb31ea25e7bf9764af80b80d78d797150bffcc6d294f81b71ac676b00ca",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -58949,7 +58949,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:661",
+          "location": "docs/dev/merge-batches.md:662",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59096,7 +59096,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:624",
+          "location": "docs/dev/merge-batches.md:625",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59111,7 +59111,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:633",
+          "location": "docs/dev/merge-batches.md:634",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59201,7 +59201,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:3611",
+          "location": "ops/integrate.py:3634",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59216,7 +59216,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:3632",
+          "location": "ops/integrate.py:3655",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -78445,7 +78445,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:637",
+      "location": "docs/dev/merge-batches.md:638",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY",
       "shape": {
         "channel": "environment",
@@ -78459,7 +78459,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:653",
+      "location": "docs/dev/merge-batches.md:654",
       "name": "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
       "shape": {
         "channel": "environment",
@@ -92969,7 +92969,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:546",
+      "location": "docs/dev/merge-batches.md:547",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -92985,7 +92985,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:548",
+      "location": "docs/dev/merge-batches.md:549",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -93001,7 +93001,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:638",
+      "location": "docs/dev/merge-batches.md:639",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED",
       "shape": {
         "channel": "environment",
@@ -93017,7 +93017,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:643",
+      "location": "docs/dev/merge-batches.md:644",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -96096,7 +96096,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:3622",
+      "location": "ops/integrate.py:3645",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -96112,7 +96112,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:3633",
+      "location": "ops/integrate.py:3656",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -97716,7 +97716,12 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:100",
+      "location": "docs/dev/merge-batches.md:101",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/merge-batches.md:104",
       "reason": "forwarded parameters"
     },
     {
@@ -97726,30 +97731,30 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:637",
+      "location": "docs/dev/merge-batches.md:638",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_TEST_BINARY"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:653",
+      "location": "docs/dev/merge-batches.md:654",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_CARGO_TARGET_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:661",
+      "location": "docs/dev/merge-batches.md:662",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_SLOTS"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:87",
+      "location": "docs/dev/merge-batches.md:88",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:970",
+      "location": "docs/dev/merge-batches.md:971",
       "reason": "forwarded parameters"
     },
     {

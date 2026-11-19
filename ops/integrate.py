@@ -896,6 +896,20 @@ def _failed_at_cancel_step(steps: list, names: list[str], index: int) -> bool:
     return failed == [index + 2] and ran[index + 2][1] == "failure"
 
 
+def _static_parity_peer(gate_id: str, jobs: dict) -> str | None:
+    """Match the same verdict split into two static required check names."""
+    systems = {"parity": "ubuntu-latest", "parity-windows": "windows-latest"}
+    if gate_id not in systems or not systems.keys() <= jobs.keys():
+        return None
+    for job_id, system in systems.items():
+        job = jobs[job_id]
+        if job.get("name") != f"Parity / {system}" or job.get("runs-on") != system or "strategy" in job:
+            return None
+    common = [{k: v for k, v in jobs[job_id].items() if k not in ("name", "runs-on")}
+              for job_id in systems]
+    return next(job_id for job_id in systems if job_id != gate_id) if common[0] == common[1] else None
+
+
 def _gate_cancelled(check: dict, runs: dict, probes: dict,
                     local: dict[str, dict]) -> tuple[bool | None, str]:
     """Whether a FAILURE check is a gate that failed only because jobs it
@@ -909,8 +923,10 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
       job of that file, or the downgrade is refused;
     - that step is, by position and name, the only one that failed, on this
       leg and on every other failed leg of the gate in the run attempt,
-      whether the rollup lists that leg or not (`_failed_at_cancel_step`),
-      or the leg ran no step at all in an attempt that itself concluded
+      whether the rollup lists that leg or not (`_failed_at_cancel_step`).
+      The two static Parity jobs count as legs only when their verdict
+      definitions agree and both match the checkout's cancel contract.
+      A leg may also run no step at all in an attempt that concluded
       `cancelled` (cancelled while starting, so it gave no verdict);
     - no other job in the run attempt failed, timed out or needs action
       (the report-only check aside, REPORT_ONLY_CHECK), and none the gate
@@ -969,16 +985,23 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
         shape = _gate_steps(data, gate_id, local.get(str(check.get("workflowName"))))
         if not _is_gate(definition) or shape is None:
             return False, ""                # no gate, or none that names a cancel
-        names, index = shape
+        shapes = {gate_id: shape}
+        peer = _static_parity_peer(gate_id, defs)
+        if peer is not None:
+            peer_shape = _gate_steps(data, peer, local.get(str(check.get("workflowName"))))
+            if peer_shape is not None:
+                shapes[peer] = peer_shape
         if any(not owners(str(other["name"])) for other in listed):
             return False, ""                # the run is not this file's
-        legs = [str(meta["id"])] + [
-            str(other["id"]) for other in listed
-            if owners(str(other["name"])) == {gate_id} and other.get("id") != meta.get("id")
+        legs = [(str(meta["id"]), gate_id)] + [
+            (str(other["id"]), next(iter(named))) for other in listed
+            if len(named := owners(str(other["name"]))) == 1 and named <= shapes.keys()
+            and other.get("id") != meta.get("id")
             and other.get("conclusion") is not None
             and other.get("conclusion") not in _NO_VERDICT]
         stepless = []
-        for leg in legs:
+        for leg, owner in legs:
+            names, index = shapes[owner]
             what = f"job {leg}"
             leg_meta = job_meta(leg)
             steps = leg_meta.get("steps")
@@ -997,7 +1020,7 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
         cancelled = []
         for other in listed:
             named = owners(str(other["name"]))
-            if other.get("id") == meta.get("id") or named == {gate_id}:
+            if other.get("id") == meta.get("id") or (len(named) == 1 and named <= shapes.keys()):
                 continue                    # a leg of this gate, read above
             if _report_only({"workflowName": check.get("workflowName"),
                              "name": other.get("name")}):
