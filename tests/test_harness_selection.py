@@ -45,6 +45,19 @@ def test_recipe_adds_candidate_free_parity_but_keeps_native_cases_in_their_lane(
     assert "--require-databases" in result.display()
 
 
+def test_docs_scope_module_is_allowed_only_in_scope(tree):
+    command = "python3 -m rust.ci.docs_scope rust"
+    expected = recipe(tree).commands
+    value = yaml.safe_load(tree[selection.WORKFLOW])
+    value["jobs"]["scope"] = {"steps": [{"run": command}]}
+    tree[selection.WORKFLOW] = yaml.safe_dump(value)
+    assert recipe(tree).commands == expected
+
+    workflow(tree, "parity-checks", command)
+    with pytest.raises(selection.SelectionError, match="parity-checks.*rust\\.ci\\.docs_scope"):
+        recipe(tree)
+
+
 def test_a_batch_head_with_an_unlisted_rust_job_path_refuses(tree):
     workflow(tree, "rust", "python -m pytest -q rust/test_new.py")
     with pytest.raises(selection.SelectionError, match="RUST_HARNESS omits.*rust/test_new.py"):
