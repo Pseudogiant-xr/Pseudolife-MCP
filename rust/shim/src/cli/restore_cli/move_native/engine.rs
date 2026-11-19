@@ -143,6 +143,7 @@ pub(super) struct Plan {
     /// The source bank as the preflight found it (kept in the record).
     pub source: super::probe::Facts,
     pub target_image: String,
+    pub target_pins: Option<super::carry::TargetPins>,
     pub target_url: String,
     pub work_dir: String,
     pub source_bank: String,
@@ -165,6 +166,8 @@ pub(super) struct Plan {
     /// For `--resume`: the gated bank as the earlier rollback read it, which
     /// the target's bank must still match before it is replaced.
     pub resume_baseline: Option<Baseline>,
+    /// These live only in this invocation. The record names the step, never the values.
+    pub identities: Option<(super::carry::Identities, super::carry::TargetPins)>,
 }
 
 /// How the move ended.
@@ -225,6 +228,7 @@ impl<H: Hosts> Run<'_, H> {
             move_id: self.record.move_id.clone(),
             work_dir: self.plan.work_dir.clone(),
             rollback: false,
+            pins: self.record.target_pins.clone(),
             op,
         }
     }
@@ -265,6 +269,7 @@ impl<H: Hosts> Run<'_, H> {
             Ok(answer) => {
                 if let Some(state) = &answer.state {
                     self.last_state = Some(state.clone());
+                    remember_target_daemon(&mut self.record, state);
                     if !state.folder.is_empty() {
                         self.record.remote_folder = state.folder.clone();
                         self.record.remote_bytes = state.folder_bytes;
@@ -526,10 +531,30 @@ impl<H: Hosts> Run<'_, H> {
                 "the restored target's write counters (pg_stat_user_tables) cannot be read, so writes it took while it served could not be found; the target was not started",
             ));
         }
+        if let Some((identities, pins)) = &plan.identities {
+            self.step("apply the source's identities to the stopped target")?;
+            self.record.verified_target_daemon = None;
+            self.mark(|flags| flags.identities_applied = true)?;
+            self.target(
+                Op::CarryApply {
+                    identities: identities.settings(),
+                    expected_pins: pins.clone(),
+                },
+                None,
+            )?;
+        }
         self.step("lift the target's gate and start it once")?;
         self.mark(|f| f.gate_lifting = true)?;
         self.target(Op::StartGated, None)?;
         self.mark(|f| f.target_started = true)?;
+        if let Some((identities, _)) = &plan.identities {
+            self.target(
+                Op::CarryVerify {
+                    identities: identities.clone(),
+                },
+                None,
+            )?;
+        }
         self.step("wait for the target to serve the moved bank")?;
         self.wait_identity()?;
         // And from the target itself: its daemon runs, ungated, on this bank
@@ -652,12 +677,9 @@ impl<H: Hosts> Run<'_, H> {
                 .push(format!("ssh {to} rm -f {}", claim_path()));
         }
         if let Err(why) = self.hosts.repoint(&plan.target_url) {
-            // The target kept its own tokens (--no-keep-tokens): a client
-            // holding this host's token needs one of the target's.
-            self.record.follow_ups.push(format!(
-                "pseudolife-mcp connect {} --token-file <a file holding a token of {}'s> --yes   # this machine's clients still point at the old daemon ({why})",
-                plan.target_url, plan.to
-            ));
+            self.record
+                .follow_ups
+                .push(repoint_line(&self.record, &why));
         }
         self.record.phase = if self.record.follow_ups.is_empty() {
             Phase::Complete
@@ -785,9 +807,11 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
         schedule_enable: plan.schedule_enable.clone(),
         source: plan.source.clone(),
         target_image: plan.target_image.clone(),
+        target_pins: plan.target_pins.clone(),
         // Kept as the earlier record had it, so a resume refused before it
         // changed anything leaves the record as resumable as it was.
         gated_baseline: plan.resume_baseline.clone(),
+        carried_identities: plan.identities.is_some(),
         ..Record::default()
     };
     let mut record = record;
@@ -976,6 +1000,17 @@ const UNKNOWN_RESTORE_LOST: &str = "this move's restore was sent and its answer 
 const UNKNOWN_RESTORE_UNRECORDED: &str = "this host's record shows this move's restore was sent, or about to be, and no answer to it is recorded on this host, so it cannot be told whether it ran there";
 const NOT_READ_BACK: &str =
     "the target could not be read after this move's restore, so its bank cannot be shown unchanged";
+const RESTORE_TARGET_IDENTITIES: &str = "restore the target's original identity settings";
+const PROVE_TARGET_STOPPED: &str = "verify the target is stopped and gated";
+
+fn remember_target_daemon(record: &mut Record, state: &State) {
+    if record.target_pins.is_some() {
+        record.verified_target_daemon = state
+            .daemon_id
+            .clone()
+            .filter(|id| super::probe::container_id(id));
+    }
+}
 
 /// The rollback: R1 to R16 in order, every undo attempted, I2 checked on a
 /// fresh reading before the fence lifts.
@@ -1020,11 +1055,13 @@ impl<H: Hosts> Back<'_, H> {
             move_id: self.record.move_id.clone(),
             work_dir: self.record.work_dir.clone(),
             rollback: true,
+            pins: self.record.target_pins.clone(),
             op,
         };
         let answer = self.hosts.target(&request, None)?;
         if let Some(state) = &answer.state {
             self.state = Some(state.clone());
+            remember_target_daemon(&mut self.record, state);
             if !state.folder.is_empty() {
                 self.record.remote_folder = state.folder.clone();
                 self.record.remote_bytes = state.folder_bytes;
@@ -1046,6 +1083,7 @@ impl<H: Hosts> Back<'_, H> {
             move_id: self.record.move_id.clone(),
             work_dir: self.record.work_dir.clone(),
             rollback: true,
+            pins: self.record.target_pins.clone(),
             op: Op::Abort,
         };
         let mut lost = 0;
@@ -1205,10 +1243,16 @@ impl<H: Hosts> Back<'_, H> {
         let served = flags.gate_lifting || flags.target_started;
         // What a bank this move never served shows of someone else's writes.
         let mut found: Vec<String> = Vec::new();
+        let mut identities_restored = !flags.identities_applied;
         if needs_proof {
             if flags.gate_lifting || flags.target_started {
                 let result = self.op(Op::Stop).map(|_| ());
                 self.attempt("stop the target daemon", result);
+            }
+            if flags.identities_applied && aborted {
+                self.record.verified_target_daemon = None;
+                let result = self.op(Op::CarryUndo).map(|_| ());
+                identities_restored = self.attempt(RESTORE_TARGET_IDENTITIES, result);
             }
             for _ in 0..3 {
                 let state = match self.read() {
@@ -1328,6 +1372,11 @@ impl<H: Hosts> Back<'_, H> {
                 "the target could not be proved stopped and gated, so the source stays stopped and fenced",
                 false,
             );
+        }
+        if !identities_restored {
+            self.record.phase = Phase::RollbackIncomplete;
+            self.attempt(PROVE_TARGET_STOPPED, Ok(()));
+            return self.incomplete(reason, "the target's identity change could not be undone. The target was verified stopped and gated. The record lists the source recovery steps", false);
         }
         if flags.target_timer_paused {
             let result = self.op(Op::TimerResume).map(|_| ());
@@ -1619,6 +1668,7 @@ impl<H: Hosts> Back<'_, H> {
             move_id: id.clone(),
             work_dir: self.record.work_dir.clone(),
             rollback: true,
+            pins: self.record.target_pins.clone(),
             op: Op::GiveBack,
         };
         let mut waited = Duration::ZERO;
@@ -1801,10 +1851,13 @@ impl<H: Hosts> Back<'_, H> {
         let source = self.hosts.source_running();
         let target = self.state.as_ref().and_then(|s| s.running);
         let running = match (source, target) {
-            (Some(true), Some(true)) => {
-                "both daemons (stop the target now: ssh {to} docker stop pseudolife-mcp-daemon)"
-                    .to_owned()
-            }
+            (Some(true), Some(true)) => format!(
+                "both daemons. Stop the selected target now. {}",
+                fill_in_container_id(format!(
+                    "ssh {{to}} docker stop {}",
+                    manual_target_daemon(&self.record)
+                ))
+            ),
             (Some(true), _) => "the source daemon on this host".to_owned(),
             (_, Some(true)) => format!("the target daemon on {}", self.record.target),
             (Some(false), Some(false)) => "neither daemon".to_owned(),
@@ -1881,9 +1934,9 @@ impl<H: Hosts> Back<'_, H> {
 /// person: written before the commit, struck off as each step succeeds.
 fn planned_follow_ups(record: &Record) -> Vec<String> {
     let to = &record.target;
-    let url = &record.target_url;
-    let mut steps = vec![format!(
-        "pseudolife-mcp connect {url} --token-file <a file holding a token of {to}'s> --yes   # point this machine's clients at the moved bank"
+    let mut steps = vec![repoint_line(
+        record,
+        "point this machine's clients at the moved bank",
     )];
     if record.flags.target_policy_paused {
         steps.push(format!(
@@ -1898,6 +1951,18 @@ fn planned_follow_ups(record: &Record) -> Vec<String> {
     }
     steps.push(format!("ssh {to} rm -f {}", claim_path()));
     steps
+}
+
+fn repoint_line(record: &Record, detail: &str) -> String {
+    let argument = if record.carried_identities {
+        "<a file holding a carried source token>".to_owned()
+    } else {
+        format!("<a file holding a token of {}'s>", record.target)
+    };
+    format!(
+        "pseudolife-mcp connect {} --token-file {argument} --yes   # {detail}",
+        record.target_url
+    )
 }
 
 /// The tables a resume counts on the target: its own dump's and those its
@@ -2039,6 +2104,7 @@ pub(super) fn give_up_refusal(record: &Record) -> Option<Outcome> {
         }
         Phase::GivenUp => return Some(given_up_answer(record, None, Asked::TargetGone)),
         Phase::RolledBack | Phase::Releasing => {}
+        Phase::RollbackIncomplete if record.flags.identities_applied => {}
         _ => {
             return Some(Outcome {
                 code: EXIT_REFUSED,
@@ -2081,9 +2147,8 @@ pub(super) fn give_up<H: Hosts>(
         return Err(Outcome {
             code: EXIT_REFUSED,
             message: format!(
-                "this host's daemon is not serving its bank, so {to} is not given up: your bank is this host's ({}), and the other copy is not given up while nothing serves it. Start this host's daemon (docker start {}) and check that its /health names that bank, then rerun. Nothing was changed",
-                record.source_bank,
-                record.source.daemon_selector()
+                "this host's daemon is not serving its bank, so {to} is not given up: your bank is this host's ({}). Recover the source using move {id}'s rollback instructions and verify its /health names that bank, then rerun. Nothing was changed",
+                record.source_bank
             ),
         });
     }
@@ -2092,6 +2157,7 @@ pub(super) fn give_up<H: Hosts>(
         move_id: id.clone(),
         work_dir: record.work_dir.clone(),
         rollback: true,
+        pins: record.target_pins.clone(),
         op: Op::State { tables: Vec::new() },
     };
     // Any answer, a refusal included, means the target is there. A give-up
@@ -2163,10 +2229,52 @@ fn remote_folder(record: &Record) -> String {
 
 /// The command that removes the move's gate on the target, for a person.
 fn gate_removal(record: &Record) -> String {
-    format!(
-        "ssh {} docker run --rm --entrypoint rm --volumes-from pseudolife-mcp-daemon {} -f /data/move.json",
-        record.target, record.target_image
-    )
+    fill_in_container_id(format!(
+        "ssh {} docker run --rm --entrypoint rm --volumes-from {} {} -f /data/move.json",
+        record.target,
+        manual_target_daemon(record),
+        record.target_image
+    ))
+}
+
+fn fill_in_container_id(command: String) -> String {
+    if command.contains("<verified-") {
+        format!("Fill in the verified container ID before running: {command}")
+    } else {
+        command
+    }
+}
+
+fn manual_target_daemon(record: &Record) -> &str {
+    if let Some(id) = record
+        .verified_target_daemon
+        .as_deref()
+        .filter(|id| super::probe::container_id(id))
+    {
+        return id;
+    }
+    match &record.target_pins {
+        Some(_) if record.flags.identities_applied => "<verified-target-daemon-id>",
+        Some(pins) => &pins.daemon,
+        None => "pseudolife-mcp-daemon",
+    }
+}
+
+fn manual_target_selection(record: &Record) -> Option<String> {
+    let pins = record.target_pins.as_ref()?;
+    let selected = manual_target_daemon(record);
+    if selected.starts_with('<') {
+        Some(format!(
+            "On the target, substitute the daemon ID saved in {}/carry.json (pins.daemon) for <verified-target-daemon-id>. Verify that Docker returns that full ID for the expected Compose service. If the journal was never created, the selected daemon ID was {}. If a recreation began without recording its replacement, verify the original Compose project and its volumes before proceeding.",
+            remote_folder(record),
+            selected
+        ))
+    } else {
+        Some(format!(
+            "On the target, verify that Docker returns the selected daemon's full ID {} before running these commands.",
+            pins.daemon
+        ))
+    }
 }
 
 /// The last way to close a record whose target keeps refusing: on this
@@ -2189,7 +2297,10 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
     let to = &record.target;
     let at = &record.updated_at;
     let folder = remote_folder(record);
-    let start = format!("ssh {to} docker start pseudolife-mcp-daemon");
+    let start = fill_in_container_id(format!(
+        "ssh {to} docker start {}",
+        manual_target_daemon(record)
+    ));
     let claim = format!("ssh {to} rm -f {}", claim_path());
     let hands = if record.given_back || !record.kept.is_empty() {
         format!(
@@ -2203,7 +2314,7 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
         )
     } else {
         format!(
-            "{to} then held the move's claim ({}), its gate /data/move.json and the stopped copy of this host's bank behind it. Its own bank first, from the safety backup that {folder}/own-bank.json names in {folder}/safety (on {to}: pseudolife-mcp restore --backup-file <that dump> --state-archive <that state archive> --leave-stopped; if own-bank.json is missing, no command restores it, so look in {folder}/safety before anything else); then the gate, never before its own bank is back, or the copy of this host's bank behind it would start there ({}); then the claim ({claim}); then its daemon ({start})",
+            "{to} then held the move's claim ({}), its gate /data/move.json and the stopped copy of this host's bank behind it. Its own bank first, from the safety backup that {folder}/own-bank.json names in {folder}/safety (on {to}, fill in both backup paths in pseudolife-mcp restore --backup-file <that dump> --state-archive <that state archive> --leave-stopped; if own-bank.json is missing, no command restores it, so look in {folder}/safety before anything else); then the gate, never before its own bank is back, or the copy of this host's bank behind it would start there ({}); then the claim ({claim}); then its daemon ({start})",
             claim_path(),
             gate_removal(record)
         )
@@ -2219,8 +2330,10 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
             }
         )
     });
+    let selection =
+        manual_target_selection(record).map_or_else(String::new, |line| format!(" {line}"));
     format!(
-        "This host gave {to} up at {at} (--target-gone), and that is final here: nothing is sent to {to} from this host for move {} again, and --release-target and --resume refuse it.{newer} The steps below describe {to} as it was at {at}, for whoever runs it. Check first: look at what {to} holds now, and if its daemon serves a bank, or a newer move has put one there, do none of this. Otherwise, in this order: {hands}",
+        "This host gave {to} up at {at} (--target-gone), and that is final here: nothing is sent to {to} from this host for move {} again, and --release-target and --resume refuse it.{newer} The steps below describe {to} as it was at {at}, for whoever runs it. Check first: look at what {to} holds now, and if its daemon serves a bank, or a newer move has put one there, do none of this.{selection} Otherwise, in this order: {hands}",
         record.move_id
     )
 }
@@ -2258,44 +2371,91 @@ pub(super) fn given_up_answer(record: &Record, newer: Option<&Record>, asked: As
 }
 
 /// The commands that undo what the record says was done, in rollback order,
-/// for a person. They need only `docker` (and `psql` inside its container)
-/// on each host.
+/// for a person. A carried move needs its verified identity rollback
+/// before the remaining steps can be performed by hand.
 pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
     let f = &record.flags;
     let to = &record.target;
     let mut lines = Vec::new();
+    let daemon = manual_target_daemon(record);
+    if (f.gate_lifting
+        || f.target_started
+        || f.target_restored
+        || f.target_policy_paused
+        || f.target_quiesced)
+        && let Some(selection) = manual_target_selection(record)
+    {
+        lines.push(selection);
+    }
     if f.gate_lifting || f.target_started {
-        lines.push(format!("ssh {to} docker stop pseudolife-mcp-daemon"));
+        lines.push(format!("ssh {to} docker stop {daemon}"));
     }
     if f.target_restored || f.gate_lifting {
         lines.push(format!(
-            "ssh {to} docker run --rm --entrypoint touch --volumes-from pseudolife-mcp-daemon {} /data/move.json",
+            "ssh {to} docker run --rm --entrypoint touch --volumes-from {daemon} {} /data/move.json",
             record.target_image
         ));
     }
-    if f.target_timer_paused {
+    let identities_pending = f.identities_applied
+        && !record
+            .rollback
+            .iter()
+            .rfind(|undo| undo.step == RESTORE_TARGET_IDENTITIES)
+            .is_some_and(|undo| undo.ok);
+    let target_proved = record
+        .rollback
+        .iter()
+        .any(|undo| undo.step == PROVE_TARGET_STOPPED && undo.ok);
+    if identities_pending {
+        lines.push(format!(
+            "To finish restoring the target's original environment, restore access to its installed Compose deployment and run pseudolife-mcp move --rollback {} from the source. For manual source recovery, first verify that the target is stopped and gated, or that the target and its moved copy are permanently retired. Keep the source stopped and fenced until then.",
+            record.move_id
+        ));
+    }
+    if f.target_timer_paused && !identities_pending {
         lines.push(format!(
             "ssh {to} systemctl --user enable --now pseudolife-update.timer"
         ));
     }
-    if f.target_policy_paused {
+    if f.target_policy_paused && !identities_pending {
         lines.push(format!(
-            "ssh {to} docker update --restart={} pseudolife-mcp-daemon",
+            "ssh {to} docker update --restart={} {daemon}",
             record.target_policy
         ));
     }
+    let source_steps = lines.len();
+    let pg = if record.source.pg_id.is_empty() {
+        record.source.pg.as_str()
+    } else {
+        if f.fenced || f.read_only {
+            lines.push(format!(
+                "Before changing the source database, verify the target is stopped and gated or permanently retired. Check the PostgreSQL container mounting the original source bank's volumes ({}) in Compose project {}. If the original container was replaced, verify the replacement mounts those same volumes and use its current full ID.",
+                record.source.pg_sources.join(", "), record.source.pg_compose_project
+            ));
+        }
+        if record.rollback.iter().any(|undo| {
+            !undo.ok
+                && matches!(
+                    undo.step.as_str(),
+                    "lift the source database's fence"
+                        | "let the source database take writes again"
+                )
+        }) {
+            "<verified-source-postgres-id>"
+        } else {
+            record.source.pg_id.as_str()
+        }
+    };
     if f.fenced {
-        lines.push(
-            format!(
-                "docker exec {} psql -U {} -d postgres -c \"ALTER DATABASE {} WITH ALLOW_CONNECTIONS true\"",
-                record.source.pg_selector(), record.source.user, record.source.db
-            ),
-        );
+        lines.push(format!(
+            "docker exec {pg} psql -h /var/run/postgresql -p {} -U {} -d postgres -c \"ALTER DATABASE {} WITH ALLOW_CONNECTIONS true\"",
+            record.source.port, record.source.user, record.source.db
+        ));
     }
     if f.read_only {
         lines.push(format!(
-            r#"docker exec {} psql -U {} -d postgres -c "ALTER DATABASE {} RESET default_transaction_read_only""#,
-            record.source.pg_selector(), record.source.user, record.source.db
+            r#"docker exec {pg} psql -h /var/run/postgresql -p {} -U {} -d postgres -c "ALTER DATABASE {} RESET default_transaction_read_only""#,
+            record.source.port, record.source.user, record.source.db
         ));
     }
     if f.moved_written {
@@ -2318,8 +2478,27 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
     if f.source_stopped {
         lines.push(format!("docker start {}", record.source.daemon_selector()));
     }
-    if f.target_quiesced && !f.target_restored {
-        lines.push(format!("ssh {to} docker start pseudolife-mcp-daemon"));
+    if f.target_quiesced && !f.target_restored && !identities_pending {
+        lines.push(format!("ssh {to} docker start {daemon}"));
+    }
+    if identities_pending && !target_proved {
+        for line in &mut lines[source_steps..] {
+            *line = format!(
+                "After verifying the target is stopped and gated or permanently retired, {line}"
+            );
+        }
     }
     lines
+        .into_iter()
+        .map(|line| {
+            if line.starts_with("ssh ")
+                || line.starts_with("docker ")
+                || line.starts_with("After verifying")
+            {
+                fill_in_container_id(line)
+            } else {
+                line
+            }
+        })
+        .collect()
 }

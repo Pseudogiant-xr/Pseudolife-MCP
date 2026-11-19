@@ -58,13 +58,17 @@ pub(super) fn unfinished(record: &Record) -> bool {
 
 /// The last effect a record says may have happened, in step order.
 fn last_effect(flags: &Flags) -> &'static str {
-    let steps: [(bool, &'static str); 15] = [
+    let steps: [(bool, &'static str); 16] = [
         (
             flags.moved_written,
             "moved.json written into the source (the commit point)",
         ),
         (flags.target_started, "the target started"),
         (flags.gate_lifting, "the target's gate lifted"),
+        (
+            flags.identities_applied,
+            "the target's identity settings changed",
+        ),
         (flags.target_restored, "the target restored"),
         (flags.gate_written, "the target gated"),
         (flags.marker_written, "the target marked"),
@@ -145,9 +149,14 @@ pub(super) fn held_refusal(records: &[Record], to: &str, resume: bool) -> Option
         )
     } else {
         format!(
-            "first finish it with pseudolife-mcp move --to {target} --target-url {url} --no-keep-tokens --resume, or give {target} back its own bank with {release}",
+            "first finish it with pseudolife-mcp move --to {target} --target-url {url}{tokens} --resume, or give {target} back its own bank with {release}",
             target = held.target,
-            url = held.target_url
+            url = held.target_url,
+            tokens = if held.carried_identities {
+                ""
+            } else {
+                " --no-keep-tokens"
+            },
         )
     };
     Some(format!(
@@ -277,10 +286,11 @@ pub(super) fn transaction(
         request.resume_move.clone()
     };
     let target = plan.target.facts.clone().unwrap_or_default();
-    let engine_plan = engine::Plan {
+    let mut engine_plan = engine::Plan {
         to: plan.to.clone(),
         source: plan.source.clone(),
         target_image: target.image.clone(),
+        target_pins: plan.target_pins.clone(),
         target_url: super::argv::base(&plan.target_url).to_owned(),
         work_dir: request.target_work_dir.clone().unwrap_or_default(),
         source_bank: plan.source.bank.clone().unwrap_or_default(),
@@ -293,6 +303,7 @@ pub(super) fn transaction(
         local_dir: super::source::local_dir(&store, &id),
         resume: !request.resume_move.is_empty(),
         resume_baseline: request.resume_baseline.clone(),
+        identities: None,
         original_target_running: if request.resume_move.is_empty() {
             target.running
         } else {
@@ -338,6 +349,25 @@ pub(super) fn transaction(
                 code: engine::EXIT_REFUSED,
                 message: format!("{why}. {NOTHING}"),
             };
+        }
+        if plan.checked_carry {
+            let Some(pins) = engine_plan.target_pins.clone() else {
+                return engine::Outcome {
+                    code: engine::EXIT_REFUSED,
+                    message: format!(
+                        "the target has no immutable Docker container IDs; update the target client and check access to its Docker stack. {NOTHING}"
+                    ),
+                };
+            };
+            match super::carry::Identities::live(&mut live.docker, &live.source) {
+                Ok(identities) => engine_plan.identities = Some((identities, pins)),
+                Err(why) => {
+                    return engine::Outcome {
+                        code: engine::EXIT_REFUSED,
+                        message: format!("{why}. {NOTHING}"),
+                    };
+                }
+            }
         }
         engine::execute(&mut live, &engine_plan, &id)
     }) {
