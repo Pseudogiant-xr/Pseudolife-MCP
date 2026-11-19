@@ -1,23 +1,10 @@
-"""Generated fixture data; do not edit by hand.
+"""Baseline recovery data for the dream-cursor harness.
 
 Source commit: 7f2e6eacf77343e1d446ecbff38eee9447afbce6.
-Capture command: python baseline_capture.py <baseline-checkout> <output-directory>
+A one-time capture compared full catalogs and table rows after fixture seeding.
 The baseline dream_cursor_oracle.seed/make_service and PostgresStorage produced
-these responses and row changes for test_dream_cursor_cancel.py's two fixtures.
-RELATIONS records the same constructor's builtin relation rows.
+the responses and row changes for test_dream_cursor_cancel.py's two fixtures.
 """
-
-RELATIONS = (('depends-on', 'src requires dst to function', True, None),
- ('part-of', 'src is a component of dst', True, None),
- ('hosts', 'src is the host/platform for dst', False, None),
- ('runs-on', 'src executes on host/platform dst', False, 'hosts'),
- ('uses', 'src makes use of dst', False, None),
- ('configures', 'src sets configuration for dst', False, None),
- ('stores-data-in', 'src persists its data in dst', False, None),
- ('implements', 'src (a source file) realizes concept/role dst', False, None),
- ('related-to', 'untyped catch-all association', False, None),
- ('prefers', 'src (a task-type) prefers approach/tool dst (positive lesson)', False, None),
- ('avoids', 'src (a task-type) should avoid dead-end dst (negative lesson)', False, None))
 
 RECOVERY = {'panic': {'fixture': {'meta': {'dream_ack_secret_v1': '1111111111111111111111111111111111111111111111111111111111111111'},
                        'entries': [{'text': 'panic recovery probe', 'ts': 1.0}]},
