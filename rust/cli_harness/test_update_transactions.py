@@ -1904,7 +1904,7 @@ def test_release_cannot_skip_an_inaccessible_chroma_directory(tmp_path):
         result = run_arm(repo, env, binary, ["--tag", "0.25.0", "--daemon-only", "--json",
                                              "--health-retries", "1"])
         assert result.returncode == 2 and "/data/chromadb" in result.stdout, result.stdout
-        assert "grant the daemon account access" in result.stdout
+        assert "grant the daemon account access" in result.stdout.lower()
         assert stages(json.loads(state_path.read_text())) == []
 
 
