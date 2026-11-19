@@ -417,11 +417,12 @@ elif a[:1]==["exec"]:
  elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
-  if "cms_counters" in a[-1]:out="f" if s["failure"] in ("pending_import", "old_schema") and not s.get("imported") else "t"
+  if "cms_counters" in a[-1]:out="f" if s.get("counters_missing") or s["failure"] in ("pending_import", "old_schema") and not s.get("imported") else "t"
   elif "reference_chroma_import" in a[-1]:out="done" if s.get("chroma_imported") or s.get("imported") and not s.get("chroma_stuck") else ""
   else:out="56" if s["failure"]=="old_schema" and not s.get("imported") and not s.get("archived_python") else "unreadable" if s["failure"]=="unreadable_schema" else str(59 if s.get("archived_python") else s.get("running_schema",58))
  elif any("/data/chromadb/chroma.sqlite3" in v for v in a):
   if s.get("probe_failed"):code=1
+  elif s.get("chroma_inaccessible"):out="inaccessible" if any("printf inaccessible" in v for v in a) else "absent"
   else:out="present" if s.get("chroma_pending") else "absent"
  elif any("test ! -e /data/memory_state/weights.pt" in v for v in a):code=int(s["failure"] in ("pending_import","imported_weights") and not s.get("imported"))
  elif any("test -e /data/memory_state/weights.pt" in v for v in a):out="present" if s["failure"] in ("pending_import","imported_weights") and not s.get("imported") else "absent"
@@ -1291,7 +1292,7 @@ def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, nat
         assert stages(state) == expected.get(failure, ["pull", "backup", "tag", "up"])
         assert not _accepted(env).exists()
         if failure == "pull":
-            assert "--engine python" in result.stdout
+            assert "restore registry access or select a published Rust daemon" in result.stdout
         if failure in expected:
             assert not any(a[:1] == ["tag"] for a in state["calls"])
         else:
@@ -1892,6 +1893,42 @@ def test_release_already_imported_bank_updates_once_and_rerun_is_a_noop(tmp_path
         assert stages(json.loads(state_path.read_text())) == []
 
 
+def test_release_cannot_skip_an_inaccessible_chroma_directory(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(chroma_inaccessible=True, target_schema=59, rust_published=True, rust_only_release=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "0.25.0", "--daemon-only", "--json",
+                                             "--health-retries", "1"])
+        assert result.returncode == 2 and "/data/chromadb" in result.stdout, result.stdout
+        assert "grant the daemon account access" in result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+def test_release_retry_requires_committed_counters_on_the_archived_waypoint(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(running_version="0.23.1", running_schema=59, target_version="0.25.0",
+                     target_schema=59, counters_missing=True, rust_only_release=True)
+        labels = {"org.pseudolife.engine": "python", "org.pseudolife.activation": "fixture",
+                  "org.pseudolife.release": "0.23.1"}
+        state["running"]["Config"]["Labels"].update(labels)
+        accepted = _accepted(env)
+        accepted.parent.mkdir(parents=True)
+        accepted.write_text(json.dumps({"services": {SERVICE: {"labels": labels, "image": ARCHIVED_PYTHON}}}))
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "0.25.0", "--daemon-only", "--json",
+                                             "--health-retries", "1"])
+        assert result.returncode == 1 and "cms_counters" in result.stdout, result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
 def test_unattended_release_can_import_a_legacy_bank_from_python(tmp_path):
     binary = _native_binary()
     if not binary:
@@ -2080,7 +2117,7 @@ def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, 
         assert result.returncode == 1, result.stdout + result.stderr
         assert "did not finish importing the bank's schema and CMS counters" in result.stdout
         assert json.loads(result.stdout)["rollback"]["restore_required"] is True
-        assert "pseudolife-mcp restore --backup-file" in result.stdout
+        assert "pseudolife-mcp restore --container " in result.stdout and "fixture-pg" in result.stdout
         state = json.loads(state_path.read_text())
         assert stages(state) == ["pull", "pull", "backup", "tag", "up"]
         assert _labels(state_path)["org.pseudolife.engine"] == "python"

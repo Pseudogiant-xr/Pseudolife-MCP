@@ -677,18 +677,23 @@ pub(super) fn import_status(
         && legacy_file(
             u,
             daemon,
+            "/data/memory_state",
             "test -e /data/memory_state/weights.pt || test -e /data/memory_state/weights.pt.bak",
         )?;
     // The Python daemon leaves the Chroma tree intact even after import.
     // Its bank-local marker is written only after verifying the copied chunks.
-    let chroma_pending = legacy_file(u, daemon, "test -f /data/chromadb/chroma.sqlite3")?
-        && sql(
-            u,
-            pg,
-            user,
-            db,
-            "SELECT value::jsonb->>'status' FROM meta WHERE key = 'reference_chroma_import'",
-        )? != "done";
+    let chroma_pending = legacy_file(
+        u,
+        daemon,
+        "/data/chromadb",
+        "test -f /data/chromadb/chroma.sqlite3",
+    )? && sql(
+        u,
+        pg,
+        user,
+        db,
+        "SELECT value::jsonb->>'status' FROM meta WHERE key = 'reference_chroma_import'",
+    )? != "done";
     Ok(ImportStatus {
         schema,
         has_counters,
@@ -697,12 +702,17 @@ pub(super) fn import_status(
     })
 }
 
-fn legacy_file(u: &Update, daemon: &str, test: &str) -> Result<bool> {
-    let script = format!("if {test}; then printf present; else printf absent; fi");
+fn legacy_file(u: &Update, daemon: &str, directory: &str, test: &str) -> Result<bool> {
+    let script = format!(
+        "if [ ! -x /data ] || {{ [ -d {directory} ] && [ ! -x {directory} ]; }}; then printf inaccessible; elif {test}; then printf present; else printf absent; fi"
+    );
     let (code, out) = u.docker_call(&["exec", daemon, "sh", "-c", &script]);
     match (code, out.trim()) {
         (0, "present") => Ok(true),
         (0, "absent") => Ok(false),
+        (0, "inaccessible") => Err(UpdateError::usage(format!(
+            "cannot check legacy data in {directory}. Grant the daemon account access to the directory and retry. Nothing was deployed"
+        ))),
         _ => Err(UpdateError::usage(
             "cannot check the daemon's state volume for legacy files; start the daemon with its original /data mount and retry; nothing was deployed",
         )),

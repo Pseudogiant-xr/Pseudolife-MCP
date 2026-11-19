@@ -175,6 +175,28 @@ enum ReleaseStage {
     AfterImport,
 }
 
+fn import_waypoint(labels: &Value) -> bool {
+    labels[engine::ENGINE_LABEL] == "python"
+        && labels[engine::RELEASE_LABEL] == IMPORT_VERSION
+        && engine::selection(&engine::release_accepted()).is_ok_and(|selection| {
+            selection.is_some_and(|service| service["image"] == IMPORT_IMAGE)
+        })
+}
+
+fn confirm_import(bank: &engine::ImportStatus) -> Result<()> {
+    if bank.schema.is_none_or(|schema| schema < 57) || !bank.has_counters {
+        return Err(UpdateError::new(
+            "the archived Python daemon did not finish importing the bank's schema and CMS counters into cms_counters; use the pre-import rollback and recover the original state before retrying",
+        ));
+    }
+    if bank.chroma_pending {
+        return Err(UpdateError::new(
+            "the archived Python daemon did not finish importing the Chroma documents; check its logs and use the pre-import rollback before retrying",
+        ));
+    }
+    Ok(())
+}
+
 /// A copy of the shipped Compose files the release archive replaces: one
 /// of this updater's release archives, the Python updater's bundled copies,
 /// or a checkout's `ops/` (the installers' layout).
@@ -757,6 +779,10 @@ impl Update {
             let bank = prepared
                 .import_status(self)
                 .inspect_err(|_| self.legacy_attempt = true)?;
+            if import_waypoint(&prepared.context.running["Config"]["Labels"]) {
+                self.legacy_attempt = true;
+                confirm_import(&bank)?;
+            }
             if bank.pending() {
                 self.legacy_attempt = true;
                 let schema = bank.schema.ok_or_else(|| UpdateError::usage(
@@ -955,17 +981,7 @@ impl Update {
         self.schema_before = health["schema"].as_i64();
         let result = (|| -> Result<()> {
             let rust = self.prepare_release("rust", true, target, Some(&health))?;
-            let bank = rust.import_status(self)?;
-            if bank.schema.is_none_or(|schema| schema < 57) || !bank.has_counters {
-                return Err(UpdateError::new(
-                    "the archived Python daemon did not finish importing the bank's schema and CMS counters into cms_counters; use the pre-import rollback below and recover the original state before retrying",
-                ));
-            }
-            if bank.chroma_pending {
-                return Err(UpdateError::new(
-                    "the archived Python daemon did not finish importing the Chroma documents; check its logs and use the pre-import rollback below before retrying",
-                ));
-            }
+            confirm_import(&rust.import_status(self)?)?;
             let pg = self.release_disk(&rust)?;
             self.apply_release(
                 rust,
@@ -1162,9 +1178,13 @@ impl Update {
                     .as_str()
                     .expect("validated state archive"),
             );
+            let pg = seams::quote(
+                pg.as_deref()
+                    .expect("the import required a PostgreSQL backup"),
+            );
             self.rollback_lines.push("      After restoring the original image, restore the bank and state from before the import:".into());
             self.rollback_lines.push(format!(
-                "      pseudolife-mcp restore --backup-file {dump} --state-archive {state} --yes"
+                "      pseudolife-mcp restore --container {pg} --backup-file {dump} --state-archive {state} --yes"
             ));
         } else {
             self.rollback_lines.extend(self.schema_rollback_note());
@@ -1797,12 +1817,7 @@ impl Update {
         labels: &Value,
         target: &str,
     ) -> (String, bool, bool) {
-        if selected == "python"
-            && labels[engine::RELEASE_LABEL] == IMPORT_VERSION
-            && engine::selection(&engine::release_accepted()).is_ok_and(|selection| {
-                selection.is_some_and(|service| service["image"] == IMPORT_IMAGE)
-            })
-        {
+        if import_waypoint(labels) {
             // A prior run reached the archived intermediate image. Retry
             // toward Rust even though this Python activation is recorded.
             return ("rust".into(), false, false);
