@@ -16,6 +16,8 @@ use uuid::Uuid;
 use super::{Fail, KEY_RENEWAL, Output, Profile, record, setup, store, vendor};
 use crate::board::state;
 
+mod diagnostics;
+pub(super) mod identity;
 mod key;
 mod process;
 #[cfg(test)]
@@ -124,7 +126,7 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
     let locks = launch_locks(root, name)?;
     let record = record::path(root, name);
     if store::occupied(&record).map_err(|_| conflict(root, name))? {
-        return Err(conflict(root, name));
+        recover_launch(root, name)?;
     }
     if !store::private_read(&path, RECORD_LIMIT).is_ok_and(|current| current == bytes) {
         return Err(Fail::Tunnel(
@@ -199,6 +201,8 @@ struct Identity {
 #[derive(Serialize, Deserialize)]
 struct LaunchRecord {
     native_launch: String,
+    #[serde(default)]
+    launch_identity: Option<String>,
     supervisor: Identity,
     target: Option<Identity>,
     ready: bool,
@@ -206,6 +210,63 @@ struct LaunchRecord {
 
 fn stage_path(root: &Path, id: Uuid) -> PathBuf {
     root.join(format!(".native-launch-{}", id.simple()))
+}
+
+fn recover_launch(root: &Path, name: &str) -> Result<(), Fail> {
+    // The caller owns the native and Python lifetime locks. A dead
+    // supervisor alone does not establish that its vendor child is gone.
+    let path = record::path(root, name);
+    let launch = read_record(&path)?;
+    let id = launch_id(&launch.native_launch).ok_or_else(|| conflict(root, name))?;
+    let directory = stage_path(root, id);
+    let table = record::table();
+    if (cfg!(target_os = "macos") && launch.target.is_none())
+        || !record::read(path.clone(), table.as_deref())
+            .is_some_and(|record| record.liveness == record::Liveness::Gone)
+    {
+        return Err(Fail::Detail(format!(
+            "cannot confirm the old runtime stopped. Check tunnel status before removing {}",
+            directory.display()
+        )));
+    }
+    remove_launch_files(&directory, &format!("{name}.profile.json"))?;
+    store::sharing_retry(|| fs::remove_file(&path)).map_err(|_| conflict(root, name))
+}
+
+fn remove_launch_files(directory: &Path, profile: &str) -> Result<(), Fail> {
+    let blocked = || {
+        Fail::Detail(format!(
+            "cannot clear the tunnel launch directory {}. Inspect and remove it after confirming the runtime is stopped",
+            directory.display()
+        ))
+    };
+    setup::check_directory(directory).map_err(|_| blocked())?;
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(blocked()),
+    };
+    let known = [profile, "profile.yaml", "key", "health.url", "stop"];
+    for entry in entries {
+        let entry = entry.map_err(|_| blocked())?;
+        if !entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| known.contains(&name))
+            || !entry.file_type().is_ok_and(|kind| kind.is_file())
+            || store::checked_path(&entry.path()).is_err()
+        {
+            return Err(blocked());
+        }
+    }
+    for name in known {
+        if let Err(error) = store::sharing_retry(|| fs::remove_file(directory.join(name)))
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(blocked());
+        }
+    }
+    store::sharing_retry(|| fs::remove_dir(directory)).map_err(|_| blocked())
 }
 
 struct Stage {
@@ -275,17 +336,9 @@ impl Drop for Stage {
             );
             return;
         }
-        for name in [&*self.profile, "profile.yaml", "key", "health.url", "stop"] {
-            let path = self.directory.join(name);
-            let _ = store::sharing_retry(|| fs::remove_file(&path));
-        }
-        if store::sharing_retry(|| fs::remove_dir(&self.directory)).is_err()
-            && self.directory.exists()
-        {
-            crate::stderrln!(
-                "Tunnel launch files remain at {}. Remove that directory after the tunnel stops.",
-                self.directory.display()
-            );
+        if let Err(Fail::Detail(message)) = remove_launch_files(&self.directory, &self.profile) {
+            crate::stderrln!("{message}");
+            return;
         }
         if self.owns_record
             && read_record(&self.record).is_ok_and(|record| record.native_launch == self.launch)
@@ -299,7 +352,12 @@ impl Drop for Stage {
     }
 }
 
-fn bridge_command(executable: &Path, directory: &Path, name: &str) -> Result<String, Fail> {
+fn bridge_command(
+    executable: &Path,
+    directory: &Path,
+    name: &str,
+    launch: Uuid,
+) -> Result<String, Fail> {
     let quote = |path: &Path| -> Result<String, Fail> {
         let text = path
             .to_str()
@@ -311,9 +369,10 @@ fn bridge_command(executable: &Path, directory: &Path, name: &str) -> Result<Str
         Ok(format!("'{}'", text.replace('\'', "'\\''")))
     };
     Ok(format!(
-        "{} tunnel shim --profile {name} --profile-dir {}",
+        "{} tunnel shim --profile {name} --profile-dir {} --launch-id {}",
         quote(executable)?,
-        quote(directory)?
+        quote(directory)?,
+        launch.simple(),
     ))
 }
 
@@ -341,7 +400,20 @@ async fn supervise(
     let mut signals = process::Signals::new().map_err(|_| CHILD_ERROR)?;
     let id = Uuid::new_v4();
     let name = &prepared.profile.name;
+    let launch_identity = identity::compute(&prepared.profile, &prepared.key, executable)?;
     let mut stage = Stage::new(prepared.root, name, id)?;
+    let mut record = LaunchRecord {
+        native_launch: id.simple().to_string(),
+        launch_identity: Some(launch_identity),
+        supervisor: Identity {
+            pid: std::process::id(),
+            exe: executable.to_owned(),
+        },
+        target: None,
+        ready: false,
+    };
+    // Record ownership before a Unix launch writes its plaintext key.
+    stage.announce(&record)?;
     let profile_path = stage.directory.join(&stage.profile);
     state::atomic_create(&profile_path, &prepared.profile_bytes).map_err(|_| UNSAFE_STORE)?;
     let key = prepared.key.stage(&stage.directory, id)?;
@@ -358,7 +430,7 @@ async fn supervise(
         "health": {"listen_addr": "127.0.0.1:0", "url_file": health},
         "admin_ui": {"open_browser": false},
         "log": {"level": "info", "format": "json"},
-        "mcp": {"commands": [{"channel": "main", "command": bridge_command(executable, &stage.directory, name)?}]}
+        "mcp": {"commands": [{"channel": "main", "command": bridge_command(executable, &stage.directory, name, id)?}]}
     });
     let config_path = stage.config();
     state::atomic_create(
@@ -366,24 +438,20 @@ async fn supervise(
         &serde_json::to_vec(&config).map_err(|_| UNSAFE_STORE)?,
     )
     .map_err(|_| UNSAFE_STORE)?;
-    let mut record = LaunchRecord {
-        native_launch: id.simple().to_string(),
-        supervisor: Identity {
-            pid: std::process::id(),
-            exe: executable.to_owned(),
-        },
-        target: None,
-        ready: false,
-    };
-    stage.announce(&record)?;
+    if stop_marker(&stage.directory, id)? {
+        return Ok((format!("Tunnel {name} stopped.\n"), 0));
+    }
     let mut command = command(&config_path);
     let target = PathBuf::from(command.as_std().get_program());
     command
         .current_dir(&stage.directory)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     let mut child = process::Child::spawn(command).map_err(|_| CHILD_ERROR)?;
+    let mut stderr = child
+        .take_stderr()
+        .map(|pipe| tokio::spawn(diagnostics::drain(pipe)));
     let result = async {
         let pid = child.id().ok_or(CHILD_ERROR)?;
         record.target = Some(Identity { pid, exe: target });
@@ -430,7 +498,32 @@ async fn supervise(
     }.await;
     if child.close().await.is_err() {
         stage.retain = true;
+        if let Some(task) = &stderr {
+            task.abort();
+        }
         return Err(CHILD_ERROR);
+    }
+    let mut notes = 0;
+    if let Some(task) = stderr.as_mut() {
+        match tokio::time::timeout(Duration::from_millis(250), &mut *task).await {
+            Ok(Ok(read)) => notes = read,
+            _ => task.abort(),
+        }
+    }
+    if notes != 0
+        && (result == Err(NOT_READY) || result.as_ref().is_ok_and(|(_, code)| *code != 0))
+        && let Some(log) = diagnostics::save(prepared.root, name, notes)
+    {
+        return match result {
+            Err(_) => Err(Fail::Detail(format!(
+                "the tunnel did not become ready. Check the runtime diagnostics at {}",
+                log.display()
+            ))),
+            Ok((output, code)) => Ok((
+                format!("{output}Runtime diagnostics: {}\n", log.display()),
+                code,
+            )),
+        };
     }
     result
 }

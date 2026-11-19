@@ -22,7 +22,13 @@ impl Child {
         #[cfg(unix)]
         command.wrap(process_wrap::tokio::ProcessGroup::leader());
         #[cfg(windows)]
-        command.wrap(process_wrap::tokio::JobObject);
+        {
+            // Leave Ctrl-C with the foreground supervisor. The Windows
+            // job still owns the child and its descendants.
+            let mut flags = process_wrap::tokio::CreationFlags(Default::default());
+            flags.0.0 = windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
+            command.wrap(flags).wrap(process_wrap::tokio::JobObject);
+        }
         Ok(Self {
             child: command.spawn()?,
             signalled: false,
@@ -31,6 +37,10 @@ impl Child {
 
     pub(super) fn id(&self) -> Option<u32> {
         self.child.id()
+    }
+
+    pub(super) fn take_stderr(&mut self) -> Option<tokio::process::ChildStderr> {
+        self.child.stderr().take()
     }
 
     pub(super) fn exit_code(&mut self) -> io::Result<Option<u8>> {

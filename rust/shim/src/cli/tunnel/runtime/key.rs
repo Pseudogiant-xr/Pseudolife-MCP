@@ -16,6 +16,11 @@ impl Drop for Key {
 }
 
 impl Key {
+    pub(super) fn digest(&self) -> sha2::digest::Output<sha2::Sha256> {
+        use sha2::Digest;
+        sha2::Sha256::digest(&self.0)
+    }
+
     pub(super) fn matches(&self, other: &[u8]) -> bool {
         self.0 == other
     }

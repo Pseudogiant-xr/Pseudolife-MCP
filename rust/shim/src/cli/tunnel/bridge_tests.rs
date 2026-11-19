@@ -126,13 +126,175 @@ impl Recorder {
     }
 }
 
+fn fixture_observer(
+    root: PathBuf,
+    profile: &store::Profile,
+    reporter: Reporter,
+    sink: Sink,
+) -> Observer {
+    let mut observer = Observer::new(root, profile, reporter, sink);
+    observer.verification = Some(ReceiptIdentity {
+        captured: IDENTITY.into(),
+        current: Arc::new(|| Ok(IDENTITY.into())),
+    });
+    observer
+}
+
 fn observer(store: &Store, name: &str, sink: Sink) -> Observer {
-    Observer::new(
+    fixture_observer(
         store.0.clone(),
         &store.load(name),
         counting_reporter(),
         sink,
     )
+}
+
+fn launch_proof(
+    store: &Store,
+    captured: String,
+    current: CurrentIdentity,
+    reporter: Reporter,
+) -> Proof {
+    Proof {
+        root: store.0.clone(),
+        binding: Binding::of(&store.load("dot")),
+        verification: Some(ReceiptIdentity { captured, current }),
+        call: Call {
+            tool: "memory_search",
+            supplied: NONCE.to_string(),
+            asked: now(),
+        },
+        reporter,
+        sink: private_sink(),
+    }
+}
+
+#[test]
+fn a_challenge_for_another_identity_names_the_refusal() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", &NONCE, now() - 1.0);
+    let (reporter, lines) = recording_reporter();
+    let proof = launch_proof(
+        &store,
+        "b".repeat(64),
+        Arc::new(|| panic!("compared current for wrong challenge")),
+        reporter,
+    );
+    assert!(proof.settle().is_none());
+    assert!(
+        lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|line| line.contains("different tunnel identity"))
+    );
+}
+
+#[cfg(unix)]
+fn put_native_record(store: &Store, generation: &str, identity: &str, executable: &Path) {
+    let record = json!({
+        "native_launch": generation, "launch_identity": identity, "ready": true, "target": null,
+        "supervisor": {"pid": std::process::id(), "exe": executable}
+    });
+    crate::board::state::atomic_write(
+        &store.0.join("dot.process.json"),
+        record.to_string().as_bytes(),
+        None,
+    )
+    .unwrap();
+}
+
+#[cfg(unix)]
+fn identity_fixture() -> (Store, std::fs::File) {
+    let store = Store::new();
+    store.profile("dot");
+    store.put("token", b"fixture-daemon-token");
+    store.put("dot.key", b"PLAIN\0fixture-runtime-key");
+    let lock = crate::board::state::create(&store.0.join("dot.native-run.lock"))
+        .unwrap()
+        .file;
+    lock.try_lock().unwrap();
+    (store, lock)
+}
+
+#[test]
+#[cfg(unix)]
+fn a_matching_identity_can_settle_after_the_same_profile_relaunches() {
+    let (store, _lock) = identity_fixture();
+    let executable = std::env::current_exe().unwrap();
+    let active = identity::fixture_identity(&store.0, &store.load("dot"), &executable);
+    let old = uuid::Uuid::new_v4().simple().to_string();
+    put_native_record(&store, &old, &active, &executable);
+    let directory = store.0.join("dot-verification");
+    crate::board::state::private_dir(&directory).unwrap();
+    store.put(
+        "dot-verification/challenge.json",
+        json!({
+            "nonce": *NONCE, "identity": active, "created": now() - 1.0
+        })
+        .to_string()
+        .as_bytes(),
+    );
+    let new = uuid::Uuid::new_v4().simple().to_string();
+    put_native_record(&store, &new, &active, &executable);
+    let current_for = |id| {
+        let root = store.0.clone();
+        let exe = executable.clone();
+        Arc::new(move || identity::active(&root, "dot", &exe, Some(&id))) as CurrentIdentity
+    };
+    assert!(
+        launch_proof(
+            &store,
+            active.clone(),
+            current_for(old),
+            counting_reporter()
+        )
+        .settle()
+        .is_none()
+    );
+    assert!(
+        launch_proof(&store, active, current_for(new), counting_reporter())
+            .settle()
+            .is_some()
+    );
+    let cloud = cloud_status(&store.0, "dot");
+    assert!(cloud.current);
+    assert_eq!(cloud.successful, 1);
+}
+
+#[test]
+#[cfg(unix)]
+fn a_changed_runtime_digest_with_an_old_record_cannot_settle() {
+    let (store, _lock) = identity_fixture();
+    let executable = store.0.join("runtime-fixture");
+    store.put("runtime-fixture", b"first runtime example");
+    let active = identity::fixture_identity(&store.0, &store.load("dot"), &executable);
+    let generation = uuid::Uuid::new_v4().simple().to_string();
+    put_native_record(&store, &generation, &active, &executable);
+    crate::board::state::private_dir(&store.0.join("dot-verification")).unwrap();
+    store.put(
+        "dot-verification/challenge.json",
+        json!({
+            "nonce": *NONCE, "identity": active, "created": now() - 1.0
+        })
+        .to_string()
+        .as_bytes(),
+    );
+    std::fs::write(&executable, b"second runtime example").unwrap();
+    let (reporter, lines) = recording_reporter();
+    let root = store.0.clone();
+    assert!(
+        launch_proof(
+            &store,
+            active,
+            Arc::new(move || { identity::active(&root, "dot", &executable, Some(&generation)) }),
+            reporter
+        )
+        .settle()
+        .is_none()
+    );
+    assert_eq!(lines.lock().unwrap().as_slice(), [identity::CHANGED]);
 }
 
 /// What a fake shim answers to one request it reads.
@@ -443,7 +605,7 @@ async fn a_challenge_newer_than_the_call_or_a_rebound_profile_writes_nothing() {
     let recorder = Recorder::default();
     session(
         search(1, &NONCE).as_bytes(),
-        Some(Observer::new(
+        Some(fixture_observer(
             store.0.clone(),
             &started,
             counting_reporter(),
@@ -475,7 +637,7 @@ async fn a_receipt_that_cannot_be_saved_is_reported_once_and_the_session_goes_on
     let (reporter, said) = recording_reporter();
     let (out, received) = session(
         request.as_bytes(),
-        Some(Observer::new(
+        Some(fixture_observer(
             store.0.clone(),
             &store.load("dot"),
             reporter,
@@ -1016,7 +1178,7 @@ async fn a_request_the_bridge_cannot_read_switches_receipts_off() {
     let request = format!("{}\u{feff}{}", search(7, &NONCE), search(7, "plain"));
     let (_, received) = session(
         request.as_bytes(),
-        Some(Observer::new(
+        Some(fixture_observer(
             store.0.clone(),
             &store.load("dot"),
             reporter,
@@ -1154,7 +1316,7 @@ fn crossing_the_in_flight_limit_fails_closed() {
     store.profile("dot");
     store.challenge("dot", &NONCE, now() - 5.0);
     let (reporter, said) = recording_reporter();
-    let mut observer = Observer::new(
+    let mut observer = fixture_observer(
         store.0.clone(),
         &store.load("dot"),
         reporter,
@@ -1230,7 +1392,7 @@ async fn a_profile_changed_in_any_bound_field_writes_nothing() {
         let recorder = Recorder::default();
         session(
             search(1, &NONCE).as_bytes(),
-            Some(Observer::new(
+            Some(fixture_observer(
                 store.0.clone(),
                 &started,
                 counting_reporter(),

@@ -34,6 +34,11 @@ fn prepared(root: &Path) -> Prepared<'_> {
     }
 }
 
+fn launch_fixture(root: &Path) -> Prepared<'_> {
+    state::atomic_create(&root.join("daemon-token"), b"fixture-daemon-token").unwrap();
+    prepared(root)
+}
+
 const FIXTURE: &str = "cli::tunnel::runtime::tests::vendor_fixture";
 const CONFIG_ENV: &str = "PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG";
 
@@ -54,6 +59,19 @@ fn vendor_fixture() {
         return;
     };
     let mode = std::env::var("PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE").unwrap();
+    #[cfg(target_os = "linux")]
+    if mode == "supervisor" {
+        let root = PathBuf::from(path);
+        let exe = std::env::current_exe().unwrap();
+        let launched = launch(
+            launch_fixture(&root),
+            &exe,
+            Duration::from_secs(8),
+            |config| fixture_command(&exe, config, "ready"),
+        );
+        assert!(launched.is_ok());
+        return;
+    }
     if mode == "legacy-lock" {
         let file = state::open_with_write(Path::new(&path), true).unwrap().file;
         assert!(legacy_lock(&file));
@@ -72,6 +90,10 @@ fn vendor_fixture() {
         std::env::vars_os().all(|(_, val)| !val.to_string_lossy().contains("fixture-runtime-key"))
     );
     if mode == "early-exit" {
+        return;
+    }
+    if mode == "bad-key" {
+        eprintln!("control plane API key is malformed [synthetic-untrusted-suffix]");
         return;
     }
     if mode == "ready" {
@@ -100,9 +122,12 @@ fn foreground_launch_owns_one_child_and_stop_waits_for_cleanup() {
     let record_path = record::path(&home.0, "dot");
     let (run, stopped, busy) = thread::scope(|scope| {
         let run = scope.spawn(|| {
-            launch(prepared(&home.0), &exe, Duration::from_secs(8), |config| {
-                fixture_command(&exe, config, "ready")
-            })
+            launch(
+                launch_fixture(&home.0),
+                &exe,
+                Duration::from_secs(8),
+                |config| fixture_command(&exe, config, "ready"),
+            )
         });
         let deadline = Instant::now() + Duration::from_secs(10);
         let ready = loop {
@@ -152,14 +177,32 @@ fn early_exit_and_readiness_timeout_release_the_launch_files() {
     ] {
         let home = Home::new();
         let started = Instant::now();
-        let result = launch(prepared(&home.0), &exe, timeout, |config| {
+        let result = launch(launch_fixture(&home.0), &exe, timeout, |config| {
             fixture_command(&exe, config, mode)
         });
         assert_eq!(result, Err(NOT_READY));
-        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(started.elapsed() < Duration::from_secs(14));
         assert_eq!(fs::read_dir(&home.0).unwrap().count(), 2);
         assert!(launch_locks(&home.0, "dot").is_ok());
     }
+}
+
+#[test]
+fn an_early_vendor_failure_names_only_a_bounded_safe_log() {
+    let home = Home::new();
+    let exe = std::env::current_exe().unwrap();
+    let log = home.0.join("dot.native-runtime.log");
+    let result = launch(
+        launch_fixture(&home.0),
+        &exe,
+        Duration::from_secs(6),
+        |config| fixture_command(&exe, config, "bad-key"),
+    );
+    assert!(
+        matches!(result, Err(Fail::Detail(message)) if message.contains(&log.display().to_string()))
+    );
+    let bytes = store::private_read(&log, 1024).unwrap();
+    assert_eq!(bytes, b"The vendor rejected the runtime key format.\n");
 }
 
 #[test]
@@ -197,6 +240,7 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
     let id = Uuid::new_v4();
     let owner = LaunchRecord {
         native_launch: id.simple().to_string(),
+        launch_identity: None,
         supervisor: Identity {
             pid: std::process::id(),
             exe: std::env::current_exe().unwrap(),
@@ -210,6 +254,60 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
         matches!(stop(&home.0, "dot"), Err(Fail::Detail(message)) if message.contains("cannot be verified"))
     );
     assert!(!stage_path(&home.0, id).exists());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
+    let home = Home::new();
+    let fixture = prepared(&home.0);
+    state::atomic_create(&home.0.join("dot.profile.json"), &fixture.profile_bytes).unwrap();
+    state::atomic_create(&home.0.join("dot.key"), b"PLAIN\0fixture-runtime-key").unwrap();
+    drop(fixture);
+    let mut supervisor = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", FIXTURE])
+        .env(CONFIG_ENV, &home.0)
+        .env("PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE", "supervisor")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let path = record::path(&home.0, "dot");
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let live = loop {
+        if let Ok(record) = read_record(&path)
+            && record.ready
+        {
+            break Some(record);
+        }
+        if Instant::now() >= deadline || supervisor.try_wait().unwrap().is_some() {
+            break None;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    let evidence = live.map(|record| {
+        let stage = stage_path(&home.0, launch_id(&record.native_launch).unwrap());
+        let refused = prepare(&home.0, "dot").is_err();
+        let key_preserved = stage.join("key").is_file();
+        (stage, refused, key_preserved)
+    });
+    let _ = supervisor.kill();
+    supervisor.wait().unwrap();
+    let (stage, refused, key_preserved) = evidence.expect("fixture never became ready");
+    assert!(refused && key_preserved);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if prepare(&home.0, "dot").is_ok() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "old launch could not be recovered"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!stage.exists());
+    assert!(!path.exists());
 }
 
 #[test]
