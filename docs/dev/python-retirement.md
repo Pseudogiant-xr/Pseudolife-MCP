@@ -69,7 +69,7 @@ head updates and completed work do not inherit an older CI claim.
 | #1568: terminal connect and unattended schedule retargeting | Merged in #1613 (16 November 2026) | Preserve a declined prompt, hidden input, unrelated configuration and the existing schedule's time/kind. |
 | #1559 → #1577; #1579, #1580, #1584 | At the time of writing #1559, #1579, #1580 and #1584 are in integration batch [#1591](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/1591); #1577 is stacked on #1559 and follows it | Reuse release/batch preparation and CI fixes; do not merge policy edits on assumed delegation. |
 | #1586: Windows Codex backup-path reporting | At the time of writing in batch #1591; check overlap with the installer stack | Keep normal user-visible paths and long-path support. |
-| #1583: move transaction and recovery | Merged | Native release-mode moves can carry bearer settings to a Linux Docker target, including when the original Compose and environment files are supplied explicitly. Remaining shapes include `--expose-target` and checkout targets. |
+| #1583: move transaction and recovery | Merged | Native release-mode moves can carry bearer settings to a Linux Docker target, accept explicitly selected original files, and use a target tailnet forward with `--expose-target`. Checkout targets remain deferred. |
 | #1526: historical shared-row refactor | Parked | Do not revive it merely to finish migration; native behaviour tests avoid the original shared-row conflict. |
 
 ## Dependency order

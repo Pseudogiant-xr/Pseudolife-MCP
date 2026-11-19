@@ -15,6 +15,7 @@ mod command;
 mod engine;
 #[cfg(test)]
 mod engine_tests;
+mod exposure;
 mod ops;
 pub(super) mod probe;
 pub(in crate::cli) mod protocol;
@@ -86,6 +87,7 @@ struct Plan {
     target_pins: Option<carry::TargetPins>,
     pub to: String,
     pub target_url: String,
+    pub expose_port: Option<u16>,
     pub source: Facts,
     pub target: Reply,
     pub checked_carry: bool,
@@ -246,7 +248,8 @@ fn check_carry<W: World>(
 
 /// Check both hosts; the plan, or the first reason a move cannot go ahead.
 fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String> {
-    let target_url = request.target_url.clone().unwrap_or_default();
+    let mut target_url = request.target_url.clone().unwrap_or_default();
+    let wants_exposure = request.expose_target && request.target_url.is_none();
     let docker = world.docker()?;
     let mut source = probe::gather(docker).map_err(|why| format!("the source: {why}"))?;
     if source.running
@@ -269,6 +272,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         .saturating_add(RESTORE_FLOOR);
     let ask = Ask {
         protocol: PROTOCOL,
+        expose: wants_exposure,
         source_schema: source.schema.unwrap_or_default(),
         source_pg_version: source.pg_version.unwrap_or_default(),
         source_bank: source.bank.clone().unwrap_or_default(),
@@ -372,6 +376,22 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         ));
     };
     let mut target_pins = carry::TargetPins::from_facts(target);
+    let mut expose_port = None;
+    if wants_exposure {
+        let status = reply.exposure.as_ref()
+            .ok_or("the target helper did not report its exposure; update both clients or pass --target-url")?;
+        if status.port != exposure::port(&target.health_url)? || target_pins.is_none() {
+            return Err("the selected target deployment could not be verified for exposure; check its Docker stack and local binding or pass --target-url".into());
+        }
+        if let Some(url) = &status.url {
+            if !exposure::valid_url(url, status.port) {
+                return Err("the target helper reported an invalid tailnet URL; check its exposure or pass --target-url".into());
+            }
+            target_url = url.clone();
+        } else {
+            expose_port = Some(status.port);
+        }
+    }
     let can_carry = !request.no_keep_tokens
         && reply.supports_carry_execution == Some(true)
         && target_pins.is_some()
@@ -389,7 +409,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     // only once the move starts it, and the move checks it then (before the
     // commit point).
     let resuming = !request.resume_move.is_empty();
-    let url_tied = if resuming {
+    let url_tied = if resuming || expose_port.is_some() {
         false
     } else {
         let health = format!("{}/health", argv::base(&target_url));
@@ -436,6 +456,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     Ok(Plan {
         to,
         target_url,
+        expose_port,
         checked_carry: !request.no_keep_tokens,
         target_pins,
         carry_executable: can_carry && deployment.is_some(),
@@ -505,7 +526,11 @@ fn render(plan: &Plan, dry_run: bool) -> String {
         t.pg_version.map_or_else(|| unknown.clone(), |v| v.to_string()),
         plan.target.version,
     ));
-    if plan.url_tied {
+    if plan.expose_port.is_some() {
+        out.push_str(
+            "  clients will use: the selected target's tailnet URL after its daemon starts\n",
+        );
+    } else if plan.url_tied {
         out.push_str(&format!("  clients will use: {}\n", plan.target_url));
     } else {
         out.push_str(&format!(
@@ -547,6 +572,11 @@ fn steps(plan: &Plan) -> Vec<String> {
         return Vec::new();
     }
     let t = plan.target.facts.clone().unwrap_or_default();
+    let endpoint = if plan.expose_port.is_some() {
+        "the target's tailnet URL"
+    } else {
+        &plan.target_url
+    };
     let timer = match plan.target.update_timer.as_str() {
         "enabled" => "pause the target's unattended update (enabled now) and restore it at the end"
             .to_owned(),
@@ -598,14 +628,16 @@ fn steps(plan: &Plan) -> Vec<String> {
         } else {
             "keep the target's own tokens (--no-keep-tokens)".to_owned()
         },
-        format!(
+        if plan.expose_port.is_some() {
+            "lift the gate, start the target, create its tailnet forward, and verify that URL serves the moved bank".to_owned()
+        } else { format!(
             "lift the gate, start the target once, and wait until {} serves the moved bank",
             plan.target_url
-        ),
+        ) },
         "write /data/moved.json into the stopped source: the commit point, after which the move is not rolled back".to_owned(),
         format!(
             "re-point this machine's clients to {}{}",
-            plan.target_url,
+            endpoint,
             if plan.checked_carry { " with their carried credentials" } else { " (a client holding this host's token needs one of the target's: the report names the command)" }
         ),
     ]);
@@ -619,6 +651,7 @@ fn document(plan: &Plan) -> Value {
         "changed": false,
         "to": plan.to,
         "target_url": plan.target_url,
+        "will_expose_target": plan.expose_port.is_some(),
         "target_url_tied": plan.url_tied,
         "executable": !plan.checked_carry || plan.carry_executable,
         "source": plan.source,

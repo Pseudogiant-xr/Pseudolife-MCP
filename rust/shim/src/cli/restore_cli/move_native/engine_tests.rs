@@ -90,6 +90,7 @@ struct Hostsides {
     target_policy: String,
     target_timer: bool,
     carries_identities: bool,
+    exposure_owned: bool,
     gated: bool,
     bank: Bank,
     claim: Option<String>,
@@ -124,6 +125,7 @@ impl Hostsides {
             target_policy: "unless-stopped".into(),
             target_timer: true,
             carries_identities: false,
+            exposure_owned: false,
             gated: false,
             bank: Bank::Empty,
             claim: None,
@@ -431,6 +433,15 @@ impl Model {
             Op::CarryUndo => {
                 assert!(request.rollback && !h.target_running && h.fenced);
                 h.carries_identities = false;
+            }
+            Op::ExposeTarget { port } => {
+                assert!(h.target_serves_clone() && h.fenced);
+                h.exposure_owned = true;
+                answer.exposure_url = Some(format!("http://100.64.0.7:{port}"));
+            }
+            Op::UndoExposure { .. } => {
+                assert!(request.rollback && h.aborted.as_deref() == Some(request.move_id.as_str()));
+                h.exposure_owned = false;
             }
             Op::TimerPause => h.target_timer = false,
             Op::TimerResume => h.target_timer = true,
@@ -787,6 +798,7 @@ fn plan() -> Plan {
         },
         target_image: "pseudolife-daemon:test".into(),
         target_pins: None,
+        expose_port: None,
         target_files: Default::default(),
         target_url: "http://100.64.0.2:8765".into(),
         work_dir: String::new(),
@@ -888,6 +900,45 @@ fn carried_identities_recover_after_a_kill_or_lost_reply_at_the_new_steps() {
     assert!(recovery.hosts.source_running && !recovery.hosts.target_running);
     assert!(recovery.hosts.gated && !recovery.hosts.carries_identities);
     assert!(recovery.violations.is_empty());
+}
+
+#[test]
+fn a_lost_exposure_reply_rolls_back_the_transfer_without_leaving_the_owned_forward() {
+    let exposed = Plan {
+        target_url: String::new(),
+        expose_port: Some(8765),
+        ..plan()
+    };
+    let mut success = Model::new();
+    let result = engine::execute(&mut success, &exposed, ID);
+    assert_eq!(result.code, engine::EXIT_OK, "{result:?}");
+    assert!(success.hosts.exposure_owned);
+    assert_eq!(success.hosts.clients, "http://100.64.0.7:8765");
+    let call = success
+        .log
+        .iter()
+        .find_map(|line| line.strip_suffix(": target expose-target"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    for fault in [
+        Fault::LostBefore,
+        Fault::LostAfter,
+        Fault::Killed,
+        Fault::Refused,
+    ] {
+        let mut model = Model::new();
+        model.fault = Some((call, fault));
+        let _ = engine::execute(&mut model, &exposed, ID);
+        let mut recovery = later(&model);
+        let _ = engine::roll_back(&mut recovery, model.record.unwrap());
+        assert!(!recovery.hosts.exposure_owned, "{fault:?}");
+        assert!(
+            recovery.hosts.source_running && !recovery.hosts.target_running,
+            "{fault:?}"
+        );
+        assert!(recovery.violations.is_empty(), "{:?}", recovery.violations);
+    }
 }
 
 #[test]

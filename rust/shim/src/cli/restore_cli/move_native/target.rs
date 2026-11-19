@@ -42,6 +42,8 @@ pub(in crate::cli) struct Ask {
     pub resume_move: String,
     #[serde(default)]
     pub carry: bool,
+    #[serde(default)]
+    pub expose: bool,
 }
 
 /// What the target answers.
@@ -65,6 +67,8 @@ pub(in crate::cli) struct Reply {
     pub supports_carry_execution: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supports_carry_files: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<super::exposure::Status>,
 }
 
 /// What the target host offers the helper: its docker, a health GET, the
@@ -453,6 +457,13 @@ struct Site2 {
 }
 
 impl super::ops::Site for Site2 {
+    fn expose(
+        &mut self,
+        action: super::exposure::Action,
+        port: u16,
+    ) -> Result<super::exposure::Report, String> {
+        run_expose(action, port)
+    }
     fn carry(
         &mut self,
         op: &super::protocol::Op,
@@ -534,6 +545,20 @@ impl super::ops::Site for Site2 {
             Err(error) => (1, format!("restore could not be started: {error}")),
         }
     }
+}
+
+fn run_expose(
+    action: super::exposure::Action,
+    port: u16,
+) -> Result<super::exposure::Report, String> {
+    let error = "the target could not run its native expose command; update its client or pass --target-url";
+    let mut command = std::process::Command::new(std::env::current_exe().map_err(|_| error)?);
+    command
+        .args(action.arguments(port))
+        .stdin(std::process::Stdio::null());
+    super::source::no_window(&mut command);
+    let result = command.output().map_err(|_| error)?;
+    super::exposure::parse(result.status.code().unwrap_or(1), &result.stdout, port)
 }
 
 fn print_answer(answer: &super::protocol::Answer) {
@@ -692,6 +717,18 @@ fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
     reply.supports_carry = ask.carry.then_some(cfg!(target_os = "linux"));
     reply.supports_carry_execution = reply.supports_carry;
     reply.supports_carry_files = reply.supports_carry;
+    if ask.expose
+        && reply.refusals.is_empty()
+        && let Some(facts) = &reply.facts
+    {
+        use super::exposure::{self, Action};
+        let result = exposure::port(&facts.health_url)
+            .and_then(|port| exposure::status(run_expose(Action::Status, port)?, port));
+        match result {
+            Ok(status) => reply.exposure = Some(status),
+            Err(error) => reply.refusals.push(error),
+        }
+    }
     reply
 }
 

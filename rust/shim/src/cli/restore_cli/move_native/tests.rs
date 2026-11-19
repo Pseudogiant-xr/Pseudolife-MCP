@@ -256,6 +256,7 @@ struct Wire {
     supports_carry: Option<bool>,
     supports_carry_execution: Option<bool>,
     supports_carry_files: Option<bool>,
+    exposure: Option<exposure::Status>,
 }
 
 impl Remote for Wire {
@@ -287,6 +288,9 @@ impl Remote for Wire {
                         check.supports_carry = self.supports_carry;
                         check.supports_carry_execution = self.supports_carry_execution;
                         check.supports_carry_files = self.supports_carry_files;
+                        if ask.expose {
+                            check.exposure.clone_from(&self.exposure);
+                        }
                         protocol::Answer {
                             protocol: protocol::PROTOCOL,
                             ok: true,
@@ -383,6 +387,7 @@ fn world() -> Both {
             supports_carry: None,
             supports_carry_execution: None,
             supports_carry_files: None,
+            exposure: None,
         },
         local_health: Some(health(SOURCE_ID, 60)),
         reached: Ok(health(TARGET_ID, 60)),
@@ -1165,6 +1170,52 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
 }
 
 #[test]
+fn exposing_a_target_plans_read_only_and_reuses_an_existing_url() {
+    let request = Request {
+        target_url: None,
+        expose_target: true,
+        ..request()
+    };
+    assert!(argv::refusal(&request).is_none());
+    let mut fake = world();
+    assert!(
+        preflight(&mut fake, &request)
+            .unwrap_err()
+            .contains("did not report its exposure")
+    );
+    assert_read_only(&fake);
+    fake.wire.exposure = Some(exposure::Status {
+        port: 8765,
+        url: None,
+    });
+    let plan = preflight(&mut fake, &request).unwrap();
+    assert_eq!(plan.expose_port, Some(8765));
+    assert!(plan.target_url.is_empty());
+    assert!(document(&plan)["will_expose_target"] == true);
+    assert!(
+        steps(&plan)
+            .iter()
+            .any(|step| step.contains("create its tailnet forward"))
+    );
+
+    let url = "http://100.64.0.7:8765";
+    fake.wire.exposure.as_mut().unwrap().url = Some(url.into());
+    let plan = preflight(&mut fake, &request).unwrap();
+    assert_eq!(plan.target_url, url);
+    assert_eq!(plan.expose_port, None);
+    assert_read_only(&fake);
+
+    fake.wire.exposure = None;
+    let provided = Request {
+        target_url: Some(url.into()),
+        ..request
+    };
+    let plan = preflight(&mut fake, &provided).unwrap();
+    assert_eq!(plan.target_url, url);
+    assert_eq!(plan.expose_port, None);
+}
+
+#[test]
 fn explicit_target_files_require_helper_support_and_keep_overlay_order_on_the_wire() {
     let request = Request {
         no_keep_tokens: false,
@@ -1420,10 +1471,7 @@ fn argv_refusals_come_before_any_effect_in_order() {
         &[&base[..], &["--target-checkout", "/srv/x"]].concat(),
         "--target-checkout is not supported",
     );
-    starts(
-        &[&base[..], &["--expose-target"]].concat(),
-        "--expose-target is not available in the native client yet: expose the target's daemon yourself",
-    );
+    assert_eq!(refused(&[&base[..], &["--expose-target"]].concat()), None);
     starts(
         &[&base[..], &["--target-env-file", "/x/.env"]].concat(),
         "--target-env-file and --target-compose-file apply only when carrying bearer settings",

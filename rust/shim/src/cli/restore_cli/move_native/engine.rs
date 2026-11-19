@@ -146,6 +146,7 @@ pub(super) struct Plan {
     pub target_pins: Option<super::carry::TargetPins>,
     pub target_files: super::carry::TargetFiles,
     pub target_url: String,
+    pub expose_port: Option<u16>,
     pub work_dir: String,
     pub source_bank: String,
     pub source_policy: String,
@@ -557,6 +558,19 @@ impl<H: Hosts> Run<'_, H> {
                 None,
             )?;
         }
+        if let Some(port) = plan.expose_port {
+            self.step("expose the selected target daemon on its tailnet")?;
+            self.mark(|flags| flags.exposure_started = true)?;
+            let answer = self.target(Op::ExposeTarget { port }, None)?;
+            self.record.target_url = answer
+                .exposure_url
+                .filter(|url| super::exposure::valid_url(url, port))
+                .map(|url| super::argv::base(&url).to_owned())
+                .ok_or_else(|| {
+                    Stop::new("the target helper did not return the selected tailnet URL")
+                })?;
+            self.save()?;
+        }
         self.step("wait for the target to serve the moved bank")?;
         self.wait_identity()?;
         // And from the target itself: its daemon runs, ungated, on this bank
@@ -603,7 +617,7 @@ impl<H: Hosts> Run<'_, H> {
     }
 
     fn wait_identity(&mut self) -> Result<(), Stop> {
-        let url = format!("{}/health", self.plan.target_url);
+        let url = format!("{}/health", self.record.target_url);
         let mut waited = Duration::ZERO;
         loop {
             self.check_interrupt()?;
@@ -618,7 +632,7 @@ impl<H: Hosts> Run<'_, H> {
                 if ok && bank.is_some() {
                     return Err(Stop::new(format!(
                         "{} serves bank {}, not the moved bank {}",
-                        self.plan.target_url,
+                        self.record.target_url,
                         bank.unwrap_or_default(),
                         self.plan.source_bank
                     )));
@@ -627,7 +641,7 @@ impl<H: Hosts> Run<'_, H> {
             if waited >= IDENTITY_WAIT {
                 return Err(Stop::new(format!(
                     "{} did not serve the moved bank within {} seconds",
-                    self.plan.target_url,
+                    self.record.target_url,
                     IDENTITY_WAIT.as_secs()
                 )));
             }
@@ -678,7 +692,7 @@ impl<H: Hosts> Run<'_, H> {
                 .follow_ups
                 .push(format!("ssh {to} rm -f {}", claim_path()));
         }
-        if let Err(why) = self.hosts.repoint(&plan.target_url) {
+        if let Err(why) = self.hosts.repoint(&self.record.target_url) {
             self.record
                 .follow_ups
                 .push(repoint_line(&self.record, &why));
@@ -800,6 +814,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
         move_id: id.to_owned(),
         target: plan.to.clone(),
         target_url: plan.target_url.clone(),
+        expose_port: plan.expose_port,
         source_bank: plan.source_bank.clone(),
         target_policy: plan.target_policy.clone(),
         source_policy: plan.source_policy.clone(),
@@ -842,7 +857,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
                 "moved: the bank {} now lives on {} ({}); this host's daemon stays stopped behind /data/moved.json. Once the moved bank is checked, {}",
                 plan.source_bank,
                 plan.to,
-                plan.target_url,
+                record.target_url,
                 files_line(record)
             );
             if record.follow_ups.is_empty() {
@@ -1237,6 +1252,13 @@ impl<H: Hosts> Back<'_, H> {
         let aborted = !flags.claimed || self.abort();
         if !aborted {
             complete = false;
+        }
+        if flags.exposure_started
+            && aborted
+            && let Some(port) = self.record.expose_port
+        {
+            let result = self.op(Op::UndoExposure { port }).map(|_| ());
+            complete &= self.attempt("remove the tailnet forward created for the move", result);
         }
         let mut proved = !needs_proof;
         // Writes a resume found in the gated bank before it would replace it.
@@ -2391,6 +2413,14 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
     let to = &record.target;
     let mut lines = Vec::new();
     let daemon = manual_target_daemon(record);
+    if f.exposure_started
+        && let Some(port) = record.expose_port
+    {
+        lines.push(format!(
+            "Check {}/exposure.json and run pseudolife-mcp expose status --port {port} --json on the target. Remove a forward only if the record says this move owns it and the reported URL still matches.",
+            remote_folder(record)
+        ));
+    }
     if (f.gate_lifting
         || f.target_started
         || f.target_restored

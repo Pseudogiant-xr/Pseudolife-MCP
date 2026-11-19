@@ -105,9 +105,6 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
     let text = if request.target_checkout.is_some() {
         "--target-checkout is not supported: move goes to an installed (release) Docker bank on the target, with the native pseudolife-mcp client there; drop --target-checkout"
             .to_owned()
-    } else if request.expose_target {
-        "--expose-target is not available in the native client yet: expose the target's daemon yourself (for example with Tailscale serve) and name the URL clients will use with --target-url <url>"
-            .to_owned()
     } else if request.no_keep_tokens && !request.target_files.is_empty() {
         "--target-env-file and --target-compose-file apply only when carrying bearer settings; drop the file flags to keep the target's existing settings".to_owned()
     } else if request
@@ -118,7 +115,7 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
         .any(|path| !TargetFiles::valid(path))
     {
         "--target-env-file and --target-compose-file must name absolute files or use ~/ on the target, without .. or control characters".to_owned()
-    } else if request.target_url.is_none() {
+    } else if request.target_url.is_none() && !request.expose_target {
         "--target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765"
             .to_owned()
     } else if let Some(dir) = &request.target_work_dir
