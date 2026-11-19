@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-import builtins
+import importlib
 import json
 import sys
 import tempfile
@@ -13,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dream_cursors import compare_step, golden_state, normalize_secret, normalize_state, scenarios
 import dream_cursors
+from rust.harness_support.import_blocker import cold_harness_imports
 
 
 def state():
@@ -26,15 +27,12 @@ def state():
 
 class DreamHarnessTests(unittest.TestCase):
     def test_seed_reaches_connection_with_product_imports_blocked(self):
-        from dream_cursor_oracle import seed
-        importing = builtins.__import__
-        def blocked(name, *args, **kwargs):
-            if name == "pseudolife_memory" or name.startswith("pseudolife_memory."):
-                raise AssertionError("product import blocked: " + name)
-            return importing(name, *args, **kwargs)
         class Connected(Exception):
             pass
-        with patch("builtins.__import__", blocked), patch("psycopg.connect", side_effect=Connected):
+
+        with cold_harness_imports(), patch("psycopg.connect", side_effect=Connected):
+            importlib.import_module("dream_cursors")
+            from dream_cursor_oracle import seed
             with self.assertRaises(Connected):
                 seed("postgresql://fixture@127.0.0.1:5434/pl_cf_w3d_probe", {})
 
