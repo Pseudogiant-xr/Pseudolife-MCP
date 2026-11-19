@@ -998,6 +998,7 @@ const UNKNOWN_RESTORE_LOST: &str = "this move's restore was sent and its answer 
 const UNKNOWN_RESTORE_UNRECORDED: &str = "this host's record shows this move's restore was sent, or about to be, and no answer to it is recorded on this host, so it cannot be told whether it ran there";
 const NOT_READ_BACK: &str =
     "the target could not be read after this move's restore, so its bank cannot be shown unchanged";
+const RESTORE_TARGET_IDENTITIES: &str = "restore the target's original identity settings";
 
 /// The rollback: R1 to R16 in order, every undo attempted, I2 checked on a
 /// fresh reading before the fence lifts.
@@ -1236,7 +1237,7 @@ impl<H: Hosts> Back<'_, H> {
             }
             if flags.identities_applied && aborted {
                 let result = self.op(Op::CarryUndo).map(|_| ());
-                if !self.attempt("restore the target's original identity settings", result) {
+                if !self.attempt(RESTORE_TARGET_IDENTITIES, result) {
                     self.record.phase = Phase::RollbackIncomplete;
                     self.save();
                     return self.incomplete(reason, "the target's identity change could not be undone; the source stays stopped and fenced", false);
@@ -2332,8 +2333,8 @@ pub(super) fn given_up_answer(record: &Record, newer: Option<&Record>, asked: As
 }
 
 /// The commands that undo what the record says was done, in rollback order,
-/// for a person. They need only `docker` (and `psql` inside its container)
-/// on each host.
+/// for a person. A carried move needs its verified identity rollback
+/// before the remaining steps can be performed by hand.
 pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
     let f = &record.flags;
     let to = &record.target;
@@ -2356,6 +2357,19 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
             "ssh {to} docker run --rm --entrypoint touch --volumes-from {daemon} {} /data/move.json",
             record.target_image
         ));
+    }
+    if f.identities_applied
+        && !record
+            .rollback
+            .iter()
+            .rfind(|undo| undo.step == RESTORE_TARGET_IDENTITIES)
+            .is_some_and(|undo| undo.ok)
+    {
+        lines.push(format!(
+            "Keep the source stopped and fenced. Restore access to the target's installed Compose deployment, then run pseudolife-mcp move --rollback {} from the source. Rollback verifies and restores the target's original environment and recreates its daemon stopped before lifting the source fence.",
+            record.move_id
+        ));
+        return lines;
     }
     if f.target_timer_paused {
         lines.push(format!(

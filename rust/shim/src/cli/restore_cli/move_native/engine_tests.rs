@@ -917,9 +917,40 @@ fn manual_rollback_uses_target_pins_and_guides_replacement_postgres_recovery() {
     );
     assert!(!commands.contains(&format!("docker exec {pg}")));
     record.flags.identities_applied = true;
+    record.rollback.push(super::record::Undo {
+        step: "restore the target's original identity settings".into(),
+        ok: true,
+        detail: String::new(),
+    });
     let commands = engine::manual_rollback(&record).join("\n");
     assert!(commands.contains("carry.json (pins.daemon)"));
     assert!(commands.contains("ssh target docker start <verified-target-daemon-id>"));
+}
+
+#[test]
+fn manual_rollback_withholds_source_recovery_until_target_settings_are_restored() {
+    let mut record = Record {
+        move_id: "20261120-000000-aabbccdd".into(),
+        target: "target".into(),
+        ..Record::default()
+    };
+    record.flags.identities_applied = true;
+    record.flags.target_restored = true;
+    record.flags.fenced = true;
+    record.flags.read_only = true;
+    record.flags.source_stopped = true;
+    let instructions = engine::manual_rollback(&record).join("\n");
+    assert!(instructions.contains("move --rollback 20261120-000000-aabbccdd"));
+    assert!(!instructions.contains("ALTER DATABASE"));
+    assert!(!instructions.contains("docker start"));
+    record.rollback.push(super::record::Undo {
+        step: "restore the target's original identity settings".into(),
+        ok: true,
+        detail: String::new(),
+    });
+    let instructions = engine::manual_rollback(&record).join("\n");
+    assert!(instructions.contains("ALLOW_CONNECTIONS true"));
+    assert!(instructions.contains("docker start"));
 }
 
 /// The calls a move with no fault makes.

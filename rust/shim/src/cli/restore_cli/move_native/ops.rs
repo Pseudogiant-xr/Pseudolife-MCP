@@ -957,7 +957,7 @@ fn give_back_steps<S: Site>(
     }
     let bank = site
         .docker()
-        .and_then(probe::gather)
+        .and_then(|docker| gather(docker, pins))
         .map(|facts| facts.meta_fingerprint);
     let theirs = match &bank {
         Ok(bank) => {
@@ -1473,6 +1473,7 @@ mod tests {
         docker: Loose,
         restored: Vec<Vec<String>>,
         restore_answer: (i32, String),
+        save_safety_copy: bool,
     }
 
     impl Fake {
@@ -1488,6 +1489,7 @@ mod tests {
                 },
                 restored: Vec::new(),
                 restore_answer: (0, "Restore complete".into()),
+                save_safety_copy: false,
             }
         }
         fn base(&self) -> PathBuf {
@@ -1516,6 +1518,17 @@ mod tests {
             Ok("enabled".into())
         }
         fn restore(&mut self, args: &[String], _abort_file: Option<&Path>) -> (i32, String) {
+            if self.save_safety_copy {
+                let dir = args
+                    .windows(2)
+                    .find(|pair| pair[0] == "--safety-dir")
+                    .unwrap();
+                std::fs::write(
+                    Path::new(&dir[1]).join(format!("{SAFETY_DUMP}release.sql.gz")),
+                    b"kept",
+                )
+                .unwrap();
+            }
             self.restored.push(args.to_vec());
             self.restore_answer.clone()
         }
@@ -1777,6 +1790,89 @@ mod tests {
             answer.error
         );
         assert!(fake.restored.is_empty());
+    }
+
+    #[test]
+    fn release_reads_the_restored_bank_from_the_selected_target() {
+        let pins = TargetPins {
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+        };
+        let daemon_name = pins.daemon.clone();
+        let postgres_name = pins.postgres.clone();
+        let daemon = serde_json::json!([{
+            "Id": daemon_name,
+            "Name": "/renamed-daemon",
+            "Image": "fixture-image",
+            "State": {"Running": false},
+            "Config": {"Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture@renamed-pg/bank"]},
+            "Mounts": [{"Destination": "/data"}],
+            "NetworkSettings": {"Networks": {"fixture": {}}}
+        }])
+        .to_string();
+        let postgres = serde_json::json!([{
+            "Id": postgres_name,
+            "Name": "/renamed-pg",
+            "State": {"Running": true},
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {"fixture": {}}}
+        }])
+        .to_string();
+        let mut banks = [r#""moved-bank""#, r#""own-bank""#].into_iter();
+        let mut fake = Fake::new(move |args| {
+            let words: Vec<_> = args.iter().map(String::as_str).collect();
+            match words.as_slice() {
+                ["version", ..] => ok("27.0"),
+                ["inspect", id] if *id == daemon_name => ok(&daemon),
+                ["inspect", id] if *id == postgres_name => ok(&postgres),
+                [
+                    "inspect",
+                    "--type=container",
+                    "-f",
+                    "{{.Id}} {{.State.Running}}",
+                    id,
+                ] if *id == daemon_name => ok(&format!("{id} false")),
+                [
+                    "inspect",
+                    "--type=container",
+                    "-f",
+                    "{{.Id}} {{.Image}}",
+                    id,
+                ] if *id == daemon_name => ok(&format!("{id} fixture-image")),
+                ["run", ..] if words.contains(&"test -e /data/move.json") => ok(""),
+                ["exec", "-e", _, id, ..] if *id == postgres_name => {
+                    if args.last().unwrap().contains("coordination_bank_id") {
+                        ok(banks.next().unwrap())
+                    } else {
+                        ok("0")
+                    }
+                }
+                _ => fail(1, "container unavailable"),
+            }
+        });
+        let folder = fake.base().join(ID);
+        let safety = folder.join("safety");
+        std::fs::create_dir_all(&safety).unwrap();
+        let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default())
+            .finish()
+            .unwrap();
+        let dump = safety.join(format!("{SAFETY_DUMP}original.sql.gz"));
+        let state = safety.join(format!("{SAFETY_STATE}original.tgz"));
+        std::fs::write(&dump, &gzip).unwrap();
+        std::fs::write(&state, &gzip).unwrap();
+        let own = OwnBank {
+            dump: dump.to_string_lossy().into_owned(),
+            state: state.to_string_lossy().into_owned(),
+            fingerprint: probe::fingerprint("own-bank"),
+            ..OwnBank::default()
+        };
+        std::fs::write(folder.join(OWN_BANK), serde_json::to_vec(&own).unwrap()).unwrap();
+        fake.save_safety_copy = true;
+        let moved_bank = probe::fingerprint("moved-bank").unwrap();
+        let answer = give_back_steps(&mut fake, &folder, &moved_bank, Some(&pins));
+        assert_eq!(fake.restored.len(), 1, "{}", answer.error);
+        assert!(answer.ok, "{}", answer.error);
+        assert_eq!(answer.kept.len(), 1);
     }
 }
 
