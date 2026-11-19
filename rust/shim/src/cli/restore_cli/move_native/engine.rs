@@ -144,6 +144,7 @@ pub(super) struct Plan {
     pub source: super::probe::Facts,
     pub target_image: String,
     pub target_pins: Option<super::carry::TargetPins>,
+    pub target_files: super::carry::TargetFiles,
     pub target_url: String,
     pub work_dir: String,
     pub source_bank: String,
@@ -539,6 +540,7 @@ impl<H: Hosts> Run<'_, H> {
                 Op::CarryApply {
                     identities: identities.settings(),
                     expected_pins: pins.clone(),
+                    files: self.plan.target_files.clone(),
                 },
                 None,
             )?;
@@ -808,6 +810,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
         source: plan.source.clone(),
         target_image: plan.target_image.clone(),
         target_pins: plan.target_pins.clone(),
+        target_files: plan.target_files.clone(),
         // Kept as the earlier record had it, so a resume refused before it
         // changed anything leaves the record as resumable as it was.
         gated_baseline: plan.resume_baseline.clone(),

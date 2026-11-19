@@ -13424,11 +13424,21 @@ fingerprint, or `ssh-keygen -R` after confirming a changed key. Move never
 accepts a key itself. `ssh` and `docker` are found only in absolute `PATH`
 directories.
 
+**Carried settings on an installed Linux target.** Use
+`--target-env-file <file>` to select the target's original private environment
+and repeat `--target-compose-file <file>` for its original Compose files in
+overlay order. The paths are absolute or start with `~/` on the target. The
+native helper verifies that those files render the installed deployment
+before changing either bank. If the original project directory is
+unavailable, the first selected Compose file's directory is used, and the
+rendered service hashes and data mounts still have to match. Omitted flags
+use the installed labels. Resume reuses the original file selection and
+undo uses the recorded deployment. Both clients must support carrying
+settings with explicit target files. When using `--no-keep-tokens`, leave the
+file flags off.
+
 **Not available in the native client yet:**
 - `--expose-target`: expose the target yourself and pass `--target-url`;
-- carrying the source's tokens: pass `--no-keep-tokens`, and the target keeps
-  its own;
-- `--target-env-file` and `--target-compose-file`;
 - checkout targets (`--target-checkout`).
 
 The rest of this section describes the Python client's move.

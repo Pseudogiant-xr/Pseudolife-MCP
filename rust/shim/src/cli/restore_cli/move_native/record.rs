@@ -171,6 +171,8 @@ pub(super) struct Record {
     pub target_image: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_pins: Option<super::carry::TargetPins>,
+    #[serde(default, skip_serializing_if = "super::carry::TargetFiles::is_empty")]
+    pub target_files: super::carry::TargetFiles,
     /// The most recent daemon ID verified by the target, including after recreation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified_target_daemon: Option<String>,

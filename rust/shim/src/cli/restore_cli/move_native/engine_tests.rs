@@ -787,6 +787,7 @@ fn plan() -> Plan {
         },
         target_image: "pseudolife-daemon:test".into(),
         target_pins: None,
+        target_files: Default::default(),
         target_url: "http://100.64.0.2:8765".into(),
         work_dir: String::new(),
         source_bank: BANK.into(),
