@@ -179,7 +179,7 @@ DOCS_SUFFIXES = frozenset({".md", ".png", ".svg", ".json", ".html"})
 DOCUMENT_ASSETS = DOCS_SUFFIXES | frozenset({
     ".adoc", ".gif", ".jpeg", ".jpg", ".pdf", ".rst", ".txt", ".webp",
 })
-DOCUMENT_EXCLUSIONS = ("tests/", "ops/", "plugin/", "pseudolife_memory/",
+DOCUMENT_EXCLUSIONS = ("tests/", "ops/", "plugin/", "pseudolife_memory/", "evals/prompts/",
                        ".github/workflows/", ".github/actions/")
 # The port's plan pages under rust/ that no Rust or parity job reads; the
 # scope job names them too. A page a job reads (PARITY.md) or one an evidence

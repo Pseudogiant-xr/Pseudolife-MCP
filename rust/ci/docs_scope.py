@@ -30,6 +30,7 @@ DIRECTORY_READERS = {
     "docs/guide/": ("tests/test_plugin_packaging.py",),
     "examples/": ("tests/test_plugin_packaging.py",),
     "rust/daemon/divergences/": (
+        "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory",
         "rust/ci/test_divergences_ledger.py::test_the_committed_index_carries_no_count_table",
         "rust/ci/test_divergences_ledger.py::test_counts_of_the_committed_ledger_cover_every_entry",
     ),
@@ -179,6 +180,11 @@ def doc_tests(paths: list[str]) -> list[str]:
     files = set(scan.stdout.decode("utf-8").rstrip("\0").split("\0")) if scan.stdout else set()
     if not all(READER_FILE.fullmatch(test) for test in files):
         raise ValueError("unrecognized reader test path")
+    if files:
+        # Match the ordinary guard lane's collection contract. Source
+        # literals in the frozen suite can name synthetic documents.
+        from tests.suite_classes import frozen
+        files -= {f"tests/{name}" for name in frozen(ROOT / "tests/suite_classes.txt")}
     readers = set(DOC_GUARDS)
     for prefix, tests in DIRECTORY_READERS.items():
         if any(path.startswith(prefix) for path in paths):

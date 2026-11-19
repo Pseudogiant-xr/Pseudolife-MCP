@@ -323,10 +323,12 @@ def test_docs_guard_selection_keeps_the_named_guards_and_touched_readers(repo, t
     root, before, commit = repo
     files = {"test_reader.py": "def test_doc(): assert 'guide-page.md'\n",
              "test_unrelated.py": "def test_example(): assert 'other-page.md'\n",
+             "test_frozen.py": "def test_doc(): assert 'guide-page.md'\n",
              "test_synthetic.py": "def fixture(tmp_path): (tmp_path / 'guide-page.md').write_text('fixture')\n"}
     (root / "tests").mkdir()
     for name, source in files.items():
         (root / "tests" / name).write_text(source, encoding="utf-8")
+    (root / "tests/suite_classes.txt").write_text("frozen test_frozen.py\n", encoding="utf-8")
     commit("initial-two.txt")
     head = commit("docs/guide/guide-page.md")
     env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example", "GITHUB_SHA": head}
@@ -342,12 +344,18 @@ def test_docs_guard_selection_keeps_the_named_guards_and_touched_readers(repo, t
 
 
 @pytest.mark.parametrize("code", ["helper.py", "docs/example.py", "tests/guide.md",
-                                  "ops/usage.md", "plugin/hooks/usage.md", ".github/workflows/notes.md"])
+                                  "ops/usage.md", "plugin/hooks/usage.md", ".github/workflows/notes.md",
+                                  "evals/prompts/sonnet_extractor_v5.md"])
 def test_code_paths_cannot_use_the_docs_selection(repo, code):
     _, _, commit = repo
     head = commit("docs/status.md", code)
     env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example", "GITHUB_SHA": head}
     assert docs_scope.docs_selection(env) == ("other", [])
+
+
+def test_divergence_ledger_selection_checks_the_committed_index(repo):
+    targets = docs_scope.doc_tests(["rust/daemon/divergences/README.md"])
+    assert "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory" in targets
 
 
 def test_unreadable_reader_selection_keeps_legacy_pr_lanes(repo, tmp_path, monkeypatch):
