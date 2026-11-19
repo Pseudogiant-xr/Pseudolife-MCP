@@ -96,6 +96,15 @@ struct Prepared<'a> {
 
 fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
     let path = store::profile_path(root, name)?;
+    setup::check_directory(root).map_err(|_| UNSAFE_STORE)?;
+    let record = record::path(root, name);
+    // Recover interrupted files even if the saved profile or key will
+    // later refuse for an unrelated reason, such as an expired key.
+    let locks = if store::occupied(&record).map_err(|_| conflict(root, name))? {
+        Some(prepare_locks(root, name)?)
+    } else {
+        None
+    };
     let unavailable = || {
         Fail::Detail(format!(
             "cannot read the tunnel profile at {}. Finish tunnel setup before running it",
@@ -104,7 +113,6 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
     };
     let bytes = store::private_read(&path, RECORD_LIMIT).map_err(|_| unavailable())?;
     let (_, profile) = store::decode_profile(&bytes, name).map_err(|_| unavailable())?;
-    setup::check_directory(root).map_err(|_| UNSAFE_STORE)?;
     if profile.state != "ready" {
         return Err(Fail::Tunnel(
             "finish tunnel setup and save a tunnel ID before running it",
@@ -123,11 +131,7 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
         ));
     }
     let key = key::Key::load(root, name)?;
-    let locks = launch_locks(root, name)?;
-    let record = record::path(root, name);
-    if store::occupied(&record).map_err(|_| conflict(root, name))? {
-        recover_launch(root, name)?;
-    }
+    let locks = locks.map_or_else(|| prepare_locks(root, name), Ok)?;
     if !store::private_read(&path, RECORD_LIMIT).is_ok_and(|current| current == bytes) {
         return Err(Fail::Tunnel(
             "the tunnel profile changed during launch. Check tunnel status before retrying",
@@ -141,6 +145,15 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
         key,
         _locks: locks,
     })
+}
+
+fn prepare_locks(root: &Path, name: &str) -> Result<(File, File), Fail> {
+    let locks = launch_locks(root, name)?;
+    let record = record::path(root, name);
+    if store::occupied(&record).map_err(|_| conflict(root, name))? {
+        recover_launch(root, name)?;
+    }
+    Ok(locks)
 }
 
 fn verify_credential(profile: &Profile, key: &key::Key) -> Result<(), Fail> {
@@ -203,6 +216,7 @@ struct LaunchRecord {
     native_launch: String,
     #[serde(default)]
     launch_identity: Option<String>,
+    spawn_started: Option<bool>,
     supervisor: Identity,
     target: Option<Identity>,
     ready: bool,
@@ -227,7 +241,8 @@ fn recover_launch(root: &Path, name: &str) -> Result<(), Fail> {
         .is_some_and(|target| !process::group_is_empty(target.pid));
     #[cfg(not(target_os = "linux"))]
     let group_alive = cfg!(target_os = "macos");
-    if group_alive
+    if (launch.target.is_none() && launch.spawn_started != Some(false))
+        || group_alive
         || !record::read(path.clone(), table.as_deref())
             .is_some_and(|record| record.liveness == record::Liveness::Gone)
     {
@@ -412,6 +427,7 @@ async fn supervise(
     let mut record = LaunchRecord {
         native_launch: id.simple().to_string(),
         launch_identity: Some(launch_identity),
+        spawn_started: Some(false),
         supervisor: Identity {
             pid: std::process::id(),
             exe: executable.to_owned(),
@@ -448,6 +464,10 @@ async fn supervise(
     if stop_marker(&stage.directory, id)? {
         return Ok((format!("Tunnel {name} stopped.\n"), 0));
     }
+    // A crash between spawn and publication of the target is ambiguous.
+    // Durably record that spawning can occur before taking that step.
+    record.spawn_started = Some(true);
+    stage.announce(&record)?;
     let mut command = command(&config_path);
     let target = PathBuf::from(command.as_std().get_program());
     command

@@ -246,6 +246,7 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
     let owner = LaunchRecord {
         native_launch: id.simple().to_string(),
         launch_identity: None,
+        spawn_started: None,
         supervisor: Identity {
             pid: std::process::id(),
             exe: std::env::current_exe().unwrap(),
@@ -303,9 +304,17 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
     supervisor.wait().unwrap();
     let (stage, refused, key_preserved, bound) = evidence.expect("fixture never became ready");
     assert!(refused && key_preserved && bound);
+    let profile = home.0.join("dot.profile.json");
+    let original = fs::read(&profile).unwrap();
+    let mut expired: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    expired["runtime_key_expires_at"] = json!("2020-01-01T00:00:00Z");
+    state::atomic_write(&profile, expired.to_string().as_bytes(), None).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if prepare(&home.0, "dot").is_ok() {
+        if matches!(prepare(&home.0, "dot"), Err(Fail::Tunnel(KEY_RENEWAL)))
+            && !stage.exists()
+            && !path.exists()
+        {
             break;
         }
         assert!(
@@ -316,6 +325,41 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
     }
     assert!(!stage.exists());
     assert!(!path.exists());
+    state::atomic_write(&profile, &original, None).unwrap();
+    assert!(prepare(&home.0, "dot").is_ok());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_preserves_unknown_ownership_before_target_publication() {
+    let home = Home::new();
+    let _locks = launch_locks(&home.0, "dot").unwrap();
+    let id = Uuid::new_v4();
+    let directory = stage_path(&home.0, id);
+    state::private_dir(&directory).unwrap();
+    let key = directory.join("key");
+    state::atomic_create(&key, b"fixture-runtime-key").unwrap();
+    let mut launch = LaunchRecord {
+        native_launch: id.simple().to_string(),
+        launch_identity: None,
+        spawn_started: Some(true),
+        supervisor: Identity {
+            pid: u32::MAX,
+            exe: std::env::current_exe().unwrap(),
+        },
+        target: None,
+        ready: false,
+    };
+    let path = record::path(&home.0, "dot");
+    state::atomic_create(&path, &serde_json::to_vec(&launch).unwrap()).unwrap();
+    assert!(
+        matches!(recover_launch(&home.0, "dot"), Err(Fail::Detail(message)) if message.contains(&directory.display().to_string()))
+    );
+    assert!(key.is_file() && path.is_file());
+    launch.spawn_started = Some(false);
+    state::atomic_write(&path, &serde_json::to_vec(&launch).unwrap(), None).unwrap();
+    recover_launch(&home.0, "dot").unwrap();
+    assert!(!directory.exists() && !path.exists());
 }
 
 #[test]

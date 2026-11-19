@@ -753,9 +753,8 @@ fn verify(options: &Options, root: &Path) -> Output {
     if profile.state != "ready" || !store::key_present(root, &profile.name)? {
         return Err(Fail::Tunnel(UNFINISHED));
     }
-    // begin_challenge computes the launch identity before writing anything;
-    // without a process record its private read fails first. With a record
-    // the challenge would be written: deferred.
+    // A native challenge needs an active native record. Legacy launch
+    // identities are outside this path.
     if occupied(&root.join(format!("{}.process.json", profile.name)))? {
         if record::read(record::path(root, &profile.name), None).is_some_and(|record| record.native)
         {
