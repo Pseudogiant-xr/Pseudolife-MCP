@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! `tunnel`: file-only answers, refusals before any effect, and deferrals
+//! `tunnel`: authenticated profile setup, read-only answers, and deferrals
 //! that change nothing and open no connection. Seeded profiles need
 //! owner-only files: the `seeded` cells run on Unix (chmod); the bridge's
 //! `serve()` cell seeds through the native client's own private-file
@@ -155,7 +155,7 @@ fn unported_commands_and_argv_shapes_defer_without_effect() {
 }
 
 #[test]
-fn a_setup_that_validates_defers_before_the_daemon_handshake() {
+fn explicit_setup_with_a_missing_credential_refuses_and_discovery_defers() {
     let home = Home::new();
     let dir = home.dir();
     let token = home.path("token");
@@ -186,7 +186,12 @@ fn a_setup_that_validates_defers_before_the_daemon_handshake() {
             token,
         ];
         args.extend_from_slice(extra);
-        assert_deferred(&home, &args, &[]);
+        assert_refused(
+            &home,
+            &args,
+            &[],
+            "daemon credential file is unavailable or unsafe; repair its owner-only access and retry setup\n",
+        );
     }
     // A token file from the environment, with the listener as the daemon URL.
     assert_deferred(
@@ -204,20 +209,388 @@ fn a_setup_that_validates_defers_before_the_daemon_handshake() {
     assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
 }
 
+const SETUP_BEARER: &str = "fixture-setup-bearer";
+
+fn setup_command(home: &Home, url: &str, token: &Path) -> (Command, Listener) {
+    let ambient = Listener::new();
+    let mut setup = command(home, &ambient);
+    setup.args(["setup", "--profile-dir", &home.dir(), "--daemon-url", url]);
+    setup.arg("--token-file").arg(token);
+    (setup, ambient)
+}
+
+fn setup_against(home: &Home, url: &str, accept: bool) -> Output {
+    setup_with(home, url, accept, &[])
+}
+
+fn setup_with(home: &Home, url: &str, accept: bool, extra: &[&str]) -> Output {
+    let (mut setup, ambient) = setup_command(home, url, &home.path("token"));
+    setup.args(extra);
+    if accept {
+        setup.arg("--accept-access");
+    }
+    let output = setup.output().unwrap();
+    ambient.assert_untouched();
+    for bytes in [&output.stdout, &output.stderr] {
+        assert!(!String::from_utf8_lossy(bytes).contains(SETUP_BEARER));
+    }
+    output
+}
+
+fn setup_home() -> Home {
+    let home = Home::new();
+    pseudolife_stdio::board::state::private_dir(&home.0).unwrap();
+    pseudolife_stdio::board::state::atomic_create(&home.path("token"), SETUP_BEARER.as_bytes())
+        .unwrap();
+    home
+}
+
+#[test]
+fn setup_saves_an_authenticated_private_profile_and_reuses_it_unchanged() {
+    let home = setup_home();
+    let daemon = common::Fixture::start_with(common::Setup {
+        lists: vec![common::Reply::Sse(serde_json::json!({
+            "tools": [{"name": "fixture", "inputSchema": {"type": "object"}}],
+        }))],
+        ..Default::default()
+    });
+    let output = setup_against(&home, &daemon.url, true);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--tunnel-id <tunnel_id>"));
+    let path = home.path("tunnels/dot.profile.json");
+    let saved = pseudolife_stdio::board::state::read(&path, 65536).unwrap();
+    let profile: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(profile["name"], "dot");
+    assert_eq!(profile["state"], "pending");
+    assert_eq!(profile["daemon_url"], daemon.url);
+    assert_eq!(profile["consent"], true);
+    assert!(!String::from_utf8_lossy(&saved).contains(SETUP_BEARER));
+
+    let requests = daemon.records.lock().unwrap().clone();
+    let auth = format!("Bearer {SETUP_BEARER}");
+    for method in ["initialize", "tools/list"] {
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.message["method"] == method
+                    && request.headers.get("authorization") == Some(&auth))
+        );
+    }
+    let before = tree(&home.0);
+    let output = setup_against(&home, &daemon.url, true);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("already configured"));
+    assert_eq!(tree(&home.0), before);
+    assert_eq!(daemon.records.lock().unwrap().len(), requests.len());
+
+    let contender = Listener::new();
+    let output = setup_against(&home, &contender.url(), true);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, native_text(DEFERRED));
+    contender.assert_untouched();
+    assert_eq!(tree(&home.0), before);
+}
+
+fn seed_setup_profile(home: &Home, profile: &serde_json::Value) {
+    let root = home.path("tunnels");
+    pseudolife_stdio::board::state::private_dir(&root).unwrap();
+    pseudolife_stdio::board::state::atomic_create(
+        &root.join("dot.profile.json"),
+        &serde_json::to_vec_pretty(profile).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn setup_reuses_an_equivalent_python_profile() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "tunnel_id": null, "organization_id": null, "state": "pending", "consent": true,
+            "autostart_consent": false, "runtime_version": null, "minimum_catalog": "current",
+            "runtime_key_expires_at": null, "cloud_verification_file": null,
+        }),
+    );
+    let before = tree(&home.0);
+    let output = setup_against(&home, &daemon.url(), false);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        output.stdout,
+        native_text("Profile dot is already configured.\n")
+    );
+    assert!(output.stderr.is_empty());
+    daemon.assert_untouched();
+    assert_eq!(tree(&home.0), before);
+}
+
+fn pending_setup_profile(home: &Home, url: &str) {
+    seed_setup_profile(
+        home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": url, "token_file": home.path("token"),
+            "state": "pending", "consent": true,
+        }),
+    );
+}
+
+#[test]
+fn setup_defers_when_a_tunnel_id_is_added() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    let url = daemon.url();
+    pending_setup_profile(&home, &url);
+    let dir = home.dir();
+    let token = home.path("token");
+    assert_deferred(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &dir,
+            "--daemon-url",
+            &url,
+            "--token-file",
+            token.to_str().unwrap(),
+            "--tunnel-id",
+            "tunnel_abc123",
+        ],
+        &[],
+    );
+    assert_deferred(
+        &home,
+        &[
+            "setup",
+            "--profile",
+            "dot",
+            "--profile-dir",
+            &dir,
+            "--tunnel-id",
+            "tunnel_abc123",
+        ],
+        &[],
+    );
+    daemon.assert_untouched();
+}
+
+#[test]
+fn setup_defers_when_a_daemon_credential_file_moves() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    let url = daemon.url();
+    pending_setup_profile(&home, &url);
+    let moved = home.path("moved-token");
+    std::fs::rename(home.path("token"), &moved).unwrap();
+    assert_deferred(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--daemon-url",
+            &url,
+            "--token-file",
+            moved.to_str().unwrap(),
+        ],
+        &[],
+    );
+    daemon.assert_untouched();
+}
+
+#[test]
+fn setup_full_catalog_describes_consent_and_hands_off_private_key_intake() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    let flags = ["--catalog", "full", "--tunnel-id", "tunnel_abc123"];
+    let output = setup_with(&home, &daemon.url, false, &flags);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("host and daemon must stay running"));
+    assert!(stderr.contains("other sessions"));
+    assert!(daemon.records.lock().unwrap().is_empty());
+    assert!(!home.path("tunnels").exists());
+
+    let output = setup_with(&home, &daemon.url, true, &flags);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let saved = stdout.find("Profile dot saved").unwrap();
+    assert!(stdout[..saved].contains("host and daemon must stay running"));
+    assert!(stdout[..saved].contains("other sessions"));
+    assert!(stdout.contains("tunnel setup --profile dot"));
+    assert!(stdout.contains("--read-key"));
+    assert_deferred(
+        &home,
+        &[
+            "setup",
+            "--profile",
+            "dot",
+            "--profile-dir",
+            &home.dir(),
+            "--read-key",
+        ],
+        &[],
+    );
+}
+
+#[test]
+fn setup_never_uses_an_ambient_proxy() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    let proxy = common::Fixture::start();
+    let (mut setup, ambient) = setup_command(&home, &daemon.url, &home.path("token"));
+    let output = setup
+        .arg("--accept-access")
+        .env("HTTP_PROXY", &proxy.url)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(proxy.records.lock().unwrap().is_empty());
+    ambient.assert_untouched();
+}
+
+#[test]
+fn setup_refuses_if_the_daemon_credential_changes_during_the_handshake() {
+    let home = setup_home();
+    let gate = std::sync::Arc::new(common::ResponseGate::default());
+    let daemon = common::Fixture::start_with(common::Setup {
+        lists: vec![common::Reply::Gated(
+            gate.clone(),
+            Box::new(common::Reply::Result(
+                serde_json::json!({"tools":[{"name":"fixture","inputSchema":{"type":"object"}}]}),
+            )),
+        )],
+        ..Default::default()
+    });
+    let (mut setup, ambient) = setup_command(&home, &daemon.url, &home.path("token"));
+    let child = setup
+        .arg("--accept-access")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let reached = loop {
+        if daemon
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.message["method"] == "tools/list")
+        {
+            break true;
+        }
+        if std::time::Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    if reached {
+        pseudolife_stdio::board::state::atomic_write(
+            &home.path("token"),
+            b"replacement-fixture",
+            None,
+        )
+        .unwrap();
+    }
+    gate.release();
+    let output = child.wait_with_output().unwrap();
+    assert!(reached);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("credential changed during setup"));
+    assert!(!home.path("tunnels").exists());
+    ambient.assert_untouched();
+}
+
+#[test]
+fn setup_refuses_orphan_keys_and_process_records_before_handshake() {
+    for file in ["dot.key", "dot.process.json"] {
+        let home = setup_home();
+        let daemon = Listener::new();
+        let root = home.path("tunnels");
+        pseudolife_stdio::board::state::private_dir(&root).unwrap();
+        pseudolife_stdio::board::state::atomic_create(&root.join(file), b"orphan fixture").unwrap();
+        let before = tree(&home.0);
+        let output = setup_against(&home, &daemon.url(), true);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("without a profile"));
+        daemon.assert_untouched();
+        assert_eq!(tree(&home.0), before);
+    }
+}
+
+#[test]
+fn setup_requires_consent_and_refuses_a_redirect_without_saving() {
+    let home = setup_home();
+    let redirected = Listener::new();
+    let daemon = common::Fixture::start_with(common::Setup {
+        initialize: vec![common::Reply::Redirect(format!("{}/mcp", redirected.url()))],
+        ..Default::default()
+    });
+    let output = setup_against(&home, &daemon.url, false);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--accept-access"));
+    assert!(daemon.records.lock().unwrap().is_empty());
+    assert!(!home.path("tunnels").exists());
+
+    let output = setup_against(&home, &daemon.url, true);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("MCP handshake failed"));
+    redirected.assert_untouched();
+    assert!(!home.path("tunnels").exists());
+}
+
+#[test]
+fn setup_refuses_an_oversized_daemon_response_without_saving() {
+    let home = setup_home();
+    let daemon = common::Fixture::start_with(common::Setup {
+        initialize: vec![common::Reply::Result(serde_json::json!({
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "fixture", "version": "1"},
+            "instructions": "x".repeat(4 * 1024 * 1024),
+        }))],
+        ..Default::default()
+    });
+    let output = setup_against(&home, &daemon.url, true);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("MCP handshake failed"));
+    assert!(!home.path("tunnels").exists());
+}
+
 #[test]
 fn setup_resuming_an_existing_profile_defers() {
-    // The main real flow: anything saved under the name means load and
-    // resume (handshake next), never a native answer.
     let home = Home::new();
     let dir = home.dir();
-    std::fs::create_dir_all(home.path("tunnels")).unwrap();
-    std::fs::write(home.path("tunnels/dot.profile.json"), b"{}").unwrap();
+    seed_setup_profile(&home, &serde_json::json!({}));
     assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
     assert_deferred(
         &home,
         &["setup", "--profile-dir", &dir, "--tunnel-id", "nope"],
         &[],
     );
+    let daemon = Listener::new();
+    assert_deferred(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &dir,
+            "--daemon-url",
+            &daemon.url(),
+            "--token-file",
+            home.path("token").to_str().unwrap(),
+        ],
+        &[],
+    );
+    daemon.assert_untouched();
 }
 
 const SHIM_USAGE: &str = "tunnel shim is started by the tunnel runtime, not by hand: it needs --profile <name>, and --profile-dir <directory> for a store other than the default
