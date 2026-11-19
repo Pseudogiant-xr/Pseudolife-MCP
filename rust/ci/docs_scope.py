@@ -163,7 +163,9 @@ def doc_tests(paths: list[str]) -> list[str]:
     scan = subprocess.run(
         ["git", "grep", "-l", "-z", "-i", "-F", "-f", "-", "--", ":(glob)tests/**/test_*.py"],
         cwd=ROOT, input=("\n".join(names) + "\n").encode("utf-8"), capture_output=True, timeout=45)
-    if scan.returncode not in (0, 1) or (scan.returncode == 0 and not scan.stdout.endswith(b"\0")):
+    if scan.returncode not in (0, 1) or (
+            scan.returncode == 0 and not scan.stdout.endswith(b"\0")
+            or scan.returncode == 1 and scan.stdout):
         raise ValueError("could not enumerate tests naming the changed documents")
     files = set(scan.stdout.decode("utf-8").rstrip("\0").split("\0")) if scan.stdout else set()
     if not all(READER_FILE.fullmatch(test) for test in files):
@@ -201,11 +203,6 @@ def docs_selection(env: Mapping[str, str]) -> tuple[str, list[str]]:
     except (OSError, subprocess.SubprocessError, ValueError, SyntaxError) as error:
         print(f"Docs-only selection unavailable: {error}", file=sys.stderr)
         return "unknown", []
-
-
-def push_scope(env: Mapping[str, str]) -> str:
-    """Expose the push verdict without test arguments."""
-    return docs_selection(env)[0]
 
 
 def report_census(env: Mapping[str, str]) -> None:

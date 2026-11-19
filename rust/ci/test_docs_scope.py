@@ -13,6 +13,7 @@ import yaml
 from ops import ci_batch_passed, ci_push_passed
 from rust.ci import docs_scope
 from rust.ci.ci_budget import Evaluator, condition_text
+from rust.ci.parity_scope import RUST_PLAN_DOCS
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -158,7 +159,7 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
         paths = ["rust/first.rs"]
     if case.startswith("rust-plan-"):
         # A real plan path receives the legacy Rust-only verdict.
-        paths = [min(docs_scope.RUST_PLAN_DOCS)]
+        paths = [min(RUST_PLAN_DOCS)]
     mixed = {"python": "helper.py", "workflow": ".github/workflows/rust.yml",
              "census": "rust/producer-census.json"}
     if case in mixed:
