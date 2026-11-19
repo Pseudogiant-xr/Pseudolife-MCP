@@ -128,9 +128,7 @@ fn unported_commands_and_argv_shapes_defer_without_effect() {
         &[][..],
         &["doctor"],
         &["doctor", "--profile-dir", &dir],
-        &["run", "--profile-dir", &dir],
         &["start", "--profile-dir", &dir],
-        &["stop", "--profile-dir", &dir],
         &["service", "preview", "--profile-dir", &dir],
         &["service", "install", "--profile-dir", &dir],
         &["service", "status", "--profile-dir", &dir],
@@ -301,6 +299,37 @@ fn seed_setup_profile(home: &Home, profile: &serde_json::Value) {
         &serde_json::to_vec_pretty(profile).unwrap(),
     )
     .unwrap();
+}
+
+#[test]
+fn run_refuses_a_ready_profile_without_a_runtime_key_before_launch() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "state": "ready", "tunnel_id": "tunnel_abcd", "consent": true,
+        }),
+    );
+    assert_refused(
+        &home,
+        &["run", "--profile-dir", &home.dir()],
+        &[],
+        "profile dot has no runtime key. Import its private key with tunnel setup before running it\n",
+    );
+    daemon.assert_untouched();
+}
+
+#[test]
+fn stop_without_a_record_is_a_no_op() {
+    let home = Home::new();
+    let before = tree(&home.0);
+    let output = run(&home, &["stop", "--profile-dir", &home.dir()], &[]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, native_text("Tunnel dot is stopped.\n"));
+    assert!(output.stderr.is_empty());
+    assert_eq!(tree(&home.0), before);
 }
 
 #[test]

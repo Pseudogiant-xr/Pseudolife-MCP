@@ -17,6 +17,7 @@ mod doctor_section;
 #[cfg(windows)]
 mod dpapi;
 mod record;
+mod runtime;
 mod setup;
 mod store;
 mod syntax;
@@ -60,6 +61,8 @@ enum Command {
     Update,
     Verify,
     Setup,
+    Run,
+    Stop,
 }
 
 #[derive(Default)]
@@ -125,6 +128,8 @@ fn parse(values: &[OsString]) -> Option<Options> {
         "update" => Command::Update,
         "verify" => Command::Verify,
         "setup" => Command::Setup,
+        "run" => Command::Run,
+        "stop" => Command::Stop,
         _ => return None,
     };
     let mut options = Options {
@@ -207,7 +212,12 @@ fn outcome(options: &Options) -> Option<Answer> {
     // `update` runs unattended inside `pseudolife-mcp update`, which shows
     // its refusal: a root it cannot open is named, never deferred.
     let root = match root {
-        Err(_) if options.command == Command::Update => {
+        Err(_)
+            if matches!(
+                options.command,
+                Command::Update | Command::Run | Command::Stop
+            ) =>
+        {
             return Some(Err(store::UNSAFE_ROOT.to_owned()));
         }
         root => root.ok()?,
@@ -220,6 +230,8 @@ fn outcome(options: &Options) -> Option<Answer> {
         Command::Update => return Some(update(&root)),
         Command::Verify => verify(options, &root),
         Command::Setup => setup(options, &root),
+        Command::Run => runtime::run(&root, &options.profile),
+        Command::Stop => runtime::stop(&root, &options.profile),
     })
 }
 
@@ -371,8 +383,14 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
         ""
     };
     match record.liveness {
+        Liveness::Running if record.native && updating => format!(
+            "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh it yet"
+        ),
         Liveness::Running if updating => format!(
             "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh or stop it yet, so it was left as it is"
+        ),
+        Liveness::Running if record.native => format!(
+            "tunnel {name} is running (process record {file}); use tunnel stop to stop its native supervisor"
         ),
         Liveness::Running => format!(
             "tunnel {name} is running (process record {file}); this client cannot refresh or stop it yet"

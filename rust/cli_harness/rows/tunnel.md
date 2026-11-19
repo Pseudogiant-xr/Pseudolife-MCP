@@ -73,6 +73,12 @@ These effects are covered in
 `shim/tests/cli_tunnel_contract.rs` against a disposable daemon fixture.
 The setup cases in this row exercise preflight refusals and deferrals.
 
+Native `run` supervises a foreground launch of the pinned runtime. It checks
+the loopback readiness endpoint and links the existing stdio bridge to a
+private snapshot of the selected profile. `stop` requests termination from
+that native supervisor without signalling a PID read from a record. Rust
+tests use a local stand-in runtime and exercise readiness and cleanup.
+
 Save the profile settings, including any key expiry, and import the first
 runtime key in separate invocations.
 The key is read from an owner-only file or from a terminal without echo.

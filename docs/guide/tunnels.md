@@ -23,8 +23,13 @@ flowchart TD
 explicit `--daemon-url` and owner-only `--token-file` after `--accept-access`
 and an authenticated daemon check. Resume the prepared profile with
 `--tunnel-id`, then import its first runtime key in a separate setup command
-using `--read-key` at a terminal or an owner-only `--key-file`. Key renewal,
-starting, stopping and refreshing a tunnel still require the Python client.
+using `--read-key` at a terminal or an owner-only `--key-file`. Use
+`pseudolife-mcp tunnel run` to keep a prepared tunnel in the foreground.
+In another terminal, `pseudolife-mcp tunnel stop` asks that native
+supervisor to stop its runtime. Pass the same `--profile` and
+`--profile-dir` in both commands if you selected a different profile or
+store. Key renewal, background start and refresh still require the Python
+client.
 
 The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel
@@ -40,7 +45,7 @@ client also answers preflight refusals for `tunnel verify` and `tunnel setup`.
 Operations it defers stop with
 `pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and exit 1,
 having changed nothing. That covers guided setup and unsupported saved-profile
-edits, `start`, `run`, `stop`,
+edits, `start`,
 `doctor`, `service`, the cloud verification, `status` of a profile in a
 form it does not read or beside a verification or refresh file in a form
 it does not read, and `verify` while a process record exists or with a
@@ -49,8 +54,8 @@ the saved key to check it: a damaged key file is no usable key, and a key
 sealed by another account, or read over a logon without the account's
 credentials (such as a key-based SSH logon), is reported as `not_verified`.
 `pseudolife-mcp doctor` lists saved tunnels and names only steps this client
-runs. On a host that runs a tunnel, keep the Python
-client, which an update does unless you opt in with
+runs. If your tunnel relies on background start or refresh, keep the
+Python client. An update keeps it unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how
