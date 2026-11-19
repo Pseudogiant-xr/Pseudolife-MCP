@@ -140,7 +140,7 @@ try {
 
 
 def _launcher_setup(arm):
-    producers.write_private(arm.home / 'locks' / 'instance.id', 'abcdef123456\n')
+    producers.write_private(arm.home / 'locks' / 'instance.id', 'abcdef123456\n', root=arm.home)
     helper = Path(__file__).resolve().parents[3] / 'evals' / 'qwen_server.ps1'
     script = _LAUNCHER.replace('__HELPER__', "'" + str(helper).replace("'", "''") + "'")
     _input(arm, 'caller.ps1', script)

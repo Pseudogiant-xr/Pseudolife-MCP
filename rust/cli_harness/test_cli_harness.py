@@ -777,10 +777,10 @@ def test_mail_renewal_can_rewrite_identical_expiry_bytes(tmp_path, monkeypatch):
         os.utime(path, ns=(modified, modified))
     monkeypatch.setattr(mail.time, "sleep", rewrite)
     rings = []
-    monkeypatch.setattr(mail.p, "write_ring", lambda *args: rings.append(args))
+    monkeypatch.setattr(mail.p, "write_ring", lambda *args, root: rings.append((root, args)))
     mail.renewed_listener(arm, SimpleNamespace(poll=lambda: None))
     assert arm.state["listener"] == "valid"
-    assert len(rings) == 1
+    assert [root for root, _ in rings] == [tmp_path]
 
 
 @pytest.mark.parametrize("invalid", [b"wrong-token\n128.0\n", b"a" * 32 + b"\n100.0\n"])
@@ -825,7 +825,10 @@ def test_mail_renewal_does_not_mix_file_generations(tmp_path, monkeypatch, inval
     monkeypatch.setattr(mail, "time", SimpleNamespace(
         monotonic=lambda: next(ticks), time=lambda: 108.0, sleep=lambda _seconds: None))
     monkeypatch.setattr(mail.p, "digest_dir", lambda _home: tmp_path)
-    monkeypatch.setattr(mail.p, "write_ring", lambda *args: None)
+    def write_ring(*_args, root):
+        assert root == tmp_path
+
+    monkeypatch.setattr(mail.p, "write_ring", write_ring)
     arm = SimpleNamespace(started=100.0, home=tmp_path, state={})
     mail.renewed_listener(arm, SimpleNamespace(poll=lambda: None))
     assert arm.state["listener"] == ["valid", f"raw:{path.name}:{invalid!r}"]
@@ -923,11 +926,11 @@ def test_mail_renewed_listener_retries_a_transient_record(
     monkeypatch.setattr(mail, "time", SimpleNamespace(
         monotonic=lambda: next(ticks), time=lambda: 108.0, sleep=sleep))
     monkeypatch.setattr(mail.p, "digest_dir", lambda _home: tmp_path)
-    monkeypatch.setattr(mail.p, "write_ring", lambda *args: rings.append(args))
+    monkeypatch.setattr(mail.p, "write_ring", lambda *args, root: rings.append((root, args)))
     mail.renewed_listener(arm, SimpleNamespace(poll=lambda: None))
     assert arm.state["listener"] == "valid"
     assert tick == 2
-    assert rings == [(mail._paths(tmp_path)["ring"], 7, "rung", "urgent")]
+    assert rings == [(tmp_path, (mail._paths(tmp_path)["ring"], 7, "rung", "urgent"))]
     assert calls == [0, 1, 2]
 
 
@@ -2138,7 +2141,7 @@ def test_doorbell_payloads_supply_matching_prompt_and_record_without_python(tmp_
     from rust.harness_support.import_blocker import cold_harness_imports
 
     writes = []
-    monkeypatch.setattr(hook.p, "write_private", lambda path, text: writes.append(text))
+    monkeypatch.setattr(hook.p, "write_private", lambda path, text, *, root: writes.append((root, text)))
     expected = {"doorbell-positive": 2, "doorbell-positive-maintainer": 3,
                 "doorbell-legacy-record": None}
     with cold_harness_imports():
@@ -2146,7 +2149,9 @@ def test_doorbell_payloads_supply_matching_prompt_and_record_without_python(tmp_
         for name, version in expected.items():
             case = cases[name]
             case.setup(SimpleNamespace(home=tmp_path))
-            record = json.loads(writes[-1])
+            root, text = writes[-1]
+            assert root == tmp_path
+            record = json.loads(text)
             assert record.get("version") == version
             assert json.loads(case.stdin)["prompt"] == record["text"]
 
@@ -2165,8 +2170,8 @@ def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatc
     arm = SimpleNamespace(home=tmp_path)
     paths = mail._paths(tmp_path)
     paths["dir"].mkdir(parents=True, exist_ok=True)
-    p.write_digest(paths["digest"], 3, "")
-    p.write_ring(paths["ring"], 3, "rung", "urgent")
+    p.write_digest(paths["digest"], 3, "", root=tmp_path)
+    p.write_ring(paths["ring"], 3, "rung", "urgent", root=tmp_path)
     reader = paths[held].open("rb")
     threading.Timer(0.3, reader.close).start()
     try:
@@ -2194,8 +2199,8 @@ def test_private_marker_writer_runs_with_frozen_imports_blocked(tmp_path):
 
         assert producers is not cached_producers
         assert qualified_producers is not cached_qualified_producers
-        producers.write_private(path, "first\n")
-        producers.write_private(path, "second ✓\n")
+        producers.write_private(path, "first\n", root=tmp_path)
+        producers.write_private(path, "second ✓\n", root=tmp_path)
         mail.seed()(SimpleNamespace(home=tmp_path / "mail"))
         hook.seed_pending("maintainer")(SimpleNamespace(home=tmp_path / "hook"))
     assert cli_harness.producers is sys.modules["cli_harness.producers"] is cached_producers
@@ -2213,14 +2218,14 @@ def test_refused_private_replace_preserves_the_previous_marker(tmp_path, monkeyp
     from cli_harness import producers
 
     path = tmp_path / "digests" / "pending"
-    producers.write_private(path, "previous\n")
+    producers.write_private(path, "previous\n", root=tmp_path)
 
     def refuse_replace(source, destination):
         raise PermissionError("fixture reader holds the file")
 
     monkeypatch.setattr(os, "replace", refuse_replace)
     with pytest.raises(RuntimeError, match="producer could not write"):
-        producers.write_private(path, "next\n")
+        producers.write_private(path, "next\n", root=tmp_path)
     assert path.read_bytes() == b"previous\n"
     assert list(path.parent.iterdir()) == [path]
 
@@ -2234,8 +2239,51 @@ def test_private_marker_writer_refuses_a_linked_parent(tmp_path):
     alias = tmp_path / "alias"
     alias.symlink_to(target, target_is_directory=True)
     with pytest.raises(RuntimeError, match="producer could not write"):
-        producers.write_private(alias / "pending", "must not reach the target\n")
+        producers.write_private(alias / "pending", "must not reach the target\n", root=tmp_path)
     assert list(target.iterdir()) == []
+
+
+@pytest.mark.parametrize("relative", ["home-other/pending", "home-other/new/pending",
+                                      "home/../home-other/pending", "home"])
+def test_private_marker_writer_refuses_paths_outside_the_home(tmp_path, relative):
+    from cli_harness import producers
+
+    home = tmp_path / "home"
+    outside = tmp_path / "home-other"
+    home.mkdir()
+    outside.mkdir()
+    existing = outside / "pending"
+    existing.write_bytes(b"keep\n")
+
+    with pytest.raises(RuntimeError, match="producer could not write") as refused:
+        producers.write_private(tmp_path / relative, "refuse\n", root=home)
+
+    assert str(refused.value.__cause__) == "fixture state path is outside its home"
+    assert existing.read_bytes() == b"keep\n"
+    assert list(outside.iterdir()) == [existing]
+    assert list(home.iterdir()) == []
+
+
+def test_private_marker_writer_refuses_a_reparse_point_home(tmp_path, monkeypatch):
+    import stat
+    from types import SimpleNamespace
+
+    from cli_harness import producers
+
+    home = tmp_path / "home"
+    home.mkdir()
+    actual_lstat = type(home).lstat
+
+    def with_reparse_point(path):
+        if path == home:
+            return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        return actual_lstat(path)
+
+    monkeypatch.setattr(type(home), "lstat", with_reparse_point)
+    with pytest.raises(RuntimeError, match="producer could not write") as refused:
+        producers.write_private(home / "new" / "pending", "refuse\n", root=home)
+    assert "reparse-point ancestor" in str(refused.value.__cause__)
+    assert list(home.iterdir()) == []
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL fallback")

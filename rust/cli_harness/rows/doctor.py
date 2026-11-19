@@ -658,7 +658,7 @@ def saved_instance(private: bool = True, raw: str | None = None, **fields):
         text = raw if raw is not None else json.dumps(value)
         path = arm.home / STATE
         if private:
-            producers.write_private(path, text)
+            producers.write_private(path, text, root=arm.home)
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
