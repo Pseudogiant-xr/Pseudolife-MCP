@@ -1,2 +1,2 @@
 ### Added (2026-11-19 — Native tunnel profile continuation)
-- Native `tunnel setup` can resume a saved profile and import its first runtime key through a private file or a terminal without echo. Windows stores the key with DPAPI. An unchanged rerun points to `tunnel status` for checking the saved configuration.
+- Native `tunnel setup` can resume a prepared profile and import its first runtime key through a private file or a terminal without echo. Windows stores the key with DPAPI. Renewal and edits to profiles with a key, process record or autostart settings continue to defer. A one-field daemon connection change also defers. Setup and status name unpublished staging files left in the store.

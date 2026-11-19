@@ -212,6 +212,9 @@ fn outcome(options: &Options) -> Option<Answer> {
         }
         root => root.ok()?,
     };
+    if matches!(options.command, Command::Status | Command::Setup) {
+        setup::warn_for_stages(&root);
+    }
     answer(match options.command {
         Command::Status => status(options, &root),
         Command::Update => return Some(update(&root)),
@@ -805,12 +808,17 @@ fn setup(options: &Options, root: &Path) -> Output {
             "use either --read-key or --key-file for private key intake",
         ));
     }
+    let saved = occupied(&path)?;
     if settings.has_key_input() && (settings.has_profile_settings() || settings.accept_access) {
-        return Err(Fail::Tunnel(
-            "save profile settings first, then use --read-key or --key-file in a separate setup invocation",
-        ));
+        return Err(if saved {
+            Fail::Defer
+        } else {
+            Fail::Tunnel(
+                "save profile settings first, then use --read-key or --key-file in a separate setup invocation",
+            )
+        });
     }
-    if occupied(&path)? {
+    if saved {
         if !settings.has_profile_settings() && !settings.has_key_input() && !settings.accept_access
         {
             return Err(Fail::Defer);

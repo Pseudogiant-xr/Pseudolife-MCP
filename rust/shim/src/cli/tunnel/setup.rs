@@ -51,6 +51,7 @@ const SYNC: &str = "the tunnel file was saved but its directory could not be syn
 const DEADLINE: Duration = Duration::from_secs(20);
 const PROFILE_LIMIT: usize = 65536;
 const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
+const STAGE_PREFIX: &str = ".tunnel-setup-";
 
 pub(super) fn save(
     options: &Options,
@@ -359,6 +360,37 @@ fn check_directory(root: &Path) -> Result<(), Fail> {
     }
 }
 
+/// An interrupted writer can leave a stage behind. List only the names of
+/// regular files that match the publisher's naming scheme. A second setup
+/// could still be writing one, so this advisory never removes a stage.
+pub(super) fn warn_for_stages(root: &Path) {
+    if check_directory(root).is_err() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    let mut stages: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_prefix(STAGE_PREFIX))
+                .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                && entry.file_type().is_ok_and(|kind| kind.is_file())
+        })
+        .map(|entry| entry.path())
+        .collect();
+    stages.sort();
+    for stage in stages {
+        crate::stderrln!(
+            "Unpublished tunnel stage {}. If no tunnel setup is running, remove this file before retrying.",
+            stage.display()
+        );
+    }
+}
+
 fn prepare_directory(root: &Path) -> Result<(), Fail> {
     check_directory(root)?;
     if !store::occupied(root)? {
@@ -400,7 +432,7 @@ fn stage_and_publish(
     publish: impl FnOnce(&Path) -> Result<(), Fail>,
 ) -> Result<(), Fail> {
     let parent = path.parent().ok_or(Fail::Tunnel(DIRECTORY))?;
-    let stage = parent.join(format!(".tunnel-setup-{}", uuid::Uuid::new_v4().simple()));
+    let stage = parent.join(format!("{STAGE_PREFIX}{}", uuid::Uuid::new_v4().simple()));
     let result = (|| {
         let mut opened = state::create(&stage).map_err(|_| Fail::Tunnel(WRITE))?;
         write(&mut opened.file)

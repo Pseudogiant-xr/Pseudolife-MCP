@@ -350,6 +350,17 @@ fn setup_repoints_a_moved_credential_after_explicit_consent() {
     std::fs::rename(home.path("token"), &moved).unwrap();
     let path = home.path("tunnels/dot.profile.json");
     let before = std::fs::read(&path).unwrap();
+    assert_deferred(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--token-file",
+            moved.to_str().unwrap(),
+        ],
+        &[],
+    );
     let (mut cmd, ambient) = setup_command(&home, &daemon.url, &moved);
     let refused = cmd.output().unwrap();
     assert_eq!(refused.status.code(), Some(2));
@@ -363,6 +374,166 @@ fn setup_repoints_a_moved_credential_after_explicit_consent() {
     let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert_eq!(saved["token_file"], moved.to_str().unwrap());
     ambient.assert_untouched();
+}
+
+#[test]
+fn setup_defers_the_renewal_command_printed_by_status() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    let root = home.path(".pseudolife-mcp/tunnel");
+    let state = pseudolife_stdio::board::state::atomic_create;
+    pseudolife_stdio::board::state::private_dir(&root).unwrap();
+    state(
+        &root.join("dot.profile.json"),
+        &serde_json::to_vec(&serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+            "runtime_key_expires_at": "2020-01-01T00:00:00Z",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    // The fixture represents an occupied key slot. Renewal must defer before
+    // native code opens or attempts to decrypt that key.
+    state(&root.join("dot.key"), b"opaque key fixture").unwrap();
+
+    let status = run(&home, &["status"], &[]);
+    assert_eq!(status.status.code(), Some(0));
+    let output = String::from_utf8_lossy(&status.stdout);
+    let renewal = output
+        .lines()
+        .find_map(|line| line.strip_prefix("Renew privately: tunnel "))
+        .unwrap();
+    let expires = "2099-12-01T00:00:00Z";
+    let renewal = renewal
+        .strip_suffix('.')
+        .unwrap()
+        .replace("<ISO timestamp>", expires);
+    assert_deferred(
+        &home,
+        &renewal.split_ascii_whitespace().collect::<Vec<_>>(),
+        &[],
+    );
+    assert_deferred(&home, &["setup", "--key-expires-at", expires], &[]);
+    assert_deferred(&home, &["setup", "--read-key"], &[]);
+    daemon.assert_untouched();
+}
+
+fn expect_setup_deferral_for_saved_authority(record: Option<&str>, autostart: bool) {
+    let home = setup_home();
+    let daemon = Listener::new();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+            "autostart_consent": autostart,
+        }),
+    );
+    if let Some(record) = record {
+        let bytes = if record.ends_with(".json") {
+            br#"{"pid":4294967295}"#.as_slice()
+        } else {
+            b"opaque key fixture"
+        };
+        pseudolife_stdio::board::state::atomic_create(&home.path("tunnels").join(record), bytes)
+            .unwrap();
+    }
+    let dir = home.dir();
+    let token = home.path("moved-token");
+    assert_deferred(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &dir,
+            "--daemon-url",
+            &daemon.url(),
+            "--token-file",
+            token.to_str().unwrap(),
+        ],
+        &[],
+    );
+    assert_deferred(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &dir,
+            "--token-file",
+            token.to_str().unwrap(),
+        ],
+        &[],
+    );
+    daemon.assert_untouched();
+}
+
+#[test]
+fn setup_defers_repointing_the_daemon_of_a_keyed_profile() {
+    expect_setup_deferral_for_saved_authority(Some("dot.key"), false);
+}
+
+#[test]
+fn setup_defers_changes_when_a_stopped_tunnel_has_a_process_record() {
+    expect_setup_deferral_for_saved_authority(Some("dot.process.json"), false);
+}
+
+#[test]
+fn setup_defers_changes_when_autostart_is_approved() {
+    expect_setup_deferral_for_saved_authority(None, true);
+}
+
+#[test]
+fn setup_refuses_mixed_settings_and_key_input_for_a_fresh_name() {
+    let home = setup_home();
+    assert_refused(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--read-key",
+            "--tunnel-id",
+            "tunnel_1111",
+        ],
+        &[],
+        "save profile settings first, then use --read-key or --key-file in a separate setup invocation\n",
+    );
+}
+
+#[test]
+fn setup_and_status_name_an_unpublished_stage_without_exposing_it() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    pending_setup_profile(&home, &daemon.url());
+    let stage = ".tunnel-setup-0123456789abcdef0123456789abcdef";
+    let secret = "synthetic-stage-contents";
+    let path = home.path("tunnels").join(stage);
+    pseudolife_stdio::board::state::atomic_create(&path, secret.as_bytes()).unwrap();
+    let unrelated = home.path("tunnels/.tunnel-setup-note");
+    pseudolife_stdio::board::state::atomic_create(&unrelated, b"unrelated fixture").unwrap();
+    let before = tree(&home.0);
+    for args in [
+        vec!["status", "--json"],
+        vec!["setup", "--catalog", "current"],
+    ] {
+        let dir = home.dir();
+        let mut args = args;
+        args.extend(["--profile-dir", &dir]);
+        let output = run(&home, &args, &[]);
+        assert_eq!(output.status.code(), Some(0));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(&path.display().to_string()));
+        assert!(stderr.contains("remove this file"));
+        assert!(!stderr.contains(&unrelated.display().to_string()));
+        assert!(!stderr.contains(secret));
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(secret));
+        if args[0] == "status" {
+            assert!(serde_json::from_slice::<serde_json::Value>(&output.stdout).is_ok());
+        }
+    }
+    assert_eq!(tree(&home.0), before);
+    daemon.assert_untouched();
 }
 
 #[test]
@@ -408,7 +579,7 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
     pseudolife_stdio::board::state::atomic_create(&input, synthetic).unwrap();
     let profile = home.path("tunnels/dot.profile.json");
     let original = std::fs::read(&profile).unwrap();
-    assert_refused(
+    assert_deferred(
         &home,
         &[
             "setup",
@@ -420,7 +591,6 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
             "tunnel_1111",
         ],
         &[],
-        "save profile settings first, then use --read-key or --key-file in a separate setup invocation\n",
     );
     let ambient = Listener::new();
     let mut setup = command(&home, &ambient);
@@ -475,8 +645,8 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fixture-runtime-key"));
     let request_count = daemon.records.lock().unwrap().len();
     let repeat = setup.output().unwrap();
-    assert_eq!(repeat.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&repeat.stderr).contains("dot.key already exists"));
+    assert_eq!(repeat.status.code(), Some(1));
+    assert_eq!(repeat.stderr, native_text(DEFERRED));
     assert_eq!(daemon.records.lock().unwrap().len(), request_count);
     assert!(std::fs::read(&key).unwrap() == stored);
     ambient.assert_untouched();
@@ -505,6 +675,34 @@ fn setup_refuses_to_import_the_daemon_bearer_as_a_runtime_key() {
         &[],
         "the runtime key matches the daemon credential; supply the separate tunnel runtime key\n",
     );
+}
+
+#[test]
+fn setup_rejects_invalid_runtime_key_bytes_without_printing_them() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+        }),
+    );
+    let input = home.path("key-input");
+    pseudolife_stdio::board::state::atomic_create(&input, b"invalid\0synthetic").unwrap();
+    assert_refused(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-file",
+            input.to_str().unwrap(),
+        ],
+        &[],
+        "invalid private tunnel runtime key; check the key and retry\n",
+    );
+    daemon.assert_untouched();
 }
 
 #[cfg(unix)]

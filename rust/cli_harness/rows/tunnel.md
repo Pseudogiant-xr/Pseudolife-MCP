@@ -61,8 +61,10 @@ writing it or contacting the daemon. An equivalent Python-written profile
 also counts as an unchanged rerun. The response points to `tunnel status`
 for checking the saved configuration. A stopped tunnel can resume profile
 setup before its first key is imported. Changing the daemon connection or
-expanding access requires explicit consent. A profile with autostart, a
-process record, or a saved key is left alone by this setup path. Malformed
+expanding access requires explicit consent. Key renewal and edits to a
+profile with autostart, a process record, or a saved key defer. Combining
+key intake with profile settings on an existing profile also defers, as
+does changing just one part of its saved daemon connection. Malformed
 saved profiles still defer. These effects are covered in
 `shim/tests/cli_tunnel_contract.rs` against a disposable daemon fixture.
 The setup cases in this row exercise preflight refusals and deferrals.
@@ -71,7 +73,8 @@ Save the profile and import the first runtime key in separate invocations.
 The key is read from an owner-only file or from a terminal without echo.
 Unix saves it in an owner-only file. Windows protects it with user-scoped
 DPAPI. The setup lock serializes native writes to the store. An interrupted
-write cannot publish a partial profile or key.
+write cannot publish a partial profile or key. Setup and status warn about
+unpublished stages without reading or removing them.
 
 Process records are read natively (`shim/src/cli/tunnel/record.rs`), and
 these cases are recorded from the candidate, not the oracle:

@@ -38,12 +38,10 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
 
     if setup.has_key_input() {
         if profile.state != "ready" {
-            return Err(Fail::Tunnel(
-                "save a tunnel ID with tunnel setup --tunnel-id before importing its runtime key",
-            ));
+            return Err(Fail::Defer);
         }
-        require_no_autostart(&saved, &status)?;
-        require_inactive(root, &profile.name, &status)?;
+        require_no_autostart(&saved)?;
+        require_inactive(root, &profile.name)?;
         let key = read_key(options)?;
         let daemon = verify_connection(&profile)?;
         if daemon
@@ -56,7 +54,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
         }
         let encoded = encode_key(&key.0)?;
         let (_lock, _) = commit_lock(root, path, &original)?;
-        require_inactive(root, &profile.name, &status)?;
+        require_inactive(root, &profile.name)?;
         publish_new(&store::key_path(root, &profile.name), |file| {
             file.write_all(&encoded.0)
         })?;
@@ -77,11 +75,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             desired.insert("daemon_url".into(), Value::from(url.clone()));
             desired.insert("token_file".into(), Value::from(absolute_token(token)?));
         }
-        _ => {
-            return Err(Fail::Tunnel(
-                "pass both --daemon-url and --token-file to change the saved daemon connection",
-            ));
-        }
+        _ => return Err(Fail::Defer),
     }
     setup.edit(&mut desired);
     let needs_consent = saved["consent"] != true
@@ -110,19 +104,19 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             0,
         ));
     }
+    require_no_autostart(&saved)?;
+    require_inactive(root, &profile.name)?;
     let updated = store::validate(&desired)?;
     if needs_consent && !setup.accept_access {
         return Err(consent_required(&updated));
     }
-    require_no_autostart(&saved, &status)?;
-    require_inactive(root, &updated.name, &status)?;
     let bytes = profile_bytes(&desired)?;
     verify_connection(&updated)?;
     if needs_consent && disclose(&updated).is_err() {
         return Ok((String::new(), crate::cli::tunnel::STDOUT_REFUSED));
     }
     let (_lock, expected) = commit_lock(root, path, &original)?;
-    require_inactive(root, &updated.name, &status)?;
+    require_inactive(root, &updated.name)?;
     stage_and_publish(
         path,
         |file| file.write_all(&bytes),
@@ -144,22 +138,17 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     Ok(saved_message(options, root, &updated))
 }
 
-fn require_no_autostart(saved: &serde_json::Map<String, Value>, status: &str) -> Result<(), Fail> {
+fn require_no_autostart(saved: &serde_json::Map<String, Value>) -> Result<(), Fail> {
     if saved.get("autostart_consent") == Some(&Value::Bool(true)) {
-        return Err(Fail::Detail(format!(
-            "this profile has autostart settings; check `{status}` before changing the saved profile or key"
-        )));
+        return Err(Fail::Defer);
     }
     Ok(())
 }
 
-fn require_inactive(root: &Path, name: &str, status: &str) -> Result<(), Fail> {
+fn require_inactive(root: &Path, name: &str) -> Result<(), Fail> {
     for path in [store::key_path(root, name), record::path(root, name)] {
         if store::occupied(&path)? {
-            return Err(Fail::Detail(format!(
-                "{} already exists; check `{status}` before changing this profile or its key",
-                path.display()
-            )));
+            return Err(Fail::Defer);
         }
     }
     Ok(())
