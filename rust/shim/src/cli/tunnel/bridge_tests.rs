@@ -238,7 +238,7 @@ fn a_matching_identity_can_settle_after_the_same_profile_relaunches() {
     );
     let new = uuid::Uuid::new_v4().simple().to_string();
     put_native_record(&store, &new, &active, &executable);
-    let current_for = |id| {
+    let current_for = |id: String| {
         let root = store.0.clone();
         let exe = executable.clone();
         Arc::new(move || identity::active(&root, "dot", &exe, Some(&id))) as CurrentIdentity
@@ -261,6 +261,11 @@ fn a_matching_identity_can_settle_after_the_same_profile_relaunches() {
     let cloud = cloud_status(&store.0, "dot");
     assert!(cloud.current);
     assert_eq!(cloud.successful, 1);
+    let receipt = directory.join(format!("{NONCE}-memory_search.json"));
+    let mut wrong = store.receipt("dot", "memory_search");
+    wrong["identity"] = json!("c".repeat(64));
+    crate::board::state::atomic_write(&receipt, wrong.to_string().as_bytes(), None).unwrap();
+    assert_eq!(cloud_status(&store.0, "dot").successful, 0);
 }
 
 #[test]

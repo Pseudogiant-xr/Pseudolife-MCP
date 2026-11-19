@@ -220,7 +220,14 @@ fn recover_launch(root: &Path, name: &str) -> Result<(), Fail> {
     let id = launch_id(&launch.native_launch).ok_or_else(|| conflict(root, name))?;
     let directory = stage_path(root, id);
     let table = record::table();
-    if (cfg!(target_os = "macos") && launch.target.is_none())
+    #[cfg(target_os = "linux")]
+    let group_alive = launch
+        .target
+        .as_ref()
+        .is_some_and(|target| !process::group_is_empty(target.pid));
+    #[cfg(not(target_os = "linux"))]
+    let group_alive = cfg!(target_os = "macos");
+    if group_alive
         || !record::read(path.clone(), table.as_deref())
             .is_some_and(|record| record.liveness == record::Liveness::Gone)
     {
@@ -589,8 +596,15 @@ pub(super) fn stop(root: &Path, name: &str) -> Output {
     let record = read_record(&record_path)?;
     let lock =
         state::open_with_write(&lock_path(root, name), true).map_err(|_| conflict(root, name))?;
-    if !matches!(lock.file.try_lock(), Err(fs::TryLockError::WouldBlock)) {
-        return Err(conflict(root, name));
+    match lock.file.try_lock() {
+        Err(fs::TryLockError::WouldBlock) => {}
+        Ok(()) => {
+            return Err(Fail::Detail(format!(
+                "the native supervisor is no longer holding its launch lock ({}). Check tunnel status, then use tunnel run to check and recover the old launch",
+                record_path.display()
+            )));
+        }
+        Err(_) => return Err(conflict(root, name)),
     }
     let id = launch_id(&record.native_launch).ok_or_else(|| conflict(root, name))?;
     let directory = stage_path(root, id);

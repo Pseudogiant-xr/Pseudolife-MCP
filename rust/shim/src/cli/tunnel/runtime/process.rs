@@ -104,6 +104,46 @@ fn exit_byte(status: Option<i32>) -> u8 {
 }
 
 #[cfg(target_os = "linux")]
+pub(super) fn group_is_empty(group: u32) -> bool {
+    use std::{fs, io::ErrorKind};
+
+    // Descendants can survive the leader's parent-death signal. Treat an
+    // unreadable group member list as unknown and preserve the launch.
+    fs::read_dir("/proc").is_ok_and(|mut entries| {
+        entries.all(|entry| {
+            let Ok(entry) = entry else {
+                return false;
+            };
+            if entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<u32>().ok())
+                .is_none()
+            {
+                return true;
+            }
+            let stat = match fs::read(entry.path().join("stat")) {
+                Ok(stat) => stat,
+                Err(error) => return error.kind() == ErrorKind::NotFound,
+            };
+            let text = String::from_utf8_lossy(&stat);
+            let Some((_, status)) = text.rsplit_once(')') else {
+                return false;
+            };
+            let mut fields = status.split_ascii_whitespace();
+            match (
+                fields.next(),
+                fields.nth(1).and_then(|value| value.parse::<u32>().ok()),
+            ) {
+                (Some("Z" | "X"), Some(_)) => true,
+                (Some(_), Some(pgrp)) => pgrp != group,
+                _ => false,
+            }
+        })
+    })
+}
+
+#[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 fn parent_death(command: &mut Command) {
     let parent = rustix::process::getpid();

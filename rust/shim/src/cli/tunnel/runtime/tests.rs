@@ -182,7 +182,12 @@ fn early_exit_and_readiness_timeout_release_the_launch_files() {
         });
         assert_eq!(result, Err(NOT_READY));
         assert!(started.elapsed() < Duration::from_secs(14));
-        assert_eq!(fs::read_dir(&home.0).unwrap().count(), 2);
+        let mut names: Vec<_> = fs::read_dir(&home.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["daemon-token", "dot.lock", "dot.native-run.lock"]);
         assert!(launch_locks(&home.0, "dot").is_ok());
     }
 }
@@ -251,7 +256,7 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
     state::atomic_write(&path, &serde_json::to_vec(&owner).unwrap(), None).unwrap();
     let _lock = open_lock(&home.0, "dot", &lock_path(&home.0, "dot")).unwrap();
     assert!(
-        matches!(stop(&home.0, "dot"), Err(Fail::Detail(message)) if message.contains("cannot be verified"))
+        matches!(stop(&home.0, "dot"), Err(Fail::Detail(message)) if message.contains("no longer holding its launch lock"))
     );
     assert!(!stage_path(&home.0, id).exists());
 }
@@ -289,12 +294,15 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
         let stage = stage_path(&home.0, launch_id(&record.native_launch).unwrap());
         let refused = prepare(&home.0, "dot").is_err();
         let key_preserved = stage.join("key").is_file();
-        (stage, refused, key_preserved)
+        let bound = store::load(&stage, "dot").is_ok_and(|profile| {
+            identity::Bound::capture(&stage, &record.native_launch, &profile).is_ok()
+        });
+        (stage, refused, key_preserved, bound)
     });
     let _ = supervisor.kill();
     supervisor.wait().unwrap();
-    let (stage, refused, key_preserved) = evidence.expect("fixture never became ready");
-    assert!(refused && key_preserved);
+    let (stage, refused, key_preserved, bound) = evidence.expect("fixture never became ready");
+    assert!(refused && key_preserved && bound);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if prepare(&home.0, "dot").is_ok() {
