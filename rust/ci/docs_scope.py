@@ -32,6 +32,9 @@ DIRECTORY_READERS = {
     "changelog.d/": ("tests/test_changelog_fragments.py",),
     "docs/i18n/": ("tests/test_plugin_packaging.py",),
     "docs/guide/": ("tests/test_plugin_packaging.py",),
+    "evals/subagent_tier_bench/results/": (
+        "tests/test_subagent_tier_bench.py::test_the_committed_pilot_scores_and_is_scrubbed",
+    ),
     "examples/": ("tests/test_plugin_packaging.py",),
     "rust/daemon/divergences/": (
         DIVERGENCE_POINTER_READER,

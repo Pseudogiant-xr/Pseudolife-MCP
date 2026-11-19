@@ -359,6 +359,11 @@ def test_divergence_ledger_selection_checks_the_committed_index(repo, path):
     assert "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory" in targets
 
 
+def test_tier_bench_results_keep_the_committed_pilot_reader(repo):
+    targets = docs_scope.doc_tests(["evals/subagent_tier_bench/results/board-guard.haiku.1.md"])
+    assert "tests/test_subagent_tier_bench.py::test_the_committed_pilot_scores_and_is_scrubbed" in targets
+
+
 @pytest.mark.parametrize("path", ["rust/PARITY.md", "rust/parity/parity-rows/config-load.md"])
 def test_parity_docs_keep_the_committed_register_readers(repo, path):
     targets = docs_scope.doc_tests([path])
