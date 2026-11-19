@@ -162,13 +162,14 @@ async fn deliver(
     server.write_all(&key.0).await?;
     drop(key);
     // The vendor reads the whole stream before resolving the reference.
-    // Flush before disconnect so the reader receives every byte, then EOF.
+    // Flush before closing so the reader receives every byte, then EOF.
     tokio::task::spawn_blocking(move || {
         // SAFETY: server owns the handle for the entire call.
         if unsafe { FlushFileBuffers(server.as_raw_handle()) } == 0 {
             return Err(std::io::Error::last_os_error());
         }
-        server.disconnect()
+        drop(server);
+        Ok(())
     })
     .await?
 }
