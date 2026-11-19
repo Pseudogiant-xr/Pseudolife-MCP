@@ -1,18 +1,17 @@
 """Rejecting controls for the store harness's semantic clock comparison."""
 import copy
 from contextlib import ExitStack
-import importlib.abc
+import importlib
 import os
 import json
 from pathlib import Path
-import runpy
 import tempfile
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
 import graph_store
 from graph_store import ClockState, catalog_shape, digest, response_diff, strict_json, wall_time
+from rust.harness_support.import_blocker import cold_harness_imports
 
 
 def state(clock=1.0):
@@ -199,33 +198,19 @@ class ClockControls(unittest.TestCase):
 
 class IndependentFixtures(unittest.TestCase):
     def test_seed_and_replay_import_without_product(self):
-        class Block(importlib.abc.MetaPathFinder):
-            def find_spec(self, fullname, *args):
-                if fullname == "pseudolife_memory" or fullname.startswith("pseudolife_memory."):
-                    raise AssertionError("product imported: " + fullname)
-
-        saved = {n: m for n, m in sys.modules.items() if n == "graph_fixtures" or n == "pseudolife_memory"
-                 or n.startswith("pseudolife_memory.")}
-        guard = Block()
-        sys.meta_path.insert(0, guard)
-        for name in saved:
-            del sys.modules[name]
-        try:
-            # Execute the module body again: a cached graph_store import
-            # would hide a new top-level dependency from the blocker.
-            replay = runpy.run_path(graph_store.__file__)
+        with cold_harness_imports():
+            replay = importlib.import_module("graph_store")
+            replay.operations("read")  # Lazy graph_read_profile import.
+            importlib.import_module("graph_read_compare")
+            importlib.import_module("candidate_record")
             import graph_fixtures
-            with patch("graph_fixtures.connect") as connection, patch("graph_fixtures.ensure_schema"):
+            with patch("graph_fixtures.connect") as connection, patch("rust.harness_support.bank_fixture.ensure_schema"):
                 graph_fixtures.seed("disposable fixture")
                 self.assertGreater(connection.return_value.__enter__.return_value.execute.call_count, 20)
-            with patch.object(replay["pg"], "create", side_effect=RuntimeError("reached disposable setup")), \
-                    patch.object(replay["pg"], "drop"):
+            with patch.object(replay.pg, "create", side_effect=RuntimeError("reached disposable setup")), \
+                    patch.object(replay.pg, "drop"):
                 with self.assertRaisesRegex(RuntimeError, "reached disposable setup"):
-                    replay["run"](Path("unused"), "golden")
-        finally:
-            sys.meta_path.remove(guard)
-            sys.modules.pop("graph_fixtures", None)
-            sys.modules.update(saved)
+                    replay.run(Path("unused"), "golden")
 
     def test_seed_guards_target_before_open_and_connection_before_writes(self):
         import graph_fixtures as fixture

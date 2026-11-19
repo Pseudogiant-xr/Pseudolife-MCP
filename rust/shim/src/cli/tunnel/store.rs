@@ -144,9 +144,13 @@ fn open_private(path: &Path) -> io::Result<File> {
         // The CRT's os.open shares read and write, never delete.
         options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
     }
+    sharing_retry(|| options.open(path))
+}
+
+pub(super) fn sharing_retry<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     let mut attempt = 0;
     loop {
-        match options.open(path) {
+        match operation() {
             // _sharing_retry: a transient Windows sharing violation clears.
             Err(error)
                 if cfg!(windows)
@@ -677,6 +681,22 @@ pub(super) fn owner_only_directory(root: &Path, _info: &Metadata) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn sharing_retry_accepts_a_move_after_transient_contention() {
+        let mut attempts = 0;
+        let result = sharing_retry(|| {
+            attempts += 1;
+            if attempts == 1 {
+                Err(io::Error::from_raw_os_error(32))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(attempts, 2);
+    }
 
     fn payload(text: &str) -> Map<String, Value> {
         serde_json::from_str(text).unwrap()

@@ -1064,7 +1064,7 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
         );
     }
     let mut answer = match op {
-        Op::Check { .. } => failed("check is protocol 1's request"),
+        Op::Check { .. } | Op::CarryCheck { .. } => failed("preflight checks are read separately"),
         Op::State { tables } => {
             let mut answer = done();
             answer.state = Some(state(site, &claims, &folder, tables));
