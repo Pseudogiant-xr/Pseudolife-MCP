@@ -7,7 +7,7 @@ import copy
 
 import psycopg
 
-from rust.harness_support.bank_fixture import initialize_bank
+from rust.harness_support.bank_fixture import assert_fixture_database, initialize_bank
 from rust.harness_support.database_guard import assert_disposable_database, dsn_database_name, refuse_production_database
 from rust.harness_support.schema import ensure_schema
 
@@ -68,6 +68,7 @@ the committed golden. The separate bank never consumes candidate output.
             # Opening the native store reapplies the schema plan, including
             # its existing-row repairs. Apply those to the independent arm.
             with self.conn.transaction():
+                assert_fixture_database(self.conn)
                 ensure_schema(self.conn)
                 self.conn.execute("UPDATE meta SET value = '2'::jsonb WHERE key = 'writer_lease_epoch'")
         except BaseException:

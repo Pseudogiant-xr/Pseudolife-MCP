@@ -205,8 +205,10 @@ class IndependentFixtures(unittest.TestCase):
             importlib.import_module("candidate_record")
             import graph_fixtures
             with patch("graph_fixtures.connect") as connection, patch("rust.harness_support.bank_fixture.ensure_schema"):
+                conn = connection.return_value.__enter__.return_value
+                conn.execute.return_value.fetchone.return_value = ("pl_cf_w3h_fixture",)
                 graph_fixtures.seed("disposable fixture")
-                self.assertGreater(connection.return_value.__enter__.return_value.execute.call_count, 20)
+                self.assertGreater(conn.execute.call_count, 20)
             with patch.object(replay.pg, "create", side_effect=RuntimeError("reached disposable setup")), \
                     patch.object(replay.pg, "drop"):
                 with self.assertRaisesRegex(RuntimeError, "reached disposable setup"):
@@ -226,6 +228,24 @@ class IndependentFixtures(unittest.TestCase):
                 fixture.seed("postgresql://localhost/pl_cf_w3h_fixture")
             connect.return_value.execute.assert_not_called()
             connect.return_value.close.assert_called_once()
+
+    def test_graph_seeds_refuse_bench_before_writing(self):
+        import graph_fixtures as fixture
+        from unittest.mock import call
+
+        for entry in (fixture.seed, fixture.ReadFixture):
+            with self.subTest(entry=entry.__name__), \
+                    patch.object(fixture.psycopg, "connect") as connect, \
+                    patch.object(fixture, "ensure_schema") as schema, \
+                    patch("rust.harness_support.bank_fixture.ensure_schema") as bank_schema:
+                conn = connect.return_value
+                conn.__enter__.return_value = conn
+                conn.execute.return_value.fetchone.return_value = ("pseudolife_memory_bench",)
+                with self.assertRaisesRegex(ValueError, "require a disposable harness database"):
+                    entry("dbname=pl_cf_w3h_fixture")
+                self.assertEqual(conn.execute.call_args_list, [call("SELECT current_database()")] * 2)
+                schema.assert_not_called()
+                bank_schema.assert_not_called()
 
     def test_collation_changes_only_the_recorded_inverse_relation(self):
         from graph_fixtures import ReadFixture
