@@ -134,10 +134,11 @@ the rows already finished; `complete` is true only once every row ran.
 
 ## Seeding
 
-State is written through the oracle's own writers (`producers.py`): the
-coordination adapter's private atomic writer and digest renderer. The digest
-renderer runs with its clock read in UTC so seeded bytes, and goldens, do not
-depend on the host timezone.
+The wait-mail digest and Codex pending notices use the payloads in
+`producer_payloads.json`. The file names the capture baseline. The digest was
+captured with its clock read in UTC, and the notice capture pinned its nonce
+and expiry inputs. The coordination adapter's private atomic writer places
+the files in each disposable home.
 
 ## Retired source mutants
 
