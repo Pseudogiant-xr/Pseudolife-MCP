@@ -182,46 +182,6 @@ fn github_discovery_routes_explicit_tags_and_unpinned_requests() {
     assert_eq!(update.target_version().unwrap().as_deref(), Some("0.24.0"));
 }
 
-fn legacy_legs_keep_the_selected_target(other_version: &'static str) {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    let mut update = Update::new(Options::parse(vec![]).unwrap());
-    let calls = Arc::new(AtomicUsize::new(0));
-    let probe = Arc::clone(&calls);
-    // An unpinned lookup during either leg would return the disagreeing
-    // version, newer than the target or older than the running daemon.
-    update.release_lookup = Some(Box::new(move || {
-        let count = probe.fetch_add(1, Ordering::Relaxed);
-        Ok(Some(
-            if count == 0 { "0.25.0" } else { other_version }.into(),
-        ))
-    }));
-    let target = update.target_version().unwrap().unwrap();
-    update.after_import = true;
-    for current in ["0.24.0", target.as_str()] {
-        update.with_release_tag(&target, |update| {
-            let selected = update.target_version().unwrap().unwrap();
-            assert_eq!(selected, target, "disagreeing version: {other_version}");
-            update.refuse_downgrade(Some(current), &selected).unwrap();
-        });
-        assert!(update.o.tag.is_none());
-    }
-    assert_eq!(calls.load(Ordering::Relaxed), 1);
-}
-
-#[test]
-fn github_discovery_legacy_leg_keeps_target_when_index_is_newer() {
-    legacy_legs_keep_the_selected_target("0.26.0");
-}
-
-#[test]
-fn github_discovery_legacy_leg_keeps_target_when_index_is_older_than_running() {
-    legacy_legs_keep_the_selected_target("0.23.0");
-}
-
 fn no_release_update() -> Update {
     let mut update = Update::new(Options::parse(vec![]).unwrap());
     update.o.as_json = true;

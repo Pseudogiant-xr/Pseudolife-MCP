@@ -119,16 +119,16 @@ review rounds or new CI jobs.
 
 ### Two release dependencies that are easy to miss
 
-**The legacy-bank import leg currently selects the target version's Python
-image.** In `rust/shim/src/cli/update/release.rs`, the pending-CMS/schema branch
-calls `deploy_release` with the engine temporarily set to Python and the same
-target version before the Rust leg. Both legs use the selected version.
-CUTOVER documents stepping through 0.23.1. Stopping Python image publication
-without changing that path breaks an upgrade past the final Python image. Implement
-the documented intermediate-release route, or refuse before mutation with a
-working explicit route. Prove old schema, pending counters, failed import and
-already-migrated banks on disposable copies. The native updater need not
-implement Chroma or `weights.pt` imports itself.
+**Legacy banks need the archived 0.23.1 image.** The native release updater
+checks the bank and the selected Rust image before it replaces the daemon.
+When a bank needs an import, the updater uses the target's verified Compose
+bundle to run the archived 0.23.1 Python image by digest. It verifies the
+schema, counters and any Chroma import before switching to the selected Rust
+image. The archived image is available for Linux amd64 Docker engines.
+Keep its digest available when Python image publication ends. The original
+image tag, dump and state archive are retained separately from the Rust hop's
+rollback. Prove old schema, pending counters, failed import and already
+imported banks on disposable copies before retirement.
 
 **PyPI is still both a release index and a workflow prerequisite.** Older
 clients read its JSON endpoint, while release images and registry

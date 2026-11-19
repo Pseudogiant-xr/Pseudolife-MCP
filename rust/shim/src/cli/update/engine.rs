@@ -627,15 +627,26 @@ fn verify_endpoint(config: &Value, url: &str) -> Result<()> {
     }
     Ok(())
 }
-/// The bank's schema (-1 when unreadable) while its CMS counters still await
-/// the import from memory_state/weights.pt (D2), else None.
-pub(super) fn import_pending(
+pub(super) struct ImportStatus {
+    pub schema: Option<i64>,
+    pub has_counters: bool,
+    pub counters_pending: bool,
+    pub chroma_pending: bool,
+}
+
+impl ImportStatus {
+    pub fn pending(&self) -> bool {
+        self.schema.is_none_or(|schema| schema < 57) || self.counters_pending || self.chroma_pending
+    }
+}
+
+pub(super) fn import_status(
     u: &Update,
     pg: &str,
     user: &str,
     db: &str,
     daemon: &str,
-) -> Result<Option<i64>> {
+) -> Result<ImportStatus> {
     let schema = sql(
         u,
         pg,
@@ -645,20 +656,57 @@ pub(super) fn import_pending(
     )?
     .trim_matches('"')
     .parse::<i64>()
-    .ok();
-    let pending = if schema.is_some_and(|v| v >= 57) {
-        let row = sql(
+    .ok()
+    .filter(|schema| *schema > 0);
+    if schema.is_none_or(|v| v < 57) {
+        return Ok(ImportStatus {
+            schema,
+            has_counters: false,
+            counters_pending: false,
+            chroma_pending: false,
+        });
+    }
+    let has_counters = sql(
+        u,
+        pg,
+        user,
+        db,
+        "SELECT EXISTS (SELECT 1 FROM cms_counters WHERE id = 1)",
+    )? == "t";
+    let counters_pending = !has_counters
+        && legacy_file(
+            u,
+            daemon,
+            "test -e /data/memory_state/weights.pt || test -e /data/memory_state/weights.pt.bak",
+        )?;
+    // The Python daemon leaves the Chroma tree intact even after import.
+    // Its bank-local marker is written only after verifying the copied chunks.
+    let chroma_pending = legacy_file(u, daemon, "test -f /data/chromadb/chroma.sqlite3")?
+        && sql(
             u,
             pg,
             user,
             db,
-            "SELECT EXISTS (SELECT 1 FROM cms_counters WHERE id = 1)",
-        )?;
-        row!="t"&&u.docker_call(&["exec",daemon,"sh","-c","test ! -e /data/memory_state/weights.pt && test ! -e /data/memory_state/weights.pt.bak"]).0!=0
-    } else {
-        true
-    };
-    Ok((schema.is_none_or(|s| s < 57) || pending).then(|| schema.unwrap_or(-1)))
+            "SELECT value::jsonb->>'status' FROM meta WHERE key = 'reference_chroma_import'",
+        )? != "done";
+    Ok(ImportStatus {
+        schema,
+        has_counters,
+        counters_pending,
+        chroma_pending,
+    })
+}
+
+fn legacy_file(u: &Update, daemon: &str, test: &str) -> Result<bool> {
+    let script = format!("if {test}; then printf present; else printf absent; fi");
+    let (code, out) = u.docker_call(&["exec", daemon, "sh", "-c", &script]);
+    match (code, out.trim()) {
+        (0, "present") => Ok(true),
+        (0, "absent") => Ok(false),
+        _ => Err(UpdateError::usage(
+            "cannot check the daemon's state volume for legacy files; start the daemon with its original /data mount and retry; nothing was deployed",
+        )),
+    }
 }
 pub(super) fn require_imported_with(
     u: &Update,
@@ -667,9 +715,9 @@ pub(super) fn require_imported_with(
     db: &str,
     daemon: &str,
 ) -> Result<()> {
-    if import_pending(u, pg, user, db, daemon)?.is_some() {
+    if import_status(u, pg, user, db, daemon)?.pending() {
         return Err(UpdateError::usage(
-            "Rust activation requires schema v57 or later and imported counters: run update --engine python --checkout <repo>, let the Python daemon import memory_state/weights.pt into cms_counters, then retry; nothing was changed",
+            "Rust activation requires schema v57 or later and completed legacy imports; use pseudolife-mcp update on the release deployment to import the bank before selecting a Rust checkout; nothing was changed",
         ));
     }
     Ok(())

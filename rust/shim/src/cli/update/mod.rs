@@ -297,7 +297,7 @@ pub(crate) struct Update {
     pub default_pulled: Option<String>,
     pub default_volumes: Vec<String>,
     /// G2-K: the Python leg that imports weights.pt already ran this update.
-    pub after_import: bool,
+    pub legacy_attempt: bool,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
@@ -446,7 +446,7 @@ impl Update {
             release_started: false,
             default_pulled: None,
             default_volumes: vec![],
-            after_import: false,
+            legacy_attempt: false,
             maintainer_context: None,
             rollback_scope: None,
             stopped_handover: false,
@@ -638,12 +638,6 @@ impl Update {
             Some(tag) => Ok(Some(tag.clone())),
             None => discover(),
         }
-    }
-    fn with_release_tag<T>(&mut self, target: &str, run: impl FnOnce(&mut Self) -> T) -> T {
-        let tag = self.o.tag.replace(target.to_owned());
-        let result = run(self);
-        self.o.tag = tag;
-        result
     }
     pub fn refuse_downgrade(&self, current: Option<&str>, target: &str) -> Result<()> {
         if let Some(current) = current

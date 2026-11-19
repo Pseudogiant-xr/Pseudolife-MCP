@@ -4,6 +4,13 @@ use std::{collections::BTreeMap, io::Read};
 
 pub(super) const PYTHON_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon";
 pub(crate) const RUST_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust";
+const IMPORT_VERSION: &str = "0.23.1";
+const IMPORT_SCHEMA: i64 = 59;
+// OCI index for the archived v0.23.1 Python daemon (Linux amd64).
+const IMPORT_IMAGE: &str = concat!(
+    "ghcr.io/pseudogiant-xr/pseudolife-daemon@sha256:",
+    "1613e1bd0cb563e9119f0444ca97dea659fa143a16931f4c512f4959243fdcc8"
+);
 const COMPOSE_FILES: [&str; 6] = [
     "docker-compose.yml",
     "docker-compose.ghcr.yml",
@@ -128,6 +135,44 @@ struct Context {
     /// daemon leaves Rust: the target project plus the Rust overlay, whose
     /// models volume the switch drops on purpose.
     identity_args: Option<Vec<String>>,
+}
+
+struct PreparedRelease {
+    context: Context,
+    env: Environment,
+    config: Value,
+    token: Option<String>,
+}
+
+impl PreparedRelease {
+    fn daemon(&self) -> &str {
+        self.context.running["Id"]
+            .as_str()
+            .unwrap_or(DAEMON_CONTAINER)
+    }
+
+    fn postgres(&self, update: &Update) -> Result<String> {
+        engine::container(update, &self.context.args, Some(&self.env), "pseudolife-pg")
+    }
+
+    fn import_status(&self, update: &Update) -> Result<engine::ImportStatus> {
+        let pg = self.postgres(update)?;
+        let env = &self.config["services"]["pseudolife-pg"]["environment"];
+        let user = env["POSTGRES_USER"]
+            .as_str()
+            .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
+        let db = env["POSTGRES_DB"]
+            .as_str()
+            .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
+        engine::import_status(update, &pg, user, db, self.daemon())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReleaseStage {
+    Ordinary,
+    Import,
+    AfterImport,
 }
 
 /// A copy of the shipped Compose files the release archive replaces: one
@@ -521,10 +566,7 @@ impl Update {
                 .as_ref()
                 .and_then(|v| v["hooks_digest"].as_str().map(str::to_owned))
         });
-        if !self.after_import {
-            // The import legs report against the schema the update started from.
-            self.schema_before = before.as_ref().and_then(|v| v["schema"].as_i64());
-        }
+        self.schema_before = before.as_ref().and_then(|v| v["schema"].as_i64());
         self.report.current = current.clone();
         self.refuse_downgrade(current.as_deref(), &target)?;
         if current.as_deref().is_some_and(|v| !safe_tag(v)) {
@@ -544,8 +586,8 @@ impl Update {
         } else {
             "python"
         };
-        let (choice, defaulted) = match self.o.engine.clone() {
-            Some(engine) => (engine, false),
+        let (choice, defaulted, probe_legacy) = match self.o.engine.clone() {
+            Some(engine) => (engine, false, false),
             None => self.default_choice(selected, &labels, &target),
         };
         // Engine selection, and every update of a Rust host, records an
@@ -584,11 +626,15 @@ impl Update {
                 previous.clone(),
                 before.clone(),
                 None,
+                probe_legacy,
             );
             match attempt {
                 Err(error) if !self.release_started => {
                     self.defaulted_engine = false;
                     self.discard_default_attempt();
+                    if self.legacy_attempt {
+                        return Err(error);
+                    }
                     // The refusal's whole first line, its fix included.
                     let reason = error.message.lines().next().unwrap_or("").trim();
                     self.warn(format!(
@@ -607,6 +653,7 @@ impl Update {
                         previous,
                         before,
                         before_recreate,
+                        false,
                     );
                 }
                 other => return other,
@@ -620,33 +667,27 @@ impl Update {
             previous,
             before,
             before_recreate,
+            probe_legacy,
         );
         if result.is_ok()
             && self.o.engine.as_deref() == Some("python")
-            && !self.after_import
             && engine::record_choice("python").is_err()
         {
             self.warn("the switch succeeded, but the Python choice could not be recorded; a later update may move this host to the default engine");
         }
         result
     }
-    #[allow(clippy::too_many_arguments)]
-    fn deploy_release_as(
+    fn prepare_release(
         &mut self,
         choice: &str,
         activating: bool,
         target: &str,
-        current: Option<String>,
-        previous: Option<String>,
-        before: Option<Value>,
-        mut before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
-    ) -> Result<()> {
-        let choice = choice.to_owned();
-        let target = target.to_owned();
-        let context = self.release_context(&target, &choice)?;
+        before: Option<&Value>,
+    ) -> Result<PreparedRelease> {
+        let context = self.release_context(target, choice)?;
         let env = compose_environment(
             &context.env_files,
-            &[("PSEUDOLIFE_IMAGE_TAG".into(), target.clone())]
+            &[("PSEUDOLIFE_IMAGE_TAG".into(), target.to_owned())]
                 .into_iter()
                 .collect(),
         );
@@ -674,141 +715,80 @@ impl Update {
         }
         self.set_rollback_scope(&config, &context.running)?;
         self.maintainer_context = Some((context.args.clone(), env.clone()));
-        let (token, running_token) = if activating {
+        let token = if activating {
             engine::verify_identity(self, &identity, &context.running, &self.o.daemon_url)?;
             let token = engine::daemon_token(&config)?;
             // A daemon running without a bearer (--allow-auth-change adding
             // one) answers any bearer: read it with the configured one.
             let running = engine::daemon_token(&running_config(&context.running))
                 .unwrap_or_else(|_| token.clone());
-            (token, running)
-        } else {
-            (String::new(), String::new())
-        };
-        // The running daemon still holds its own bearer (--allow-auth-change
-        // replaces it); the configured one is checked after recreation.
-        if activating
-            && (before.as_ref().is_none_or(|v| v["status"] != "ok")
-                || !seams::authenticated_read(&self.o.daemon_url, &running_token))
-        {
-            return Err(UpdateError::usage(
-                "the running daemon did not pass an authenticated bank read; use the previous update's rollback commands before retrying; no rollback tag was moved",
-            ));
-        }
-        if choice == "rust" {
-            let pg = engine::container(self, &context.args, Some(&env), "pseudolife-pg")?;
-            let pg_env = &config["services"]["pseudolife-pg"]["environment"];
-            let user = pg_env["POSTGRES_USER"]
-                .as_str()
-                .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
-            let db = pg_env["POSTGRES_DB"]
-                .as_str()
-                .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
-            let pending = engine::import_pending(
-                self,
-                &pg,
-                user,
-                db,
-                context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER),
-            )?;
-            let host_rust = context.running["Config"]["Labels"][engine::ENGINE_LABEL] == "rust";
-            if let Some(schema) = pending {
-                if self.after_import {
-                    // The Python leg already changed the host: a failure, not a refusal.
-                    return Err(UpdateError::new(
-                        "the Python daemon did not import memory_state/weights.pt into cms_counters, so the host stays on Python at the target. If its log (docker logs pseudolife-mcp-daemon) says the counters cannot be read, the file is unreadable: move memory_state/weights.pt aside (the counters then restart from zero), then retry update --engine rust",
-                    ));
-                }
-                // Only a readable schema below v57, or a pending import, takes the
-                // import leg: an unreadable one would fail the Python daemon too.
-                if host_rust || schema < 0 {
-                    return Err(UpdateError::usage(
-                        "Rust activation requires schema v57 or later and imported counters: run update --engine python, let the Python daemon import memory_state/weights.pt into cms_counters, then retry; nothing was changed",
-                    ));
-                }
-                // G2-K: the Rust daemon never reads weights.pt. The Python
-                // daemon at the target imports it at startup, so update to that
-                // first (its own backup, rollback tag and gate), then move on.
-                model_volumes(&config)?;
-                let shown = if schema >= 0 {
-                    format!("v{schema}")
-                } else {
-                    "an unreadable schema".into()
-                };
-                self.step(format!(
-                    "this bank ({shown}) still keeps its CMS counters in memory_state/weights.pt: moving to the Python daemon {target} first, which imports them, then to the Rust daemon"
+            if before.is_none_or(|v| v["status"] != "ok")
+                || !seams::authenticated_read(&self.o.daemon_url, &running)
+            {
+                return Err(UpdateError::usage(
+                    "the running daemon did not pass an authenticated bank read; use the previous update's rollback commands before retrying; no rollback tag was moved",
                 ));
-                // The Rust image must exist before the Python leg changes anything,
-                // and the disk floor holds before that image is pulled.
-                disk::host(&data_dir())?;
-                self.disk_storage(
-                    context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER),
-                    Some(pg.as_str()),
-                    context.running["Image"].as_str(),
-                )?;
-                let rust_image = format!("{RUST_IMAGE}:{target}");
-                let fresh = self.defaulted_engine && {
-                    let (code, out) = self.docker_call(&["image", "inspect", &rust_image]);
-                    code != 0 && out.to_lowercase().contains("no such image")
-                };
-                self.step(format!("pulling {rust_image}..."));
-                if self
-                    .command(&["pull".into(), rust_image.clone()], None, 7200, true)
-                    .0
-                    != 0
-                {
-                    return Err(UpdateError::new(format!(
-                        "docker pull {rust_image} failed; nothing was changed. Is a Rust daemon image published for {target}? Use --engine python to stay on the Python daemon"
+            }
+            Some(token)
+        } else {
+            None
+        };
+        Ok(PreparedRelease {
+            context,
+            env,
+            config,
+            token,
+        })
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn deploy_release_as(
+        &mut self,
+        choice: &str,
+        activating: bool,
+        target: &str,
+        current: Option<String>,
+        previous: Option<String>,
+        before: Option<Value>,
+        before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
+        probe_legacy: bool,
+    ) -> Result<()> {
+        let prepared = self.prepare_release(choice, activating, target, before.as_ref())?;
+        if choice == "rust" || probe_legacy {
+            let bank = prepared
+                .import_status(self)
+                .inspect_err(|_| self.legacy_attempt = true)?;
+            if bank.pending() {
+                self.legacy_attempt = true;
+                let schema = bank.schema.ok_or_else(|| UpdateError::usage(
+                    "the bank's schema version is unreadable; restore a verified backup of this bank before retrying; nothing was deployed",
+                ))?;
+                if schema > IMPORT_SCHEMA {
+                    return Err(UpdateError::usage(format!(
+                        "the bank is at schema v{schema}, newer than the archived Python daemon's v{IMPORT_SCHEMA}; restore a verified pre-migration backup at v{IMPORT_SCHEMA} or earlier before retrying; nothing was deployed"
                     )));
                 }
-                if fresh {
-                    self.default_pulled = Some(rust_image.clone());
+                if self.o.no_backup {
+                    return Err(UpdateError::usage(
+                        "legacy import requires a bank and state backup; retry without --no-backup; nothing was deployed",
+                    ));
                 }
-                // And it must run this bank's configuration: a refusal now
-                // leaves the Python daemon untouched, not one at the target.
-                self.check_config(&rust_image, &config)?;
-                self.after_import = true;
-                // The host changes from here, as in the Python updater: a
-                // later failure is the update's, never a defaulted fallback.
-                self.release_started = true;
-                let defaulted = std::mem::replace(&mut self.defaulted_engine, false);
-                let requested = self.o.engine.replace("python".into());
-                // A Python daemon already at the target must still restart to import.
-                let reinstall = std::mem::replace(&mut self.o.reinstall, true);
-                // Both legs tag a Python image of the same version: keep them apart.
-                let suffix = self.o.rollback_suffix.clone();
-                if !suffix.is_empty() {
-                    self.o.rollback_suffix = format!("{suffix}-pre-import");
-                }
-                // The clients move once, after the Rust leg's gate, never mid-way.
-                let daemon_only = std::mem::replace(&mut self.o.daemon_only, true);
-                let first = self.with_release_tag(&target, |update| {
-                    update.deploy_release(current.clone(), before_recreate, previous.clone())
-                });
-                self.o.reinstall = reinstall;
-                self.o.rollback_suffix = suffix;
-                self.o.daemon_only = daemon_only;
-                if let Err(error) = first {
-                    self.o.engine = requested;
-                    self.defaulted_engine = defaulted;
-                    return Err(error);
-                }
-                // Leg 2 is Rust at this target, whatever chose it, without asking
-                // the release index again.
-                let before_import = self.report.rollback.clone();
-                self.o.engine = Some("rust".into());
-                let second = self.with_release_tag(&target, |update| {
-                    update.deploy_release(Some(target.clone()), None, previous)
-                });
-                self.o.engine = requested;
-                self.defaulted_engine = defaulted;
-                if self.report.rollback.is_object() {
-                    self.report.rollback["before_import"] = before_import;
-                }
-                return second;
+                let rust = if choice == "rust" {
+                    prepared
+                } else {
+                    self.prepare_release("rust", true, target, before.as_ref())?
+                };
+                return self.import_release(
+                    rust,
+                    target,
+                    current.as_deref(),
+                    previous.as_deref(),
+                    before.as_ref(),
+                    before_recreate,
+                );
             }
-            // Refuse a misplaced model directory before the pull.
-            model_volumes(&config)?;
+        }
+        if choice == "rust" {
+            model_volumes(&prepared.config)?;
         }
         let repository = if choice == "rust" {
             RUST_IMAGE
@@ -816,82 +796,11 @@ impl Update {
             PYTHON_IMAGE
         };
         let image = format!("{repository}:{target}");
-        disk::host(&data_dir())?;
-        let pg = storage_pg(self.o.no_backup, || {
-            engine::container(self, &context.args, Some(&env), "pseudolife-pg")
-        })?;
-        self.disk_storage(
-            context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER),
-            pg.as_deref(),
-            context.running["Image"].as_str(),
-        )?;
-        // A defaulted attempt removes an image it pulled if it falls back:
-        // only one Docker said was absent, never one a Docker error hid.
-        let fresh = self.defaulted_engine && {
-            let (code, out) = self.docker_call(&["image", "inspect", &image]);
-            code != 0 && out.to_lowercase().contains("no such image")
-        };
-        self.step(format!("pulling {image}..."));
-        if self
-            .command(&["pull".into(), image.clone()], None, 7200, true)
-            .0
-            != 0
-        {
-            return Err(UpdateError::new(
-                if choice == "rust" && self.defaulted_engine {
-                    format!(
-                        "docker pull {image} failed; nothing was changed: this host keeps its Python daemon. A later update moves it once {target}'s Rust daemon image pulls"
-                    )
-                } else if choice == "rust" && self.o.engine.is_none() {
-                    format!(
-                        "docker pull {image} failed; nothing was changed: this host keeps its current Rust daemon. Retry once {target} publishes its Rust daemon image, or move to it on Python with --engine python"
-                    )
-                } else if choice == "rust" {
-                    format!(
-                        "docker pull {image} failed; nothing was changed. Is a Rust daemon image published for {target}? Use --engine python to stay on the Python daemon"
-                    )
-                } else {
-                    format!(
-                        "docker pull {image} failed; nothing was changed. Is {target} a published release?"
-                    )
-                },
-            ));
-        }
-        if fresh {
-            self.default_pulled = Some(image.clone());
-        }
-        let probe = if choice == "rust" {
-            vec![
-                "run".into(),
-                "--rm".into(),
-                "--network".into(),
-                "none".into(),
-                "--entrypoint".into(),
-                "/usr/local/bin/pseudolife-mcp".into(),
-                image.clone(),
-                "update".into(),
-                "--schema-version".into(),
-            ]
-        } else {
-            vec![
-                "run".into(),
-                "--rm".into(),
-                "--network".into(),
-                "none".into(),
-                "--entrypoint".into(),
-                "sh".into(),
-                image.clone(),
-                "-c".into(),
-                "cat /app/pseudolife_memory/storage/schema.py".into(),
-            ]
-        };
-        let schema = if activating {
-            let (code, metadata) = self.command(&probe, None, 60, false);
-            Some(if choice=="rust"{metadata.trim().parse::<i64>().ok()}else{regex::Regex::new(r"(?m)^SCHEMA_META_VERSION\s*=\s*([0-9]+)").expect("schema").captures(&metadata).and_then(|c|c[1].parse::<i64>().ok())}.filter(|_|code==0)
-                .ok_or_else(||UpdateError::usage("cannot read the pulled image's schema version; verify its published CLI/image contract and retry; nothing was deployed"))?)
-        } else {
-            None
-        };
+        let pg = self.release_disk(&prepared)?;
+        self.pull_release_image(&image, choice, target)?;
+        let schema = activating
+            .then(|| self.release_image_schema(&image, choice))
+            .transpose()?;
         if let (Some(image_schema), Some(bank)) = (schema, self.schema_before)
             && bank > image_schema
         {
@@ -899,6 +808,224 @@ impl Update {
                 "the bank is at schema v{bank}, newer than {image}'s v{image_schema}, which would refuse it; update to a release at schema v{bank} or later; nothing was changed"
             )));
         }
+        self.apply_release(
+            prepared,
+            ReleaseStage::Ordinary,
+            choice,
+            target,
+            target,
+            current.as_deref(),
+            previous.as_deref(),
+            &image,
+            schema,
+            pg,
+            before_recreate,
+        )?;
+        Ok(())
+    }
+
+    fn release_disk(&mut self, prepared: &PreparedRelease) -> Result<Option<String>> {
+        disk::host(&data_dir())?;
+        let pg = storage_pg(self.o.no_backup, || prepared.postgres(self))?;
+        self.disk_storage(
+            prepared.daemon(),
+            pg.as_deref(),
+            prepared.context.running["Image"].as_str(),
+        )?;
+        Ok(pg)
+    }
+
+    fn pull_release_image(&mut self, image: &str, choice: &str, target: &str) -> Result<()> {
+        let fresh = self.defaulted_engine && image != IMPORT_IMAGE && {
+            let (code, out) = self.docker_call(&["image", "inspect", image]);
+            code != 0 && out.to_lowercase().contains("no such image")
+        };
+        self.step(format!("pulling {image}..."));
+        if self
+            .command(&["pull".into(), image.into()], None, 7200, true)
+            .0
+            != 0
+        {
+            let fix = if image == IMPORT_IMAGE {
+                format!(
+                    "restore registry access to the archived Python daemon {IMPORT_VERSION} on a Linux amd64 Docker engine and retry"
+                )
+            } else if choice == "rust" && !self.legacy_attempt && self.defaulted_engine {
+                format!(
+                    "this host keeps its Python daemon. Retry when the Rust daemon image for {target} can be pulled"
+                )
+            } else if choice == "rust" && !self.legacy_attempt && self.o.engine.is_none() {
+                format!(
+                    "this host keeps its current Rust daemon. Restore registry access or select a published Rust daemon with --tag <version> (requested {target})"
+                )
+            } else if choice == "rust" {
+                format!(
+                    "restore registry access or select a published Rust daemon with --tag <version> (requested {target})"
+                )
+            } else {
+                format!("verify that {target} publishes a Python daemon image and retry")
+            };
+            return Err(UpdateError::new(format!(
+                "docker pull {image} failed; {fix}; nothing was changed"
+            )));
+        }
+        if fresh {
+            self.default_pulled = Some(image.into());
+        }
+        Ok(())
+    }
+
+    fn release_image_schema(&self, image: &str, choice: &str) -> Result<i64> {
+        let mut probe = vec!["run", "--rm", "--network", "none", "--entrypoint"];
+        if choice == "rust" {
+            probe.extend([
+                "/usr/local/bin/pseudolife-mcp",
+                image,
+                "update",
+                "--schema-version",
+            ]);
+        } else {
+            probe.extend([
+                "sh",
+                image,
+                "-c",
+                "cat /app/pseudolife_memory/storage/schema.py",
+            ]);
+        }
+        let (code, metadata) = self.docker_call(&probe);
+        let schema = if choice == "rust" {
+            metadata.trim().parse::<i64>().ok()
+        } else {
+            regex::Regex::new(r"(?m)^SCHEMA_META_VERSION\s*=\s*([0-9]+)")
+                .expect("schema")
+                .captures(&metadata)
+                .and_then(|c| c[1].parse::<i64>().ok())
+        };
+        schema.filter(|_| code == 0).ok_or_else(|| UpdateError::usage(
+            "cannot read the pulled image's schema version; verify its published CLI/image contract and retry; nothing was deployed",
+        ))
+    }
+
+    fn import_release(
+        &mut self,
+        rust: PreparedRelease,
+        target: &str,
+        current: Option<&str>,
+        previous: Option<&str>,
+        before: Option<&Value>,
+        before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
+    ) -> Result<()> {
+        model_volumes(&rust.config)?;
+        let python = self.prepare_release("python", true, target, before)?;
+        let pg = self.release_disk(&rust)?;
+        let rust_image = format!("{RUST_IMAGE}:{target}");
+        self.pull_release_image(&rust_image, "rust", target)?;
+        self.check_config(&rust_image, &rust.config, true)?;
+        let rust_schema = self.release_image_schema(&rust_image, "rust")?;
+        if rust_schema < IMPORT_SCHEMA {
+            return Err(UpdateError::usage(format!(
+                "Rust release {target} opens schema v{rust_schema}, older than the import result at v{IMPORT_SCHEMA}; select a newer release with --tag <version>; nothing was deployed"
+            )));
+        }
+        self.pull_release_image(IMPORT_IMAGE, "python", IMPORT_VERSION)?;
+        if self.release_image_schema(IMPORT_IMAGE, "python")? != IMPORT_SCHEMA {
+            return Err(UpdateError::usage(format!(
+                "the archived Python daemon did not report schema v{IMPORT_SCHEMA}; verify the pinned image and retry; nothing was deployed"
+            )));
+        }
+        self.step(format!(
+            "importing the legacy bank with the archived Python daemon {IMPORT_VERSION} before deploying Rust {target}"
+        ));
+
+        let health = self.apply_release(
+            python,
+            ReleaseStage::Import,
+            "python",
+            target,
+            IMPORT_VERSION,
+            current,
+            None,
+            IMPORT_IMAGE,
+            Some(IMPORT_SCHEMA),
+            pg,
+            before_recreate,
+        )?;
+        let before_import = self.report.rollback.clone();
+        let original_commands = self.rollback_lines.clone();
+        self.schema_before = health["schema"].as_i64();
+        let result = (|| -> Result<()> {
+            let rust = self.prepare_release("rust", true, target, Some(&health))?;
+            let bank = rust.import_status(self)?;
+            if bank.schema.is_none_or(|schema| schema < 57) || !bank.has_counters {
+                return Err(UpdateError::new(
+                    "the archived Python daemon did not finish importing the bank's schema and CMS counters into cms_counters; use the pre-import rollback below and recover the original state before retrying",
+                ));
+            }
+            if bank.chroma_pending {
+                return Err(UpdateError::new(
+                    "the archived Python daemon did not finish importing the Chroma documents; check its logs and use the pre-import rollback below before retrying",
+                ));
+            }
+            let pg = self.release_disk(&rust)?;
+            self.apply_release(
+                rust,
+                ReleaseStage::AfterImport,
+                "rust",
+                target,
+                target,
+                Some(IMPORT_VERSION),
+                previous,
+                &rust_image,
+                Some(rust_schema),
+                pg,
+                None,
+            )?;
+            Ok(())
+        })();
+        if self.report.rollback != before_import {
+            self.report.rollback["before_import"] = before_import;
+        }
+        result.map_err(|error| {
+            let has_second_rollback = self.rollback_lines != original_commands;
+            let error = if error.message.contains("\nto roll back:\n") {
+                error
+            } else {
+                self.rollback_error(error.message)
+            };
+            if has_second_rollback {
+                UpdateError::new(format!(
+                    "{}\nto restore the host and bank from before the import:\n{}",
+                    error.message,
+                    original_commands.join("\n")
+                ))
+            } else {
+                error
+            }
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_release(
+        &mut self,
+        prepared: PreparedRelease,
+        stage: ReleaseStage,
+        choice: &str,
+        target: &str,
+        version: &str,
+        current: Option<&str>,
+        previous: Option<&str>,
+        image: &str,
+        schema: Option<i64>,
+        pg: Option<String>,
+        before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
+    ) -> Result<Value> {
+        let PreparedRelease {
+            context,
+            env,
+            config,
+            token,
+        } = prepared;
+        self.maintainer_context = Some((context.args.clone(), env.clone()));
         // Once the pull and the schema check passed (they change nothing):
         // can the daemon account use its volumes? A model cache it cannot use
         // is repaired here; the state waits for its backup.
@@ -911,9 +1038,10 @@ impl Update {
                 return Ok(json!({}));
             }
             let pg = pg.as_deref().expect("backup discovery returns PostgreSQL");
-            if let Some(repo) = checkout
-                .as_deref()
-                .filter(|repo| u.checkout_script(repo, "backup").is_some())
+            if stage == ReleaseStage::Ordinary
+                && let Some(repo) = checkout
+                    .as_deref()
+                    .filter(|repo| u.checkout_script(repo, "backup").is_some())
             {
                 let pg_env = &config["services"]["pseudolife-pg"]["environment"];
                 let user = pg_env["POSTGRES_USER"]
@@ -924,7 +1052,19 @@ impl Update {
                     .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
                 u.project_backup(repo, pg, daemon, user, db)
             } else {
-                u.builtin_backup(pg, daemon, &data_dir().join("backups"))
+                let mut directory = data_dir().join("backups");
+                if stage == ReleaseStage::Import {
+                    // Reserve the original dump and state independently of the
+                    // post-import backup and its ordinary rotation.
+                    directory.push("pre-import");
+                }
+                let backup = u.builtin_backup(pg, daemon, &directory)?;
+                if stage != ReleaseStage::Ordinary && backup["state_archive"].is_null() {
+                    return Err(UpdateError::new(
+                        "the legacy import needs a complete state archive; fix the state backup and retry; no daemon was replaced in this step",
+                    ));
+                }
+                Ok(backup)
             }
         };
         // A state volume the daemon account cannot use is backed up and
@@ -941,8 +1081,8 @@ impl Update {
             // A first start would otherwise download the models inside the
             // health gate. The running daemon keeps serving meanwhile.
             // Before provisioning: a configuration Rust refuses downloads no models.
-            self.check_config(&image, &config)?;
-            self.provision_models(&image, &config)?;
+            self.check_config(image, &config, stage == ReleaseStage::AfterImport)?;
+            self.provision_models(image, &config)?;
         }
         let backups = match early {
             Some(backups) => backups,
@@ -951,7 +1091,7 @@ impl Update {
         // A backup changes nothing on the host: a refused one still lets a
         // defaulted move fall back to the ordinary update.
         self.release_started = true;
-        if let Some(callback) = before_recreate.as_mut() {
+        if let Some(callback) = before_recreate {
             callback()?;
         }
         let (running_id, _) = self.running_image();
@@ -968,7 +1108,13 @@ impl Update {
         let old_engine = context.running["Config"]["Labels"][engine::ENGINE_LABEL]
             .as_str()
             .unwrap_or("python");
-        let suffix = self.rollback_suffix();
+        let mut suffix = self.rollback_suffix();
+        if stage == ReleaseStage::Import {
+            // Reserve the recovery image beside the separately retained
+            // pre-import backup. The suffix also survives a new invocation
+            // that resumes on Python after the first hop.
+            suffix.push_str("-pre-import");
+        }
         let rollback = format!(
             "{}:{}-{suffix}",
             if old_engine == "rust" {
@@ -976,10 +1122,13 @@ impl Update {
             } else {
                 PYTHON_IMAGE
             },
-            current.as_deref().unwrap_or("previous")
+            current.unwrap_or("previous")
         );
         engine::tag_validated(self, &running_id, &rollback)?;
-        let old_service = engine::rollback_service(&context.running, &rollback, None);
+        let mut old_service = engine::rollback_service(&context.running, &rollback, None);
+        if stage == ReleaseStage::AfterImport {
+            old_service["user"] = json!("10001:10001");
+        }
         let rollback_file = data_dir().join("update-engine").join(format!(
             "docker-compose.rollback-{}-{}.json",
             stamp(),
@@ -993,7 +1142,7 @@ impl Update {
             // target release's overlay may lack the model volume.
             let overlay = context.running_rust.clone().unwrap_or_else(|| {
                 compose_root()
-                    .join(&target)
+                    .join(target)
                     .join("docker-compose.rust-ghcr.yml")
             });
             restore_args.extend(["-f".into(), overlay.to_string_lossy().into_owned()]);
@@ -1004,23 +1153,41 @@ impl Update {
             &rollback_file,
             &engine::release_accepted(),
             None,
-            Some(&target),
+            Some(target),
         );
-        self.rollback_lines.extend(self.schema_rollback_note());
-        self.report.rollback =
-            json!({"tag":rollback,"state":"tagged","overlay":rollback_file,"backup":backups});
+        if stage == ReleaseStage::Import {
+            let dump = seams::quote(backups["dump"].as_str().expect("validated bank dump"));
+            let state = seams::quote(
+                backups["state_archive"]
+                    .as_str()
+                    .expect("validated state archive"),
+            );
+            self.rollback_lines.push("      After restoring the original image, restore the bank and state from before the import:".into());
+            self.rollback_lines.push(format!(
+                "      pseudolife-mcp restore --backup-file {dump} --state-archive {state} --yes"
+            ));
+        } else {
+            self.rollback_lines.extend(self.schema_rollback_note());
+        }
+        self.report.rollback = json!({"tag":rollback,"image_id":running_id,"state":"tagged","overlay":rollback_file,"backup":backups});
         self.prune_rollbacks(PYTHON_IMAGE);
         self.prune_rollbacks(RUST_IMAGE);
         let activation = uuid::Uuid::new_v4().simple().to_string();
         let mut service = json!({"image":image});
-        if activating {
-            service["labels"] = json!({(engine::ENGINE_LABEL):choice,(engine::ACTIVATION_LABEL):activation,(engine::RELEASE_LABEL):target});
+        if token.is_some() {
+            service["labels"] = json!({(engine::ENGINE_LABEL):choice,(engine::ACTIVATION_LABEL):activation,(engine::RELEASE_LABEL):version});
+        }
+        if stage == ReleaseStage::Import {
+            // The archived entrypoint can migrate ownership as root. The
+            // updater already backed up and checked the volume above.
+            service["user"] = json!("10001:10001");
+            self.report.rollback["restore_required"] = json!(true);
         }
         let candidate = data_dir()
             .join("update-engine")
             .join(format!("docker-compose.engine-candidate-{activation}.json"));
         engine::write_overlay(&candidate, &service).map_err(|e| self.rollback_error(e.message))?;
-        let result = (|| -> Result<()> {
+        let result = (|| -> Result<Value> {
             let mut args = vec!["compose".into()];
             args.extend(context.args.clone());
             args.extend([
@@ -1030,28 +1197,33 @@ impl Update {
                 "-d".into(),
                 "--no-deps".into(),
                 "--no-build".into(),
-                DAEMON_SERVICE.into(),
             ]);
+            if stage != ReleaseStage::Ordinary {
+                args.extend(["--pull".into(), "never".into()]);
+            }
+            args.push(DAEMON_SERVICE.into());
             self.step(format!(
                 "recreating the daemon container on {image} (Postgres + extractor untouched)..."
             ));
             if self.command(&args, Some(&env), 3600, true).0 != 0 {
                 return Err(UpdateError::new("daemon recreate failed"));
             }
-            let health = if activating {
-                self.wait_health(Some(&target), schema, &token, false)?
+            let health = if let Some(token) = token {
+                self.wait_health(Some(version), schema, &token, false)?
             } else {
-                self.wait_plain_health(Some(&target))?
+                self.wait_plain_health(Some(version))?
             };
-            if activating {
+            if service.get("labels").is_some() {
                 engine::write_overlay(&engine::release_accepted(), &service)?;
             }
-            if !self.o.daemon_only {
-                self.clients(None, &format!("pseudolife-mcp=={target}"), Some(&health));
-            } else {
-                self.hooks_changed_note(previous.as_deref(), Some(&health));
+            if stage != ReleaseStage::Import {
+                if self.o.daemon_only {
+                    self.hooks_changed_note(previous, Some(&health));
+                } else {
+                    self.clients(None, &format!("pseudolife-mcp=={target}"), Some(&health));
+                }
             }
-            Ok(())
+            Ok(health)
         })();
         if fs::remove_file(&candidate).is_err() {
             self.warn("could not remove the temporary engine overlay; the rollback instructions remain usable");
@@ -1617,14 +1789,35 @@ impl Update {
     /// activation label, or recorded an accepted selection or an explicit
     /// choice (an unreadable record counts as chosen). The default applies
     /// only on an attended update with a backup.
-    fn default_choice(&mut self, selected: &str, labels: &Value, target: &str) -> (String, bool) {
+    // The final value permits checking a Python host for legacy import even
+    // when the ordinary engine policy would keep it on Python.
+    fn default_choice(
+        &mut self,
+        selected: &str,
+        labels: &Value,
+        target: &str,
+    ) -> (String, bool, bool) {
+        if selected == "python"
+            && labels[engine::RELEASE_LABEL] == IMPORT_VERSION
+            && engine::selection(&engine::release_accepted()).is_ok_and(|selection| {
+                selection.is_some_and(|service| service["image"] == IMPORT_IMAGE)
+            })
+        {
+            // A prior run reached the archived intermediate image. Retry
+            // toward Rust even though this Python activation is recorded.
+            return ("rust".into(), false, false);
+        }
         // The run's own flags first: an unattended run never reads the records.
         if self.o.unattended
             || self.o.no_backup
             || self.o.allow_auth_change
             || DEFAULT_ENGINE == selected
         {
-            return (selected.to_owned(), false);
+            return (
+                selected.to_owned(),
+                false,
+                self.o.unattended && selected == "python",
+            );
         }
         let chosen = labels[engine::ACTIVATION_LABEL]
             .as_str()
@@ -1641,19 +1834,19 @@ impl Update {
                 }
             };
         if chosen {
-            return (selected.to_owned(), false);
+            return (selected.to_owned(), false, false);
         }
         let image = format!("{RUST_IMAGE}:{target}");
         if self.docker_call(&["manifest", "inspect", &image]).0 != 0 {
             self.step(format!(
-                "could not confirm a published {DEFAULT_ENGINE} daemon image for {target} (docker manifest inspect); this host stays on {selected}"
+                "could not confirm a published {DEFAULT_ENGINE} daemon image for {target} (docker manifest inspect); checking this bank before choosing the update path"
             ));
-            return (selected.to_owned(), false);
+            return (selected.to_owned(), false, true);
         }
         self.step(format!(
             "moving this host to the {DEFAULT_ENGINE} daemon, the default since G2 (keep {selected} with --engine {selected})"
         ));
-        (DEFAULT_ENGINE.to_owned(), true)
+        (DEFAULT_ENGINE.to_owned(), true, false)
     }
     /// Remove what a defaulted attempt pulled or created, so falling back
     /// leaves the host as it found it.
@@ -1676,7 +1869,7 @@ impl Update {
     /// Refuse before the backup a configuration the Rust daemon would refuse
     /// at startup (a non-default reranker, an embedding model it cannot
     /// load): the Python daemon keeps serving.
-    fn check_config(&mut self, image: &str, config: &Value) -> Result<()> {
+    fn check_config(&mut self, image: &str, config: &Value, strict: bool) -> Result<()> {
         self.step(format!(
             "checking this bank's configuration against {image}..."
         ));
@@ -1703,7 +1896,7 @@ impl Update {
                 "the Rust daemon does not support this bank's configuration: {detail}; nothing was deployed"
             )));
         }
-        if self.defaulted_engine {
+        if strict || self.defaulted_engine {
             return Err(UpdateError::new(format!(
                 "could not check this bank's configuration against {image} (exit {code}{}); nothing was deployed",
                 if detail.is_empty() {
