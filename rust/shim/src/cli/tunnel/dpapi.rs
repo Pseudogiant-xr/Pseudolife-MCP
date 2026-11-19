@@ -7,7 +7,7 @@ use windows_sys::Win32::Foundation::{
     ERROR_INVALID_DATA, ERROR_INVALID_PARAMETER, GetLastError, LocalFree,
 };
 use windows_sys::Win32::Security::Cryptography::{
-    CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData,
+    CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
 };
 
 /// Whether `sealed` unseals, for this account in this session, to a valid
@@ -78,19 +78,11 @@ fn wipe(mut bytes: Vec<u8>) {
     std::hint::black_box(&bytes);
 }
 
-/// Seal `plain` as the Python client's `set_key` does, for tests that need
-/// a key file in this platform's saved form. `None`, after saying why, only
-/// in an SSH logon that cannot seal (key-based SSH carries no credentials
-/// for the account's DPAPI keys, so CryptProtectData is denied there); any
-/// other failure panics, and so does a denial on GitHub Actions, so CI can
-/// never pass these tests by skipping them.
-#[cfg(test)]
+/// Seal a runtime key for the current Windows account without a UI prompt.
 #[allow(unsafe_code)]
-pub(super) fn seal(plain: &[u8]) -> Option<Vec<u8>> {
-    use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
-    use windows_sys::Win32::Security::Cryptography::CryptProtectData;
+pub(super) fn protect(plain: &[u8]) -> Result<Vec<u8>, u32> {
     let input = CRYPT_INTEGER_BLOB {
-        cbData: u32::try_from(plain.len()).unwrap(),
+        cbData: u32::try_from(plain.len()).map_err(|_| ERROR_INVALID_PARAMETER)?,
         pbData: plain.as_ptr().cast_mut(),
     };
     let mut output = CRYPT_INTEGER_BLOB {
@@ -111,21 +103,35 @@ pub(super) fn seal(plain: &[u8]) -> Option<Vec<u8>> {
     };
     if sealed == 0 {
         // SAFETY: reads this thread's last-error value, set by the call above.
-        let error = unsafe { GetLastError() };
-        let ssh = std::env::var_os("SSH_CONNECTION").is_some();
-        let ci = std::env::var_os("GITHUB_ACTIONS").is_some();
-        if error == ERROR_ACCESS_DENIED && ssh && !ci {
-            eprintln!(
-                "skipped: CryptProtectData is denied in this SSH logon, which holds no credentials for the account's DPAPI keys; run this test in a logon signed in with the account's password (hosted runners are)"
-            );
-            return None;
-        }
-        panic!("CryptProtectData failed with Windows error {error}");
+        return Err(unsafe { GetLastError() });
+    }
+    if output.pbData.is_null() {
+        return Err(ERROR_INVALID_DATA);
     }
     // SAFETY: on success `output` is a LocalAlloc buffer of `cbData` bytes.
     let data =
         unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize) }.to_vec();
     // SAFETY: allocated by CryptProtectData with LocalAlloc, not used after.
     unsafe { LocalFree(output.pbData.cast()) };
-    Some(data)
+    Ok(data)
+}
+
+/// A key-based dev VM SSH logon may lack the credentials for DPAPI.
+/// Hosted CI must seal a key successfully.
+#[cfg(test)]
+pub(super) fn seal(plain: &[u8]) -> Option<Vec<u8>> {
+    use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
+    match protect(plain) {
+        Ok(sealed) => Some(sealed),
+        Err(ERROR_ACCESS_DENIED)
+            if std::env::var_os("SSH_CONNECTION").is_some()
+                && std::env::var_os("GITHUB_ACTIONS").is_none() =>
+        {
+            eprintln!(
+                "skipped: CryptProtectData is denied in this SSH logon; run in an interactive sign-in under this account"
+            );
+            None
+        }
+        Err(error) => panic!("CryptProtectData failed with Windows error {error}"),
+    }
 }

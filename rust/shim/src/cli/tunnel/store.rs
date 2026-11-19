@@ -220,7 +220,14 @@ pub(super) fn profile_path(root: &Path, name: &str) -> Result<PathBuf, Fail> {
 /// `ProfileStore.load(name)`.
 pub(super) fn load(root: &Path, name: &str) -> Result<Profile, Fail> {
     let data = private_read(&profile_path(root, name)?, 65536)?;
-    let payload = match json_loads(&data) {
+    decode_profile(&data, name).map(|(_, profile)| profile)
+}
+
+pub(super) fn decode_profile(
+    data: &[u8],
+    name: &str,
+) -> Result<(Map<String, Value>, Profile), Fail> {
+    let payload = match json_loads(data) {
         Admit::Yes(Value::Object(payload)) => payload,
         Admit::Yes(_) | Admit::No => return Err(Fail::Tunnel(INVALID_PROFILE)),
         Admit::Defer => return Err(Fail::Defer),
@@ -235,7 +242,7 @@ pub(super) fn load(root: &Path, name: &str) -> Result<Profile, Fail> {
     if profile.name != name {
         return Err(Fail::Tunnel(INVALID_PROFILE));
     }
-    Ok(profile)
+    Ok((payload, profile))
 }
 
 /// The profile file a person would look for, even when its path cannot be
@@ -459,12 +466,12 @@ pub(super) fn key_present(root: &Path, name: &str) -> Result<bool, Fail> {
 pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
     let path = match checked_path(&root.join(format!("{name}.key"))) {
         Ok(path) => path,
-        Err(Fail::Tunnel(_)) => return Ok(Some(false)),
+        Err(Fail::Tunnel(_) | Fail::Detail(_)) => return Ok(Some(false)),
         Err(Fail::Defer) => return Err(Fail::Defer),
     };
     let data = match private_read(&path, 16384) {
         Ok(data) => data,
-        Err(Fail::Tunnel(_)) => return Ok(Some(false)),
+        Err(Fail::Tunnel(_) | Fail::Detail(_)) => return Ok(Some(false)),
         Err(Fail::Defer) => return Err(Fail::Defer),
     };
     let (prefix, encoded) = match data.iter().position(|b| *b == 0) {
