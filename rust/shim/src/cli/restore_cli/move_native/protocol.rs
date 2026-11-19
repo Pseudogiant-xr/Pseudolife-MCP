@@ -12,7 +12,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::target::Ask;
+use super::{
+    carry::{Identities, TargetPins},
+    target::Ask,
+};
 
 /// The protocol this client's source speaks for a move's transaction.
 pub(in crate::cli) const PROTOCOL: u32 = 2;
@@ -29,6 +32,16 @@ pub(in crate::cli) enum Op {
     CarryCheck {
         populated: [bool; 4],
     },
+    CarryApply {
+        identities: Identities,
+        /// The restore's expected selection. Keep it distinct from the
+        /// request's pins because the operation is flattened on the wire.
+        expected_pins: TargetPins,
+    },
+    CarryVerify {
+        identities: Identities,
+    },
+    CarryUndo,
     /// Claim the target for this move: refused while another move holds it.
     Claim {
         source_bank: String,
@@ -87,6 +100,9 @@ pub(in crate::cli) enum Op {
 }
 
 impl Op {
+    pub(super) fn carries_secret(&self) -> bool {
+        matches!(self, Self::CarryApply { .. } | Self::CarryVerify { .. })
+    }
     /// Whether the operation changes the target (and so needs the claim
     /// and the update lock, and is journalled).
     pub(in crate::cli) fn changes(&self) -> bool {
@@ -100,6 +116,9 @@ impl Op {
         match self {
             Self::Check { .. } => "check",
             Self::CarryCheck { .. } => "carry-check",
+            Self::CarryApply { .. } => "carry-apply",
+            Self::CarryVerify { .. } => "carry-verify",
+            Self::CarryUndo => "carry-undo",
             Self::Claim { .. } => "claim",
             Self::State { .. } => "state",
             Self::TimerPause => "timer-pause",
@@ -133,6 +152,9 @@ pub(in crate::cli) struct Request {
     /// Sent by the rollback: allowed after the move's abort.
     #[serde(default)]
     pub rollback: bool,
+    /// The selected target of a new move. Older sources omit these.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins: Option<TargetPins>,
     #[serde(flatten)]
     pub op: Op,
 }
@@ -141,6 +163,8 @@ pub(in crate::cli) struct Request {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(in crate::cli) struct State {
+    /// Full daemon ID after checking the selected target deployment.
+    pub daemon_id: Option<String>,
     /// Whether the daemon container runs (`None`: it could not be read).
     pub running: Option<bool>,
     /// Whether `/data/move.json` is present (`None`: it could not be read).
@@ -175,6 +199,8 @@ pub(in crate::cli) struct State {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(in crate::cli) struct Answer {
+    /// Read-only receipt for the deployment, saved before carrying begins.
+    pub carry_deployment: Option<[u8; 32]>,
     pub protocol: u32,
     pub version: String,
     /// Whether the operation did what it says.
@@ -198,4 +224,32 @@ pub(in crate::cli) struct Answer {
     /// For `give-back`: the files that now hold the moved bank as it stood
     /// on the target, with any writes it took (the restore's safety backup).
     pub kept: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn carry_apply_request_round_trips_with_request_and_apply_pins() {
+        let pins = TargetPins {
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            ..TargetPins::default()
+        };
+        let request = Request {
+            protocol: PROTOCOL,
+            move_id: "20261119-000000-aabbccdd".into(),
+            work_dir: String::new(),
+            rollback: false,
+            pins: Some(pins.clone()),
+            op: Op::CarryApply {
+                identities: super::super::carry::fixture(),
+                expected_pins: pins,
+            },
+        };
+        let wire = serde_json::to_vec(&request).unwrap();
+        let decoded = serde_json::from_slice::<Request>(&wire).expect("carry-apply request parses");
+        assert_eq!(decoded, request);
+    }
 }

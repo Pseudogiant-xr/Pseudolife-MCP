@@ -15,6 +15,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::carry::{self, TargetPins};
 use super::probe::{self, Facts};
 use super::protocol::{Answer, Op, PROTOCOL, Request, State};
 use super::record::valid_id;
@@ -62,6 +63,9 @@ pub(super) trait Site {
     /// (which it reads under its own update lock; `None` for the release,
     /// which runs after the abort): its exit code and output.
     fn restore(&mut self, args: &[String], abort_file: Option<&Path>) -> (i32, String);
+    fn carry(&mut self, _: &Op, _: &Path, _: &str, _: Option<&TargetPins>) -> Result<(), String> {
+        Err("this target cannot apply carried identities".into())
+    }
 }
 
 /// The claim a move holds on the target.
@@ -134,16 +138,35 @@ fn run<D: Docker>(docker: &mut D, args: &[&str], timeout: Duration) -> Ran {
     docker.run(&args, timeout)
 }
 
-fn daemon() -> &'static str {
-    bank::DAEMON_CONTAINER
+fn daemon(pins: Option<&TargetPins>) -> &str {
+    pins.map_or(bank::DAEMON_CONTAINER, |pins| pins.daemon.as_str())
 }
 
-fn inspect<D: Docker>(docker: &mut D, format: &str) -> Result<String, String> {
-    let ran = run(docker, &["inspect", "-f", format, daemon()], SHORT);
+fn gather(docker: &mut impl Docker, pins: Option<&TargetPins>) -> Result<Facts, String> {
+    match pins {
+        Some(pins) => probe::gather_at(docker, &pins.daemon, &pins.postgres),
+        None => probe::gather(docker),
+    }
+}
+
+fn operating_pins(
+    folder: &Path,
+    supplied: Option<&TargetPins>,
+) -> Result<Option<TargetPins>, String> {
+    let recorded = carry::recorded_pins(folder, supplied)?;
+    Ok(recorded.or_else(|| supplied.cloned()))
+}
+
+fn inspect<D: Docker>(docker: &mut D, selector: &str, format: &str) -> Result<String, String> {
+    if probe::container_id(selector) {
+        return probe::inspect_container_field(docker, selector, selector, format, SHORT)
+            .ok_or_else(|| "Docker did not return the pinned target daemon".into());
+    }
+    let ran = run(docker, &["inspect", "-f", format, selector], SHORT);
     if !ran.ok() {
         return Err(format!(
             "docker inspect {} failed ({})",
-            daemon(),
+            selector,
             probe::why(&ran)
         ));
     }
@@ -152,18 +175,18 @@ fn inspect<D: Docker>(docker: &mut D, format: &str) -> Result<String, String> {
 
 /// The daemon container's image, by ID: a helper over its volumes then
 /// never pulls, and never runs a retagged image (as restore's helpers).
-fn image<D: Docker>(docker: &mut D) -> Result<String, String> {
-    inspect(docker, "{{.Image}}").and_then(|image| {
+fn image<D: Docker>(docker: &mut D, daemon: &str) -> Result<String, String> {
+    inspect(docker, daemon, "{{.Image}}").and_then(|image| {
         if image.is_empty() {
-            Err(format!("{} names no image", daemon()))
+            Err(format!("{daemon} names no image"))
         } else {
             Ok(image)
         }
     })
 }
 
-fn running<D: Docker>(docker: &mut D) -> Option<bool> {
-    match inspect(docker, "{{.State.Running}}").ok()?.as_str() {
+fn running<D: Docker>(docker: &mut D, daemon: &str) -> Option<bool> {
+    match inspect(docker, daemon, "{{.State.Running}}").ok()?.as_str() {
         "true" => Some(true),
         "false" => Some(false),
         _ => None,
@@ -171,9 +194,10 @@ fn running<D: Docker>(docker: &mut D) -> Option<bool> {
 }
 
 /// The restart policy as `docker update --restart` takes it back.
-fn policy<D: Docker>(docker: &mut D) -> Result<String, String> {
+fn policy<D: Docker>(docker: &mut D, daemon: &str) -> Result<String, String> {
     let raw = inspect(
         docker,
+        daemon,
         "{{.HostConfig.RestartPolicy.Name}} {{.HostConfig.RestartPolicy.MaximumRetryCount}}",
     )?;
     let mut parts = raw.split_whitespace();
@@ -194,7 +218,12 @@ fn valid_policy(policy: &str) -> bool {
 }
 
 /// A helper container over the daemon's volumes, with no network.
-fn helper<'a>(image: &'a str, entrypoint: &'a str, rest: &[&'a str]) -> Vec<&'a str> {
+fn helper<'a>(
+    daemon: &'a str,
+    image: &'a str,
+    entrypoint: &'a str,
+    rest: &[&'a str],
+) -> Vec<&'a str> {
     let mut args = vec![
         "run",
         "--rm",
@@ -203,17 +232,17 @@ fn helper<'a>(image: &'a str, entrypoint: &'a str, rest: &[&'a str]) -> Vec<&'a 
         "--entrypoint",
         entrypoint,
         "--volumes-from",
-        bank::DAEMON_CONTAINER,
+        daemon,
         image,
     ];
     args.extend_from_slice(rest);
     args
 }
 
-fn gated<D: Docker>(docker: &mut D, image: &str) -> Option<bool> {
+fn gated<D: Docker>(docker: &mut D, daemon: &str, image: &str) -> Option<bool> {
     let ran = run(
         docker,
-        &helper(image, "sh", &["-c", &format!("test -e {GATE}")]),
+        &helper(daemon, image, "sh", &["-c", &format!("test -e {GATE}")]),
         SHORT,
     );
     match (ran.fault.is_some(), ran.code) {
@@ -261,7 +290,13 @@ pub(super) fn folder_bytes(folder: &Path) -> Option<u64> {
 }
 
 /// What is true on the target now.
-fn state<S: Site>(site: &mut S, base: &Path, folder: &Path, tables: &[String]) -> State {
+fn state<S: Site>(
+    site: &mut S,
+    base: &Path,
+    folder: &Path,
+    tables: &[String],
+    pins: Option<&TargetPins>,
+) -> State {
     let mut state = State {
         folder: folder.to_string_lossy().into_owned(),
         folder_bytes: folder_bytes(folder),
@@ -274,12 +309,19 @@ fn state<S: Site>(site: &mut S, base: &Path, folder: &Path, tables: &[String]) -
     let Ok(docker) = site.docker() else {
         return state;
     };
-    state.running = running(docker);
-    state.restart_policy = policy(docker).unwrap_or_default();
-    if let Ok(image) = image(docker) {
-        state.gated = gated(docker, &image);
+    let daemon = daemon(pins);
+    if let Some(pins) = pins {
+        if pins.inspect_daemon(docker).is_err() || pins.inspect_postgres(docker).is_err() {
+            return state;
+        }
+        state.daemon_id = Some(pins.daemon.clone());
     }
-    let Ok(facts) = probe::gather(docker) else {
+    state.running = running(docker, daemon);
+    state.restart_policy = policy(docker, daemon).unwrap_or_default();
+    if let Ok(image) = image(docker, daemon) {
+        state.gated = gated(docker, daemon, &image);
+    }
+    let Ok(facts) = gather(docker, pins) else {
         return state;
     };
     state.bank = facts.meta_fingerprint.clone();
@@ -301,8 +343,8 @@ fn state<S: Site>(site: &mut S, base: &Path, folder: &Path, tables: &[String]) -
         );
         let mut bank = Bank {
             docker,
-            pg: facts.pg.clone(),
-            daemon: facts.daemon.clone(),
+            pg: facts.pg_selector().to_owned(),
+            daemon: facts.daemon_selector().to_owned(),
         };
         if let Ok(row) = probe::query(&mut bank, &facts.user, facts.port, &facts.db, &sql) {
             let counts: Vec<&str> = row.split('|').collect();
@@ -349,8 +391,8 @@ fn state<S: Site>(site: &mut S, base: &Path, folder: &Path, tables: &[String]) -
     // one.
     let mut bank = Bank {
         docker,
-        pg: facts.pg.clone(),
-        daemon: facts.daemon.clone(),
+        pg: facts.pg_selector().to_owned(),
+        daemon: facts.daemon_selector().to_owned(),
     };
     state.mutations = probe::query(
         &mut bank,
@@ -438,17 +480,17 @@ fn receive(
         .map_err(|error| format!("cannot move {} into place: {error}", part.display()))
 }
 
-fn snapshot<D: Docker>(docker: &mut D, folder: &Path) -> Result<(), String> {
+fn snapshot<D: Docker>(docker: &mut D, folder: &Path, daemon: &str) -> Result<(), String> {
     let final_path = folder.join(SNAPSHOT);
     if final_path.exists() {
         // Taken before this bank was replaced: never retaken (a resumed move
         // would capture the copy, not the target's own state).
         return Ok(());
     }
-    let image = image(docker)?;
+    let image = image(docker, daemon)?;
     let part = folder.join(format!("{SNAPSHOT}.part"));
     let _ = std::fs::remove_file(&part);
-    let args: Vec<String> = helper(&image, "tar", &["czf", "-", "-C", "/data", "."])
+    let args: Vec<String> = helper(daemon, &image, "tar", &["czf", "-", "-C", "/data", "."])
         .into_iter()
         .map(str::to_owned)
         .collect();
@@ -558,9 +600,17 @@ fn record_own_bank(
 
 /// `restore` of `dump` and `state` into the target's bank, left stopped,
 /// with its safety backup in the move's folder.
-fn restore_args(dump: &Path, state: &Path, folder: &Path, facts: &Facts) -> Vec<String> {
+fn restore_args(
+    dump: &Path,
+    state: &Path,
+    folder: &Path,
+    facts: &Facts,
+) -> Result<Vec<String>, String> {
+    if !probe::container_id(&facts.pg_id) || !probe::container_id(&facts.daemon_id) {
+        return Err("the target restore requires verified immutable Docker container IDs".into());
+    }
     let path = |p: &Path| p.to_string_lossy().into_owned();
-    vec![
+    Ok(vec![
         "restore".to_owned(),
         "--yes".to_owned(),
         "--leave-stopped".to_owned(),
@@ -571,16 +621,16 @@ fn restore_args(dump: &Path, state: &Path, folder: &Path, facts: &Facts) -> Vec<
         "--safety-dir".to_owned(),
         path(&folder.join("safety")),
         "--container".to_owned(),
-        facts.pg.clone(),
+        facts.pg_id.clone(),
         "--daemon-container".to_owned(),
-        facts.daemon.clone(),
+        facts.daemon_id.clone(),
         "--db".to_owned(),
         facts.db.clone(),
         "--user".to_owned(),
         facts.user.clone(),
         "--db-port".to_owned(),
         facts.port.to_string(),
-    ]
+    ])
 }
 
 /// `give-back`'s progress, in the move's folder.
@@ -765,8 +815,13 @@ pub(super) fn give_back_next(
 /// `give-back`: the target's own bank back, from the safety backup this
 /// move's first restore took of it. That restore's own safety backup keeps
 /// the moved bank, which is never deleted.
-fn give_back<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> Answer {
-    let mut answer = give_back_steps(site, folder, source_bank);
+fn give_back<S: Site>(
+    site: &mut S,
+    folder: &Path,
+    source_bank: &str,
+    pins: Option<&TargetPins>,
+) -> Answer {
+    let mut answer = give_back_steps(site, folder, source_bank, pins);
     // Whether its restore of the target's own bank began (now or in an
     // earlier run): until then a refusal changed nothing.
     if !answer.ok {
@@ -775,7 +830,12 @@ fn give_back<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> Answer 
     answer
 }
 
-fn give_back_steps<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> Answer {
+fn give_back_steps<S: Site>(
+    site: &mut S,
+    folder: &Path,
+    source_bank: &str,
+    pins: Option<&TargetPins>,
+) -> Answer {
     let mut mark = match read_mark(folder) {
         Ok(mark) => mark,
         Err(why) => return failed(why),
@@ -784,18 +844,28 @@ fn give_back_steps<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> A
         Ok(docker) => docker,
         Err(why) => return failed(why),
     };
-    let facts: Facts = match (probe::gather(docker), &mark.facts) {
+    let facts: Facts = match (gather(docker, pins), &mark.facts) {
         (Ok(facts), _) => facts,
         // Its own restore was cut short, perhaps with the database dropped:
         // restore again into the containers it named when it began.
-        (Err(_), Some(saved)) if mark.phase == "begun" => Facts {
-            meta_fingerprint: None,
-            ..saved.clone()
-        },
+        (Err(_), Some(saved))
+            if mark.phase == "begun"
+                && pins.is_none_or(|pins| {
+                    saved.daemon_id == pins.daemon && saved.pg_id == pins.postgres
+                }) =>
+        {
+            Facts {
+                meta_fingerprint: None,
+                ..saved.clone()
+            }
+        }
         (Err(why), _) => return failed(format!("cannot read the target's bank: {why}")),
     };
-    let is_running = running(docker);
-    let is_gated = image(docker).ok().and_then(|image| gated(docker, &image));
+    let daemon = daemon(pins);
+    let is_running = running(docker, daemon);
+    let is_gated = image(docker, daemon)
+        .ok()
+        .and_then(|image| gated(docker, daemon, &image));
     let (began, own_bank) = own_began(folder);
     match give_back_next(
         &mark,
@@ -858,7 +928,10 @@ fn give_back_steps<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> A
             return failed(format!("{why}; nothing was changed"));
         }
     }
-    let args = restore_args(Path::new(&own.dump), Path::new(&own.state), folder, &facts);
+    let args = match restore_args(Path::new(&own.dump), Path::new(&own.state), folder, &facts) {
+        Ok(args) => args,
+        Err(why) => return failed(why),
+    };
     let (code, output) = site.restore(&args, Some(&folder.join(GIVE_BACK_DONE)));
     if code != 0 {
         let mut answer = failed(format!(
@@ -896,7 +969,7 @@ fn give_back_steps<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> A
     }
     let bank = site
         .docker()
-        .and_then(probe::gather)
+        .and_then(|docker| gather(docker, pins))
         .map(|facts| facts.meta_fingerprint);
     let theirs = match &bank {
         Ok(bank) => {
@@ -918,12 +991,17 @@ fn give_back_steps<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> A
     answer
 }
 
-fn restore<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> Answer {
+fn restore<S: Site>(
+    site: &mut S,
+    folder: &Path,
+    source_bank: &str,
+    pins: Option<&TargetPins>,
+) -> Answer {
     let (dump, state_archive) = match manifest(folder) {
         Ok(files) => files,
         Err(why) => return failed(why),
     };
-    let facts: Facts = match site.docker().and_then(probe::gather) {
+    let facts: Facts = match site.docker().and_then(|docker| gather(docker, pins)) {
         Ok(facts) => facts,
         Err(why) => return failed(format!("cannot read the target's bank: {why}")),
     };
@@ -953,7 +1031,10 @@ fn restore<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> Answer {
             ));
         }
     }
-    let args = restore_args(&dump, &state_archive, folder, &facts);
+    let args = match restore_args(&dump, &state_archive, folder, &facts) {
+        Ok(args) => args,
+        Err(why) => return failed(why),
+    };
     let (code, output) = site.restore(&args, Some(&folder.join(ABORTED)));
     let now = site.now();
     record_own_bank(folder, &before, own, &now, facts.meta_fingerprint.clone());
@@ -1063,11 +1144,68 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
             &serde_json::json!({"at": site.now(), "op": op.name(), "phase": "begun"}),
         );
     }
+    let selected = match operating_pins(&folder, request.pins.as_ref()) {
+        Ok(pins) => pins,
+        Err(why) => return failed(why),
+    };
+    let pins = selected.as_ref();
+    let daemon = daemon(pins);
+    if let Some(pins) = pins
+        && matches!(
+            op,
+            Op::Claim { .. }
+                | Op::State { .. }
+                | Op::PolicyNo
+                | Op::PolicySet { .. }
+                | Op::Stop
+                | Op::Start
+                | Op::Gate
+                | Op::Ungate
+                | Op::StartGated
+                | Op::Snapshot
+                | Op::Restore
+                | Op::GiveBack
+        )
+    {
+        let identities = site.docker().and_then(|docker| {
+            pins.inspect_daemon(docker)?;
+            pins.inspect_postgres(docker).map(drop)
+        });
+        if let Err(why) = identities {
+            return failed(why);
+        }
+    }
     let mut answer = match op {
         Op::Check { .. } | Op::CarryCheck { .. } => failed("preflight checks are read separately"),
+        Op::CarryApply {
+            expected_pins: expected,
+            ..
+        } => {
+            let daemon = &expected.daemon;
+            let safe = site.docker().is_ok_and(|docker| {
+                pins == Some(expected)
+                    && expected.inspect_daemon(docker).is_ok()
+                    && expected.inspect_postgres(docker).is_ok()
+                    && running(docker, daemon) == Some(false)
+                    && image(docker, daemon)
+                        .is_ok_and(|image| gated(docker, daemon, &image) == Some(true))
+            });
+            if !safe {
+                failed("the target could not be proved stopped and gated; rerun move --rollback")
+            } else {
+                site.carry(op, &folder, &request.move_id, request.pins.as_ref())
+                    .map_or_else(failed, |()| done())
+            }
+        }
+        Op::CarryUndo if !request.rollback || !folder.join(ABORTED).is_file() => {
+            failed("the move has not begun rollback on the target")
+        }
+        Op::CarryUndo | Op::CarryVerify { .. } => site
+            .carry(op, &folder, &request.move_id, request.pins.as_ref())
+            .map_or_else(failed, |()| done()),
         Op::State { tables } => {
             let mut answer = done();
-            answer.state = Some(state(site, &claims, &folder, tables));
+            answer.state = Some(state(site, &claims, &folder, tables, pins));
             answer
         }
         Op::Claim {
@@ -1105,7 +1243,7 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
                 Ok(docker) => docker,
                 Err(why) => return failed(why),
             };
-            let old = policy(docker).unwrap_or_default();
+            let old = policy(docker, daemon).unwrap_or_default();
             let new = match op {
                 Op::PolicySet { policy } if valid_policy(policy) => policy.clone(),
                 Op::PolicySet { policy } => {
@@ -1115,7 +1253,7 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
             };
             let ran = run(
                 docker,
-                &["update", &format!("--restart={new}"), daemon()],
+                &["update", &format!("--restart={new}"), daemon],
                 SHORT,
             );
             if ran.ok() {
@@ -1139,8 +1277,8 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
                 Ok(docker) => docker,
                 Err(why) => return failed(why),
             };
-            let ran = run(docker, &["stop", "-t", "120", daemon()], STOP);
-            match running(docker) {
+            let ran = run(docker, &["stop", "-t", "120", daemon], STOP);
+            match running(docker, daemon) {
                 Some(false) => done(),
                 _ => failed(format!(
                     "the target daemon did not stop ({})",
@@ -1149,9 +1287,9 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
             }
         }
         Op::Start | Op::Gate | Op::Ungate | Op::StartGated => {
-            gate_and_start(site, &folder, &claims, request)
+            gate_and_start(site, &folder, &claims, request, pins)
         }
-        Op::Snapshot => match site.docker().and_then(|d| snapshot(d, &folder)) {
+        Op::Snapshot => match site.docker().and_then(|d| snapshot(d, &folder, daemon)) {
             Ok(()) => done(),
             Err(why) => failed(why),
         },
@@ -1162,9 +1300,9 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
                 Err(why) => return failed(why),
             };
             if matches!(op, Op::Restore) {
-                restore(site, &folder, &source_bank)
+                restore(site, &folder, &source_bank, pins)
             } else {
-                give_back(site, &folder, &source_bank)
+                give_back(site, &folder, &source_bank, pins)
             }
         }
         Op::Abort => match std::fs::write(folder.join(ABORTED), b"") {
@@ -1177,8 +1315,9 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
         if !matches!(
             op,
             Op::Receive { .. } | Op::Claim { .. } | Op::Release | Op::Abort
-        ) {
-            answer.state = Some(state(site, &claims, &folder, &[]));
+        ) && let Ok(updated) = operating_pins(&folder, request.pins.as_ref())
+        {
+            answer.state = Some(state(site, &claims, &folder, &[], updated.as_ref()));
         }
         journal(
             &folder,
@@ -1225,17 +1364,19 @@ fn gate_and_start<S: Site>(
     folder: &Path,
     claims: &Path,
     request: &Request,
+    pins: Option<&TargetPins>,
 ) -> Answer {
     let docker = match site.docker() {
         Ok(docker) => docker,
         Err(why) => return failed(why),
     };
-    let image = match image(docker) {
+    let daemon = daemon(pins);
+    let image = match image(docker, daemon) {
         Ok(image) => image,
         Err(why) => return failed(why),
     };
     let ungate = |docker: &mut S::D| {
-        let ran = run(docker, &helper(&image, "rm", &["-f", GATE]), SHORT);
+        let ran = run(docker, &helper(daemon, &image, "rm", &["-f", GATE]), SHORT);
         if ran.ok() {
             Ok(())
         } else {
@@ -1243,7 +1384,7 @@ fn gate_and_start<S: Site>(
         }
     };
     let start = |docker: &mut S::D| {
-        let ran = run(docker, &["start", daemon()], SHORT);
+        let ran = run(docker, &["start", daemon], SHORT);
         if ran.ok() {
             Ok(())
         } else {
@@ -1257,10 +1398,11 @@ fn gate_and_start<S: Site>(
             match std::fs::write(&file, format!("{body}\n")) {
                 Err(error) => Err(format!("cannot write {}: {error}", file.display())),
                 Ok(()) => {
-                    let args: Vec<String> = helper(&image, "sh", &["-c", &format!("cat > {GATE}")])
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect();
+                    let args: Vec<String> =
+                        helper(daemon, &image, "sh", &["-c", &format!("cat > {GATE}")])
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect();
                     let mut args = args;
                     args.insert(2, "-i".to_owned());
                     let ran = docker.run_io(&args, SHORT, Input::File(&file), Output::Capture);
@@ -1280,7 +1422,7 @@ fn gate_and_start<S: Site>(
                 Ok(None) => String::new(),
                 Err(why) => return failed(why),
             };
-            match probe::gather(docker) {
+            match gather(docker, pins) {
                 Ok(facts) if facts.meta_fingerprint.as_deref() == Some(source_bank.as_str()) => {
                     Err(format!(
                         "the target reads the moved bank, so {GATE} stays; only the move starts that bank"
@@ -1295,7 +1437,7 @@ fn gate_and_start<S: Site>(
         Op::StartGated => ungate(docker).and_then(|()| start(docker)),
         _ => {
             // The target's own bank only: a gate means it holds the moved one.
-            match gated(docker, &image) {
+            match gated(docker, daemon, &image) {
                 Some(false) => start(docker),
                 Some(true) => Err(format!(
                     "{GATE} is present: the target holds the moved bank, which only the move starts"
@@ -1347,6 +1489,8 @@ mod tests {
         docker: Loose,
         restored: Vec<Vec<String>>,
         restore_answer: (i32, String),
+        save_safety_copy: bool,
+        carrying: Vec<String>,
     }
 
     impl Fake {
@@ -1362,6 +1506,8 @@ mod tests {
                 },
                 restored: Vec::new(),
                 restore_answer: (0, "Restore complete".into()),
+                save_safety_copy: false,
+                carrying: Vec::new(),
             }
         }
         fn base(&self) -> PathBuf {
@@ -1390,8 +1536,29 @@ mod tests {
             Ok("enabled".into())
         }
         fn restore(&mut self, args: &[String], _abort_file: Option<&Path>) -> (i32, String) {
+            if self.save_safety_copy {
+                let dir = args
+                    .windows(2)
+                    .find(|pair| pair[0] == "--safety-dir")
+                    .unwrap();
+                std::fs::write(
+                    Path::new(&dir[1]).join(format!("{SAFETY_DUMP}release.sql.gz")),
+                    b"kept",
+                )
+                .unwrap();
+            }
             self.restored.push(args.to_vec());
             self.restore_answer.clone()
+        }
+        fn carry(
+            &mut self,
+            op: &Op,
+            _: &Path,
+            _: &str,
+            _: Option<&TargetPins>,
+        ) -> Result<(), String> {
+            self.carrying.push(op.name().into());
+            Ok(())
         }
     }
 
@@ -1404,6 +1571,7 @@ mod tests {
             move_id: id.into(),
             work_dir: String::new(),
             rollback: false,
+            pins: None,
             op,
         }
     }
@@ -1424,6 +1592,199 @@ mod tests {
             source_bank: bank.into(),
             resume: false,
         }
+    }
+
+    #[test]
+    fn carry_apply_requires_matching_pins_and_a_stopped_gated_target() {
+        let pins = TargetPins {
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            project: "fixture".into(),
+            ..Default::default()
+        };
+        for (running, gate, matched, wanted) in [
+            (true, true, true, false),
+            (false, false, true, false),
+            (false, true, false, false),
+            (false, true, true, true),
+        ] {
+            let selected = pins.clone();
+            let mut fake = Fake::new(move |args| {
+                let words: Vec<_> = args.iter().map(String::as_str).collect();
+                match words.as_slice() {
+                    ["inspect", "--type=container", id] => {
+                        let service = if *id == selected.daemon {
+                            "pseudolife-daemon"
+                        } else {
+                            "pseudolife-pg"
+                        };
+                        ok(&serde_json::json!([{"Id":id,"Config":{"Labels":{
+                            "com.docker.compose.project":"fixture","com.docker.compose.service":service
+                        }}}]).to_string())
+                    }
+                    [
+                        "inspect",
+                        "--type=container",
+                        "-f",
+                        "{{.Id}} {{.State.Running}}",
+                        id,
+                    ] => ok(&format!("{id} {running}")),
+                    [
+                        "inspect",
+                        "--type=container",
+                        "-f",
+                        "{{.Id}} {{.Image}}",
+                        id,
+                    ] => ok(&format!("{id} img:1")),
+                    ["run", ..] if gate => ok(""),
+                    _ => fail(1, "unavailable"),
+                }
+            });
+            assert!(act(&mut fake, ID, claim("bank")).ok);
+            let mut expected = pins.clone();
+            if !matched {
+                expected.postgres = "3".repeat(64);
+            }
+            let mut call = request(
+                ID,
+                Op::CarryApply {
+                    identities: carry::fixture(),
+                    expected_pins: expected,
+                },
+            );
+            call.pins = Some(pins.clone());
+            assert_eq!(perform(&mut fake, &call, &mut std::io::empty()).ok, wanted);
+            assert_eq!(fake.carrying.len(), usize::from(wanted));
+        }
+    }
+
+    #[test]
+    fn carry_undo_requires_both_a_rollback_request_and_abort() {
+        let mut fake = Fake::new(quiet);
+        assert!(act(&mut fake, ID, claim("bank")).ok);
+        let mut call = request(ID, Op::CarryUndo);
+        call.rollback = true;
+        assert!(!perform(&mut fake, &call, &mut std::io::empty()).ok);
+        assert!(fake.carrying.is_empty());
+        assert!(act(&mut fake, ID, Op::Abort).ok);
+        assert!(!act(&mut fake, ID, Op::CarryUndo).ok);
+        assert!(fake.carrying.is_empty());
+        assert!(perform(&mut fake, &call, &mut std::io::empty()).ok);
+        assert_eq!(fake.carrying, ["carry-undo"]);
+    }
+
+    #[test]
+    fn pinned_operations_verify_both_compose_service_labels() {
+        let pins = TargetPins {
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            project: "fixture".into(),
+            ..Default::default()
+        };
+        for (daemon_project, daemon_service, pg_project, pg_service, accepted) in [
+            (
+                "alternate",
+                "pseudolife-daemon",
+                "fixture",
+                "pseudolife-pg",
+                false,
+            ),
+            (
+                "fixture",
+                "pseudolife-pg",
+                "fixture",
+                "pseudolife-pg",
+                false,
+            ),
+            (
+                "fixture",
+                "pseudolife-daemon",
+                "alternate",
+                "pseudolife-pg",
+                false,
+            ),
+            (
+                "fixture",
+                "pseudolife-daemon",
+                "fixture",
+                "pseudolife-daemon",
+                false,
+            ),
+            (
+                "fixture",
+                "pseudolife-daemon",
+                "fixture",
+                "pseudolife-pg",
+                true,
+            ),
+        ] {
+            let daemon = pins.daemon.clone();
+            let mut fake = Fake::new(move |args| {
+                let words: Vec<_> = args.iter().map(String::as_str).collect();
+                match words.as_slice() {
+                    ["inspect", "--type=container", id] => {
+                        let (project, service) = if *id == daemon {
+                            (daemon_project, daemon_service)
+                        } else {
+                            (pg_project, pg_service)
+                        };
+                        ok(&serde_json::json!([{"Id":id,"Name":"/renamed-fixture","Config":{"Labels":{
+                            "com.docker.compose.project":project,"com.docker.compose.service":service
+                        }}}]).to_string())
+                    }
+                    [
+                        "inspect",
+                        "--type=container",
+                        "-f",
+                        "{{.Id}} {{.State.Running}}",
+                        id,
+                    ] => ok(&format!("{id} false")),
+                    ["stop", ..] => ok(""),
+                    _ => fail(1, "unavailable"),
+                }
+            });
+            assert!(act(&mut fake, ID, claim("bank")).ok);
+            let mut call = request(ID, Op::Stop);
+            call.pins = Some(pins.clone());
+            assert_eq!(
+                perform(&mut fake, &call, &mut std::io::empty()).ok,
+                accepted
+            );
+            assert_eq!(
+                fake.docker.calls.iter().any(|args| args[0] == "stop"),
+                accepted
+            );
+        }
+    }
+
+    #[test]
+    fn restore_uses_inspected_ids_even_for_facts_gathered_by_name() {
+        let mut facts = Facts {
+            daemon: "daemon-by-name".into(),
+            pg: "postgres-by-name".into(),
+            daemon_id: "1".repeat(64),
+            pg_id: "2".repeat(64),
+            ..Default::default()
+        };
+        let restore = |facts: &Facts| {
+            restore_args(
+                Path::new("dump"),
+                Path::new("state"),
+                Path::new("move"),
+                facts,
+            )
+        };
+        let args = restore(&facts).unwrap();
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--container", &facts.pg_id])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--daemon-container", &facts.daemon_id])
+        );
+        facts.daemon_id.clear();
+        assert!(restore(&facts).is_err());
     }
 
     #[test]
@@ -1651,6 +2012,90 @@ mod tests {
         );
         assert!(fake.restored.is_empty());
     }
+
+    #[test]
+    fn release_reads_the_restored_bank_from_the_selected_target() {
+        let pins = TargetPins {
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            ..Default::default()
+        };
+        let daemon_name = pins.daemon.clone();
+        let postgres_name = pins.postgres.clone();
+        let daemon = serde_json::json!([{
+            "Id": daemon_name,
+            "Name": "/renamed-daemon",
+            "Image": "fixture-image",
+            "State": {"Running": false},
+            "Config": {"Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture@renamed-pg/bank"]},
+            "Mounts": [{"Destination": "/data"}],
+            "NetworkSettings": {"Networks": {"fixture": {}}}
+        }])
+        .to_string();
+        let postgres = serde_json::json!([{
+            "Id": postgres_name,
+            "Name": "/renamed-pg",
+            "State": {"Running": true},
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {"fixture": {}}}
+        }])
+        .to_string();
+        let mut banks = [r#""moved-bank""#, r#""own-bank""#].into_iter();
+        let mut fake = Fake::new(move |args| {
+            let words: Vec<_> = args.iter().map(String::as_str).collect();
+            match words.as_slice() {
+                ["version", ..] => ok("27.0"),
+                ["inspect", id] if *id == daemon_name => ok(&daemon),
+                ["inspect", id] if *id == postgres_name => ok(&postgres),
+                [
+                    "inspect",
+                    "--type=container",
+                    "-f",
+                    "{{.Id}} {{.State.Running}}",
+                    id,
+                ] if *id == daemon_name => ok(&format!("{id} false")),
+                [
+                    "inspect",
+                    "--type=container",
+                    "-f",
+                    "{{.Id}} {{.Image}}",
+                    id,
+                ] if *id == daemon_name => ok(&format!("{id} fixture-image")),
+                ["run", ..] if words.contains(&"test -e /data/move.json") => ok(""),
+                ["exec", "-e", _, id, ..] if *id == postgres_name => {
+                    if args.last().unwrap().contains("coordination_bank_id") {
+                        ok(banks.next().unwrap())
+                    } else {
+                        ok("0")
+                    }
+                }
+                _ => fail(1, "container unavailable"),
+            }
+        });
+        let folder = fake.base().join(ID);
+        let safety = folder.join("safety");
+        std::fs::create_dir_all(&safety).unwrap();
+        let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default())
+            .finish()
+            .unwrap();
+        let dump = safety.join(format!("{SAFETY_DUMP}original.sql.gz"));
+        let state = safety.join(format!("{SAFETY_STATE}original.tgz"));
+        std::fs::write(&dump, &gzip).unwrap();
+        std::fs::write(&state, &gzip).unwrap();
+        let own = OwnBank {
+            dump: dump.to_string_lossy().into_owned(),
+            state: state.to_string_lossy().into_owned(),
+            fingerprint: probe::fingerprint("own-bank"),
+            ..OwnBank::default()
+        };
+        std::fs::write(folder.join(OWN_BANK), serde_json::to_vec(&own).unwrap()).unwrap();
+        fake.save_safety_copy = true;
+        let moved_bank = probe::fingerprint("moved-bank").unwrap();
+        let answer = give_back_steps(&mut fake, &folder, &moved_bank, Some(&pins));
+        assert_eq!(fake.restored.len(), 1, "{}", answer.error);
+        assert!(answer.ok, "{}", answer.error);
+        assert_eq!(answer.kept.len(), 1);
+    }
 }
 
 #[cfg(test)]
@@ -1707,6 +2152,7 @@ mod abort_tests {
             move_id: ID.into(),
             work_dir: String::new(),
             rollback,
+            pins: None,
             op,
         };
         perform(site, &request, &mut std::io::empty())

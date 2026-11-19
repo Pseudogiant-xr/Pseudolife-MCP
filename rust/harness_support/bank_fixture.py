@@ -1,12 +1,11 @@
 """Constructor-equivalent bank setup for disposable Rust harness fixtures."""
-import re
 import time
 
-from .database_guard import assert_disposable_database
+from .database_guard import assert_disposable_database, fixture_database_pattern
 from .schema import ensure_schema
 
 
-_FIXTURE_DATABASE = re.compile(r"pl_cf_(?:w[0-9][a-z]|http|pgs|prn|mir)_[a-z0-9_]{1,40}")
+_FIXTURE_DATABASE = fixture_database_pattern()
 
 # Captured from the Python constructor at 7f2e6eacf. The fixture lanes compared
 # full database catalogs and rows, including the relation clock and writer epoch.
