@@ -2180,16 +2180,26 @@ def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatc
 def test_private_marker_writer_runs_with_frozen_imports_blocked(tmp_path):
     from types import SimpleNamespace
 
-    from cli_harness import producers
+    import cli_harness
+    import rust.cli_harness
+    from cli_harness import producers as cached_producers
     from cli_harness.rows import hook, mail
+    from rust.cli_harness import producers as cached_qualified_producers
     from rust.harness_support.import_blocker import cold_harness_imports
 
     path = tmp_path / "digests" / "pending"
     with cold_harness_imports():
+        from cli_harness import producers
+        from rust.cli_harness import producers as qualified_producers
+
+        assert producers is not cached_producers
+        assert qualified_producers is not cached_qualified_producers
         producers.write_private(path, "first\n")
         producers.write_private(path, "second ✓\n")
         mail.seed()(SimpleNamespace(home=tmp_path / "mail"))
         hook.seed_pending("maintainer")(SimpleNamespace(home=tmp_path / "hook"))
+    assert cli_harness.producers is sys.modules["cli_harness.producers"] is cached_producers
+    assert rust.cli_harness.producers is sys.modules["rust.cli_harness.producers"] is cached_qualified_producers
     assert path.read_bytes() == "second ✓\n".encode()
     assert list(path.parent.iterdir()) == [path]
     assert mail._paths(tmp_path / "mail")["digest"].read_bytes() == ("7\n" + mail._body() + "\n").encode()
