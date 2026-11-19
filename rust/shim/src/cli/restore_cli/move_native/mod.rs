@@ -119,6 +119,15 @@ fn source_refusal(facts: &Facts) -> Option<String> {
     if let Some(why) = gate_refusal("source", facts) {
         return Some(why);
     }
+    if !probe::container_id(&facts.daemon_id) {
+        return Some("the source daemon has no immutable Docker container ID; restore access to the source Docker stack and retry move --dry-run".into());
+    }
+    if !probe::container_id(&facts.pg_id) {
+        return Some("the source PostgreSQL has no immutable Docker container ID; restore access to the source Docker stack and retry move --dry-run".into());
+    }
+    if facts.compose_project != facts.pg_compose_project {
+        return Some("the source daemon and PostgreSQL belong to different Compose projects; restore the matching source stack and retry move --dry-run".into());
+    }
     if !source::valid_database(&facts.db) {
         return Some(format!(
             "the source database is named {:?}, which the move's fence cannot name safely; move needs a plain lower-case name (letters, digits, underscores), so rename it, then retry",
@@ -547,6 +556,7 @@ fn document(plan: &Plan) -> Value {
         "to": plan.to,
         "target_url": plan.target_url,
         "target_url_tied": plan.url_tied,
+        "executable": !plan.checked_carry,
         "source": plan.source,
         "target": plan.target,
         "steps": steps(plan),

@@ -268,20 +268,6 @@ pub(crate) fn fetch_health_json(url: &str, timeout: u64) -> Option<Value> {
     let result: Value = serde_json::from_slice(&reply.body).ok()?;
     result.is_object().then_some(result)
 }
-pub(crate) fn fetch_json(url: &str, timeout: u64) -> Option<Value> {
-    block_on(async {
-        // Use the same environment-aware proxy policy as release downloads.
-        // No daemon bearer or board credentials are attached to discovery.
-        let client = reqwest::Client::builder()
-            .user_agent("pseudolife-mcp")
-            .timeout(Duration::from_secs(timeout))
-            .build()
-            .ok()?;
-        let reply = client.get(url).send().await.ok()?.error_for_status().ok()?;
-        let result: Value = reply.json().await.ok()?;
-        result.is_object().then_some(result)
-    })
-}
 pub(crate) fn authenticated_read(url: &str, token: &str) -> bool {
     let authorization = format!("Bearer {token}");
     let Some(reply) = daemon_get(

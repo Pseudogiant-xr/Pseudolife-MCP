@@ -18,7 +18,7 @@ mod windows_job;
 use super::lease::lock as os_lock;
 pub(crate) use options::Options;
 use seams::{Environment, compose_args, compose_environment, display, stamp, tree_state};
-pub(crate) use seams::{data_dir, fetch_json, home, run_cli};
+pub(crate) use seams::{data_dir, home, run_cli};
 
 /// The unattended-update schedules as `connect` reads and re-creates them.
 pub(crate) mod schedules {
@@ -46,8 +46,177 @@ use std::{
 pub(crate) const DAEMON_CONTAINER: &str = "pseudolife-mcp-daemon";
 pub(crate) const PG_CONTAINER: &str = "pseudolife-mcp-postgres";
 pub(crate) const DAEMON_SERVICE: &str = "pseudolife-daemon";
-pub(crate) const PYPI_JSON: &str = "https://pypi.org/pypi/pseudolife-mcp/json";
+const GITHUB_RELEASE: &str =
+    "https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/latest";
+const RELEASE_METADATA_LIMIT: usize = 1024 * 1024;
+const NO_PUBLISHED_RELEASE: &str = "no newer release with all native assets is published yet. Name a published release with --tag <version> to install it now.";
 pub(crate) type Result<T> = std::result::Result<T, UpdateError>;
+
+fn discovery_error(detail: &str) -> UpdateError {
+    UpdateError::usage(format!("{detail}. Nothing was changed"))
+}
+
+fn invalid_release_metadata() -> UpdateError {
+    discovery_error("GitHub returned invalid release metadata; retry later")
+}
+
+fn discovery_transport_error(error: reqwest::Error) -> UpdateError {
+    if error.is_timeout() {
+        discovery_error(
+            "the GitHub release check timed out; check access to api.github.com and retry",
+        )
+    } else {
+        discovery_error(
+            "could not reach GitHub or read its reply; check access to api.github.com and retry",
+        )
+    }
+}
+
+fn discovery_client() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+}
+
+async fn discovery_body(mut response: reqwest::Response) -> Result<Vec<u8>> {
+    let too_large =
+        || discovery_error("GitHub release metadata exceeds the size limit. Retry later");
+    if response
+        .headers()
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok()?.parse::<u64>().ok())
+        .is_some_and(|size| size > RELEASE_METADATA_LIMIT as u64)
+    {
+        return Err(too_large());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(discovery_transport_error)? {
+        if chunk.len() > RELEASE_METADATA_LIMIT - bytes.len() {
+            return Err(too_large());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+fn latest_release() -> Result<Option<String>> {
+    seams::block_on(async {
+        let client = discovery_client().build().map_err(|_| {
+            discovery_error(
+                "could not initialize the GitHub release check; check HTTPS and proxy settings and retry",
+            )
+        })?;
+        fetch_latest_with(&client, |request| client.execute(request)).await
+    })
+}
+
+async fn fetch_latest_with<F, Fut>(client: &reqwest::Client, send: F) -> Result<Option<String>>
+where
+    F: FnOnce(reqwest::Request) -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<reqwest::Response, reqwest::Error>>,
+{
+    let request = client
+        .get(GITHUB_RELEASE)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header(reqwest::header::USER_AGENT, "pseudolife-mcp")
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|_| {
+            discovery_error(
+                "could not build the GitHub release request; retry with an updated client",
+            )
+        })?;
+    let response = send(request).await.map_err(discovery_transport_error)?;
+    match response.status().as_u16() {
+        200 => {}
+        404 => return Ok(None),
+        status @ 300..=399 => {
+            return Err(discovery_error(&format!(
+                "GitHub returned a redirection status for release discovery (HTTP {status}). Install the current client or retry with --tag <published version>"
+            )));
+        }
+        status => {
+            let headers = response.headers();
+            let rate_limited = status == 429
+                || (status == 403
+                    && (headers.contains_key(reqwest::header::RETRY_AFTER)
+                        || headers
+                            .get("x-ratelimit-remaining")
+                            .is_some_and(|value| value == "0")
+                        // Secondary rate limits can omit both headers.
+                        || serde_json::from_slice::<Value>(&discovery_body(response).await?)
+                            .is_ok_and(|data| {
+                                data["message"].as_str().is_some_and(|message| {
+                                    message.to_ascii_lowercase().contains("rate limit")
+                                })
+                            })));
+            let detail = if rate_limited {
+                "GitHub API rate limit reached; retry after the limit resets".to_owned()
+            } else {
+                format!("GitHub release check failed (HTTP {status}); retry later")
+            };
+            return Err(discovery_error(&detail));
+        }
+    }
+    let data: Value = serde_json::from_slice(&discovery_body(response).await?)
+        .map_err(|_| invalid_release_metadata())?;
+    match (data["draft"].as_bool(), data["prerelease"].as_bool()) {
+        (Some(false), Some(false)) => {}
+        (Some(_), Some(_)) => return Ok(None),
+        _ => return Err(invalid_release_metadata()),
+    }
+    let version = release_version(&data).ok_or_else(invalid_release_metadata)?;
+    if data.get("assets").is_some_and(|assets| !assets.is_array()) {
+        return Err(invalid_release_metadata());
+    }
+    Ok(complete_assets(&data, version).then(|| version.to_owned()))
+}
+
+// Keep the positive version range and component rules aligned with the daemon.
+fn release_version(data: &Value) -> Option<&str> {
+    let version = data["tag_name"]
+        .as_str()
+        .and_then(|s| s.strip_prefix('v'))?;
+    let parts: Vec<_> = version.split('.').collect();
+    if !(1..=32).contains(&version.len())
+        || !(2..=4).contains(&parts.len())
+        || parts.iter().any(|s| {
+            s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) || s.parse::<u64>().is_err()
+        })
+    {
+        return None;
+    }
+    Some(version)
+}
+
+// Keep this in step with the daemon while the two discovery paths are separate.
+fn complete_assets(data: &Value, version: &str) -> bool {
+    let Some(assets) = data["assets"].as_array() else {
+        return false;
+    };
+    // SHA256SUMS uploads first, not last. All six archives must also be present.
+    // Keep these names aligned with docs/dev/release-assets.md and its publisher.
+    let mut names = vec![
+        "RELEASE-READY.json".to_owned(),
+        "SHA256SUMS".to_owned(),
+        format!("pseudolife-compose-{version}.tar.gz"),
+    ];
+    for (target, extension) in [
+        ("x86_64-unknown-linux-gnu", "tar.gz"),
+        ("aarch64-unknown-linux-gnu", "tar.gz"),
+        ("x86_64-apple-darwin", "tar.gz"),
+        ("aarch64-apple-darwin", "tar.gz"),
+        ("x86_64-pc-windows-msvc", "zip"),
+    ] {
+        names.push(format!("pseudolife-mcp-{version}-{target}.{extension}"));
+    }
+    names.iter().all(|name| {
+        let mut matches = assets.iter().filter(|asset| asset["name"] == *name);
+        matches.next().is_some_and(|asset| {
+            asset["state"] == "uploaded" && asset["size"].as_u64().is_some_and(|n| n > 0)
+        }) && matches.next().is_none()
+    })
+}
 
 fn client_release_target(health: Option<&Value>, tag: Option<&str>) -> Result<String> {
     let current = health
@@ -108,6 +277,11 @@ pub(crate) struct Report {
     pub ok: bool,
     pub exit_code: u8,
 }
+#[cfg(test)]
+type ReleaseLookup = Box<dyn Fn() -> Result<Option<String>> + Send + Sync>;
+#[cfg(test)]
+type CommandProbe = fn(&[String]) -> (i32, String);
+
 pub(crate) struct Update {
     pub o: Options,
     pub report: Report,
@@ -143,6 +317,12 @@ pub(crate) struct Update {
     /// An unattended run the guard turned daemon-only: its refusal, which
     /// keeps the client steps out even if a later step reached them.
     pub tunnel_refused: Option<String>,
+    #[cfg(test)]
+    release_lookup: Option<ReleaseLookup>,
+    #[cfg(test)]
+    health_probe: Option<fn() -> Option<Value>>,
+    #[cfg(test)]
+    command_probe: Option<CommandProbe>,
 }
 
 /// The checkout as the deploy later names it to the shim step.
@@ -276,6 +456,12 @@ impl Update {
             tunnel_probe: tunnel_guard::probe,
             tunnel_checked: false,
             tunnel_refused: None,
+            #[cfg(test)]
+            release_lookup: None,
+            #[cfg(test)]
+            health_probe: None,
+            #[cfg(test)]
+            command_probe: None,
         }
     }
     /// Refuses, before anything is changed, a run whose client steps would
@@ -370,6 +556,10 @@ impl Update {
         timeout: u64,
         stream: bool,
     ) -> (i32, String) {
+        #[cfg(test)]
+        if let Some(probe) = self.command_probe {
+            return probe(args);
+        }
         let mut cmd = vec![self.docker.clone()];
         cmd.extend_from_slice(args);
         run_cli(&cmd, env, timeout, stream && !self.o.as_json)
@@ -383,6 +573,10 @@ impl Update {
         )
     }
     pub fn daemon_health(&self) -> Option<Value> {
+        #[cfg(test)]
+        if let Some(probe) = self.health_probe {
+            return probe();
+        }
         seams::fetch_health_json(
             &format!("{}/health", self.o.daemon_url.trim_end_matches('/')),
             3,
@@ -429,16 +623,27 @@ impl Update {
         }
         .into())
     }
-    pub fn latest_release(&self) -> Option<String> {
-        fetch_json(PYPI_JSON, 10).and_then(|v| {
-            v["info"]["version"]
-                .as_str()
-                .filter(|s| plain_release(s))
-                .map(str::to_owned)
-        })
+    pub fn target_version(&self) -> Result<Option<String>> {
+        #[cfg(test)]
+        if let Some(discover) = &self.release_lookup {
+            return self.target_version_with(discover);
+        }
+        self.target_version_with(latest_release)
     }
-    pub fn target_version(&self) -> Result<String> {
-        self.o.tag.clone().or_else(||self.latest_release()).ok_or_else(||UpdateError::usage("could not read the newest release from PyPI; name one with --tag <version>. Nothing was changed"))
+    fn target_version_with(
+        &self,
+        discover: impl FnOnce() -> Result<Option<String>>,
+    ) -> Result<Option<String>> {
+        match &self.o.tag {
+            Some(tag) => Ok(Some(tag.clone())),
+            None => discover(),
+        }
+    }
+    fn with_release_tag<T>(&mut self, target: &str, run: impl FnOnce(&mut Self) -> T) -> T {
+        let tag = self.o.tag.replace(target.to_owned());
+        let result = run(self);
+        self.o.tag = tag;
+        result
     }
     pub fn refuse_downgrade(&self, current: Option<&str>, target: &str) -> Result<()> {
         if let Some(current) = current
@@ -459,8 +664,12 @@ impl Update {
         } else {
             Some(env!("CARGO_PKG_VERSION").into())
         };
-        let latest = self.target_version()?;
         self.report.current = current.clone();
+        let Some(latest) = self.target_version()? else {
+            self.step(NO_PUBLISHED_RELEASE);
+            self.report.exit_code = 3;
+            return Ok(());
+        };
         self.report.target = Some(latest.clone());
         let current = current.ok_or_else(|| {
             UpdateError::usage("could not read the current version (daemon /health did not answer)")
@@ -529,7 +738,10 @@ impl Update {
             self.update_client_machine()
         } else {
             self.run_locked()?;
-            if !self.o.clients_only && !self.o.shadow {
+            if !self.o.clients_only
+                && !self.o.shadow
+                && (self.report.mode != "release" || self.report.target.is_some())
+            {
                 self.maintainer_passkeys();
             }
             Ok(())

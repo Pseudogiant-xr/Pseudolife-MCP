@@ -333,6 +333,12 @@ pub(super) fn transaction(
                 ),
             };
         }
+        if let Err(why) = live.verify_pins() {
+            return engine::Outcome {
+                code: engine::EXIT_REFUSED,
+                message: format!("{why}. {NOTHING}"),
+            };
+        }
         engine::execute(&mut live, &engine_plan, &id)
     }) {
         Ok(outcome) => report(request.json, &id, &outcome, false),

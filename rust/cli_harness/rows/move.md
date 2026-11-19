@@ -66,7 +66,7 @@ Unicode, not starting with `-`.
 Each of these was a case of this row while the native command deferred:
 
 - Every argv that passes the checks above: the native module answers it.
-  `--dry-run` checks either bearer mode, and checks carried bearer settings
+  On Linux targets, `--dry-run` checks both bearer modes and checks carried bearer settings
   against the target's installed Compose files without sending the source's
   values. Execution requires `--no-keep-tokens`. Checkout targets, automatic
   exposure, explicit target environment or Compose files, a missing
