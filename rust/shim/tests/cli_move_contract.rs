@@ -21,7 +21,6 @@ const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ss
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
-const TOKENS: &str = "move: carrying the source's tokens to the target is not available in the native client yet: pass --no-keep-tokens (the target keeps its own tokens, and clients re-pair or use the target's). Nothing was changed\n";
 const URL_REQUIRED: &str = "move: --target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765. Nothing was changed\n";
 const NO_CHECKOUT: &str = "move: --target-checkout is not supported: move goes to an installed (release) Docker bank on the target, with the native pseudolife-mcp client there; drop --target-checkout. Nothing was changed\n";
 const NO_SSH: &str = "move: no ssh program is on PATH (only absolute PATH entries are searched); install the OpenSSH client, then retry. Nothing was changed\n";
@@ -141,8 +140,8 @@ fn valid_argv_gets_the_native_answer_without_a_connection() {
         ),
         (
             &["--to", "box", "--target-url", "https://box.example.com/"],
-            2,
-            TOKENS,
+            4,
+            NO_SSH,
         ),
         (
             &["--to", "box", "--target-checkout", "a\tb"],
@@ -151,8 +150,8 @@ fn valid_argv_gets_the_native_answer_without_a_connection() {
         ),
         (
             &["--to", "box", "--target-url", "http://[::1]:8765"],
-            2,
-            TOKENS,
+            4,
+            NO_SSH,
         ),
         // Every argv check passes: the preflight's first need, ssh, is not
         // on PATH (it holds only the empty home).

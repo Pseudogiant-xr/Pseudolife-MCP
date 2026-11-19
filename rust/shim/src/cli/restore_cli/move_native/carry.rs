@@ -1,14 +1,17 @@
-//! Read-only preflight for a move that would carry the source's bearer
-//! settings. Only which settings are supplied crosses SSH. Compose is
-//! rendered with fixture values on the target; it never receives a source
-//! bearer from a dry run.
+//! Carry the source's bearer settings. A dry run sends four presence flags
+//! over SSH and the target renders Compose with fixture values. Execution
+//! sends the settings to a compatible target through SSH stdin.
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::super::docker::{self, Docker};
 use super::probe::Facts;
 use crate::cli::update::seams;
+
+mod runtime;
+pub(super) use runtime::{apply, loopback, recorded_pins, undo, verify};
 
 const KEYS: [&str; 4] = [
     "PSEUDOLIFE_MCP_TOKEN",
@@ -27,6 +30,119 @@ const ENV: &str = "the target's Compose environment is not a private writable fi
 const DAEMON_SERVICE: &str = "pseudolife-daemon";
 const PG_SERVICE: &str = "pseudolife-pg";
 const INTERPOLATION: &str = "the target's Compose files do not apply the carried identity settings without changing other settings; restore its original identity interpolation and retry move --dry-run";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::cli) struct TargetPins {
+    pub(super) daemon: String,
+    pub(super) postgres: String,
+    #[serde(default)]
+    pub(super) project: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) deployment_digest: Option<[u8; 32]>,
+}
+
+impl TargetPins {
+    pub(super) fn from_facts(facts: &Facts) -> Option<Self> {
+        (super::probe::container_id(&facts.daemon_id)
+            && super::probe::container_id(&facts.pg_id)
+            && !facts.compose_project.is_empty()
+            && facts.compose_project == facts.pg_compose_project)
+            .then(|| Self {
+                daemon: facts.daemon_id.clone(),
+                postgres: facts.pg_id.clone(),
+                project: facts.compose_project.clone(),
+                deployment_digest: None,
+            })
+    }
+
+    pub(super) fn inspect_daemon(&self, docker: &mut impl Docker) -> Result<Value, String> {
+        self.inspect_service(docker, &self.daemon, DAEMON_SERVICE)
+    }
+
+    pub(super) fn inspect_postgres(&self, docker: &mut impl Docker) -> Result<Value, String> {
+        self.inspect_service(docker, &self.postgres, PG_SERVICE)
+    }
+
+    fn inspect_service(
+        &self,
+        docker: &mut impl Docker,
+        id: &str,
+        service: &str,
+    ) -> Result<Value, String> {
+        let doc = Self::inspect(docker, id)?;
+        let labels = &doc["Config"]["Labels"];
+        if self.project.is_empty()
+            || labels["com.docker.compose.project"] != self.project
+            || labels["com.docker.compose.service"] != service
+        {
+            return Err(TARGET_PIN.into());
+        }
+        Ok(doc)
+    }
+
+    pub(super) fn inspect(docker: &mut impl Docker, id: &str) -> Result<Value, String> {
+        if !super::probe::container_id(id) {
+            return Err(TARGET_PIN.into());
+        }
+        inspect(docker, id)
+            .filter(|container| container["Id"] == id)
+            .ok_or_else(|| TARGET_PIN.into())
+    }
+}
+
+const TARGET_PIN: &str = "the target's selected Docker containers could not be verified by immutable ID; restore the original Compose stack and retry move --dry-run";
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::cli) struct Identities {
+    values: [String; 4],
+    probe: String,
+}
+
+impl std::fmt::Debug for Identities {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Identities([redacted])")
+    }
+}
+
+impl Identities {
+    pub(super) fn live(docker: &mut impl Docker, facts: &Facts) -> Result<Self, String> {
+        source_identities(docker, facts, configured_bearer)
+    }
+
+    pub(super) fn settings(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            probe: String::new(),
+        }
+    }
+
+    fn entries(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        KEYS.into_iter()
+            .zip(self.values.iter().map(String::as_str))
+            .filter(|(key, value)| *key != KEYS[3] || !value.is_empty())
+    }
+
+    fn assignments(&self) -> Result<String, String> {
+        shape(&self.values)?;
+        Ok(self
+            .entries()
+            .map(|(key, value)| format!("{key}='{value}'\n"))
+            .collect())
+    }
+}
+
+#[cfg(test)]
+pub(super) fn fixture() -> Identities {
+    Identities {
+        values: [
+            "test-fixture-bearer".into(),
+            String::new(),
+            String::new(),
+            "core".into(),
+        ],
+        probe: "test-fixture-bearer".into(),
+    }
+}
 
 fn docker_run(docker: &mut impl Docker, args: &[&str]) -> docker::Ran {
     let args: Vec<String> = args.iter().map(|&arg| arg.to_owned()).collect();
@@ -54,11 +170,13 @@ fn source_values(container: &Value) -> [String; 4] {
 }
 
 pub(super) fn source(docker: &mut impl Docker, facts: &Facts) -> Result<[bool; 4], String> {
-    source_with_token(docker, facts, || {
-        crate::credentials::CredentialProvider::from_environment()
-            .and_then(|provider| provider.snapshot())
-            .map(|snapshot| snapshot.token().map(str::to_owned))
-    })
+    source_with_token(docker, facts, configured_bearer)
+}
+
+fn configured_bearer() -> Result<Option<String>, crate::credentials::CredentialError> {
+    crate::credentials::CredentialProvider::from_environment()
+        .and_then(|provider| provider.snapshot())
+        .map(|snapshot| snapshot.token().map(str::to_owned))
 }
 
 pub(super) fn source_with_token(
@@ -66,6 +184,15 @@ pub(super) fn source_with_token(
     facts: &Facts,
     credential: impl FnOnce() -> Result<Option<String>, crate::credentials::CredentialError>,
 ) -> Result<[bool; 4], String> {
+    let identities = source_identities(docker, facts, credential)?;
+    shape(&identities.values)
+}
+
+fn source_identities(
+    docker: &mut impl Docker,
+    facts: &Facts,
+    credential: impl FnOnce() -> Result<Option<String>, crate::credentials::CredentialError>,
+) -> Result<Identities, String> {
     if facts.auth != Some(true) {
         return Err("the source does not report bearer authentication; configure a bearer on the source daemon, then retry move --dry-run".into());
     }
@@ -73,9 +200,13 @@ pub(super) fn source_with_token(
         .filter(|container| facts.daemon_id.is_empty() || container["Id"] == facts.daemon_id)
         .ok_or("the source daemon's identity settings cannot be read; check Docker access and retry move --dry-run")?;
     let values = source_values(&container);
-    let shape = shape(&values)?;
-    if !values[0].is_empty() || has_mapped_bearer(&values[1]) {
-        return Ok(shape);
+    shape(&values)?;
+    if let Some(probe) = Some(values[0].as_str())
+        .filter(|token| !token.is_empty())
+        .or_else(|| mapped_bearer(&values[1]))
+        .map(str::to_owned)
+    {
+        return Ok(Identities { values, probe });
     }
     const BEARER: &str = "the stored-principal source needs an active bearer; set PSEUDOLIFE_MCP_TOKEN_FILE to its private file, then retry move --dry-run";
     use sha2::{Digest, Sha256};
@@ -96,19 +227,21 @@ pub(super) fn source_with_token(
     hashes
         .lines()
         .any(|hash| hash == digest)
-        .then_some(shape)
+        .then_some(Identities { values, probe: token })
         .ok_or_else(|| "the configured bearer does not match an active source principal; select a bearer for an active principal and retry move --dry-run".into())
 }
 
-fn has_mapped_bearer(raw: &str) -> bool {
+fn mapped_bearer(raw: &str) -> Option<&str> {
     raw.split(',')
         .filter_map(|entry| entry.rsplit_once(':'))
-        .any(|(token, principal)| {
+        .find_map(|(token, principal)| {
+            let token = token.trim();
             let principal = principal.trim();
-            !token.trim().is_empty()
+            (!token.is_empty()
                 && !principal.is_empty()
                 && !principal.eq_ignore_ascii_case("default")
-                && !principal.eq_ignore_ascii_case("maintainer")
+                && !principal.eq_ignore_ascii_case("maintainer"))
+            .then_some(token)
         })
 }
 
@@ -126,46 +259,75 @@ fn shape(values: &[String; 4]) -> Result<[bool; 4], String> {
 fn private_env(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        use rustix::fs::{Mode, OFlags};
-        use std::os::unix::fs::MetadataExt;
-        crate::private_path::check_ancestors(path).map_err(|_| ENV)?;
-        // O_PATH obtains an identity for fstat without opening the file for
-        // I/O, even if the path unexpectedly names a FIFO or device.
-        let fd = rustix::fs::open(
-            path,
-            OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map_err(|_| ENV)?;
-        let meta = std::fs::File::from(fd).metadata().map_err(|_| ENV)?;
-        if meta.is_file()
-            && meta.mode() & 0o677 == 0o600
-            && meta.nlink() == 1
-            && meta.uid() == rustix::process::geteuid().as_raw()
-        {
-            return Ok(());
-        }
+        env_descriptor(path).map(drop)
     }
     #[cfg(not(target_os = "linux"))]
-    let _ = path;
+    {
+        let _ = path;
+        Err(ENV.into())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn env_descriptor(path: &Path) -> Result<std::fs::File, String> {
+    use rustix::fs::{Mode, OFlags};
+    use std::os::unix::fs::MetadataExt;
+    crate::private_path::check_ancestors(path).map_err(|_| ENV)?;
+    // O_PATH obtains an identity for fstat without opening the file for
+    // I/O, even if the path unexpectedly names a FIFO or device.
+    let fd = rustix::fs::open(
+        path,
+        OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| ENV)?;
+    let file = std::fs::File::from(fd);
+    let meta = file.metadata().map_err(|_| ENV)?;
+    if meta.is_file()
+        && meta.mode() & 0o677 == 0o600
+        && meta.nlink() == 1
+        && meta.uid() == rustix::process::geteuid().as_raw()
+    {
+        return Ok(file);
+    }
     Err(ENV.into())
 }
 
-pub(super) fn target(docker: &mut docker::Real, shape: [bool; 4]) -> Result<(), String> {
-    let program = docker.program.clone();
-    target_with(docker, shape, |deployment, args, env| {
-        deployment.compose(&program, args, env)
-    })
+pub(super) fn target(
+    docker: &mut docker::Real,
+    shape: [bool; 4],
+    pins: Option<&TargetPins>,
+) -> Result<Option<[u8; 32]>, String> {
+    let (deployment, _) = checked_target(docker, shape, pins)?;
+    pins.map(|pins| deployment.digest(pins)).transpose()
 }
 
+#[derive(Serialize, Deserialize)]
 struct Deployment {
     args: Vec<String>,
+    project: String,
+    env_file: String,
     tag: String,
+    image_id: String,
     daemon_hash: String,
     pg_hash: String,
 }
 
 impl Deployment {
+    fn digest(&self, pins: &TargetPins) -> Result<[u8; 32], String> {
+        use sha2::{Digest, Sha256};
+        let bytes = serde_json::to_vec(&(self, &pins.daemon, &pins.postgres, &pins.project))
+            .map_err(|_| STACK)?;
+        Ok(Sha256::digest(bytes).into())
+    }
+
+    fn check_binding(&self, pins: &TargetPins) -> Result<(), String> {
+        if pins.deployment_digest != Some(self.digest(pins)?) {
+            return Err(TARGET_PIN.into());
+        }
+        Ok(())
+    }
+
     fn compose(
         &self,
         program: &Path,
@@ -188,14 +350,32 @@ impl Deployment {
     }
 }
 
+fn checked_target(
+    docker: &mut docker::Real,
+    shape: [bool; 4],
+    pins: Option<&TargetPins>,
+) -> Result<(Deployment, Value), String> {
+    let program = docker.program.clone();
+    target_with(docker, shape, pins, |deployment, args, env| {
+        deployment.compose(&program, args, env)
+    })
+}
+
 fn target_with(
     docker: &mut impl Docker,
     shape: [bool; 4],
+    pins: Option<&TargetPins>,
     mut run: impl FnMut(&Deployment, &[&str], &seams::Environment) -> Result<String, String>,
-) -> Result<(), String> {
+) -> Result<(Deployment, Value), String> {
     use super::super::bank::{DAEMON_CONTAINER, PG_CONTAINER};
-    let daemon = inspect(docker, DAEMON_CONTAINER).ok_or(STACK)?;
-    let pg = inspect(docker, PG_CONTAINER).ok_or(STACK)?;
+    let (daemon, pg) = if let Some(pins) = pins {
+        (pins.inspect_daemon(docker)?, pins.inspect_postgres(docker)?)
+    } else {
+        (
+            inspect(docker, DAEMON_CONTAINER).ok_or(STACK)?,
+            inspect(docker, PG_CONTAINER).ok_or(STACK)?,
+        )
+    };
     let labels = &daemon["Config"]["Labels"];
     let pg_labels = &pg["Config"]["Labels"];
     let label = |key: &str| labels[key].as_str().filter(|s| !s.is_empty()).ok_or(STACK);
@@ -250,7 +430,10 @@ fn target_with(
     }
     let deployment = Deployment {
         args,
+        project: project.to_owned(),
+        env_file,
         tag: tag.into(),
+        image_id: image_id.into(),
         daemon_hash: label("com.docker.compose.config-hash")?.into(),
         pg_hash: pg_labels["com.docker.compose.config-hash"]
             .as_str()
@@ -288,7 +471,7 @@ fn target_with(
     {
         return Err(INTERPOLATION.into());
     }
-    Ok(())
+    Ok((deployment, original))
 }
 
 impl Deployment {
@@ -353,6 +536,59 @@ fn mounts_match(config: &Value, service: &str, container: &Value, data: fn(&str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn carried_settings_reject_a_substitute_at_the_pinned_target_id() {
+        struct Replaced {
+            selector: String,
+            returned: String,
+        }
+        impl Docker for Replaced {
+            fn run_io(
+                &mut self,
+                argv: &[String],
+                _: Duration,
+                _: docker::Input<'_>,
+                _: docker::Output<'_>,
+            ) -> docker::Ran {
+                assert_eq!(argv, ["inspect", "--type=container", &self.selector]);
+                docker::Ran {
+                    stdout: serde_json::to_vec(&serde_json::json!([{"Id": self.returned}]))
+                        .unwrap(),
+                    ..docker::Ran::default()
+                }
+            }
+        }
+
+        let id = "1".repeat(64);
+        let mut docker = Replaced {
+            selector: id.clone(),
+            returned: "2".repeat(64),
+        };
+        assert!(TargetPins::inspect(&mut docker, &id).is_err());
+        docker.returned = id.clone();
+        assert!(TargetPins::inspect(&mut docker, &id).is_ok());
+    }
+
+    #[test]
+    fn carried_env_writes_literal_values_and_accounts_for_compose_render_escaping() {
+        let mut settings = fixture();
+        settings.values[0] = "fixture$dollar#hash\"quote\\mid".into();
+        settings.values[1] = "spaces and `backticks`:fixture".into();
+        settings.values[2] = "unicode\u{2028}separator".into();
+        let lines = settings.assignments().unwrap();
+        for (key, value) in settings.entries() {
+            assert!(
+                lines.contains(&format!("{key}='{value}'\n")),
+                "{key} was not written literally"
+            );
+        }
+        assert!(runtime::compose_value(&settings.values[0]) == "fixture$$dollar#hash\"quote\\mid");
+        for invalid in ["line\nbreak", "single'quote", "trailing\\"] {
+            settings.values[0] = invalid.into();
+            assert!(settings.assignments().is_err());
+        }
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -463,29 +699,34 @@ mod tests {
                 "image" => docker.image = "sha256:other",
                 _ => {}
             }
-            let result = target_with(&mut docker, [true, false, false, false], |_, args, env| {
-                if args == ["config", "--hash", "*"] {
-                    let daemon = if case == "daemon hash" {
-                        "other"
-                    } else {
-                        "daemon-hash"
-                    };
-                    let pg = if case == "pg hash" {
-                        "other"
-                    } else {
-                        "pg-hash"
-                    };
-                    return Ok(format!("{DAEMON_SERVICE} {daemon}\n{PG_SERVICE} {pg}\n"));
-                }
-                assert_eq!(args, ["config", "--format", "json"]);
-                let mut rendered = original.clone();
-                if case != "interpolation" {
-                    for (key, value) in env {
-                        rendered["services"][DAEMON_SERVICE]["environment"][key] = json!(value);
+            let result = target_with(
+                &mut docker,
+                [true, false, false, false],
+                None,
+                |_, args, env| {
+                    if args == ["config", "--hash", "*"] {
+                        let daemon = if case == "daemon hash" {
+                            "other"
+                        } else {
+                            "daemon-hash"
+                        };
+                        let pg = if case == "pg hash" {
+                            "other"
+                        } else {
+                            "pg-hash"
+                        };
+                        return Ok(format!("{DAEMON_SERVICE} {daemon}\n{PG_SERVICE} {pg}\n"));
                     }
-                }
-                Ok(rendered.to_string())
-            });
+                    assert_eq!(args, ["config", "--format", "json"]);
+                    let mut rendered = original.clone();
+                    if case != "interpolation" {
+                        for (key, value) in env {
+                            rendered["services"][DAEMON_SERVICE]["environment"][key] = json!(value);
+                        }
+                    }
+                    Ok(rendered.to_string())
+                },
+            );
             assert_eq!(result.is_ok(), case == "valid", "{case}");
         }
     }
@@ -512,10 +753,8 @@ mod tests {
 
     #[test]
     fn a_mapped_bearer_requires_a_token_and_a_non_reserved_principal() {
-        assert!(has_mapped_bearer("left:right:fixture"));
-        assert!(!has_mapped_bearer(
-            "bad, :fixture, some: , other: DEFAULT, last: maintainer"
-        ));
+        assert!(mapped_bearer("left:right:fixture").is_some());
+        assert!(mapped_bearer("bad, :fixture, some: , other: DEFAULT, last: maintainer").is_none());
     }
 
     #[test]
