@@ -317,8 +317,7 @@ pub async fn write_batch(
 
 #[cfg(test)]
 mod tests {
-    //! Golden sequences from the Python recorder
-    //! (`harness/gen_principal_activity_goldens.py`).
+    //! Golden sequences captured by the frozen Python recorder at d81bba3a2.
     use super::*;
     use serde_json::Value;
     use std::sync::Arc;
