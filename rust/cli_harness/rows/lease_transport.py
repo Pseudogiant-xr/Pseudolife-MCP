@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from .. import core, normalize, producers
+from .. import core, lease_fixture, normalize, producers
 
 _DOCKER = """import base64, json, os, sys
 from pathlib import Path
@@ -163,12 +163,11 @@ def _launcher_binding(arm, proc):
 
 
 def _launcher_after(arm, obs):
-    from pseudolife_memory.os_lock import probe
     binding = arm.state['binding']
     routes = [json.loads(line) for line in (arm.home / 'routes.jsonl').read_text(encoding='utf-8-sig').splitlines()]
     assert routes == [{'File': binding['File'], 'Lead': binding['Lead']}] * 5, routes
     assert obs['exit'] == 0, core.decode(obs, 'stderr')
-    assert probe(arm.home / 'locks' / 'lease-gpu.lock') is False
+    assert lease_fixture.probe(arm.home / 'locks' / 'lease-gpu.lock') is False
     owned = json.loads((arm.home / 'owned.json').read_text(encoding='utf-8-sig'))
     assert [p['role'] for p in owned] == ['server', 'hold', 'second']
     assert len({p['pid'] for p in owned}) == 3
