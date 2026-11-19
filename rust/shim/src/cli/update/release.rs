@@ -192,8 +192,12 @@ pub(super) struct ImportRecovery {
     path: PathBuf,
     #[serde(skip)]
     on_bridge: bool,
+    #[serde(skip)]
+    replacement_interrupted: bool,
     bank: (String, String, String),
     image_id: String,
+    source_id: String,
+    source_image_id: String,
     original: RecoveryPoint,
     bridge: Option<RecoveryPoint>,
 }
@@ -203,6 +207,49 @@ impl ImportRecovery {
         data_dir()
             .join("update-engine")
             .join(format!("import-{activation}.json"))
+    }
+
+    fn pending_path() -> PathBuf {
+        data_dir().join("update-engine/pending-import")
+    }
+
+    fn valid_activation(activation: &str) -> bool {
+        activation.len() == 32 && activation.bytes().all(|b| b.is_ascii_hexdigit())
+    }
+
+    fn invalid() -> UpdateError {
+        UpdateError::usage(
+            "cannot verify the legacy import recovery record against the running daemon and its bank; restore the original pre-import recovery record or use the first run's rollback commands before retrying",
+        )
+    }
+
+    fn read(path: PathBuf) -> Result<Self> {
+        let bytes =
+            crate::board::state::read(&path, IMPORT_RECOVERY_LIMIT).map_err(|_| Self::invalid())?;
+        let mut record: Self = serde_json::from_slice(&bytes).map_err(|_| Self::invalid())?;
+        if record.original.commands.is_empty() {
+            return Err(Self::invalid());
+        }
+        record.path = path;
+        Ok(record)
+    }
+
+    fn pending() -> Result<Option<(String, Self)>> {
+        let path = Self::pending_path();
+        if let Err(error) = fs::symlink_metadata(&path)
+            && error.kind() == std::io::ErrorKind::NotFound
+        {
+            return Ok(None);
+        }
+        let bytes = crate::board::state::read(&path, 32).map_err(|_| Self::invalid())?;
+        let activation = std::str::from_utf8(&bytes)
+            .ok()
+            .filter(|value| Self::valid_activation(value))
+            .ok_or_else(Self::invalid)?;
+        Ok(Some((
+            activation.to_owned(),
+            Self::read(Self::path(activation))?,
+        )))
     }
 
     fn bank(running: &Value) -> Option<(String, String, String)> {
@@ -244,6 +291,16 @@ impl ImportRecovery {
             self.bridge.as_ref().map(|point| point.commands.as_slice()),
         )
     }
+
+    fn unverified_progress(&self) -> ImportProgress {
+        if self.replacement_interrupted {
+            ImportProgress::ReplacementUnverified
+        } else if !self.on_bridge && self.bridge.is_some() {
+            ImportProgress::ApplyingRust
+        } else {
+            ImportProgress::ApplyingBridge
+        }
+    }
 }
 
 struct ImportRun {
@@ -278,6 +335,7 @@ impl ImportRun {
 enum ImportProgress {
     BeforeBridge,
     ApplyingBridge,
+    ReplacementUnverified,
     BridgeHealthy,
     Imported,
     ApplyingRust,
@@ -296,6 +354,9 @@ fn import_stage_error(
             format!(
                 "The Python {IMPORT_VERSION} bridge replacement was attempted. Its health and bank import could not be verified."
             )
+        }
+        ImportProgress::ReplacementUnverified => {
+            "The update saved its recovery point before replacing the daemon. The replacement has not been verified.".into()
         }
         ImportProgress::BridgeHealthy => {
             format!(
@@ -765,10 +826,10 @@ impl Update {
             && labels[engine::RELEASE_LABEL].is_string()
             && engine::validated(&labels).is_err();
         if !on_bridge && !unfinished_rust {
-            return Ok(None);
+            return self.unfinished_replacement();
         }
         let Some(activation) = labels[engine::ACTIVATION_LABEL].as_str() else {
-            return Ok(None);
+            return self.unfinished_replacement();
         };
         let missing = || {
             UpdateError::usage(
@@ -781,11 +842,11 @@ impl Update {
                     || engine::validated(&labels)
                         .is_ok_and(|service| service["image"] == IMPORT_IMAGE))
         };
-        if activation.len() != 32 || !activation.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if !ImportRecovery::valid_activation(activation) {
             return if legacy_bridge() {
                 Err(missing())
             } else {
-                Ok(None)
+                self.unfinished_replacement()
             };
         }
         let path = ImportRecovery::path(activation);
@@ -795,42 +856,89 @@ impl Update {
             return if legacy_bridge() {
                 Err(missing())
             } else {
-                Ok(None)
+                self.unfinished_replacement()
             };
         }
-        let invalid = || {
-            UpdateError::usage(
-                "cannot verify the legacy import recovery record against the running daemon and its bank; restore the original pre-import recovery record or use the first run's rollback commands before retrying",
-            )
-        };
-        let bytes =
-            crate::board::state::read(&path, IMPORT_RECOVERY_LIMIT).map_err(|_| invalid())?;
-        let mut recovery: ImportRecovery = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-        let (code, out) = self.docker_call(&["inspect", DAEMON_CONTAINER]);
-        let data: Vec<Value> = serde_json::from_str(&out).map_err(|_| invalid())?;
-        let running = data.first().filter(|_| code == 0).ok_or_else(invalid)?;
+        let mut recovery = ImportRecovery::read(path)?;
+        let running = self.inspect_import_daemon()?;
         if running["Config"]["Labels"][engine::ACTIVATION_LABEL] != activation
             || running["Image"] != recovery.image_id
-            || ImportRecovery::bank(running).as_ref() != Some(&recovery.bank)
-            || recovery.original.commands.is_empty()
+            || ImportRecovery::bank(&running).as_ref() != Some(&recovery.bank)
         {
-            return Err(invalid());
+            return Err(ImportRecovery::invalid());
         }
         recovery.on_bridge = on_bridge;
-        recovery.path = path;
         Ok(Some(recovery))
+    }
+
+    fn inspect_import_daemon(&self) -> Result<Value> {
+        let (code, out) = self.docker_call(&["inspect", DAEMON_CONTAINER]);
+        let data: Vec<Value> = serde_json::from_str(&out).map_err(|_| ImportRecovery::invalid())?;
+        data.into_iter()
+            .next()
+            .filter(|_| code == 0)
+            .ok_or_else(ImportRecovery::invalid)
+    }
+
+    fn unfinished_replacement(&self) -> Result<Option<ImportRecovery>> {
+        let Some((activation, mut recovery)) = ImportRecovery::pending()? else {
+            return Ok(None);
+        };
+        let running = self.inspect_import_daemon()?;
+        if ImportRecovery::bank(&running).as_ref() != Some(&recovery.bank) {
+            return Err(ImportRecovery::invalid());
+        }
+        let labels = &running["Config"]["Labels"];
+        // A crash after accepting Rust can leave only the pending pointer.
+        if labels[engine::ACTIVATION_LABEL] == activation
+            && running["Image"] == recovery.image_id
+            && labels[engine::ENGINE_LABEL] == "rust"
+            && engine::validated(labels).is_ok()
+        {
+            return Ok(None);
+        }
+        // The original rollback recreates the daemon from this exact tag.
+        // Its new container ID distinguishes it from the interrupted source.
+        if running["Image"] == recovery.original.rollback["image_id"]
+            && running["Config"]["Image"] == recovery.original.rollback["tag"]
+            && running["Id"] != recovery.source_id
+        {
+            return Ok(None);
+        }
+        if running["Id"] != recovery.source_id || running["Image"] != recovery.source_image_id {
+            return Err(ImportRecovery::invalid());
+        }
+        recovery.replacement_interrupted = true;
+        Ok(Some(recovery))
+    }
+
+    pub(super) fn refuse_missing_import_daemon(&self) -> Result<()> {
+        let Some((_, mut recovery)) = ImportRecovery::pending()? else {
+            return Ok(());
+        };
+        recovery.replacement_interrupted = true;
+        Err(recovery.error(UpdateError::new(
+            "Docker Compose no longer exposes the daemon under its normal name; restore a verified recovery point before retrying",
+        ), recovery.unverified_progress()))
+    }
+
+    pub(super) fn refuse_import_noop(&self) -> Result<()> {
+        if let Err(error) = fs::symlink_metadata(ImportRecovery::pending_path())
+            && error.kind() == std::io::ErrorKind::NotFound
+        {
+            return Ok(());
+        }
+        let Some(recovery) = self.active_import()? else {
+            return Ok(());
+        };
+        Err(recovery.error(UpdateError::new(
+            "the running version does not establish that the legacy import finished; check the daemon and use the saved recovery instructions before retrying",
+        ), recovery.unverified_progress()))
     }
 
     pub(super) fn import_health_error(&self, error: UpdateError) -> UpdateError {
         match self.active_import() {
-            Ok(Some(record)) => record.error(
-                error,
-                if record.on_bridge {
-                    ImportProgress::ApplyingBridge
-                } else {
-                    ImportProgress::ApplyingRust
-                },
-            ),
+            Ok(Some(record)) => record.error(error, record.unverified_progress()),
             Ok(None) => error,
             Err(error) => error,
         }
@@ -1304,15 +1412,14 @@ impl Update {
         self.rollback_lines = recovery.original.commands.clone();
         let original_commands = self.rollback_lines.join("\n");
         let on_bridge = recovery.on_bridge;
-        let import = ImportRun::new(
-            if on_bridge {
-                ImportProgress::ApplyingBridge
-            } else {
-                ImportProgress::ApplyingRust
-            },
-            Some(recovery),
-        );
+        let interrupted = recovery.replacement_interrupted;
+        let import = ImportRun::new(recovery.unverified_progress(), Some(recovery));
         let result = (|| {
+            if interrupted {
+                return Err(UpdateError::new(
+                    "Docker Compose did not finish replacing the daemon; restore a verified recovery point before retrying",
+                ));
+            }
             if !on_bridge {
                 return Err(UpdateError::new(
                     "the Rust replacement has no accepted activation; restore a verified recovery point before retrying",
@@ -1406,6 +1513,14 @@ impl Update {
             return Err(unavailable());
         }
         let bank = ImportRecovery::bank(running).ok_or_else(unavailable)?;
+        let source_id = running["Id"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(unavailable)?;
+        let source_image_id = running["Image"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(unavailable)?;
         let point = RecoveryPoint {
             rollback: self.report.rollback.clone(),
             commands: self.rollback_lines.clone(),
@@ -1416,8 +1531,11 @@ impl Update {
             let record = ImportRecovery {
                 path,
                 on_bridge,
+                replacement_interrupted: false,
                 bank,
                 image_id: image_id.into(),
+                source_id: source_id.into(),
+                source_image_id: source_image_id.into(),
                 original: point,
                 bridge: None,
             };
@@ -1433,9 +1551,13 @@ impl Update {
             let mut replacement = record.clone();
             replacement.path = path;
             replacement.image_id = image_id.into();
+            replacement.source_id = source_id.into();
+            replacement.source_image_id = source_image_id.into();
             replacement.save()?;
         }
-        Ok(())
+        // Publish only after the corresponding original/bridge recovery
+        // data is durable, and before Compose can remove the original name.
+        seams::write_atomic(&ImportRecovery::pending_path(), activation.as_bytes())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1674,6 +1796,12 @@ impl Update {
             }
             if service.get("labels").is_some() {
                 engine::write_overlay(&engine::release_accepted(), &service)?;
+            }
+            if matches!(stage, ReleaseStage::AfterImport(_))
+                && let Err(error) = fs::remove_file(ImportRecovery::pending_path())
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                self.warn("could not clear the completed import pointer; the accepted Rust activation and recovery records remain valid");
             }
             if !matches!(stage, ReleaseStage::Import(_)) {
                 if self.o.daemon_only {

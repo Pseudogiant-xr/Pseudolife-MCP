@@ -294,7 +294,8 @@ def models_overlay(s,files):
   s.get("models_overlay") and any(v.endswith("docker-compose.rust-ghcr.yml") for v in files))
 s["calls"].append(a)
 code=0;out=""
-if a[:1]==["inspect"]:
+if a[:1]==["inspect"] and s.get("canonical_missing"):code=1;out="Error: No such container"
+elif a[:1]==["inspect"]:
  if "--format" in a: out=s["running"]["Image"]
  elif "-f" in a:
   f=a[a.index("-f")+1]
@@ -392,6 +393,9 @@ elif a[:1]==["compose"]:
    if previous and previous not in s["images"].values():s.setdefault("orphaned",[]).append(previous)
  elif "up" in a:
   code=int(s["failure"]=="up" or bool(s.get("archived_python") and s.get("fail_rust_recreate")))
+  if s.get("interrupted_recreate"):
+   code=1
+   s["canonical_missing"]=s["interrupted_recreate"]=="removed"
   if code==0:
    s["deployed"]=True
    built=""
@@ -594,8 +598,9 @@ def host(tmp_path, failure="", mode="release"):
                 body = json.dumps({"tag_name": self.path.rsplit("/", 1)[-1], "draft": False}).encode()
             elif self.path == "/health":
                 deployed = current["deployed"]
-                waiting = current.get("archived_python") and current.get("wait_for_bridge")
-                if waiting:
+                bridge_wait = current.get("archived_python") and current.get("wait_for_bridge")
+                waiting = bridge_wait or deployed and not current.get("archived_python") and current.get("wait_for_rust")
+                if bridge_wait:
                     (home / "bridge-health-requested").touch()
                 body = json.dumps({"status": "starting" if waiting else "error" if deployed and failure == "health" or not deployed and failure == "stopped" else "ok",
                                    "version": "wrong" if deployed and failure == "version" else "0.23.1" if current.get("archived_python") else current.get("target_version", "0.21.1") if deployed else current.get("running_version", "0.21.0"),
@@ -2045,6 +2050,55 @@ def test_resume_refuses_a_different_bank_at_the_same_bridge(tmp_path):
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary, [*args, "--health-retries", "1"])
         assert "cannot verify the legacy import recovery record" in result.stdout, result.stdout
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+@pytest.mark.parametrize("cut", ["original still running", "removed"])
+def test_interrupted_compose_replacement_keeps_pre_import_recovery(tmp_path, cut):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_published=True,
+                     rust_only_release=True, interrupted_recreate=cut)
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.25.0", "--daemon-only", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--engine", "rust", "--rollback-tag", "original-fixture"])
+        assert first.returncode == 1 and "daemon recreate failed" in first.stdout, first.stdout
+        point = json.loads(first.stdout)["rollback"]
+        assert point["tag"].endswith("original-fixture-pre-import")
+        state = json.loads(state_path.read_text())
+        state.update(calls=[], interrupted_recreate=None)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, [*args, "--rollback-tag", "retry-fixture"])
+        assert result.returncode != 0, result.stdout
+        assert Path(point["backup"]["dump"]).name in result.stdout, result.stdout
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+def test_unattended_does_not_accept_a_matching_version_after_unverified_rust_recreate(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_only_release=True,
+                     no_board_peer=True, wait_for_rust=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.25.0", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--engine", "rust", "--rollback-tag", "original-fixture"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        original = json.loads(first.stdout)["rollback"]["before_import"]["backup"]["dump"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        state = json.loads(state_path.read_text())
+        state.update(calls=[], wait_for_rust=False)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, [*args, "--unattended"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert Path(original).name in result.stdout, result.stdout
+        assert "to roll back to the imported bank" in result.stdout, result.stdout
         assert "backup" not in stages(json.loads(state_path.read_text()))
 
 

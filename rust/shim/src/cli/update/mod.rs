@@ -683,7 +683,8 @@ impl Update {
         self.update()
     }
     pub fn update(&mut self) -> Result<()> {
-        if !self.o.clients_only
+        if self.o.checkout.is_none()
+            && !self.o.clients_only
             && let Some(recovery) = self.active_import()?
         {
             self.report.mode = "release".into();
@@ -725,6 +726,9 @@ impl Update {
         }
         let tier = self.detect_tier()?;
         self.report.tier = tier.clone();
+        if tier == "client" && !self.o.clients_only && !self.o.check {
+            self.refuse_missing_import_daemon()?;
+        }
         if self.o.engine.is_some() && tier != "docker" {
             return Err(UpdateError::usage(
                 "--engine requires a Docker host; run update --engine <engine> --checkout <repo> there; nothing was changed",

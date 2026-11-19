@@ -299,6 +299,7 @@ fn run_inner(
     let tier = update.detect_tier()?;
     update.report.tier = tier.clone();
     if tier != "docker" {
+        update.refuse_missing_import_daemon()?;
         if on_shim_runtime() {
             return run_clients(update);
         }
@@ -324,6 +325,7 @@ fn run_inner(
         ));
     }
     if !version_is_newer(&latest, &current) {
+        update.refuse_import_noop()?;
         update.step(format!(
             "current: {current} is the newest release; nothing to do"
         ));
@@ -378,6 +380,7 @@ fn run_inner(
     let current = health_version(&health)?;
     update.report.current = Some(current.clone());
     if !version_is_newer(&latest, &current) {
+        update.refuse_import_noop()?;
         update.step(format!(
             "current: the daemon already runs {current} (another update moved it); nothing to do"
         ));
