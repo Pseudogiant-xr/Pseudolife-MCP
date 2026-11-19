@@ -353,8 +353,9 @@ def test_code_paths_cannot_use_the_docs_selection(repo, code):
     assert docs_scope.docs_selection(env) == ("other", [])
 
 
-def test_divergence_ledger_selection_checks_the_committed_index(repo):
-    targets = docs_scope.doc_tests(["rust/daemon/divergences/README.md"])
+@pytest.mark.parametrize("path", ["rust/daemon/divergences.md", "rust/daemon/divergences/README.md"])
+def test_divergence_ledger_selection_checks_the_committed_index(repo, path):
+    targets = docs_scope.doc_tests([path])
     assert "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory" in targets
 
 

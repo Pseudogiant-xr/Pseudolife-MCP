@@ -24,6 +24,9 @@ DOC_GUARDS = (
     "tests/test_eval_evidence.py", "tests/test_i18n_readme.py", "tests/test_claude_md_citations.py",
     "tests/test_extractor_model_lists.py",
 )
+DIVERGENCE_POINTER_READER = (
+    "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory"
+)
 # Some readers resolve directories or snapshots instead of naming the file.
 DIRECTORY_READERS = {
     "changelog.d/": ("tests/test_changelog_fragments.py",),
@@ -31,7 +34,7 @@ DIRECTORY_READERS = {
     "docs/guide/": ("tests/test_plugin_packaging.py",),
     "examples/": ("tests/test_plugin_packaging.py",),
     "rust/daemon/divergences/": (
-        "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory",
+        DIVERGENCE_POINTER_READER,
         "rust/ci/test_divergences_ledger.py::test_the_committed_index_carries_no_count_table",
         "rust/ci/test_divergences_ledger.py::test_counts_of_the_committed_ledger_cover_every_entry",
     ),
@@ -196,6 +199,8 @@ def doc_tests(paths: list[str]) -> list[str]:
     for prefix, tests in DIRECTORY_READERS.items():
         if any(path.startswith(prefix) for path in paths):
             readers.update(tests)
+    if "rust/daemon/divergences.md" in paths:
+        readers.add(DIVERGENCE_POINTER_READER)
     if CENSUS in paths or any(
             path.startswith(("docs/", "examples/")) and PurePosixPath(path).suffix in CENSUS_EXTENSIONS
             for path in paths):
