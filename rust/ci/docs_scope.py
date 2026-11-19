@@ -14,7 +14,7 @@ import sys
 from ops.ci_batch_passed import BATCH_PREFIX, MASTER, ApiError, github_get
 from rust.producer_census import EXTENSIONS as CENSUS_EXTENSIONS
 
-from .parity_scope import RUST_PLAN_DOCS, is_docs, is_documentation_path
+from .parity_scope import RUST_PLAN_DOCS, is_docs, is_documentation_excluded, is_documentation_path
 
 ROOT = Path(__file__).resolve().parents[2]
 CENSUS = "rust/producer-census.json"
@@ -27,6 +27,8 @@ DOC_GUARDS = (
 DIVERGENCE_POINTER_READER = (
     "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory"
 )
+RERANK_READER = ("rust/daemon/harness/test_w2d_rerank_check.py"
+                 "::test_the_declared_case_is_the_truncated_lorem_pool_and_its_entry_exists")
 # Some readers resolve directories or snapshots instead of naming the file.
 DIRECTORY_READERS = {
     "changelog.d/": ("tests/test_changelog_fragments.py",),
@@ -41,6 +43,7 @@ DIRECTORY_READERS = {
         "rust/ci/test_divergences_ledger.py::test_the_committed_directory_renders_and_parses_back_to_itself",
         "rust/ci/test_divergences_ledger.py::test_the_committed_index_carries_no_count_table",
         "rust/ci/test_divergences_ledger.py::test_counts_of_the_committed_ledger_cover_every_entry",
+        RERANK_READER,
     ),
 }
 CENSUS_READERS = (
@@ -55,7 +58,10 @@ PARITY_READERS = (
     "rust/test_contract_inventory.py",
 )
 READER_FILE = re.compile(r"tests/(?:[a-zA-Z0-9_-]+/)*test_[a-zA-Z0-9_]+\.py")
-TEST_TARGET = re.compile(rf"(?:{READER_FILE.pattern}|rust/(?:ci/)?test_[A-Za-z0-9_]+\.py)(?:::test_[A-Za-z0-9_]+)?")
+TEST_TARGET = re.compile(
+    rf"(?:{READER_FILE.pattern}|rust/(?:ci/)?test_[A-Za-z0-9_]+\.py)(?:::test_[A-Za-z0-9_]+)?"
+    rf"|{re.escape(RERANK_READER)}"
+)
 
 
 def reader_targets(file: str, names: list[str]) -> set[str]:
@@ -91,7 +97,7 @@ def documentation_only(paths: Iterable[str], *, allow_generated_census: bool = F
     """True for a nonempty docs diff, optionally with the batch's census."""
     docs = False
     for path in paths:
-        if is_docs(path):
+        if is_docs(path) and not is_documentation_excluded(path):
             docs = True
         elif not (allow_generated_census and path == CENSUS):
             return False

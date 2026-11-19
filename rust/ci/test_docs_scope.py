@@ -132,6 +132,8 @@ def ci_outputs(root, tmp_path, env, before, weekly=""):
     ("rust-plan-docs", "docs"),
     ("python", "other"),
     ("workflow", "other"),
+    ("installer-input", "other"),
+    ("frontend-asset", "other"),
     ("census", "other"),
     ("earlier-code", "other"),
     ("batch-passed", "other"),
@@ -161,6 +163,8 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
         # A real plan path receives the legacy Rust-only verdict.
         paths = [min(RUST_PLAN_DOCS)]
     mixed = {"python": "helper.py", "workflow": ".github/workflows/rust.yml",
+             "installer-input": "examples/CLAUDE.memory.md",
+             "frontend-asset": "frontend/public/vendor/README.md",
              "census": "rust/producer-census.json"}
     if case in mixed:
         paths.append(mixed[case])
@@ -345,7 +349,8 @@ def test_docs_guard_selection_keeps_the_named_guards_and_touched_readers(repo, t
 
 @pytest.mark.parametrize("code", ["helper.py", "docs/example.py", "tests/guide.md",
                                   "ops/usage.md", "plugin/hooks/usage.md", ".github/workflows/notes.md",
-                                  "evals/prompts/sonnet_extractor_v5.md"])
+                                  "evals/prompts/sonnet_extractor_v5.md", "examples/CLAUDE.memory.md",
+                                  "frontend/public/vendor/README.md"])
 def test_code_paths_cannot_use_the_docs_selection(repo, code):
     _, _, commit = repo
     head = commit("docs/status.md", code)
@@ -359,6 +364,39 @@ def test_divergence_ledger_selection_checks_the_committed_index(repo, path):
     assert "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory" in targets
     round_trip = "rust/ci/test_divergences_ledger.py::test_the_committed_directory_renders_and_parses_back_to_itself"
     assert (round_trip in targets) is path.startswith("rust/daemon/divergences/")
+
+
+RERANK_READER = ("rust/daemon/harness/test_w2d_rerank_check.py"
+                 "::test_the_declared_case_is_the_truncated_lorem_pool_and_its_entry_exists")
+
+
+def test_renaming_a_divergence_selects_the_rerank_reader(repo):
+    from rust.daemon.harness.w2d_rerank_check import DECLARED_TIES
+
+    _, _, commit = repo
+    old = DECLARED_TIES[20]
+    commit(old)
+    docs_scope.git("mv", old, str(Path(old).with_name("renamed-entry.md")).replace(os.sep, "/"))
+    head = commit("rust/daemon/divergences/README.md")
+    env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example", "GITHUB_SHA": head}
+    decision, targets = docs_scope.docs_selection(env)
+    assert decision == "docs"
+    assert RERANK_READER in targets
+
+
+def test_docs_guard_runner_accepts_the_rerank_reader(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["docs_scope", "tests"])
+    monkeypatch.setenv("DOC_TESTS", json.dumps([*docs_scope.DOC_GUARDS, RERANK_READER]))
+
+    def run(argv, *, cwd):
+        assert argv[-1] == RERANK_READER
+        assert cwd == ROOT
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", run)
+    with pytest.raises(SystemExit) as result:
+        docs_scope.main()
+    assert result.value.code == 0
 
 
 def test_tier_bench_results_keep_the_committed_pilot_reader(repo):

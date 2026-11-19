@@ -1312,6 +1312,19 @@ def test_static_parity_siblings_share_a_verdict_only_while_their_definitions_mat
     assert integrate._static_parity_peer("parity", jobs) is None
 
 
+def test_a_failing_static_parity_peer_with_a_different_definition_keeps_a_member_out(world, capsys):
+    timeout_alias = "timeout-minutes: *parity_timeout"
+    assert WORKFLOW.count(timeout_alias) == 1
+    workflow = WORKFLOW.replace(timeout_alias, "timeout-minutes: 6")
+    # Only Ubuntu is in the rollup. The Windows failure must be found in
+    # the attempt listing even though both legs have cancellation-shaped steps.
+    _gate_world(world, rollup=["509"], head_workflow=workflow, checkout_workflow=workflow)
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("job", GATES, ids=["windows", "ubuntu"])
 @pytest.mark.parametrize("sibling_conclusion", ["success", "cancelled", "failure"],
                          ids=["own-failure", "cancelled-sibling", "cancel-step-sibling"])

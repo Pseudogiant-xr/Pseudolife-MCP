@@ -768,7 +768,7 @@ DOCS_ONLY_CHANGES = [
     ["CLAUDE.md"],
     ["README.md", "CHANGELOG.md", "changelog.d/2026-10-17-x.md"],
     ["docs/guide/configuration.md", "docs/atlas/atlas.json", "llms.txt", "llms-full.txt"],
-    ["examples/CLAUDE.memory.md", "frontend/README.md", "README.zh-CN.md"],
+    ["examples/hook-instructions.md", "frontend/README.md", "README.zh-CN.md"],
     ["docs/images/diagram.svg"],
     ["docs/runbooks/note.MD", "docs/images/diagram.PNG"],
     # The port's plan pages no Rust or parity job reads (parity_scope.RUST_PLAN_DOCS).
@@ -824,6 +824,16 @@ def test_legacy_scope_keeps_census_companion_when_docs_plan_is_unavailable(monke
         "full=true", "rust=false"]
 
 
+@pytest.mark.parametrize("event, ref, full", [
+    ("pull_request", "docs/topic", "false"),
+    ("pull_request", BATCH_REF, "true"),
+    ("merge_group", "", "true"),
+])
+@pytest.mark.parametrize("path", ["examples/CLAUDE.memory.md", "frontend/public/vendor/README.md"])
+def test_checkout_runtime_input_still_runs_the_rust_job(monkeypatch, event, ref, full, path):
+    assert run_scope(monkeypatch, event, [path], head_ref=ref) == [f"full={full}", "rust=true"]
+
+
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", CODE_CHANGES)
 def test_scope_runs_everything_for_any_other_change(monkeypatch, files, event):
@@ -872,13 +882,17 @@ function git {
 '''
     script = tmp_path / "master-scope.ps1"
     script.write_text(fake_git + "\n" + old_scope, encoding="utf-8")
+    # The installer copies this checkout input into the destination's AGENTS.md.
+    # The Rust job now checks it even though legacy per-suite and golden
+    # selection still match the baseline above.
+    scope_paths = [path for path in paths if path != "examples/CLAUDE.memory.md"]
     for event, ref in (("pull_request", "docs/topic"), ("pull_request", BATCH_REF), ("merge_group", "")):
         env = dict(os.environ, EVENT_NAME=event, HEAD_REF=ref, MERGE_GROUP_BASE_REF="refs/heads/master",
-                   GITHUB_OUTPUT=str(tmp_path / "github-output"), W59_SCOPE_PATHS=json.dumps(paths))
+                   GITHUB_OUTPUT=str(tmp_path / "github-output"), W59_SCOPE_PATHS=json.dumps(scope_paths))
         baseline = subprocess.check_output(["pwsh", "-NoProfile", "-File", str(script)], env=env, text=True)
         expected = [line for line in baseline.splitlines() if line.startswith(("full=", "rust="))]
         assert expected == [f"full={str(ref != 'docs/topic').lower()}", "rust=false"]
-        for path in paths:
+        for path in scope_paths:
             assert run_scope(monkeypatch, event, [path], head_ref=ref) == expected, path
 
 

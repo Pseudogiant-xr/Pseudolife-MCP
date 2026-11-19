@@ -237,7 +237,7 @@ def test_docs_path_hardening_excludes_code_suffixes(path):
 
 
 @pytest.mark.parametrize("path", [
-    "README.md", "examples/CLAUDE.memory.md", "examples/hook-instructions.md",
+    "README.md", "examples/hook-instructions.md",
     "examples/commands/dream.md", ".claude/skills/sample/SKILL.md",
     "docs/dev/merge-batches.md", "docs/guide/configuration.md", "docs/specs/example.md",
     "docs/atlas/atlas.json", "docs/images/diagram.svg", "docs/atlas/atlas.html",
