@@ -19,8 +19,14 @@ flowchart TD
     H -. changed credentials or connection .-> F
 ```
 
-**With the native client**, tunnels are not available yet: it cannot set
-up, start, stop or refresh one. It answers `tunnel status` for a profile it
+**With the native client**, `tunnel setup` can save a profile using an
+explicit `--daemon-url` and owner-only `--token-file` after `--accept-access`
+and an authenticated daemon check. Resume the prepared profile with
+`--tunnel-id`, then import its first runtime key in a separate setup command
+using `--read-key` at a terminal or an owner-only `--key-file`. Key renewal,
+starting, stopping and refreshing a tunnel still require the Python client.
+
+The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel
 runs. It also answers `tunnel update`, which starts, stops and signals
 nothing. `tunnel update` reports a tunnel that is not running, and names a
@@ -30,10 +36,11 @@ runs, or may run, as `stale`: it is left as it is, because this client
 cannot refresh it yet. A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native
-client also answers the refusals of `tunnel verify` and `tunnel setup`
-before they would change anything. Every other step stops with
+client also answers preflight refusals for `tunnel verify` and `tunnel setup`.
+Operations it defers stop with
 `pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and exit 1,
-having changed nothing. That covers setup itself, `start`, `run`, `stop`,
+having changed nothing. That covers guided setup and unsupported saved-profile
+edits, `start`, `run`, `stop`,
 `doctor`, `service`, the cloud verification, `status` of a profile in a
 form it does not read or beside a verification or refresh file in a form
 it does not read, and `verify` while a process record exists or with a

@@ -4,7 +4,7 @@
 use std::{
     fs::{self, File},
     io::{IsTerminal, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use serde_json::Value;
@@ -38,7 +38,13 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
 
     if setup.has_key_input() {
         if profile.state != "ready" {
-            return Err(Fail::Defer);
+            return Err(if profile.tunnel_id.is_none() {
+                Fail::Tunnel(
+                    "save a tunnel ID with tunnel setup --tunnel-id before importing its runtime key",
+                )
+            } else {
+                Fail::Defer
+            });
         }
         require_no_autostart(&saved)?;
         require_inactive(root, &profile.name)?;
@@ -54,7 +60,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
         }
         let encoded = encode_key(&key.0)?;
         let (_lock, _) = commit_lock(root, path, &original)?;
-        require_inactive(root, &profile.name)?;
+        recheck_inactive(root, &profile.name, &status)?;
         publish_new(&store::key_path(root, &profile.name), |file| {
             file.write_all(&encoded.0)
         })?;
@@ -75,7 +81,11 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             desired.insert("daemon_url".into(), Value::from(url.clone()));
             desired.insert("token_file".into(), Value::from(absolute_token(token)?));
         }
-        _ => return Err(Fail::Defer),
+        _ => {
+            return Err(Fail::Tunnel(
+                "pass both --daemon-url and --token-file to change the saved daemon connection",
+            ));
+        }
     }
     setup.edit(&mut desired);
     let needs_consent = saved["consent"] != true
@@ -116,7 +126,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
         return Ok((String::new(), crate::cli::tunnel::STDOUT_REFUSED));
     }
     let (_lock, expected) = commit_lock(root, path, &original)?;
-    require_inactive(root, &updated.name)?;
+    recheck_inactive(root, &updated.name, &status)?;
     stage_and_publish(
         path,
         |file| file.write_all(&bytes),
@@ -146,12 +156,32 @@ fn require_no_autostart(saved: &serde_json::Map<String, Value>) -> Result<(), Fa
 }
 
 fn require_inactive(root: &Path, name: &str) -> Result<(), Fail> {
-    for path in [store::key_path(root, name), record::path(root, name)] {
-        if store::occupied(&path)? {
-            return Err(Fail::Defer);
-        }
+    if runtime_conflict(root, name)?.is_some() {
+        return Err(Fail::Defer);
     }
     Ok(())
+}
+
+fn recheck_inactive(root: &Path, name: &str, status: &str) -> Result<(), Fail> {
+    if let Some((path, kind)) = runtime_conflict(root, name)? {
+        return Err(Fail::Detail(format!(
+            "a {kind} appeared during setup at {}. Check `{status}` before retrying",
+            path.display(),
+        )));
+    }
+    Ok(())
+}
+
+fn runtime_conflict(root: &Path, name: &str) -> Result<Option<(PathBuf, &'static str)>, Fail> {
+    for (path, kind) in [
+        (store::key_path(root, name), "runtime key"),
+        (record::path(root, name), "process record"),
+    ] {
+        if store::occupied(&path)? {
+            return Ok(Some((path, kind)));
+        }
+    }
+    Ok(None)
 }
 
 fn commit_lock(root: &Path, profile: &Path, expected: &[u8]) -> Result<(File, Vec<u128>), Fail> {

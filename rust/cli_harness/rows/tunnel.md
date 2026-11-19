@@ -61,11 +61,14 @@ writing it or contacting the daemon. An equivalent Python-written profile
 also counts as an unchanged rerun. The response points to `tunnel status`
 for checking the saved configuration. A stopped tunnel can resume profile
 setup before its first key is imported. Changing the daemon connection or
-expanding access requires explicit consent. Key renewal and edits to a
-profile with autostart, a process record, or a saved key defer. Combining
-key intake with profile settings on an existing profile also defers, as
-does changing just one part of its saved daemon connection. Malformed
-saved profiles still defer. These effects are covered in
+expanding access requires explicit consent. Key renewal is refused with
+instructions for the Python client, which also appear in expired-key status.
+Setup requires a saved tunnel ID before first-key intake and both connection
+flags when repointing the daemon. A key or process record that appears during
+setup gets a refusal naming its path. Edits to a profile with autostart,
+a process record, or a saved key still defer at preflight. Combining key
+intake with other profile settings and unreadable saved profiles still defer.
+These effects are covered in
 `shim/tests/cli_tunnel_contract.rs` against a disposable daemon fixture.
 The setup cases in this row exercise preflight refusals and deferrals.
 

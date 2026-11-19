@@ -519,9 +519,8 @@ fn report(
         ));
     }
     if expired {
-        text.push_str(&format!(
-            "Renew privately: tunnel setup --profile {name} --read-key --key-expires-at <ISO timestamp>.\n"
-        ));
+        text.push_str(KEY_RENEWAL);
+        text.push('\n');
     }
     text
 }
@@ -800,6 +799,8 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
     Ok((selected, token))
 }
 
+const KEY_RENEWAL: &str = "Runtime key renewal requires the Python client. Rerun the release installer with PSEUDOLIFE_SHIM_ENGINE=python, then use that client's tunnel setup with --read-key and --key-expires-at.";
+
 fn setup(options: &Options, root: &Path) -> Output {
     let path = store::profile_path(root, &options.profile)?;
     let settings = &options.setup;
@@ -809,6 +810,9 @@ fn setup(options: &Options, root: &Path) -> Output {
         ));
     }
     let saved = occupied(&path)?;
+    if saved && settings.has_key_input() && settings.key_expires_at.is_some() {
+        return Err(Fail::Tunnel(KEY_RENEWAL));
+    }
     if settings.has_key_input() && (settings.has_profile_settings() || settings.accept_access) {
         return Err(if saved {
             Fail::Defer

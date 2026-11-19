@@ -342,6 +342,20 @@ fn pending_setup_profile(home: &Home, url: &str) {
 }
 
 #[test]
+fn setup_requires_a_tunnel_id_before_first_key_intake() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    pending_setup_profile(&home, &daemon.url());
+    assert_refused(
+        &home,
+        &["setup", "--profile-dir", &home.dir(), "--read-key"],
+        &[],
+        "save a tunnel ID with tunnel setup --tunnel-id before importing its runtime key\n",
+    );
+    daemon.assert_untouched();
+}
+
+#[test]
 fn setup_repoints_a_moved_credential_after_explicit_consent() {
     let home = setup_home();
     let daemon = common::Fixture::start();
@@ -350,7 +364,7 @@ fn setup_repoints_a_moved_credential_after_explicit_consent() {
     std::fs::rename(home.path("token"), &moved).unwrap();
     let path = home.path("tunnels/dot.profile.json");
     let before = std::fs::read(&path).unwrap();
-    assert_deferred(
+    assert_refused(
         &home,
         &[
             "setup",
@@ -360,6 +374,7 @@ fn setup_repoints_a_moved_credential_after_explicit_consent() {
             moved.to_str().unwrap(),
         ],
         &[],
+        "pass both --daemon-url and --token-file to change the saved daemon connection\n",
     );
     let (mut cmd, ambient) = setup_command(&home, &daemon.url, &moved);
     let refused = cmd.output().unwrap();
@@ -377,7 +392,7 @@ fn setup_repoints_a_moved_credential_after_explicit_consent() {
 }
 
 #[test]
-fn setup_defers_the_renewal_command_printed_by_status() {
+fn setup_refuses_native_renewal_and_status_points_to_python() {
     let home = setup_home();
     let daemon = Listener::new();
     let root = home.path(".pseudolife-mcp/tunnel");
@@ -393,27 +408,21 @@ fn setup_defers_the_renewal_command_printed_by_status() {
         .unwrap(),
     )
     .unwrap();
-    // The fixture represents an occupied key slot. Renewal must defer before
-    // native code opens or attempts to decrypt that key.
+    // The fixture represents an occupied key slot. The refusal must precede
+    // any native attempt to open or decrypt that key.
     state(&root.join("dot.key"), b"opaque key fixture").unwrap();
 
     let status = run(&home, &["status"], &[]);
     assert_eq!(status.status.code(), Some(0));
     let output = String::from_utf8_lossy(&status.stdout);
-    let renewal = output
-        .lines()
-        .find_map(|line| line.strip_prefix("Renew privately: tunnel "))
-        .unwrap();
     let expires = "2099-12-01T00:00:00Z";
-    let renewal = renewal
-        .strip_suffix('.')
-        .unwrap()
-        .replace("<ISO timestamp>", expires);
-    assert_deferred(
-        &home,
-        &renewal.split_ascii_whitespace().collect::<Vec<_>>(),
-        &[],
-    );
+    let guidance = "Runtime key renewal requires the Python client. Rerun the release installer with PSEUDOLIFE_SHIM_ENGINE=python, then use that client's tunnel setup with --read-key and --key-expires-at.";
+    for key_args in [&["--read-key"][..], &["--key-file", "unused-fixture"]] {
+        let mut args = vec!["setup", "--profile", "dot", "--key-expires-at", expires];
+        args.extend_from_slice(key_args);
+        assert_refused(&home, &args, &[], &format!("{guidance}\n"));
+    }
+    assert!(output.lines().any(|line| line == guidance));
     assert_deferred(&home, &["setup", "--key-expires-at", expires], &[]);
     assert_deferred(&home, &["setup", "--read-key"], &[]);
     daemon.assert_untouched();
@@ -454,7 +463,7 @@ fn expect_setup_deferral_for_saved_authority(record: Option<&str>, autostart: bo
         ],
         &[],
     );
-    assert_deferred(
+    assert_refused(
         &home,
         &[
             "setup",
@@ -464,6 +473,7 @@ fn expect_setup_deferral_for_saved_authority(record: Option<&str>, autostart: bo
             token.to_str().unwrap(),
         ],
         &[],
+        "pass both --daemon-url and --token-file to change the saved daemon connection\n",
     );
     daemon.assert_untouched();
 }
@@ -808,22 +818,7 @@ fn setup_refuses_if_the_daemon_credential_changes_during_the_handshake() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-    let reached = loop {
-        if daemon
-            .records
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|r| r.message["method"] == "tools/list")
-        {
-            break true;
-        }
-        if std::time::Instant::now() >= deadline {
-            break false;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    };
+    let reached = wait_for_setup_tools_list(&daemon);
     if reached {
         pseudolife_stdio::board::state::atomic_write(
             &home.path("token"),
@@ -839,6 +834,83 @@ fn setup_refuses_if_the_daemon_credential_changes_during_the_handshake() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("credential changed during setup"));
     assert!(!home.path("tunnels").exists());
     ambient.assert_untouched();
+}
+
+#[test]
+fn setup_refuses_a_process_record_created_during_the_handshake() {
+    expect_setup_refusal_for_a_late_runtime_file("dot.process.json", "process record");
+}
+
+#[test]
+fn setup_refuses_a_key_created_during_the_handshake() {
+    expect_setup_refusal_for_a_late_runtime_file("dot.key", "runtime key");
+}
+
+fn expect_setup_refusal_for_a_late_runtime_file(file: &str, kind: &str) {
+    let home = setup_home();
+    let gate = std::sync::Arc::new(common::ResponseGate::default());
+    let daemon = common::Fixture::start_with(common::Setup {
+        lists: vec![common::Reply::Gated(
+            gate.clone(),
+            Box::new(common::Reply::Result(
+                serde_json::json!({"tools":[{"name":"fixture","inputSchema":{"type":"object"}}]}),
+            )),
+        )],
+        ..Default::default()
+    });
+    pending_setup_profile(&home, &daemon.url);
+    let profile = home.path("tunnels/dot.profile.json");
+    let before = std::fs::read(&profile).unwrap();
+    let path = home.path("tunnels").join(file);
+    let (mut setup, ambient) = setup_command(&home, &daemon.url, &home.path("token"));
+    let child = setup
+        .args(["--catalog", "full", "--accept-access"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let reached = wait_for_setup_tools_list(&daemon);
+    if reached {
+        pseudolife_stdio::board::state::atomic_create(&path, b"new runtime fixture").unwrap();
+    }
+    gate.release();
+    let output = child.wait_with_output().unwrap();
+    assert!(reached, "setup never reached tools/list");
+    assert_eq!(output.status.code(), Some(2), "{file}");
+    assert_eq!(
+        output.stderr,
+        native_text(&format!(
+            "a {kind} appeared during setup at {}. Check `pseudolife-mcp tunnel status --profile dot --profile-dir {}` before retrying\n",
+            path.display(),
+            shell_quoted(&home.dir())
+        ))
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("full"));
+    assert!(!stdout.contains("Profile dot saved"));
+    assert!(home.path("tunnels/.tunnel-setup.lock").is_file());
+    assert_eq!(std::fs::read(profile).unwrap(), before);
+    assert_eq!(std::fs::read(path).unwrap(), b"new runtime fixture");
+    ambient.assert_untouched();
+}
+
+fn wait_for_setup_tools_list(daemon: &common::Fixture) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        if daemon
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|record| record.message["method"] == "tools/list")
+        {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }
 
 #[test]
