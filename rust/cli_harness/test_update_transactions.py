@@ -2117,6 +2117,31 @@ def test_schema_56_without_weights_needs_no_counter_row_after_import(tmp_path):
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
 
 
+def test_resume_cannot_force_the_original_rollback_tag_onto_the_bridge(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(running_version="0.23.1", running_schema=59, target_version="0.25.0",
+                     target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.25.0", "--daemon-only", "--json",
+                "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--rollback-tag", "original"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        point = json.loads(first.stdout)["rollback"]
+        state = json.loads(state_path.read_text())
+        assert state["images"][point["tag"]] == point["image_id"]
+        state.update(calls=[], wait_for_bridge=False)
+        state_path.write_text(json.dumps(state))
+        resumed = run_arm(repo, env, binary, [*args, "--rollback-tag", "original-pre-import",
+                                               "--force-rollback-tag"])
+        assert resumed.returncode != 0, resumed.stdout
+        assert "reserved for the original pre-import rollback" in resumed.stdout, resumed.stdout
+        assert json.loads(state_path.read_text())["images"][point["tag"]] == point["image_id"]
+
+
 @pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("outcome", ["moved", "rust-leg-fails"])
 def test_an_import_leg_update_moves_the_clients_once_after_the_rust_gate(tmp_path, native, outcome):

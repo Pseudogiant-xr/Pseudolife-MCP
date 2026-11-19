@@ -1440,6 +1440,13 @@ impl Update {
             self.report.target = Some(target.clone());
             self.refuse_downgrade(Some(IMPORT_VERSION), &target)?;
             let before = self.daemon_health();
+            let previous = previous.or_else(|| {
+                before
+                    .as_ref()?
+                    .get("hooks_digest")?
+                    .as_str()
+                    .map(str::to_owned)
+            });
             let rust = self.prepare_release("rust", true, &target, before.as_ref())?;
             if let Some(reason) = gate_failure(
                 before.as_ref(),
@@ -1456,6 +1463,9 @@ impl Update {
             import.progress.set(ImportProgress::BridgeHealthy);
             confirm_import(&rust.import_status(self)?)?;
             import.progress.set(ImportProgress::Imported);
+            if !self.o.daemon_only {
+                self.refuse_tunnel_move_before_daemon()?;
+            }
             self.schema_before = Some(IMPORT_SCHEMA);
             let pg = self.release_disk(&rust)?;
             let image = format!("{RUST_IMAGE}:{target}");
@@ -1686,6 +1696,17 @@ impl Update {
             },
             current.unwrap_or("previous")
         );
+        if let ReleaseStage::AfterImport(import) = stage
+            && import
+                .recovery
+                .borrow()
+                .as_ref()
+                .is_some_and(|record| record.original.rollback["tag"] == rollback)
+        {
+            return Err(UpdateError::usage(
+                "that tag is reserved for the original pre-import rollback; choose another --rollback-tag suffix before retrying",
+            ));
+        }
         engine::tag_validated(self, &running_id, &rollback)?;
         let mut old_service = engine::rollback_service(&context.running, &rollback, None);
         if matches!(stage, ReleaseStage::AfterImport(_)) {
