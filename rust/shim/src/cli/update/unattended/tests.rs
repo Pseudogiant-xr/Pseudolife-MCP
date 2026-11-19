@@ -6,6 +6,31 @@ use std::{
 };
 
 #[test]
+fn github_discovery_unattended_exits_three_for_incomplete_release() {
+    let mut update = Update::new(super::super::Options::parse(vec![]).unwrap());
+    update.o.as_json = true;
+    update.docker = "fixture-docker".into();
+    update.command_probe = Some(|args| {
+        assert_eq!(
+            args,
+            ["inspect", "-f", "{{.Id}}", super::super::DAEMON_CONTAINER]
+        );
+        (0, "fixture".into())
+    });
+    update.health_probe =
+        Some(|| Some(json!({"version":"0.24.0","updates":{"unattended_daemon":true}})));
+    update.release_lookup = Some(Box::new(|| Ok(None)));
+    let code = run_inner(&mut update, |_| panic!("a release was not yet available")).unwrap();
+    assert_eq!(code, 3);
+    assert!(update.report.target.is_none());
+    assert_eq!(
+        update.report.steps.last().map(String::as_str),
+        Some(super::super::NO_PUBLISHED_RELEASE)
+    );
+    assert!(!update.release_started);
+}
+
+#[test]
 fn board_unavailable_malformed_or_truncated_fails_closed() {
     for reply in [
         json!({}),
