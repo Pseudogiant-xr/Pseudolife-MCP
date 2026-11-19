@@ -168,6 +168,12 @@ fn foreground_launch_owns_one_child_and_stop_waits_for_cleanup() {
         let lock = open_lock(&home.0, "dot", &lock_path(&home.0, "dot")).unwrap();
         let busy = matches!(lock.try_lock(), Err(fs::TryLockError::WouldBlock));
         let stage = stage_path(&home.0, launch_id(&ready.native_launch).unwrap());
+        let owner = state::open_with_write(&stage.join(OWNER_LOCK), true).unwrap();
+        assert!(matches!(
+            owner.file.try_lock_shared(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        drop(owner);
         let wrong = Uuid::new_v4().simple().to_string();
         state::atomic_create(&stage.join("stop"), wrong.as_bytes()).unwrap();
         let refused = stop(&home.0, "dot");

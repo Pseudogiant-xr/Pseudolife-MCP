@@ -225,6 +225,8 @@ struct LaunchRecord {
     ready: bool,
 }
 
+const OWNER_LOCK: &str = "supervisor.lock";
+
 fn stage_path(root: &Path, id: Uuid) -> PathBuf {
     root.join(format!(".native-launch-{}", id.simple()))
 }
@@ -271,7 +273,14 @@ fn remove_launch_files(directory: &Path, profile: &str) -> Result<(), Fail> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_) => return Err(blocked()),
     };
-    let known = [profile, "profile.yaml", "key", "health.url", "stop"];
+    let known = [
+        profile,
+        "profile.yaml",
+        "key",
+        "health.url",
+        "stop",
+        OWNER_LOCK,
+    ];
     for entry in entries {
         let entry = entry.map_err(|_| blocked())?;
         if !entry
@@ -298,6 +307,7 @@ struct Stage {
     directory: PathBuf,
     record: PathBuf,
     owns_record: bool,
+    owner: Option<File>,
     retain: bool,
     launch: String,
     profile: String,
@@ -317,15 +327,22 @@ impl Stage {
         #[cfg(windows)]
         crate::credentials::windows_security::create_dir_owner_only(&directory)
             .map_err(|_| UNSAFE_STORE)?;
-        let stage = Self {
+        let mut stage = Self {
             directory,
             record: record::path(root, name),
             owns_record: false,
+            owner: None,
             retain: false,
             launch: launch.simple().to_string(),
             profile: format!("{name}.profile.json"),
         };
         state::private_dir(&stage.directory).map_err(|_| UNSAFE_STORE)?;
+        // This lock belongs to this UUID for the supervisor's entire launch.
+        let owner = state::create(&stage.directory.join(OWNER_LOCK))
+            .map_err(|_| UNSAFE_STORE)?
+            .file;
+        owner.try_lock().map_err(|_| UNSAFE_STORE)?;
+        stage.owner = Some(owner);
         Ok(stage)
     }
 
@@ -354,6 +371,7 @@ impl Stage {
 
 impl Drop for Stage {
     fn drop(&mut self) {
+        drop(self.owner.take());
         if self.retain {
             crate::stderrln!(
                 "Tunnel ownership remains at {}. Check tunnel status.",

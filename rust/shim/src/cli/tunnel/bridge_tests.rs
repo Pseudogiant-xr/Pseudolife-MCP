@@ -220,12 +220,48 @@ fn identity_fixture() -> (Store, std::fs::File) {
 
 #[test]
 #[cfg(unix)]
+fn a_recovery_lock_cannot_activate_a_stale_ready_record() {
+    // Recovery has both lifetime locks. The ready record belongs to a
+    // generation whose supervisor is gone.
+    let (store, _native) = identity_fixture();
+    let legacy_path = store.0.join("dot.lock");
+    let legacy = crate::board::state::create(&legacy_path).unwrap().file;
+    legacy.try_lock().unwrap();
+    let executable = std::env::current_exe().unwrap();
+    let active = identity::fixture_identity(&store.0, &store.load("dot"), &executable);
+    let generation = uuid::Uuid::new_v4().simple().to_string();
+    let record = json!({
+        "native_launch": generation, "launch_identity": active, "ready": true, "target": null,
+        "supervisor": {"pid": u32::MAX, "exe": executable}
+    });
+    store.put("dot.process.json", record.to_string().as_bytes());
+    // The old owner released its exclusive lock. Another observer can
+    // hold a shared probe without standing in for the supervisor.
+    let observer = identity::fixture_owner(&store.0, &generation);
+    observer.unlock().unwrap();
+    observer.try_lock_shared().unwrap();
+    crate::board::state::private_dir(&store.0.join("dot-verification")).unwrap();
+    store.put(
+        "dot-verification/challenge.json",
+        json!({"nonce": *NONCE, "identity": active, "created": now() - 1.0})
+            .to_string()
+            .as_bytes(),
+    );
+    assert!(!cloud_status(&store.0, "dot").current);
+    assert!(begin(&store.0, "dot").is_err());
+    let saved = read_challenge(&store.0, "dot").unwrap();
+    assert_eq!(saved.nonce, *NONCE);
+}
+
+#[test]
+#[cfg(unix)]
 fn a_matching_identity_can_settle_after_the_same_profile_relaunches() {
     let (store, _lock) = identity_fixture();
     let executable = std::env::current_exe().unwrap();
     let active = identity::fixture_identity(&store.0, &store.load("dot"), &executable);
     let old = uuid::Uuid::new_v4().simple().to_string();
     put_native_record(&store, &old, &active, &executable);
+    let old_owner = identity::fixture_owner(&store.0, &old);
     let directory = store.0.join("dot-verification");
     crate::board::state::private_dir(&directory).unwrap();
     store.put(
@@ -237,7 +273,9 @@ fn a_matching_identity_can_settle_after_the_same_profile_relaunches() {
         .as_bytes(),
     );
     let new = uuid::Uuid::new_v4().simple().to_string();
+    drop(old_owner);
     put_native_record(&store, &new, &active, &executable);
+    let _new_owner = identity::fixture_owner(&store.0, &new);
     let current_for = |id: String| {
         let root = store.0.clone();
         let exe = executable.clone();
@@ -277,6 +315,7 @@ fn a_changed_runtime_digest_with_an_old_record_cannot_settle() {
     let active = identity::fixture_identity(&store.0, &store.load("dot"), &executable);
     let generation = uuid::Uuid::new_v4().simple().to_string();
     put_native_record(&store, &generation, &active, &executable);
+    let _owner = identity::fixture_owner(&store.0, &generation);
     crate::board::state::private_dir(&store.0.join("dot-verification")).unwrap();
     store.put(
         "dot-verification/challenge.json",

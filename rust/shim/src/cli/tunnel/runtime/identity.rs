@@ -10,7 +10,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::{
-    key::Key, launch_id, lock_path, read_record, record, setup, stage_path, store, vendor,
+    OWNER_LOCK, key::Key, launch_id, lock_path, read_record, record, setup, stage_path, store,
+    vendor,
 };
 
 pub(in crate::cli::tunnel) const CHANGED: &str = "the saved tunnel identity differs from the active launch. Stop and run the tunnel again before verification";
@@ -69,10 +70,21 @@ fn compute_identity(
     ))
 }
 
-fn held(root: &Path, name: &str) -> bool {
-    setup::check_directory(root).is_ok()
-        && crate::board::state::open_with_write(&lock_path(root, name), true)
-            .is_ok_and(|lock| matches!(lock.file.try_lock(), Err(fs::TryLockError::WouldBlock)))
+fn held(path: &Path) -> bool {
+    crate::board::state::open_with_write(path, true).is_ok_and(|lock| {
+        matches!(
+            lock.file.try_lock_shared(),
+            Err(fs::TryLockError::WouldBlock)
+        )
+    })
+}
+
+fn owns_generation(root: &Path, name: &str, stage: &Path) -> bool {
+    // Startup and recovery both acquire the profile lock. Only the
+    // supervisor holds the second lock for this particular generation.
+    setup::check_directory(stage).is_ok()
+        && held(&stage.join(OWNER_LOCK))
+        && held(&lock_path(root, name))
 }
 
 fn expected(
@@ -98,7 +110,9 @@ pub(in crate::cli::tunnel) fn active(
     if generation.is_some_and(|id| record.native_launch != id) {
         return Err(CHANGED);
     }
-    if !record.ready || !held(root, name) {
+    let id = launch_id(&record.native_launch).ok_or(UNAVAILABLE)?;
+    let stage = stage_path(root, id);
+    if !record.ready || !owns_generation(root, name, &stage) {
         return Err(UNAVAILABLE);
     }
     let profile = store::load(root, name).map_err(|_| UNAVAILABLE)?;
@@ -108,7 +122,7 @@ pub(in crate::cli::tunnel) fn active(
         || !current.ready
         || record.launch_identity.as_deref() != Some(&identity)
         || current.launch_identity != record.launch_identity
-        || !held(root, name)
+        || !owns_generation(root, name, &stage)
     {
         return Err(CHANGED);
     }
@@ -122,6 +136,17 @@ pub(in crate::cli::tunnel) fn fixture_identity(
     executable: &Path,
 ) -> String {
     expected(root, profile, executable).unwrap()
+}
+
+#[cfg(all(test, unix))]
+pub(in crate::cli::tunnel) fn fixture_owner(root: &Path, generation: &str) -> File {
+    let stage = stage_path(root, launch_id(generation).unwrap());
+    crate::board::state::private_dir(&stage).unwrap();
+    let owner = crate::board::state::create(&stage.join(OWNER_LOCK))
+        .unwrap()
+        .file;
+    owner.try_lock().unwrap();
+    owner
 }
 
 pub(in crate::cli::tunnel) fn current(root: &Path, name: &str) -> Result<String, &'static str> {
@@ -145,10 +170,9 @@ impl Bound {
     ) -> Result<Self, &'static str> {
         let id = launch_id(generation).ok_or(UNAVAILABLE)?;
         let root = stage.parent().ok_or(UNAVAILABLE)?;
-        if stage_path(root, id) != stage || !held(root, &profile.name) {
+        if stage_path(root, id) != stage || !owns_generation(root, &profile.name, stage) {
             return Err(UNAVAILABLE);
         }
-        setup::check_directory(stage).map_err(|_| UNAVAILABLE)?;
         let executable = std::env::current_exe().map_err(|_| UNAVAILABLE)?;
         let identity = expected(root, profile, &executable)?;
         // The bridge is what gets the vendor ready. Check the record even
