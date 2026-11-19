@@ -254,6 +254,7 @@ struct Wire {
     /// What the helper answers a `state` request (a resume's preflight).
     state: Option<protocol::State>,
     supports_carry: Option<bool>,
+    supports_carry_execution: Option<bool>,
 }
 
 impl Remote for Wire {
@@ -283,6 +284,7 @@ impl Remote for Wire {
                     protocol::Op::Check { ask } => {
                         let mut check = target::answer(&mut self.far, &ask);
                         check.supports_carry = self.supports_carry;
+                        check.supports_carry_execution = self.supports_carry_execution;
                         protocol::Answer {
                             protocol: protocol::PROTOCOL,
                             ok: true,
@@ -376,6 +378,7 @@ fn world() -> Both {
             runs: Vec::new(),
             state: None,
             supports_carry: None,
+            supports_carry_execution: None,
         },
         local_health: Some(health(SOURCE_ID, 60)),
         reached: Ok(health(TARGET_ID, 60)),
@@ -598,7 +601,7 @@ fn carried_execution_refuses_missing_or_invalid_source_ids_before_ssh() {
 #[test]
 fn keeping_target_tokens_produces_an_executable_plan_on_a_carry_capable_target() {
     let mut world = world();
-    world.wire.supports_carry = Some(true);
+    world.wire.supports_carry_execution = Some(true);
     let plan = preflight(&mut world, &request()).unwrap();
     assert_eq!(document(&plan)["executable"], true);
     assert_eq!(world.wire.runs.len(), 1);
@@ -1055,7 +1058,7 @@ fn default_dry_run_admits_a_plan_for_carried_identities() {
     assert!(!request.no_keep_tokens);
     assert_eq!(argv::refusal(&request), None);
     request.dry_run = false;
-    assert!(argv::refusal(&request).is_some());
+    assert_eq!(argv::refusal(&request), None);
 }
 
 #[test]
@@ -1124,6 +1127,25 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
     assert!(!output.contains("run it without --dry-run to move"));
     assert!(steps(&plan).is_empty());
     assert_eq!(document(&plan)["executable"], false);
+    let execution = Request {
+        dry_run: false,
+        ..request.clone()
+    };
+    current.wire.runs.clear();
+    assert!(
+        preflight(&mut current, &execution)
+            .unwrap_err()
+            .contains("only supports carried-identity preflight")
+    );
+    assert_eq!(current.wire.runs.len(), 1);
+    current.wire.supports_carry_execution = Some(true);
+    let plan = preflight(&mut current, &execution).unwrap();
+    assert_eq!(document(&plan)["executable"], true);
+    assert!(
+        steps(&plan)
+            .iter()
+            .any(|step| step.contains("apply the carried bearer settings"))
+    );
     let mut old = world();
     assert!(
         preflight(&mut old, &request)
@@ -1136,6 +1158,49 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
     let error = preflight(&mut unsupported, &request).unwrap_err();
     assert!(error.contains("Linux Docker target") && error.contains("--no-keep-tokens"));
     assert_eq!(unsupported.wire.runs.len(), 1);
+}
+
+#[test]
+fn carrying_requires_a_numeric_loopback_verification_endpoint() {
+    let request = Request {
+        dry_run: false,
+        no_keep_tokens: false,
+        ..request()
+    };
+    let mut world = world();
+    world.wire.supports_carry = Some(true);
+    world.wire.supports_carry_execution = Some(true);
+    world
+        .wire
+        .far
+        .docker
+        .docs
+        .get_mut("pseudolife-mcp-daemon")
+        .unwrap()["HostConfig"]["PortBindings"]["8765/tcp"][0]["HostIp"] = json!("192.0.2.10");
+    assert!(
+        preflight(&mut world, &request)
+            .unwrap_err()
+            .contains("no loopback daemon endpoint")
+    );
+    assert_eq!(world.wire.runs.len(), 1);
+    let dry = Request {
+        dry_run: true,
+        ..request
+    };
+    let plan = preflight(&mut world, &dry).unwrap();
+    let json = document(&plan);
+    assert_eq!(json["executable"], false);
+    let reason = "The target needs a loopback or wildcard daemon binding";
+    assert!(render(&plan, true).contains(reason));
+    assert!(
+        json["carried_identities"]
+            .as_str()
+            .unwrap()
+            .contains(reason)
+    );
+    assert!(carry::loopback("http://127.0.0.1:12345"));
+    assert!(carry::loopback("http://[::1]:12345"));
+    assert!(!carry::loopback("http://localhost:12345"));
 }
 
 #[test]

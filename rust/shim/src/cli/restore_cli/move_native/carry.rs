@@ -11,7 +11,7 @@ use super::probe::Facts;
 use crate::cli::update::seams;
 
 mod runtime;
-pub(super) use runtime::{apply, recorded_pins, undo, verify};
+pub(super) use runtime::{apply, loopback, recorded_pins, undo, verify};
 
 const KEYS: [&str; 4] = [
     "PSEUDOLIFE_MCP_TOKEN",
@@ -71,6 +71,17 @@ impl std::fmt::Debug for Identities {
 }
 
 impl Identities {
+    pub(super) fn live(docker: &mut impl Docker, facts: &Facts) -> Result<Self, String> {
+        source_identities(docker, facts, configured_bearer)
+    }
+
+    pub(super) fn settings(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            probe: String::new(),
+        }
+    }
+
     fn entries(&self) -> impl Iterator<Item = (&'static str, &str)> {
         KEYS.into_iter()
             .zip(self.values.iter().map(String::as_str))
@@ -87,7 +98,7 @@ impl Identities {
 }
 
 #[cfg(test)]
-fn fixture() -> Identities {
+pub(super) fn fixture() -> Identities {
     Identities {
         values: [
             "test-fixture-bearer".into(),

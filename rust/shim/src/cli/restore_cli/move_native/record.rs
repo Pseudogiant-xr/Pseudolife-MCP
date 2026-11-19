@@ -101,6 +101,8 @@ pub(super) struct Flags {
     pub marker_written: bool,
     pub gate_written: bool,
     pub target_restored: bool,
+    /// The target may have changed its Compose environment or container.
+    pub identities_applied: bool,
     /// Set before the gate is lifted and the target started: from here the
     /// target may be running, and the rollback stops and re-gates it.
     pub gate_lifting: bool,
@@ -133,6 +135,7 @@ pub(super) struct Record {
     /// Set inside the commit window, right after `moved.json` reached the
     /// stopped source.
     pub committed: bool,
+    pub carried_identities: bool,
     pub flags: Flags,
     /// The target daemon's restart policy before the move paused it.
     pub target_policy: String,

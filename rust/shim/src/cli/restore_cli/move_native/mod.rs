@@ -88,6 +88,7 @@ struct Plan {
     pub source: Facts,
     pub target: Reply,
     pub checked_carry: bool,
+    pub carry_executable: bool,
     /// Whether --target-url answered with the target's own fingerprint. A
     /// fresh target has none, and its URL is matched by release and schema
     /// only.
@@ -364,6 +365,19 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         ));
     };
     let target_pins = carry::TargetPins::from_facts(target);
+    let carry_executable = !request.no_keep_tokens
+        && reply.supports_carry_execution == Some(true)
+        && target_pins.is_some()
+        && carry::loopback(&target.health_url);
+    if !request.no_keep_tokens && !request.dry_run && !carry_executable {
+        return Err(if reply.supports_carry_execution != Some(true) {
+            "the target client only supports carried-identity preflight; update the target client to an execution-capable release or pass --no-keep-tokens".into()
+        } else if target_pins.is_none() {
+            "the target has no immutable Docker container IDs; update the target client and check access to its Docker stack".into()
+        } else {
+            "the target has no loopback daemon endpoint for carried-bearer verification; configure a loopback or wildcard binding, or pass --no-keep-tokens".into()
+        });
+    }
     // A resumed move's target is stopped behind its gate: its URL answers
     // only once the move starts it, and the move checks it then (before the
     // commit point).
@@ -373,6 +387,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
             to,
             target_url,
             checked_carry: check_carry(world, request, &source, target_pins)?,
+            carry_executable,
             source,
             target: reply.clone(),
             url_tied: false,
@@ -412,13 +427,32 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         to,
         target_url,
         checked_carry: check_carry(world, request, &source, target_pins)?,
+        carry_executable,
         source,
         target: reply,
         url_tied,
     })
 }
 
-const CARRY_RESULT: &str = "Carried bearer settings were verified. Native handover of these settings is pending. To run the move with this client, use an authenticated target, remove --dry-run, and add --no-keep-tokens.";
+fn carry_result(plan: &Plan) -> &'static str {
+    if plan.carry_executable {
+        "Carried bearer settings were verified."
+    } else if plan.target.supports_carry_execution == Some(true) {
+        if plan
+            .target
+            .facts
+            .as_ref()
+            .and_then(carry::TargetPins::from_facts)
+            .is_none()
+        {
+            "Carried bearer settings were verified. Execution needs immutable target Docker container IDs. Update the target client and check its Docker stack."
+        } else {
+            "Carried bearer settings were verified. The target needs a loopback or wildcard daemon binding to apply them safely. To move with its existing credentials, remove --dry-run and add --no-keep-tokens."
+        }
+    } else {
+        "Carried bearer settings were verified. The target client only supports preflight for carrying. To move with its existing credentials, remove --dry-run and add --no-keep-tokens."
+    }
+}
 
 /// The plan as text.
 fn render(plan: &Plan, dry_run: bool) -> String {
@@ -467,8 +501,8 @@ fn render(plan: &Plan, dry_run: bool) -> String {
         plan.target.work_dir,
         sized(plan.target.free_bytes)
     ));
-    if plan.checked_carry {
-        out.push_str(CARRY_RESULT);
+    if plan.checked_carry && !plan.carry_executable {
+        out.push_str(carry_result(plan));
         out.push('\n');
         return out;
     }
@@ -492,7 +526,7 @@ fn render(plan: &Plan, dry_run: bool) -> String {
 
 /// The steps a move would take, as the plan prints them.
 fn steps(plan: &Plan) -> Vec<String> {
-    if plan.checked_carry {
+    if plan.checked_carry && !plan.carry_executable {
         return Vec::new();
     }
     let t = plan.target.facts.clone().unwrap_or_default();
@@ -542,15 +576,20 @@ fn steps(plan: &Plan) -> Vec<String> {
         ),
         "stop the target daemon, check its bank is still empty, and archive its own state".to_owned(),
         "gate the target (/data/move.json), restore it from those files, and check the restored bank's identity and row counts".to_owned(),
-        "keep the target's own tokens (--no-keep-tokens)".to_owned(),
+        if plan.checked_carry {
+            "apply the carried bearer settings and check the rendered Compose configuration before starting the target daemon".to_owned()
+        } else {
+            "keep the target's own tokens (--no-keep-tokens)".to_owned()
+        },
         format!(
             "lift the gate, start the target once, and wait until {} serves the moved bank",
             plan.target_url
         ),
         "write /data/moved.json into the stopped source: the commit point, after which the move is not rolled back".to_owned(),
         format!(
-            "re-point this machine's clients to {} (a client holding this host's token needs one of the target's: the report names the command)",
-            plan.target_url
+            "re-point this machine's clients to {}{}",
+            plan.target_url,
+            if plan.checked_carry { " with their carried credentials" } else { " (a client holding this host's token needs one of the target's: the report names the command)" }
         ),
     ]);
     steps
@@ -564,13 +603,13 @@ fn document(plan: &Plan) -> Value {
         "to": plan.to,
         "target_url": plan.target_url,
         "target_url_tied": plan.url_tied,
-        "executable": !plan.checked_carry,
+        "executable": !plan.checked_carry || plan.carry_executable,
         "source": plan.source,
         "target": plan.target,
         "steps": steps(plan),
     });
     if plan.checked_carry {
-        value["carried_identities"] = json!(CARRY_RESULT);
+        value["carried_identities"] = json!(carry_result(plan));
     }
     value
 }
@@ -760,6 +799,10 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
                     request.target_work_dir =
                         (!earlier.work_dir.is_empty()).then(|| earlier.work_dir.clone());
                     request.resume_move = earlier.move_id.clone();
+                    if earlier.carried_identities && request.no_keep_tokens {
+                        return Some(finish(&request, Err("the previous attempt carried bearer settings; resume it without --no-keep-tokens".into())));
+                    }
+                    request.no_keep_tokens |= !earlier.carried_identities;
                     request.resume_baseline = earlier.gated_baseline.clone();
                     request.resume_target_was_running = earlier.target_was_running;
                 }

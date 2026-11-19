@@ -166,6 +166,8 @@ pub(super) struct Plan {
     /// For `--resume`: the gated bank as the earlier rollback read it, which
     /// the target's bank must still match before it is replaced.
     pub resume_baseline: Option<Baseline>,
+    /// These live only in this invocation. The record names the step, never the values.
+    pub identities: Option<(super::carry::Identities, super::carry::TargetPins)>,
 }
 
 /// How the move ended.
@@ -528,10 +530,29 @@ impl<H: Hosts> Run<'_, H> {
                 "the restored target's write counters (pg_stat_user_tables) cannot be read, so writes it took while it served could not be found; the target was not started",
             ));
         }
+        if let Some((identities, pins)) = &plan.identities {
+            self.step("apply the source's identities to the stopped target")?;
+            self.mark(|flags| flags.identities_applied = true)?;
+            self.target(
+                Op::CarryApply {
+                    identities: identities.settings(),
+                    pins: pins.clone(),
+                },
+                None,
+            )?;
+        }
         self.step("lift the target's gate and start it once")?;
         self.mark(|f| f.gate_lifting = true)?;
         self.target(Op::StartGated, None)?;
         self.mark(|f| f.target_started = true)?;
+        if let Some((identities, _)) = &plan.identities {
+            self.target(
+                Op::CarryVerify {
+                    identities: identities.clone(),
+                },
+                None,
+            )?;
+        }
         self.step("wait for the target to serve the moved bank")?;
         self.wait_identity()?;
         // And from the target itself: its daemon runs, ungated, on this bank
@@ -654,12 +675,9 @@ impl<H: Hosts> Run<'_, H> {
                 .push(format!("ssh {to} rm -f {}", claim_path()));
         }
         if let Err(why) = self.hosts.repoint(&plan.target_url) {
-            // The target kept its own tokens (--no-keep-tokens): a client
-            // holding this host's token needs one of the target's.
-            self.record.follow_ups.push(format!(
-                "pseudolife-mcp connect {} --token-file <a file holding a token of {}'s> --yes   # this machine's clients still point at the old daemon ({why})",
-                plan.target_url, plan.to
-            ));
+            self.record
+                .follow_ups
+                .push(repoint_line(&self.record, &why));
         }
         self.record.phase = if self.record.follow_ups.is_empty() {
             Phase::Complete
@@ -791,6 +809,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
         // Kept as the earlier record had it, so a resume refused before it
         // changed anything leaves the record as resumable as it was.
         gated_baseline: plan.resume_baseline.clone(),
+        carried_identities: plan.identities.is_some(),
         ..Record::default()
     };
     let mut record = record;
@@ -1214,6 +1233,14 @@ impl<H: Hosts> Back<'_, H> {
             if flags.gate_lifting || flags.target_started {
                 let result = self.op(Op::Stop).map(|_| ());
                 self.attempt("stop the target daemon", result);
+            }
+            if flags.identities_applied && aborted {
+                let result = self.op(Op::CarryUndo).map(|_| ());
+                if !self.attempt("restore the target's original identity settings", result) {
+                    self.record.phase = Phase::RollbackIncomplete;
+                    self.save();
+                    return self.incomplete(reason, "the target's identity change could not be undone; the source stays stopped and fenced", false);
+                }
             }
             for _ in 0..3 {
                 let state = match self.read() {
@@ -1887,9 +1914,9 @@ impl<H: Hosts> Back<'_, H> {
 /// person: written before the commit, struck off as each step succeeds.
 fn planned_follow_ups(record: &Record) -> Vec<String> {
     let to = &record.target;
-    let url = &record.target_url;
-    let mut steps = vec![format!(
-        "pseudolife-mcp connect {url} --token-file <a file holding a token of {to}'s> --yes   # point this machine's clients at the moved bank"
+    let mut steps = vec![repoint_line(
+        record,
+        "point this machine's clients at the moved bank",
     )];
     if record.flags.target_policy_paused {
         steps.push(format!(
@@ -1904,6 +1931,18 @@ fn planned_follow_ups(record: &Record) -> Vec<String> {
     }
     steps.push(format!("ssh {to} rm -f {}", claim_path()));
     steps
+}
+
+fn repoint_line(record: &Record, detail: &str) -> String {
+    let argument = if record.carried_identities {
+        "<a file holding a carried source token>".to_owned()
+    } else {
+        format!("<a file holding a token of {}'s>", record.target)
+    };
+    format!(
+        "pseudolife-mcp connect {} --token-file {argument} --yes   # {detail}",
+        record.target_url
+    )
 }
 
 /// The tables a resume counts on the target: its own dump's and those its
@@ -2179,18 +2218,27 @@ fn gate_removal(record: &Record) -> String {
 }
 
 fn manual_target_daemon(record: &Record) -> &str {
-    record
-        .target_pins
-        .as_ref()
-        .map_or("pseudolife-mcp-daemon", |pins| pins.daemon.as_str())
+    match &record.target_pins {
+        Some(_) if record.flags.identities_applied => "<verified-target-daemon-id>",
+        Some(pins) => &pins.daemon,
+        None => "pseudolife-mcp-daemon",
+    }
 }
 
 fn manual_target_selection(record: &Record) -> Option<String> {
     let pins = record.target_pins.as_ref()?;
-    Some(format!(
-        "On the target, verify that Docker returns the selected daemon's full ID {} before running these commands.",
-        pins.daemon
-    ))
+    if record.flags.identities_applied {
+        Some(format!(
+            "On the target, substitute the daemon ID saved in {}/carry.json (pins.daemon) for <verified-target-daemon-id>. Verify that Docker returns that full ID for the expected Compose service. If the journal was never created, the selected daemon ID was {}. If a recreation began without recording its replacement, verify the original Compose project and its volumes before proceeding.",
+            remote_folder(record),
+            pins.daemon
+        ))
+    } else {
+        Some(format!(
+            "On the target, verify that Docker returns the selected daemon's full ID {} before running these commands.",
+            pins.daemon
+        ))
+    }
 }
 
 /// The last way to close a record whose target keeps refusing: on this
