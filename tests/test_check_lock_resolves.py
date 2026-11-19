@@ -152,13 +152,15 @@ def test_a_dockerfile_whose_install_moved_fails_loudly(tmp_path):
         check.dry_run_command((tmp_path / "ops" / "Dockerfile.daemon").read_text(), tmp_path)
 
 
-def test_ci_runs_it_unscoped_on_the_images_python():
+def test_ci_runs_it_on_the_images_python_with_docs_only_skip():
     jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))["jobs"]
     job = jobs["lock-resolve"]
-    # Never scoped by the diff: reuse a same-tree batch on push or an exact
-    # successful push on schedule; a failed scope still runs it.
+    # A verified docs-only diff leaves the image's install inputs unchanged.
+    # Reuse a same-tree batch on push or an exact successful push on schedule.
+    # A failed scope still runs the job.
     assert job["needs"] == "scope"
-    assert job["if"] == ("${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && "
+    assert job["if"] == ("${{ !cancelled() && needs.scope.outputs.docs != 'docs' && "
+                         "needs.scope.outputs.push_passed != 'true' && "
                          "!contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}")
     assert not job.get("continue-on-error") and not any(s.get("continue-on-error") for s in job["steps"])
     assert job["runs-on"] == "ubuntu-latest"

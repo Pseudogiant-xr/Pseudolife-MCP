@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "52869779b5c29f68",
+  "fingerprint": "2fa00fdcb13d556e",
+  "reason": "Master already budgets the Rust-only release-image guard added by #1755. The docs selection and the existing ordinary PR selection still share the same runner and setup, and the new Rust-only file is not added to the docs selection. Keep the existing job budget."
+}

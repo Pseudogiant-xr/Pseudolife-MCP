@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-windows",
+  "before": null,
+  "fingerprint": "82f06d5508203d4b",
+  "reason": "Retains the Windows leg of the former Parity matrix with the same display name, runner, verdict steps and timeout. A static name lets a docs-only skip report the exact required Windows context. This replaces a runner leg rather than adding one."
+}
