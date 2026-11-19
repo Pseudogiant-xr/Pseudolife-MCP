@@ -3367,6 +3367,37 @@ fn a_given_up_record_sends_nothing_to_a_target_that_now_serves_the_bank_moved_th
 }
 
 #[test]
+fn given_up_carried_move_restores_target_environment_before_the_daemon_starts() {
+    let parked = parked_move();
+    let mut record = parked.record.clone().unwrap();
+    let unchanged = engine::given_up_line(&record, None);
+    assert!(!unchanged.contains("# Pseudolife move"));
+
+    record.flags.identities_applied = true;
+    record.target_pins = Some(super::carry::TargetPins {
+        daemon: "4".repeat(64),
+        postgres: "5".repeat(64),
+        ..Default::default()
+    });
+    record.verified_target_daemon = Some("6".repeat(64));
+    for given_back in [false, true] {
+        record.given_back = given_back;
+        let steps = engine::given_up_line(&record, None);
+        let restore = steps
+            .find(&format!("# Pseudolife move {}", record.move_id))
+            .expect("show the environment recovery step");
+        let remove_gate = steps.find("--entrypoint rm").unwrap();
+        assert!(restore < remove_gate);
+        assert!(steps.contains("original_bytes and original_digest"));
+        assert!(steps.contains("fill in its new verified container ID"));
+        assert!(!steps.contains(&format!("--volumes-from {}", "6".repeat(64))));
+        if !given_back {
+            assert!(remove_gate < steps.find("docker start").unwrap());
+        }
+    }
+}
+
+#[test]
 fn the_steps_for_a_given_up_target_are_as_of_its_give_up_and_checked_first() {
     let parked = parked_move();
     let record = parked.record.clone().unwrap();
