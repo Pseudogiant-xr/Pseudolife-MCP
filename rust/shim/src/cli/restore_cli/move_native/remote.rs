@@ -89,7 +89,8 @@ fn own_group(command: &mut Command) {
 
 /// The options every move ssh carries; none of them touches host-key
 /// checking.
-pub(super) const OPTIONS: [&str; 8] = [
+pub(super) const OPTIONS: [&str; 9] = [
+    "-T",
     "-o",
     "BatchMode=yes",
     "-o",

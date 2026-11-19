@@ -22,17 +22,10 @@ from ..core import Case
 
 SESSION = "w1b-mail-session"
 KEY = p.digest_key(SESSION)
-BODY = None  # rendered lazily: the producer is imported from the oracle
 
 
 def _body() -> str:
-    global BODY
-    if BODY is None:
-        BODY = p.render(2, [
-            p.preview("m-0001", "reviewer", "please re-run the gate on 35b8"),
-            p.preview("m-0002", "delegate ü", "merged — ünïcödé ✓ and  nbsp"),
-        ])
-    return BODY
+    return p.wait_mail_digest()
 
 
 def _paths(home: Path, key: str = KEY) -> dict[str, Path]:

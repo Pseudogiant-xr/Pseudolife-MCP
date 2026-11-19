@@ -66,9 +66,10 @@ Unicode, not starting with `-`.
 Each of these was a case of this row while the native command deferred:
 
 - Every argv that passes the checks above: the native module answers it.
-  On Linux targets, `--dry-run` checks both bearer modes and checks carried bearer settings
-  against the target's installed Compose files without sending the source's
-  values. Execution requires `--no-keep-tokens`. Checkout targets, automatic
+  On Linux targets, `--dry-run` checks both bearer modes. It checks carried
+  bearer settings against the installed Compose files without sending the
+  source values. Execution requires an execution-capable target helper and
+  a loopback daemon endpoint for carried-bearer verification. Checkout targets, automatic
   exposure, explicit target environment or Compose files, a missing
   `--target-url`, and a relative `--target-work-dir` are refused (exit 2).
   The oracle would contact the live daemon, so these use the Rust tests.

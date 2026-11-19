@@ -59,6 +59,9 @@ pub(in crate::cli) struct Reply {
     /// Protocol 2 helpers predating carried identities omit this capability.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supports_carry: Option<bool>,
+    /// Preflight-only helpers omit this even when they support CarryCheck.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_carry_execution: Option<bool>,
 }
 
 /// What the target host offers the helper: its docker, a health GET, the
@@ -409,6 +412,25 @@ struct Site2 {
 }
 
 impl super::ops::Site for Site2 {
+    fn carry(
+        &mut self,
+        op: &super::protocol::Op,
+        folder: &Path,
+        id: &str,
+        pins: Option<&super::carry::TargetPins>,
+    ) -> Result<(), String> {
+        use super::{carry, protocol::Op};
+        let docker = self.docker()?;
+        match op {
+            Op::CarryApply {
+                identities,
+                expected_pins,
+            } => carry::apply(docker, folder, id, identities, expected_pins),
+            Op::CarryVerify { identities } => carry::verify(docker, folder, identities, pins),
+            Op::CarryUndo => carry::undo(docker, folder, id, pins),
+            _ => Err("unrecognized carried identity operation".into()),
+        }
+    }
     type D = docker::Real;
     fn docker(&mut self) -> Result<&mut docker::Real, String> {
         self.docker.as_mut().ok_or_else(|| self.missing.clone())
@@ -549,9 +571,12 @@ fn answer_op(
         let mut answer = refuse(String::new());
         match site
             .docker()
-            .and_then(|docker| super::carry::target(docker, *populated))
+            .and_then(|docker| super::carry::target(docker, *populated, request.pins.as_ref()))
         {
-            Ok(()) => answer.ok = true,
+            Ok(digest) => {
+                answer.ok = true;
+                answer.carry_deployment = digest;
+            }
             Err(why) => answer.error = why,
         }
         return answer;
@@ -608,6 +633,7 @@ fn takes_lock(op: &super::protocol::Op) -> bool {
 fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
     let mut reply = answer(here, ask);
     reply.supports_carry = ask.carry.then_some(cfg!(target_os = "linux"));
+    reply.supports_carry_execution = reply.supports_carry;
     reply
 }
 
@@ -627,6 +653,7 @@ mod lock_tests {
             move_id: String::new(),
             work_dir: String::new(),
             rollback: false,
+            pins: None,
         };
         // The transaction's perform rejects the empty move id before it
         // looks for Docker. Only the read-only dispatcher returns this error.

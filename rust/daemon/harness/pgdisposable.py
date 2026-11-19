@@ -24,7 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import psycopg
 from psycopg import sql
-from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
+from rust.harness_support.database_guard import (
+    FIXTURE_SLICE_ID, assert_disposable_database, fixture_database_pattern, refuse_production_database,
+)
 from rust.harness_support.database_turn import require_turn
 from rust.cli_harness.pg_create import create_from_default_template
 from rust.cli_harness.run_names import RunNames
@@ -32,7 +34,6 @@ from rust.cli_harness.run_names import RunNames
 HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
 LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
                   or Path.home() / ".pseudolife-mcp" / "test-pg.env")
-SLICE_ID = re.compile(r"w[0-9][a-z]|http|pgs|prn|mir")
 # Set by the forced runner (mirror/forced.py) to its run's token: a drop
 # renames the database to one of the run's tombstones (``tombstone_prefix``)
 # and returns, and the runner drops the tombstones in the background while
@@ -53,15 +54,11 @@ def tombstone_prefix(token: str) -> str:
 # (rust/daemon/harness/mirror/forced.py): only the mirror's names, and only
 # where the launcher sets it, so no slice reaches it by default.
 BASE_ENV = "PL_HARNESS_BASE_DATABASE"
-BASE_NAME = re.compile(r"pl_cf_mir_[a-z0-9_]{1,40}")
+BASE_NAME = fixture_database_pattern("mir")
 DEFAULT_SLICE = "w1a"
 # One run owns every slice's names: name() adds a random run suffix so two
 # invocations of the same slice cannot share a database.
 NAMES = RunNames()
-
-
-def _pattern(prefix: str) -> re.Pattern:
-    return re.compile(re.escape(prefix) + r"[a-z0-9_]{1,40}")
 
 
 class Slice:
@@ -72,11 +69,11 @@ class Slice:
     on the module or on one handle both take effect."""
 
     def __init__(self, slice_id: str):
-        if not isinstance(slice_id, str) or not SLICE_ID.fullmatch(slice_id):
+        if not isinstance(slice_id, str) or not FIXTURE_SLICE_ID.fullmatch(slice_id):
             raise SystemExit(f"PL_HARNESS_SLICE={slice_id!r}: expected a slice id like w1a, w2g, http, pgs or prn")
         self.SLICE = slice_id
         self.PREFIX = f"pl_cf_{slice_id}_"
-        self.DISPOSABLE_NAME = _pattern(self.PREFIX)
+        self.DISPOSABLE_NAME = fixture_database_pattern(slice_id)
 
     @classmethod
     def from_env(cls, default: str = DEFAULT_SLICE) -> Slice:
@@ -164,8 +161,7 @@ def base_database() -> str | None:
 
 
 def _check(name: str, space: Slice | None = None) -> str:
-    PREFIX = (space or current()).PREFIX
-    DISPOSABLE_NAME = _pattern(PREFIX)
+    DISPOSABLE_NAME = (space or current()).DISPOSABLE_NAME
     refuse_production_database(name)
     if not DISPOSABLE_NAME.fullmatch(name):
         raise ValueError(f"refusing non-disposable database name {name!r}")
