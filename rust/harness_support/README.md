@@ -9,6 +9,9 @@ and process lifecycle belong with their respective owners.
 HTTP readiness, and `schema.py` executes the daemon's committed schema plan.
 `bank_fixture.py` uses that plan and seeds the built-in relations and writer
 epoch for the dream, graph and principal harnesses.
+Fixture writes require a server-confirmed disposable name in the
+`pl_cf_<slice>_<name>` namespace. The shared production-bank guard still
+applies.
 `import_blocker.py` lets the harness tests reload cached modules and reject
 imports of the frozen Python package. The principal parity tests also collect
 the readiness and cold-import controls in `test_readiness.py`.

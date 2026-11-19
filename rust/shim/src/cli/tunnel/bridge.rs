@@ -204,7 +204,7 @@ struct Start {
 
 /// The `tunnel status` command for this profile, in the store the bridge
 /// was started with, its folder quoted for the shell as update's advice is.
-fn status_command(name: &str, directory: Option<&str>) -> String {
+pub(super) fn status_command(name: &str, directory: Option<&str>) -> String {
     let store_option = directory
         .map(|directory| {
             format!(
@@ -224,6 +224,7 @@ fn prepare(values: &[OsString]) -> Result<Start, String> {
     let profile = match store::load(&root, &name) {
         Ok(profile) => profile,
         Err(Fail::Tunnel(message)) => return Err(format!("{message}; {status}")),
+        Err(Fail::Detail(message)) => return Err(format!("{message}; {status}")),
         Err(Fail::Defer) => return Err(format!("tunnel profile cannot be read safely; {status}")),
     };
     // A ready profile carries the user's consent and a tunnel identifier

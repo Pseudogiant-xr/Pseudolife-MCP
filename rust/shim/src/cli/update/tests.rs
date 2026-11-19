@@ -1,5 +1,480 @@
 use super::*;
 
+fn github_release() -> Value {
+    let names = [
+        "RELEASE-READY.json",
+        "SHA256SUMS",
+        "pseudolife-compose-0.25.0.tar.gz",
+        "pseudolife-mcp-0.25.0-x86_64-unknown-linux-gnu.tar.gz",
+        "pseudolife-mcp-0.25.0-aarch64-unknown-linux-gnu.tar.gz",
+        "pseudolife-mcp-0.25.0-x86_64-apple-darwin.tar.gz",
+        "pseudolife-mcp-0.25.0-aarch64-apple-darwin.tar.gz",
+        "pseudolife-mcp-0.25.0-x86_64-pc-windows-msvc.zip",
+    ];
+    json!({
+        "tag_name": "v0.25.0", "draft": false, "prerelease": false,
+        "assets": names.map(|name| json!({"name": name, "state": "uploaded", "size": 100}))
+    })
+}
+
+#[tokio::test]
+async fn github_discovery_requires_one_uploaded_nonempty_ready_marker() {
+    let complete = github_release();
+    let mut accepted = Vec::new();
+    for condition in ["missing", "uploading", "duplicate", "empty"] {
+        let mut data = complete.clone();
+        let assets = data["assets"].as_array_mut().unwrap();
+        assert_eq!(assets[0]["name"], "RELEASE-READY.json");
+        match condition {
+            "missing" => {
+                assets.remove(0);
+            }
+            "uploading" => assets[0]["state"] = json!("starter"),
+            "duplicate" => assets.push(assets[0].clone()),
+            "empty" => assets[0]["size"] = json!(0),
+            _ => unreachable!(),
+        }
+        if discovery_reply(200, data.to_string())
+            .await
+            .unwrap()
+            .is_some()
+        {
+            accepted.push(condition);
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "accepted invalid ready markers: {accepted:?}"
+    );
+    assert_eq!(
+        discovery_reply(200, complete.to_string())
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("0.25.0")
+    );
+}
+
+async fn discovery_reply(status: u16, body: String) -> Result<Option<String>> {
+    discovery_reply_with_headers(status, body, &[]).await
+}
+
+async fn discovery_reply_with_headers(
+    status: u16,
+    body: String,
+    headers: &[(&str, &str)],
+) -> Result<Option<String>> {
+    let mut response = http::Response::builder().status(status);
+    for (name, value) in headers {
+        response = response.header(*name, *value);
+    }
+    let response = response.body(body).unwrap();
+    fetch_latest_with(&reqwest::Client::new(), |_| async { Ok(response.into()) }).await
+}
+
+#[tokio::test]
+async fn github_discovery_redirect_names_a_published_tag_or_current_client() {
+    for status in [301, 302, 304, 307, 308] {
+        let error = discovery_reply(status, String::new()).await.unwrap_err();
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains(&format!("HTTP {status}")));
+        assert!(error.message.contains("--tag"), "{error}");
+        assert!(error.message.contains("current client"), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn github_discovery_rejects_an_oversized_advertised_body() {
+    let error = discovery_reply_with_headers(200, String::new(), &[("content-length", "1048577")])
+        .await
+        .unwrap_err();
+    assert_eq!(error.exit_code, 2);
+    assert!(error.message.contains("size limit"), "{error}");
+}
+
+#[tokio::test]
+async fn github_discovery_bounds_a_body_that_never_finishes() {
+    use futures::StreamExt;
+    use std::time::Duration;
+
+    for status in [200, 403] {
+        // An unbounded reader reaches the pending tail instead of checking size.
+        let stream = futures::stream::iter([vec![b' '; 600_000], vec![b' '; 600_000]])
+            .map(Ok::<_, std::io::Error>)
+            .chain(futures::stream::pending());
+        let response = http::Response::builder()
+            .status(status)
+            .body(reqwest::Body::wrap_stream(stream))
+            .unwrap();
+        let error = tokio::time::timeout(
+            Duration::from_secs(2),
+            fetch_latest_with(&reqwest::Client::new(), |_| async { Ok(response.into()) }),
+        )
+        .await
+        .expect("discovery waited for the oversized body's end")
+        .unwrap_err();
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains("size limit"), "{error}");
+    }
+}
+
+#[test]
+fn github_discovery_uses_the_daemons_complete_asset_rule() {
+    fn predicate(source: &str) -> String {
+        let source = source.replace("\r\n", "\n");
+        let (_, function) = source.split_once("\nfn complete_assets(").unwrap();
+        function.split_once("\n}").unwrap().0.to_owned()
+    }
+    let client = predicate(include_str!("mod.rs"));
+    assert!(client.contains(r#""RELEASE-READY.json".to_owned()"#));
+    assert_eq!(
+        client,
+        predicate(include_str!("../../../../daemon/src/release_check.rs")),
+        "update the client and daemon asset acceptance rules together"
+    );
+}
+
+#[test]
+fn github_discovery_uses_the_daemons_release_tag_rule() {
+    let client = include_str!("mod.rs").replace("\r\n", "\n");
+    let daemon = include_str!("../../../../daemon/src/release_check.rs").replace("\r\n", "\n");
+    let tag = r#"data["tag_name"].as_str().and_then(|s| s.strip_prefix('v'))"#;
+    let compact = |source: &str| source.split_whitespace().collect::<String>();
+    assert!(compact(&client).contains(&compact(tag)) && compact(&daemon).contains(&compact(tag)));
+    // The daemon's shape check also permits letters and .+-. Its component
+    // check below is what narrows the accepted version to digits and dots.
+    let shape = daemon
+        .split_once("fn version_shape(value: &str) -> bool {")
+        .unwrap()
+        .1
+        .split_once("\n}")
+        .unwrap()
+        .0;
+    assert_eq!(
+        compact(shape),
+        compact(
+            r#"(1..=32).contains(&value.len()) && value.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".+-".contains(&b))"#
+        )
+    );
+    fn rejection_rule(source: &str) -> &str {
+        let (_, tail) = source
+            .split_once("let parts: Vec<_> = version.split('.').collect();\n")
+            .unwrap();
+        tail.split_once("\n    {").unwrap().0
+    }
+    assert_eq!(
+        rejection_rule(&client),
+        rejection_rule(&daemon).replace(
+            "!version_shape(version)",
+            "!(1..=32).contains(&version.len())"
+        ),
+    );
+}
+
+#[test]
+fn github_discovery_routes_explicit_tags_and_unpinned_requests() {
+    let mut update = Update::new(Options::parse(vec![]).unwrap());
+    update.release_lookup = Some(Box::new(|| Ok(Some("0.25.0".into()))));
+    assert_eq!(update.target_version().unwrap().as_deref(), Some("0.25.0"));
+    update.o.tag = Some("0.24.0".into());
+    update.release_lookup = Some(Box::new(|| panic!("a pinned update tried discovery")));
+    assert_eq!(update.target_version().unwrap().as_deref(), Some("0.24.0"));
+}
+
+fn legacy_legs_keep_the_selected_target(other_version: &'static str) {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let mut update = Update::new(Options::parse(vec![]).unwrap());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let probe = Arc::clone(&calls);
+    // An unpinned lookup during either leg would return the disagreeing
+    // version, newer than the target or older than the running daemon.
+    update.release_lookup = Some(Box::new(move || {
+        let count = probe.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(
+            if count == 0 { "0.25.0" } else { other_version }.into(),
+        ))
+    }));
+    let target = update.target_version().unwrap().unwrap();
+    update.after_import = true;
+    for current in ["0.24.0", target.as_str()] {
+        update.with_release_tag(&target, |update| {
+            let selected = update.target_version().unwrap().unwrap();
+            assert_eq!(selected, target, "disagreeing version: {other_version}");
+            update.refuse_downgrade(Some(current), &selected).unwrap();
+        });
+        assert!(update.o.tag.is_none());
+    }
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn github_discovery_legacy_leg_keeps_target_when_index_is_newer() {
+    legacy_legs_keep_the_selected_target("0.26.0");
+}
+
+#[test]
+fn github_discovery_legacy_leg_keeps_target_when_index_is_older_than_running() {
+    legacy_legs_keep_the_selected_target("0.23.0");
+}
+
+fn no_release_update() -> Update {
+    let mut update = Update::new(Options::parse(vec![]).unwrap());
+    update.o.as_json = true;
+    update.release_lookup = Some(Box::new(|| Ok(None)));
+    update
+}
+
+#[test]
+fn github_discovery_check_exits_three_for_incomplete_release() {
+    let mut update = no_release_update();
+    assert_eq!(update.run_with(|update| update.check("client")), 3);
+    assert_eq!(
+        update.report.steps,
+        [
+            "no newer release with all native assets is published yet. Name a published release with --tag <version> to install it now."
+        ]
+    );
+    assert!(update.report.target.is_none());
+}
+
+#[test]
+fn github_discovery_release_does_not_deploy_an_incomplete_release() {
+    let mut update = no_release_update();
+    update.command_probe = Some(|args| {
+        assert_eq!(args[0], "inspect");
+        assert!(args.iter().any(|arg| arg.contains(".Config.Labels")));
+        (0, "{}".into())
+    });
+    update.health_probe = Some(|| panic!("the update continued past release discovery"));
+    update.deploy_release(None, None, None).unwrap();
+    assert_eq!(update.report.steps, [NO_PUBLISHED_RELEASE]);
+    assert!(update.report.target.is_none());
+    assert!(update.report.clients.is_none());
+    assert!(!update.release_started);
+}
+
+#[tokio::test]
+async fn github_discovery_requests_fixed_unauthenticated_endpoint() {
+    let result = fetch_latest_with(&reqwest::Client::new(), |request| async move {
+        assert_eq!(request.method(), reqwest::Method::GET);
+        assert_eq!(
+            request.url().as_str(),
+            "https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/latest"
+        );
+        assert!(request.body().is_none());
+        assert!(request.headers().get("authorization").is_none());
+        assert_eq!(request.headers()["accept"], "application/vnd.github+json");
+        assert_eq!(request.headers()["user-agent"], "pseudolife-mcp");
+        assert_eq!(request.timeout(), Some(&std::time::Duration::from_secs(5)));
+        Ok(http::Response::new(github_release().to_string()).into())
+    })
+    .await
+    .unwrap();
+    assert_eq!(result.as_deref(), Some("0.25.0"));
+}
+
+#[tokio::test]
+async fn github_discovery_waits_for_assets_and_rediscovers_completed_release() {
+    let complete = github_release();
+    let mut missing = complete.clone();
+    missing.as_object_mut().unwrap().remove("assets");
+    let mut empty = complete.clone();
+    empty["assets"] = json!([]);
+    let mut partial = complete.clone();
+    partial["assets"].as_array_mut().unwrap().pop();
+    let mut duplicate = complete.clone();
+    let assets = duplicate["assets"].as_array_mut().unwrap();
+    assets.push(assets[0].clone());
+    let mut uploading = complete.clone();
+    uploading["assets"][0]["state"] = json!("starter");
+    let mut zero_size = complete.clone();
+    zero_size["assets"][0]["size"] = json!(0);
+    let mut different_version = complete.clone();
+    different_version["assets"][2]["name"] = json!("pseudolife-compose-0.26.0.tar.gz");
+
+    let mut wrongly_accepted = Vec::new();
+    for (why, mut data) in [
+        ("absent assets", missing),
+        ("empty assets", empty),
+        ("partial upload", partial),
+        ("duplicate name", duplicate),
+        ("upload still in progress", uploading),
+        ("zero bytes", zero_size),
+        ("wrong asset version", different_version),
+    ] {
+        data["info"] = json!({"version": "0.25.0"});
+        if discovery_reply(200, data.to_string())
+            .await
+            .unwrap()
+            .is_some()
+        {
+            wrongly_accepted.push(why);
+        }
+    }
+    let after_retry = discovery_reply(200, complete.to_string()).await.unwrap();
+    assert!(
+        wrongly_accepted.is_empty() && after_retry.as_deref() == Some("0.25.0"),
+        "accepted before completion: {wrongly_accepted:?}; release after retry: {after_retry:?}"
+    );
+}
+
+#[tokio::test]
+async fn github_discovery_rejects_drafts_and_prereleases() {
+    let mut wrongly_accepted = Vec::new();
+    for flag in ["draft", "prerelease"] {
+        let mut data = github_release();
+        data["info"] = json!({"version": "0.25.0"});
+        data[flag] = json!(true);
+        if discovery_reply(200, data.to_string())
+            .await
+            .unwrap()
+            .is_some()
+        {
+            wrongly_accepted.push(flag);
+        }
+    }
+    assert!(
+        wrongly_accepted.is_empty(),
+        "accepted: {wrongly_accepted:?}"
+    );
+    assert_eq!(discovery_reply(404, String::new()).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn github_discovery_reports_malformed_metadata_and_unavailable_service() {
+    let did_report = |reply: Result<Option<String>>, detail| {
+        reply.is_err_and(|error| {
+            error.exit_code == 2
+                && error.message.contains(detail)
+                && error.message.contains("Nothing was changed")
+        })
+    };
+    let mut missed_errors = Vec::new();
+    let data = github_release();
+    for (field, bad) in [
+        ("draft", json!("false")),
+        ("prerelease", Value::Null),
+        ("tag_name", json!("0.25.0")),
+        ("tag_name", json!("vv0.25.0")),
+        ("tag_name", json!("v1")),
+        ("tag_name", json!("v1.2.3.4.5")),
+        ("tag_name", json!("v0.+25.0")),
+        ("tag_name", json!("v0.25.0-rc1")),
+        ("tag_name", json!("v18446744073709551616.0")),
+        ("tag_name", json!("v000000000000000000000000000000000.1")),
+        ("assets", json!("uploading")),
+    ] {
+        let mut changed = data.clone();
+        let case = format!("{field}={bad}");
+        changed[field] = bad;
+        let reply = discovery_reply(200, changed.to_string()).await;
+        if !did_report(reply, "invalid release metadata") {
+            missed_errors.push(case);
+        }
+    }
+    for (status, body, detail) in [
+        (200, "{", "invalid release metadata"),
+        (
+            403,
+            r#"{"message":"You have exceeded a secondary rate limit."}"#,
+            "rate limit",
+        ),
+        (403, r#"{"message":"Forbidden"}"#, "HTTP 403"),
+        (429, "{}", "rate limit"),
+        (503, "{}", "HTTP 503"),
+        (302, "", "HTTP 302"),
+    ] {
+        let reply = discovery_reply(status, body.to_owned()).await;
+        if !did_report(reply, detail) {
+            missed_errors.push(format!("HTTP {status} {body:?}"));
+        }
+    }
+    for header in [("x-ratelimit-remaining", "0"), ("retry-after", "120")] {
+        let reply = discovery_reply_with_headers(403, "{}".to_owned(), &[header]).await;
+        if !did_report(reply, "rate limit") {
+            missed_errors.push(format!("HTTP 403 with {}: {}", header.0, header.1));
+        }
+    }
+    assert!(
+        missed_errors.is_empty(),
+        "wrong or missing errors: {missed_errors:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "run the real loopback transport on the Linux and Windows dev machines"]
+async fn github_discovery_handles_network_failures_and_redirects_over_loopback() {
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let client = discovery_client().no_proxy().build().unwrap();
+    let mut missed_errors = Vec::new();
+    for (case, detail) in [
+        ("offline", "could not reach GitHub"),
+        ("stalled headers", "timed out"),
+        ("stalled body", "timed out"),
+        ("redirect", "HTTP 302"),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
+        let redirect_url = format!("{url}/elsewhere");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drop(listener);
+            let mut request = [0; 2048];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+            match case {
+                "stalled headers" => std::future::pending::<()>().await,
+                "stalled body" => {
+                    stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{")
+                        .await
+                        .unwrap();
+                    std::future::pending::<()>().await;
+                }
+                "redirect" => {
+                    let reply = format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {redirect_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    );
+                    stream.write_all(reply.as_bytes()).await.unwrap();
+                }
+                _ => stream.shutdown().await.unwrap(),
+            }
+        });
+        let result = fetch_latest_with(&client, |mut request| {
+            *request.url_mut() = url.parse().unwrap();
+            *request.timeout_mut() = Some(if detail == "timed out" {
+                Duration::from_millis(250)
+            } else {
+                Duration::from_secs(2)
+            });
+            client.execute(request)
+        })
+        .await;
+        if detail == "timed out" {
+            server.abort();
+        } else {
+            tokio::time::timeout(Duration::from_secs(2), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        if !result.is_err_and(|error| error.exit_code == 2 && error.message.contains(detail)) {
+            missed_errors.push(case);
+        }
+    }
+    assert!(
+        missed_errors.is_empty(),
+        "wrong or missing errors: {missed_errors:?}"
+    );
+}
+
 #[test]
 fn failed_health_endpoint_hint_uses_only_valid_loopback_publications() {
     for (ports, url) in [
@@ -85,11 +560,26 @@ struct Temp(PathBuf);
 #[ignore = "subprocess fixture for isolated proxy environment"]
 fn native_update_proxy_child() {
     let url = std::env::var("UPDATE_PROXY_TEST_URL").unwrap();
-    let reply = fetch_json(&url, 2);
+    let error = seams::block_on(async {
+        let client = discovery_client().build().unwrap();
+        fetch_latest_with(&client, |mut request| {
+            *request.url_mut() = url.parse().unwrap();
+            *request.timeout_mut() = Some(std::time::Duration::from_secs(2));
+            client.execute(request)
+        })
+        .await
+    })
+    .unwrap_err();
     if url.starts_with("http:") {
-        assert_eq!(reply, Some(json!({"info":{"version":"1.2.3"}})));
+        // The proxy replied with the old metadata shape. Discovery reached
+        // the fixture and refused that response as a GitHub release.
+        assert!(
+            error.message.contains("invalid release metadata"),
+            "{error}"
+        );
     } else {
-        assert!(reply.is_none()); // The fixture refuses CONNECT without contacting a release host.
+        // The fixture refuses CONNECT without contacting a release host.
+        assert!(error.message.contains("could not reach GitHub"), "{error}");
     }
 }
 

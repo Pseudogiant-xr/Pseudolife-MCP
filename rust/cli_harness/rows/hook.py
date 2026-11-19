@@ -17,9 +17,7 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import time
-import uuid
 from pathlib import Path
 
 from .. import producers as p
@@ -238,38 +236,6 @@ def _prompt_cases() -> list[Case]:
     return c
 
 
-_PENDING_CACHE: dict[str, str] = {}
-
-
-def pending_text(thread: str, *, count=2, maintainer=0, legacy=False) -> str:
-    """The pending record bytes ``PendingNotice.reserve`` writes, made once
-    in a scratch digest dir so both arms seed identical bytes."""
-    key = f"{thread}:{count}:{maintainer}:{legacy}"
-    if key not in _PENDING_CACHE:
-        from pseudolife_memory.codex_doorbell_state import PendingNotice, notice_text  # noqa
-        with tempfile.TemporaryDirectory() as scratch:
-            notice = PendingNotice(Path(scratch), thread)
-            if legacy:
-                nonce = uuid.UUID(int=7).hex
-                record = {"thread_id": thread, "nonce": nonce, "count": count,
-                          "text": notice_text(count, nonce)}
-                _PENDING_CACHE[key] = json.dumps(record, separators=(",", ":")) + "\n"
-            else:
-                # The real reserve(), with its nonce source pinned so goldens
-                # recorded in one process replay in another.
-                import pseudolife_memory.codex_doorbell_state as state  # noqa: PLC0415
-                original = state.uuid.uuid4
-                state.uuid.uuid4 = lambda: uuid.UUID(int=0x5EED + count + maintainer)
-                try:
-                    record = notice.reserve(count, maintainer=maintainer,
-                                            expires_at=1_791_600_000.0, now=1_791_500_000.0)
-                finally:
-                    state.uuid.uuid4 = original
-                _PENDING_CACHE[key] = notice.path.read_text(encoding="utf-8")
-                assert record is not None
-    return _PENDING_CACHE[key]
-
-
 THREAD = "0199c3f0-2b7e-7a51-9c1d-4e5f6a7b8c9d"
 
 
@@ -277,9 +243,9 @@ def _bell(home: Path, suffix: str, thread: str = THREAD) -> Path:
     return p.digest_dir(home) / f"{p.digest_key(thread)}.{suffix}"
 
 
-def seed_pending(**kwargs):
+def seed_pending(kind="regular"):
     def setup(arm):
-        p.write_private(_bell(arm.home, "bell-pending"), pending_text(THREAD, **kwargs))
+        p.write_private(_bell(arm.home, "bell-pending"), p.doorbell_record(kind))
     return setup
 
 
@@ -291,8 +257,8 @@ def bell_input(prompt: str | None, thread=THREAD, **extra) -> bytes:
     return json.dumps(payload).encode()
 
 
-def _notice(**kwargs) -> str:
-    return json.loads(pending_text(THREAD, **kwargs))["text"]
+def _notice(kind: str) -> str:
+    return json.loads(p.doorbell_record(kind))["text"]
 
 
 def _doorbell_cases() -> list[Case]:
@@ -301,7 +267,7 @@ def _doorbell_cases() -> list[Case]:
     add(Case("doorbell-positive", ["doorbell-prompt-seen"],
              stdin=None, setup=seed_pending(), note="stdin set lazily"))
     add(Case("doorbell-positive-maintainer", ["doorbell-prompt-seen"], stdin=None,
-             setup=seed_pending(count=3, maintainer=1)))
+             setup=seed_pending("maintainer")))
     add(Case("doorbell-ordinary-prompt", ["doorbell-prompt-seen"],
              stdin=bell_input("please continue"), setup=seed_pending()))
     add(Case("doorbell-no-pending", ["doorbell-prompt-seen"], stdin=bell_input("anything")))
@@ -317,26 +283,26 @@ def _doorbell_cases() -> list[Case]:
              setup=seed_pending()))
     add(Case("doorbell-not-json", ["doorbell-prompt-seen"], stdin=b"{", setup=seed_pending()))
     add(Case("doorbell-legacy-record", ["doorbell-prompt-seen"], stdin=None,
-             setup=seed_pending(legacy=True), rules=("doorbell-legacy-first-seen",)))
+             setup=seed_pending("legacy"), rules=("doorbell-legacy-first-seen",)))
     add(Case("doorbell-digest-dir-env", ["doorbell-prompt-seen"], stdin=None,
              env={"PSEUDOLIFE_DIGEST_DIR": "{HOME}/custom-digests"},
              setup=lambda arm: p.write_private(
                  arm.home / "custom-digests" / f"{p.digest_key(THREAD)}.bell-pending",
-                 pending_text(THREAD))))
+                 p.doorbell_record("regular"))))
     return c
 
 
 def _finish(cases: list[Case]) -> list[Case]:
     # Positive doorbell inputs carry the exact notice text, rendered from the
-    # same cached record the setup seeds.
+    # same captured record the setup seeds.
     for case in cases:
         if case.stdin is None:
-            kwargs = {}
+            kind = "regular"
             if case.id == "doorbell-positive-maintainer":
-                kwargs = {"count": 3, "maintainer": 1}
+                kind = "maintainer"
             elif case.id == "doorbell-legacy-record":
-                kwargs = {"legacy": True}
-            case.stdin = bell_input(_notice(**kwargs))
+                kind = "legacy"
+            case.stdin = bell_input(_notice(kind))
     return cases
 
 

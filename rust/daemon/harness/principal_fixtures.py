@@ -6,10 +6,8 @@ import hashlib
 
 import psycopg
 
-from rust.harness_support.bank_fixture import initialize_bank
-from rust.harness_support.database_guard import (
-    assert_disposable_database, dsn_database_name, refuse_production_database,
-)
+from rust.harness_support.bank_fixture import assert_fixture_database, initialize_bank, require_fixture_database
+from rust.harness_support.database_guard import dsn_database_name, refuse_production_database
 
 
 def check_target(dsn):
@@ -17,6 +15,7 @@ def check_target(dsn):
     if name is None:
         raise ValueError("fixture DSN must name an explicit disposable database")
     refuse_production_database(name)
+    require_fixture_database(name)
 
 
 def prepare_bank(dsn):
@@ -27,7 +26,7 @@ def prepare_bank(dsn):
 
 def seed_principal(conn, name, *, token=None, tier=None, ttl=3600, revoked=False):
     """Write one fresh pending, paired or revoked fixture row, never upsert."""
-    assert_disposable_database(conn)
+    assert_fixture_database(conn)
     code = hashlib.sha256(("principal-fixture:" + name).encode()).hexdigest()[:12].upper()
     digest = hashlib.sha256(code.encode()).hexdigest()
     token_hash = hashlib.sha256(token.encode()).hexdigest() if token is not None else None
