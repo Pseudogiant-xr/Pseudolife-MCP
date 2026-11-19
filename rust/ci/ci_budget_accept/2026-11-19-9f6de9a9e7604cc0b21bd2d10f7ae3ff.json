@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "e870c1b9a74bdfee",
-  "fingerprint": "e3fd3caa3ee77535",
-  "reason": "The parity scope helper gains a docs-event format and runtime-prompt classifier, changing its fingerprint. Existing non-doc shard selection, execution, templates and setup are unchanged."
-}

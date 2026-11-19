@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "e870c1b9a74bdfee",
+  "fingerprint": "b894d61c282566f1",
+  "reason": "The scope helper fingerprint changes for the docs-event classifier and supported document suffixes. Existing safe document formats remain documentation for non-doc parity and golden selection. Non-doc shard templates and setup are unchanged."
+}
