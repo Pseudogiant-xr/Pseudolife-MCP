@@ -348,7 +348,11 @@ elif a[:1]==["run"]:
  if "check-config" in a:
   code=s.get("check_config",0)
   out={3:"unsupported memory.reranker.model_name 'BAAI/bge-reranker-base': the native daemon supports only cross-encoder/ms-marco-MiniLM-L-6-v2; set memory.reranker.model_name to that model, or keep the Python engine for a different reranker",2:"storage resolution refused: the Rust daemon requires PSEUDOLIFE_MCP_DATABASE_URL"}.get(code,"the native daemon supports the configuration in /data/config.yaml")
- elif "provision" in a: code=int(s["failure"]=="provision")
+ elif "provision" in a:
+  code=s.get("provision_exit",int(s["failure"]=="provision"))
+  if code and "provision_stderr" in s:
+   out="starting model provision (stdout)"
+   sys.stderr.write(s["provision_stderr"])
  else:
   schema=s.get("target_schema",58) if "--schema-version" in a else s.get("archive_schema",59) if any("@sha256:" in v for v in a) else 58
   out=str(schema) if "--schema-version" in a else f"SCHEMA_META_VERSION = {schema}\n"
@@ -386,7 +390,7 @@ elif a[:1]==["compose"]:
    previous=s["images"].get(name);s["images"][name]="sha256:built-"+str(len(s["calls"]))
    if previous and previous not in s["images"].values():s.setdefault("orphaned",[]).append(previous)
  elif "up" in a:
-  code=int(s["failure"]=="up")
+  code=int(s["failure"]=="up" or bool(s.get("archived_python") and s.get("fail_rust_recreate")))
   if code==0:
    s["deployed"]=True
    built=""
@@ -2121,6 +2125,72 @@ def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, 
         state = json.loads(state_path.read_text())
         assert stages(state) == ["pull", "pull", "backup", "tag", "up"]
         assert _labels(state_path)["org.pseudolife.engine"] == "python"
+
+
+
+@pytest.mark.parametrize(("detail", "diagnostic"), [
+    ("could not download https://example.invalid/model?token=fixture-secret (DNS error)", "DNS error"),
+    ("could not write '/home/private-operator/model file': No space left on device", "No space left on device"),
+    ("model checksum mismatch for /home/private-operator/model: expected fixture-secret", "model checksum mismatch"),
+])
+def test_failed_provision_after_import_reports_the_bridge_and_can_retry(tmp_path, detail, diagnostic):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_schema=59, provision_exit=47)
+        state["provision_stderr"] = "read-only file system\n" + "x" * 8192 + "\n" + detail + "\n"
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
+                "--rollback-tag", "pre-stuck"]
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 1, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        assert report["rollback"]["restore_required"] is True
+        assert report["rollback"]["tag"].endswith("-pre-import")
+        message = "\n".join(report["steps"])
+        assert "The last verified daemon is the Python 0.23.1 bridge at schema v59." in message
+        assert "The bank import completed." in message
+        assert "The pre-import backups and rollback point are available." in message
+        assert "rerun the same update to finish the Rust step" in message
+        assert "nothing was deployed" not in message.lower()
+        assert "exit 47" in message and diagnostic in message
+        assert "starting model provision (stdout)" not in message
+        assert "fixture-secret" not in message and "private-operator" not in message
+        assert "read-only file system" not in message
+
+        state = json.loads(state_path.read_text())
+        assert state["archived_python"] and state["imported"]
+        state.update(calls=[], provision_exit=0)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        assert not any(argv[:2] == ["pull", ARCHIVED_PYTHON] for argv in state["calls"])
+
+
+def test_failed_rust_recreate_after_import_reports_attempt_and_original_rollback(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_schema=59, fail_rust_recreate=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json",
+                          "--health-retries", "1", "--rollback-tag", "pre-stuck"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        message = "\n".join(report["steps"])
+        assert "The bank import completed on the Python 0.23.1 bridge at schema v59." in message
+        assert "The Rust replacement was attempted and its health could not be verified." in message
+        assert "The pre-import backups and rollback point are available." in message
+        assert "restore the host and bank from before the import" in message
+        assert "pseudolife-mcp restore --container " in message
+        assert "rerun the same update to finish" not in message
 
 
 @pytest.mark.parametrize("native", [True], ids=["native"])

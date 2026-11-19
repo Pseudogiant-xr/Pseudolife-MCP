@@ -1,6 +1,6 @@
 use super::*;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, io::Read};
+use std::{cell::Cell, collections::BTreeMap, io::Read};
 
 pub(super) const PYTHON_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon";
 pub(crate) const RUST_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust";
@@ -168,11 +168,85 @@ impl PreparedRelease {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ReleaseStage {
+#[derive(Clone, Copy)]
+enum ReleaseStage<'a> {
     Ordinary,
-    Import,
-    AfterImport,
+    Import(&'a Cell<ImportProgress>),
+    AfterImport(&'a Cell<ImportProgress>),
+}
+
+#[derive(Clone, Copy)]
+enum ImportProgress {
+    BeforeBridge,
+    ApplyingBridge,
+    BridgeHealthy,
+    Imported,
+    ApplyingRust,
+    RustHealthy,
+}
+
+fn import_stage_error(
+    error: UpdateError,
+    progress: ImportProgress,
+    original_commands: &[String],
+    second_commands: Option<&[String]>,
+) -> UpdateError {
+    let state = match progress {
+        ImportProgress::BeforeBridge => return error,
+        ImportProgress::ApplyingBridge => {
+            format!(
+                "The Python {IMPORT_VERSION} bridge replacement was attempted. Its health and bank import could not be verified."
+            )
+        }
+        ImportProgress::BridgeHealthy => {
+            format!(
+                "The Python {IMPORT_VERSION} bridge reached schema v{IMPORT_SCHEMA}. The bank import could not be verified."
+            )
+        }
+        ImportProgress::Imported => {
+            format!(
+                "The last verified daemon is the Python {IMPORT_VERSION} bridge at schema v{IMPORT_SCHEMA}. The bank import completed."
+            )
+        }
+        ImportProgress::ApplyingRust => {
+            format!(
+                "The bank import completed on the Python {IMPORT_VERSION} bridge at schema v{IMPORT_SCHEMA}. The Rust replacement was attempted and its health could not be verified."
+            )
+        }
+        ImportProgress::RustHealthy => {
+            format!(
+                "The bank import completed on the Python {IMPORT_VERSION} bridge at schema v{IMPORT_SCHEMA}. The Rust daemon passed its health gate, but its activation record could not be saved."
+            )
+        }
+    };
+    // Inner errors describe a single deployment and may already carry rollback
+    // commands. Render recovery once using the import transaction's full state.
+    let reason = error
+        .message
+        .split("\nto roll back:\n")
+        .next()
+        .unwrap_or_default()
+        .replace("; nothing was changed", "")
+        .replace(". Nothing was changed", ".")
+        .replace("; nothing was deployed", "")
+        .replace(". Nothing was deployed", ".");
+    let recovery = if let Some(commands) = second_commands {
+        format!(
+            "to roll back to the imported bank:\n{}\nto restore the host and bank from before the import:\n{}",
+            commands.join("\n"),
+            original_commands.join("\n")
+        )
+    } else {
+        format!("to roll back:\n{}", original_commands.join("\n"))
+    };
+    let next = if matches!(progress, ImportProgress::Imported) {
+        "Fix the reported error and rerun the same update to finish the Rust step. To return to the old state, use the rollback commands below."
+    } else {
+        "Use the rollback commands below to restore the image and bank from before the import."
+    };
+    UpdateError::new(format!(
+        "{state} The pre-import backups and rollback point are available.\n{reason}\n{next}\n{recovery}"
+    ))
 }
 
 fn import_waypoint(labels: &Value) -> bool {
@@ -195,6 +269,39 @@ fn confirm_import(bank: &engine::ImportStatus) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn model_provision_diagnostic(stderr_tail: &str) -> Option<&'static str> {
+    // The helper and Docker can include URLs, proxy credentials and paths in
+    // their diagnostics. Only retain fixed, non-sensitive excerpts.
+    const EXCERPTS: &[&str] = &[
+        "No space left on device",
+        "Disk quota exceeded",
+        "Read-only file system",
+        "Permission denied",
+        "DNS error",
+        "Temporary failure in name resolution",
+        "Network is unreachable",
+        "Connection refused",
+        "Connection reset",
+        "certificate verify failed",
+        "command timed out",
+        "command interrupted",
+        "model checksum mismatch",
+        "does not match its pinned sha256",
+        "model artifact is missing or unsafe",
+        "does not match this build",
+        "download exceeds the pinned artifact byte size",
+        "download is shorter than the pinned",
+        "could not download",
+        "cannot start the requested command",
+        "missing executable",
+    ];
+    let lower = stderr_tail.to_ascii_lowercase();
+    EXCERPTS
+        .iter()
+        .copied()
+        .find(|excerpt| lower.contains(&excerpt.to_ascii_lowercase()))
 }
 
 /// A copy of the shipped Compose files the release archive replaces: one
@@ -963,29 +1070,35 @@ impl Update {
             "importing the legacy bank with the archived Python daemon {IMPORT_VERSION} before deploying Rust {target}"
         ));
 
-        let health = self.apply_release(
-            python,
-            ReleaseStage::Import,
-            "python",
-            target,
-            IMPORT_VERSION,
-            current,
-            None,
-            IMPORT_IMAGE,
-            Some(IMPORT_SCHEMA),
-            pg,
-            before_recreate,
-        )?;
+        let progress = Cell::new(ImportProgress::BeforeBridge);
+        let health = self
+            .apply_release(
+                python,
+                ReleaseStage::Import(&progress),
+                "python",
+                target,
+                IMPORT_VERSION,
+                current,
+                None,
+                IMPORT_IMAGE,
+                Some(IMPORT_SCHEMA),
+                pg,
+                before_recreate,
+            )
+            .map_err(|error| {
+                import_stage_error(error, progress.get(), &self.rollback_lines, None)
+            })?;
         let before_import = self.report.rollback.clone();
         let original_commands = self.rollback_lines.clone();
         self.schema_before = health["schema"].as_i64();
         let result = (|| -> Result<()> {
             let rust = self.prepare_release("rust", true, target, Some(&health))?;
             confirm_import(&rust.import_status(self)?)?;
+            progress.set(ImportProgress::Imported);
             let pg = self.release_disk(&rust)?;
             self.apply_release(
                 rust,
-                ReleaseStage::AfterImport,
+                ReleaseStage::AfterImport(&progress),
                 "rust",
                 target,
                 target,
@@ -1002,21 +1115,9 @@ impl Update {
             self.report.rollback["before_import"] = before_import;
         }
         result.map_err(|error| {
-            let has_second_rollback = self.rollback_lines != original_commands;
-            let error = if error.message.contains("\nto roll back:\n") {
-                error
-            } else {
-                self.rollback_error(error.message)
-            };
-            if has_second_rollback {
-                UpdateError::new(format!(
-                    "{}\nto restore the host and bank from before the import:\n{}",
-                    error.message,
-                    original_commands.join("\n")
-                ))
-            } else {
-                error
-            }
+            let second = (self.rollback_lines != original_commands)
+                .then_some(self.rollback_lines.as_slice());
+            import_stage_error(error, progress.get(), &original_commands, second)
         })
     }
 
@@ -1024,7 +1125,7 @@ impl Update {
     fn apply_release(
         &mut self,
         prepared: PreparedRelease,
-        stage: ReleaseStage,
+        stage: ReleaseStage<'_>,
         choice: &str,
         target: &str,
         version: &str,
@@ -1054,7 +1155,7 @@ impl Update {
                 return Ok(json!({}));
             }
             let pg = pg.as_deref().expect("backup discovery returns PostgreSQL");
-            if stage == ReleaseStage::Ordinary
+            if matches!(stage, ReleaseStage::Ordinary)
                 && let Some(repo) = checkout
                     .as_deref()
                     .filter(|repo| u.checkout_script(repo, "backup").is_some())
@@ -1069,13 +1170,13 @@ impl Update {
                 u.project_backup(repo, pg, daemon, user, db)
             } else {
                 let mut directory = data_dir().join("backups");
-                if stage == ReleaseStage::Import {
+                if matches!(stage, ReleaseStage::Import(_)) {
                     // Reserve the original dump and state independently of the
                     // post-import backup and its ordinary rotation.
                     directory.push("pre-import");
                 }
                 let backup = u.builtin_backup(pg, daemon, &directory)?;
-                if stage != ReleaseStage::Ordinary && backup["state_archive"].is_null() {
+                if !matches!(stage, ReleaseStage::Ordinary) && backup["state_archive"].is_null() {
                     return Err(UpdateError::new(
                         "the legacy import needs a complete state archive; fix the state backup and retry; no daemon was replaced in this step",
                     ));
@@ -1097,7 +1198,11 @@ impl Update {
             // A first start would otherwise download the models inside the
             // health gate. The running daemon keeps serving meanwhile.
             // Before provisioning: a configuration Rust refuses downloads no models.
-            self.check_config(image, &config, stage == ReleaseStage::AfterImport)?;
+            self.check_config(
+                image,
+                &config,
+                matches!(stage, ReleaseStage::AfterImport(_)),
+            )?;
             self.provision_models(image, &config)?;
         }
         let backups = match early {
@@ -1125,7 +1230,7 @@ impl Update {
             .as_str()
             .unwrap_or("python");
         let mut suffix = self.rollback_suffix();
-        if stage == ReleaseStage::Import {
+        if matches!(stage, ReleaseStage::Import(_)) {
             // Reserve the recovery image beside the separately retained
             // pre-import backup. The suffix also survives a new invocation
             // that resumes on Python after the first hop.
@@ -1142,7 +1247,7 @@ impl Update {
         );
         engine::tag_validated(self, &running_id, &rollback)?;
         let mut old_service = engine::rollback_service(&context.running, &rollback, None);
-        if stage == ReleaseStage::AfterImport {
+        if matches!(stage, ReleaseStage::AfterImport(_)) {
             old_service["user"] = json!("10001:10001");
         }
         let rollback_file = data_dir().join("update-engine").join(format!(
@@ -1171,7 +1276,7 @@ impl Update {
             None,
             Some(target),
         );
-        if stage == ReleaseStage::Import {
+        if matches!(stage, ReleaseStage::Import(_)) {
             let dump = seams::quote(backups["dump"].as_str().expect("validated bank dump"));
             let state = seams::quote(
                 backups["state_archive"]
@@ -1197,7 +1302,7 @@ impl Update {
         if token.is_some() {
             service["labels"] = json!({(engine::ENGINE_LABEL):choice,(engine::ACTIVATION_LABEL):activation,(engine::RELEASE_LABEL):version});
         }
-        if stage == ReleaseStage::Import {
+        if matches!(stage, ReleaseStage::Import(_)) {
             // The archived entrypoint can migrate ownership as root. The
             // updater already backed up and checked the volume above.
             service["user"] = json!("10001:10001");
@@ -1218,13 +1323,18 @@ impl Update {
                 "--no-deps".into(),
                 "--no-build".into(),
             ]);
-            if stage != ReleaseStage::Ordinary {
+            if !matches!(stage, ReleaseStage::Ordinary) {
                 args.extend(["--pull".into(), "never".into()]);
             }
             args.push(DAEMON_SERVICE.into());
             self.step(format!(
                 "recreating the daemon container on {image} (Postgres + extractor untouched)..."
             ));
+            match stage {
+                ReleaseStage::Import(progress) => progress.set(ImportProgress::ApplyingBridge),
+                ReleaseStage::AfterImport(progress) => progress.set(ImportProgress::ApplyingRust),
+                ReleaseStage::Ordinary => {}
+            }
             if self.command(&args, Some(&env), 3600, true).0 != 0 {
                 return Err(UpdateError::new("daemon recreate failed"));
             }
@@ -1233,10 +1343,15 @@ impl Update {
             } else {
                 self.wait_plain_health(Some(version))?
             };
+            match stage {
+                ReleaseStage::Import(progress) => progress.set(ImportProgress::BridgeHealthy),
+                ReleaseStage::AfterImport(progress) => progress.set(ImportProgress::RustHealthy),
+                ReleaseStage::Ordinary => {}
+            }
             if service.get("labels").is_some() {
                 engine::write_overlay(&engine::release_accepted(), &service)?;
             }
-            if stage != ReleaseStage::Import {
+            if !matches!(stage, ReleaseStage::Import(_)) {
                 if self.o.daemon_only {
                     self.hooks_changed_note(previous, Some(&health));
                 } else {
@@ -1984,10 +2099,14 @@ impl Update {
             .into_iter()
             .map(str::to_owned),
         );
-        if self.command(&args, None, 3600, true).0 != 0 {
-            return Err(UpdateError::new(
-                "could not provision the Rust daemon's models; check this host's network access and disk space, then retry; nothing was deployed",
-            ));
+        args.insert(0, self.docker.clone());
+        let (code, stderr_tail) = seams::run_cli_stderr(&args, 3600, !self.o.as_json);
+        if code != 0 {
+            let detail = model_provision_diagnostic(&stderr_tail)
+                .map_or_else(String::new, |excerpt| format!(": {excerpt}"));
+            return Err(UpdateError::new(format!(
+                "could not provision the Rust daemon's models (exit {code}){detail}; check the model cache, network access and disk space, then retry; nothing was deployed"
+            )));
         }
         Ok(())
     }
