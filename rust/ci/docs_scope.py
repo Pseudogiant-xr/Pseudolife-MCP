@@ -38,6 +38,7 @@ DIRECTORY_READERS = {
     "examples/": ("tests/test_plugin_packaging.py",),
     "rust/daemon/divergences/": (
         DIVERGENCE_POINTER_READER,
+        "rust/ci/test_divergences_ledger.py::test_the_committed_directory_renders_and_parses_back_to_itself",
         "rust/ci/test_divergences_ledger.py::test_the_committed_index_carries_no_count_table",
         "rust/ci/test_divergences_ledger.py::test_counts_of_the_committed_ledger_cover_every_entry",
     ),

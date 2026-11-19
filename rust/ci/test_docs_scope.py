@@ -357,6 +357,8 @@ def test_code_paths_cannot_use_the_docs_selection(repo, code):
 def test_divergence_ledger_selection_checks_the_committed_index(repo, path):
     targets = docs_scope.doc_tests([path])
     assert "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory" in targets
+    round_trip = "rust/ci/test_divergences_ledger.py::test_the_committed_directory_renders_and_parses_back_to_itself"
+    assert (round_trip in targets) is path.startswith("rust/daemon/divergences/")
 
 
 def test_tier_bench_results_keep_the_committed_pilot_reader(repo):
