@@ -4,11 +4,10 @@ The native CLI archives publish with every release
 (`.github/workflows/release.yml`), because the installers download them,
 and they are on the GitHub release before PyPI publishes. Older updaters
 learn that a release exists from PyPI and then download its archives.
-PyPI cannot be unpublished, so a failed native build stops the release
-before PyPI. The Rust daemon image needs the human-approved
-`publish` job, and additionally its
-repository variable, which stays enabled since it became the default
-Docker engine in 0.23.0. This contract does not authorize a release.
+Native discovery waits for `RELEASE-READY.json`, which the workflow attaches
+after protected publication and the configured image jobs succeed.
+The Rust image also needs its repository variable, which stays enabled
+since it became the default Docker engine in 0.23.0.
 
 ## Names and targets
 
@@ -45,6 +44,14 @@ release, verify the archive before extraction, and refuse missing or
 duplicate entries and digest mismatches. A missing native asset means
 that release predates the native set (0.23.1 and earlier publish none) or
 its publication job failed.
+
+`RELEASE-READY.json` is separate from the checksum manifest. It contains
+the release `version`, the full tagged `commit` SHA, and an `images` object
+mapping `pseudolife-daemon` and `pseudolife-pg` to their published
+`sha256:` digests. If the Rust image job ran, the object also includes
+`pseudolife-daemon-rust`. The JSON contains no timestamp or run attempt.
+These fields give operators a stable record of what the workflow approved
+and published. Discovery uses the marker's asset metadata from GitHub.
 
 The compose archive has these six regular files at its root, copied from
 the release's `ops/` directory without rewriting their contents:
@@ -104,9 +111,9 @@ to PyPI or an older release when that answer is incomplete.
   Preserve the version's spelling, including leading zeroes, for asset
   names and the reported version. This mirrors the client's `plain_release`
   shape and `version_key` integer range.
-- Require all seven assets: `SHA256SUMS`, the five binary archive names in
-  the table above, and `pseudolife-compose-<version>.tar.gz`, using that exact
-  version. Each required name must occur exactly once, with `state` equal
+- Require `RELEASE-READY.json`, `SHA256SUMS`, the five binary archive names
+  in the table above, and `pseudolife-compose-<version>.tar.gz`, using that
+  exact version in the archive names. Each required name must occur exactly once, with `state` equal
   to `uploaded` and an integer `size` greater than zero. Unrelated assets
   are ignored. Discovery checks metadata only; installation still verifies
   the checksum manifest and the downloaded bytes. The publisher verifies
@@ -148,10 +155,21 @@ the last accepted version remain separate, without conditional-response state.
 
 The existing `updates.check_releases: false` setting and
 `PSEUDOLIFE_RELEASE_CHECK=0` environment override still disable all checks.
-Asset completeness does not prove that container images are published: image
-jobs still wait for the human-approved PyPI job, after native asset attachment.
-The native client and daemon can discover the release while image publication
-still awaits approval. Image-based updates can fail during that window.
+The marker closes the gap between native asset attachment and protected
+publication. The new client reports nothing newer for an unmarked release
+and the new daemon offers no notice for that version. The daemon can still
+report its last accepted release from a previous check.
+
+| Consumer | Marked release | Unmarked release |
+|---|---|---|
+| Released 0.24.0 clients | Discover through PyPI and use the selected release's assets. | Still follow PyPI and can update when the wheel is visible. |
+| Client with the readiness rule | Accepts the target once the archives, checksum manifest and marker are uploaded. | Unpinned discovery reports nothing newer. |
+| Daemon with the original GitHub rule | Accepts a complete archive and checksum set. | Can offer a release once the original asset set is complete. |
+| Daemon with the readiness rule | Accepts the full asset set and can advertise a newer version. | Offers no notice for that release. |
+
+The first cut with this rule must publish the traditional asset set, wheel,
+configured images and `RELEASE-READY.json` from the same tagged commit. Keep
+`PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` for existing Rust Docker installations.
 
 ## Image and publication gates
 
@@ -167,8 +185,12 @@ The image job is enabled only by the maintainer setting
 `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true`; unset or other values disable it.
 The native asset set has no variable: it publishes on every release
 event once the `build` job's version guards passed, before the `publish`
-(PyPI) job, which needs it. Build-only CI proofs neither attach release
-assets nor push images. Installers and updaters still treat an asset as
+(PyPI) job, which needs it. The `release-ready` job waits for `publish`
+and `images` to succeed. It accepts a skipped `rust-image` job only when
+its repository variable disables that image. A failed or cancelled image
+job leaves the release undiscoverable by the new client and daemon.
+Build-only CI proofs skip the marker job, asset attachment and image
+publication. Installers and pinned updates still treat an asset as
 unavailable until the release actually carries it (a 404 or a missing
 `SHA256SUMS` line refuses with nothing changed).
 
@@ -196,15 +218,19 @@ even if the Rust image variable is enabled. A release event builds the same
 archives after the `build` job's guards, then verifies the downloaded
 `SHA256SUMS` immediately before attaching the complete set to the
 already published GitHub release; PyPI, the images and the registry wait
-for that attachment. Publication requires exactly the six listed archives plus the
-checksum manifest. On a retry, it downloads and verifies every already
+for that attachment. The archive attachment job requires exactly the six listed
+archives plus the checksum manifest. On a retry, it downloads and verifies every already
 published asset, including `SHA256SUMS`, before uploading only missing assets;
 any differing published bytes fail the job without replacement. Rerun the
 publication job with the same complete artifact after a partial upload.
 Re-running the failed jobs of a release run reruns only what failed and
 what waits for it: a failed target build rebuilds that target, then the
 bundle, the attachment (only missing assets) and PyPI's approval; a
-failure after the attachment leaves the assets in place. Use "Re-run
+failure after the attachment leaves the assets in place. When the marker
+job is retried, it uses the successful jobs' image digests and verifies any
+existing marker byte for byte. It uploads the marker only if absent.
+A partial or different existing marker stops the job for investigation.
+Use "Re-run
 failed jobs", never "Re-run all jobs": a rebuild need not be byte-identical,
 so its `SHA256SUMS` would differ from the attached one and the attachment
 would refuse, which blocks PyPI until the attached assets are deleted.

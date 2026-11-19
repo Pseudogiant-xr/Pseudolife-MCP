@@ -26,6 +26,7 @@ COMPOSE_FILES = (
     "docker-compose.rust-shadow.yml", "docker-compose.rust-ghcr.yml",
 )
 BUNDLE_FILES = (*COMPOSE_FILES, "Dockerfile.extractor")
+READY_MARKER = "RELEASE-READY.json"
 
 
 def checked_version(version: str) -> str:
@@ -155,29 +156,54 @@ def verified_assets(value: str, out: Path) -> dict[str, str]:
     return digests
 
 
-def publish_assets(value: str, out: Path, tag: str, repo: str) -> None:
-    if tag != "v" + checked_version(value):
-        raise ValueError("release tag differs from native package version")
-    digests = verified_assets(value, out)
+def upload_missing(out: Path, tag: str, repo: str, digests: dict[str, str]) -> None:
     release = json.loads(subprocess.check_output(
         ["gh", "release", "view", tag, "--repo", repo, "--json", "assets"]))
-    present = {asset["name"] for asset in release["assets"]}
+    names = [asset["name"] for asset in release["assets"] if asset["name"] in digests]
+    present = set(names)
+    if len(names) != len(present):
+        raise ValueError("release lists duplicate assets to verify")
     # Check every existing asset before uploading any missing one. A retry
     # never replaces published bytes, including the checksum manifest itself.
     with tempfile.TemporaryDirectory(prefix="native-published-") as directory:
-        for name in sorted(present.intersection(digests)):
+        for name in sorted(present):
             subprocess.run(["gh", "release", "download", tag, "--repo", repo,
                             "--pattern", name, "--dir", directory], check=True)
             if hashlib.sha256((Path(directory) / name).read_bytes()).hexdigest() != digests[name]:
                 raise ValueError(f"published asset differs: {name}")
     for name in sorted(digests.keys() - present):
         subprocess.run(["gh", "release", "upload", tag, str(out / name), "--repo", repo], check=True)
+
+
+def publish_assets(value: str, out: Path, tag: str, repo: str) -> None:
+    if tag != "v" + checked_version(value):
+        raise ValueError("release tag differs from native package version")
+    upload_missing(out, tag, repo, verified_assets(value, out))
     print("native release assets verified; only missing assets uploaded")
+
+
+def publish_ready(value: str, tag: str, repo: str, commit: str, images: dict[str, str]) -> None:
+    if tag != "v" + checked_version(value):
+        raise ValueError("release tag differs from native package version")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("expected the full release commit SHA")
+    required = {"pseudolife-daemon", "pseudolife-pg"}
+    if not required <= images.keys() <= required | {"pseudolife-daemon-rust"} or any(
+        not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) for digest in images.values()
+    ):
+        raise ValueError("expected valid published image digests")
+    marker = json.dumps({"version": value, "commit": commit, "images": images},
+                        sort_keys=True, indent=2).encode("utf-8") + b"\n"
+    with tempfile.TemporaryDirectory(prefix="release-ready-") as directory:
+        out = Path(directory)
+        (out / READY_MARKER).write_bytes(marker)
+        upload_missing(out, tag, repo, {READY_MARKER: hashlib.sha256(marker).hexdigest()})
+    print("release readiness marker verified")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("version", "package", "smoke", "assemble", "publish"))
+    parser.add_argument("command", choices=("version", "package", "smoke", "assemble", "publish", "publish-ready"))
     parser.add_argument("--target", choices=TARGETS)
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--out", type=Path, default=Path("release-assets"))
@@ -191,6 +217,18 @@ def main() -> None:
         assemble(ROOT, value, args.out)
     elif args.command == "publish":
         publish_assets(value, args.out, os.environ["GITHUB_REF_NAME"], os.environ["GITHUB_REPOSITORY"])
+    elif args.command == "publish-ready":
+        images = {
+            "pseudolife-daemon": os.environ["DAEMON_IMAGE_DIGEST"],
+            "pseudolife-pg": os.environ["PG_IMAGE_DIGEST"],
+        }
+        rust_result = os.environ["RUST_IMAGE_RESULT"]
+        if rust_result == "success":
+            images["pseudolife-daemon-rust"] = os.environ["RUST_IMAGE_DIGEST"]
+        elif rust_result != "skipped":
+            raise ValueError("Rust image job did not succeed or skip")
+        publish_ready(value, os.environ["GITHUB_REF_NAME"], os.environ["GITHUB_REPOSITORY"],
+                      os.environ["GITHUB_SHA"], images)
     else:
         if not args.target or (args.command == "package" and not args.binary):
             parser.error("package needs --binary and --target; smoke needs --target")

@@ -174,6 +174,105 @@ def test_publication_recovers_partial_upload_without_replacing_bytes(tmp_path, m
     assert [call[2] for call in calls].count("upload") == 6
 
 
+@pytest.mark.parametrize("rust_digest", [None, "sha256:" + "c" * 64])
+def test_ready_marker_is_idempotent_and_refuses_different_published_bytes(monkeypatch, rust_digest):
+    remote = {}
+    calls = fake_release(monkeypatch, remote)
+    images = {
+        "pseudolife-daemon": "sha256:" + "a" * 64,
+        "pseudolife-pg": "sha256:" + "b" * 64,
+    }
+    if rust_digest:
+        images["pseudolife-daemon-rust"] = rust_digest
+    args = ("1.2.3", "v1.2.3", "owner/repo", "f" * 40, images)
+    assets.publish_ready(*args)
+    expected = {"version": "1.2.3", "commit": "f" * 40, "images": images}
+    assert json.loads(remote["RELEASE-READY.json"]) == expected
+    published = remote.copy()
+    assets.publish_ready(*args)
+    assert remote == published
+    assert [call[2] for call in calls if call[:2] == ["gh", "release"]] == [
+        "view", "upload", "view", "download",
+    ]
+    with pytest.raises(ValueError, match="published asset differs"):
+        assets.publish_ready(*args[:3], "0" * 40, images)
+    assert remote == published
+    assert sum(call[2] == "upload" for call in calls) == 1
+
+
+@pytest.mark.parametrize("damage, diagnostic", [
+    ("tag", "tag differs"),
+    ("commit", "commit SHA"),
+    ("missing-image", "image digests"),
+    ("bad-rust-digest", "image digests"),
+    ("unconfigured-image", "image digests"),
+])
+def test_ready_marker_refuses_invalid_attestation_before_github(monkeypatch, damage, diagnostic):
+    tag, commit = "v1.2.3", "f" * 40
+    images = {"pseudolife-daemon": "sha256:" + "a" * 64, "pseudolife-pg": "sha256:" + "b" * 64}
+    if damage == "tag":
+        tag = "v1.2.4"
+    elif damage == "commit":
+        commit = "short"
+    elif damage == "missing-image":
+        images.pop("pseudolife-pg")
+    elif damage == "bad-rust-digest":
+        images["pseudolife-daemon-rust"] = ""
+    else:
+        images["unknown"] = "sha256:" + "c" * 64
+    calls = fake_release(monkeypatch, {})
+    with pytest.raises(ValueError, match=diagnostic):
+        assets.publish_ready("1.2.3", tag, "owner/repo", commit, images)
+    assert not calls
+
+
+def test_marker_publisher_refuses_duplicate_remote_markers(monkeypatch):
+    images = {"pseudolife-daemon": "sha256:" + "a" * 64, "pseudolife-pg": "sha256:" + "b" * 64}
+    marker = json.dumps({"version": "1.2.3", "commit": "f" * 40, "images": images},
+                        sort_keys=True, indent=2).encode("utf-8") + b"\n"
+    calls = fake_release(monkeypatch, {"RELEASE-READY.json": marker})
+
+    def view(_args):
+        return json.dumps({"assets": [{"name": "RELEASE-READY.json"}] * 2}).encode()
+
+    monkeypatch.setattr(assets.subprocess, "check_output", view)
+    with pytest.raises(ValueError, match="duplicate assets"):
+        assets.publish_ready("1.2.3", "v1.2.3", "owner/repo", "f" * 40, images)
+    assert not calls
+
+
+@pytest.mark.parametrize("rust_result", ["success", "skipped", "failure"])
+def test_ready_marker_cli_uses_the_rust_job_result(monkeypatch, rust_result):
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["release_assets.py", "publish-ready"])
+    monkeypatch.setattr(assets, "version", lambda: "1.2.3")
+    for name, value in {
+        "GITHUB_EVENT_NAME": "release",
+        "GITHUB_REF_NAME": "v1.2.3",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_SHA": "f" * 40,
+        "DAEMON_IMAGE_DIGEST": "sha256:" + "a" * 64,
+        "PG_IMAGE_DIGEST": "sha256:" + "b" * 64,
+        "RUST_IMAGE_DIGEST": "sha256:" + "c" * 64,
+        "RUST_IMAGE_RESULT": rust_result,
+    }.items():
+        monkeypatch.setenv(name, value)
+    remote = {}
+    calls = fake_release(monkeypatch, remote)
+    if rust_result == "failure":
+        with pytest.raises(ValueError, match="did not succeed or skip"):
+            assets.main()
+        assert not calls
+    else:
+        assets.main()
+        marker = json.loads(remote["RELEASE-READY.json"])
+        names = {"pseudolife-daemon", "pseudolife-pg"}
+        if rust_result == "success":
+            names.add("pseudolife-daemon-rust")
+        assert marker["images"].keys() == names
+
+
 @pytest.mark.parametrize("name", ["SHA256SUMS", assets.asset_name("1.2.3", assets.TARGETS[0])])
 def test_publication_refuses_existing_mismatch_before_any_upload(tmp_path, monkeypatch, name):
     out = complete_assets(tmp_path)

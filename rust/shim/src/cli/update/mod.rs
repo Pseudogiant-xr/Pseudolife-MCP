@@ -197,6 +197,7 @@ fn complete_assets(data: &Value, version: &str) -> bool {
     // SHA256SUMS uploads first, not last. All six archives must also be present.
     // Keep these names aligned with docs/dev/release-assets.md and its publisher.
     let mut names = vec![
+        "RELEASE-READY.json".to_owned(),
         "SHA256SUMS".to_owned(),
         format!("pseudolife-compose-{version}.tar.gz"),
     ];

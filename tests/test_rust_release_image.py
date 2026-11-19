@@ -12,6 +12,12 @@ EXPECTED_GATES = {
     "rust-assets": "!cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.build.result == 'success'))",
     "rust-assets-bundle": "!cancelled() && needs.rust-assets.result == 'success'",
     "rust-assets-publish": "!cancelled() && github.event_name == 'release' && needs.build.result == 'success' && needs.rust-assets-bundle.result == 'success'",
+    "release-ready": (
+        "!cancelled() && github.event_name == 'release' "
+        "&& needs.publish.result == 'success' && needs.images.result == 'success' "
+        "&& (needs.rust-image.result == 'success' "
+        "|| (needs.rust-image.result == 'skipped' && vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON != 'true'))"
+    ),
 }
 
 
@@ -110,12 +116,48 @@ def _upstream(jobs, name) -> set[str]:
     return seen
 
 
+def assert_ready_job_dependencies(jobs):
+    assert sorted(_needs(jobs["release-ready"])) == ["images", "publish", "rust-image"]
+
+
+def test_release_ready_depends_on_the_protected_publish_and_image_jobs():
+    root = Path(__file__).resolve().parents[1]
+    jobs = yaml.safe_load((root / ".github/workflows/release.yml").read_text(encoding="utf-8"))["jobs"]
+    assert_ready_job_dependencies(jobs)
+    ready = jobs["release-ready"]
+    assert_release_gates(jobs)
+    assert jobs["publish"]["environment"]["name"] == "pypi"
+    assert ready["permissions"] == {"contents": "write"}
+    assert jobs["images"]["outputs"] == {
+        "daemon-digest": "${{ steps.daemon.outputs.digest }}",
+        "pg-digest": "${{ steps.pg.outputs.digest }}",
+    }
+    assert jobs["rust-image"]["outputs"] == {"digest": "${{ steps.daemon.outputs.digest }}"}
+    for name, step_ids in (("images", {"daemon", "pg"}), ("rust-image", {"daemon"})):
+        builds = [s for s in jobs[name]["steps"] if s.get("uses", "").startswith("docker/build-push-action@")]
+        assert {s["id"] for s in builds} == step_ids
+        assert all(s["with"]["push"] is True for s in builds)
+        assert "continue-on-error" not in jobs[name]
+        assert not any("continue-on-error" in s for s in jobs[name]["steps"])
+    steps = [s for s in ready["steps"] if s.get("run") == "python rust/ci/release_assets.py publish-ready"]
+    assert len(steps) == 1
+    assert steps[0]["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "DAEMON_IMAGE_DIGEST": "${{ needs.images.outputs.daemon-digest }}",
+        "PG_IMAGE_DIGEST": "${{ needs.images.outputs.pg-digest }}",
+        "RUST_IMAGE_DIGEST": "${{ needs.rust-image.outputs.digest }}",
+        "RUST_IMAGE_RESULT": "${{ needs.rust-image.result }}",
+    }
+
+
+def test_release_ready_dependency_guard_rejects_early_publication():
+    with pytest.raises(AssertionError):
+        assert_ready_job_dependencies({"release-ready": {"needs": ["images", "rust-image"]}})
+
+
 def test_native_archives_reach_the_release_before_pypi():
-    # The updaters learn that a release exists from PyPI (`update` and the
-    # 0.23.x bridge read pypi.org's JSON, then fetch that tag's GitHub assets),
-    # and PyPI cannot be unpublished: the archives and SHA256SUMS are attached
-    # before PyPI or anything after it publishes, and a failed native build
-    # stops the release before PyPI.
+    # Older updaters learn that a release exists from PyPI, so keep the
+    # archives and SHA256SUMS available before the irreversible wheel upload.
     root = Path(__file__).resolve().parents[1]
     jobs = yaml.safe_load((root / ".github/workflows/release.yml").read_text(encoding="utf-8"))["jobs"]
     for publisher in ("publish", "images", "rust-image", "registry"):

@@ -2,6 +2,7 @@ use super::*;
 
 fn github_release() -> Value {
     let names = [
+        "RELEASE-READY.json",
         "SHA256SUMS",
         "pseudolife-compose-0.25.0.tar.gz",
         "pseudolife-mcp-0.25.0-x86_64-unknown-linux-gnu.tar.gz",
@@ -14,6 +15,44 @@ fn github_release() -> Value {
         "tag_name": "v0.25.0", "draft": false, "prerelease": false,
         "assets": names.map(|name| json!({"name": name, "state": "uploaded", "size": 100}))
     })
+}
+
+#[tokio::test]
+async fn github_discovery_requires_one_uploaded_nonempty_ready_marker() {
+    let complete = github_release();
+    let mut accepted = Vec::new();
+    for condition in ["missing", "uploading", "duplicate", "empty"] {
+        let mut data = complete.clone();
+        let assets = data["assets"].as_array_mut().unwrap();
+        assert_eq!(assets[0]["name"], "RELEASE-READY.json");
+        match condition {
+            "missing" => {
+                assets.remove(0);
+            }
+            "uploading" => assets[0]["state"] = json!("starter"),
+            "duplicate" => assets.push(assets[0].clone()),
+            "empty" => assets[0]["size"] = json!(0),
+            _ => unreachable!(),
+        }
+        if discovery_reply(200, data.to_string())
+            .await
+            .unwrap()
+            .is_some()
+        {
+            accepted.push(condition);
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "accepted invalid ready markers: {accepted:?}"
+    );
+    assert_eq!(
+        discovery_reply(200, complete.to_string())
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("0.25.0")
+    );
 }
 
 async fn discovery_reply(status: u16, body: String) -> Result<Option<String>> {
@@ -86,8 +125,10 @@ fn github_discovery_uses_the_daemons_complete_asset_rule() {
         let (_, function) = source.split_once("\nfn complete_assets(").unwrap();
         function.split_once("\n}").unwrap().0.to_owned()
     }
+    let client = predicate(include_str!("mod.rs"));
+    assert!(client.contains(r#""RELEASE-READY.json".to_owned()"#));
     assert_eq!(
-        predicate(include_str!("mod.rs")),
+        client,
         predicate(include_str!("../../../../daemon/src/release_check.rs")),
         "update the client and daemon asset acceptance rules together"
     );
@@ -249,7 +290,7 @@ async fn github_discovery_waits_for_assets_and_rediscovers_completed_release() {
     let mut zero_size = complete.clone();
     zero_size["assets"][0]["size"] = json!(0);
     let mut different_version = complete.clone();
-    different_version["assets"][1]["name"] = json!("pseudolife-compose-0.26.0.tar.gz");
+    different_version["assets"][2]["name"] = json!("pseudolife-compose-0.26.0.tar.gz");
 
     let mut wrongly_accepted = Vec::new();
     for (why, mut data) in [
