@@ -43,9 +43,12 @@ an unsupported configuration before the backup instead of falling back.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
 on the Python daemon; the next attended `pseudolife-mcp update` moves the host. A
-bank whose counters were never imported takes one extra step inside the
-same update: it first runs the new release on Python once to import them,
-then switches.
+bank with a legacy schema or pending import takes one extra step inside
+the release update: it runs the pinned Python 0.23.1 daemon to complete
+the import, then switches to the selected Rust release. The archived
+image is available only for Linux amd64. On another platform, restore a
+verified backup on a Linux amd64 Docker host and complete the update
+there before moving the migrated bank back.
 
 A rerun keeps the engine already installed, also after `docker compose
 down`. A Rust daemon stays on the release it was installed or last updated

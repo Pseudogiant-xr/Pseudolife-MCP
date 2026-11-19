@@ -683,6 +683,12 @@ impl Update {
         self.update()
     }
     pub fn update(&mut self) -> Result<()> {
+        if !self.o.clients_only
+            && let Some(recovery) = self.active_import()?
+        {
+            self.report.mode = "release".into();
+            return self.resume_import(recovery, None, None);
+        }
         if let Some(repo) = engine::selected_checkout(self)? {
             self.report.mode = "checkout".into();
             if self.o.all_clients {

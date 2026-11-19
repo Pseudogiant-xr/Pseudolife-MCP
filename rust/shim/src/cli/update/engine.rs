@@ -629,7 +629,6 @@ fn verify_endpoint(config: &Value, url: &str) -> Result<()> {
 }
 pub(super) struct ImportStatus {
     pub schema: Option<i64>,
-    pub has_counters: bool,
     pub counters_pending: bool,
     pub chroma_pending: bool,
 }
@@ -661,7 +660,6 @@ pub(super) fn import_status(
     if schema.is_none_or(|v| v < 57) {
         return Ok(ImportStatus {
             schema,
-            has_counters: false,
             counters_pending: false,
             chroma_pending: false,
         });
@@ -696,7 +694,6 @@ pub(super) fn import_status(
     )? != "done";
     Ok(ImportStatus {
         schema,
-        has_counters,
         counters_pending,
         chroma_pending,
     })
@@ -707,7 +704,11 @@ fn legacy_file(u: &Update, daemon: &str, directory: &str, test: &str) -> Result<
         "if [ ! -x /data ] || {{ [ -d {directory} ] && [ ! -x {directory} ]; }}; then printf inaccessible; elif {test}; then printf present; else printf absent; fi"
     );
     let (code, out) = u.docker_call(&["exec", daemon, "sh", "-c", &script]);
-    match (code, out.trim()) {
+    legacy_file_result(directory, code, &out)
+}
+
+fn legacy_file_result(directory: &str, code: i32, output: &str) -> Result<bool> {
+    match (code, output.trim()) {
         (0, "present") => Ok(true),
         (0, "absent") => Ok(false),
         (0, "inaccessible") => Err(UpdateError::usage(format!(
@@ -717,6 +718,23 @@ fn legacy_file(u: &Update, daemon: &str, directory: &str, test: &str) -> Result<
             "cannot check the daemon's state volume for legacy files; start the daemon with its original /data mount and retry; nothing was deployed",
         )),
     }
+}
+
+#[cfg(test)]
+#[test]
+fn legacy_file_probe_refuses_inaccessible_or_unexpected_output() {
+    let directory = "/data/memory_state";
+    assert!(legacy_file_result(directory, 0, "present\n").unwrap());
+    assert!(!legacy_file_result(directory, 0, "absent\n").unwrap());
+    let inaccessible = legacy_file_result(directory, 0, "inaccessible").unwrap_err();
+    assert!(inaccessible.message.contains(directory));
+    assert!(
+        inaccessible
+            .message
+            .contains("Grant the daemon account access")
+    );
+    assert!(legacy_file_result(directory, 1, "absent").is_err());
+    assert!(legacy_file_result(directory, 0, "").is_err());
 }
 pub(super) fn require_imported_with(
     u: &Update,

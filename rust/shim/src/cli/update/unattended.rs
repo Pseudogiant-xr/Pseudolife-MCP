@@ -307,7 +307,9 @@ fn run_inner(
         ));
     }
     let health = update.daemon_health().ok_or_else(|| {
-        UpdateError::usage("the daemon did not answer /health; nothing was changed")
+        update.import_health_error(UpdateError::usage(
+            "the daemon did not answer /health; nothing was changed",
+        ))
     })?;
     update.report.current = health["version"].as_str().map(str::to_owned);
     let Some(latest) = update.target_version()? else {
@@ -370,7 +372,9 @@ fn run_inner(
         }
         Err(error) => return Err(error),
     };
-    let health=update.daemon_health().ok_or_else(||UpdateError::usage("the daemon did not answer /health after the update lock was taken; nothing was changed"))?;
+    let health = update.daemon_health().ok_or_else(|| {
+        update.import_health_error(UpdateError::usage("the daemon did not answer /health after the update lock was taken; nothing was changed"))
+    })?;
     let current = health_version(&health)?;
     update.report.current = Some(current.clone());
     if !version_is_newer(&latest, &current) {
