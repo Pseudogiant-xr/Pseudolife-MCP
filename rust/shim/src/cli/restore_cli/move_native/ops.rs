@@ -63,7 +63,7 @@ pub(super) trait Site {
     /// (which it reads under its own update lock; `None` for the release,
     /// which runs after the abort): its exit code and output.
     fn restore(&mut self, args: &[String], abort_file: Option<&Path>) -> (i32, String);
-    fn carry(&mut self, _: &Op, _: &Path, _: &str) -> Result<(), String> {
+    fn carry(&mut self, _: &Op, _: &Path, _: &str, _: Option<&TargetPins>) -> Result<(), String> {
         Err("this target cannot apply carried identities".into())
     }
 }
@@ -153,12 +153,7 @@ fn operating_pins(
     folder: &Path,
     supplied: Option<&TargetPins>,
 ) -> Result<Option<TargetPins>, String> {
-    let recorded = carry::recorded_pins(folder)?;
-    if let (Some(previous), Some(supplied)) = (&recorded, supplied)
-        && previous.postgres != supplied.postgres
-    {
-        return Err("the target PostgreSQL ID no longer matches the move's journal".into());
-    }
+    let recorded = carry::recorded_pins(folder, supplied)?;
     Ok(recorded.or_else(|| supplied.cloned()))
 }
 
@@ -315,6 +310,12 @@ fn state<S: Site>(
         return state;
     };
     let daemon = daemon(pins);
+    if let Some(pins) = pins {
+        if pins.inspect_daemon(docker).is_err() || pins.inspect_postgres(docker).is_err() {
+            return state;
+        }
+        state.daemon_id = Some(pins.daemon.clone());
+    }
     state.running = running(docker, daemon);
     state.restart_policy = policy(docker, daemon).unwrap_or_default();
     if let Ok(image) = image(docker, daemon) {
@@ -599,9 +600,17 @@ fn record_own_bank(
 
 /// `restore` of `dump` and `state` into the target's bank, left stopped,
 /// with its safety backup in the move's folder.
-fn restore_args(dump: &Path, state: &Path, folder: &Path, facts: &Facts) -> Vec<String> {
+fn restore_args(
+    dump: &Path,
+    state: &Path,
+    folder: &Path,
+    facts: &Facts,
+) -> Result<Vec<String>, String> {
+    if !probe::container_id(&facts.pg_id) || !probe::container_id(&facts.daemon_id) {
+        return Err("the target restore requires verified immutable Docker container IDs".into());
+    }
     let path = |p: &Path| p.to_string_lossy().into_owned();
-    vec![
+    Ok(vec![
         "restore".to_owned(),
         "--yes".to_owned(),
         "--leave-stopped".to_owned(),
@@ -612,16 +621,16 @@ fn restore_args(dump: &Path, state: &Path, folder: &Path, facts: &Facts) -> Vec<
         "--safety-dir".to_owned(),
         path(&folder.join("safety")),
         "--container".to_owned(),
-        facts.pg.clone(),
+        facts.pg_id.clone(),
         "--daemon-container".to_owned(),
-        facts.daemon.clone(),
+        facts.daemon_id.clone(),
         "--db".to_owned(),
         facts.db.clone(),
         "--user".to_owned(),
         facts.user.clone(),
         "--db-port".to_owned(),
         facts.port.to_string(),
-    ]
+    ])
 }
 
 /// `give-back`'s progress, in the move's folder.
@@ -919,7 +928,10 @@ fn give_back_steps<S: Site>(
             return failed(format!("{why}; nothing was changed"));
         }
     }
-    let args = restore_args(Path::new(&own.dump), Path::new(&own.state), folder, &facts);
+    let args = match restore_args(Path::new(&own.dump), Path::new(&own.state), folder, &facts) {
+        Ok(args) => args,
+        Err(why) => return failed(why),
+    };
     let (code, output) = site.restore(&args, Some(&folder.join(GIVE_BACK_DONE)));
     if code != 0 {
         let mut answer = failed(format!(
@@ -1019,7 +1031,10 @@ fn restore<S: Site>(
             ));
         }
     }
-    let args = restore_args(&dump, &state_archive, folder, &facts);
+    let args = match restore_args(&dump, &state_archive, folder, &facts) {
+        Ok(args) => args,
+        Err(why) => return failed(why),
+    };
     let (code, output) = site.restore(&args, Some(&folder.join(ABORTED)));
     let now = site.now();
     record_own_bank(folder, &before, own, &now, facts.meta_fingerprint.clone());
@@ -1153,8 +1168,8 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
         )
     {
         let identities = site.docker().and_then(|docker| {
-            TargetPins::inspect(docker, &pins.daemon)?;
-            TargetPins::inspect(docker, &pins.postgres).map(|_| ())
+            pins.inspect_daemon(docker)?;
+            pins.inspect_postgres(docker).map(drop)
         });
         if let Err(why) = identities {
             return failed(why);
@@ -1168,8 +1183,9 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
         } => {
             let daemon = &expected.daemon;
             let safe = site.docker().is_ok_and(|docker| {
-                pins.is_none_or(|pins| pins == expected)
-                    && TargetPins::inspect(docker, &expected.postgres).is_ok()
+                pins == Some(expected)
+                    && expected.inspect_daemon(docker).is_ok()
+                    && expected.inspect_postgres(docker).is_ok()
                     && running(docker, daemon) == Some(false)
                     && image(docker, daemon)
                         .is_ok_and(|image| gated(docker, daemon, &image) == Some(true))
@@ -1177,7 +1193,7 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
             if !safe {
                 failed("the target could not be proved stopped and gated; rerun move --rollback")
             } else {
-                site.carry(op, &folder, &request.move_id)
+                site.carry(op, &folder, &request.move_id, request.pins.as_ref())
                     .map_or_else(failed, |()| done())
             }
         }
@@ -1185,7 +1201,7 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
             failed("the move has not begun rollback on the target")
         }
         Op::CarryUndo | Op::CarryVerify { .. } => site
-            .carry(op, &folder, &request.move_id)
+            .carry(op, &folder, &request.move_id, request.pins.as_ref())
             .map_or_else(failed, |()| done()),
         Op::State { tables } => {
             let mut answer = done();
@@ -1474,6 +1490,7 @@ mod tests {
         restored: Vec<Vec<String>>,
         restore_answer: (i32, String),
         save_safety_copy: bool,
+        carrying: Vec<String>,
     }
 
     impl Fake {
@@ -1490,6 +1507,7 @@ mod tests {
                 restored: Vec::new(),
                 restore_answer: (0, "Restore complete".into()),
                 save_safety_copy: false,
+                carrying: Vec::new(),
             }
         }
         fn base(&self) -> PathBuf {
@@ -1532,6 +1550,16 @@ mod tests {
             self.restored.push(args.to_vec());
             self.restore_answer.clone()
         }
+        fn carry(
+            &mut self,
+            op: &Op,
+            _: &Path,
+            _: &str,
+            _: Option<&TargetPins>,
+        ) -> Result<(), String> {
+            self.carrying.push(op.name().into());
+            Ok(())
+        }
     }
 
     const ID: &str = "20261114-080000-abcdef01";
@@ -1564,6 +1592,199 @@ mod tests {
             source_bank: bank.into(),
             resume: false,
         }
+    }
+
+    #[test]
+    fn carry_apply_requires_matching_pins_and_a_stopped_gated_target() {
+        let pins = TargetPins {
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            project: "fixture".into(),
+            ..Default::default()
+        };
+        for (running, gate, matched, wanted) in [
+            (true, true, true, false),
+            (false, false, true, false),
+            (false, true, false, false),
+            (false, true, true, true),
+        ] {
+            let selected = pins.clone();
+            let mut fake = Fake::new(move |args| {
+                let words: Vec<_> = args.iter().map(String::as_str).collect();
+                match words.as_slice() {
+                    ["inspect", "--type=container", id] => {
+                        let service = if *id == selected.daemon {
+                            "pseudolife-daemon"
+                        } else {
+                            "pseudolife-pg"
+                        };
+                        ok(&serde_json::json!([{"Id":id,"Config":{"Labels":{
+                            "com.docker.compose.project":"fixture","com.docker.compose.service":service
+                        }}}]).to_string())
+                    }
+                    [
+                        "inspect",
+                        "--type=container",
+                        "-f",
+                        "{{.Id}} {{.State.Running}}",
+                        id,
+                    ] => ok(&format!("{id} {running}")),
+                    [
+                        "inspect",
+                        "--type=container",
+                        "-f",
+                        "{{.Id}} {{.Image}}",
+                        id,
+                    ] => ok(&format!("{id} img:1")),
+                    ["run", ..] if gate => ok(""),
+                    _ => fail(1, "unavailable"),
+                }
+            });
+            assert!(act(&mut fake, ID, claim("bank")).ok);
+            let mut expected = pins.clone();
+            if !matched {
+                expected.postgres = "3".repeat(64);
+            }
+            let mut call = request(
+                ID,
+                Op::CarryApply {
+                    identities: carry::fixture(),
+                    expected_pins: expected,
+                },
+            );
+            call.pins = Some(pins.clone());
+            assert_eq!(perform(&mut fake, &call, &mut std::io::empty()).ok, wanted);
+            assert_eq!(fake.carrying.len(), usize::from(wanted));
+        }
+    }
+
+    #[test]
+    fn carry_undo_requires_both_a_rollback_request_and_abort() {
+        let mut fake = Fake::new(quiet);
+        assert!(act(&mut fake, ID, claim("bank")).ok);
+        let mut call = request(ID, Op::CarryUndo);
+        call.rollback = true;
+        assert!(!perform(&mut fake, &call, &mut std::io::empty()).ok);
+        assert!(fake.carrying.is_empty());
+        assert!(act(&mut fake, ID, Op::Abort).ok);
+        assert!(!act(&mut fake, ID, Op::CarryUndo).ok);
+        assert!(fake.carrying.is_empty());
+        assert!(perform(&mut fake, &call, &mut std::io::empty()).ok);
+        assert_eq!(fake.carrying, ["carry-undo"]);
+    }
+
+    #[test]
+    fn pinned_operations_verify_both_compose_service_labels() {
+        let pins = TargetPins {
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            project: "fixture".into(),
+            ..Default::default()
+        };
+        for (daemon_project, daemon_service, pg_project, pg_service, accepted) in [
+            (
+                "alternate",
+                "pseudolife-daemon",
+                "fixture",
+                "pseudolife-pg",
+                false,
+            ),
+            (
+                "fixture",
+                "pseudolife-pg",
+                "fixture",
+                "pseudolife-pg",
+                false,
+            ),
+            (
+                "fixture",
+                "pseudolife-daemon",
+                "alternate",
+                "pseudolife-pg",
+                false,
+            ),
+            (
+                "fixture",
+                "pseudolife-daemon",
+                "fixture",
+                "pseudolife-daemon",
+                false,
+            ),
+            (
+                "fixture",
+                "pseudolife-daemon",
+                "fixture",
+                "pseudolife-pg",
+                true,
+            ),
+        ] {
+            let daemon = pins.daemon.clone();
+            let mut fake = Fake::new(move |args| {
+                let words: Vec<_> = args.iter().map(String::as_str).collect();
+                match words.as_slice() {
+                    ["inspect", "--type=container", id] => {
+                        let (project, service) = if *id == daemon {
+                            (daemon_project, daemon_service)
+                        } else {
+                            (pg_project, pg_service)
+                        };
+                        ok(&serde_json::json!([{"Id":id,"Name":"/renamed-fixture","Config":{"Labels":{
+                            "com.docker.compose.project":project,"com.docker.compose.service":service
+                        }}}]).to_string())
+                    }
+                    [
+                        "inspect",
+                        "--type=container",
+                        "-f",
+                        "{{.Id}} {{.State.Running}}",
+                        id,
+                    ] => ok(&format!("{id} false")),
+                    ["stop", ..] => ok(""),
+                    _ => fail(1, "unavailable"),
+                }
+            });
+            assert!(act(&mut fake, ID, claim("bank")).ok);
+            let mut call = request(ID, Op::Stop);
+            call.pins = Some(pins.clone());
+            assert_eq!(
+                perform(&mut fake, &call, &mut std::io::empty()).ok,
+                accepted
+            );
+            assert_eq!(
+                fake.docker.calls.iter().any(|args| args[0] == "stop"),
+                accepted
+            );
+        }
+    }
+
+    #[test]
+    fn restore_uses_inspected_ids_even_for_facts_gathered_by_name() {
+        let mut facts = Facts {
+            daemon: "daemon-by-name".into(),
+            pg: "postgres-by-name".into(),
+            daemon_id: "1".repeat(64),
+            pg_id: "2".repeat(64),
+            ..Default::default()
+        };
+        let restore = |facts: &Facts| {
+            restore_args(
+                Path::new("dump"),
+                Path::new("state"),
+                Path::new("move"),
+                facts,
+            )
+        };
+        let args = restore(&facts).unwrap();
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--container", &facts.pg_id])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--daemon-container", &facts.daemon_id])
+        );
+        facts.daemon_id.clear();
+        assert!(restore(&facts).is_err());
     }
 
     #[test]
@@ -1797,6 +2018,7 @@ mod tests {
         let pins = TargetPins {
             daemon: "1".repeat(64),
             postgres: "2".repeat(64),
+            ..Default::default()
         };
         let daemon_name = pins.daemon.clone();
         let postgres_name = pins.postgres.clone();

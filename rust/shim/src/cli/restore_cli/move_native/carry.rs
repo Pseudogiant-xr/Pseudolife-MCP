@@ -31,19 +31,53 @@ const DAEMON_SERVICE: &str = "pseudolife-daemon";
 const PG_SERVICE: &str = "pseudolife-pg";
 const INTERPOLATION: &str = "the target's Compose files do not apply the carried identity settings without changing other settings; restore its original identity interpolation and retry move --dry-run";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::cli) struct TargetPins {
     pub(super) daemon: String,
     pub(super) postgres: String,
+    #[serde(default)]
+    pub(super) project: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) deployment_digest: Option<[u8; 32]>,
 }
 
 impl TargetPins {
     pub(super) fn from_facts(facts: &Facts) -> Option<Self> {
-        (super::probe::container_id(&facts.daemon_id) && super::probe::container_id(&facts.pg_id))
+        (super::probe::container_id(&facts.daemon_id)
+            && super::probe::container_id(&facts.pg_id)
+            && !facts.compose_project.is_empty()
+            && facts.compose_project == facts.pg_compose_project)
             .then(|| Self {
                 daemon: facts.daemon_id.clone(),
                 postgres: facts.pg_id.clone(),
+                project: facts.compose_project.clone(),
+                deployment_digest: None,
             })
+    }
+
+    pub(super) fn inspect_daemon(&self, docker: &mut impl Docker) -> Result<Value, String> {
+        self.inspect_service(docker, &self.daemon, DAEMON_SERVICE)
+    }
+
+    pub(super) fn inspect_postgres(&self, docker: &mut impl Docker) -> Result<Value, String> {
+        self.inspect_service(docker, &self.postgres, PG_SERVICE)
+    }
+
+    fn inspect_service(
+        &self,
+        docker: &mut impl Docker,
+        id: &str,
+        service: &str,
+    ) -> Result<Value, String> {
+        let doc = Self::inspect(docker, id)?;
+        let labels = &doc["Config"]["Labels"];
+        if self.project.is_empty()
+            || labels["com.docker.compose.project"] != self.project
+            || labels["com.docker.compose.service"] != service
+        {
+            return Err(TARGET_PIN.into());
+        }
+        Ok(doc)
     }
 
     pub(super) fn inspect(docker: &mut impl Docker, id: &str) -> Result<Value, String> {
@@ -263,8 +297,9 @@ pub(super) fn target(
     docker: &mut docker::Real,
     shape: [bool; 4],
     pins: Option<&TargetPins>,
-) -> Result<(), String> {
-    checked_target(docker, shape, pins).map(|_| ())
+) -> Result<Option<[u8; 32]>, String> {
+    let (deployment, _) = checked_target(docker, shape, pins)?;
+    pins.map(|pins| deployment.digest(pins)).transpose()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -279,6 +314,20 @@ struct Deployment {
 }
 
 impl Deployment {
+    fn digest(&self, pins: &TargetPins) -> Result<[u8; 32], String> {
+        use sha2::{Digest, Sha256};
+        let bytes = serde_json::to_vec(&(self, &pins.daemon, &pins.postgres, &pins.project))
+            .map_err(|_| STACK)?;
+        Ok(Sha256::digest(bytes).into())
+    }
+
+    fn check_binding(&self, pins: &TargetPins) -> Result<(), String> {
+        if pins.deployment_digest != Some(self.digest(pins)?) {
+            return Err(TARGET_PIN.into());
+        }
+        Ok(())
+    }
+
     fn compose(
         &self,
         program: &Path,
@@ -320,10 +369,7 @@ fn target_with(
 ) -> Result<(Deployment, Value), String> {
     use super::super::bank::{DAEMON_CONTAINER, PG_CONTAINER};
     let (daemon, pg) = if let Some(pins) = pins {
-        (
-            TargetPins::inspect(docker, &pins.daemon)?,
-            TargetPins::inspect(docker, &pins.postgres)?,
-        )
+        (pins.inspect_daemon(docker)?, pins.inspect_postgres(docker)?)
     } else {
         (
             inspect(docker, DAEMON_CONTAINER).ok_or(STACK)?,

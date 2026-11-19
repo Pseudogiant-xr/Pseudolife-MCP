@@ -171,6 +171,9 @@ pub(super) struct Record {
     pub target_image: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_pins: Option<super::carry::TargetPins>,
+    /// The most recent daemon ID verified by the target, including after recreation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified_target_daemon: Option<String>,
     /// The move's folder on the target, and what its files took at the last
     /// reading.
     pub remote_folder: String,

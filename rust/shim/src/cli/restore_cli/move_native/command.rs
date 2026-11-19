@@ -290,7 +290,7 @@ pub(super) fn transaction(
         to: plan.to.clone(),
         source: plan.source.clone(),
         target_image: target.image.clone(),
-        target_pins: super::carry::TargetPins::from_facts(&target),
+        target_pins: plan.target_pins.clone(),
         target_url: super::argv::base(&plan.target_url).to_owned(),
         work_dir: request.target_work_dir.clone().unwrap_or_default(),
         source_bank: plan.source.bank.clone().unwrap_or_default(),

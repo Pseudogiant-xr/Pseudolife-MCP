@@ -59,7 +59,7 @@ fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
             "Env": [format!("PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife:{SECRET}@pseudolife-pg:5432/pseudolife_memory"), "PSEUDOLIFE_MCP_TOKEN=tok-secret", "PSEUDOLIFE_MCP_DATA_DIR=/data", "PATH=/bin"],
             "User": "pseudolife",
             "Image": "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.25.0",
-            "Labels": {"com.docker.compose.project": project, "com.docker.compose.project.working_dir": dir, "com.docker.compose.project.config_files": format!("{dir}/docker-compose.yml")}
+            "Labels": {"com.docker.compose.project": project, "com.docker.compose.service": "pseudolife-daemon", "com.docker.compose.project.working_dir": dir, "com.docker.compose.project.config_files": format!("{dir}/docker-compose.yml")}
         },
         "HostConfig": {"RestartPolicy": {"Name": "unless-stopped"}, "PortBindings": {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8765"}]}},
         "NetworkSettings": {"Networks": {"stack": {"IPAddress": "10.0.0.3"}}},
@@ -72,7 +72,7 @@ fn pg_doc(project: &str) -> Value {
         "Id": "2".repeat(64),
         "Name": "/pseudolife-mcp-postgres",
         "State": {"Running": true},
-        "Config": {"Labels": {"com.docker.compose.project": project}},
+        "Config": {"Labels": {"com.docker.compose.project": project, "com.docker.compose.service": "pseudolife-pg"}},
         "NetworkSettings": {"Networks": {"stack": {"Aliases": ["pseudolife-pg"], "IPAddress": "10.0.0.2"}}},
         "Mounts": [{"Type": "volume", "Destination": "/var/lib/postgresql", "Source": "/var/lib/docker/volumes/pseudolife-mcp-bank/_data"}]
     })
@@ -298,6 +298,7 @@ impl Remote for Wire {
                         protocol::Answer {
                             protocol: protocol::PROTOCOL,
                             ok: true,
+                            carry_deployment: Some([7; 32]),
                             ..protocol::Answer::default()
                         }
                     }
@@ -1742,6 +1743,8 @@ fn target_operation_stays_on_the_pinned_daemon_after_name_substitution() {
         pins: Some(carry::TargetPins {
             daemon: expected.clone(),
             postgres: "2".repeat(64),
+            project: "pseudolife-stack".into(),
+            ..Default::default()
         }),
         op: Op::Stop,
     };

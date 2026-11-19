@@ -83,6 +83,7 @@ trait World {
 /// What a dry run found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Plan {
+    target_pins: Option<carry::TargetPins>,
     pub to: String,
     pub target_url: String,
     pub source: Facts,
@@ -203,9 +204,9 @@ fn check_carry<W: World>(
     request: &Request,
     source: &Facts,
     pins: Option<carry::TargetPins>,
-) -> Result<bool, String> {
+) -> Result<Option<[u8; 32]>, String> {
     if request.no_keep_tokens {
-        return Ok(false);
+        return Ok(None);
     }
     let populated = carry::source(world.docker()?, source)?;
     let check = protocol::Request {
@@ -232,7 +233,7 @@ fn check_carry<W: World>(
         .and_then(|json| serde_json::from_str::<protocol::Answer>(json).ok())
         .filter(|answer| answer.protocol == protocol::PROTOCOL);
     match answer {
-        Some(answer) if answer.ok => Ok(true),
+        Some(answer) if answer.ok => Ok(answer.carry_deployment),
         Some(answer) if !answer.error.trim().is_empty() => Err(answer.error),
         Some(_) => Err(CARRY_CHECK_UNAVAILABLE.into()),
         _ if ran.lost() => Err("SSH lost the target during the identity check; restore SSH access and retry move --dry-run".into()),
@@ -364,16 +365,16 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
             "the native move helper on {to} sent no facts about its bank; update both clients so they match, then retry"
         ));
     };
-    let target_pins = carry::TargetPins::from_facts(target);
-    let carry_executable = !request.no_keep_tokens
+    let mut target_pins = carry::TargetPins::from_facts(target);
+    let can_carry = !request.no_keep_tokens
         && reply.supports_carry_execution == Some(true)
         && target_pins.is_some()
         && carry::loopback(&target.health_url);
-    if !request.no_keep_tokens && !request.dry_run && !carry_executable {
+    if !request.no_keep_tokens && !request.dry_run && !can_carry {
         return Err(if reply.supports_carry_execution != Some(true) {
             "the target client only supports carried-identity preflight; update the target client to an execution-capable release or pass --no-keep-tokens".into()
         } else if target_pins.is_none() {
-            "the target has no immutable Docker container IDs; update the target client and check access to its Docker stack".into()
+            "the target has no immutable Docker container IDs for one Compose project; update the target client and check its Docker stack".into()
         } else {
             "the target has no loopback daemon endpoint for carried-bearer verification; configure a loopback or wildcard binding, or pass --no-keep-tokens".into()
         });
@@ -381,53 +382,57 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     // A resumed move's target is stopped behind its gate: its URL answers
     // only once the move starts it, and the move checks it then (before the
     // commit point).
-    if !request.resume_move.is_empty() {
-        resume_check(world, request, target_pins.clone())?;
-        return Ok(Plan {
-            to,
-            target_url,
-            checked_carry: check_carry(world, request, &source, target_pins)?,
-            carry_executable,
-            source,
-            target: reply.clone(),
-            url_tied: false,
-        });
-    }
-    let health = format!("{}/health", argv::base(&target_url));
-    let answer = world.reach(&health).map_err(|why| {
+    let resuming = !request.resume_move.is_empty();
+    let url_tied = if resuming {
+        false
+    } else {
+        let health = format!("{}/health", argv::base(&target_url));
+        let answer = world.reach(&health).map_err(|why| {
         format!(
             "--target-url {target_url} does not answer from this host ({why}); name the URL clients will use to reach the target's daemon, check that it is exposed there, then retry"
         )
     })?;
-    let reached = answer.get("bank").and_then(Value::as_str);
-    if reached != target.bank.as_deref() {
-        return Err(format!(
-            "--target-url {target_url} reaches a daemon whose bank ({}) is not the target's ({}); name the URL of {to}'s daemon, then retry",
-            reached.unwrap_or("none"),
-            target.bank.as_deref().unwrap_or("none")
-        ));
-    }
-    // A fresh target has no fingerprint to match: the daemon reached must
-    // at least answer as the target's does (its version and schema).
-    if target.bank.is_none() {
-        let version = answer
-            .get("version")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let schema = answer.get("schema").and_then(Value::as_i64);
-        if version != target.version || schema != target.schema {
+        let reached = answer.get("bank").and_then(Value::as_str);
+        if reached != target.bank.as_deref() {
             return Err(format!(
-                "--target-url {target_url} reaches a daemon (version {version:?}, schema {schema:?}) that does not answer as {to}'s does (version {:?}, schema {:?}); name the URL of {to}'s daemon, then retry",
-                target.version, target.schema
+                "--target-url {target_url} reaches a daemon whose bank ({}) is not the target's ({}); name the URL of {to}'s daemon, then retry",
+                reached.unwrap_or("none"),
+                target.bank.as_deref().unwrap_or("none")
             ));
         }
+        // A fresh target has no fingerprint to match: the daemon reached must
+        // at least answer as the target's does (its version and schema).
+        if target.bank.is_none() {
+            let version = answer
+                .get("version")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let schema = answer.get("schema").and_then(Value::as_i64);
+            if version != target.version || schema != target.schema {
+                return Err(format!(
+                    "--target-url {target_url} reaches a daemon (version {version:?}, schema {schema:?}) that does not answer as {to}'s does (version {:?}, schema {:?}); name the URL of {to}'s daemon, then retry",
+                    target.version, target.schema
+                ));
+            }
+        }
+        target.bank.is_some()
+    };
+    let deployment = check_carry(world, request, &source, target_pins.clone())?;
+    if can_carry && !request.dry_run && deployment.is_none() {
+        return Err("the target client did not verify its installed deployment for execution; update the client or pass --no-keep-tokens".into());
     }
-    let url_tied = target.bank.is_some();
+    if let Some(pins) = &mut target_pins {
+        pins.deployment_digest = deployment;
+    }
+    if resuming {
+        resume_check(world, request, target_pins.clone())?;
+    }
     Ok(Plan {
         to,
         target_url,
-        checked_carry: check_carry(world, request, &source, target_pins)?,
-        carry_executable,
+        checked_carry: !request.no_keep_tokens,
+        target_pins,
+        carry_executable: can_carry && deployment.is_some(),
         source,
         target: reply,
         url_tied,
@@ -446,6 +451,12 @@ fn carry_result(plan: &Plan) -> &'static str {
             .is_none()
         {
             "Carried bearer settings were verified. Execution needs immutable target Docker container IDs. Update the target client and check its Docker stack."
+        } else if plan
+            .target_pins
+            .as_ref()
+            .is_none_or(|pins| pins.deployment_digest.is_none())
+        {
+            "Carried bearer settings were verified. Update the target client to verify its installed deployment for execution, or pass --no-keep-tokens."
         } else {
             "Carried bearer settings were verified. The target needs a loopback or wildcard daemon binding to apply them safely. To move with its existing credentials, remove --dry-run and add --no-keep-tokens."
         }

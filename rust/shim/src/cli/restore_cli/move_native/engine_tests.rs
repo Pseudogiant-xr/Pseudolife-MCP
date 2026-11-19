@@ -356,6 +356,7 @@ impl Model {
             _ => BTreeMap::new(),
         };
         State {
+            daemon_id: None,
             running: Some(h.target_running),
             gated: Some(h.gated),
             restart_policy: h.target_policy.clone(),
@@ -812,6 +813,8 @@ fn carried_identities_recover_after_a_kill_or_lost_reply_at_the_new_steps() {
             super::carry::TargetPins::from_facts(&super::probe::Facts {
                 daemon_id: "1".repeat(64),
                 pg_id: "2".repeat(64),
+                compose_project: "fixture".into(),
+                pg_compose_project: "fixture".into(),
                 ..super::probe::Facts::default()
             })
             .unwrap(),
@@ -895,6 +898,7 @@ fn manual_rollback_uses_target_pins_and_guides_replacement_postgres_recovery() {
         target_pins: Some(super::carry::TargetPins {
             daemon: target_daemon.clone(),
             postgres: "5".repeat(64),
+            ..Default::default()
         }),
         source: super::probe::Facts {
             pg_id: pg.clone(),
@@ -907,6 +911,11 @@ fn manual_rollback_uses_target_pins_and_guides_replacement_postgres_recovery() {
     };
     record.flags.target_quiesced = true;
     record.flags.fenced = true;
+    record.rollback.push(super::record::Undo {
+        step: "lift the source database's fence".into(),
+        ok: false,
+        detail: String::new(),
+    });
     let commands = engine::manual_rollback(&record).join("\n");
     assert!(commands.contains(&format!("ssh target docker start {target_daemon}")));
     assert!(commands.contains("original-pg-volume"));
@@ -925,6 +934,11 @@ fn manual_rollback_uses_target_pins_and_guides_replacement_postgres_recovery() {
     let commands = engine::manual_rollback(&record).join("\n");
     assert!(commands.contains("carry.json (pins.daemon)"));
     assert!(commands.contains("ssh target docker start <verified-target-daemon-id>"));
+    assert!(commands.contains("Fill in the verified container ID before running:"));
+    record.verified_target_daemon = Some("6".repeat(64));
+    let commands = engine::manual_rollback(&record).join("\n");
+    assert!(commands.contains(&format!("ssh target docker start {}", "6".repeat(64))));
+    assert!(!commands.contains("<verified-target-daemon-id>"));
 }
 
 #[test]
@@ -941,8 +955,13 @@ fn manual_rollback_withholds_source_recovery_until_target_settings_are_restored(
     record.flags.source_stopped = true;
     let instructions = engine::manual_rollback(&record).join("\n");
     assert!(instructions.contains("move --rollback 20261120-000000-aabbccdd"));
-    assert!(!instructions.contains("ALTER DATABASE"));
-    assert!(!instructions.contains("docker start"));
+    assert!(instructions.contains("target and its moved copy are permanently retired"));
+    assert!(!instructions.lines().any(|line| line.starts_with("docker ")));
+    assert!(
+        instructions.lines().any(|line| line
+            .starts_with("After verifying the target is stopped and gated or permanently retired")
+            && line.contains("ALLOW_CONNECTIONS true"))
+    );
     record.rollback.push(super::record::Undo {
         step: "restore the target's original identity settings".into(),
         ok: true,
@@ -3245,6 +3264,28 @@ fn a_target_is_given_up_only_while_it_gives_no_answer_and_is_then_final() {
     // Nor for the dead end this does not reach: an incomplete rollback.
     moving.phase = Phase::RollbackIncomplete;
     assert_eq!(engine::give_up_refusal(&moving).unwrap().code, 4);
+}
+
+#[test]
+fn target_gone_can_close_incomplete_carry_only_after_manual_source_recovery() {
+    let parked = parked_move();
+    let mut record = parked.record.clone().unwrap();
+    record.phase = Phase::RollbackIncomplete;
+    record.flags.identities_applied = true;
+    let mut model = later(&parked);
+    model.hosts.source_running = false;
+    model.hosts.fenced = true;
+    model.always = vec![("target state", Fault::LostBefore)];
+    let refusal = engine::give_up(&mut model, &record).unwrap_err();
+    assert!(refusal.message.contains("rollback instructions"));
+    assert!(model.hosts.fenced && !model.hosts.source_running);
+    // Independent manual proof and recovery have happened outside the command.
+    model.hosts.fenced = false;
+    model.hosts.source_running = true;
+    let before = model.hosts.clone();
+    let (given_up, _) = engine::give_up(&mut model, &record).unwrap();
+    assert_eq!(given_up.phase, Phase::GivenUp);
+    assert_eq!(model.hosts, before);
 }
 
 #[test]

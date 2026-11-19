@@ -412,7 +412,13 @@ struct Site2 {
 }
 
 impl super::ops::Site for Site2 {
-    fn carry(&mut self, op: &super::protocol::Op, folder: &Path, id: &str) -> Result<(), String> {
+    fn carry(
+        &mut self,
+        op: &super::protocol::Op,
+        folder: &Path,
+        id: &str,
+        pins: Option<&super::carry::TargetPins>,
+    ) -> Result<(), String> {
         use super::{carry, protocol::Op};
         let docker = self.docker()?;
         match op {
@@ -420,8 +426,8 @@ impl super::ops::Site for Site2 {
                 identities,
                 expected_pins,
             } => carry::apply(docker, folder, id, identities, expected_pins),
-            Op::CarryVerify { identities } => carry::verify(docker, folder, identities),
-            Op::CarryUndo => carry::undo(docker, folder, id),
+            Op::CarryVerify { identities } => carry::verify(docker, folder, identities, pins),
+            Op::CarryUndo => carry::undo(docker, folder, id, pins),
             _ => Err("unrecognized carried identity operation".into()),
         }
     }
@@ -567,7 +573,10 @@ fn answer_op(
             .docker()
             .and_then(|docker| super::carry::target(docker, *populated, request.pins.as_ref()))
         {
-            Ok(()) => answer.ok = true,
+            Ok(digest) => {
+                answer.ok = true;
+                answer.carry_deployment = digest;
+            }
             Err(why) => answer.error = why,
         }
         return answer;

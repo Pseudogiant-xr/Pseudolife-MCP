@@ -163,6 +163,8 @@ pub(in crate::cli) struct Request {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(in crate::cli) struct State {
+    /// Full daemon ID after checking the selected target deployment.
+    pub daemon_id: Option<String>,
     /// Whether the daemon container runs (`None`: it could not be read).
     pub running: Option<bool>,
     /// Whether `/data/move.json` is present (`None`: it could not be read).
@@ -197,6 +199,8 @@ pub(in crate::cli) struct State {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(in crate::cli) struct Answer {
+    /// Read-only receipt for the deployment, saved before carrying begins.
+    pub carry_deployment: Option<[u8; 32]>,
     pub protocol: u32,
     pub version: String,
     /// Whether the operation did what it says.
@@ -231,6 +235,7 @@ mod tests {
         let pins = TargetPins {
             daemon: "1".repeat(64),
             postgres: "2".repeat(64),
+            ..TargetPins::default()
         };
         let request = Request {
             protocol: PROTOCOL,
