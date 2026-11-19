@@ -247,6 +247,15 @@ def test_docs_with_readers_can_use_the_documentation_lane(path):
     assert parity_scope.is_documentation_path(path)
 
 
+@pytest.mark.parametrize("path", ["docs/notes.txt", "docs/notes.rst", "docs/diagram.pdf"])
+def test_supported_docs_do_not_widen_mixed_pr_parity(path):
+    from pr_precheck import rows_for
+
+    code = "rust/shim/src/cli/episode.rs"
+    assert select("pull_request", [code, path]) == select("pull_request", [code])
+    assert rows_for(path, {}) == ()
+
+
 @pytest.mark.parametrize("files, push_docs, pr_docs", [
     (["docs/x.md"], True, True),
     (["docs/x.md", "rust/producer-census.json"], False, True),

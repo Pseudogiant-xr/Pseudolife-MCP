@@ -175,9 +175,8 @@ SHIM_COMMANDS = {
 }
 # The documentation-only rule shared by workflow scope and parity selection.
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
-DOCS_SUFFIXES = frozenset({".md", ".png", ".svg", ".json", ".html"})
-DOCUMENT_ASSETS = DOCS_SUFFIXES | frozenset({
-    ".adoc", ".gif", ".jpeg", ".jpg", ".pdf", ".rst", ".txt", ".webp",
+DOCS_SUFFIXES = frozenset({
+    ".adoc", ".gif", ".html", ".jpeg", ".jpg", ".json", ".md", ".pdf", ".png", ".rst", ".svg", ".txt", ".webp",
 })
 DOCUMENT_EXCLUSIONS = ("tests/", "ops/", "plugin/", "pseudolife_memory/", "evals/prompts/",
                        ".github/workflows/", ".github/actions/")
@@ -198,7 +197,7 @@ def is_documentation_path(path: str) -> bool:
         return False
     suffix = PurePosixPath(path).suffix.lower()
     if lower.startswith("docs/"):
-        return path.startswith("docs/") and suffix in DOCUMENT_ASSETS
+        return path.startswith("docs/") and suffix in DOCS_SUFFIXES
     return path in ("llms.txt", "llms-full.txt") or suffix == ".md"
 
 

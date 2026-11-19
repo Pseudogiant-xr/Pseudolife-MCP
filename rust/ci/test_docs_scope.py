@@ -358,6 +358,13 @@ def test_divergence_ledger_selection_checks_the_committed_index(repo):
     assert "rust/ci/test_divergences_ledger.py::test_the_committed_ledger_is_the_pointer_and_a_valid_directory" in targets
 
 
+@pytest.mark.parametrize("path", ["rust/PARITY.md", "rust/parity/parity-rows/config-load.md"])
+def test_parity_docs_keep_the_committed_register_readers(repo, path):
+    targets = docs_scope.doc_tests([path])
+    assert "rust/test_contract_inventory.py" in targets
+    assert "rust/ci/test_parity_ledger.py::test_the_committed_register_is_the_pointer_and_a_valid_directory" in targets
+
+
 def test_docs_image_does_not_select_census_source_readers(repo):
     targets = docs_scope.doc_tests(["docs/images/example.png"])
     assert not any(target.startswith("rust/test_producer_census.py") for target in targets)

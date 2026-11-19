@@ -41,6 +41,12 @@ CENSUS_READERS = (
     "rust/test_producer_census.py::test_snapshot_is_independent_of_source_commit_history",
 )
 PLAN_READER = "rust/ci/test_parity_scope.py::test_the_plan_pages_counted_as_docs_are_read_by_no_code"
+PARITY_READERS = (
+    "rust/ci/test_parity_ledger.py::test_the_committed_register_is_the_pointer_and_a_valid_directory",
+    "rust/ci/test_parity_ledger.py::test_the_committed_directory_renders_and_parses_back_to_itself",
+    "rust/ci/test_parity_ledger.py::test_the_rendered_register_is_what_readers_get",
+    "rust/test_contract_inventory.py",
+)
 READER_FILE = re.compile(r"tests/(?:[a-zA-Z0-9_-]+/)*test_[a-zA-Z0-9_]+\.py")
 TEST_TARGET = re.compile(rf"(?:{READER_FILE.pattern}|rust/(?:ci/)?test_[A-Za-z0-9_]+\.py)(?:::test_[A-Za-z0-9_]+)?")
 
@@ -196,6 +202,8 @@ def doc_tests(paths: list[str]) -> list[str]:
         readers.update(CENSUS_READERS)
     if RUST_PLAN_DOCS.intersection(paths):
         readers.add(PLAN_READER)
+    if "rust/PARITY.md" in paths or any(path.startswith("rust/parity/") for path in paths):
+        readers.update(PARITY_READERS)
     for file in sorted(files - readers):
         readers.update(reader_targets(file, names))
     return sorted(readers)

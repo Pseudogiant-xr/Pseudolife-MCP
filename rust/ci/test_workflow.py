@@ -841,7 +841,7 @@ def test_pr_and_batch_doc_selection_matches_master(tmp_path, monkeypatch):
              "docs/atlas/atlas.json", "docs/images/diagram.svg", "docs/images/diagram.png",
              "docs/atlas/atlas.html", "llms.txt", "llms-full.txt", "rust/CUTOVER.md",
              ".claude/skills/release-procedure/SKILL.md", "CHANGELOG.md", "changelog.d/note.md",
-             "docs/i18n/README.source.md"]
+             "docs/i18n/README.source.md", "docs/notes.txt", "docs/notes.rst", "docs/diagram.pdf"]
     master = "5318cf0593484d15b8c32122c9689d13ebd680cc"
 
     def source(path):
