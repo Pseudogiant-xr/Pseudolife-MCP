@@ -228,12 +228,20 @@ failure after the attachment leaves the assets in place. When the marker
 job is retried, it uses the successful jobs' image digests and verifies any
 existing marker byte for byte. It uploads the marker only if absent.
 A differing existing marker requires a maintainer decision before removal.
-Use "Re-run failed jobs" to reuse successful build outputs. If a rerun
+Use "Re-run failed jobs" to reuse successful build outputs. Never use
+"Re-run all jobs": rebuilt archives need not be byte-identical, so the
+attachment refuses the new `SHA256SUMS` and PyPI cannot follow until the
+attached assets are deleted. If a rerun
 cannot clear a marker failure, the tagged commit's script still runs on
 each attempt. The maintainer chooses between checking the three published
 images and attaching a hand-built `RELEASE-READY.json` with
 `gh release upload`, or cutting a patch release. If approval is declined,
 the marker stays absent and native GitHub discovery withholds the release.
+To abandon a version after declining approval, delete the GitHub release
+or its assets: its archives are already attached, so a version-pinned
+native client install still downloads them and daemons with the original
+GitHub rule still announce it, and while it stays GitHub's latest release,
+current native discovery sees nothing newer.
 Packaging fixes
 gzip/tar timestamps at the Unix epoch and ZIP timestamps at 1980-01-01;
 identical input bytes produce identical archives with the same packager.
