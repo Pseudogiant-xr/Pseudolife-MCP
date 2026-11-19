@@ -233,7 +233,12 @@ fn no_release_update() -> Update {
 fn github_discovery_check_exits_three_for_incomplete_release() {
     let mut update = no_release_update();
     assert_eq!(update.run_with(|update| update.check("client")), 3);
-    assert_eq!(update.report.steps, [NO_PUBLISHED_RELEASE]);
+    assert_eq!(
+        update.report.steps,
+        [
+            "no newer release with all native assets is published yet. Name a published release with --tag <version> to install it now."
+        ]
+    );
     assert!(update.report.target.is_none());
 }
 

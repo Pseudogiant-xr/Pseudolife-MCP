@@ -5,9 +5,8 @@ The native CLI archives publish with every release
 and they are on the GitHub release before PyPI publishes. Older updaters
 learn that a release exists from PyPI and then download its archives.
 Native discovery waits for `RELEASE-READY.json`, which the workflow attaches
-after protected publication and the configured image jobs succeed.
-The Rust image also needs its repository variable, which stays enabled
-since it became the default Docker engine in 0.23.0.
+after protected publication and both image jobs succeed. Releases need
+the Rust image for discovery because it is the default Docker engine.
 
 ## Names and targets
 
@@ -47,9 +46,9 @@ its publication job failed.
 
 `RELEASE-READY.json` is separate from the checksum manifest. It contains
 the release `version`, the full tagged `commit` SHA, and an `images` object
-mapping `pseudolife-daemon` and `pseudolife-pg` to their published
-`sha256:` digests. If the Rust image job ran, the object also includes
-`pseudolife-daemon-rust`. The JSON contains no timestamp or run attempt.
+mapping `pseudolife-daemon`, `pseudolife-pg` and `pseudolife-daemon-rust`
+to their published `sha256:` digests. The JSON contains no timestamp or run
+attempt.
 These fields give operators a stable record of what the workflow approved
 and published. Discovery uses the marker's asset metadata from GitHub.
 
@@ -168,7 +167,7 @@ report its last accepted release from a previous check.
 | Daemon with the readiness rule | Accepts the full asset set and can advertise a newer version. | Offers no notice for that release. |
 
 The first cut with this rule must publish the traditional asset set, wheel,
-configured images and `RELEASE-READY.json` from the same tagged commit. Keep
+all three images and `RELEASE-READY.json` from the same tagged commit. Keep
 `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` for existing Rust Docker installations.
 
 ## Image and publication gates
@@ -185,10 +184,9 @@ The image job is enabled only by the maintainer setting
 `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true`; unset or other values disable it.
 The native asset set has no variable: it publishes on every release
 event once the `build` job's version guards passed, before the `publish`
-(PyPI) job, which needs it. The `release-ready` job waits for `publish`
-and `images` to succeed. It accepts a skipped `rust-image` job only when
-its repository variable disables that image. A failed or cancelled image
-job leaves the release undiscoverable by the new client and daemon.
+(PyPI) job, which needs it. The `release-ready` job requires successful
+`publish`, `images` and `rust-image` jobs. A skipped, failed or cancelled
+image job leaves the marker absent.
 Build-only CI proofs skip the marker job, asset attachment and image
 publication. Installers and pinned updates still treat an asset as
 unavailable until the release actually carries it (a 404 or a missing

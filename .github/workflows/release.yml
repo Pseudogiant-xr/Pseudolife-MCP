@@ -361,12 +361,11 @@ jobs:
 
   release-ready:
     needs: [publish, images, rust-image]
-    # The Rust image may skip only when its repository variable disables it.
+    # Existing Rust Docker hosts need the Rust image before discovery offers this tag.
     if: >-
       ${{ !cancelled() && github.event_name == 'release'
       && needs.publish.result == 'success' && needs.images.result == 'success'
-      && (needs.rust-image.result == 'success'
-      || (needs.rust-image.result == 'skipped' && vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON != 'true')) }}
+      && needs.rust-image.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -382,7 +381,6 @@ jobs:
           DAEMON_IMAGE_DIGEST: ${{ needs.images.outputs.daemon-digest }}
           PG_IMAGE_DIGEST: ${{ needs.images.outputs.pg-digest }}
           RUST_IMAGE_DIGEST: ${{ needs.rust-image.outputs.digest }}
-          RUST_IMAGE_RESULT: ${{ needs.rust-image.result }}
         run: python rust/ci/release_assets.py publish-ready
 
   registry:

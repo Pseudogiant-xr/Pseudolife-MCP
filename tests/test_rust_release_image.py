@@ -15,8 +15,7 @@ EXPECTED_GATES = {
     "release-ready": (
         "!cancelled() && github.event_name == 'release' "
         "&& needs.publish.result == 'success' && needs.images.result == 'success' "
-        "&& (needs.rust-image.result == 'success' "
-        "|| (needs.rust-image.result == 'skipped' && vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON != 'true'))"
+        "&& needs.rust-image.result == 'success'"
     ),
 }
 
@@ -146,13 +145,21 @@ def test_release_ready_depends_on_the_protected_publish_and_image_jobs():
         "DAEMON_IMAGE_DIGEST": "${{ needs.images.outputs.daemon-digest }}",
         "PG_IMAGE_DIGEST": "${{ needs.images.outputs.pg-digest }}",
         "RUST_IMAGE_DIGEST": "${{ needs.rust-image.outputs.digest }}",
-        "RUST_IMAGE_RESULT": "${{ needs.rust-image.result }}",
     }
 
 
 def test_release_ready_dependency_guard_rejects_early_publication():
     with pytest.raises(AssertionError):
         assert_ready_job_dependencies({"release-ready": {"needs": ["images", "rust-image"]}})
+
+
+def test_release_ready_does_not_run_when_the_rust_image_is_skipped():
+    from rust.ci.ci_budget import can_start
+
+    root = Path(__file__).resolve().parents[1]
+    job = yaml.safe_load((root / ".github/workflows/release.yml").read_text(
+        encoding="utf-8"))["jobs"]["release-ready"]
+    assert not can_start(job, {"rust-image"}, "release")
 
 
 def test_native_archives_reach_the_release_before_pypi():

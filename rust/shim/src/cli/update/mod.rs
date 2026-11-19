@@ -49,7 +49,7 @@ pub(crate) const DAEMON_SERVICE: &str = "pseudolife-daemon";
 const GITHUB_RELEASE: &str =
     "https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/latest";
 const RELEASE_METADATA_LIMIT: usize = 1024 * 1024;
-const NO_PUBLISHED_RELEASE: &str = "no newer release with all native assets is published yet";
+const NO_PUBLISHED_RELEASE: &str = "no newer release with all native assets is published yet. Name a published release with --tag <version> to install it now.";
 pub(crate) type Result<T> = std::result::Result<T, UpdateError>;
 
 fn discovery_error(detail: &str) -> UpdateError {

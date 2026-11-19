@@ -174,16 +174,14 @@ def test_publication_recovers_partial_upload_without_replacing_bytes(tmp_path, m
     assert [call[2] for call in calls].count("upload") == 6
 
 
-@pytest.mark.parametrize("rust_digest", [None, "sha256:" + "c" * 64])
-def test_ready_marker_is_idempotent_and_refuses_different_published_bytes(monkeypatch, rust_digest):
+def test_ready_marker_is_idempotent_and_refuses_different_published_bytes(monkeypatch):
     remote = {}
     calls = fake_release(monkeypatch, remote)
     images = {
         "pseudolife-daemon": "sha256:" + "a" * 64,
         "pseudolife-pg": "sha256:" + "b" * 64,
+        "pseudolife-daemon-rust": "sha256:" + "c" * 64,
     }
-    if rust_digest:
-        images["pseudolife-daemon-rust"] = rust_digest
     args = ("1.2.3", "v1.2.3", "owner/repo", "f" * 40, images)
     assets.publish_ready(*args)
     expected = {"version": "1.2.3", "commit": "f" * 40, "images": images}
@@ -209,7 +207,11 @@ def test_ready_marker_is_idempotent_and_refuses_different_published_bytes(monkey
 ])
 def test_ready_marker_refuses_invalid_attestation_before_github(monkeypatch, damage, diagnostic):
     tag, commit = "v1.2.3", "f" * 40
-    images = {"pseudolife-daemon": "sha256:" + "a" * 64, "pseudolife-pg": "sha256:" + "b" * 64}
+    images = {
+        "pseudolife-daemon": "sha256:" + "a" * 64,
+        "pseudolife-pg": "sha256:" + "b" * 64,
+        "pseudolife-daemon-rust": "sha256:" + "c" * 64,
+    }
     if damage == "tag":
         tag = "v1.2.4"
     elif damage == "commit":
@@ -227,7 +229,11 @@ def test_ready_marker_refuses_invalid_attestation_before_github(monkeypatch, dam
 
 
 def test_marker_publisher_refuses_duplicate_remote_markers(monkeypatch):
-    images = {"pseudolife-daemon": "sha256:" + "a" * 64, "pseudolife-pg": "sha256:" + "b" * 64}
+    images = {
+        "pseudolife-daemon": "sha256:" + "a" * 64,
+        "pseudolife-pg": "sha256:" + "b" * 64,
+        "pseudolife-daemon-rust": "sha256:" + "c" * 64,
+    }
     marker = json.dumps({"version": "1.2.3", "commit": "f" * 40, "images": images},
                         sort_keys=True, indent=2).encode("utf-8") + b"\n"
     calls = fake_release(monkeypatch, {"RELEASE-READY.json": marker})
@@ -241,8 +247,16 @@ def test_marker_publisher_refuses_duplicate_remote_markers(monkeypatch):
     assert not calls
 
 
-@pytest.mark.parametrize("rust_result", ["success", "skipped", "failure"])
-def test_ready_marker_cli_uses_the_rust_job_result(monkeypatch, rust_result):
+def test_ready_marker_refuses_missing_rust_digest_before_github(monkeypatch):
+    images = {"pseudolife-daemon": "sha256:" + "a" * 64, "pseudolife-pg": "sha256:" + "b" * 64}
+    calls = fake_release(monkeypatch, {})
+    with pytest.raises(ValueError, match="image digests"):
+        assets.publish_ready("1.2.3", "v1.2.3", "owner/repo", "f" * 40, images)
+    assert not calls
+
+
+@pytest.mark.parametrize("has_rust_digest", [True, False])
+def test_ready_marker_cli_requires_the_rust_image_digest(monkeypatch, has_rust_digest):
     import sys
 
     monkeypatch.setattr(sys, "argv", ["release_assets.py", "publish-ready"])
@@ -254,23 +268,20 @@ def test_ready_marker_cli_uses_the_rust_job_result(monkeypatch, rust_result):
         "GITHUB_SHA": "f" * 40,
         "DAEMON_IMAGE_DIGEST": "sha256:" + "a" * 64,
         "PG_IMAGE_DIGEST": "sha256:" + "b" * 64,
-        "RUST_IMAGE_DIGEST": "sha256:" + "c" * 64,
-        "RUST_IMAGE_RESULT": rust_result,
     }.items():
         monkeypatch.setenv(name, value)
     remote = {}
     calls = fake_release(monkeypatch, remote)
-    if rust_result == "failure":
-        with pytest.raises(ValueError, match="did not succeed or skip"):
+    if not has_rust_digest:
+        monkeypatch.delenv("RUST_IMAGE_DIGEST", raising=False)
+        with pytest.raises(ValueError, match="image digests"):
             assets.main()
         assert not calls
     else:
+        monkeypatch.setenv("RUST_IMAGE_DIGEST", "sha256:" + "c" * 64)
         assets.main()
         marker = json.loads(remote["RELEASE-READY.json"])
-        names = {"pseudolife-daemon", "pseudolife-pg"}
-        if rust_result == "success":
-            names.add("pseudolife-daemon-rust")
-        assert marker["images"].keys() == names
+        assert marker["images"]["pseudolife-daemon-rust"] == "sha256:" + "c" * 64
 
 
 @pytest.mark.parametrize("name", ["SHA256SUMS", assets.asset_name("1.2.3", assets.TARGETS[0])])
