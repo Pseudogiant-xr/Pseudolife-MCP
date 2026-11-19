@@ -10,6 +10,7 @@
 //! takes no update lock, creates no move record and writes no file on
 //! either host.
 mod argv;
+mod carry;
 mod command;
 mod engine;
 #[cfg(test)]
@@ -86,6 +87,7 @@ struct Plan {
     pub target_url: String,
     pub source: Facts,
     pub target: Reply,
+    pub checked_carry: bool,
     /// Whether --target-url answered with the target's own fingerprint. A
     /// fresh target has none, and its URL is matched by release and schema
     /// only.
@@ -184,6 +186,44 @@ fn last_line(bytes: &[u8]) -> String {
         .to_owned()
 }
 
+const CARRY_CHECK_UNAVAILABLE: &str = "the target client cannot check carried identities; update the target client to the same native release, then retry move --dry-run";
+
+fn check_carry<W: World>(world: &mut W, request: &Request, source: &Facts) -> Result<bool, String> {
+    if request.no_keep_tokens {
+        return Ok(false);
+    }
+    let populated = carry::source(world.docker()?, source)?;
+    let check = protocol::Request {
+        protocol: protocol::PROTOCOL,
+        move_id: String::new(),
+        work_dir: String::new(),
+        rollback: false,
+        op: protocol::Op::CarryCheck { populated },
+    };
+    let mut body =
+        serde_json::to_vec(&check).map_err(|_| "cannot prepare the move's identity check")?;
+    body.push(b'\n');
+    let ran = world.remote()?.run(
+        &request.to,
+        &remote::sh(&script(protocol::PROTOCOL)),
+        &body,
+        PROBE_TIME,
+    );
+    let reply = String::from_utf8_lossy(&ran.stdout);
+    let answer = reply
+        .lines()
+        .find_map(|line| line.strip_prefix(FRAME))
+        .and_then(|json| serde_json::from_str::<protocol::Answer>(json).ok())
+        .filter(|answer| answer.protocol == protocol::PROTOCOL);
+    match answer {
+        Some(answer) if answer.ok => Ok(true),
+        Some(answer) if !answer.error.trim().is_empty() => Err(answer.error),
+        Some(_) => Err(CARRY_CHECK_UNAVAILABLE.into()),
+        _ if ran.lost() => Err("SSH lost the target during the identity check; restore SSH access and retry move --dry-run".into()),
+        _ => Err(CARRY_CHECK_UNAVAILABLE.into()),
+    }
+}
+
 /// Check both hosts; the plan, or the first reason a move cannot go ahead.
 fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String> {
     let target_url = request.target_url.clone().unwrap_or_default();
@@ -215,6 +255,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         work_dir: request.target_work_dir.clone().unwrap_or_default(),
         need_bytes: need,
         resume_move: request.resume_move.clone(),
+        carry: !request.no_keep_tokens,
     };
     // Protocol 2's `check`: the same checks protocol 1 answers, from a
     // helper that can also run the move, so an older target is refused here.
@@ -291,6 +332,13 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     if reply.protocol != PROTOCOL {
         return Err(skew(&reply.version, reply.protocol));
     }
+    if !request.no_keep_tokens {
+        match reply.supports_carry {
+            Some(true) => {}
+            Some(false) => return Err("checking carried identities requires a Linux Docker target; pass --no-keep-tokens to check a move using the target's bearer settings".into()),
+            None => return Err(CARRY_CHECK_UNAVAILABLE.into()),
+        }
+    }
     if !reply.refusals.is_empty() {
         return Err(reply.refusals.join("; "));
     }
@@ -307,6 +355,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         return Ok(Plan {
             to,
             target_url,
+            checked_carry: check_carry(world, request, &source)?,
             source,
             target: reply.clone(),
             url_tied: false,
@@ -345,11 +394,14 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     Ok(Plan {
         to,
         target_url,
+        checked_carry: check_carry(world, request, &source)?,
         source,
         target: reply,
         url_tied,
     })
 }
+
+const CARRY_RESULT: &str = "Carried bearer settings were verified. Native handover of these settings is pending. To run the move with this client, use an authenticated target, remove --dry-run, and add --no-keep-tokens.";
 
 /// The plan as text.
 fn render(plan: &Plan, dry_run: bool) -> String {
@@ -398,6 +450,11 @@ fn render(plan: &Plan, dry_run: bool) -> String {
         plan.target.work_dir,
         sized(plan.target.free_bytes)
     ));
+    if plan.checked_carry {
+        out.push_str(CARRY_RESULT);
+        out.push('\n');
+        return out;
+    }
     out.push_str(if dry_run {
         "The move would, in this order:\n"
     } else {
@@ -418,6 +475,9 @@ fn render(plan: &Plan, dry_run: bool) -> String {
 
 /// The steps a move would take, as the plan prints them.
 fn steps(plan: &Plan) -> Vec<String> {
+    if plan.checked_carry {
+        return Vec::new();
+    }
     let t = plan.target.facts.clone().unwrap_or_default();
     let timer = match plan.target.update_timer.as_str() {
         "enabled" => "pause the target's unattended update (enabled now) and restore it at the end"
@@ -481,7 +541,7 @@ fn steps(plan: &Plan) -> Vec<String> {
 
 /// The plan as one JSON document.
 fn document(plan: &Plan) -> Value {
-    json!({
+    let mut value = json!({
         "dry_run": true,
         "changed": false,
         "to": plan.to,
@@ -490,7 +550,11 @@ fn document(plan: &Plan) -> Value {
         "source": plan.source,
         "target": plan.target,
         "steps": steps(plan),
-    })
+    });
+    if plan.checked_carry {
+        value["carried_identities"] = json!(CARRY_RESULT);
+    }
+    value
 }
 
 /// The real hosts.

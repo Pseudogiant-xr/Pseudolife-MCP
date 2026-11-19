@@ -114,7 +114,7 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
     } else if request.target_url.is_none() {
         "--target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765"
             .to_owned()
-    } else if !request.no_keep_tokens {
+    } else if !request.no_keep_tokens && !request.dry_run {
         "carrying the source's tokens to the target is not available in the native client yet: pass --no-keep-tokens (the target keeps its own tokens, and clients re-pair or use the target's)"
             .to_owned()
     } else if let Some(dir) = &request.target_work_dir
