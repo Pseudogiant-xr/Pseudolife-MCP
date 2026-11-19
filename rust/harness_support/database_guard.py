@@ -7,12 +7,20 @@ a disposable-looking connection string alone is insufficient.
 from __future__ import annotations
 
 import os
+import re
 from typing import Iterable
 
 DEFAULT_PRODUCTION_DATABASE = "pseudolife_memory"
 PRODUCTION_DATABASES = frozenset({DEFAULT_PRODUCTION_DATABASE})
 PRODUCTION_DATABASE_ENV = "_PSEUDOLIFE_PRODUCTION_DB"
 UNRESOLVED_PRODUCTION_DATABASE = "<unresolved>"
+FIXTURE_SLICE_ID = re.compile(r"w[0-9][a-z]|http|pgs|prn|mir")
+
+
+def fixture_database_pattern(slice_id: str | None = None) -> re.Pattern[str]:
+    """Accept the harness namespace or one literal slice of it."""
+    slice_pattern = f"(?:{FIXTURE_SLICE_ID.pattern})" if slice_id is None else re.escape(slice_id)
+    return re.compile(rf"pl_cf_{slice_pattern}_[a-z0-9_]{{1,40}}")
 
 
 class ProductionDatabaseError(RuntimeError):
