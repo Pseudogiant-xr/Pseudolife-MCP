@@ -659,11 +659,7 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
     let output = setup.output().unwrap();
     let key = home.path("tunnels/dot.key");
     #[cfg(windows)]
-    if output.status.code() == Some(2)
-        && std::env::var_os("SSH_CONNECTION").is_some()
-        && std::env::var_os("GITHUB_ACTIONS").is_none()
-        && String::from_utf8_lossy(&output.stderr).contains("Windows could not protect")
-    {
+    if refused_dpapi_in_ssh_logon(&output) {
         assert!(!key.exists());
         assert_eq!(std::fs::read(&profile).unwrap(), original);
         ambient.assert_untouched();
@@ -712,6 +708,14 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
     assert_eq!(daemon.records.lock().unwrap().len(), request_count);
     assert!(std::fs::read(&key).unwrap() == stored);
     ambient.assert_untouched();
+}
+
+#[cfg(windows)]
+fn refused_dpapi_in_ssh_logon(output: &Output) -> bool {
+    output.status.code() == Some(2)
+        && std::env::var_os("SSH_CONNECTION").is_some()
+        && std::env::var_os("GITHUB_ACTIONS").is_none()
+        && String::from_utf8_lossy(&output.stderr).contains("Windows could not protect")
 }
 
 #[test]
@@ -853,16 +857,7 @@ fn setup_never_uses_an_ambient_proxy() {
 #[test]
 fn setup_refuses_if_the_daemon_credential_changes_during_the_handshake() {
     let home = setup_home();
-    let gate = std::sync::Arc::new(common::ResponseGate::default());
-    let daemon = common::Fixture::start_with(common::Setup {
-        lists: vec![common::Reply::Gated(
-            gate.clone(),
-            Box::new(common::Reply::Result(
-                serde_json::json!({"tools":[{"name":"fixture","inputSchema":{"type":"object"}}]}),
-            )),
-        )],
-        ..Default::default()
-    });
+    let (daemon, gate) = gated_setup_daemon();
     let (mut setup, ambient) = setup_command(&home, &daemon.url, &home.path("token"));
     let child = setup
         .arg("--accept-access")
@@ -900,16 +895,7 @@ fn setup_refuses_a_key_created_during_the_handshake() {
 
 fn expect_setup_refusal_for_a_late_runtime_file(file: &str, kind: &str) {
     let home = setup_home();
-    let gate = std::sync::Arc::new(common::ResponseGate::default());
-    let daemon = common::Fixture::start_with(common::Setup {
-        lists: vec![common::Reply::Gated(
-            gate.clone(),
-            Box::new(common::Reply::Result(
-                serde_json::json!({"tools":[{"name":"fixture","inputSchema":{"type":"object"}}]}),
-            )),
-        )],
-        ..Default::default()
-    });
+    let (daemon, gate) = gated_setup_daemon();
     pending_setup_profile(&home, &daemon.url);
     let profile = home.path("tunnels/dot.profile.json");
     let before = std::fs::read(&profile).unwrap();
@@ -928,7 +914,58 @@ fn expect_setup_refusal_for_a_late_runtime_file(file: &str, kind: &str) {
     gate.release();
     let output = child.wait_with_output().unwrap();
     assert!(reached, "setup never reached tools/list");
-    assert_eq!(output.status.code(), Some(2), "{file}");
+    assert_late_conflict(&home, &path, kind, &output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("full"));
+    assert!(!stdout.contains("Profile dot saved"));
+    assert!(home.path("tunnels/.tunnel-setup.lock").is_file());
+    assert_eq!(std::fs::read(profile).unwrap(), before);
+    assert_eq!(std::fs::read(path).unwrap(), b"new runtime fixture");
+    ambient.assert_untouched();
+}
+
+#[test]
+fn setup_refuses_a_process_record_created_during_first_key_import() {
+    let home = setup_home();
+    let (daemon, gate) = gated_setup_daemon();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+        }),
+    );
+    let profile = home.path("tunnels/dot.profile.json");
+    let before = std::fs::read(&profile).unwrap();
+    let record = home.path("tunnels").join("dot.process.json");
+    let key_file = home.path("private-key-fixture");
+    pseudolife_stdio::board::state::atomic_create(&key_file, b"fixture-runtime-key").unwrap();
+    let ambient = Listener::new();
+    let child = command(&home, &ambient)
+        .args(["setup", "--profile-dir", &home.dir(), "--key-file"])
+        .arg(&key_file)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let reached = wait_for_setup_tools_list(&daemon);
+    if reached {
+        pseudolife_stdio::board::state::atomic_create(&record, b"new runtime fixture").unwrap();
+    }
+    gate.release();
+    let output = child.wait_with_output().unwrap();
+    assert!(reached, "setup never reached tools/list");
+    assert!(output.stdout.is_empty());
+    assert!(!home.path("tunnels/dot.key").exists());
+    assert_eq!(std::fs::read(profile).unwrap(), before);
+    assert_eq!(std::fs::read(&record).unwrap(), b"new runtime fixture");
+    ambient.assert_untouched();
+    assert_late_conflict(&home, &record, "process record", &output);
+    assert!(home.path("tunnels/.tunnel-setup.lock").is_file());
+}
+
+fn assert_late_conflict(home: &Home, path: &Path, kind: &str, output: &Output) {
+    assert_eq!(output.status.code(), Some(2), "{}", path.display());
     assert_eq!(
         output.stderr,
         native_text(&format!(
@@ -937,13 +974,20 @@ fn expect_setup_refusal_for_a_late_runtime_file(file: &str, kind: &str) {
             shell_quoted(&home.dir())
         ))
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("full"));
-    assert!(!stdout.contains("Profile dot saved"));
-    assert!(home.path("tunnels/.tunnel-setup.lock").is_file());
-    assert_eq!(std::fs::read(profile).unwrap(), before);
-    assert_eq!(std::fs::read(path).unwrap(), b"new runtime fixture");
-    ambient.assert_untouched();
+}
+
+fn gated_setup_daemon() -> (common::Fixture, std::sync::Arc<common::ResponseGate>) {
+    let gate = std::sync::Arc::new(common::ResponseGate::default());
+    let daemon = common::Fixture::start_with(common::Setup {
+        lists: vec![common::Reply::Gated(
+            gate.clone(),
+            Box::new(common::Reply::Result(
+                serde_json::json!({"tools":[{"name":"fixture","inputSchema":{"type":"object"}}]}),
+            )),
+        )],
+        ..Default::default()
+    });
+    (daemon, gate)
 }
 
 fn wait_for_setup_tools_list(daemon: &common::Fixture) -> bool {

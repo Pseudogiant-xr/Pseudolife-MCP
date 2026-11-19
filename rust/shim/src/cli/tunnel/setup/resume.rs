@@ -64,9 +64,10 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
                 "the runtime key matches the daemon credential; supply the separate tunnel runtime key",
             ));
         }
-        let encoded = encode_key(&key.0)?;
+        let encoded = encode_key(&key.0);
         let (_lock, _) = commit_lock(root, path, &original)?;
         recheck_inactive(root, &profile.name, &status)?;
+        let encoded = encoded?;
         publish_new(&store::key_path(root, &profile.name), |file| {
             file.write_all(&encoded.0)
         })?;
