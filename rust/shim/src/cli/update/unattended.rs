@@ -310,14 +310,10 @@ fn run_inner(
         UpdateError::usage("the daemon did not answer /health; nothing was changed")
     })?;
     update.report.current = health["version"].as_str().map(str::to_owned);
-    let latest = update
-        .o
-        .tag
-        .clone()
-        .or_else(|| update.latest_release())
-        .ok_or_else(|| {
-            UpdateError::usage("could not read the newest release; nothing was changed")
-        })?;
+    let Some(latest) = update.target_version()? else {
+        update.step(super::NO_PUBLISHED_RELEASE);
+        return Ok(3);
+    };
     update.report.target = Some(latest.clone());
     let current = health_version(&health)?;
     if super::version_key(&latest).is_none() {
