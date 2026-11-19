@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 import parity_scope
-from rust.ci.docs_scope import documentation_only, push_docs_eligible
+from rust.ci.docs_scope import documentation_only
 from parity_scope import ALL, FLOOR, ROW_SUITES, SHARDS, SHIM_COMMANDS, SUITES, matrix, reached, select
 from test_workflow import CODE_CHANGES, DOCS_ONLY_CHANGES, W1C_SUITES
 
@@ -242,9 +242,9 @@ def test_docs_path_hardening_excludes_code_suffixes(path):
     "docs/dev/merge-batches.md", "docs/guide/configuration.md", "docs/specs/example.md",
     "docs/atlas/atlas.json", "docs/images/diagram.svg", "docs/atlas/atlas.html",
 ])
-def test_fast_docs_paths_exclude_code_and_files_read_outside_the_guards(path):
+def test_docs_with_readers_can_use_the_documentation_lane(path):
     assert parity_scope.is_docs(path)
-    assert not push_docs_eligible(path)
+    assert parity_scope.is_documentation_path(path)
 
 
 @pytest.mark.parametrize("files, push_docs, pr_docs", [

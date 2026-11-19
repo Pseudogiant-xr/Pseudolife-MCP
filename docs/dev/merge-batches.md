@@ -12,8 +12,9 @@ the procedure behind it.
 
 Each change waits for hosted CI once, on its batch:
 
-- **An ordinary pull request** (any head branch but `integrate/*`) runs the
-  fast lanes only. In `ci.yml`: `scope`, `guards`, `lock-resolve` and
+- **An ordinary pull request** (any head branch but `integrate/*`) without a
+  docs-only scope decision runs the fast lanes only. In `ci.yml`: `scope`,
+  `guards`, `lock-resolve` and
   `frontend`; the `test` job and the lite OS lanes are skipped. In
   `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest and
   the selected early parity replay described below),
@@ -100,20 +101,8 @@ Each change waits for hosted CI once, on its batch:
 - **A batch pull request** (from `integrate/*`) runs everything its diff
   needs, exactly as every pull request did before 2026-10-21 (the
   Rust-only and documentation-only scope skips still apply).
-- **A direct documentation-only master push** runs the same lanes as an
-  ordinary documentation-only pull request. CI runs `scope`, `guards`,
-  `lock-resolve` and `frontend`; Rust shim runs `Scope` and both
-  `Parity` gates. Both workflows use the Rust documentation predicate over
-  the push event's `before` and `after` trees. The same range covers the
-  entire net change on a multi-commit push.
-  A missing, empty or unreadable range, a force push, or an ambiguous
-  API result keeps the push lanes it had before this shortcut. The generated
-  producer census is eligible alongside docs on pull requests and merge groups only.
-  Documentation can stale the census until the next batch regenerates
-  it. Rust shim reports that drift in the push's Scope job summary.
-  The nightly still runs the lanes skipped by this push.
-- **A master push from an integration batch** skips what that batch
-  already passed on the same code.
+- **A docs-only change runs only what a documentation change can break**, as a pull request and as a push to master: the `scope` decision, the doc guards, and the tests that read a touched path. No suite, lite lane, Rust job, lock-resolve or frontend job runs, and the required checks report as skipped. Both workflows decide with the Rust documentation predicate; when they cannot prove a change is docs-only (a missing, empty or unreadable range, a force push, an ambiguous API result) it runs the lanes it had before this shortcut. The generated producer census is eligible alongside docs on pull requests and merge groups only; documentation can stale it until the next batch regenerates it, and Rust shim reports that drift in the push's Scope job summary. The nightly still runs the lanes a docs push skipped.
+- **A master push from an integration batch** skips what that batch already passed on the same code.
   `ops/integrate.py merge` merges a batch with a merge commit only while
   master is its base or an ancestor of its head, so the commit pushed to
   master has the batch head's tree. Each scope job runs

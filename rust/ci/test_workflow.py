@@ -376,12 +376,15 @@ def workflow():
 
 def test_shards_cover_both_systems_and_build_once():
     jobs = workflow()["jobs"]
-    for name in ("rust", "candidate", "parity-checks", "parity"):
+    for name in ("rust", "candidate", "parity-checks"):
         assert jobs[name]["strategy"]["matrix"]["os"] == SYSTEMS
         assert jobs[name]["strategy"]["fail-fast"] is False
         assert not jobs[name].get("continue-on-error", False)
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
-    assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
+    for name, system in zip(("parity", "parity-windows"), SYSTEMS, strict=True):
+        assert jobs[name]["name"] == f"Parity / {system}"
+        assert jobs[name]["runs-on"] == system
+        assert "strategy" not in jobs[name]
     assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "candidate-harness", "fixtures", "parity-pool"]
     rust_steps = jobs["rust"]["steps"]
     override = commands(next(step["run"] for step in rust_steps
@@ -1029,6 +1032,7 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     scope = jobs["scope"]
     assert scope["runs-on"] == "ubuntu-latest" and "needs" not in scope
     assert scope["outputs"] == {"rust": "${{ steps.scope.outputs.rust }}",
+                                "docs": "${{ steps.scope.outputs.docs }}",
                                 "full": "${{ steps.scope.outputs.full }}",
                                 "parity": "${{ steps.parity.outputs.parity }}",
                                 "parity_selfhosted": "${{ steps.parity.outputs.selfhosted }}",

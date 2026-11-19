@@ -176,15 +176,35 @@ SHIM_COMMANDS = {
 # The documentation-only rule shared by workflow scope and parity selection.
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
 DOCS_SUFFIXES = frozenset({".md", ".png", ".svg", ".json", ".html"})
+DOCUMENT_ASSETS = DOCS_SUFFIXES | frozenset({
+    ".adoc", ".gif", ".jpeg", ".jpg", ".pdf", ".rst", ".txt", ".webp",
+})
+DOCUMENT_EXCLUSIONS = ("tests/", "ops/", "plugin/", "pseudolife_memory/",
+                       ".github/workflows/", ".github/actions/")
 # The port's plan pages under rust/ that no Rust or parity job reads; the
 # scope job names them too. A page a job reads (PARITY.md) or one an evidence
 # file hashes (PORTING.md, PORT-STATE.md, PHASE3-READ-PATH.md) stays code.
 RUST_PLAN_DOCS = frozenset({"rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md"})
 
 
+def plain_path(path: str) -> bool:
+    return path.isascii() and all(c not in '"\\' and 32 <= ord(c) < 127 for c in path)
+
+
+def is_documentation_path(path: str) -> bool:
+    """Recognize a path eligible for docs-only CI with its reader tests."""
+    lower = path.lower()
+    if not plain_path(path) or lower.startswith(DOCUMENT_EXCLUSIONS):
+        return False
+    suffix = PurePosixPath(path).suffix.lower()
+    if lower.startswith("docs/"):
+        return path.startswith("docs/") and suffix in DOCUMENT_ASSETS
+    return path in ("llms.txt", "llms-full.txt") or suffix == ".md"
+
+
 def is_docs(path: str) -> bool:
-    """Classify paths for Rust job, parity and golden-replay selection."""
-    if not path.isascii() or any(c in '"\\' or ord(c) < 32 or ord(c) == 127 for c in path):
+    """Classify paths for legacy Rust job, parity and golden-replay selection."""
+    if not plain_path(path):
         return False
     if path in RUST_PLAN_DOCS:
         return True

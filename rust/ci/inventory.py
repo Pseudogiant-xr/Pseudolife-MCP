@@ -248,7 +248,13 @@ def check(workflow):
     assert {'pull_request', 'merge_group', 'workflow_dispatch'} <= set(events), 'CI events dropped or changed'
     gate = jobs['parity']
     assert gate['needs'] == ['scope', 'rust', 'candidate', 'parity-checks'], 'Parity event gate lost dependency'
-    assert gate['if'] == f'always() && ({ordinary_ci})' and not gate.get('continue-on-error'), 'Parity event gate can skip failures'
+    assert gate['if'] == ("always() && (needs.scope.result != 'success' || "
+                          f"needs.scope.outputs.docs != 'true') && ({ordinary_ci})")
+    for job, os_name in ((gate, 'ubuntu-latest'), (jobs['parity-windows'], 'windows-latest')):
+        assert job['name'] == f'Parity / {os_name}' and job['runs-on'] == os_name
+        assert 'strategy' not in job and not job.get('continue-on-error')
+        assert {k: v for k, v in job.items() if k not in ('name', 'runs-on')} == {
+            k: v for k, v in gate.items() if k not in ('name', 'runs-on')}
     assert len(gate['steps']) == 2, 'Parity event gate steps changed'
     cancelled, required = gate['steps']
     # A cancelled need fails its own step, which ops/integrate.py reads as

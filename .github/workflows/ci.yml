@@ -124,6 +124,8 @@ jobs:
       pull-requests: read
     outputs:
       python: ${{ steps.docs.outputs.decision == 'docs' && 'false' || steps.scope.outputs.python }}
+      docs: ${{ steps.docs.outputs.decision }}
+      docs_tests: ${{ steps.docs.outputs.docs_tests }}
       # true for a batch, push or merge group whose change is Rust-only: the
       # guards job then also runs the live tests that read rust/ files.
       rust_only: ${{ steps.docs.outputs.decision != 'docs' && steps.scope.outputs.rust_only || '' }}
@@ -247,16 +249,16 @@ jobs:
             echo "rust_only=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check for a direct documentation-only master push
+      - name: Select documentation checks
         id: docs
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
         # Save the legacy verdict first. This classifier can fetch an
         # older before object in a shallow checkout to prove a docs push.
-        run: |
-          scope=$(python3 -m rust.ci.docs_scope ci) || scope=unknown
-          printf 'decision=%s\n' "$scope" >> "$GITHUB_OUTPUT"
+        run: python3 -m rust.ci.docs_scope ci
 
   guards:
     # Runs only when `scope` skips the Python lanes: the guards that scan
@@ -307,6 +309,7 @@ jobs:
           pip install -e .[dev]
 
       - name: Tree-wide guards
+        if: needs.scope.outputs.docs != 'docs'
         # Every test file that reads CHANGELOG.md, plus the tracked-tree
         # scans (the wall-clock budget guard covers rust/ tests, so Rust-only
         # PRs, which skip the test job, still run it). The disposable-database guard scans every tracked .py file,
@@ -321,8 +324,6 @@ jobs:
           python -m pytest -q -m "not real_model"
           tests/test_release_ux.py tests/test_eval_evidence.py
           tests/test_atlas_currency.py tests/test_client_install_ux.py
-          tests/test_llms_txt.py tests/test_i18n_readme.py
-          tests/test_claude_md_citations.py tests/test_extractor_model_lists.py
           tests/test_codex_hook_launcher.py tests/test_label_pair.py
           tests/test_merge_queue.py tests/test_plugin_packaging.py
           tests/test_rescore_strict_mc.py tests/test_schema_version.py
@@ -331,11 +332,12 @@ jobs:
           tests/test_fake_embedder.py tests/test_installer_bash32.py
           tests/test_integrate_script.py::test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness
           tests/test_integrate_script.py::test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips
-          tests/test_batch_timeline.py::test_committed_artifact_backs_the_findings
-          rust/ci/test_docs_scope.py
-          rust/ci/test_parity_scope.py::test_the_plan_pages_counted_as_docs_are_read_by_no_code
-          rust/test_producer_census.py::test_current_tree_census_has_real_producer_floors
-          rust/test_producer_census.py::test_snapshot_is_independent_of_source_commit_history
+
+      - name: Documentation guards and readers
+        if: needs.scope.outputs.docs == 'docs'
+        env:
+          DOC_TESTS: ${{ needs.scope.outputs.docs_tests }}
+        run: python -m rust.ci.docs_scope tests
 
       - name: Live tests that read rust/ files
         # Since the Python freeze a Rust-only batch skips the Python lanes on
@@ -351,14 +353,14 @@ jobs:
           python -m pytest -q -n 2 --dist loadfile
           tests/test_batch_timeline.py tests/test_board_status.py tests/test_ci_merge_queue.py
           tests/test_coordination_console.py tests/test_coordination_receive_ack.py tests/test_coordination_storage.py
-          tests/test_coordination_web.py tests/test_integrate_script.py
+          tests/test_coordination_web.py tests/test_extractor_model_lists.py tests/test_integrate_script.py
           tests/test_integrate_snapshot_admission.py tests/test_move_cli.py tests/test_operator_engine_transport.py
           tests/test_harness_database_turn.py tests/test_harness_database_turn_native.py tests/test_harness_selection.py
           tests/test_pdfium_pin.py tests/test_prune_worktrees.py tests/test_rehearse_activation.py
           tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_schema_version_guard.py
           tests/test_update_engine.py tests/test_suite_classes.py
           tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
-          tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
+          tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
           tests/test_scheduled_task_lock.py
 
   lock-resolve:
@@ -377,7 +379,7 @@ jobs:
     # The Python must be the image's (tests/test_check_lock_resolves.py pins
     # it to the FROM line).
     needs: scope
-    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
+    if: ${{ !cancelled() && needs.scope.outputs.docs != 'docs' && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1247,7 +1249,7 @@ jobs:
     # Never scoped by the diff; skips a same-tree batch pass on push or a
     # same-SHA successful push on schedule, and runs when scope fails.
     needs: scope
-    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
+    if: ${{ !cancelled() && needs.scope.outputs.docs != 'docs' && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

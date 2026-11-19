@@ -33,20 +33,12 @@ def test_scope_uses_the_shared_documentation_classifier(name):
                for step in workflow(name)["jobs"]["scope"]["steps"])
 
 
-@pytest.mark.parametrize("reader", [
-    "tests/test_release_ux.py", "tests/test_llms_txt.py", "tests/test_atlas_currency.py",
-    "tests/test_eval_evidence.py", "tests/test_i18n_readme.py", "tests/test_claude_md_citations.py",
-    "tests/test_extractor_model_lists.py", "rust/ci/test_docs_scope.py",
-    "tests/test_batch_timeline.py::test_committed_artifact_backs_the_findings",
-    "rust/ci/test_parity_scope.py::test_the_plan_pages_counted_as_docs_are_read_by_no_code",
-    "rust/test_producer_census.py::test_current_tree_census_has_real_producer_floors",
-    "rust/test_producer_census.py::test_snapshot_is_independent_of_source_commit_history",
-])
-def test_fast_ci_runs_doc_readers_and_the_scope_tests(reader):
+def test_only_the_documentation_step_runs_for_a_docs_verdict():
     steps = workflow("ci.yml")["jobs"]["guards"]["steps"]
-    tree_guards = next(step for step in steps if step.get("name") == "Tree-wide guards")
-    assert "if" not in tree_guards
-    assert reader in shlex.split(tree_guards["run"])
+    guarded = {step["name"]: step["if"] for step in steps
+               if step.get("name") in ("Tree-wide guards", "Documentation guards and readers")}
+    assert guarded == {"Tree-wide guards": "needs.scope.outputs.docs != 'docs'",
+                       "Documentation guards and readers": "needs.scope.outputs.docs == 'docs'"}
 
 
 class ScopeOutputs(Evaluator):
@@ -57,6 +49,8 @@ class ScopeOutputs(Evaluator):
     def lookup(self, path):
         if path[:3] == ["needs", "scope", "outputs"]:
             return self.outputs.get(path[3], "")
+        if path == ["needs", "scope", "result"]:
+            return self.outputs.get("scope_result", "success")
         return super().lookup(path)
 
     def call(self, name):
@@ -109,8 +103,9 @@ def ci_outputs(root, tmp_path, env, before, weekly=""):
                            env={**os.environ, **env, "BEFORE": before, "WEEKLY_FROZEN": weekly,
                                 "GITHUB_OUTPUT": str(output)}, check=True, capture_output=True, text=True)
             step_outputs["scope"] = dict(line.split("=", 1) for line in output.read_text().splitlines())
-        if step.get("id") == "docs" and env["EVENT_NAME"] == "push":
-            step_outputs["docs"] = {"decision": docs_scope.push_scope(env)}
+        if step.get("id") == "docs" and env["EVENT_NAME"] in ("push", "pull_request"):
+            decision, tests = docs_scope.docs_selection(env)
+            step_outputs["docs"] = {"decision": decision, "docs_tests": json.dumps(tests)}
 
     class JobOutputs(ScopeOutputs):
         def lookup(self, path):
@@ -120,7 +115,9 @@ def ci_outputs(root, tmp_path, env, before, weekly=""):
 
     evaluator = JobOutputs(env["EVENT_NAME"], {})
     resolved = {name: evaluator.run(condition_text(job["outputs"][name]))
-                for name in ("python", "rust_only", "include_frozen")}
+                for name in ("python", "rust_only", "include_frozen", "docs")}
+    if resolved["docs"] != "docs":
+        resolved.pop("docs")
     return {name: value for name, value in resolved.items() if value}, step_outputs.get("docs", {}).get("decision")
 
 
@@ -274,7 +271,7 @@ def test_master_push_lanes(repo, tmp_path, monkeypatch, case, expected):
     fast = {"lock-resolve", "frontend"}
     python_checks = {"test", "test-lite-windows", "test-lite-macos"}
     rust_only = case in ("rust-only-push", "rust-plan-api-failure")
-    ci_expected = fast | ({"guards"} if expected == "docs" or rust_only else python_checks)
+    ci_expected = {"guards"} if expected == "docs" else fast | ({"guards"} if rust_only else python_checks)
     if case == "batch-passed":
         ci_expected.remove("test")
     assert selected_lanes("ci.yml", CI_JOBS, "push", ci) == ci_expected
@@ -312,13 +309,56 @@ def test_ordinary_docs_pull_request_keeps_the_fast_lanes(repo, tmp_path, generat
     paths = ["docs/example.md"]
     if generated_census:
         paths.append(docs_scope.CENSUS)
-    commit(*paths)
-    env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example"}
+    sha = commit(*paths)
+    env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example", "GITHUB_SHA": sha}
     ci, _ = ci_outputs(root, tmp_path, env, before)
-    assert selected_lanes("ci.yml", CI_JOBS, "pull_request", ci) == {"guards", "lock-resolve", "frontend"}
+    assert selected_lanes("ci.yml", CI_JOBS, "pull_request", ci) == {"guards"}
     full, rust = docs_scope.rust_scope(env)
     assert (full, rust) == (False, False)
     assert not selected_lanes("rust.yml", RUST_JOBS, "pull_request", {"full": "false", "rust": "false"})
+
+
+def test_docs_guard_selection_keeps_the_named_guards_and_touched_readers(repo, tmp_path):
+    root, before, commit = repo
+    files = {"test_reader.py": "def test_doc(): assert 'guide-page.md'\n",
+             "test_unrelated.py": "def test_example(): assert 'other-page.md'\n",
+             "test_synthetic.py": "def fixture(tmp_path): (tmp_path / 'guide-page.md').write_text('fixture')\n"}
+    (root / "tests").mkdir()
+    for name, source in files.items():
+        (root / "tests" / name).write_text(source, encoding="utf-8")
+    commit("initial-two.txt")
+    head = commit("docs/guide/guide-page.md")
+    env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example", "GITHUB_SHA": head}
+    decision, targets = docs_scope.docs_selection(env)
+    assert decision == "docs"
+    assert set(targets) == {
+        "tests/test_release_ux.py", "tests/test_llms_txt.py", "tests/test_atlas_currency.py",
+        "tests/test_eval_evidence.py", "tests/test_i18n_readme.py", "tests/test_claude_md_citations.py",
+        "tests/test_extractor_model_lists.py", "tests/test_reader.py::test_doc", "tests/test_plugin_packaging.py",
+        "rust/test_producer_census.py",
+    }
+
+
+@pytest.mark.parametrize("code", ["helper.py", "docs/example.py", "tests/guide.md",
+                                  "ops/usage.md", "plugin/hooks/usage.md", ".github/workflows/notes.md"])
+def test_code_paths_cannot_use_the_docs_selection(repo, code):
+    _, _, commit = repo
+    head = commit("docs/status.md", code)
+    env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example", "GITHUB_SHA": head}
+    assert docs_scope.docs_selection(env) == ("other", [])
+
+
+@pytest.mark.parametrize("event", ["push", "pull_request"])
+def test_docs_verdict_skips_both_static_required_parity_contexts(event):
+    jobs = workflow("rust.yml")["jobs"]
+    for name, os_name in (("parity", "ubuntu-latest"), ("parity-windows", "windows-latest")):
+        job = jobs[name]
+        assert job["name"] == f"Parity / {os_name}"
+        assert "strategy" not in job
+        condition = condition_text(job["if"])
+        assert ScopeOutputs(event, {"docs": "true"}).run(condition) is False
+        assert ScopeOutputs(event, {"docs": "true", "scope_result": "failure"}).run(condition) is True
+        assert ScopeOutputs(event, {"docs": "false"}).run(condition) is True
 
 
 @pytest.mark.parametrize("checks, reuse", [
@@ -364,6 +404,6 @@ def test_a_census_reporting_error_keeps_the_rust_lanes(monkeypatch):
     def broken_report(_):
         raise subprocess.CalledProcessError(1, "producer_census.py")
 
-    monkeypatch.setattr(docs_scope, "push_scope", lambda _: "docs")
+    monkeypatch.setattr(docs_scope, "docs_selection", lambda _: ("docs", []))
     monkeypatch.setattr(docs_scope, "report_census", broken_report)
     assert docs_scope.rust_scope({"EVENT_NAME": "push"}) == (True, True)

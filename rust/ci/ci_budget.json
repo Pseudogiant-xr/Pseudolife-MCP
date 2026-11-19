@@ -12,6 +12,9 @@
       "parity": {
         "*": "the required Parity gate reads every gated job's result"
       },
+      "parity-windows": {
+        "*": "the required Parity gate reads every gated job's result"
+      },
       "stress-report": {
         "stress-plan": "reports only a loop that was planned"
       },

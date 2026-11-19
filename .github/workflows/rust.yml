@@ -120,6 +120,7 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
+      docs: ${{ steps.scope.outputs.docs }}
       full: ${{ steps.scope.outputs.full }}
       parity: ${{ steps.parity.outputs.parity }}
       parity_selfhosted: ${{ steps.parity.outputs.selfhosted }}
@@ -1587,16 +1588,14 @@ jobs:
     # skips the candidate and parity jobs, and a master push whose merged
     # batch passed every parity pair (parity_any false) skips parity-checks;
     # any other skip still fails.
-    if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')
-    name: Parity / ${{ matrix.os }}
-    needs: [scope, rust, candidate, parity-checks]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
-    steps:
+    # Static job names let GitHub report both required contexts even when
+    # the docs decision skips these jobs before runner allocation.
+    if: &parity_condition always() && (needs.scope.result != 'success' || needs.scope.outputs.docs != 'true') && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')
+    name: Parity / ubuntu-latest
+    needs: &parity_needs [scope, rust, candidate, parity-checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: &parity_timeout 5
+    steps: &parity_verdict_steps
       # A cancelled needed job fails this step and skips the verdict, the
       # same result the verdict gives it, so the failed step names the cause:
       # ops/integrate.py admits such a head as cancelled, not failing.
@@ -1622,6 +1621,14 @@ jobs:
               exit 1
             }
           }
+
+  parity-windows:
+    if: *parity_condition
+    name: Parity / windows-latest
+    needs: *parity_needs
+    runs-on: windows-latest
+    timeout-minutes: *parity_timeout
+    steps: *parity_verdict_steps
 
   # A stress loop (mode=stress): run one selection on N fresh hosted runners
   # and report every iteration (rust/ci/stress.py). It compares against this

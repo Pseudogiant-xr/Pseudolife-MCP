@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from collections.abc import Iterable, Mapping
 import json
 import os
@@ -12,25 +13,54 @@ import sys
 
 from ops.ci_batch_passed import BATCH_PREFIX, MASTER, ApiError, github_get
 
-from .parity_scope import RUST_PLAN_DOCS, is_docs
+from .parity_scope import is_docs, is_documentation_path
 
 ROOT = Path(__file__).resolve().parents[2]
 CENSUS = "rust/producer-census.json"
 SHA = re.compile(r"[0-9a-f]{40}")
-PUSH_DOCS_SUFFIXES = frozenset({".md", ".png"})
-PUSH_DOCS_FULL_CI_DIRS = ("docs/dev/", "docs/guide/", "docs/specs/")
+DOC_GUARDS = (
+    "tests/test_release_ux.py", "tests/test_llms_txt.py", "tests/test_atlas_currency.py",
+    "tests/test_eval_evidence.py", "tests/test_i18n_readme.py", "tests/test_claude_md_citations.py",
+    "tests/test_extractor_model_lists.py",
+)
+# Some readers resolve directories or snapshots instead of naming the file.
+DIRECTORY_READERS = {
+    "changelog.d/": ("tests/test_changelog_fragments.py",),
+    "docs/i18n/": ("tests/test_plugin_packaging.py",),
+    "docs/guide/": ("tests/test_plugin_packaging.py",),
+    "examples/": ("tests/test_plugin_packaging.py",),
+}
+READER_FILE = re.compile(r"(?:tests/(?:[a-zA-Z0-9_-]+/)*test_[a-zA-Z0-9_]+\.py|rust/test_producer_census\.py)")
+TEST_TARGET = re.compile(READER_FILE.pattern + r"(?:::test_[A-Za-z0-9_]+)?")
 
 
-def push_docs_eligible(path: str) -> bool:
-    """Check that the kept master-push jobs cover this document's readers."""
-    if not is_docs(path):
-        return False
-    if path in RUST_PLAN_DOCS or path in ("CLAUDE.md", "CHANGELOG.md", "llms.txt", "llms-full.txt"):
-        return True
-    if path.startswith("changelog.d/"):
-        return PurePosixPath(path).suffix == ".md"
-    return (path.startswith("docs/") and not path.lower().startswith(PUSH_DOCS_FULL_CI_DIRS)
-            and PurePosixPath(path).suffix.lower() in PUSH_DOCS_SUFFIXES)
+def reader_targets(file: str, names: list[str]) -> set[str]:
+    """Use individual tests for direct literals, or the file for shared readers."""
+    source = ast.parse((ROOT / file).read_bytes(), filename=file)
+    nodes = list(ast.walk(source))
+    docstrings = {id(body[0].value) for node in nodes
+                  if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                  and (body := node.body) and isinstance(body[0], ast.Expr)
+                  and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)}
+    # A path overwritten by a fixture does not read the checkout document.
+    writes = {id(part) for node in nodes if isinstance(node, ast.Call)
+              and isinstance(node.func, ast.Attribute) and node.func.attr in ("write_text", "write_bytes")
+              for part in ast.walk(node.func.value)}
+    tests = [node for node in source.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+             and node.name.startswith("test_")]
+    targets = set()
+    for node in nodes:
+        if (not isinstance(node, ast.Constant) or id(node) in docstrings or id(node) in writes
+                or not isinstance(node.value, (str, bytes))):
+            continue
+        if not any(name in str(node.value).casefold() for name in names):
+            continue
+        owner = next((test for test in tests
+                      if min(item.lineno for item in (test, *test.decorator_list)) <= node.lineno <= test.end_lineno), None)
+        if owner is None or any(isinstance(ref, ast.Name) and ref.id == owner.name for ref in nodes):
+            return {file}
+        targets.add(f"{file}::{owner.name}")
+    return targets
 
 
 def documentation_only(paths: Iterable[str], *, allow_generated_census: bool = False) -> bool:
@@ -98,8 +128,8 @@ def is_direct_push(env: Mapping[str, str], after: str) -> bool:
     return not ref.startswith(BATCH_PREFIX)
 
 
-def push_scope(env: Mapping[str, str]) -> str:
-    """Return 'docs', 'other' for a classified push, or 'unknown'."""
+def push_paths(env: Mapping[str, str]) -> tuple[str, list[str]]:
+    """Read the exact regular documentation paths of a direct master push."""
     try:
         payload = json.loads(Path(env["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         if (env.get("GITHUB_EVENT_NAME") != "push" or env.get("GITHUB_REF") != MASTER
@@ -119,12 +149,63 @@ def push_scope(env: Mapping[str, str]) -> str:
         paths, regular = changed_paths(before, after)
         if not paths:
             raise ValueError("empty changed-file range")
-        if regular and all(map(push_docs_eligible, paths)) and is_direct_push(env, after):
-            return "docs"
-        return "other"
+        if regular and all(map(is_documentation_path, paths)) and is_direct_push(env, after):
+            return "docs", paths
+        return "other", []
     except (ApiError, OSError, subprocess.SubprocessError, ValueError, KeyError, AttributeError) as error:
         print(f"Docs-only push scope unavailable: {error}", file=sys.stderr)
-        return "unknown"
+        return "unknown", []
+
+
+def doc_tests(paths: list[str]) -> list[str]:
+    """Select the standing guards and tracked tests naming touched basenames."""
+    names = sorted({PurePosixPath(path).name.casefold() for path in paths})
+    scan = subprocess.run(
+        ["git", "grep", "-l", "-z", "-i", "-F", "-f", "-", "--", ":(glob)tests/**/test_*.py"],
+        cwd=ROOT, input=("\n".join(names) + "\n").encode("utf-8"), capture_output=True, timeout=45)
+    if scan.returncode not in (0, 1) or (scan.returncode == 0 and not scan.stdout.endswith(b"\0")):
+        raise ValueError("could not enumerate tests naming the changed documents")
+    files = set(scan.stdout.decode("utf-8").rstrip("\0").split("\0")) if scan.stdout else set()
+    if not all(READER_FILE.fullmatch(test) for test in files):
+        raise ValueError("unrecognized reader test path")
+    readers = set(DOC_GUARDS)
+    for prefix, tests in DIRECTORY_READERS.items():
+        if any(path.startswith(prefix) for path in paths):
+            readers.update(tests)
+    if CENSUS in paths or any(path.startswith(("docs/", "examples/")) for path in paths):
+        readers.add("rust/test_producer_census.py")
+    for file in sorted(files - readers):
+        readers.update(reader_targets(file, names))
+    return sorted(readers)
+
+
+def docs_selection(env: Mapping[str, str]) -> tuple[str, list[str]]:
+    """Only emit an affirmative shortcut with a complete test selection."""
+    try:
+        event = env.get("GITHUB_EVENT_NAME") or env.get("EVENT_NAME")
+        if event == "push":
+            decision, paths = push_paths(env)
+            if decision != "docs":
+                return decision, []
+        elif event == "pull_request":
+            sha = env.get("GITHUB_SHA")
+            if not env.get("HEAD_REF") or not sha or sha != git("rev-parse", "HEAD").strip():
+                raise ValueError("pull request checkout identity is unavailable")
+            paths, regular = changed_paths("HEAD^1")
+            docs = [path for path in paths if path != CENSUS]
+            if not regular or not docs or not all(map(is_documentation_path, docs)):
+                return "other", []
+        else:
+            return "other", []
+        return "docs", doc_tests(paths)
+    except (OSError, subprocess.SubprocessError, ValueError, SyntaxError) as error:
+        print(f"Docs-only selection unavailable: {error}", file=sys.stderr)
+        return "unknown", []
+
+
+def push_scope(env: Mapping[str, str]) -> str:
+    """Expose the push verdict without test arguments."""
+    return docs_selection(env)[0]
 
 
 def report_census(env: Mapping[str, str]) -> None:
@@ -137,13 +218,17 @@ def report_census(env: Mapping[str, str]) -> None:
         summary.write(f"### Producer census\n\n{result}\n")
 
 
-def rust_scope(env: Mapping[str, str]) -> tuple[bool, bool]:
+def rust_scope(env: Mapping[str, str], *, docs: bool | None = None) -> tuple[bool, bool]:
     """Return whether to run full lanes and whether to run Rust lanes."""
     event = env.get("EVENT_NAME")
     try:
-        if event == "push" and push_scope(env) == "docs":
-            report_census(env)
-            return True, False
+        if docs is None:
+            docs = docs_selection(env)[0] == "docs"
+        if docs:
+            if event == "push":
+                report_census(env)
+                return True, False
+            return bool(env.get("HEAD_REF", "").startswith(BATCH_PREFIX)), False
         if event == "pull_request":
             base = "HEAD^1"
         elif event == "merge_group" and env.get("MERGE_GROUP_BASE_REF") == MASTER:
@@ -165,16 +250,25 @@ def rust_scope(env: Mapping[str, str]) -> tuple[bool, bool]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("workflow", choices=("ci", "rust"))
+    parser.add_argument("workflow", choices=("ci", "rust", "tests"))
     args = parser.parse_args()
+    if args.workflow == "tests":
+        tests = json.loads(os.environ["DOC_TESTS"])
+        if (not isinstance(tests, list) or not all(isinstance(path, str) and TEST_TARGET.fullmatch(path) for path in tests)
+                or not set(DOC_GUARDS) <= set(tests)):
+            parser.error("invalid docs test selection")
+        raise SystemExit(subprocess.call([sys.executable, "-m", "pytest", "-q", "-m", "not real_model", *tests],
+                                         cwd=ROOT))
+    decision, tests = docs_selection(os.environ)
     if args.workflow == "ci":
-        print(push_scope(os.environ))
+        result = f"decision={decision}\ndocs_tests={json.dumps(tests)}\n"
     else:
-        full, rust = rust_scope(os.environ)
-        result = f"full={str(full).lower()}\nrust={str(rust).lower()}\n"
-        print(result, end="")
-        with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
-            output.write(result)
+        full, rust = rust_scope(os.environ, docs=decision == "docs")
+        optimized = decision == "docs" and not rust
+        result = f"full={str(full).lower()}\nrust={str(rust).lower()}\ndocs={str(optimized).lower()}\n"
+    print(result, end="")
+    with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+        output.write(result)
 
 
 if __name__ == "__main__":
