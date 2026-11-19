@@ -253,7 +253,7 @@
     "ops/docker-compose.stack.yml": "e03dd1386234809ee8ce8e4c6d9efaa56fe66b20c61025626591b40a0dab997b",
     "ops/docker-compose.yml": "c1649e5d48a7ec67b384baa3caa136de184e8c3b0cb5d7e4d855132939d0e707",
     "ops/gen_llms_txt.py": "b3e88325c54345808e8895ed439c73b1158eca5f031fbdd1be6abcb33f1ff2f2",
-    "ops/harness_selection.py": "93e1e1ab63c8b783998f3a1d75325182881e68d8bfa384d7b24877e4cd297233",
+    "ops/harness_selection.py": "4565a193edb079f7de01cc97449f36a89cbf2dad530a6c165f9514b93f8c45a8",
     "ops/install-autostart.ps1": "ba472020c721c6b0d45dbbc7813be9ea06088fa9e0f99b6138a434383f05ff0e",
     "ops/install-backup-task.ps1": "5fa15b92ff18a616d3165436cc283ea32c3790590e6e4b969ca22461ae85830f",
     "ops/install-cache-retention.ps1": "be1a6185015777fbe8852e32b4618dfc42b8321f2a949802d9cc481fcf34fda8",
