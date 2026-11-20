@@ -337,7 +337,7 @@ def maintainer_host_write(obs: dict) -> None:
 
     - ``maintainer_key`` events by the operator (empty principal, agent,
       project, task and hlc) whose ``created_at`` lies in this arm's run
-      window and whose ``hash`` is the oracle's ``audit_hash`` of the row
+      window and whose ``hash`` matches the harness's ``audit_hash`` of the row
       over its ``prev_hash``: ``created_at`` and ``hash`` become tokens, as
       does any later row's ``prev_hash`` naming that hash;
     - a passkey's ``active_from`` / ``revoked_at`` inside the window;
@@ -348,7 +348,7 @@ def maintainer_host_write(obs: dict) -> None:
       the one such unused row's 64-hex ``code_hash`` and ``expires_at``;
     - the secret, when it differs from the seed's and is 64 lowercase hex.
     """
-    from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
+    from rust.harness_support.audit_oracle import audit_hash  # noqa: PLC0415
     db = obs.get("db")
     if not isinstance(db, dict):
         return
