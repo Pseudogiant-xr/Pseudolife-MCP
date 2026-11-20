@@ -2,10 +2,11 @@
 //! live generation. Relaunching the same inputs preserves the identity.
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
+use hmac::{Hmac, Mac};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -19,14 +20,74 @@ const UNAVAILABLE: &str =
     "the native tunnel launch identity is unavailable. Check tunnel status before verification";
 
 pub(super) fn compute(
+    root: &Path,
     profile: &store::Profile,
     key: &Key,
     executable: &Path,
 ) -> Result<String, super::Fail> {
-    compute_identity(profile, key, executable).map_err(super::Fail::Tunnel)
+    ensure_signing_key(root).map_err(super::Fail::Tunnel)?;
+    compute_identity(root, profile, key, executable).map_err(super::Fail::Tunnel)
+}
+
+const SIGNING_KEY: &str = ".tunnel-identity-key";
+
+fn ensure_signing_key(root: &Path) -> Result<(), &'static str> {
+    let path = root.join(SIGNING_KEY);
+    if !store::occupied(&path).map_err(|_| UNAVAILABLE)? {
+        let mut key = [0; 32];
+        getrandom::fill(&mut key).map_err(|_| UNAVAILABLE)?;
+        let result = setup::publish_new(&path, |file| file.write_all(&key));
+        key.fill(0);
+        std::hint::black_box(&key);
+        if result.is_err() && !store::occupied(&path).map_err(|_| UNAVAILABLE)? {
+            return Err(UNAVAILABLE);
+        }
+    }
+    Ok(())
+}
+
+fn mac(root: &Path) -> Result<Hmac<Sha256>, &'static str> {
+    let mut key = store::private_read(&root.join(SIGNING_KEY), 32).map_err(|_| UNAVAILABLE)?;
+    let signer = if key.len() == 32 {
+        Hmac::new_from_slice(&key).map_err(|_| UNAVAILABLE)
+    } else {
+        Err(UNAVAILABLE)
+    };
+    key.fill(0);
+    std::hint::black_box(&key);
+    signer
+}
+
+#[cfg(test)]
+#[test]
+fn signing_requires_an_existing_owner_only_store_key() {
+    let first = std::env::temp_dir().join(format!("tunnel-mac-{}", uuid::Uuid::new_v4()));
+    let second = first.join("second");
+    let roots = [&first, &second];
+    for root in roots {
+        crate::board::state::private_dir(root).unwrap();
+        assert!(mac(root).is_err());
+        ensure_signing_key(root).unwrap();
+    }
+    let token = first.join("token");
+    let executable = first.join("runtime");
+    crate::board::state::atomic_create(&token, b"fixture-daemon-token").unwrap();
+    crate::board::state::atomic_create(&executable, b"fixture runtime binary").unwrap();
+    let saved = json!({
+        "name": "dot", "daemon_url":"http://127.0.0.1:9", "token_file": token,
+        "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+    });
+    let (_, profile) = store::decode_profile(saved.to_string().as_bytes(), "dot").unwrap();
+    let sign =
+        |root: &Path| compute_identity(root, &profile, &Key::fixture(), &executable).unwrap();
+    let original = sign(&first);
+    ensure_signing_key(&first).unwrap();
+    assert!(original == sign(&first) && original != sign(&second));
+    fs::remove_dir_all(first).unwrap();
 }
 
 fn compute_identity(
+    root: &Path,
     profile: &store::Profile,
     key: &Key,
     executable: &Path,
@@ -47,7 +108,7 @@ fn compute_identity(
     let snapshot = provider.snapshot().map_err(|_| UNAVAILABLE)?;
     let token = snapshot.token().ok_or(UNAVAILABLE)?;
     let inputs = json!({
-        "schema": 1,
+        "schema": 2,
         "runtime_digest": format!("{:x}", hasher.finalize()),
         "runtime_version": env!("CARGO_PKG_VERSION"),
         "vendor_version": vendor::VERSION,
@@ -64,10 +125,9 @@ fn compute_identity(
         "runtime_key": format!("{:x}", key.digest()),
     });
     provider.require_current(&snapshot).map_err(|_| CHANGED)?;
-    Ok(format!(
-        "{:x}",
-        Sha256::digest(inputs.to_string().as_bytes())
-    ))
+    let mut signer = mac(root)?;
+    signer.update(inputs.to_string().as_bytes());
+    Ok(format!("{:x}", signer.finalize().into_bytes()))
 }
 
 fn held(path: &Path) -> bool {
@@ -96,7 +156,7 @@ fn expected(
         return Err(CHANGED);
     }
     let key = Key::load(root, &profile.name).map_err(|_| UNAVAILABLE)?;
-    compute_identity(profile, &key, executable)
+    compute_identity(root, profile, &key, executable)
 }
 
 pub(in crate::cli::tunnel) fn active(
@@ -129,16 +189,17 @@ pub(in crate::cli::tunnel) fn active(
     Ok(identity)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(in crate::cli::tunnel) fn fixture_identity(
     root: &Path,
     profile: &store::Profile,
     executable: &Path,
 ) -> String {
+    ensure_signing_key(root).unwrap();
     expected(root, profile, executable).unwrap()
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(in crate::cli::tunnel) fn fixture_owner(root: &Path, generation: &str) -> File {
     let stage = stage_path(root, launch_id(generation).unwrap());
     crate::board::state::private_dir(&stage).unwrap();

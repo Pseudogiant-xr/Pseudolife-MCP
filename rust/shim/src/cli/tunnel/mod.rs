@@ -97,12 +97,15 @@ impl Setup {
     }
 
     fn has_profile_settings(&self) -> bool {
+        self.key_expires_at.is_some() || self.has_non_expiry_settings()
+    }
+
+    fn has_non_expiry_settings(&self) -> bool {
         self.daemon_url.is_some()
             || self.token_file.is_some()
-            || self
-                .profile_fields()
-                .iter()
-                .any(|(_, value)| value.is_some())
+            || self.tunnel_id.is_some()
+            || self.organization_id.is_some()
+            || self.catalog.is_some()
     }
 
     fn has_key_input(&self) -> bool {
@@ -354,8 +357,10 @@ fn shallow_challenge(root: &Path, name: &str) -> Result<(), Fail> {
 }
 
 fn status(options: &Options, root: &Path) -> Output {
+    setup::check_pending(root, &options.profile)?;
     let profile = store::load(root, &options.profile)?;
     let key = store::key_state(root, &profile.name)?;
+    setup::check_pending(root, &profile.name)?;
     let path = record::path(root, &profile.name);
     let table = if occupied(&path).unwrap_or(true) {
         record::table()
@@ -373,14 +378,7 @@ fn status(options: &Options, root: &Path) -> Output {
         _ => Some(bridge::Cloud::default()),
     };
     Ok((
-        report(
-            &profile,
-            key,
-            record.as_ref(),
-            &refresh,
-            cloud,
-            options.json,
-        ),
+        report(&profile, key, record.as_ref(), &refresh, cloud, options),
         0,
     ))
 }
@@ -445,7 +443,7 @@ fn report(
     record: Option<&record::Record>,
     refresh: &Refresh,
     cloud: Option<bridge::Cloud>,
-    as_json: bool,
+    options: &Options,
 ) -> String {
     let running = record.map(|record| record.liveness);
     let ready = running == Some(Liveness::Running) && record.is_some_and(|record| record.ready);
@@ -487,7 +485,7 @@ fn report(
         }
     };
     let name = &profile.name;
-    if as_json {
+    if options.json {
         let record_json = record.map_or(String::new(), |record| {
             format!(
                 ", \"process_record\": {{\"path\": {}, \"detail\": {}}}",
@@ -562,8 +560,15 @@ fn report(
         ));
     }
     if expired {
-        text.push_str(KEY_RENEWAL);
-        text.push('\n');
+        let directory = options
+            .profile_dir
+            .as_ref()
+            .map_or_else(String::new, |dir| {
+                format!(" --profile-dir {}", crate::cli::update::seams::quote(dir))
+            });
+        text.push_str(&format!(
+            "Renew privately: pseudolife-mcp tunnel setup --profile {name}{directory} --read-key --key-expires-at <ISO timestamp>.\n"
+        ));
     }
     text
 }
@@ -749,6 +754,7 @@ fn update(root: &Path) -> Answer {
 }
 
 fn verify(options: &Options, root: &Path) -> Output {
+    setup::check_pending(root, &options.profile)?;
     let profile = store::load(root, &options.profile)?;
     if profile.state != "ready" || !store::key_present(root, &profile.name)? {
         return Err(Fail::Tunnel(UNFINISHED));
@@ -845,7 +851,7 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
     Ok((selected, token))
 }
 
-const KEY_RENEWAL: &str = "Runtime key renewal requires the Python client. Rerun the release installer with PSEUDOLIFE_SHIM_ENGINE=python, then use that client's tunnel setup with --read-key and --key-expires-at.";
+const KEY_RENEWAL: &str = "renew the runtime key with tunnel setup --read-key or --key-file and an optional new --key-expires-at";
 
 fn setup(options: &Options, root: &Path) -> Output {
     let path = store::profile_path(root, &options.profile)?;
@@ -856,16 +862,23 @@ fn setup(options: &Options, root: &Path) -> Output {
         ));
     }
     let saved = occupied(&path)?;
-    if saved && settings.has_key_input() && settings.key_expires_at.is_some() {
+    if let Some(recovered) = setup::recover_pending(options, root, &path)? {
+        return Ok(recovered);
+    }
+    if saved
+        && settings.has_key_input()
+        && settings.key_expires_at.is_some()
+        && !occupied(&store::key_path(root, &options.profile))?
+    {
         return Err(Fail::Tunnel(
-            if occupied(&store::key_path(root, &options.profile))? {
-                KEY_RENEWAL
-            } else {
-                "save the expiry with tunnel setup --key-expires-at first, then import the private key with --read-key or --key-file in a separate invocation"
-            },
+            "save the expiry with tunnel setup --key-expires-at first, then import the private key with --read-key or --key-file in a separate invocation",
         ));
     }
-    if settings.has_key_input() && (settings.has_profile_settings() || settings.accept_access) {
+    if settings.has_key_input()
+        && (settings.has_non_expiry_settings()
+            || settings.accept_access
+            || (!saved && settings.key_expires_at.is_some()))
+    {
         return Err(if saved {
             Fail::Defer
         } else {
