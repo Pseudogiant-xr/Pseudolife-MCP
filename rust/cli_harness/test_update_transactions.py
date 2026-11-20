@@ -310,7 +310,7 @@ elif a[:1]==["inspect"]:
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
   elif f=="{{json .}}":out=json.dumps(s["running"])
   else: out=s["running"]["Id"]
- else: out=json.dumps([s["running"]] if a[-1]!="fixture-pg" else [{"Name":"/fixture-pg","NetworkSettings":{"Networks":{"fixture":{"Aliases":["pseudolife-pg"]}}}}])
+ else: out=json.dumps([s["running"]] if a[-1]!="fixture-pg" else [{"Name":"/fixture-pg","NetworkSettings":{"Networks":{"fixture":{"Aliases":["pseudolife-pg"],"IPAddress":s.get("pg_address","")}}}}])
 elif a[:2]==["image","inspect"] and a[-1] in s.get("orphaned",[]):code=1;out="Error: No such image: "+a[-1]
 elif a[:1] in (["run"],["create"]) and any(v in s.get("orphaned",[]) for v in a):
  # The containerd image store: an ID no name refers to any more no longer resolves.
@@ -2189,6 +2189,67 @@ def test_bridge_resume_matches_the_bank_after_a_password_change(tmp_path):
         report = json.loads(result.stdout)
         assert result.returncode == 0, result.stdout
         assert report["rollback"]["before_import"] == json.loads(first.stdout)["rollback"]
+
+
+@pytest.mark.parametrize("different_bank", [False, True])
+def test_prior_accepted_source_does_not_retire_an_unfinished_import(tmp_path, different_bank):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        original = state["running"]
+        labels = original["Config"]["Labels"]
+        labels.update({"org.pseudolife.engine": "rust", "org.pseudolife.release": "0.21.0",
+                       "org.pseudolife.activation": "a" * 32})
+        accepted = _accepted(env)
+        accepted.parent.mkdir(parents=True)
+        accepted.write_text(json.dumps({"services": {SERVICE: {"labels": labels}}}))
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        first = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0", "--json",
+                                            "--health-retries", "1", "--rollback-tag", "original"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        state = json.loads(state_path.read_text())
+        original["Id"] = "replacement-with-prior-activation"
+        state.update(running=original, archived_python=False, deployed=False, wait_for_bridge=False, calls=[])
+        if different_bank:
+            new_url = "postgresql://fixture:fixture@pseudolife-pg:5432/different"
+            original["Config"]["Env"][0] = "PSEUDOLIFE_MCP_DATABASE_URL=" + new_url
+            state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = new_url
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "0.21.0", "--daemon-only", "--json"])
+        assert result.returncode != 0, result.stdout
+        assert "pending-import" in result.stdout, result.stdout
+        assert (accepted.parent / "pending-import").is_file()
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+def test_bridge_resume_refuses_a_changed_effective_database_host(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        def set_host(state, addr):
+            url = f"postgresql://fixture:fixture@pseudolife-pg:5432/fixture?hostaddr={addr}"
+            state["running"]["Config"]["Env"][0] = "PSEUDOLIFE_MCP_DATABASE_URL=" + url
+            state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = url
+            state["pg_address"] = addr
+
+        state = json.loads(state_path.read_text())
+        set_host(state, "192.0.2.10")
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.25.0", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--rollback-tag", "original"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        state = json.loads(state_path.read_text())
+        set_host(state, "192.0.2.11")
+        state.update(calls=[], wait_for_bridge=False)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        assert "cannot verify the legacy import recovery record" in result.stdout, result.stdout
+        assert "backup" not in stages(json.loads(state_path.read_text()))
 
 
 def test_schema_56_without_weights_needs_no_counter_row_after_import(tmp_path):

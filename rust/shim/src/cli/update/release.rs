@@ -200,6 +200,8 @@ pub(super) struct ImportRecovery {
     image_id: String,
     source_id: String,
     source_image_id: String,
+    original_activation: Option<String>,
+    source_activation: Option<String>,
     original: RecoveryPoint,
     bridge: Option<RecoveryPoint>,
 }
@@ -364,19 +366,26 @@ impl ImportRecovery {
                 PendingDisposition::Interrupted
             };
         }
-        // A different validated activation or an unrelated image supersedes
-        // this pending transaction. Neither can be its interrupted source.
-        if (accepted && labels[engine::ACTIVATION_LABEL] != activation)
-            || (image != self.image_id
-                && image != self.source_image_id
-                && self.original.rollback["image_id"] != image)
-        {
-            return PendingDisposition::Finished;
-        }
         if same_bank
             && self.original.rollback["image_id"] == image
             && running["Config"]["Image"] == self.original.rollback["tag"]
             && running["Id"] != self.source_id
+        {
+            return PendingDisposition::Finished;
+        }
+        let later_activation = labels[engine::ACTIVATION_LABEL]
+            .as_str()
+            .is_some_and(|current| {
+                current != activation
+                    && self.original_activation.as_deref() != Some(current)
+                    && self.source_activation.as_deref() != Some(current)
+            });
+        // Recreating an already accepted source can preserve its activation
+        // while changing its container ID. Only a later activation supersedes it.
+        if (accepted && later_activation)
+            || (image != self.image_id
+                && image != self.source_image_id
+                && self.original.rollback["image_id"] != image)
         {
             return PendingDisposition::Finished;
         }
@@ -391,9 +400,14 @@ fn connection_fingerprint(dsn: &str) -> Option<String> {
     } else {
         "postgresql"
     };
+    let hostname = fields.get("host");
+    let host = match fields.get("hostaddr").filter(|addr| !addr.is_empty()) {
+        Some(address) => json!([hostname, address]),
+        None => json!(hostname),
+    };
     let identity = (
         scheme,
-        fields.get("host"),
+        host,
         fields.get("port"),
         fields.get("user"),
         fields.get("dbname"),
@@ -1661,6 +1675,9 @@ impl Update {
             .as_str()
             .filter(|s| !s.is_empty())
             .ok_or_else(unavailable)?;
+        let source_activation = running["Config"]["Labels"][engine::ACTIVATION_LABEL]
+            .as_str()
+            .map(str::to_owned);
         let point = RecoveryPoint {
             rollback: self.report.rollback.clone(),
             commands: self.rollback_lines.clone(),
@@ -1677,6 +1694,8 @@ impl Update {
                 image_id: image_id.into(),
                 source_id: source_id.into(),
                 source_image_id: source_image_id.into(),
+                original_activation: source_activation.clone(),
+                source_activation,
                 original: point,
                 bridge: None,
             };
@@ -1694,6 +1713,7 @@ impl Update {
             replacement.image_id = image_id.into();
             replacement.source_id = source_id.into();
             replacement.source_image_id = source_image_id.into();
+            replacement.source_activation = source_activation;
             replacement.save()?;
         }
         // Publish only after the corresponding original/bridge recovery
@@ -2744,6 +2764,8 @@ mod disk_review_tests {
             image_id: "sha256:bridge".into(),
             source_id: "old-container".into(),
             source_image_id: "sha256:old".into(),
+            original_activation: Some("original-activation".into()),
+            source_activation: Some("original-activation".into()),
             original: RecoveryPoint {
                 rollback: json!({"image_id": "sha256:old", "tag": "daemon:original"}),
                 commands: vec!["recreate original".into()],
@@ -2777,6 +2799,21 @@ mod disk_review_tests {
             serde_json::to_vec(&rotated).unwrap(),
             serde_json::to_vec(&original).unwrap()
         );
+        for (one, two) in [
+            (
+                "postgresql://fixture@postgres/bank?hostaddr=192.0.2.10",
+                "postgresql://fixture@postgres/bank?hostaddr=192.0.2.11",
+            ),
+            (
+                "host=postgres hostaddr=192.0.2.10 user=fixture dbname=bank",
+                "host=postgres hostaddr=192.0.2.11 user=fixture dbname=bank",
+            ),
+        ] {
+            assert_ne!(
+                connection_fingerprint(one).unwrap(),
+                connection_fingerprint(two).unwrap()
+            );
+        }
     }
 
     #[test]
@@ -2799,6 +2836,11 @@ mod disk_review_tests {
         assert_eq!(check(&record, &running, false), Finished);
         running["Config"]["Image"] = json!("daemon:old");
         assert_eq!(check(&record, &running, false), Unverified);
+        running["Config"]["Labels"][engine::ACTIVATION_LABEL] = json!("original-activation");
+        assert_eq!(check(&record, &running, true), Unverified);
+        running["Mounts"][0]["Name"] = json!("another-state");
+        assert_eq!(check(&record, &running, true), Unverified);
+        running["Mounts"][0]["Name"] = json!("state");
         running["Config"]["Labels"][engine::ACTIVATION_LABEL] = json!("later-activation");
         assert_eq!(check(&record, &running, true), Finished);
         running["Image"] = json!("sha256:unrelated");
