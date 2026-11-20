@@ -279,6 +279,7 @@ struct Report {
     error: Option<J>,
     include_move_failure: bool,
     move_failure: Option<&'static str>,
+    move_failure_detail: Option<String>,
     stdout: Vec<u16>,
     stderr: String,
 }
@@ -302,6 +303,7 @@ impl Report {
             include_move_failure: std::env::var_os(MOVE_EXPOSURE_REPORT_ENV).as_deref()
                 == Some(std::ffi::OsStr::new("1")),
             move_failure: matches!(args.action, Action::Tailscale).then_some("not_attempted"),
+            move_failure_detail: None,
             stdout: Vec::new(),
             stderr: String::new(),
         }
@@ -360,6 +362,12 @@ impl Report {
         self.fail(code, &units(line))
     }
 
+    /// A diagnostic built here for move's receipt handling, without raw child output.
+    fn move_detail(mut self, detail: impl Into<String>) -> Self {
+        self.move_failure_detail = Some(detail.into());
+        self
+    }
+
     fn finish(mut self, code: u8) -> Out {
         if self.as_json {
             let text = |value: Option<String>| value.map_or(J::Null, J::Str);
@@ -403,6 +411,9 @@ impl Report {
                 && let Some(failure) = self.move_failure
             {
                 fields.push((J::from("move_failure"), J::from(failure)));
+                if let Some(detail) = self.move_failure_detail.take() {
+                    fields.push((J::from("move_failure_detail"), J::Str(detail)));
+                }
             }
             let data = J::Dict(fields);
             self.stdout
@@ -688,6 +699,16 @@ async fn serve(
         {
             "serve_not_enabled"
         } else {
+            report.move_failure_detail = Some(if proc.timed_out {
+                "Tailscale Serve reached its deadline with no forward present. Check Tailscale's connection before retrying.".into()
+            } else if proc.succeeded() {
+                "Tailscale Serve exited successfully, but the requested forward was absent on read-back. Check its Serve configuration before retrying.".into()
+            } else {
+                format!(
+                    "Tailscale Serve exited {} and the forward was absent on read-back. Check Tailscale's status before retrying.",
+                    proc.code
+                )
+            });
             "not_created"
         });
     }
@@ -800,6 +821,10 @@ async fn undo(
         None => {
             if proc.settled && removal.settled {
                 report.move_failure = Some("not_created");
+                report.move_failure_detail = Some(format!(
+                    "Tailscale Serve exited {} and its forward was removed again. Check Tailscale's status before retrying.",
+                    proc.code
+                ));
             }
             report.fail_text(
             EXIT_UNDONE,
@@ -937,7 +962,7 @@ async fn expose(host: &impl Host, args: &Args, mut report: Report) -> Out {
     let local = format!("http://127.0.0.1:{port}");
     let health = match host.health(&local, LOCAL_HEALTH_TIMEOUT).await {
         Health::Other => {
-            return report.fail_text(
+            return report.move_detail(format!("The local endpoint on port {port} did not return the daemon's health response. Verify the daemon's port before retrying.")).fail_text(
                 EXIT_REFUSED,
                 &format!(
                     "something that is not the Pseudolife daemon answers on 127.0.0.1:{port} (a redirect or a body that is not its /health JSON); pass --port for the daemon's port"
@@ -945,7 +970,7 @@ async fn expose(host: &impl Host, args: &Args, mut report: Report) -> Out {
             );
         }
         Health::None => {
-            return report.fail_text(
+            return report.move_detail(format!("No daemon answers at {local}/health. Start the selected daemon before retrying.")).fail_text(
                 EXIT_REFUSED,
                 &format!("no daemon answers at {local}/health: start it first (or pass --port)"),
             );
@@ -960,13 +985,13 @@ async fn expose(host: &impl Host, args: &Args, mut report: Report) -> Out {
     let status = pyjson::get(&health, "status");
     if status.and_then(J::as_str) != Some("ok") {
         let shown = status.map_or_else(|| "None".to_owned(), pyjson::py_value_repr);
-        return report.fail_text(
+        return report.move_detail(format!("The daemon at {local} reported an unhealthy status. Check its local health before retrying.")).fail_text(
             EXIT_REFUSED,
             &format!("the daemon at {local} reports status {shown}: fix it before exposing it"),
         );
     }
     if pyjson::get(&health, "auth") != Some(&J::Bool(true)) {
-        return report.fail_text(
+        return report.move_detail(format!("The daemon at {local} did not report authentication enabled. Configure bearer authentication before retrying.")).fail_text(
             EXIT_REFUSED,
             &format!(
                 "the daemon at {local} does not report \"auth\": true, so anyone on the tailnet could read and write the bank. Give it a token first (PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKENS, see docs/guide/remote-bank.md); an unauthenticated bank is never exposed"
@@ -974,15 +999,19 @@ async fn expose(host: &impl Host, args: &Args, mut report: Report) -> Out {
         );
     }
     let Some(binary) = host.find() else {
-        return report.fail_text(
-            EXIT_REFUSED,
-            &format!("the tailscale CLI was not found: {INSTALL_FIX}"),
-        );
+        return report
+            .move_detail(format!(
+                "The target's Tailscale CLI was not found. {INSTALL_FIX}"
+            ))
+            .fail_text(
+                EXIT_REFUSED,
+                &format!("the tailscale CLI was not found: {INSTALL_FIX}"),
+            );
     };
     report.tailscale = Some(binary.shown.clone());
     let (status, config) = match running_and_config(host, &binary).await {
         Ok(both) => both,
-        Err(why) => return report.fail_text(EXIT_REFUSED, &why),
+        Err(why) => return report.move_detail("The target's Tailscale status or Serve configuration could not be read. Check Tailscale on the target before retrying.").fail_text(EXIT_REFUSED, &why),
     };
     let (state, detail) = tailscale::port_state(&config, port);
     if state == State::Foreign {
@@ -992,10 +1021,10 @@ async fn expose(host: &impl Host, args: &Args, mut report: Report) -> Out {
             units("; expose never replaces another serve. Remove it yourself, or pass --port for the daemon's port if this is not it"),
         ]
         .concat();
-        return report.fail(EXIT_REFUSED, &line);
+        return report.move_detail(format!("Tailnet port {port} already has a different handler. Verify the selected port before retrying.")).fail(EXIT_REFUSED, &line);
     }
     let Some(ip) = tailscale::tailnet_ipv4(host, &binary, &status).await else {
-        return report.fail_text(
+        return report.move_detail("Tailscale reports no tailnet IPv4 address for the target. Connect it to the tailnet before retrying.").fail_text(
             EXIT_REFUSED,
             "tailscale reports no tailnet IPv4 address for this host",
         );

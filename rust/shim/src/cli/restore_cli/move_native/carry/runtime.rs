@@ -473,24 +473,38 @@ fn undo_with(
     compose: &mut Compose<'_>,
 ) -> Result<(), String> {
     let path = folder.join(JOURNAL);
-    let Some(mut journal) = checked_journal(folder, supplied)? else {
+    let recover = |cause: &str| {
+        let command = recovery_command(&path.to_string_lossy());
+        format!(
+            "{cause}. Keep the target stopped and gated. On the target, run {command} to check the recovery steps."
+        )
+    };
+    let Some(mut journal) = checked_journal(folder, supplied)
+        .map_err(|_| recover("the carry journal could not be verified for this move"))?
+    else {
         return Ok(());
     };
-    journal.postgres(docker)?;
+    journal.postgres(docker).map_err(|_| {
+        "the recorded target PostgreSQL container could not be verified; verify that container before rerunning move --rollback"
+    })?;
     if journal
-        .compose_daemon(docker, compose)?
+        .compose_daemon(docker, compose)
+        .map_err(|_| recover("the selected target daemon could not be verified"))?
         .is_some_and(|value| value["State"]["Running"] != false)
     {
-        return Err("the target daemon must be stopped to restore its identity settings; rerun move --rollback".into());
+        return Err("the selected target daemon is running or its stopped state is unknown; verify it is stopped before rerunning move --rollback".into());
     }
     if journal.restored {
         return Ok(());
     }
-    let mut file = open_env(Path::new(&journal.deployment.env_file))?;
-    let current = contents(&mut file)?;
+    let mut file = open_env(Path::new(&journal.deployment.env_file))
+        .map_err(|_| recover("the target environment could not be opened for a private write"))?;
+    let current = contents(&mut file).map_err(|_| {
+        recover("the target environment could not be read within the recovery size limit")
+    })?;
     let (prefix, suffix) = current
         .split_at_checked(journal.original_bytes)
-        .ok_or(ENV)?;
+        .ok_or_else(|| recover("the target environment is shorter than the recorded original"))?;
     let header = marker(id);
     if digest(prefix) != journal.original_digest
         || !owns_env_suffix(
@@ -500,20 +514,29 @@ fn undo_with(
             journal.appended_digest,
         )
     {
-        return Err("the target's environment changed outside this move; restore its original configuration, then rerun move --rollback".into());
+        return Err(recover(
+            "the target environment differs from the recorded original prefix or this move's appended block",
+        ));
     }
     file.set_len(journal.original_bytes as u64)
         .and_then(|()| file.sync_all())
-        .map_err(|_| ENV)?;
+        .map_err(|_| recover("the target environment could not be truncated and synced"))?;
     let hashes = compose(
         &journal.deployment,
         &["config", "--hash", "*"],
         &seams::Environment::new(),
-    )?;
-    journal.deployment.check_hashes(&hashes)?;
-    journal.recreate(docker, compose, None)?;
+    )
+    .map_err(|_| recover("Compose could not render the restored target environment"))?;
+    journal.deployment.check_hashes(&hashes).map_err(|_| {
+        recover("the restored files render a different Compose deployment than the journal records")
+    })?;
+    journal.recreate(docker, compose, None).map_err(|_| {
+        recover("the selected target daemon could not be recreated and verified stopped")
+    })?;
     journal.restored = true;
-    journal.save(&path)
+    journal.save(&path).map_err(|_| {
+        "the original environment and stopped daemon were restored, but the carry journal could not be updated. Keep the target stopped and gated. Restore write access to the journal, then rerun move --rollback".into()
+    })
 }
 
 pub(in crate::cli::restore_cli::move_native) fn loopback(url: &str) -> bool {
@@ -1124,6 +1147,66 @@ mod tests {
             resumed.daemon = "3".repeat(64);
             resumed.deployment_digest = Some(journal.deployment.digest(&resumed).unwrap());
             assert!(checked_journal(&f.root, Some(&resumed)).unwrap().is_none());
+        }
+
+        #[test]
+        fn carry_undo_names_the_failed_recreation_step_and_the_recovery_command() {
+            let f = Fixture::new();
+            let pins = f.pins();
+            apply_with(
+                &mut Engine(&f),
+                &f.root,
+                Application {
+                    id: ID,
+                    identities: &fixture(),
+                    pins: &pins,
+                    files: &TargetFiles::default(),
+                },
+                &mut |deployment, args, env| f.compose(deployment, args, env),
+                |file, bytes| file.write_all(bytes),
+            )
+            .unwrap();
+            for (operation, cause) in [
+                (
+                    "config",
+                    "Compose could not render the restored target environment",
+                ),
+                (
+                    "up",
+                    "the selected target daemon could not be recreated and verified stopped",
+                ),
+            ] {
+                let error = undo_with(
+                    &mut Engine(&f),
+                    &f.root,
+                    ID,
+                    Some(&pins),
+                    &mut |deployment, args, env| {
+                        if args[0] == operation {
+                            Err(STACK.into())
+                        } else {
+                            f.compose(deployment, args, env)
+                        }
+                    },
+                )
+                .unwrap_err();
+                let path = crate::cli::restore_cli::bank::sh_quote(
+                    &f.root.join(JOURNAL).to_string_lossy(),
+                );
+                assert_eq!(
+                    error,
+                    format!(
+                        "{cause}. Keep the target stopped and gated. On the target, run pseudolife-mcp move-target recovery-commands {path} to check the recovery steps."
+                    )
+                );
+                assert_eq!(fs::read(f.root.join(".env")).unwrap(), ORIGINAL);
+                assert!(
+                    !read_journal(&f.root.join(JOURNAL))
+                        .unwrap()
+                        .unwrap()
+                        .restored
+                );
+            }
         }
     }
 
