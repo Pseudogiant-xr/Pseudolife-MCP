@@ -27,7 +27,7 @@ fn previous_path(root: &Path, name: &str) -> PathBuf {
     root.join(format!("{name}.key-previous"))
 }
 
-pub(in crate::cli::tunnel) fn has_previous_key(root: &Path, name: &str) -> Result<bool, Fail> {
+fn has_previous_key(root: &Path, name: &str) -> Result<bool, Fail> {
     store::occupied(&previous_path(root, name))
 }
 
@@ -214,15 +214,26 @@ fn apply_journal(root: &Path, name: &str, marker: &Path, journal: &Journal) -> R
 
 fn read_previous(root: &Path, name: &str) -> Result<Journal, Fail> {
     let marker = previous_path(root, name);
-    let journal = read_journal(name, &marker)?;
-    let (profile, key) = saved_pair(root, name, &marker)?;
+    let journal = read_journal(name, &marker).map_err(|_| {
+        Fail::Detail(format!(
+            "cannot read the retained previous key at {}. Preserve this file and restore an owner-only copy of it from backup",
+            marker.display()
+        ))
+    })?;
+    let mismatch = || {
+        Fail::Detail(format!(
+            "cannot use the retained previous key at {} because the saved key or profile changed since the replacement was started. Keep the retained file and restore the saved profile and key together to the replacement pair before retrying",
+            marker.display()
+        ))
+    };
+    let (profile, key) = saved_pair(root, name, &marker).map_err(|_| mismatch())?;
     let (previous_profile, previous_key) = journal.pair();
     let (candidate_profile, candidate_key) = journal.prior();
     if !(profile.0 == previous_profile && key.0 == previous_key
         || digest(&profile.0).as_slice() == candidate_profile
             && digest(&key.0).as_slice() == candidate_key)
     {
-        return Err(changed(&marker));
+        return Err(mismatch());
     }
     Ok(journal)
 }
@@ -231,8 +242,11 @@ pub(in crate::cli::tunnel) fn validate_previous_key(root: &Path, name: &str) -> 
     if !has_previous_key(root, name)? {
         return Ok(false);
     }
-    read_previous(root, name)?;
-    Ok(true)
+    match read_previous(root, name) {
+        Ok(_) => Ok(true),
+        Err(_) if !has_previous_key(root, name)? => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn remove_previous(root: &Path, name: &str) -> Result<(), Fail> {
@@ -260,7 +274,12 @@ fn remove_previous(root: &Path, name: &str) -> Result<(), Fail> {
 
 pub(in crate::cli::tunnel) fn qualify_previous_key(root: &Path, name: &str) -> Result<(), Fail> {
     read_previous(root, name)?;
-    remove_previous(root, name)
+    remove_previous(root, name).map_err(|_| {
+        Fail::Detail(format!(
+            "the replacement key completed a control-plane poll, but cleanup could not durably remove {}. Check owner-only access, then retry `pseudolife-mcp tunnel setup --discard-previous-key` for the same profile and directory",
+            previous_path(root, name).display()
+        ))
+    })
 }
 
 pub(in crate::cli::tunnel) fn finish_previous_key(
@@ -341,6 +360,72 @@ pub(in crate::cli::tunnel) fn recover_pending(
 mod tests {
     use super::*;
     use crate::board::state;
+
+    #[test]
+    fn mismatched_previous_pair_preserves_recovery_file_without_advertising_restore() {
+        let root = std::env::temp_dir().join(format!("tunnel-previous-{}", uuid::Uuid::new_v4()));
+        state::private_dir(&root).unwrap();
+        let name = "dot";
+        let profile = store::profile_path(&root, name).unwrap();
+        let key = store::key_path(&root, name);
+        let previous = previous_path(&root, name);
+        let mut saved = serde_json::json!({
+            "name": name, "daemon_url": "http://127.0.0.1:9", "token_file": root.join("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+            "runtime_key_expires_at": "2020-01-01T00:00:00Z",
+        });
+        let original = saved.to_string();
+        saved["runtime_key_expires_at"] = serde_json::Value::Null;
+        let replacement = saved.to_string();
+        let prefix = if cfg!(windows) {
+            b"DPAPI\0"
+        } else {
+            b"PLAIN\0"
+        };
+        let old_key = [prefix.as_slice(), b"old fixture"].concat();
+        let new_key = [prefix.as_slice(), b"new fixture"].concat();
+        state::atomic_create(&profile, replacement.as_bytes()).unwrap();
+        state::atomic_create(&key, &new_key).unwrap();
+        write_journal(
+            &previous,
+            (replacement.as_bytes(), &new_key),
+            (original.as_bytes(), &old_key),
+        )
+        .unwrap();
+        let retained = store::private_read(&previous, JOURNAL_LIMIT).unwrap();
+        let cli = super::super::super::parse;
+        let status = super::super::super::status;
+        let text = cli(&["status".into()]).unwrap();
+        let json = cli(&["status".into(), "--json".into()]).unwrap();
+        assert!(status(&text, &root).unwrap().0.contains("--restore-key"));
+
+        saved["tunnel_id"] = serde_json::json!("tunnel_dcba");
+        let edited = saved.to_string();
+        state::atomic_write(&profile, edited.as_bytes(), None).unwrap();
+        for options in [&text, &json] {
+            let error =
+                status(options, &root).expect_err("status must refuse a mismatched retained key");
+            let Fail::Detail(message) = error else {
+                panic!("unexpected status refusal: {error:?}");
+            };
+            assert!(message.contains(&previous.display().to_string()));
+            assert!(message.contains("saved key or profile changed"));
+            assert!(message.contains("restore the saved profile and key together"));
+            assert!(
+                !message.contains("--restore-key") && !message.contains("--discard-previous-key")
+            );
+            assert_eq!(
+                validate_previous_key(&root, name),
+                Err(Fail::Detail(message))
+            );
+        }
+        assert!(fs::read(&profile).unwrap() == edited.as_bytes());
+        assert!(fs::read(&key).unwrap() == new_key);
+        assert!(store::private_read(&previous, JOURNAL_LIMIT).unwrap() == retained);
+        state::atomic_write(&profile, replacement.as_bytes(), None).unwrap();
+        assert!(status(&text, &root).unwrap().0.contains("--restore-key"));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn committed_renewal_recovers_at_each_publication_boundary() {

@@ -41,8 +41,10 @@ the same profile and directory before starting the tunnel again. Check the
 saved expiry with `tunnel status`, then use `tunnel run`.
 The native client retains the previous private key and expiry until the
 replacement completes a control-plane poll. If the trial fails, stop the
-tunnel and use the restore or discard command shown by `tunnel status`.
-After accepting the replacement, revoke the previous key at the provider.
+tunnel and run `pseudolife-mcp tunnel setup --restore-key` with the same
+profile and directory. Use `--discard-previous-key` only after the
+replacement has worked. After accepting the replacement, revoke the
+previous key at the provider.
 
 The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel

@@ -521,13 +521,14 @@ fn setup_renews_a_stopped_profiles_private_key_and_expiry() {
     assert_eq!(status.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&status.stdout).lines().any(|line| {
         line.contains("Previous key retained")
-            && line.contains("--restore-key")
+            && line.contains("--restore-key` if the replacement fails")
             && line.contains("--discard-previous-key")
+            && line.contains("only after the replacement has worked")
     }));
     let refused = run(&home, &base, &[]);
     assert_eq!(refused.status.code(), Some(2));
     let error = String::from_utf8_lossy(&refused.stderr);
-    assert!(error.contains("--restore-key") && error.contains("--discard-previous-key"));
+    assert!(error.contains("--restore-key") && !error.contains("--discard-previous-key"));
     assert_eq!(read_profile()["runtime_key_expires_at"], expiry);
 
     let restore = run(

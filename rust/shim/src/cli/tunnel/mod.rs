@@ -363,12 +363,12 @@ fn shallow_challenge(root: &Path, name: &str) -> Result<(), Fail> {
 fn status(options: &Options, root: &Path) -> Output {
     let profile = store::load(root, &options.profile)?;
     let key = store::key_state(root, &profile.name)?;
+    setup::check_pending(root, &profile.name)?;
     let key = KeyStatus {
         readable: key,
         saved: occupied(&store::key_path(root, &profile.name))?,
-        retained: setup::has_previous_key(root, &profile.name)?,
+        retained: setup::validate_previous_key(root, &profile.name)?,
     };
-    setup::check_pending(root, &profile.name)?;
     let path = record::path(root, &profile.name);
     let table = if occupied(&path).unwrap_or(true) {
         record::table()
@@ -410,7 +410,7 @@ fn setup_command(name: &str, directory: Option<&str>) -> String {
 
 fn previous_key_hint(command: &str) -> String {
     format!(
-        "Previous key retained until the replacement completes a control-plane poll. Stop the tunnel, then restore with `{command} --restore-key` or discard with `{command} --discard-previous-key`."
+        "Previous key retained until the replacement completes a control-plane poll. Stop the tunnel before restoring or discarding. Restore with `{command} --restore-key` if the replacement fails. Use `{command} --discard-previous-key` only after the replacement has worked."
     )
 }
 

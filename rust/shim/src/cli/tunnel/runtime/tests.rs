@@ -246,9 +246,10 @@ fn replacement_releases_previous_key_only_after_a_successful_poll() {
             assert_eq!(outcome.is_ok(), becomes_ready);
         } else {
             assert!(store::private_read(&marker, 131072).unwrap() == expected);
-            assert!(
-                matches!(&outcome, Err(Fail::Tunnel(message)) if message.contains("previous key is retained"))
-            );
+            assert!(matches!(&outcome, Err(Fail::Tunnel(message))
+                    if message.contains("previous key is retained")
+                    && message.contains("pseudolife-mcp tunnel setup --restore-key")
+                    && !message.contains("--discard-previous-key")));
             if mode == "trial-refused" {
                 assert_eq!(outcome, Err(TRIAL_AUTH));
             }

@@ -14,8 +14,8 @@ use super::{
 use crate::{
     board::state,
     cli::tunnel::{
-        Fail, KEY_RENEWAL, Options, Output, Setup, absolute_token, bridge::status_command,
-        previous_key_hint, record, runtime, setup_command, store,
+        Fail, KEY_RENEWAL, Options, Output, Setup, absolute_token, bridge::status_command, record,
+        runtime, setup_command, store,
     },
     credentials::{CredentialProvider, MAX_TOKEN_BYTES, decode_token},
 };
@@ -241,9 +241,11 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
 }
 
 fn require_no_previous_key(options: &Options, root: &Path) -> Result<(), Fail> {
-    if renewal::has_previous_key(root, &options.profile)? {
+    if renewal::validate_previous_key(root, &options.profile)? {
         let command = setup_command(&options.profile, options.profile_dir.as_deref());
-        return Err(Fail::Detail(previous_key_hint(&command)));
+        return Err(Fail::Detail(format!(
+            "The previous key is still retained. Stop the tunnel and run `{command} --restore-key` before trying a different replacement."
+        )));
     }
     Ok(())
 }

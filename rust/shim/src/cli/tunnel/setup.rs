@@ -34,7 +34,7 @@ mod resume;
 pub(super) use resume::resume;
 mod renewal;
 pub(super) use renewal::{
-    check_pending, finish_previous_key, has_previous_key, qualify_previous_key, recover_pending,
+    check_pending, finish_previous_key, qualify_previous_key, recover_pending,
     validate_previous_key,
 };
 

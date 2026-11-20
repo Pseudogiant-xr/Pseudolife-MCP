@@ -36,7 +36,10 @@ const READINESS_TIMEOUT: Fail = Fail::Tunnel(
     "the tunnel readiness deadline elapsed. Check the daemon, tunnel ID and runtime key before retrying",
 );
 const TRIAL_AUTH: Fail = Fail::Tunnel(
-    "the tunnel control plane refused the replacement key. The previous key is retained. Run tunnel status for the restore and discard commands",
+    "the tunnel control plane refused the replacement key. The previous key is retained. Run `pseudolife-mcp tunnel setup --restore-key` with the same profile and directory",
+);
+const TRIAL_UNCONFIRMED: Fail = Fail::Tunnel(
+    "the replacement key did not complete a control-plane poll. The previous key is retained. Run `pseudolife-mcp tunnel setup --restore-key` with the same profile and directory",
 );
 const CHILD_ERROR: Fail = Fail::Tunnel(
     "the tunnel runtime could not be started or reaped. Check tunnel status before retrying",
@@ -625,7 +628,7 @@ async fn supervise(
     {
         let reason = reason.map_or_else(String::new, |reason| format!(" {reason}"));
         let retained = if awaiting_poll {
-            " The previous key is retained. Run tunnel status for the restore and discard commands."
+            " The previous key is retained. Run `pseudolife-mcp tunnel setup --restore-key` with the same profile and directory."
         } else {
             ""
         };
@@ -651,9 +654,7 @@ async fn supervise(
         };
     }
     if awaiting_poll && (result == Err(NOT_READY) || result == Err(READINESS_TIMEOUT)) {
-        return Err(Fail::Tunnel(
-            "the replacement key did not complete a control-plane poll. The previous key is retained. Run tunnel status for the restore and discard commands",
-        ));
+        return Err(TRIAL_UNCONFIRMED);
     }
     result
 }
