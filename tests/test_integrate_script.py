@@ -95,9 +95,10 @@ class FakeGh:
             self.labeled_at[number] = labeled_at
 
     VIEW_FIELDS = {"headRefOid", "statusCheckRollup", "headRefName", "baseRefName",
-                   "state", "isCrossRepository", "url", "mergeCommit", "labels"}
+                   "state", "isCrossRepository", "url", "mergeCommit", "labels",
+                   "baseRefOid", "isDraft", "mergeable", "mergeStateStatus"}
     VIEW_DEFAULTS = {"baseRefName": "master", "state": "OPEN", "isCrossRepository": False,
-                     "mergeCommit": None, "labels": [],
+                     "mergeCommit": None, "labels": [], "mergeStateStatus": "CLEAN",
                      "statusCheckRollup": [
                          {"name": name, "status": "COMPLETED", "conclusion": "SUCCESS"}
                          for name in ("scope", "test", "Parity / ubuntu-latest",
@@ -109,7 +110,7 @@ class FakeGh:
     def mutations(self) -> list[list[str]]:
         return [args for args, _ in self.calls
                 if args[:2] in (["pr", "create"], ["pr", "comment"], ["pr", "edit"],
-                                ["pr", "merge"])]
+                                ["pr", "merge"]) or args[:3] == ["api", "--method", "PUT"]]
 
     def bodies(self, verb: str) -> list[tuple[list[str], str]]:
         return [(args, body) for args, body in self.calls if args[:2] == ["pr", verb]]
@@ -133,30 +134,28 @@ class FakeGh:
             number = int(args[2])
             pr = self.pr(number)
             view = {f: pr.get(f, self.VIEW_DEFAULTS.get(f)) for f in fields}
+            if "baseRefOid" in view and "baseRefOid" not in pr:
+                view["baseRefOid"] = _git(self.origin, "rev-parse", "master")
             if view.get("state") == "MERGED" and self.lag.get(number):
                 self.lag[number] -= 1           # GitHub has not caught up yet
                 view["state"] = "OPEN"
             return json.dumps(view)
         if args[:2] == ["pr", "merge"]:
-            if self.fail_merge == "before":
-                raise integrate.Refusal("`gh pr merge` failed (1): HTTP 502")
-            pr = self.pr(int(args[2]))
-            assert pr["state"] == "OPEN"
             head = args[args.index("--match-head-commit") + 1]
-            # The merge GitHub would make: a merge commit of that head on master.
-            _git(self.seed, "fetch", "-q", "origin")
-            _git(self.seed, "switch", "-q", "-C", "master", "origin/master")
-            _git(self.seed, "merge", "-q", "--no-ff", "-m",
-                 f"Merge pull request #{args[2]}", head)
-            _git(self.seed, "push", "-q", "origin", "master")
-            pr["state"] = "MERGED"
-            pr["mergeCommit"] = {"oid": _git(self.seed, "rev-parse", "HEAD")}
+            self._merge(int(args[2]), head)
             for member in self.ready:
                 if member["number"] not in self.unmerged:
                     member["state"] = "MERGED"
-            if self.fail_merge == "after":       # merged, but the reply was lost
+            if self.fail_merge == "after":
                 raise integrate.Refusal("`gh pr merge` failed (1): HTTP 504")
             return ""
+        if args[:3] == ["api", "--method", "PUT"]:
+            number = int(args[3].removesuffix("/merge").rsplit("/", 1)[1])
+            head = self.pr(number)["headRefOid"]
+            assert args[3:] == [f"repos/{{owner}}/{{repo}}/pulls/{number}/merge",
+                                "-f", "merge_method=merge", "-f", f"sha={head}"]
+            sha = self._merge(number, head)
+            return json.dumps({"merged": True, "sha": sha})
         if args[0] == "api" and "/check-runs/" in args[1]:
             # Every page: a timeout annotation can follow 30 others.
             assert args[1].endswith("/annotations")
@@ -197,6 +196,20 @@ class FakeGh:
         if args[:2] in (["pr", "comment"], ["pr", "edit"]):
             return ""
         raise AssertionError(f"unexpected gh call: {args}")
+
+    def _merge(self, number: int, head: str) -> str:
+        if self.fail_merge == "before":
+            raise integrate.Refusal("`gh pr merge` failed (1): HTTP 502")
+        pr = self.pr(number)
+        assert pr["state"] == "OPEN"
+        _git(self.seed, "fetch", "-q", "origin")
+        _git(self.seed, "switch", "-q", "-C", "master", "origin/master")
+        _git(self.seed, "merge", "-q", "--no-ff", "-m",
+             f"Merge pull request #{number}", head)
+        _git(self.seed, "push", "-q", "origin", "master")
+        sha = _git(self.seed, "rev-parse", "HEAD")
+        pr.update(state="MERGED", mergeCommit={"oid": sha})
+        return sha
 
     def _actions(self, args: list[str]) -> str:
         """The Actions REST calls that read a failed gate's run."""
@@ -469,6 +482,457 @@ def _make_world(tmp_path, monkeypatch, *, guard=True, harness_guard=False):
 
 
 GUARD = (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8")
+
+
+def _docs_pr(world, files=None, **overrides):
+    head = world.pr(42, files or {"docs/guide.md": "guide\n"})
+    world.gh.history.append({"number": 42, "state": "OPEN", "headRefName": "docs-guide",
+                             "headRefOid": head, "mergeable": "MERGEABLE",
+                             "isDraft": False, **overrides})
+    return head
+
+
+def _docs_preview(world, head, *, preview_head=None):
+    base = _git(world.origin, "rev-parse", "master")
+    tree = _git(world.seed, "merge-tree", "--write-tree", base, preview_head or head)
+    preview = _git(world.seed, "commit-tree", tree, "-p", base, "-p", head, "-m", "preview")
+    _git(world.seed, "push", "-q", "origin", f"{preview}:refs/pull/42/merge")
+    return base, tree
+
+
+@pytest.fixture
+def docs_world(world, monkeypatch):
+    # The disposable origin carries the same classifier as CI in production.
+    files = {path: (ROOT / path).read_text(encoding="utf-8")
+             for path in (*integrate.DOCS_SCOPE_FILES, "tests/suite_classes.py")}
+    files.update({integrate.CENSUS: "EXTENSIONS = set()\n", "tests/__init__.py": "",
+                  "tests/suite_classes.txt": "live test_docs.py\n",
+                  "tests/test_docs.py": "def test_docs(): pass\n"})
+    world.advance_master(files)
+    _doc_targets(monkeypatch, ("tests/test_docs.py",))
+    return world
+
+
+_SHARED_DOCS_TEST_RUNNER = integrate._DOCS_TEST_RUNNER
+
+
+def _doc_targets(monkeypatch, paths):
+    monkeypatch.setattr(integrate, "_DOCS_TEST_RUNNER", _SHARED_DOCS_TEST_RUNNER.replace(
+        "tests = docs_scope.doc_tests(paths)",
+        f"docs_scope.DOC_GUARDS = {paths!r}\ntests = docs_scope.doc_tests(paths)"))
+
+
+@pytest.mark.parametrize("path", ["docs/guide.md", "docs/atlas/atlas.json", "llms.txt"])
+def test_merge_docs_uses_a_pinned_regular_merge_commit(docs_world, capsys, path):
+    world = docs_world
+    head = _docs_pr(world, {path: "updated docs\n"}, statusCheckRollup=[
+        {"name": name, "status": "COMPLETED", "conclusion": result}
+        for name, result in zip(integrate.REQUIRED_CHECKS, ("SKIPPED", "SUCCESS", "NEUTRAL"))
+    ])
+    # An unrelated master advance before the preflight must be included in
+    # the tree whose guards run, even though the PR head does not contain it.
+    world.advance_master({"a.txt": "another change on master\n"})
+    world.gh.history.append({"number": 43, "state": "OPEN", "headRefName": "integrate/example",
+                             "isCrossRepository": True})
+    base, tree = _docs_preview(world, head)
+    checkout_before = _git(world.work, "rev-parse", "HEAD")
+    assert integrate.main(["merge-docs", "42"]) == 0
+    assert world.gh.mutations() == [["api", "--method", "PUT",
+                                    "repos/{owner}/{repo}/pulls/42/merge",
+                                    "-f", "merge_method=merge", "-f", f"sha={head}"]]
+    assert _git(world.origin, "rev-parse", "master^{tree}") == tree
+    assert _git(world.origin, "rev-parse", "master^1", "master^2").splitlines() == [base, head]
+    assert _git(world.work, "rev-parse", "HEAD") == checkout_before
+    assert "independent of other open pull requests" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("pr_fields", "reason"), [
+    ({"state": "CLOSED"}, "closed"),
+    ({"state": "MERGED"}, "merged"),
+    ({"isDraft": True}, "draft"),
+    ({"baseRefName": "another-base"}, "targets another-base"),
+    ({"mergeable": "CONFLICTING"}, "conflict"),
+    ({"mergeable": "UNKNOWN"}, "has not reported mergeability"),
+    ({"mergeStateStatus": "BLOCKED"}, "as BLOCKED"),
+    ({"headRefName": "integrate/2026-10-19-batch-1"}, "use `merge`"),
+])
+def test_merge_docs_refuses_an_ineligible_pr(world, capsys, pr_fields, reason):
+    _docs_pr(world, **pr_fields)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert reason in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+@pytest.mark.parametrize(("result", "reason"), [
+    ("FAILURE", "CI failed"), ("CANCELLED", "CI failed"),
+    ("QUEUED", "CI on #42 has not finished"), (None, "not reported yet"),
+])
+def test_merge_docs_requires_every_check_and_the_required_lanes(world, capsys, result, reason):
+    checks = list(FakeGh.VIEW_DEFAULTS["statusCheckRollup"])
+    checks.pop()
+    if result is not None:
+        checks.append({"name": "Parity / windows-latest", "status": "QUEUED" if result == "QUEUED"
+                       else "COMPLETED", "conclusion": result})
+    _docs_pr(world, statusCheckRollup=checks)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert reason in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_refuses_an_incomplete_open_pr_listing(world, capsys, monkeypatch):
+    _docs_pr(world)
+    monkeypatch.setattr(integrate, "OPEN_PR_LIMIT", 1)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "a batch could be missing" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_refuses_a_mismatched_initial_base(world, capsys):
+    _docs_pr(world, baseRefOid="a" * 40)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "master moved while #42 was read" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_refuses_a_dirty_checkout(world, capsys):
+    _docs_pr(world)
+    (world.work / "README.md").write_text("work in progress\n", encoding="utf-8")
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "uncommitted changes to tracked files" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_requires_a_positive_pr_number(world, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        integrate.main(["merge-docs", "0"])
+    assert stopped.value.code == 2
+    assert "PR must be a positive pull request number" in capsys.readouterr().err
+    assert not world.gh.calls
+
+
+@pytest.mark.parametrize("code", ["ops/example.py", "docs/example.py", "rust/producer-census.json",
+                                  "examples/CLAUDE.memory.md", "docs/example.bin"])
+def test_merge_docs_does_not_accept_docs_with_code(docs_world, capsys, code):
+    head = _docs_pr(docs_world, {"docs/guide.md": "guide\n", code: "changed\n"})
+    _docs_preview(docs_world, head)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "whole diff is not docs-only" in capsys.readouterr().err
+    assert not docs_world.gh.mutations()
+
+
+def test_merge_docs_rejects_nonregular_documentation(docs_world, capsys):
+    world = docs_world
+    _docs_pr(world)
+    target = _git(world.seed, "hash-object", "-w", "docs/guide.md")
+    _git(world.seed, "update-index", "--add", "--cacheinfo", f"120000,{target},docs/alias.md")
+    _git(world.seed, "commit", "-qm", "add docs symlink")
+    head = _git(world.seed, "rev-parse", "HEAD")
+    _git(world.seed, "push", "-q", "origin", "HEAD:refs/pull/42/head")
+    world.gh.pr(42)["headRefOid"] = head
+    _docs_preview(world, head)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "whole diff is not docs-only" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_rejects_an_empty_diff(docs_world, capsys):
+    world = docs_world
+    _docs_pr(world)
+    _git(world.seed, "switch", "-q", "--detach", "origin/master")
+    _git(world.seed, "commit", "--allow-empty", "-qm", "empty change")
+    head = _git(world.seed, "rev-parse", "HEAD")
+    _git(world.seed, "push", "-q", "-f", "origin", "HEAD:refs/pull/42/head")
+    world.gh.pr(42)["headRefOid"] = head
+    _docs_preview(world, head)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "whole diff is not docs-only" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_runs_the_ci_reader_tests(docs_world, capsys):
+    world = docs_world
+    world.advance_master({"tests/test_guide_reader.py": "from pathlib import Path\n\n"
+                          "def test_reader():\n"
+                          "    assert not Path('docs/guide.md').is_file()\n"})
+    _docs_preview(world, _docs_pr(world))
+    assert integrate.main(["merge-docs", "42"]) == 2
+    err = capsys.readouterr().err
+    assert "doc guards failed" in err and "test_guide_reader.py::test_reader" in err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_checks_both_sides_of_a_rename(docs_world, capsys):
+    world = docs_world
+    _docs_pr(world)
+    _git(world.seed, "mv", "a.txt", "docs/renamed.md")
+    _git(world.seed, "commit", "-qm", "rename into docs")
+    head = _git(world.seed, "rev-parse", "HEAD")
+    _git(world.seed, "push", "-q", "origin", "HEAD:refs/pull/42/head")
+    world.gh.pr(42)["headRefOid"] = head
+    _docs_preview(world, head)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "whole diff is not docs-only" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_refuses_non_docs_in_the_proposed_push(docs_world, capsys):
+    world = docs_world
+    head = _docs_pr(world)
+    other = world.pr(43, {"docs/guide.md": "guide\n", "ops/example.py": "changed\n"})
+    _docs_preview(world, head, preview_head=other)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "test merge into master is not docs-only" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_refuses_conflicting_edits_in_the_combined_doc_guards(docs_world, monkeypatch, capsys):
+    world = docs_world
+    guard = "tests/test_claude_md_citations.py"
+    target = f"{guard}::test_claude_md_stays_under_its_word_ceiling"
+    monkeypatch.setattr(integrate, "_DOCS_TEST_RUNNER", _SHARED_DOCS_TEST_RUNNER.replace(
+        "tests = docs_scope.doc_tests(paths)", f"tests = [{target!r}]"))
+    first, last = "one " * 2395, "two " * 2395
+    middle = "\nkeep-1\nkeep-2\nkeep-3\nkeep-4\nkeep-5\n"
+    world.advance_master({"CLAUDE.md": first + middle + last,
+                          guard: (ROOT / guard).read_text(encoding="utf-8")})
+    head = _docs_pr(world, {"CLAUDE.md": first + "extra " * 4 + middle + last})
+    # Both versions have 4799 words alone, 4803 together. They touch
+    # different lines, and GitHub would combine them without a conflict.
+    world.advance_master({"CLAUDE.md": first + middle + last + "another " * 4})
+    base, _ = _docs_preview(world, head)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    err = capsys.readouterr().err
+    assert "doc guards failed" in err and target in err and "4803" in err
+    assert _git(world.origin, "rev-parse", "master") == base
+    assert not world.gh.mutations()
+
+
+@pytest.mark.parametrize("published", [False, True])
+def test_merge_docs_refuses_a_batch_that_is_locally_built_or_open(world, capsys, published):
+    _docs_pr(world)
+    world.gh.add(10, world.pr(10, {"b.txt": "b\n"}))
+    assert _build() == 0
+    if published:
+        assert _open(world) == 0
+    branch = _git(world.work, "branch", "--show-current")
+    other = world.work.parent / "docs-operator"
+    _git(world.work, "worktree", "add", "-q", "--detach", str(other), "origin/master")
+    here = Path.cwd()
+    try:
+        os.chdir(other)
+        before = world.gh.mutations()
+        assert integrate.main(["merge-docs", "42"]) == 2
+        assert world.gh.mutations() == before
+    finally:
+        os.chdir(here)
+        _git(world.work, "worktree", "remove", str(other))
+    err = capsys.readouterr().err
+    assert branch in err and ("is open" if published else "is built locally") in err
+    if published:
+        assert "#900" in err
+        assert integrate.main(["merge"]) == 0
+
+
+def test_merge_docs_preserves_a_local_stacked_gate(world, stacked, capsys):
+    parent, _, branch, _ = stacked
+    _land_stack_parent(world, parent)
+    _docs_pr(world)
+    before = world.gh.mutations()
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert f"batch {branch} is built locally" in capsys.readouterr().err
+    assert world.gh.mutations() == before
+
+
+def test_merge_docs_refuses_an_unreadable_local_batch_plan(world, capsys):
+    _docs_pr(world)
+    world.gh.add(10, world.pr(10, {"b.txt": "b\n"}))
+    assert _build() == 0
+    branch = _git(world.work, "branch", "--show-current")
+    integrate.Plan.path(branch).write_text("broken plan", encoding="utf-8")
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert f"cannot read the local plan for {branch}" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+@pytest.mark.parametrize(("change", "reason"), [
+    ("head", "base or head"),
+    ("master", "base or head"),
+    ("stale GitHub base", "master changed after the doc guards"),
+    ("checks", "CI failed"),
+    ("batch", "batch #901"),
+])
+def test_merge_docs_rechecks_after_the_guards(docs_world, capsys, monkeypatch, change, reason):
+    world = docs_world
+    head = _docs_pr(world)
+    base, _ = _docs_preview(world, head)
+
+    def guards(*_):
+        if change in ("master", "stale GitHub base"):
+            if change == "stale GitHub base":
+                world.gh.pr(42)["baseRefOid"] = base
+            world.advance_master({"doc.md": "master moved\n"})
+        elif change == "head":
+            world.gh.pr(42)["headRefOid"] = world.pr(42, {"doc.md": "new PR head\n"})
+        elif change == "checks":
+            world.gh.pr(42)["statusCheckRollup"] = _green(_run("extra", "FAILURE"))
+        else:
+            world.gh.history.append({"number": 901, "state": "OPEN", "headRefName": f"integrate/{DATE}-batch-2"})
+        return False
+
+    monkeypatch.setattr(integrate, "_docs_guards", guards)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert reason in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_rejects_a_stale_test_merge(docs_world, capsys):
+    head = _docs_pr(docs_world)
+    _docs_preview(docs_world, head)
+    docs_world.advance_master({"doc.md": "master moved after the preview\n"})
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "test merge for #42 has a different base or head" in capsys.readouterr().err
+    assert not docs_world.gh.mutations()
+
+
+def test_merge_docs_requires_githubs_test_merge(world, capsys):
+    _docs_pr(world)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "cannot fetch GitHub's test merge" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_refuses_when_the_fetched_head_differs(world, capsys):
+    _docs_pr(world)
+    world.gh.pr(42)["headRefOid"] = "a" * 40
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "head changed while it was fetched" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_reports_an_unexpected_landed_tree(docs_world, capsys, monkeypatch):
+    world = docs_world
+    _docs_preview(world, _docs_pr(world))
+
+    def gh(*args, **kwargs):
+        if args[:3] == ("api", "--method", "PUT"):
+            # A writer outside the serialized merge flow races the last read.
+            world.advance_master({"doc.md": "a late push\n"})
+        return world.gh(*args, **kwargs)
+
+    monkeypatch.setattr(integrate, "gh", gh)
+    assert integrate.main(["merge-docs", "42"]) == 1
+    output = capsys.readouterr()
+    assert "merged #42" in output.out
+    assert "different tree" in output.err
+
+
+def test_merge_docs_requires_the_scope_on_master(world, capsys):
+    _docs_preview(world, _docs_pr(world))
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "master has no shared CI docs scope yet" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_refuses_when_the_merge_base_is_ambiguous(docs_world, capsys, monkeypatch):
+    world = docs_world
+    head = _docs_pr(world)
+    base, _ = _docs_preview(world, head)
+    git = integrate.git
+
+    def git_with_two_bases(*args, **kwargs):
+        if args[:2] == ("merge-base", "--all"):
+            return subprocess.CompletedProcess(args, 0, stdout=f"{base}\n{head}\n")
+        return git(*args, **kwargs)
+
+    monkeypatch.setattr(integrate, "git", git_with_two_bases)
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "do not have a single merge base" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+@pytest.mark.parametrize("failure", ["nonzero with valid JSON", "non-Boolean"])
+def test_merge_docs_refuses_when_the_shared_scope_breaks(docs_world, capsys, failure):
+    world = docs_world
+    if failure == "non-Boolean":
+        source = "import os\nos.write(1, b'[\"yes\", true]')\nos._exit(0)\n"
+    else:
+        source = ("import atexit, os, sys\n"
+                  "atexit.register(lambda: (sys.stdout.flush(), os._exit(1)))\n"
+                  "def is_documentation_path(path): return True\n"
+                  "def changed_paths(old, new): return ['docs/guide.md'], True\n")
+    world.advance_master({integrate.DOCS_SCOPE: source})
+    _docs_preview(world, _docs_pr(world))
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "cannot read the shared CI docs scope" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+def test_merge_docs_reports_census_drift_after_a_successful_merge(docs_world, capsys):
+    world = docs_world
+    world.advance_master({integrate.CENSUS: """
+import sys
+EXTENSIONS = set()
+if __name__ == "__main__":
+    assert sys.argv[1:] == ["--ci-check"]
+    print("producer census is stale (report only); regenerate before using it in a port slice")
+"""})
+    _docs_preview(world, _docs_pr(world))
+    assert integrate.main(["merge-docs", "42"]) == 0
+    assert "The next integration batch regenerates it" in capsys.readouterr().out
+
+
+def test_merge_docs_isolates_the_doc_guard_environment(docs_world, capsys, monkeypatch):
+    world = docs_world
+    monkeypatch.setenv("GH_TOKEN", "synthetic-test-value")
+    world.advance_master({"tests/test_docs.py": """
+import os
+def test_docs():
+    assert "GH_TOKEN" not in os.environ
+    assert os.environ["PSEUDOLIFE_TEST_PG_HOST_PORT"] == "127.0.0.1:1"
+"""})
+    _docs_preview(world, _docs_pr(world))
+    assert integrate.main(["merge-docs", "42"]) == 0, capsys.readouterr()
+
+
+def test_merge_docs_refuses_a_hard_census_failure(docs_world, capsys):
+    world = docs_world
+    world.advance_master({integrate.CENSUS:
+                          "EXTENSIONS = set()\nif __name__ == '__main__': raise SystemExit(1)\n"})
+    _docs_preview(world, _docs_pr(world))
+    assert integrate.main(["merge-docs", "42"]) == 2
+    assert "producer census check failed" in capsys.readouterr().err
+    assert not world.gh.mutations()
+
+
+@pytest.mark.parametrize(("reply", "reason"), [
+    ("http-error", "could not confirm the regular merge"),
+    ("malformed", "could not confirm the regular merge"),
+    ("non-object", "GitHub did not confirm the merge"),
+    ("bad-sha", "GitHub did not confirm the merge"),
+    ("unmerged", "GitHub did not confirm the merge"),
+    ("missing", "merge is missing from fetched origin/master"),
+])
+def test_merge_docs_reports_an_unconfirmed_merge(docs_world, capsys, monkeypatch, reply, reason):
+    world = docs_world
+    head = _docs_pr(world)
+    _docs_preview(world, head)
+
+    def gh(*args, **kwargs):
+        if args[:3] != ("api", "--method", "PUT"):
+            return world.gh(*args, **kwargs)
+        if reply == "http-error":
+            raise integrate.Refusal("request failed")
+        if reply == "malformed":
+            return "malformed response"
+        if reply == "non-object":
+            return "[]"
+        if reply == "bad-sha":
+            return json.dumps({"merged": True, "sha": "not a commit"})
+        return json.dumps({"merged": reply == "missing", "sha": head})
+
+    monkeypatch.setattr(integrate, "gh", gh)
+    assert integrate.main(["merge-docs", "42"]) == (1 if reply == "missing" else 2)
+    assert reason in capsys.readouterr().err
 
 
 def _build(*extra: str) -> int:
@@ -5156,14 +5620,14 @@ def test_merge_refuses_a_head_the_plan_did_not_build(world, capsys):
     assert _merge_calls(world) == []
 
 
-def test_merge_refuses_when_master_moved_past_the_batch(world, capsys):
+@pytest.mark.parametrize("files", [
+    {"docs/guide.md": "new doc\n"},
+    {"change.py": "new code\n"},
+    {"docs/guide.md": "new doc\n", "rust/producer-census.json": "{}\n"},
+])
+def test_merge_refuses_when_master_moved_past_the_batch(world, capsys, files):
     _opened(world, capsys)
-    _git(world.seed, "fetch", "-q", "origin")
-    _git(world.seed, "switch", "-q", "-C", "master", "origin/master")
-    (world.seed / "m.txt").write_text("m\n", encoding="utf-8")
-    _git(world.seed, "add", "-A")
-    _git(world.seed, "commit", "-q", "-m", "master moves")
-    _git(world.seed, "push", "-q", "origin", "master")
+    world.gh._merge(42, _docs_pr(world, files))
 
     assert integrate.main(["merge"]) == 2
 
