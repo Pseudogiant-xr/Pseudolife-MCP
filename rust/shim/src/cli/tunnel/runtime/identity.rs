@@ -311,6 +311,14 @@ impl Bound {
         // while starting, but require readiness before accepting a receipt.
         let record = read_record(&record::path(root, &profile.name)).map_err(|_| UNAVAILABLE)?;
         if record
+            .bridge_attempt
+            .as_ref()
+            .map(|attempt| attempt.id.as_str())
+            != requested_attempt
+        {
+            return Err("the bridge readiness attempt does not match the signed launch");
+        }
+        if record
             .refresh
             .as_ref()
             .is_some_and(|refresh| !crate::runtime::same_path(&executable, &refresh.image.path))
