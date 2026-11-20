@@ -9,7 +9,9 @@
         "test_audit_verifier_identifies_the_first_break",
         "test_audit_verifier_checks_body_commitments",
         "test_audit_verifier_validates_the_redaction_record",
+        "test_audit_verifier_requires_matching_operator_redaction",
         "test_audit_verifier_anchors_a_pruned_chain",
+        "test_audit_verifier_rejects_invalid_prune_record",
         "test_audit_archive_edit_rehashes_without_the_frozen_package"
       ]
     },
