@@ -1,13 +1,14 @@
 """CI's two startup parts run every cell and control once, with no extra build."""
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2]))
@@ -16,14 +17,82 @@ import candidate_record
 import clock_retry_cases
 import schema_cases
 import schema_ci
+import session_fixture
 import startup_ci
 import startup_cases
 import test_schema_executor
+import writer_session_cases
 
 
 def script(command):
     """The harness script a recorded command runs, or the program itself."""
     return Path(command[1]).name if len(command) > 1 and command[0] == sys.executable else command[0]
+
+
+class SessionFixtureControls(unittest.TestCase):
+    def test_clock_and_writer_entry_points_import_with_frozen_storage_blocked(self):
+        with patch.dict(sys.modules, {"pseudolife_memory.storage.schema": None,
+                                      "pseudolife_memory.storage.postgres": None}), \
+                patch.object(sys, "path", sys.path.copy()):
+            sys.modules.pop("startup_cases", None)
+            for name in ("clock_retry_cases.py", "writer_session_cases.py"):
+                with self.subTest(name=name):
+                    runpy.run_path(str(HERE / name))
+
+    def test_session_seed_refuses_a_non_disposable_server_name_before_writing(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = ("ordinary_bank",)
+        with patch.dict(os.environ, {"_PSEUDOLIFE_PRODUCTION_DB": "configured_bank"}), \
+                patch.object(session_fixture.psycopg, "connect", return_value=conn), \
+                self.assertRaisesRegex(ValueError, "require a disposable harness database"):
+            session_fixture.seed_bank("fixture-dsn", highwater="malformed")
+        conn.execute.assert_called_once_with("SELECT current_database()")
+        conn.transaction.assert_not_called()
+
+    def test_second_writer_refuses_an_uninitialized_writer_epoch(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = ("pl_cf_pgs_1_0123456789abcdef",)
+        conn.execute.return_value.rowcount = 0
+        env = {"_PSEUDOLIFE_PRODUCTION_DB": "configured_bank",
+               "PL_PGS_WRITER_DSN": "dbname=pl_cf_pgs_1_0123456789abcdef"}
+        with patch.dict(os.environ, env), \
+                patch.object(writer_session_cases.psycopg, "connect", return_value=conn), \
+                self.assertRaisesRegex(ValueError, "missing its writer lease epoch"):
+            writer_session_cases.other_writer()
+        self.assertNotIn("coordination_hlc_highwater", str(conn.execute.call_args_list))
+
+    def test_second_writer_refuses_a_different_disposable_server_name_before_writing(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = ("pl_cf_pgs_2_0123456789abcdef",)
+        env = {"_PSEUDOLIFE_PRODUCTION_DB": "configured_bank",
+               "PL_PGS_WRITER_DSN": "dbname=pl_cf_pgs_1_0123456789abcdef"}
+        with patch.dict(os.environ, env), \
+                patch.object(writer_session_cases.psycopg, "connect", return_value=conn), \
+                self.assertRaisesRegex(ValueError, "connected to a different database"):
+            writer_session_cases.other_writer()
+        conn.execute.assert_called_once_with("SELECT current_database()")
+        conn.transaction.assert_not_called()
+
+    def test_writer_mutant_requires_the_expected_panic_and_durable_witness(self):
+        writer = writer_session_cases
+        before = {"catalog": {"tables": []}, "rows": {"public.meta": {
+            "columns": ["key", "value"], "rows": [["writer_lease_epoch", 1], ["coordination_hlc_highwater", [103, 2]]],
+        }}}
+        with tempfile.TemporaryDirectory() as scratch:
+            phases = Path(scratch)
+            result = subprocess.CompletedProcess([], 101, "0 passed; 1 failed", "a live session to kill")
+            self.assertIsNone(writer.mutant_witness("writer-no-reconnect", result, phases, before))
+            for phase in ("initial", "death"):
+                (phases / f"{phase}.json").write_text(json.dumps(writer.expected_state(before, "initial")))
+            self.assertEqual(writer.mutant_witness("writer-no-reconnect", result, phases, before), result.stderr)
+            result.stderr = "writer helper failed"
+            self.assertIsNone(writer.mutant_witness("writer-no-reconnect", result, phases, before))
+            result.stderr = "a live session to kill"
+            (phases / "death.json").write_text(json.dumps(writer.expected_state(before, "death")))
+            self.assertIsNone(writer.mutant_witness("writer-no-reconnect", result, phases, before))
 
 
 class StartupParts(unittest.TestCase):
@@ -224,6 +293,7 @@ class GoldenChecking(unittest.TestCase):
             return {"ok": True, "startup": {}, "entries": []}, [0.0, 0.0]
 
         with patch.object(module, "invoke", invoke), \
+                patch.object(module, "seed_bank", create=True), \
                 patch.object(module.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
                 patch.object(module.pg, "drop", lambda name, *args: None), \
                 patch.object(module.dbstate, "dump", empty_state), \
