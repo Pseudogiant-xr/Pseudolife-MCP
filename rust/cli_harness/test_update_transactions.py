@@ -600,6 +600,10 @@ def host(tmp_path, failure="", mode="release"):
                     return
                 body = json.dumps({"tag_name": self.path.rsplit("/", 1)[-1], "draft": False}).encode()
             elif self.path == "/health":
+                if current.get("archived_python") and current.get("bridge_health_offline"):
+                    self.send_response(503)
+                    self.end_headers()
+                    return
                 deployed = current["deployed"]
                 bridge_wait = current.get("archived_python") and current.get("wait_for_bridge")
                 waiting = bridge_wait or deployed and not current.get("archived_python") and current.get("wait_for_rust")
@@ -2085,6 +2089,8 @@ def test_interrupted_bridge_keeps_original_recovery_on_rerun(tmp_path, interrupt
         retry = ["--tag", "0.25.0", "--json", "--health-retries", "1",
                  "--rollback-tag", "retry-fixture"]
         if unattended:
+            state["bridge_health_offline"] = True
+            state_path.write_text(json.dumps(state))
             for _ in range(2):
                 held = run_arm(repo, env, binary, [*retry, "--unattended"])
                 assert held.returncode == 4, held.stdout + held.stderr
@@ -2095,6 +2101,8 @@ def test_interrupted_bridge_keeps_original_recovery_on_rerun(tmp_path, interrupt
             assert "original-fixture-pre-import" in log and original[0].name in log
             state = json.loads(state_path.read_text())
             assert state["archived_python"] and not stages(state)
+            state["bridge_health_offline"] = False
+            state_path.write_text(json.dumps(state))
         retry.append("--daemon-only")
         pending = run_arm(repo, env, binary, retry)
         assert pending.returncode != 0
