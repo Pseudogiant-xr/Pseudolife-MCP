@@ -27,6 +27,7 @@ from pathlib import Path
 
 from .. import core, normalize
 from . import _bank
+from rust.harness_support.audit_oracle import audit_hash, verify_audit_chain
 
 DAY = 86400
 # Fixed seed clock: far enough in the past that a redaction's
@@ -404,8 +405,6 @@ def archive(variant: str) -> bytes:
         row["payload"] = {"odd": "\ud800"}
         return _lines([row])
     if variant == "head-19-digits":
-        from pseudolife_memory.storage.coordination import (  # noqa: PLC0415
-            audit_hash, verify_audit_chain)
         # Lift an oracle-produced retention-anchored chain to a BIGINT head.
         rows = export_rows("pruned")
         shift = 1000000000000000000 - rows[-1]["seq"]
@@ -419,8 +418,7 @@ def archive(variant: str) -> bytes:
         assert verify_audit_chain(rows, expect_head=(rows[-1]["seq"], previous))["ok"]
         return _lines(rows)
     if variant.startswith("reserved-number-key-"):
-        from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
-        # Keep one complete exported row, hashed by the oracle with an ordinary
+        # Keep one complete exported row, hashed with an ordinary
         # payload key that happens to match serde's internal number transport.
         row = export_rows("rich")[0]
         row["payload"]["$serde_json::private::Number"] = "1"
@@ -516,14 +514,13 @@ def audit_redact_clock(obs: dict) -> None:
     """A redaction's own event is stamped with the arm's wall clock, which
     is hashed. Validated, then tokenized: the newest event must be a redact
     whose created_at lies inside this arm's run window and whose hash is the
-    oracle's ``audit_hash`` of that row; its created_at and hash become
+    harness's ``audit_hash`` of that row; its created_at and hash become
     tokens. Every printed hash reference must be this arm's own validated
     hash before it is replaced: stdout's ``redact_hash`` and ``expect_head``
     (when stdout carries the result), the stderr ``--expect-head SEQ:HASH``
     note, and no other 64-hex string or literal token anywhere. The live
     message row's ``expires_at``, when a redaction's ``LEAST(expires_at,
     now)`` moved it to exactly that clock, is tokenized the same way."""
-    from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
     db = obs.get("db")
     if not isinstance(db, dict):
         return

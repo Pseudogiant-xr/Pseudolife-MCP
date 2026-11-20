@@ -34,7 +34,8 @@ import dbstate
 import pgdisposable
 import startup_cases as startup
 import psycopg
-from pseudolife_memory.storage.schema import assert_disposable_database
+from session_fixture import HLC_META_KEY, seed_bank, with_meta
+from rust.harness_support.database_guard import assert_disposable_database
 
 pg = pgdisposable.Slice.from_env("pgs")
 PHASES = ("initial", "clock-corrected", "column-dropped", "retry", "healthy-clock-broken", "healthy")
@@ -90,14 +91,10 @@ def same_as_first(service, original):
             "storage": current[2] is original[2], "embedder": current[3] is original[3]}
 
 
-def oracle_cell(seed_only=False):
+def oracle_cell():
     from pseudolife_memory.storage.postgres import PostgresStorage
     storage = PostgresStorage(os.environ["PL_PGS_CLOCK_RETRY_DSN"])
     try:
-        if seed_only:
-            startup.seed(storage, "clock-retry")
-            storage.meta_set("coordination_hlc_highwater", "malformed")
-            return
         import torch
         from pseudolife_memory.memory.hlc import HybridLogicalClock
         from pseudolife_memory.service import MemoryService
@@ -178,7 +175,7 @@ def runtime_library():
     return next(root.glob("libonnxruntime.so.*"))
 
 
-def invoke(binary, kind, dsn, home, model, phases, output, seed_only=False, mutant=None):
+def invoke(binary, kind, dsn, home, model, phases, output, mutant=None):
     env = daemons.base_env(home, {
         "PL_HARNESS_SLICE": "pgs", "PL_PGS_CLOCK_RETRY_DSN": dsn,
         "PL_PGS_CLOCK_CONFIG": str(home / "data" / "config.yaml"),
@@ -192,8 +189,6 @@ def invoke(binary, kind, dsn, home, model, phases, output, seed_only=False, muta
             env.pop(key)
     if kind == "python":
         command = [sys.executable, str(Path(__file__).resolve()), "--oracle-cell"]
-        if seed_only:
-            command.append("--seed-cell")
     else:
         command = [str(binary), "--exact", "service::tests::db_clock_reseed_retry", "--nocapture"]
         if mutant:
@@ -204,16 +199,7 @@ def invoke(binary, kind, dsn, home, model, phases, output, seed_only=False, muta
                            f"{run.stdout[-1800:]} {run.stderr[-1800:]}")
     if kind == "rust" and "1 passed" not in run.stdout:
         raise RuntimeError("native clock retry probe did not execute one passing test")
-    return None if seed_only else json.loads(output.read_text(encoding="utf-8"))
-
-
-def meta_value(state, value):
-    state = json.loads(json.dumps(state))
-    table = state["rows"]["public.meta"]
-    key, column = table["columns"].index("key"), table["columns"].index("value")
-    row = next(row for row in table["rows"] if row[key] == "coordination_hlc_highwater")
-    row[column] = value
-    return state
+    return json.loads(output.read_text(encoding="utf-8"))
 
 
 def expectations(result):
@@ -242,7 +228,7 @@ def expectations(result):
 def cell(binary, number, result, mutant=None, expected=None, oracle=True):
     """The cell on cloned banks. With ``oracle`` the Python service runs beside
     Rust and the two are compared; without it only Rust runs and ``expected``
-    (the committed golden) is its expectation. Python seeds the template."""
+    (the committed golden) is its expectation. Both use the same fixture rows."""
     arms = ("python", "rust") if oracle else ("rust",)
     names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []
@@ -252,17 +238,17 @@ def cell(binary, number, result, mutant=None, expected=None, oracle=True):
             from embedding_fixture import create
             model = root / "model"
             create(model)
-            homes = [daemons.make_home(root, name, CONFIG) for name in ("seed", *arms)]
+            homes = [daemons.make_home(root, name, CONFIG) for name in arms]
             template = pg.create(names[0])
             created.append(names[0])
-            invoke(binary, "python", template, homes[0], model, root / "seed-db", root / "seed.json", seed_only=True)
+            seed_bank(template, highwater="malformed")
             before = dbstate.dump(template)
             dsns = []
             for name in names[1:]:
                 dsns.append(pg.create(name, template=names[0]))
                 created.append(name)
             outputs, states = [], []
-            for kind, dsn, home in zip(arms, dsns, homes[1:]):
+            for kind, dsn, home in zip(arms, dsns, homes):
                 phases = root / f"{kind}-db"
                 outputs.append(invoke(binary, kind, dsn, home, model, phases, root / f"{kind}.json", mutant=mutant))
                 states.append({phase: json.loads((phases / f"{phase}.json").read_text()) for phase in PHASES})
@@ -286,9 +272,11 @@ def cell(binary, number, result, mutant=None, expected=None, oracle=True):
                 if startup.epoch(state["initial"]) != startup.epoch(before) + 1:
                     result["epoch_diffs"].append(f"arm {arm}: constructor epoch must increment once")
                 result["write_diffs"] += dbstate.diff(startup.without_epoch(before), startup.without_epoch(state["initial"]))
-                result["write_diffs"] += dbstate.diff(meta_value(state["initial"], [20000, 2]), state["clock-corrected"])
+                result["write_diffs"] += dbstate.diff(with_meta(state["initial"], **{HLC_META_KEY: [20000, 2]}),
+                                                     state["clock-corrected"])
                 result["write_diffs"] += dbstate.diff(state["column-dropped"], state["retry"])
-                result["write_diffs"] += dbstate.diff(meta_value(state["retry"], "malformed"), state["healthy-clock-broken"])
+                result["write_diffs"] += dbstate.diff(with_meta(state["retry"], **{HLC_META_KEY: "malformed"}),
+                                                     state["healthy-clock-broken"])
                 result["write_diffs"] += dbstate.diff(state["healthy-clock-broken"], state["healthy"])
             result["db_phases"] = dict(zip(arms, states))
     finally:
@@ -320,7 +308,6 @@ def main(argv=None):
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed golden")
     parser.add_argument("--dump-db", choices=PHASES, help=argparse.SUPPRESS)
     parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--seed-cell", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
@@ -338,7 +325,7 @@ def main(argv=None):
         dump_phase(args.dump_db)
         return 0
     if args.oracle_cell:
-        oracle_cell(args.seed_cell)
+        oracle_cell()
         return 0
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")

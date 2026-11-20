@@ -1,7 +1,9 @@
 """Native audit refusals and complete file publication on disposable banks."""
 from __future__ import annotations
 
+import atexit
 import hashlib
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 from pathlib import Path
@@ -9,7 +11,9 @@ import subprocess
 
 import pytest
 
+from . import normalize
 from .rows import _bank
+from rust.harness_support.import_blocker import cold_harness_imports
 
 
 SECRET = "synthetic-audit-body-must-not-escape"
@@ -100,6 +104,134 @@ def event(**changes):
     row["hash"] = hashlib.sha256((row["prev_hash"] + json.dumps(
         material, ensure_ascii=False, separators=(",", ":"))).encode()).hexdigest()
     return row
+
+
+@pytest.fixture
+def audit_rules():
+    with cold_harness_imports():
+        from rust.harness_support import audit_oracle
+
+        yield audit_oracle
+
+
+def test_audit_hash_distinguishes_stored_text_from_parsed_payload(audit_rules):
+    row = event(payload='{"z":-0.0,"a":"雪","n":1e-7}', created_at=1700000000.1234567)
+    parsed = {"z": -0.0, "n": 1e-7, "a": "雪"}
+    assert audit_rules.canonical_payload(parsed) == row["payload"]
+    assert audit_rules.audit_hash(row["prev_hash"], row) == row["hash"]
+    assert audit_rules.audit_hash(row["prev_hash"], dict(row, payload=parsed)) == row["hash"]
+    unsorted = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+    assert audit_rules.audit_hash(row["prev_hash"], dict(row, payload=unsorted)) != row["hash"]
+
+
+@pytest.mark.parametrize("defect,seq,reason", [
+    ("genesis", 1, "broken_link"),
+    ("gap", 3, "sequence_gap"),
+    ("link", 2, "broken_link"),
+    ("payload", 2, "hash_mismatch"),
+    ("head_missing", 3, "head_missing"),
+    ("head_mismatch", 2, "head_mismatch"),
+])
+def test_audit_verifier_identifies_the_first_break(audit_rules, defect, seq, reason):
+    first = event()
+    last = event(seq=2, prev_hash=first["hash"])
+    head = (2, last["hash"])
+    assert audit_rules.verify_audit_chain([first, last], expect_head=head) == {
+        "ok": True, "events": 2, "first_seq": 1, "head_seq": 2,
+        "head_hash": last["hash"], "head_created_at": last["created_at"], "start_cut": None,
+    }
+    if defect == "genesis":
+        first = event(prev_hash="a" * 64)
+    elif defect == "gap":
+        last = event(seq=3, prev_hash=first["hash"])
+    elif defect == "link":
+        last = event(seq=2, prev_hash="b" * 64)
+    elif defect == "payload":
+        last["payload"] = '{"changed":true}'
+    elif defect == "head_missing":
+        head = (seq, head[1])
+    elif defect == "head_mismatch":
+        head = (seq, "c" * 64)
+    assert audit_rules.verify_audit_chain([first, last], expect_head=head) == {
+        "ok": False, "seq": seq, "reason": reason,
+    }
+
+
+@pytest.mark.parametrize("change,reason", [
+    ({"body": "changed"}, "body_mismatch"),
+    ({"body_salt": "AB" * 16}, "body_mismatch"),
+    ({"body": None}, "body_mismatch"),
+    ({"body": None, "body_salt": None}, "body_missing"),
+])
+def test_audit_verifier_checks_body_commitments(audit_rules, change, reason):
+    body, salt = "fixture body 雪", "ab" * 16
+    digest = hashlib.sha256(bytes.fromhex(salt) + body.encode("utf-8")).hexdigest()
+    sent = event(event="send", message_id="message", body=body, body_salt=salt,
+                 payload=json.dumps({"text_commitment": digest}))
+    assert audit_rules.verify_audit_chain([sent])["ok"]
+    assert audit_rules.verify_audit_chain([dict(sent, **change)]) == {
+        "ok": False, "seq": 1, "reason": reason,
+    }
+
+
+def test_audit_verifier_validates_the_redaction_record(audit_rules):
+    body, salt = "fixture body", "01" * 16
+    digest = hashlib.sha256(bytes.fromhex(salt) + body.encode("utf-8")).hexdigest()
+    sent = event(event="send", message_id="message", body=body, body_salt=salt,
+                 payload=json.dumps({"text_commitment": digest}))
+    blank = dict(sent, body=None, body_salt=None)
+    old_export = {key: value for key, value in blank.items() if key != "body"}
+    assert audit_rules.verify_audit_chain([old_export]) == {
+        "ok": False, "seq": 1, "reason": "body_not_exported",
+    }
+    redact = event(seq=2, event="redact", actor="operator", prev_hash=sent["hash"],
+                   payload='{"seq":1,"message_id":"message","audit_copy":"removed"}')
+    assert audit_rules.verify_audit_chain([blank, redact])["ok"]
+    assert audit_rules.verify_audit_chain([sent, redact]) == {
+        "ok": False, "seq": 1, "reason": "body_mismatch",
+    }
+
+
+def test_audit_verifier_anchors_a_pruned_chain(audit_rules):
+    gone = event(created_at=0.0)
+    first = event(seq=2, prev_hash=gone["hash"], created_at=86_400.125)
+    payload = {"through_seq": 1, "through_hash": gone["hash"], "retention_days": 1, "cutoff": 86_400}
+    cut_args = {"seq": 3, "event": "audit_prune", "actor": "daemon",
+                "created_at": 172_800.125, "prev_hash": first["hash"]}
+    cut = event(**cut_args, payload=json.dumps(payload))
+    verdict = audit_rules.verify_audit_chain([first, cut])
+    assert verdict["ok"] and verdict["start_cut"] == {
+        "seq": 3, "created_at": 172_800.125, "cutoff": 86_400,
+        "retention_days": 1, "through_seq": 1,
+    }
+    assert audit_rules.verify_audit_chain([first, cut], expect_head=(1, gone["hash"])) == {
+        "ok": False, "seq": 1, "reason": "head_pruned", "start_cut": verdict["start_cut"],
+    }
+    invalid = event(**cut_args, payload=json.dumps(dict(payload, cutoff=86_399)))
+    assert audit_rules.verify_audit_chain([first, invalid]) == {
+        "ok": False, "seq": 2, "reason": "unanchored_start",
+    }
+
+
+def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
+    # Load the row afresh even when test_audit_stats already imported it.
+    path = Path(__file__).with_name("rows") / "audit.py"
+    spec = spec_from_file_location(f"{__package__}.rows._audit_probe", path)
+    isolated = module_from_spec(spec)
+    monkeypatch.setattr(normalize, "RULES", normalize.RULES.copy())
+    raw = event()
+    raw["payload"] = json.loads(raw["payload"])
+    with cold_harness_imports():
+        spec.loader.exec_module(isolated)
+        try:
+            monkeypatch.setattr(isolated, "export_rows", lambda _: [raw])
+            edited = json.loads(isolated.archive("reserved-number-key-single"))
+        finally:
+            atexit.unregister(isolated._drop_all)
+
+    expected = event(payload='{"safe":"雪","$serde_json::private::Number":"1"}')
+    assert edited["payload"] == json.loads(expected["payload"])
+    assert edited["hash"] == expected["hash"]
 
 
 def assert_refused(result, parameter):
