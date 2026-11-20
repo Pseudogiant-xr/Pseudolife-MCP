@@ -185,8 +185,11 @@ fn eager_vendor(config: &Path) {
             );
             if candidate && mode() == "rollback" && status == "200 OK" {
                 // Prove that a 200 racing the vendor's exit cannot settle.
-                eprintln!("controlplane client: unexpected status 401");
                 drop(stream);
+                let (_, attempt) = expression.rsplit_once(" --bridge-attempt ").unwrap();
+                let settling = root.join(format!("settling-{attempt}"));
+                wait_until(|| settling.is_file());
+                eprintln!("controlplane client: unexpected status 401");
                 drop(bridge.stdin.take());
                 assert!(bridge.wait().unwrap().success());
                 return;
@@ -313,6 +316,8 @@ pub(in crate::cli::tunnel::runtime) async fn before_settling_readiness(
         .is_some_and(|capability| capability.image.path.starts_with(root.join("runtimes")))
         && fs::read_to_string(root.join("scenario")).is_ok_and(|mode| mode == "rollback")
     {
+        let attempt = &record.bridge_attempt.as_ref().unwrap().id;
+        state::atomic_create(&root.join(format!("settling-{attempt}")), b"").unwrap();
         tokio::time::timeout(Duration::from_secs(10), async {
             while child.exit_code().unwrap().is_none() {
                 tokio::time::sleep(POLL).await;
