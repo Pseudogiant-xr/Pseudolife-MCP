@@ -235,18 +235,28 @@ fn client_release_target(health: Option<&Value>, tag: Option<&str>) -> Result<St
 pub(crate) struct UpdateError {
     pub message: String,
     pub exit_code: u8,
+    pub(super) attended_required: bool,
 }
 impl UpdateError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             exit_code: 1,
+            attended_required: false,
         }
     }
     pub fn usage(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             exit_code: 2,
+            attended_required: false,
+        }
+    }
+    pub(super) fn attended(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            exit_code: 4,
+            attended_required: true,
         }
     }
 }
@@ -297,7 +307,7 @@ pub(crate) struct Update {
     pub default_pulled: Option<String>,
     pub default_volumes: Vec<String>,
     /// G2-K: the Python leg that imports weights.pt already ran this update.
-    pub after_import: bool,
+    pub legacy_attempt: bool,
     pub maintainer_context: Option<(Vec<String>, Environment)>,
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
@@ -446,7 +456,7 @@ impl Update {
             release_started: false,
             default_pulled: None,
             default_volumes: vec![],
-            after_import: false,
+            legacy_attempt: false,
             maintainer_context: None,
             rollback_scope: None,
             stopped_handover: false,
@@ -639,12 +649,6 @@ impl Update {
             None => discover(),
         }
     }
-    fn with_release_tag<T>(&mut self, target: &str, run: impl FnOnce(&mut Self) -> T) -> T {
-        let tag = self.o.tag.replace(target.to_owned());
-        let result = run(self);
-        self.o.tag = tag;
-        result
-    }
     pub fn refuse_downgrade(&self, current: Option<&str>, target: &str) -> Result<()> {
         if let Some(current) = current
             && let (Some(a), Some(b)) = (version_key(current), version_key(target))
@@ -689,6 +693,13 @@ impl Update {
         self.update()
     }
     pub fn update(&mut self) -> Result<()> {
+        if self.o.checkout.is_none()
+            && !self.o.clients_only
+            && let Some(recovery) = self.active_import()?
+        {
+            self.report.mode = "release".into();
+            return self.resume_import(recovery, None, None);
+        }
         if let Some(repo) = engine::selected_checkout(self)? {
             self.report.mode = "checkout".into();
             if self.o.all_clients {
@@ -725,6 +736,9 @@ impl Update {
         }
         let tier = self.detect_tier()?;
         self.report.tier = tier.clone();
+        if tier == "client" && !self.o.clients_only && !self.o.check {
+            self.refuse_missing_import_daemon()?;
+        }
         if self.o.engine.is_some() && tier != "docker" {
             return Err(UpdateError::usage(
                 "--engine requires a Docker host; run update --engine <engine> --checkout <repo> there; nothing was changed",

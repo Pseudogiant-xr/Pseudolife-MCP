@@ -30,9 +30,8 @@ that already exists it installs on Python and then switches through update
 
 A release-mode `pseudolife-mcp update` moves a Docker host that never
 chose an engine to the Rust daemon when the target release publishes its
-image. Every run does this except the scheduled `--unattended` one, which
-always keeps the engine; a run with no terminal (a script, ssh, an agent's
-shell) moves the host too. Before it downloads the models or backs
+image. An ordinary update can move the host from a script, an SSH command
+or an agent's shell too. Before it downloads the models or backs
 anything up, the update asks the Rust image whether it supports this bank's configuration (`pseudolife-daemon
 check-config`: a non-default reranker or embedding model, for instance, is
 not). If that check, or anything else before the backup, refuses, the update
@@ -43,9 +42,20 @@ an unsupported configuration before the backup instead of falling back.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
 on the Python daemon; the next attended `pseudolife-mcp update` moves the host. A
-bank whose counters were never imported takes one extra step inside the
-same update: it first runs the new release on Python once to import them,
-then switches.
+bank with a legacy schema or pending import takes one extra step inside
+the release update: it runs the pinned Python 0.23.1 daemon to complete
+the import, then switches to the selected Rust release. The archived
+image is available only for Linux amd64. On another platform, restore a
+verified backup on a Linux amd64 Docker host and complete the update
+there before moving the migrated bank back.
+
+Scheduled (`--unattended`) updates always keep the installed engine. On
+a Python host, if the newest release has no Python image or the update
+requires the legacy import, the scheduled run holds and posts one notice
+per reason per release. Run `pseudolife-mcp update --engine rust --tag <version>`
+once at a terminal, using the version in the notice. A scheduled run
+leaves an interrupted attended bridge in place. Use the same command at
+a terminal to resume it.
 
 A rerun keeps the engine already installed, also after `docker compose
 down`. A Rust daemon stays on the release it was installed or last updated

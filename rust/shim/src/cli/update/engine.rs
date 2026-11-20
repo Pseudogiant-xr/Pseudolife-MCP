@@ -627,15 +627,25 @@ fn verify_endpoint(config: &Value, url: &str) -> Result<()> {
     }
     Ok(())
 }
-/// The bank's schema (-1 when unreadable) while its CMS counters still await
-/// the import from memory_state/weights.pt (D2), else None.
-pub(super) fn import_pending(
+pub(super) struct ImportStatus {
+    pub schema: Option<i64>,
+    pub counters_pending: bool,
+    pub chroma_pending: bool,
+}
+
+impl ImportStatus {
+    pub fn pending(&self) -> bool {
+        self.schema.is_none_or(|schema| schema < 57) || self.counters_pending || self.chroma_pending
+    }
+}
+
+pub(super) fn import_status(
     u: &Update,
     pg: &str,
     user: &str,
     db: &str,
     daemon: &str,
-) -> Result<Option<i64>> {
+) -> Result<ImportStatus> {
     let schema = sql(
         u,
         pg,
@@ -645,20 +655,86 @@ pub(super) fn import_pending(
     )?
     .trim_matches('"')
     .parse::<i64>()
-    .ok();
-    let pending = if schema.is_some_and(|v| v >= 57) {
-        let row = sql(
+    .ok()
+    .filter(|schema| *schema > 0);
+    if schema.is_none_or(|v| v < 57) {
+        return Ok(ImportStatus {
+            schema,
+            counters_pending: false,
+            chroma_pending: false,
+        });
+    }
+    let has_counters = sql(
+        u,
+        pg,
+        user,
+        db,
+        "SELECT EXISTS (SELECT 1 FROM cms_counters WHERE id = 1)",
+    )? == "t";
+    let counters_pending = !has_counters
+        && legacy_file(
             u,
-            pg,
-            user,
-            db,
-            "SELECT EXISTS (SELECT 1 FROM cms_counters WHERE id = 1)",
+            daemon,
+            "/data/memory_state",
+            "test -e /data/memory_state/weights.pt || test -e /data/memory_state/weights.pt.bak",
         )?;
-        row!="t"&&u.docker_call(&["exec",daemon,"sh","-c","test ! -e /data/memory_state/weights.pt && test ! -e /data/memory_state/weights.pt.bak"]).0!=0
-    } else {
-        true
-    };
-    Ok((schema.is_none_or(|s| s < 57) || pending).then(|| schema.unwrap_or(-1)))
+    // The Python daemon leaves the Chroma tree intact even after import.
+    // Its bank-local marker is written only after verifying the copied chunks.
+    let chroma_pending = legacy_file(
+        u,
+        daemon,
+        "/data/chromadb",
+        "test -f /data/chromadb/chroma.sqlite3",
+    )? && sql(
+        u,
+        pg,
+        user,
+        db,
+        "SELECT value::jsonb->>'status' FROM meta WHERE key = 'reference_chroma_import'",
+    )? != "done";
+    Ok(ImportStatus {
+        schema,
+        counters_pending,
+        chroma_pending,
+    })
+}
+
+fn legacy_file(u: &Update, daemon: &str, directory: &str, test: &str) -> Result<bool> {
+    let script = format!(
+        "if [ ! -x /data ] || {{ [ -d {directory} ] && [ ! -x {directory} ]; }}; then printf inaccessible; elif {test}; then printf present; else printf absent; fi"
+    );
+    let (code, out) = u.docker_call(&["exec", daemon, "sh", "-c", &script]);
+    legacy_file_result(directory, code, &out)
+}
+
+fn legacy_file_result(directory: &str, code: i32, output: &str) -> Result<bool> {
+    match (code, output.trim()) {
+        (0, "present") => Ok(true),
+        (0, "absent") => Ok(false),
+        (0, "inaccessible") => Err(UpdateError::usage(format!(
+            "cannot check legacy data in {directory}. Grant the daemon account access to the directory and retry. Nothing was deployed"
+        ))),
+        _ => Err(UpdateError::usage(
+            "cannot check the daemon's state volume for legacy files; start the daemon with its original /data mount and retry; nothing was deployed",
+        )),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn legacy_file_probe_refuses_inaccessible_or_unexpected_output() {
+    let directory = "/data/memory_state";
+    assert!(legacy_file_result(directory, 0, "present\n").unwrap());
+    assert!(!legacy_file_result(directory, 0, "absent\n").unwrap());
+    let inaccessible = legacy_file_result(directory, 0, "inaccessible").unwrap_err();
+    assert!(inaccessible.message.contains(directory));
+    assert!(
+        inaccessible
+            .message
+            .contains("Grant the daemon account access")
+    );
+    assert!(legacy_file_result(directory, 1, "absent").is_err());
+    assert!(legacy_file_result(directory, 0, "").is_err());
 }
 pub(super) fn require_imported_with(
     u: &Update,
@@ -667,9 +743,9 @@ pub(super) fn require_imported_with(
     db: &str,
     daemon: &str,
 ) -> Result<()> {
-    if import_pending(u, pg, user, db, daemon)?.is_some() {
+    if import_status(u, pg, user, db, daemon)?.pending() {
         return Err(UpdateError::usage(
-            "Rust activation requires schema v57 or later and imported counters: run update --engine python --checkout <repo>, let the Python daemon import memory_state/weights.pt into cms_counters, then retry; nothing was changed",
+            "Rust activation requires schema v57 or later and completed legacy imports; use pseudolife-mcp update on the release deployment to import the bank before selecting a Rust checkout; nothing was changed",
         ));
     }
     Ok(())
@@ -1144,6 +1220,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     let kept = |e: UpdateError, built: bool| UpdateError {
         message: kept_note(&e.message, &rollback, built.then_some(image.as_str())),
         exit_code: e.exit_code,
+        attended_required: e.attended_required,
     };
     let activation = uuid::Uuid::new_v4().simple().to_string();
     let service = json!({"image":image,"build":{"dockerfile":format!("ops/Dockerfile.daemon{}",if choice=="rust"{"-rust"}else{""})},"labels":{ENGINE_LABEL:choice,CHECKOUT_LABEL:repo,ACTIVATION_LABEL:activation}});

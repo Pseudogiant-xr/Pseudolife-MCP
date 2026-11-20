@@ -109,7 +109,7 @@ review rounds or new CI jobs.
 | Work item | Sources and boundary | Acceptance and useful existing tests |
 |---|---|---|
 | **Client workflow completion** | `rust/shim/src/cli.rs` and [the cutover command table](../../rust/CUTOVER.md#what-is-left) | The sweeps finished native answers for `connect` (#1677), `invite` and `pair` (#1679), `export` and `import` (#1676), `board-audit` (#1699), `doctor` (#1704), `conductor-watch` (#1723), `expose` (#1636, #1725), `test-login` (#1727), `maintainer` (#1730) and `console` (#1736). `tunnel` and `move` are the two remaining dispatcher deferrals. Some tunnel arguments and profile operations still fall through. Move falls through when its native handlers decline the command line. The rows below own that work. Real Console launch on macOS is unverified. |
-| **Tunnel lifecycle and update** | `rust/shim/src/cli/tunnel/`, `cli/update/clients/` and `cli/update/tunnel_guard.rs` | Native setup saves and resumes prepared profiles and imports the first private key. `tunnel run` supervises a foreground launch, and `tunnel stop` can stop that native launch. `tunnel update` leaves running or unconfirmed tunnels in place. The client switch refuses a host with a registered Python tunnel autostart. Finish native key renewal, verification, background start, service registration, refresh, interrupted refresh, restart and the next normal operation. Keep keys private, refuse ambiguous authority, and retain a running tunnel when refresh fails. |
+| **Tunnel lifecycle and update** | `rust/shim/src/cli/tunnel/`, `cli/update/clients/` and `cli/update/tunnel_guard.rs` | Native setup saves and resumes prepared profiles, imports and renews the private key, and recovers an interrupted renewal. `tunnel run` supervises a foreground launch, `tunnel stop` requests its shutdown, and native verification binds receipts to that launch's identity. `tunnel update` leaves running or unconfirmed tunnels in place. The client switch refuses a host with a registered Python tunnel autostart. Finish background start, service registration, refresh, interrupted refresh, restart and the next normal operation. Keep keys private, refuse ambiguous authority, and retain a running tunnel when refresh fails. |
 | **Move completion** | Continue #1583 and its approved transaction design in `restore_cli/move_native/`; do not create a competing implementation | Finish remaining supported token/exposure/config shapes as bounded follow-ups. Build on #1583's disposable Docker runs. Prove the remaining shapes and current recovery paths on disposable hosts: abort, interrupted commit, rollback after target writes, resume and target release. At most one daemon serves the bank; uncertain target state keeps the source fenced; recovery preserves writes. Reuse `cli_move_contract` and the PR's failure-injection cases. |
 | **Schema ownership and legacy upgrade route** | `rust/daemon/src/storage/{schema.sql,schema_meta.rs,schema_plan.json,schema.rs}`, `daemon/harness/gen_schema_sql.py`, `shim/src/cli/update/{engine,release}.rs` | The Rust daemon owns the base DDL in `schema.sql` and the ordered startup plan, version and embedding dimension in `schema_plan.json`. The existing schema check validates those inputs and the derived `schema_meta.rs`. Checkout update still needs to read the native schema version. Preserve startup transaction/order, newer-schema and dimension refusals. Run schema-generation/guard/startup tests and checkout-update cases. |
 | **Console output relocation** | Readers include `frontend/vite.config.ts`, `frontend/scripts/check-dist.mjs`, `ops/Dockerfile.daemon-rust` (its `COPY` of the output, pinned by `rust/daemon/test_container.py`), `daemon/container_inputs.py`, `container_probe.py`, `daemon/harness/run.py` (the replays' static directory), the tests in `rust/daemon/src/static_files.rs`, the freeze exemption in `rust/ci/python_freeze.py`, `.gitattributes` and the committed-build check in `ci.yml` | Move the built output and every active reader together. Verify a clean frontend build, static route/cache/path tests and the Console served from the packaged image. Preserve fonts/licenses/vendor files. Coordinate a changed frozen-package output path with freeze enforcement; do not quietly broaden the exception. |
@@ -119,16 +119,16 @@ review rounds or new CI jobs.
 
 ### Two release dependencies that are easy to miss
 
-**The legacy-bank import leg currently selects the target version's Python
-image.** In `rust/shim/src/cli/update/release.rs`, the pending-CMS/schema branch
-calls `deploy_release` with the engine temporarily set to Python and the same
-target version before the Rust leg. Both legs use the selected version.
-CUTOVER documents stepping through 0.23.1. Stopping Python image publication
-without changing that path breaks an upgrade past the final Python image. Implement
-the documented intermediate-release route, or refuse before mutation with a
-working explicit route. Prove old schema, pending counters, failed import and
-already-migrated banks on disposable copies. The native updater need not
-implement Chroma or `weights.pt` imports itself.
+**Legacy banks need the archived 0.23.1 image.** The native release updater
+checks the bank and the selected Rust image before it replaces the daemon.
+When a bank needs an import, the updater uses the target's verified Compose
+bundle to run the archived 0.23.1 Python image by digest. It verifies the
+schema, counters and any Chroma import before switching to the selected Rust
+image. The archived image is available for Linux amd64 Docker engines.
+Keep its digest available when Python image publication ends. The original
+image tag, dump and state archive are retained separately from the Rust hop's
+rollback. Prove old schema, pending counters, failed import and already
+imported banks on disposable copies before retirement.
 
 **PyPI is still both a release index and a workflow prerequisite.** Older
 clients read its JSON endpoint, while release images and registry

@@ -538,11 +538,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLgpBUEkga2V5IGV4cGlyeTogMjAyMC0wMS0wMVQwMDowMDowMFouClJ1bnRpbWUga2V5IHJlbmV3YWwgcmVxdWlyZXMgdGhlIFB5dGhvbiBjbGllbnQuIFJlcnVuIHRoZSByZWxlYXNlIGluc3RhbGxlciB3aXRoIFBTRVVET0xJRkVfU0hJTV9FTkdJTkU9cHl0aG9uLCB0aGVuIHVzZSB0aGF0IGNsaWVudCdzIHR1bm5lbCBzZXR1cCB3aXRoIC0tcmVhZC1rZXkgYW5kIC0ta2V5LWV4cGlyZXMtYXQuCg==",
+   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLgpBUEkga2V5IGV4cGlyeTogMjAyMC0wMS0wMVQwMDowMDowMFouClJlbmV3IHByaXZhdGVseTogcHNldWRvbGlmZS1tY3AgdHVubmVsIHNldHVwIC0tcHJvZmlsZSBkb3QgLS1wcm9maWxlLWRpciAne0hPTUV9L3R1bm5lbHMnIC0tcmVhZC1rZXkgLS1rZXktZXhwaXJlcy1hdCA8SVNPIHRpbWVzdGFtcD4uCg==",
    "stderr": "",
    "window": [
-    1795098585.3277543,
-    1795098585.3315098
+    1795139501.3959975,
+    1795139501.397319
    ],
    "requests": [],
    "arm": "rust",
@@ -4117,10 +4117,10 @@
  },
  "recorded_from_candidate": {
   "status-expired-text": {
-   "commit": "744d3ad553a6108ed15514a79f9b2c7b7e48715e",
+   "commit": "bf9718e7c39bf2759d66520589c7188ec3e66c22",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "a120123c0a1db8f348859e9e774edb45ff5cc055fb77ca4aaa89597ae525b335"
+   "candidate_sha256": "feb95485908d675f2fc35acc0d5483537e3198392659360dc29e4c9d03b19812"
   },
   "status-process-record": {
    "commit": "1827ebaa0d0365d0dffc7d83300ec4815c4fdfda",

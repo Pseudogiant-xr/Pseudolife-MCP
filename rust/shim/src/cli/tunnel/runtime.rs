@@ -100,6 +100,7 @@ struct Prepared<'a> {
 fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
     let path = store::profile_path(root, name)?;
     setup::check_directory(root).map_err(|_| UNSAFE_STORE)?;
+    setup::check_pending(root, name)?;
     let record = record::path(root, name);
     // Recover interrupted files even if the saved profile or key will
     // later refuse for an unrelated reason, such as an expired key.
@@ -133,13 +134,15 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
             "the saved daemon URL needs an HTTP origin. Repoint it with tunnel setup before running",
         ));
     }
-    let key = key::Key::load(root, name)?;
+    key::Key::require_file(root, name)?;
     let locks = locks.map_or_else(|| prepare_locks(root, name), Ok)?;
+    setup::check_pending(root, name)?;
     if !store::private_read(&path, RECORD_LIMIT).is_ok_and(|current| current == bytes) {
         return Err(Fail::Tunnel(
             "the tunnel profile changed during launch. Check tunnel status before retrying",
         ));
     }
+    let key = key::Key::load(root, name)?;
     verify_credential(&profile, &key)?;
     Ok(Prepared {
         root,
@@ -150,13 +153,17 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
     })
 }
 
-fn prepare_locks(root: &Path, name: &str) -> Result<(File, File), Fail> {
+pub(super) fn prepare_locks(root: &Path, name: &str) -> Result<(File, File), Fail> {
     let locks = launch_locks(root, name)?;
     let record = record::path(root, name);
     if store::occupied(&record).map_err(|_| conflict(root, name))? {
         recover_launch(root, name)?;
     }
     Ok(locks)
+}
+
+pub(super) fn saved_key_matches(root: &Path, name: &str, candidate: &[u8]) -> bool {
+    key::Key::load(root, name).is_ok_and(|key| key.matches(candidate))
 }
 
 fn verify_credential(profile: &Profile, key: &key::Key) -> Result<(), Fail> {
@@ -199,13 +206,24 @@ fn open_lock(root: &Path, name: &str, path: &Path) -> Result<File, Fail> {
 }
 
 fn launch_locks(root: &Path, name: &str) -> Result<(File, File), Fail> {
+    let retry_pause = || std::thread::sleep(Duration::from_millis(25));
     let native = open_lock(root, name, &lock_path(root, name))?;
-    native.try_lock().map_err(|_| conflict(root, name))?;
+    try_launch_lock(&native, retry_pause).map_err(|_| conflict(root, name))?;
     // The retained Python client flocks this file on Unix and locks its
     // first byte on Windows. Rust's Windows whole-file lock overlaps it.
     let legacy = open_lock(root, name, &legacy_lock_path(root, name))?;
-    legacy.try_lock().map_err(|_| conflict(root, name))?;
+    try_launch_lock(&legacy, retry_pause).map_err(|_| conflict(root, name))?;
     Ok((native, legacy))
+}
+
+fn try_launch_lock(lock: &File, on_busy: impl FnOnce()) -> Result<(), fs::TryLockError> {
+    match lock.try_lock() {
+        Err(fs::TryLockError::WouldBlock) => {
+            on_busy();
+            lock.try_lock()
+        }
+        result => result,
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -252,8 +270,9 @@ fn recover_launch(root: &Path, name: &str) -> Result<(), Fail> {
             .is_some_and(|record| record.liveness == record::Liveness::Gone)
     {
         return Err(Fail::Detail(format!(
-            "cannot confirm the old runtime stopped. Check tunnel status before removing {}",
-            directory.display()
+            "cannot confirm the old runtime stopped. Check tunnel status before removing the launch directory {} and the process record {}",
+            directory.display(),
+            path.display()
         )));
     }
     remove_launch_files(&directory, &format!("{name}.profile.json"))?;
@@ -443,7 +462,8 @@ async fn supervise(
     let mut signals = process::Signals::new().map_err(|_| CHILD_ERROR)?;
     let id = Uuid::new_v4();
     let name = &prepared.profile.name;
-    let launch_identity = identity::compute(&prepared.profile, &prepared.key, executable)?;
+    let launch_identity =
+        identity::compute(prepared.root, &prepared.profile, &prepared.key, executable)?;
     let mut stage = Stage::new(prepared.root, name, id)?;
     let mut record = LaunchRecord {
         native_launch: id.simple().to_string(),
@@ -562,8 +582,9 @@ async fn supervise(
         && (result == Err(NOT_READY)
             || result == Err(READINESS_TIMEOUT)
             || result.as_ref().is_ok_and(|(_, code)| *code != 0))
-        && let Some(log) = diagnostics::save(prepared.root, name, notes)
+        && let Some((log, reason)) = diagnostics::save(prepared.root, name, notes)
     {
+        let reason = reason.map_or_else(String::new, |reason| format!(" {reason}"));
         return match result {
             Err(error) => {
                 let cause = if error == READINESS_TIMEOUT {
@@ -572,12 +593,15 @@ async fn supervise(
                     "the tunnel did not become ready"
                 };
                 Err(Fail::Detail(format!(
-                    "{cause}. Check the runtime diagnostics at {}",
+                    "{cause}.{reason} Check the runtime diagnostics at {}",
                     log.display()
                 )))
             }
             Ok((output, code)) => Ok((
-                format!("{output}Runtime diagnostics: {}\n", log.display()),
+                format!(
+                    "{output}Runtime diagnostics:{reason} See {}\n",
+                    log.display()
+                ),
                 code,
             )),
         };

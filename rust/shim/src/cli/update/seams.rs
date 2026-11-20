@@ -75,6 +75,21 @@ pub(crate) fn run_cli(
     timeout: u64,
     stream: bool,
 ) -> (i32, String) {
+    run_cli_output(argv, env, timeout, stream, false)
+}
+
+/// Preserve interactive stdout while keeping only a bounded stderr diagnostic.
+pub(super) fn run_cli_stderr(argv: &[String], timeout: u64, stream_stdout: bool) -> (i32, String) {
+    run_cli_output(argv, None, timeout, stream_stdout, true)
+}
+
+fn run_cli_output(
+    argv: &[String],
+    env: Option<&Environment>,
+    timeout: u64,
+    stream: bool,
+    stderr_tail: bool,
+) -> (i32, String) {
     #[cfg(unix)]
     let _signals = match super::signals::Guard::new() {
         Ok(guard) => guard,
@@ -120,7 +135,15 @@ pub(crate) fn run_cli(
             }
             #[cfg(windows)]
             command.envs(&powershell_environment);
-            if stream {
+            if stderr_tail {
+                command
+                    .stdout(if stream {
+                        Stdio::inherit()
+                    } else {
+                        Stdio::null()
+                    })
+                    .stderr(Stdio::piped());
+            } else if stream {
                 command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
             } else {
                 command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -170,7 +193,21 @@ pub(crate) fn run_cli(
                 },
                 async {
                     if let Some(pipe) = &mut stderr {
-                        pipe.read_to_end(&mut err).await?;
+                        if stderr_tail {
+                            const LIMIT: usize = 2048;
+                            let mut chunk = [0; 1024];
+                            loop {
+                                let count = pipe.read(&mut chunk).await?;
+                                if count == 0 {
+                                    break;
+                                }
+                                let excess = (err.len() + count).saturating_sub(LIMIT);
+                                err.drain(..excess);
+                                err.extend_from_slice(&chunk[..count]);
+                            }
+                        } else {
+                            pipe.read_to_end(&mut err).await?;
+                        }
                     }
                     Ok::<_, std::io::Error>(())
                 }
@@ -198,7 +235,7 @@ pub(crate) fn run_cli(
                     return (1, "cannot release completed command helpers".into());
                 }
                 let code = status.code().unwrap_or(1);
-                let bytes = if code != 0 && out.is_empty() {
+                let bytes = if stderr_tail || (code != 0 && out.is_empty()) {
                     &err
                 } else {
                     &out
