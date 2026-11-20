@@ -17,7 +17,7 @@
     "docs/dev/merge-batches.md": "35aad388e6d1c5c1a58594f00d0691902fc7010567bddbba78594f31501dddb9",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "02104e3aaac74c9b578e007f6b37b16e59a163d4ff9adafd920844e805bec3f7",
-    "docs/dev/python-retirement.md": "77da90d715ddf3cbb43d815fa38d462fbb207b4e2c1c4d2a5ee59ac48e347ab5",
+    "docs/dev/python-retirement.md": "bb14bb5b2f9e938ae7f0c422c914930eeaff71d70ac822d88f43e69a3c1fb1e4",
     "docs/dev/release-assets.md": "dca16d906c41015e08b4863b0aedfd9e31c2f37e854b6fa2ac1a5c73be15e767",
     "docs/dev/run-rust-beside-python.md": "d469218a5dde03c87c769867bfcdb198193f3e1a27761c9ae1cc200491d8739e",
     "docs/dev/worktree-retention.md": "21ba0e48574bb6be98d456c9725a6d3746a99891d667cef8d8ed76c984819f8e",
@@ -35,7 +35,7 @@
     "docs/guide/remote-bank.md": "662191157bc916f26dfeaa738aaf973896b448579060f10a95febd3ca71d05e2",
     "docs/guide/retrieval.md": "9d5825f277e8f7facf4f2387e24f263d60692f2b9d56c40c04405128ddfcb8ba",
     "docs/guide/security-posture.md": "5996f4cef7908476b81cf9957a95bc762a1d02bcfafa24f66ba691a22d1f0505",
-    "docs/guide/tunnels.md": "faf8a82c4c2b88928e874ad5774a48b358d2bc35f2bed1da51b694a5bda96736",
+    "docs/guide/tunnels.md": "a956848202c835dd8b7129268cb140336cb7c7d5a974d599311e0d9ab6d62f3f",
     "docs/i18n/README.es.md": "469eef4e5dbd6109eff09a9bad6d7e17e1f7001039d467295dd50ad98f6ae59f",
     "docs/i18n/README.ja.md": "110b86c9e0351f014391cd4dc03246494c42264a836b730754af2e308258fff1",
     "docs/i18n/README.ko.md": "287f61ef5828d1a065ddaf8a176d973df343fbd796a3f80bd03d66e6d162fb01",
@@ -579,17 +579,17 @@
     "rust/shim/src/cli/tunnel/bridge.rs": "adcb0a4d97449d09b3c92577eabca795b3dc030164997ee820d10295bd7d0296",
     "rust/shim/src/cli/tunnel/doctor_section.rs": "fcbe0884033a67447c86036776ac9195a030b20b42ad2791a6ad74d92440342a",
     "rust/shim/src/cli/tunnel/dpapi.rs": "5c643af4ba0b6225c2301822852b3f6fde9cf86f36a2d256ea05702b7f4842b0",
-    "rust/shim/src/cli/tunnel/mod.rs": "6795e0af02af346a9f26fe68e7b06b4cdede7bd692e9619224a4ef5f805aca94",
+    "rust/shim/src/cli/tunnel/mod.rs": "74addd84291753a98416442cbce5613c84666695cbf3608be7ed07694b6db7e6",
     "rust/shim/src/cli/tunnel/record.rs": "a6b5433cbbe967f595822ef79e26d7d56074ea04ff3c0efd5fe920e051bf2b8d",
-    "rust/shim/src/cli/tunnel/runtime.rs": "b272f922eb50339c86661063f988420d513d02c6bbdccf83c292e2b0a91fe008",
+    "rust/shim/src/cli/tunnel/runtime.rs": "e20c82e0b55ccfd41f70f9e2681872aa5b6cadd304b6f728b5d0eea8c052058d",
     "rust/shim/src/cli/tunnel/runtime/diagnostics.rs": "bab29aed4daff5b3f880fd03ee0c1f0b47dd046b1f4938931884f0c3bdd7346f",
     "rust/shim/src/cli/tunnel/runtime/identity.rs": "a0300447a04d7182090bfaabd2bc19147bbc560abfac432a8a1c07af9f27ee24",
     "rust/shim/src/cli/tunnel/runtime/key.rs": "30d5619ce2c106c2e1d8d99ace529ef1e84ea97c5ec0f0c35fe3811f3801b063",
     "rust/shim/src/cli/tunnel/runtime/process.rs": "5711345055037bc48909fc601970399c29b19bd1bf187e97ca3ebf7c017adbbe",
-    "rust/shim/src/cli/tunnel/runtime/tests.rs": "bc2b3bd531331ae94a96f6b9c2650ae3934abb9a1fd04ba481c179edd4f46f5a",
-    "rust/shim/src/cli/tunnel/setup.rs": "2f61a0c33a5db92e6ee03ad5ed64fb052e5e2dc39eeb50ce2678a553301c1a8f",
-    "rust/shim/src/cli/tunnel/setup/renewal.rs": "3b1047c84a78d120b1a78d3c6e0152d4a83cf735404b51ebdc3d02384725881a",
-    "rust/shim/src/cli/tunnel/setup/resume.rs": "df29c8a5f26531a2b3c7d57537047f658ae364845445b18711465b13a9d50ad2",
+    "rust/shim/src/cli/tunnel/runtime/tests.rs": "9c2e670d302204941bc5cd2318129f08c3549571e5b2aaff1482743cbaf1b6c3",
+    "rust/shim/src/cli/tunnel/setup.rs": "d5da9e47b3921fbb19daf9c52a307985d6e7f9f287894e85c596c3d34ba4afd6",
+    "rust/shim/src/cli/tunnel/setup/renewal.rs": "a363a716d0df412bfadf98513b8b4aa5b904d2d855946ad4b3b01695c10f67b9",
+    "rust/shim/src/cli/tunnel/setup/resume.rs": "fe169d306e815e8029d06a7459c0bb7b61db4a77b6ac0a2e2702aa126ba037dd",
     "rust/shim/src/cli/tunnel/store.rs": "3d082c9a744ce286f148d3fa93c4d3a884e96443f97e2fb78006d4c2ee1df97b",
     "rust/shim/src/cli/tunnel/syntax.rs": "bafbf6307fdd29df5be69c3c4f42296284480e3cef37f92147b36101c38353de",
     "rust/shim/src/cli/tunnel/vendor.rs": "05a1901a79a6191dc43e73522032839187c5c69907bcd42cdb21ef630a663661",
@@ -3244,19 +3244,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/setup.rs:44",
-          "shape": {
-            "argv_source": "doctor , then retry setup\";",
-            "channel": "argv",
-            "complete": false,
-            "expression": ", then retry setup\";",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "rust/shim/src/cli/update/clients/codex.rs:786",
           "shape": {
             "argv_source": "doctor reports the manual hook bundle present.\".into();",
@@ -3499,7 +3486,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:65",
+          "location": "docs/guide/tunnels.md:71",
           "shape": {
             "argv_source": "doctor",
             "channel": "argv",
@@ -9059,7 +9046,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:102",
+          "location": "docs/guide/tunnels.md:108",
           "shape": {
             "argv_source": "tunnel setup --tunnel-id <tunnel_id>",
             "channel": "argv",
@@ -9099,7 +9086,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:90",
+          "location": "docs/guide/tunnels.md:96",
           "shape": {
             "argv_source": "tunnel setup --daemon-url http://127.0.0.1:8765 --token-file <private-token-file> --accept-access",
             "channel": "argv",
@@ -9421,22 +9408,16 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:570",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:401",
           "shape": {
-            "argv_source": "tunnel setup --profile {name}{directory} --read-key --key-expires-at <ISO timestamp>.\\n\"",
+            "argv_source": "tunnel setup --profile {name}\");",
             "channel": "argv",
             "complete": false,
-            "expression": "setup --profile {name}{directory} --read-key --key-expires-at <ISO timestamp>.\\n\"",
+            "expression": "setup --profile {name}\");",
             "omitted_optional": null,
             "parameters": {
-              "--key-expires-at": {
-                "expression": "<ISO"
-              },
               "--profile": {
-                "expression": "{name}{directory}"
-              },
-              "--read-key": {
-                "expression": "value not established"
+                "expression": "{name}\");"
               }
             }
           }
@@ -9444,18 +9425,27 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/setup.rs:156",
+          "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:251",
           "shape": {
-            "argv_source": "tunnel setup --profile {name}{directory} {flag}\\n\"",
+            "argv_source": "tunnel setup --restore-key\")",
             "channel": "argv",
             "complete": false,
-            "expression": "setup --profile {name}{directory} {flag}\\n\"",
+            "expression": "setup --restore-key\")",
             "omitted_optional": null,
-            "parameters": {
-              "--profile": {
-                "expression": "{name}{directory}"
-              }
-            }
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/tunnel/setup/renewal.rs:279",
+          "shape": {
+            "argv_source": "tunnel setup --discard-previous-key` for the same profile and directory\",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "setup --discard-previous-key` for the same profile and directory\",",
+            "omitted_optional": null,
+            "parameters": {}
           }
         },
         {
@@ -9520,7 +9510,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:107",
+          "location": "docs/guide/tunnels.md:113",
           "shape": {
             "argv_source": "tunnel setup --read-key",
             "channel": "argv",
@@ -9535,7 +9525,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:113",
+          "location": "docs/guide/tunnels.md:119",
           "shape": {
             "argv_source": "tunnel start",
             "channel": "argv",
@@ -9546,7 +9536,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:128",
+          "location": "docs/guide/tunnels.md:134",
           "shape": {
             "argv_source": "tunnel verify",
             "channel": "argv",
@@ -9557,7 +9547,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:136",
+          "location": "docs/guide/tunnels.md:142",
           "shape": {
             "argv_source": "tunnel status",
             "channel": "argv",
@@ -9568,7 +9558,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:137",
+          "location": "docs/guide/tunnels.md:143",
           "shape": {
             "argv_source": "tunnel doctor --json",
             "channel": "argv",
@@ -9583,7 +9573,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:165",
+          "location": "docs/guide/tunnels.md:171",
           "shape": {
             "argv_source": "tunnel update",
             "channel": "argv",
@@ -9594,7 +9584,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:172",
+          "location": "docs/guide/tunnels.md:178",
           "shape": {
             "argv_source": "tunnel update",
             "channel": "argv",
@@ -9605,7 +9595,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:239",
+          "location": "docs/guide/tunnels.md:245",
           "shape": {
             "argv_source": "tunnel service remove",
             "channel": "argv",
@@ -9638,7 +9628,22 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:80",
+          "location": "docs/guide/tunnels.md:44",
+          "shape": {
+            "argv_source": "tunnel setup --restore-key",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "--restore-key": {
+                "expression": "value not established"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/tunnels.md:86",
           "shape": {
             "argv_source": "tunnel setup",
             "channel": "argv",
@@ -11921,7 +11926,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:159",
+          "location": "docs/guide/tunnels.md:165",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -26342,7 +26347,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/tunnels.md:130",
+          "location": "docs/guide/tunnels.md:136",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -41050,7 +41055,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:848",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:896",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50245,7 +50250,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:824",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:872",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -54184,7 +54189,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:823",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:871",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -69436,7 +69441,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:130",
+          "location": "docs/guide/tunnels.md:136",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -85779,7 +85784,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:332",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:432",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE",
       "shape": {
         "channel": "environment",
@@ -85793,7 +85798,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:43",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:44",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG",
       "shape": {
         "channel": "environment",
@@ -85807,7 +85812,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:471",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:571",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE",
       "shape": {
         "channel": "environment",
@@ -85821,7 +85826,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:71",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:72",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE",
       "shape": {
         "channel": "environment",
@@ -85835,7 +85840,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:80",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:81",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE",
       "shape": {
         "channel": "environment",
@@ -87304,6 +87309,20 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:156",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
       "location": "rust/shim/src/cli/update/shadow.rs:826",
       "method": "GET",
       "name": "/health",
@@ -88482,7 +88501,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/tunnels.md:285",
+      "location": "docs/guide/tunnels.md:291",
       "method": null,
       "name": "/api/docs/guides/secure-mcp-tunnels",
       "shape": {
@@ -91730,20 +91749,6 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/tunnel/setup.rs:211",
-      "method": null,
-      "name": "/mcp",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
       "location": "rust/shim/src/cli/update/mod.rs:225",
       "method": null,
       "name": "/health",
@@ -93676,7 +93681,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/tunnels.md:235",
+      "location": "docs/guide/tunnels.md:241",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -93692,7 +93697,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/tunnels.md:238",
+      "location": "docs/guide/tunnels.md:244",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -93708,7 +93713,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/tunnels.md:68",
+      "location": "docs/guide/tunnels.md:74",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -103032,19 +103037,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/tunnels.md:102",
+      "location": "docs/guide/tunnels.md:108",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/tunnels.md:130",
+      "location": "docs/guide/tunnels.md:136",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:agents"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/tunnels.md:285",
+      "location": "docs/guide/tunnels.md:291",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/docs/guides/secure-mcp-tunnels"
     },
@@ -103056,7 +103061,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/tunnels.md:90",
+      "location": "docs/guide/tunnels.md:96",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
@@ -126585,75 +126590,75 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:570",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:401",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:823",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:871",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:824",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:872",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:848",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:896",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:332",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:156",
       "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
+      "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:43",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:471",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:71",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:80",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/setup.rs:156",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:251",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/setup.rs:211",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:432",
       "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/mcp"
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/setup.rs:44",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:44",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:571",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:72",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:81",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/setup/renewal.rs:279",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:doctor"
+      "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
