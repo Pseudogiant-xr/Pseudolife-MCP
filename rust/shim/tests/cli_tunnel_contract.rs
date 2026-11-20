@@ -420,6 +420,194 @@ fn setup_repoints_a_moved_credential_after_explicit_consent() {
     ambient.assert_untouched();
 }
 
+fn seed_profile_for_renewal(home: &Home, daemon_url: &str) -> bool {
+    seed_setup_profile(
+        home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon_url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+            "runtime_key_expires_at": "2020-01-01T00:00:00Z",
+        }),
+    );
+    let source = home.path("old-key-fixture");
+    pseudolife_stdio::board::state::atomic_create(&source, b"fixture-old-key").unwrap();
+    let output = run(
+        home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-file",
+            source.to_str().unwrap(),
+        ],
+        &[],
+    );
+    #[cfg(windows)]
+    if refused_dpapi_in_ssh_logon(&output) {
+        eprintln!("DPAPI renewal is exercised in hosted Windows");
+        return false;
+    }
+    assert_eq!(output.status.code(), Some(0));
+    true
+}
+
+#[test]
+fn setup_renews_a_stopped_profiles_private_key_and_expiry() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    if !seed_profile_for_renewal(&home, &daemon.url) {
+        return;
+    }
+    let key = home.path("tunnels/dot.key");
+    let replacement = home.path("replacement-key-fixture");
+    pseudolife_stdio::board::state::atomic_create(&replacement, b"fixture-renewed-key").unwrap();
+    let directory = home.dir();
+    let expiry = "2099-12-01T00:00:00Z";
+    let base = [
+        "setup",
+        "--profile-dir",
+        &directory,
+        "--key-file",
+        replacement.to_str().unwrap(),
+    ];
+    let args = [&base[..], &["--key-expires-at", expiry]].concat();
+    let old = std::fs::read(&key).unwrap();
+    let output = run(&home, &args, &[]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Runtime key renewed"));
+    let saved = std::fs::read(&key).unwrap();
+    assert!(saved != old);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert!(saved == b"PLAIN\0fixture-renewed-key");
+        assert_eq!(key.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    #[cfg(windows)]
+    {
+        assert!(saved.starts_with(b"DPAPI\0"));
+        assert!(
+            !saved
+                .windows(b"fixture-renewed-key".len())
+                .any(|part| part == b"fixture-renewed-key")
+        );
+    }
+    let repeated = run(&home, &args, &[]);
+    assert_eq!(repeated.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&repeated.stdout).contains("already configured"));
+    assert!(std::fs::read(&key).unwrap() == saved);
+    let read_profile = || {
+        serde_json::from_slice::<serde_json::Value>(
+            &std::fs::read(home.path("tunnels/dot.profile.json")).unwrap(),
+        )
+        .unwrap()
+    };
+    let profile = read_profile();
+    assert_eq!(profile["runtime_key_expires_at"], expiry);
+    assert_eq!(profile["tunnel_id"], "tunnel_abcd");
+    let output = run(&home, &base, &[]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(read_profile()["runtime_key_expires_at"].is_null());
+    assert!(!home.path("tunnels/dot.key-renewal").exists());
+}
+
+#[test]
+fn a_rejected_renewal_preserves_both_saved_files() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    if !seed_profile_for_renewal(&home, &daemon.url) {
+        return;
+    }
+    let profile = home.path("tunnels/dot.profile.json");
+    let original = std::fs::read(&profile).unwrap();
+    let saved = std::fs::read(home.path("tunnels/dot.key")).unwrap();
+    let output = run(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-file",
+            home.path("token").to_str().unwrap(),
+            "--key-expires-at",
+            "2099-12-01T00:00:00Z",
+        ],
+        &[],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("runtime key matches the daemon credential"));
+    assert!(!stderr.contains(SETUP_BEARER));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(SETUP_BEARER));
+    assert!(std::fs::read(home.path("tunnels/dot.key")).unwrap() == saved);
+    assert!(std::fs::read(profile).unwrap() == original);
+}
+
+#[test]
+fn renewal_refuses_a_held_launch_lock_before_publishing() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+        }),
+    );
+    let root = home.path("tunnels");
+    let state = pseudolife_stdio::board::state::atomic_create;
+    let key = root.join("dot.key");
+    let replacement = home.path("new-key-fixture");
+    state(&key, b"opaque prior fixture").unwrap();
+    state(&replacement, b"replacement fixture").unwrap();
+    let lock = pseudolife_stdio::board::state::create(&root.join("dot.native-run.lock"))
+        .unwrap()
+        .file;
+    lock.try_lock().unwrap();
+    let output = run(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-file",
+            replacement.to_str().unwrap(),
+        ],
+        &[],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("launch ownership"));
+    assert!(std::fs::read(key).unwrap() == b"opaque prior fixture");
+    assert!(!root.join("dot.key-renewal").exists());
+}
+
+#[test]
+fn pending_renewal_refuses_reads_and_names_the_recovery_command() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+        }),
+    );
+    let marker = home.path("tunnels/dot.key-renewal");
+    pseudolife_stdio::board::state::atomic_create(&marker, b"invalid journal fixture").unwrap();
+    for mode in ["status", "run", "verify"] {
+        let output = run(&home, &[mode, "--profile-dir", &home.dir()], &[]);
+        assert_eq!(output.status.code(), Some(2));
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("dot.key-renewal") && error.contains("Retry tunnel setup"));
+        assert!(output.stdout.is_empty());
+    }
+    let output = run(&home, &["setup", "--profile-dir", &home.dir()], &[]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot recover runtime key renewal"));
+    assert!(marker.exists());
+    daemon.assert_untouched();
+}
+
 #[test]
 fn setup_points_first_key_with_expiry_to_two_native_steps() {
     let home = setup_home();
@@ -457,7 +645,7 @@ fn setup_points_first_key_with_expiry_to_two_native_steps() {
 }
 
 #[test]
-fn setup_refuses_native_renewal_and_status_points_to_python() {
+fn status_points_to_native_renewal_and_expiry_alone_refuses() {
     let home = setup_home();
     let daemon = Listener::new();
     let root = home.path(".pseudolife-mcp/tunnel");
@@ -481,20 +669,13 @@ fn setup_refuses_native_renewal_and_status_points_to_python() {
     assert_eq!(status.status.code(), Some(0));
     let output = String::from_utf8_lossy(&status.stdout);
     let expires = "2099-12-01T00:00:00Z";
-    let guidance = "Runtime key renewal requires the Python client. Rerun the release installer with PSEUDOLIFE_SHIM_ENGINE=python, then use that client's tunnel setup with --read-key and --key-expires-at.";
-    for key_args in [&["--read-key"][..], &["--key-file", "unused-fixture"]] {
-        let mut args = vec!["setup", "--profile", "dot", "--key-expires-at", expires];
-        args.extend_from_slice(key_args);
-        assert_refused(&home, &args, &[], &format!("{guidance}\n"));
-    }
-    assert!(output.lines().any(|line| line == guidance));
-    for args in [
-        &["setup", "--key-expires-at", expires][..],
-        &["setup", "--read-key"],
-        &["setup", "--key-file", "unused-fixture"],
-    ] {
-        assert_refused(&home, args, &[], &format!("{guidance}\n"));
-    }
+    assert!(output.lines().any(|line| line == "Renew privately: pseudolife-mcp tunnel setup --profile dot --read-key --key-expires-at <ISO timestamp>."));
+    assert_refused(
+        &home,
+        &["setup", "--key-expires-at", expires],
+        &[],
+        "renew the runtime key with tunnel setup --read-key or --key-file and an optional new --key-expires-at\n",
+    );
     let before = tree(&home.0);
     let same_expiry = run(
         &home,
@@ -727,14 +908,9 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
     assert_eq!(std::fs::read(&profile).unwrap(), original);
     assert!(!String::from_utf8_lossy(&output.stdout).contains("fixture-runtime-key"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fixture-runtime-key"));
-    let request_count = daemon.records.lock().unwrap().len();
     let repeat = setup.output().unwrap();
-    assert_eq!(repeat.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&repeat.stderr)
-            .contains("Runtime key renewal requires the Python client.")
-    );
-    assert_eq!(daemon.records.lock().unwrap().len(), request_count);
+    assert_eq!(repeat.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&repeat.stdout).contains("already configured"));
     assert!(std::fs::read(&key).unwrap() == stored);
     ambient.assert_untouched();
 }

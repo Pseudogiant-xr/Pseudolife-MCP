@@ -32,6 +32,8 @@ use crate::{
 
 mod resume;
 pub(super) use resume::resume;
+mod renewal;
+pub(super) use renewal::{check_pending, recover_pending};
 
 const ACCESS: &str = "This tunnel makes the daemon available to the selected OpenAI organization and associated ChatGPT workspace. The host and daemon must stay running for tunnel access.";
 const FULL_CATALOG: &str = "The full catalog also expands tool discovery for the daemon principal's other sessions. Authentication permissions stay the same.";
@@ -440,13 +442,19 @@ fn stage_and_publish(
             .map_err(|_| Fail::Tunnel(WRITE))?;
         drop(opened);
         publish(&stage)?;
-        #[cfg(unix)]
-        fs::File::open(parent)
-            .and_then(|dir| dir.sync_all())
-            .map_err(|_| Fail::Tunnel(SYNC))?;
-        Ok(())
+        sync_directory(parent)
     })();
     finish_publication(result, &stage, || fs::remove_file(&stage))
+}
+
+fn sync_directory(path: &Path) -> Result<(), Fail> {
+    #[cfg(unix)]
+    fs::File::open(path)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|_| Fail::Tunnel(SYNC))?;
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 fn finish_publication(

@@ -7,22 +7,46 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::{state, store};
 
-const KNOWN: [(&[u8], &str); 4] = [
+const KNOWN: &[(&[&[u8]], &str)] = &[
     (
-        b"control plane API key is required",
+        &[b"control plane API key is required"],
         "The vendor did not receive an API key.",
     ),
     (
-        b"control plane API key is malformed",
+        &[b"control plane API key is malformed"],
         "The vendor rejected the runtime key format.",
     ),
     (
-        b"read control-plane api key file",
+        &[b"read control-plane api key file"],
         "The vendor could not read the runtime-key source.",
     ),
     (
-        b"read config file",
+        &[b"read config file"],
         "The vendor could not read its launch configuration.",
+    ),
+    (
+        &[
+            b"controlplane client: unexpected status 401",
+            b"controlplane client: unexpected status 403",
+            b"controlplane client: unexpected metadata status 401",
+            b"controlplane client: unexpected metadata status 403",
+        ],
+        "The tunnel control plane refused authentication or access.",
+    ),
+    (
+        &[
+            b"controlplane client: unexpected status 404",
+            b"controlplane client: unexpected metadata status 404",
+        ],
+        "The tunnel control plane could not find the saved tunnel.",
+    ),
+    (
+        &[
+            b"controlplane client: poll transport failed (network_error)",
+            b"controlplane client: poll transport failed (timeout)",
+            b"controlplane client: fetch tunnel metadata:",
+        ],
+        "The tunnel client could not reach the control plane.",
     ),
 ];
 
@@ -36,11 +60,12 @@ pub(super) async fn drain(mut input: impl AsyncRead + Unpin) -> u8 {
         }
         let end = overlap + length;
         notes |= 1;
-        for (index, (needle, _)) in KNOWN.iter().enumerate() {
-            if buffer[..end]
-                .windows(needle.len())
-                .any(|match_| match_ == *needle)
-            {
+        for (index, (needles, _)) in KNOWN.iter().enumerate() {
+            if needles.iter().any(|needle| {
+                buffer[..end]
+                    .windows(needle.len())
+                    .any(|match_| match_ == *needle)
+            }) {
                 notes |= 2 << index;
             }
         }
@@ -53,11 +78,13 @@ pub(super) async fn drain(mut input: impl AsyncRead + Unpin) -> u8 {
     notes
 }
 
-pub(super) fn save(root: &Path, name: &str, notes: u8) -> Option<PathBuf> {
+pub(super) fn save(root: &Path, name: &str, notes: u8) -> Option<(PathBuf, Option<&'static str>)> {
     let path = store::checked_path(&root.join(format!("{name}.native-runtime.log"))).ok()?;
     let mut summary = String::new();
+    let mut reason = None;
     for (index, (_, message)) in KNOWN.iter().enumerate() {
         if notes & (2 << index) != 0 {
+            reason.get_or_insert(*message);
             summary.push_str(message);
             summary.push('\n');
         }
@@ -66,5 +93,5 @@ pub(super) fn save(root: &Path, name: &str, notes: u8) -> Option<PathBuf> {
         summary.push_str("The vendor reported a diagnostic outside the recognized categories.\n");
     }
     state::atomic_write(&path, summary.as_bytes(), None).ok()?;
-    Some(path)
+    Some((path, reason))
 }

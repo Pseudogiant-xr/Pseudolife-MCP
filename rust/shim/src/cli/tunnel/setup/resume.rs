@@ -11,15 +11,15 @@ use serde_json::Value;
 
 use super::{
     PROFILE_LIMIT, check_directory, consent_required, disclose, fill_profile_defaults,
-    profile_bytes, publish_new, saved_message, stage_and_publish, verify_connection,
+    profile_bytes, publish_new, renewal, saved_message, stage_and_publish, verify_connection,
 };
 use crate::{
     board::state,
     cli::tunnel::{
         Fail, KEY_RENEWAL, Options, Output, Setup, absolute_token, bridge::status_command, record,
-        store,
+        runtime, store,
     },
-    credentials::{MAX_TOKEN_BYTES, decode_token},
+    credentials::{CredentialProvider, MAX_TOKEN_BYTES, decode_token},
 };
 
 const CHANGED: &str =
@@ -40,9 +40,6 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     );
 
     if setup.has_key_input() {
-        if store::occupied(&store::key_path(root, &profile.name))? {
-            return Err(Fail::Tunnel(KEY_RENEWAL));
-        }
         if profile.state != "ready" {
             return Err(if profile.tunnel_id.is_none() {
                 Fail::Tunnel(
@@ -53,7 +50,47 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             });
         }
         require_no_autostart(&saved)?;
-        require_inactive(root, &profile.name)?;
+        let key_path = store::key_path(root, &profile.name);
+        let old_key = if store::occupied(&key_path)? {
+            let record_path = record::path(root, &profile.name);
+            if store::occupied(&record_path)? {
+                let table = record::table();
+                if !record::read(record_path.clone(), table.as_deref()).is_some_and(|record| {
+                    record.native && record.liveness == record::Liveness::Gone
+                }) {
+                    return Err(Fail::Detail(format!(
+                        "cannot renew the key while a launch may own {}. Stop the tunnel before retrying setup",
+                        record_path.display()
+                    )));
+                }
+            }
+            Some(KeyBytes(store::private_read(
+                &key_path,
+                renewal::KEY_LIMIT,
+            )?))
+        } else {
+            require_inactive(root, &profile.name)?;
+            None
+        };
+        let replacement_profile = if old_key.is_some() {
+            saved.insert(
+                "runtime_key_expires_at".into(),
+                Value::from(setup.key_expires_at.clone()),
+            );
+            let updated = store::validate(&saved)?;
+            if updated
+                .expires_at
+                .as_ref()
+                .is_some_and(|(_, expires)| *expires <= chrono::Utc::now())
+            {
+                return Err(Fail::Tunnel(
+                    "supply a future --key-expires-at value for the replacement runtime key",
+                ));
+            }
+            Some(profile_bytes(&saved)?)
+        } else {
+            None
+        };
         let key = read_key(options)?;
         let daemon = verify_connection(&profile)?;
         if daemon
@@ -64,8 +101,46 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
                 "the runtime key matches the daemon credential; supply the separate tunnel runtime key",
             ));
         }
+        if let (Some(old_key), Some(replacement_profile)) = (old_key, replacement_profile) {
+            let _runtime = runtime::prepare_locks(root, &profile.name)?;
+            let (_lock, _) = commit_lock(root, path, &original)?;
+            if !store::private_read(&key_path, renewal::KEY_LIMIT)
+                .is_ok_and(|bytes| KeyBytes(bytes).0 == old_key.0)
+            {
+                return Err(Fail::Tunnel(CHANGED));
+            }
+            CredentialProvider::new(None, Some((&profile.token_file).into()))
+                .and_then(|provider| provider.require_current(&daemon))
+                .map_err(|_| Fail::Tunnel(CHANGED))?;
+            if profile.expires_at.as_ref().map(|(text, _)| text) == setup.key_expires_at.as_ref()
+                && runtime::saved_key_matches(root, &profile.name, &key.0)
+            {
+                return Ok((
+                    format!(
+                        "Runtime key for profile {} is already configured. Check it with `{status}`.\n",
+                        profile.name
+                    ),
+                    0,
+                ));
+            }
+            let encoded = encode_key(&key.0)?;
+            renewal::publish(
+                root,
+                &profile.name,
+                (&original, &old_key.0),
+                (&replacement_profile, &encoded.0),
+            )?;
+            return Ok((
+                format!(
+                    "Runtime key renewed for profile {}. Check it with `{status}`.\n",
+                    profile.name
+                ),
+                0,
+            ));
+        }
         let encoded = encode_key(&key.0);
         let (_lock, _) = commit_lock(root, path, &original)?;
+        renewal::check_pending(root, &profile.name)?;
         recheck_inactive(root, &profile.name, &status)?;
         let encoded = encoded?;
         publish_new(&store::key_path(root, &profile.name), |file| {
@@ -206,7 +281,11 @@ fn runtime_conflict(root: &Path, name: &str) -> Result<Option<(PathBuf, &'static
     Ok(None)
 }
 
-fn commit_lock(root: &Path, profile: &Path, expected: &[u8]) -> Result<(File, Vec<u128>), Fail> {
+pub(super) fn commit_lock(
+    root: &Path,
+    profile: &Path,
+    expected: &[u8],
+) -> Result<(File, Vec<u128>), Fail> {
     check_directory(root)?;
     let path = store::checked_path(&root.join(".tunnel-setup.lock"))?;
     // Keep a single lock file for this store. Never unlink a lock other
@@ -227,7 +306,7 @@ fn commit_lock(root: &Path, profile: &Path, expected: &[u8]) -> Result<(File, Ve
     Ok((opened.file, profile_identity))
 }
 
-struct KeyBytes(Vec<u8>);
+pub(super) struct KeyBytes(pub(super) Vec<u8>);
 
 impl Drop for KeyBytes {
     fn drop(&mut self) {

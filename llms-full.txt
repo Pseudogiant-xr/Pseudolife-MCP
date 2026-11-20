@@ -13771,8 +13771,15 @@ supervisor to stop its runtime. Pass the same `--profile` and
 `--profile-dir` in both commands if you selected a different profile or
 store. Use the same client to manage a running tunnel. The Python client's
 status can report a native launch as stopped, and Python stop leaves that
-launch running. Key renewal, background start and refresh still require
-the Python client.
+launch running. Background start and refresh still require the Python client.
+
+To renew a key with the native client, stop the tunnel, then run
+`pseudolife-mcp tunnel setup --profile dot --read-key --key-expires-at <ISO timestamp>`
+with your profile name and the new key's expiry. You can supply the replacement
+through an owner-only `--key-file`. Omit the expiry if the new key has no known
+deadline. If setup reports an interrupted renewal, rerun `tunnel setup` for
+the same profile and directory before starting the tunnel again. Check the
+saved expiry with `tunnel status`, then use `tunnel run`.
 
 The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel

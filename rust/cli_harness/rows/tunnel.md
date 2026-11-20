@@ -21,6 +21,8 @@ once, each value as the next argument and never `-`-led
   [--key-expires-at E] [--accept-access]`
 - `setup [--profile N] [--profile-dir D] (--read-key | --key-file F)`
   imports the first runtime key for a profile with a saved tunnel ID.
+- `setup [--profile N] [--profile-dir D] (--read-key | --key-file F) [--key-expires-at E]`
+  renews an existing runtime key while the tunnel is stopped.
 
 Every other shape defers: other commands (`doctor`, `run`, `start`, `stop`,
 `shim`, `service ...`), no command, `-h`/`--help`, abbreviations,
@@ -61,9 +63,10 @@ writing it or contacting the daemon. An equivalent Python-written profile
 also counts as an unchanged rerun. The response points to `tunnel status`
 for checking the saved configuration. A stopped tunnel can resume profile
 setup before its first key is imported. Changing the daemon connection or
-expanding access requires explicit consent. Key input alone and an expiry
-change alone on a keyed profile show the same Python renewal instructions
-as expired-key status. An unchanged expiry remains a no-op.
+expanding access requires explicit consent. An expired key's status points to
+native renewal. Renewal requires key input. Omitting the expiry clears the
+previous deadline, and repeating the same key and expiry leaves both files
+unchanged. An expiry-only request with a new deadline asks for key input.
 Setup requires a saved tunnel ID before first-key intake and both connection
 flags when repointing the daemon. A key or process record that appears during
 setup gets a refusal naming its path. Edits to a profile with autostart,
@@ -83,9 +86,11 @@ Save the profile settings, including any key expiry, and import the first
 runtime key in separate invocations.
 The key is read from an owner-only file or from a terminal without echo.
 Unix saves it in an owner-only file. Windows protects it with user-scoped
-DPAPI. The setup lock serializes native writes to the store. An interrupted
-write cannot publish a partial profile or key. Setup and status warn about
-unpublished stages without reading or removing them.
+DPAPI. The setup lock serializes native writes to the store. Renewal also
+holds the lifetime locks and records the replacement pair before publishing
+either file. The next setup can finish an interrupted renewal, while
+status, run and verify name the pending record and how to recover. Setup and
+status also warn about unpublished stages.
 
 Process records are read natively (`shim/src/cli/tunnel/record.rs`), and
 these cases are recorded from the candidate, not the oracle:
