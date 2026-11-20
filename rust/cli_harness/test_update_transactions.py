@@ -583,6 +583,11 @@ def host(tmp_path, failure="", mode="release"):
         def log_message(self, *args):
             pass
 
+        def do_CONNECT(self):
+            # The unknown-target test uses this local proxy for GitHub discovery.
+            (home / "release-discovery-refused").touch()
+            self.send_error(503)
+
         def do_GET(self):
             current = json.loads(state_path.read_text())
             if (self.path.endswith("SHA256SUMS") and current.get("missing_sums")) or (self.path.endswith(".tar.gz") and current.get("missing_bundle")):
@@ -609,6 +614,8 @@ def host(tmp_path, failure="", mode="release"):
                 waiting = bridge_wait or deployed and not current.get("archived_python") and current.get("wait_for_rust")
                 if bridge_wait:
                     (home / "bridge-health-requested").touch()
+                if deployed and not current.get("archived_python") and current.get("wait_for_rust"):
+                    (home / "rust-health-requested").touch()
                 body = json.dumps({"status": "starting" if waiting else "error" if deployed and failure == "health" or not deployed and failure == "stopped" else "ok",
                                    "version": "wrong" if deployed and failure == "version" else "0.23.1" if current.get("archived_python") else current.get("target_version", "0.21.1") if deployed else current.get("running_version", "0.21.0"),
                                    "schema": (59 if failure == "schema" or current.get("archived_python") else current.get("target_schema", 58)) if deployed else current.get("running_schema", 58),
@@ -1953,7 +1960,7 @@ def test_release_refuses_an_archived_waypoint_with_no_original_recovery_record(t
         assert stages(json.loads(state_path.read_text())) == []
 
 
-def test_unattended_rust_only_release_holds_and_posts_once_per_release(tmp_path):
+def test_unattended_posts_each_hold_reason_once_per_release(tmp_path):
     binary = _native_binary()
     if not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
@@ -1987,7 +1994,9 @@ def test_unattended_rust_only_release_holds_and_posts_once_per_release(tmp_path)
         for _ in range(2):
             held = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json"])
             assert held.returncode == 4, held.stdout
-        assert len(state_path.with_name("notices.jsonl").read_text().splitlines()) == 2
+        after_bridge = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+        assert after_bridge[:2] == notices and len(after_bridge) == 3
+        assert "release 0.25.0" in after_bridge[2] and "unfinished" in after_bridge[2]
         log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
         assert log.count("Original pre-import recovery instructions (saved at ") == 1
         assert "attended-fixture-pre-import" in log
@@ -2002,10 +2011,35 @@ def test_unattended_rust_only_release_holds_and_posts_once_per_release(tmp_path)
         for _ in range(2):
             held = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json"])
             assert held.returncode == 4, held.stdout
-        assert len(state_path.with_name("notices.jsonl").read_text().splitlines()) == 2
+        assert len(state_path.with_name("notices.jsonl").read_text().splitlines()) == 3
         log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
         assert log.count("Original pre-import recovery instructions (saved at ") == 2
         assert "second-attempt-pre-import" in log
+
+
+def test_unattended_posts_again_when_release_discovery_is_unavailable(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        first = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0", "--json",
+                                            "--health-retries", "1"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        env["HTTPS_PROXY"] = env["https_proxy"] = env["PSEUDOLIFE_MCP_DAEMON_URL"]
+        for _ in range(2):
+            held = run_arm(repo, env, binary, ["--unattended", "--json"])
+            assert held.returncode == 4, held.stdout + held.stderr
+            assert json.loads(held.stdout).get("target") is None
+        assert state_path.with_name("release-discovery-refused").is_file()
+        notices = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+        assert len(notices) == 2
+        assert all("unfinished" in notice and "pseudolife-mcp update --engine rust`" in notice for notice in notices)
+        state_dir = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-attended-releases")
+        assert not state_dir.exists() or not list(state_dir.iterdir())
 
 
 @pytest.mark.parametrize("manifest_denied", [False, True])
@@ -2201,7 +2235,8 @@ def test_interrupted_compose_replacement_keeps_pre_import_recovery(tmp_path, cut
         assert "backup" not in stages(json.loads(state_path.read_text()))
 
 
-def test_unattended_does_not_accept_a_matching_version_after_unverified_rust_recreate(tmp_path):
+@pytest.mark.parametrize("held_lock", [False, True], ids=["unverified-rust", "busy-update"])
+def test_unattended_does_not_accept_a_matching_version_after_unverified_rust_recreate(tmp_path, held_lock):
     binary = _native_binary()
     if not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
@@ -2212,6 +2247,23 @@ def test_unattended_does_not_accept_a_matching_version_after_unverified_rust_rec
                      no_board_peer=True, wait_for_rust=True)
         state_path.write_text(json.dumps(state))
         args = ["--tag", "0.25.0", "--json", "--health-retries", "1"]
+        if held_lock:
+            with subprocess.Popen([binary, "update", "--tag", "0.25.0", "--json", "--engine", "rust",
+                                   "--health-retries", "50", "--rollback-tag", "original-fixture"],
+                                  cwd=repo, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+                try:
+                    _await_file(state_path.with_name("rust-health-requested"), child)
+                    before = stages(json.loads(state_path.read_text()))
+                    held = run_arm(repo, env, binary, [*args, "--unattended"])
+                    assert held.returncode == 4, held.stdout + held.stderr
+                    assert "held off: another pseudolife-mcp update is running" in held.stdout
+                    assert not state_path.with_name("notices.jsonl").exists()
+                    assert stages(json.loads(state_path.read_text())) == before
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                    child.communicate(timeout=15)
+            return
         first = run_arm(repo, env, binary, [*args, "--engine", "rust", "--rollback-tag", "original-fixture"])
         assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
         original = json.loads(first.stdout)["rollback"]["before_import"]["backup"]["dump"]

@@ -259,7 +259,6 @@ fn reserve_attended_notice(update: &mut Update, path: &Path) -> bool {
 
 fn attended_hold(update: &mut Update, target: Option<&str>, reason: &str) -> u8 {
     let target = target.filter(|tag| super::plain_release(tag));
-    let id = format!("{:x}", Sha256::digest(target.unwrap_or("unknown-target")));
     let release = target.map_or_else(|| "this update".to_owned(), |tag| format!("release {tag}"));
     let command = target.map_or_else(
         || "pseudolife-mcp update --engine rust".to_owned(),
@@ -268,8 +267,17 @@ fn attended_hold(update: &mut Update, target: Option<&str>, reason: &str) -> u8 
     let (cause, recovery) = reason
         .split_once('\n')
         .map_or((reason, None), |(cause, detail)| (cause, Some(detail)));
+    let id = target.map(|tag| {
+        let hash = Sha256::new()
+            .chain_update(tag)
+            .chain_update([0])
+            .chain_update(cause);
+        format!("{:x}", hash.finalize())
+    });
     let directory = seams::data_dir().join("unattended-attended-releases");
-    let post = reserve_attended_notice(update, &directory.join(format!("{id}.notice")));
+    let post = id
+        .as_ref()
+        .is_none_or(|id| reserve_attended_notice(update, &directory.join(format!("{id}.notice"))));
     let text = format!(
         "Pseudolife-MCP: {release} needs an attended update. {cause} The installed daemon stays in place. Run `{command}`.{}",
         if recovery.is_some() {
@@ -281,13 +289,14 @@ fn attended_hold(update: &mut Update, target: Option<&str>, reason: &str) -> u8 
     if post {
         update.step(&text);
     }
-    if let Some(detail) = recovery {
-        // The same release can have multiple attended attempts. Keep each
-        // new original recovery record in the log without posting again.
-        let record = format!("{:x}", Sha256::digest(detail));
-        if reserve_attended_notice(update, &directory.join(format!("{id}.{record}.recovery"))) {
-            update.step(detail);
-        }
+    // A later attempt can leave new recovery instructions for the same cause.
+    if let Some(detail) = recovery
+        && id.as_ref().is_none_or(|id| {
+            let record = format!("{:x}", Sha256::digest(detail));
+            reserve_attended_notice(update, &directory.join(format!("{id}.{record}.recovery")))
+        })
+    {
+        update.step(detail);
     }
     if post {
         notice(update, &text);
@@ -406,7 +415,13 @@ fn run_inner(
         ));
     }
     if !version_is_newer(&latest, &current) {
-        update.refuse_import_noop(false)?;
+        if let Err(error) = update.refuse_import_noop(false) {
+            if !busy(&error) {
+                return Err(error);
+            }
+            update.step(format!("held off: {error}"));
+            return Ok(4);
+        }
         update.step(format!(
             "current: {current} is the newest release; nothing to do"
         ));
