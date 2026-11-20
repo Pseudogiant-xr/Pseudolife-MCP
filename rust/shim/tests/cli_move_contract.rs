@@ -113,6 +113,51 @@ fn listing(home: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
+fn recovery_commands_validate_the_path_and_distinguish_a_missing_journal() {
+    let home = Home::new("recovery");
+    let journal = home.0.join("carry.json");
+    let recovery_error = |args: &[&str], code| {
+        let result = cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+            .args(["move-target", "recovery-commands"])
+            .args(args)
+            .current_dir(&home.0)
+            .env("HOME", &home.0)
+            .env("USERPROFILE", &home.0)
+            .env("PATH", &home.0)
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(code));
+        assert!(result.stdout.is_empty());
+        String::from_utf8(result.stderr).unwrap()
+    };
+    let usage = "usage: pseudolife-mcp move-target recovery-commands <carry.json>\n";
+    assert_eq!(recovery_error(&[], 2), usage);
+    assert_eq!(recovery_error(&["~/carry.json", "extra"], 2), usage);
+    assert_eq!(
+        recovery_error(&["carry.json"], 2),
+        "move-target: name the carry journal with an absolute path or ~/ on this host\n",
+    );
+    let missing = recovery_error(&["~/carry.json"], 4);
+    assert!(listing(&home.0).is_empty());
+    fs::write(&journal, b"invalid JSON").unwrap();
+    let invalid = recovery_error(&["~/carry.json"], 4);
+    assert_ne!(missing, invalid);
+    assert_eq!(
+        missing,
+        format!(
+            "move-target: no carry journal at {journal:?}. If this is the move's intact folder, the move never changed the environment file and there is nothing to restore there. Otherwise locate the move's carry.json.\n"
+        ),
+    );
+    assert_eq!(
+        invalid,
+        format!(
+            "move-target: cannot read or parse the target carry journal at {journal:?}. Verify the file before continuing.\n"
+        ),
+    );
+    assert_eq!(fs::read(journal).unwrap(), b"invalid JSON");
+}
+
+#[test]
 fn valid_argv_gets_the_native_answer_without_a_connection() {
     let home = Home::new("valid");
     let (socket, url) = listener();

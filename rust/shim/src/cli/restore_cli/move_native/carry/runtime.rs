@@ -72,6 +72,88 @@ fn read_journal(path: &Path) -> Result<Option<Journal>, String> {
     }
 }
 
+/// Render the target's manual commands without reading its env file or running Docker.
+pub(in crate::cli::restore_cli::move_native) fn recovery_commands(
+    path: &Path,
+) -> Result<String, String> {
+    match read_journal(path) {
+        Ok(Some(journal)) => render_recovery_commands(&journal),
+        Ok(None) => Err(format!(
+            "no carry journal at {path:?}. If this is the move's intact folder, the move never changed the environment file and there is nothing to restore there. Otherwise locate the move's carry.json."
+        )),
+        Err(_) => Err(format!(
+            "cannot read or parse the target carry journal at {path:?}. Verify the file before continuing."
+        )),
+    }
+}
+
+fn render_recovery_commands(journal: &Journal) -> Result<String, String> {
+    use crate::cli::restore_cli::bank::sh_quote;
+
+    let deployment = &journal.deployment;
+    let invalid = concat!(
+        "the carry journal's deployment could not be verified. Keep the daemon stopped and gated. ",
+        "Restore the original environment by hand using deployment.env_file, original_bytes and ",
+        "original_digest from the journal. Verify the deployment, then recreate the daemon ",
+        "stopped using its recorded deployment.args."
+    );
+    deployment
+        .check_binding(&journal.original_pins)
+        .map_err(|_| invalid)?;
+    let args: Vec<_> = deployment.args.iter().map(String::as_str).collect();
+    let [
+        "compose",
+        "--project-name",
+        project,
+        "--project-directory",
+        dir,
+        "--env-file",
+        env,
+        files @ ..,
+    ] = args.as_slice()
+    else {
+        return Err(invalid.into());
+    };
+    let absolute = |path: &str| path.starts_with('/') && TargetFiles::valid(path);
+    if *project != deployment.project
+        || *env != deployment.env_file
+        || !absolute(dir)
+        || !absolute(env)
+        || files.is_empty()
+        || !files
+            .chunks(2)
+            .all(|pair| matches!(pair, ["-f", file] if absolute(file)))
+        || journal.original_bytes > MAX_ENV as usize
+        || !crate::cli::update::plain_release(&deployment.tag)
+    {
+        return Err(invalid.into());
+    }
+    let expected = journal
+        .original_digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let checksum = format!(
+        "Verify the original prefix (expected SHA-256 {expected}):\n  head -c {} {} | sha256sum",
+        journal.original_bytes,
+        sh_quote(env),
+    );
+    if journal.restored {
+        return Ok(format!(
+            "The carry journal records that the original environment was restored. Keep the daemon stopped and gated while you verify it.\n{checksum}"
+        ));
+    }
+    let compose = args
+        .iter()
+        .map(|arg| sh_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(format!(
+        "{checksum}\nAfter restoring the original environment, check for exported overrides in the shell where you will run Compose:\n  bash -c 'compgen -e' | grep -E '^(COMPOSE_|PSEUDOLIFE_)'\nThe check should print nothing. If it lists any names, unset each listed variable in this shell and run the check again. If the check reports an error, resolve it before continuing.\nThen recreate the selected daemon stopped:\n  PSEUDOLIFE_IMAGE_TAG={} docker {compose} up --no-start --no-deps --no-build --pull never --force-recreate {DAEMON_SERVICE}",
+        sh_quote(&deployment.tag)
+    ))
+}
+
 fn digest(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
@@ -521,6 +603,98 @@ fn container_matches(container: &Value, identities: &Identities) -> bool {
 mod tests {
     use super::*;
 
+    fn manual_recovery_journal() -> Journal {
+        let deployment = Deployment {
+            args: [
+                "compose",
+                "--project-name",
+                "fixture",
+                "--project-directory",
+                "/srv/recovery",
+                "--env-file",
+                "/srv/recovery/private env",
+                "-f",
+                "/srv/recovery/base.yml",
+                "-f",
+                "/srv/recovery/overlay.yml",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            project: "fixture".into(),
+            env_file: "/srv/recovery/private env".into(),
+            tag: "0.25.0".into(),
+            image_id: "fixture-image".into(),
+            daemon_hash: "fixture-daemon-hash".into(),
+            pg_hash: "fixture-pg-hash".into(),
+        };
+        let mut pins = TargetPins {
+            project: deployment.project.clone(),
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            ..Default::default()
+        };
+        pins.deployment_digest = Some(deployment.digest(&pins).unwrap());
+        Journal {
+            deployment,
+            original_pins: pins.clone(),
+            pins,
+            running_shape: [0; 32],
+            original_bytes: 17,
+            original_digest: [0xa7; 32],
+            appended_bytes: 0,
+            appended_digest: [0; 32],
+            restored: false,
+        }
+    }
+
+    #[test]
+    fn manual_recovery_commands_render_the_hex_digest_and_ordered_deployment() {
+        let mut journal = manual_recovery_journal();
+        let lines = render_recovery_commands(&journal).unwrap();
+        assert!(lines.contains(&format!("expected SHA-256 {}", "a7".repeat(32))));
+        assert!(lines.contains("head -c 17 '/srv/recovery/private env' | sha256sum"));
+        assert!(lines.contains("PSEUDOLIFE_IMAGE_TAG=0.25.0 docker compose --project-name fixture --project-directory /srv/recovery --env-file '/srv/recovery/private env' -f /srv/recovery/base.yml -f /srv/recovery/overlay.yml up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon"));
+
+        journal.deployment.args.push("--profile".into());
+        journal.original_pins.deployment_digest =
+            Some(journal.deployment.digest(&journal.original_pins).unwrap());
+        assert!(render_recovery_commands(&journal).is_err());
+    }
+
+    #[test]
+    fn manual_recovery_for_an_unverified_deployment_names_the_manual_steps() {
+        let mut journal = manual_recovery_journal();
+        journal.deployment.args.push("--profile".into());
+        let error = render_recovery_commands(&journal).unwrap_err();
+        assert!(error.contains("stopped and gated"));
+        assert!(error.contains("deployment.env_file"));
+        assert!(error.contains("original_bytes"));
+        assert!(error.contains("original_digest"));
+        assert!(error.contains("deployment.args"));
+    }
+
+    #[test]
+    fn manual_recreation_prints_the_shell_override_check_before_the_command() {
+        let lines = render_recovery_commands(&manual_recovery_journal()).unwrap();
+        let check = lines
+            .find("  bash -c 'compgen -e' | grep -E '^(COMPOSE_|PSEUDOLIFE_)'\n")
+            .unwrap_or_else(|| panic!("{lines}"));
+        assert!(lines.contains("The check should print nothing. If it lists any names, unset each listed variable in this shell and run the check again."));
+        assert!(check < lines.find("  PSEUDOLIFE_IMAGE_TAG=").unwrap());
+    }
+
+    #[test]
+    fn a_restored_carry_journal_only_asks_to_verify_the_original_prefix() {
+        let mut journal = manual_recovery_journal();
+        journal.restored = true;
+        let lines = render_recovery_commands(&journal).unwrap();
+        assert!(
+            lines.contains("The carry journal records that the original environment was restored.")
+        );
+        assert!(lines.contains("head -c 17 '/srv/recovery/private env' | sha256sum"));
+        assert!(!lines.contains("--force-recreate"));
+    }
+
     #[cfg(target_os = "linux")]
     mod transaction {
         use super::*;
@@ -685,6 +859,36 @@ mod tests {
                     }
                     _ => fail(1, "unexpected fixture command"),
                 }
+            }
+        }
+
+        #[test]
+        fn explicit_compose_file_errors_name_the_missing_or_nonfile_path() {
+            let f = Fixture::new();
+            let directory = f.root.join("directory instead of overlay");
+            fs::create_dir(&directory).unwrap();
+            let pins = f.pins();
+            for path in [f.root.join("missing overlay.yml"), directory] {
+                let files = TargetFiles {
+                    env: None,
+                    compose: vec![
+                        f.root.join("compose.yaml").to_string_lossy().into_owned(),
+                        path.to_string_lossy().into_owned(),
+                    ],
+                };
+                let message = target_with(
+                    &mut Engine(&f),
+                    [true, false, false, true],
+                    Some(&pins),
+                    &files,
+                    |_, _, _| {
+                        panic!("an unreadable explicit Compose file must refuse before rendering")
+                    },
+                )
+                .err()
+                .unwrap();
+                assert!(message.contains(path.to_str().unwrap()));
+                assert!(message.contains("missing or not a regular file"));
             }
         }
 
