@@ -20,7 +20,8 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(0));
-        // SHA-256 of cli_help.txt (cli.py::_USAGE with serve and embedded refused), with Windows CRLF.
+        // SHA-256 of cli_help.txt (cli.py::_USAGE with serve and embedded refused and move's
+        // installed-release target), with Windows CRLF.
         let expected = if cfg!(windows) {
             "d345d2272d96edf8a4fed77201eac20640cb9af773cdb5e181dbacd42d2827b7"
         } else {

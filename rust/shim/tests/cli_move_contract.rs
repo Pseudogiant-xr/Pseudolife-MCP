@@ -330,6 +330,13 @@ fn unsupported_argument_shapes_receive_native_usage() {
         let want = format!("move: {problem}{nothing}");
         assert_answer(&run(&home.0, &url, "80", args), 2, "", &want);
     }
+    // --target-checkout in any spelling gets the transaction parser's text.
+    for args in [
+        &["--to", "root@box", "--target-checkout", "-x"][..],
+        &["--target-checkout=/srv", "--to", "root@box"],
+    ] {
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", NO_CHECKOUT);
+    }
     // A --to value starting with `-` would be an ssh option: never taken.
     for args in [
         &["--to"][..],
@@ -347,6 +354,7 @@ fn unsupported_argument_shapes_receive_native_usage() {
     for args in [
         &["--to", "root@box", "--dry-run", "--help"][..],
         &["--rollback", "--help"],
+        &["--rollback", MOVE_ID, "--help"],
         &["--release-target", "-h"],
     ] {
         let output = run(&home.0, &url, "100", args);
@@ -406,25 +414,24 @@ fn non_unicode_argv_is_named_by_position() {
 fn usage_refusals_come_before_any_move_record_is_read() {
     let home = Home::new("unreadable-records");
     let (socket, url) = listener();
-    // A moves folder that cannot be listed: any read of the records fails.
-    let state = home.0.join(".pseudolife-mcp");
-    fs::create_dir(&state).unwrap();
-    fs::write(state.join("moves"), b"not a folder").unwrap();
+    // A record that is a directory: any read of the records fails, on
+    // every OS, with "cannot read" (an empty home would say "no record").
+    let record = home
+        .0
+        .join(".pseudolife-mcp")
+        .join("moves")
+        .join(MOVE_ID)
+        .join("record.json");
+    fs::create_dir_all(&record).unwrap();
     // The controls: well-formed command lines read the records and fail on
-    // the planted file, so a refusal below that reads them would say so.
+    // the planted directory, so a refusal below that reads them would say so.
     for control in [
         rollback(&home.0, &url, &["--rollback", MOVE_ID]),
         run(&home.0, &url, "80", DRY),
     ] {
         let stderr = String::from_utf8_lossy(&control.stderr);
         assert_eq!(control.status.code(), Some(4), "{control:?}");
-        assert!(
-            // Windows reports a record under a file as absent, not unreadable.
-            stderr.contains("cannot read")
-                || stderr.contains("cannot be listed")
-                || stderr.contains("has no record of move"),
-            "{control:?}"
-        );
+        assert!(stderr.contains("cannot read"), "{control:?}");
     }
     let nothing = ". Nothing was changed\n";
     for (args, problem) in [

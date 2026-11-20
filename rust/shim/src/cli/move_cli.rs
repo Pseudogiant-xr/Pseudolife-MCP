@@ -45,8 +45,8 @@ const HELP: &str = concat!(
     "  --dry-run             show the plan; change nothing\n",
     "  --expose-target       consent to creating a persistent Tailscale serve on\n",
     "                        the target if needed\n",
-    "  --target-release      accepted for compatibility; native move always uses\n",
-    "                        the target's installed release\n",
+    "  --target-release      use the target's installed release (native move always\n",
+    "                        does, so the flag may be omitted)\n",
     "  --target-env-file TARGET_ENV_FILE\n",
     "                        the target deployment's original environment file,\n",
     "                        read when carrying bearer settings\n",
@@ -64,6 +64,10 @@ const HELP: &str = concat!(
     "  pseudolife-mcp move --release-target MOVE-ID [--target-gone] [--yes] [--json]\n",
     "  To retry a move rolled back after its restore, rerun it with --resume.\n",
 );
+/// Why `--target-checkout` is refused, whatever its spelling or value: the
+/// transaction parser's refusal (`restore_cli/move_native/argv.rs`) and the
+/// usage path here print this one text.
+pub(super) const TARGET_CHECKOUT_REFUSAL: &str = "--target-checkout selects a checkout rebuild and stopped handover. Native move requires an installed release Docker deployment and the native client on the target. Retry against that deployment with --target-release and omit --target-checkout";
 const REQUIRED: &str = "pseudolife-mcp move: error: the following arguments are required: --to\n";
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 \
@@ -115,7 +119,6 @@ enum Origin {
 #[derive(Default)]
 struct Args<'a> {
     to: Option<&'a str>,
-    checkout: Option<&'a str>,
     url: Option<&'a str>,
     json: bool,
     deployment_paths: Vec<&'a str>,
@@ -151,7 +154,8 @@ fn parse(arguments: &[String]) -> Option<Args<'_>> {
         }
         match token {
             "--to" => args.to = Some(value.as_str()),
-            "--target-checkout" => args.checkout = Some(value.as_str()),
+            // Refused as unsupported by the transaction parser, whatever the value.
+            "--target-checkout" => {}
             "--target-url" => args.url = Some(value.as_str()),
             "--target-env-file" | "--target-compose-file" | "--target-work-dir" => {
                 args.deployment_paths.push(value.as_str());
@@ -273,9 +277,10 @@ pub(super) fn utf8_argv() -> bool {
     cfg!(windows) || posix_utf8_argv(|name| std::env::var(name).ok())
 }
 
-/// The oracle's order: argparse (`_parser`, `main`), the `--target-url`
-/// check, `main`'s `--to` check, then `Mover.run`'s `--to` and
-/// `--target-checkout` checks.
+/// The early refusals, in the oracle's order: argparse's missing `--to`, the
+/// `--target-url` check, `main`'s `--to` check, `Mover.run`'s `--to` check,
+/// then the deployment paths. `--target-checkout` passes on to the
+/// transaction parser's refusal.
 pub(super) fn decide(arguments: &[String], context: &Context) -> Decision {
     // Outside UTF-8 decoding CPython sees other characters than these.
     if !context.utf8_argv && !arguments.iter().all(|argument| argument.is_ascii()) {
@@ -439,13 +444,13 @@ fn forward_problem(words: &[&str]) -> Option<String> {
         }
         // Whatever its spelling or value, the option itself is the cause.
         if name == "--target-checkout" {
-            return Some(
-                "--target-checkout is not supported: native move needs an installed release \
-                 deployment on the target; omit --target-checkout"
-                    .to_owned(),
-            );
+            return Some(TARGET_CHECKOUT_REFUSAL.to_owned());
         }
         if name != word {
+            let joined = &word[name.len() + 1..];
+            if takes_value && joined.starts_with('-') {
+                return Some(value_problem(name));
+            }
             return Some(if takes_value {
                 format!("{NO_JOINED_VALUE} ({name} VALUE); move does not read {name}=VALUE")
             } else {
@@ -462,12 +467,7 @@ fn forward_problem(words: &[&str]) -> Option<String> {
                 .get(index + 1)
                 .is_none_or(|value| value.starts_with('-'))
             {
-                return Some(if name == "--to" {
-                    "--to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -"
-                        .to_owned()
-                } else {
-                    format!("{name} needs a value after it, and the value cannot start with -")
-                });
+                return Some(value_problem(name));
             }
             to |= name == "--to";
             index += 1;
@@ -483,6 +483,17 @@ fn forward_problem(words: &[&str]) -> Option<String> {
 /// Options that are neither forward options nor recovery forms, for the
 /// abbreviation check.
 const OTHER_OPTIONS: [&str; 2] = ["--target-gone", "--help"];
+
+/// A value missing, or one that starts with `-` (for `--to` that would be
+/// an ssh option).
+fn value_problem(name: &str) -> String {
+    if name == "--to" {
+        "--to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -"
+            .to_owned()
+    } else {
+        format!("{name} needs a value after it, and the value cannot start with -")
+    }
+}
 
 fn unknown(word: &str, index: usize) -> String {
     match option_name(word) {
@@ -876,11 +887,27 @@ mod tests {
             ),
             (
                 &["--to", "box", "--target-checkout", "-x"],
-                "--target-checkout is not supported: native move needs an installed release deployment on the target; omit --target-checkout",
+                TARGET_CHECKOUT_REFUSAL,
             ),
             (
                 &["--target-checkout=/srv", "--to", "box"],
-                "--target-checkout is not supported: native move needs an installed release deployment on the target; omit --target-checkout",
+                TARGET_CHECKOUT_REFUSAL,
+            ),
+            (
+                &["--to=-oProxy=x"],
+                "--to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -",
+            ),
+            (
+                &["--to", "box", "--target-url=-x"],
+                "--target-url needs a value after it, and the value cannot start with -",
+            ),
+            (
+                &["--to", "box", "--abcdefghijklmnopqrstuvwxyzabcdefghijkl"],
+                "--abcdefghijklmnopqrstuvwxyzabcdefghijkl is not a move option; see pseudolife-mcp move --help",
+            ),
+            (
+                &["--to", "box", "--abcdefghijklmnopqrstuvwxyzabcdefghijklm"],
+                "argument 3 is not a move option; see pseudolife-mcp move --help",
             ),
             (
                 &["--to", "box", "--target-url", "-x"],

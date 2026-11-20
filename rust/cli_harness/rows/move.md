@@ -47,7 +47,7 @@ below. None reaches the dispatcher's deferral line.
 | `--target-url` given and not an origin: `move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 (no path, query or credentials)`, stderr, exit 2, before any `--to` check | `main` 1837-1844; `codex_connection.py:104-117` |
 | `--to` empty, or any `str.isspace` character: `move: --to takes an ssh target such as user@box or a ~/.ssh/config alias` (the frozen Python says `root@box`; the native text, since 16 November 2026, does not teach a root login), stderr, exit 2 (also under `--json`) | `main` 1848-1850 |
 | `--to` holding a C0 character that is not whitespace (U+0000-U+0008, U+000E-U+001B): the same text, stderr, exit 2 | `Mover.run` 619-620, `fail` 555-559 |
-| `--target-checkout` with any value: the native refusal that the option is not supported (the oracle's `holds a control character` for CR or LF is not kept, since the option is refused whatever its value), stderr, exit 2 | `Mover.__init__` 498, `Mover.run` 621-622 |
+| `--target-checkout` with any value or spelling: the one native refusal (`move_cli::TARGET_CHECKOUT_REFUSAL`, #1815's text: `--target-checkout selects a checkout rebuild and stopped handover ... omit --target-checkout. Nothing was changed`), whether the transaction parser or the usage path meets it; the oracle's `holds a control character` for CR or LF is not kept, since the option is refused whatever its value. stderr, exit 2 | `Mover.__init__` 498, `Mover.run` 621-622 |
 | Order: argparse, `--target-url`, `--to` (main), `--to` (Mover.run), `--target-checkout` | as above |
 | Streams: Python text streams, CRLF on Windows | `print(..., file=sys.stderr)` |
 
@@ -101,7 +101,7 @@ names the recovery commands.
 Argv neither native parser takes gets one refusal on stderr, exit 2,
 `move: <cause>. Nothing was changed`, before any move record is read or
 either host consulted. The cause names the first problem in argv order:
-`--target-checkout` in any spelling (not supported), a joined `--opt=value`, a flag given a value, an abbreviation (with the
+`--target-checkout` in any spelling (the same refusal as above), a joined `--opt=value`, a flag given a value, an abbreviation (with the
 full name it stands for), an unknown option, a repeated option, a
 positional argument, a missing value or one starting with `-` (for `--to`
 that would be an ssh option), non-Unicode argv, `--target-gone` outside
