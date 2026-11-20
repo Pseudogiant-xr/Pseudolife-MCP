@@ -1283,5 +1283,5 @@ jobs:
         # ship a console that differs from the reviewed code.
         working-directory: .
         run: |
-          git status --porcelain -- pseudolife_memory/web/static
-          test -z "$(git status --porcelain -- pseudolife_memory/web/static)"
+          git status --porcelain -- frontend/dist
+          test -z "$(git status --porcelain -- frontend/dist)"

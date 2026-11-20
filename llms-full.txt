@@ -36,9 +36,8 @@ that already exists it installs on Python and then switches through update
 
 A release-mode `pseudolife-mcp update` moves a Docker host that never
 chose an engine to the Rust daemon when the target release publishes its
-image. Every run does this except the scheduled `--unattended` one, which
-always keeps the engine; a run with no terminal (a script, ssh, an agent's
-shell) moves the host too. Before it downloads the models or backs
+image. An ordinary update can move the host from a script, an SSH command
+or an agent's shell too. Before it downloads the models or backs
 anything up, the update asks the Rust image whether it supports this bank's configuration (`pseudolife-daemon
 check-config`: a non-default reranker or embedding model, for instance, is
 not). If that check, or anything else before the backup, refuses, the update
@@ -49,9 +48,20 @@ an unsupported configuration before the backup instead of falling back.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
 on the Python daemon; the next attended `pseudolife-mcp update` moves the host. A
-bank whose counters were never imported takes one extra step inside the
-same update: it first runs the new release on Python once to import them,
-then switches.
+bank with a legacy schema or pending import takes one extra step inside
+the release update: it runs the pinned Python 0.23.1 daemon to complete
+the import, then switches to the selected Rust release. The archived
+image is available only for Linux amd64. On another platform, restore a
+verified backup on a Linux amd64 Docker host and complete the update
+there before moving the migrated bank back.
+
+Scheduled (`--unattended`) updates always keep the installed engine. On
+a Python host, if the newest release has no Python image or the update
+requires the legacy import, the scheduled run holds and posts one notice
+per reason per release. Run `pseudolife-mcp update --engine rust --tag <version>`
+once at a terminal, using the version in the notice. A scheduled run
+leaves an interrupted attended bridge in place. Use the same command at
+a terminal to resume it.
 
 A rerun keeps the engine already installed, also after `docker compose
 down`. A Rust daemon stays on the release it was installed or last updated
@@ -1748,14 +1758,14 @@ wire bytes: 4 MiB for the text-bearing writes (`/api/facts/set`,
 16 KiB for the session-end hook, 1 KiB for `/api/pair`, and 256 KiB for
 everything else; a larger body gets HTTP 413 `{"error":
 "request_too_large"}`. No CDN, fully offline: a Svelte
-build committed under `pseudolife_memory/web/static/` with vendored OFL fonts
+build committed under `frontend/dist/` with vendored OFL fonts
 and a vendored 3D engine, served straight from the daemon, so neither the
 daemon image nor a pip install needs Node. The source is in
 [`frontend/`](frontend/README.md); CI rebuilds it and fails if the committed
-build differs. Developing the UI? A fixture-backed dev server (no Postgres,
-no torch) serves the console against canned data:
-`python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
-Its payloads self-announce (`"fixtures": true` on `/health`), and the
+build differs. For UI development, the [Vite fixture-server workflow](frontend/README.md#develop)
+serves the Console at `http://localhost:5173/ui/` against canned data
+without Postgres or torch. Its payloads self-announce
+(`"fixtures": true` on `/health`), and the
 topbar shows a "Demo data, not a real bank" chip, so a fixture run is never
 mistaken for a real bank.
 
@@ -13392,14 +13402,30 @@ If the target will never answer again, `pseudolife-mcp move --release-target <mo
 
 For a move that may have applied carried bearer settings, first keep the
 target daemon stopped and gated while restoring its original environment.
-The target move folder's `carry.json` names the file in `deployment.env_file`.
-Remove only the block beginning `# Pseudolife move <move id>`. Use the
-journal's `original_bytes` to recover the original prefix only after checking
-its `original_digest` and checking for later edits. If the env file is already
-restored, verify its original settings. Recreate the selected daemon stopped
-with the verified environment. Use its newly verified container ID in the
-remaining commands, with the gate in place until the target has its own bank
-back.
+Before editing the environment file, run
+`pseudolife-mcp move-target recovery-commands <carry.json>` on the target,
+filling in the journal path. If the client is unavailable on `PATH`, use the
+installed launcher at
+`${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp`
+or `$HOME/.local/bin/pseudolife-mcp`. If the journal is absent from this
+move's intact folder, there is nothing to restore in its environment file.
+
+The journal names the file in `deployment.env_file`. The helper prints the
+exact `head -c … | sha256sum` check and the expected hex checksum. If the
+journal records a completed restoration, verify the original prefix and
+check the daemon ID recorded in the journal. Otherwise verify the digest
+and check for later edits before using `original_bytes` to recover the
+original prefix. Remove only the block beginning `# Pseudolife move
+<move id>`.
+
+When recreation is needed, the helper prints a shell check for exported
+`COMPOSE_*` and `PSEUDOLIFE_*` variables. Unset any names it lists and rerun
+the check in the same shell until it prints nothing. Resolve any error from
+the check before continuing. Then use the printed
+`docker compose … up --no-start --no-deps --no-build --pull never
+--force-recreate pseudolife-daemon` command to recreate the daemon stopped.
+Use its newly verified container ID in the remaining commands, with the gate
+in place until the target has its own bank back.
 
 Restore the target's own bank from the safety backup named in the move
 folder's `own-bank.json` using `pseudolife-mcp restore --backup-file …
@@ -13425,8 +13451,10 @@ accepts a key itself. `ssh` and `docker` are found only in absolute `PATH`
 directories.
 
 **Carried settings on an installed Linux target.** Use
-`--target-env-file <file>` to select the target's original private environment
-and repeat `--target-compose-file <file>` for its original Compose files in
+`--target-env-file <file>` to select the target's original private environment.
+An env file inside a Git checkout can be committed later with the carried
+settings in it. Choose a private file outside the checkout. Repeat
+`--target-compose-file <file>` for its original Compose files in
 overlay order. The paths are absolute or start with `~/` on the target. The
 native helper verifies that those files render the installed deployment
 before changing either bank. If the original project directory is
@@ -13802,8 +13830,15 @@ supervisor to stop its runtime. Pass the same `--profile` and
 `--profile-dir` in both commands if you selected a different profile or
 store. Use the same client to manage a running tunnel. The Python client's
 status can report a native launch as stopped, and Python stop leaves that
-launch running. Key renewal, background start and refresh still require
-the Python client.
+launch running. Background start and refresh still require the Python client.
+
+To renew a key with the native client, stop the tunnel, then run
+`pseudolife-mcp tunnel setup --profile dot --read-key --key-expires-at <ISO timestamp>`
+with your profile name and the new key's expiry. You can supply the replacement
+through an owner-only `--key-file`. Omit the expiry if the new key has no known
+deadline. If setup reports an interrupted renewal, rerun `tunnel setup` for
+the same profile and directory before starting the tunnel again. Check the
+saved expiry with `tunnel status`, then use `tunnel run`.
 
 The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel

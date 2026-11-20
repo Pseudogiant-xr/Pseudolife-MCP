@@ -51,7 +51,7 @@ def fixture_pid(obs):
         states.append(obs["db"]["final"])
     if not states:
         return
-    from pseudolife_memory.storage.coordination import audit_hash, verify_audit_chain
+    from rust.harness_support.audit_oracle import audit_hash, verify_audit_chain
 
     for state in states:
         assert verify_audit_chain(_audit(state))["ok"]
@@ -158,7 +158,7 @@ def operator_clock(obs):
 
 def _operator_clock(obs):
     """Validate raw clocks/chains, then associate only their timestamp paths."""
-    from pseudolife_memory.storage.coordination import audit_hash, verify_audit_chain
+    from rust.harness_support.audit_oracle import audit_hash, verify_audit_chain
     seed = obs["seed_stamp"]
     assert obs["seed_window"][0] <= seed <= obs["seed_window"][1]
     before, final = obs["db"]["before"], obs["db"]["final"]

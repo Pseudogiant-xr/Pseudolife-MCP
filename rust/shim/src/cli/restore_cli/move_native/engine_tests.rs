@@ -3375,6 +3375,7 @@ fn given_up_carried_move_restores_target_environment_before_the_daemon_starts() 
     assert!(!unchanged.contains("# Pseudolife move"));
 
     record.flags.identities_applied = true;
+    record.remote_folder = "~/move files/fixture".into();
     record.target_pins = Some(super::carry::TargetPins {
         daemon: "4".repeat(64),
         postgres: "5".repeat(64),
@@ -3390,12 +3391,41 @@ fn given_up_carried_move_restores_target_environment_before_the_daemon_starts() 
         let remove_gate = steps.find("--entrypoint rm").unwrap();
         assert!(restore < remove_gate);
         assert!(steps.contains("original_bytes and original_digest"));
+        assert!(steps.lines().any(|line| line
+            == "  pseudolife-mcp move-target recovery-commands '~/move files/fixture/carry.json'"));
+        assert!(
+            steps
+                .contains("${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp")
+        );
+        assert!(steps.contains("$HOME/.local/bin/pseudolife-mcp"));
+        assert!(steps.contains("head -c"));
+        assert!(steps.contains("sha256sum"));
+        assert!(steps.contains(
+            "up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon"
+        ));
         assert!(steps.contains("fill in its new verified container ID"));
         assert!(!steps.contains(&format!("--volumes-from {}", "6".repeat(64))));
         if !given_back {
             assert!(remove_gate < steps.find("docker start").unwrap());
         }
     }
+}
+
+#[test]
+fn given_up_without_a_replacement_names_the_original_daemon_id() {
+    let mut record = parked_move().record.unwrap();
+    let original = "4".repeat(64);
+    record.flags.identities_applied = true;
+    record.target_pins = Some(super::carry::TargetPins {
+        daemon: original.clone(),
+        postgres: "5".repeat(64),
+        ..Default::default()
+    });
+    record.verified_target_daemon = None;
+    let steps = engine::given_up_line(&record, None);
+    assert!(steps.contains(&format!(
+        "If the journal was never created, the selected daemon ID was {original}."
+    )));
 }
 
 #[test]

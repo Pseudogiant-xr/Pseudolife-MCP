@@ -37,7 +37,7 @@ pub(super) fn database_arg(database: &str) -> String {
 
 // Read only the authority fields; TLS options remain the daemon's concern.
 // Keep libpq keyword quoting and URI query overrides without ever logging a DSN.
-fn connection_fields(raw: &str) -> Option<BTreeMap<String, String>> {
+pub(super) fn connection_fields(raw: &str) -> Option<BTreeMap<String, String>> {
     if raw.contains('\0') {
         return None;
     }

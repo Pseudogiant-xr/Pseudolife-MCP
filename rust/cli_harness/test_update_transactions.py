@@ -25,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVICE = "pseudolife-daemon"
 FILES = ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-daemon.yml",
          "docker-compose.rust-shadow.yml", "docker-compose.rust-ghcr.yml", "Dockerfile.extractor")
+ARCHIVED_PYTHON = ("ghcr.io/pseudogiant-xr/pseudolife-daemon@sha256:"
+                   "1613e1bd0cb563e9119f0444ca97dea659fa143a16931f4c512f4959243fdcc8")
 
 
 def _native_binary():
@@ -292,7 +294,8 @@ def models_overlay(s,files):
   s.get("models_overlay") and any(v.endswith("docker-compose.rust-ghcr.yml") for v in files))
 s["calls"].append(a)
 code=0;out=""
-if a[:1]==["inspect"]:
+if a[:1]==["inspect"] and s.get("canonical_missing"):code=1;out="Error: No such container"
+elif a[:1]==["inspect"]:
  if "--format" in a: out=s["running"]["Image"]
  elif "-f" in a:
   f=a[a.index("-f")+1]
@@ -307,7 +310,7 @@ if a[:1]==["inspect"]:
   elif "|" in f: out=s["running"]["Image"]+"|"+s["running"]["Config"]["Image"]
   elif f=="{{json .}}":out=json.dumps(s["running"])
   else: out=s["running"]["Id"]
- else: out=json.dumps([s["running"]] if a[-1]!="fixture-pg" else [{"Name":"/fixture-pg","NetworkSettings":{"Networks":{"fixture":{"Aliases":["pseudolife-pg"]}}}}])
+ else: out=json.dumps([s["running"]] if a[-1]!="fixture-pg" else [{"Name":"/fixture-pg","NetworkSettings":{"Networks":{"fixture":{"Aliases":["pseudolife-pg"],"IPAddress":s.get("pg_address","")}}}}])
 elif a[:2]==["image","inspect"] and a[-1] in s.get("orphaned",[]):code=1;out="Error: No such image: "+a[-1]
 elif a[:1] in (["run"],["create"]) and any(v in s.get("orphaned",[]) for v in a):
  # The containerd image store: an ID no name refers to any more no longer resolves.
@@ -323,8 +326,16 @@ elif a[:2]==["volume","inspect"]:
  if s.get("volume_inspect_failure"):code=1
  else:out=json.dumps(s.get("volume_inspections",{}).get(a[-1],[]))
 elif a[:1]==["ps"]: out=s["running"]["Id"]
-elif a[:1]==["pull"]: code=int(s["failure"]=="pull" or (bool(s.get("rust_pull_fails")) and "-rust:" in a[-1]) or (bool(s.get("python_pull_fails")) and "-rust:" not in a[-1]))
-elif a[:2]==["manifest","inspect"]: code=0 if s.get("rust_published") else 1
+elif a[:1]==["pull"]:
+ rust="-rust:" in a[-1];archived="@sha256:" in a[-1]
+ code=int(bool(s["failure"]=="pull" or rust and s.get("rust_pull_fails")
+               or not rust and s.get("python_pull_fails")
+               or not rust and not archived and s.get("rust_only_release")))
+ if code==0 and (rust or archived):s["images"].setdefault(a[-1],"sha256:replacement")
+elif a[:2]==["manifest","inspect"]:
+ if "-rust:" in a[-1]:code=0 if s.get("rust_published") else 1
+ elif s.get("python_manifest_denied"):code=1;out="unauthorized: authentication required"
+ elif s.get("rust_only_release"):code=1;out="manifest unknown"
 elif a[:1]==["run"] and any(m in a for m in ("--probe-access","--list-root-owned","--repair-ownership")):
  # The ownership helpers (cli::ownership), answering in hex as the script
  # does: an entry the row made unusable stays so until a repair of its root
@@ -342,8 +353,14 @@ elif a[:1]==["run"]:
  if "check-config" in a:
   code=s.get("check_config",0)
   out={3:"unsupported memory.reranker.model_name 'BAAI/bge-reranker-base': the native daemon supports only cross-encoder/ms-marco-MiniLM-L-6-v2; set memory.reranker.model_name to that model, or keep the Python engine for a different reranker",2:"storage resolution refused: the Rust daemon requires PSEUDOLIFE_MCP_DATABASE_URL"}.get(code,"the native daemon supports the configuration in /data/config.yaml")
- elif "provision" in a: code=int(s["failure"]=="provision")
- else: out="58" if "--schema-version" in a else "SCHEMA_META_VERSION = 58\n"
+ elif "provision" in a:
+  code=s.get("provision_exit",int(s["failure"]=="provision"))
+  if code and "provision_stderr" in s:
+   out="starting model provision (stdout)"
+   sys.stderr.write(s["provision_stderr"])
+ else:
+  schema=s.get("target_schema",58) if "--schema-version" in a else s.get("archive_schema",59) if any("@sha256:" in v for v in a) else 58
+  out=str(schema) if "--schema-version" in a else f"SCHEMA_META_VERSION = {schema}\n"
 elif a[:1]==["tag"]:
  # The containerd image store: an ID no name refers to any more no longer resolves.
  if a[-2] in s.setdefault("orphaned",[]):code=1;out="Error response from daemon: No such image: "+a[-2]
@@ -378,7 +395,10 @@ elif a[:1]==["compose"]:
    previous=s["images"].get(name);s["images"][name]="sha256:built-"+str(len(s["calls"]))
    if previous and previous not in s["images"].values():s.setdefault("orphaned",[]).append(previous)
  elif "up" in a:
-  code=int(s["failure"]=="up")
+  code=int(s["failure"]=="up" or bool(s.get("archived_python") and s.get("fail_rust_recreate")))
+  if s.get("interrupted_recreate"):
+   code=1
+   s["canonical_missing"]=s["interrupted_recreate"]=="removed"
   if code==0:
    s["deployed"]=True
    built=""
@@ -387,6 +407,10 @@ elif a[:1]==["compose"]:
     try:
      service=json.loads(pathlib.Path(path).read_text())["services"]["pseudolife-daemon"]
      if "labels" in service:s["running"]["Config"]["Labels"]={**(s["running"]["Config"]["Labels"] or {}),**service["labels"]}
+     if service.get("labels",{}).get("org.pseudolife.release")=="0.23.1":
+      s["archived_python"]=True
+      s["running"]["Config"]["Image"]=service["image"]
+     elif service.get("labels",{}).get("org.pseudolife.engine")=="rust":s["archived_python"]=False
      built=s["images"].get(service.get("image"),"")
      if service.get("labels",{}).get("org.pseudolife.engine")=="python" and not s.get("import_stuck"):s["imported"]=True
     except (OSError,ValueError,KeyError):pass
@@ -405,9 +429,15 @@ elif a[:1]==["exec"]:
  elif "--host-state" in a or "pseudolife_memory.maintainer_setup" in a:
   out=s.get("setup_reply",json.dumps({"problem":None,"keys":[{"state":"active"}]}))
  elif "psql" in a:
-  if "cms_counters" in a[-1]:out="f" if s["failure"]=="pending_import" and not s.get("imported") else "t"
-  else:out="56" if s["failure"]=="old_schema" and not s.get("imported") else "unreadable" if s["failure"]=="unreadable_schema" else "58"
+  if "cms_counters" in a[-1]:out="f" if s.get("counters_missing") or s["failure"] in ("pending_import", "old_schema") and not s.get("imported") else "t"
+  elif "reference_chroma_import" in a[-1]:out="done" if s.get("chroma_imported") or s.get("imported") and not s.get("chroma_stuck") else ""
+  else:out="56" if s["failure"]=="old_schema" and not s.get("imported") and not s.get("archived_python") else "unreadable" if s["failure"]=="unreadable_schema" else str(59 if s.get("archived_python") else s.get("running_schema",58))
+ elif any("/data/chromadb/chroma.sqlite3" in v for v in a):
+  if s.get("probe_failed"):code=1
+  elif s.get("chroma_inaccessible"):out="inaccessible" if any("printf inaccessible" in v for v in a) else "absent"
+  else:out="present" if s.get("chroma_pending") else "absent"
  elif any("test ! -e /data/memory_state/weights.pt" in v for v in a):code=int(s["failure"] in ("pending_import","imported_weights") and not s.get("imported"))
+ elif any("test -e /data/memory_state/weights.pt" in v for v in a):out="present" if s["failure"] in ("pending_import","imported_weights") and not s.get("imported") else "absent"
  elif any("pg_dump" in v for v in a):code=int(s["failure"]=="backup")
  elif any("tar czf" in v for v in a):code=int(s["failure"]=="missing_state")
 elif a[:1]==["cp"]:
@@ -553,6 +583,11 @@ def host(tmp_path, failure="", mode="release"):
         def log_message(self, *args):
             pass
 
+        def do_CONNECT(self):
+            # The unknown-target test uses this local proxy for GitHub discovery.
+            (home / "release-discovery-refused").touch()
+            self.send_error(503)
+
         def do_GET(self):
             current = json.loads(state_path.read_text())
             if (self.path.endswith("SHA256SUMS") and current.get("missing_sums")) or (self.path.endswith(".tar.gz") and current.get("missing_bundle")):
@@ -570,10 +605,20 @@ def host(tmp_path, failure="", mode="release"):
                     return
                 body = json.dumps({"tag_name": self.path.rsplit("/", 1)[-1], "draft": False}).encode()
             elif self.path == "/health":
+                if current.get("archived_python") and current.get("bridge_health_offline"):
+                    self.send_response(503)
+                    self.end_headers()
+                    return
                 deployed = current["deployed"]
-                body = json.dumps({"status": "error" if deployed and failure == "health" or not deployed and failure == "stopped" else "ok",
-                                   "version": "wrong" if deployed and failure == "version" else current.get("target_version", "0.21.1") if deployed else "0.21.0",
-                                   "schema": (59 if failure == "schema" else 58) if deployed else current.get("running_schema", 58),
+                bridge_wait = current.get("archived_python") and current.get("wait_for_bridge")
+                waiting = bridge_wait or deployed and not current.get("archived_python") and current.get("wait_for_rust")
+                if bridge_wait:
+                    (home / "bridge-health-requested").touch()
+                if deployed and not current.get("archived_python") and current.get("wait_for_rust"):
+                    (home / "rust-health-requested").touch()
+                body = json.dumps({"status": "starting" if waiting else "error" if deployed and failure == "health" or not deployed and failure == "stopped" else "ok",
+                                   "version": "wrong" if deployed and failure == "version" else "0.23.1" if current.get("archived_python") else current.get("target_version", "0.21.1") if deployed else current.get("running_version", "0.21.0"),
+                                   "schema": (59 if failure == "schema" or current.get("archived_python") else current.get("target_schema", 58)) if deployed else current.get("running_schema", 58),
                                    "auth": True, "persist_errors": 0,
                                    "updates": {"unattended_daemon": True}}).encode()
             else:
@@ -589,7 +634,7 @@ def host(tmp_path, failure="", mode="release"):
             self.wfile.write(body)
 
         def do_POST(self):
-            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            request = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             current = json.loads(state_path.read_text())
             if self.path == "/api/coordination/register":
                 payload = {"agent_id": "fixture-address", "credential": "fixture-key"}
@@ -598,6 +643,10 @@ def host(tmp_path, failure="", mode="release"):
                 # callback inside deploy_release can observe this transition.
                 active = not current.get("no_board_peer") and any(a[:1] == ["fixture-backup"] for a in current["calls"])
                 payload = {"agents": [{"agent_id": "fixture-peer", "task": "working"}] if active else []}
+            elif self.path == "/api/daemon-notice":
+                with state_path.with_name("notices.jsonl").open("a", encoding="utf-8") as notices:
+                    notices.write(json.dumps(json.loads(request)["text"]) + "\n")
+                payload = {"recipients": 1}
             else:
                 payload = {"recipients": 1}
             body = json.dumps(payload).encode()
@@ -1274,7 +1323,7 @@ def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, nat
         assert stages(state) == expected.get(failure, ["pull", "backup", "tag", "up"])
         assert not _accepted(env).exists()
         if failure == "pull":
-            assert "--engine python" in result.stdout
+            assert "restore registry access or select a published Rust daemon" in result.stdout
         if failure in expected:
             assert not any(a[:1] == ["tag"] for a in state["calls"])
         else:
@@ -1605,10 +1654,15 @@ def test_release_default_never_applies_to_unattended_or_auth_change_runs(tmp_pat
         result = run_arm(repo, env, binary if native else None, args)
         assert result.returncode == 0, result.stdout + result.stderr
         state = json.loads(state_path.read_text())
-        # The update ran, on the Python daemon, without asking about Rust.
+        # A scheduled update may check whether the target Python image exists
+        # before it decides whether to hold. Neither flag selects Rust.
         assert "up" in stages(state), stages(state)
         assert not any(a[:1] == ["pull"] and "-rust:" in a[-1] for a in state["calls"]), result.stdout
-        assert not any(a[:2] == ["manifest", "inspect"] for a in state["calls"])
+        manifests = [a[2:] for a in state["calls"] if a[:2] == ["manifest", "inspect"]]
+        if flag == "--unattended":
+            assert all(ref == ["ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"] for ref in manifests), manifests
+        else:
+            assert not manifests
         assert "default since G2" not in result.stdout
         assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
@@ -1741,39 +1795,677 @@ def test_release_default_never_blocks_an_ordinary_update(tmp_path, native, case)
             assert removed == (case == "state-backup-refused")
 
 
+@pytest.mark.parametrize("case", ["old_schema", "pending_import", "chroma", "rust_host",
+                                  "python_newer", "schema_newer", "target_too_old", "missing_target", "pin_unavailable",
+                                  "wrong_pin_schema", "file_probe_failed", "no_backup", "bad_config",
+                                  "config_probe_failed", "no_counter_row", "chroma_stuck"])
+def test_release_legacy_import_uses_archived_image_and_stops_at_its_gate(tmp_path, case):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    failure = "old_schema" if case == "old_schema" else "pending_import"
+    if case in ("chroma", "chroma_stuck"):
+        failure = ""
+    with host(tmp_path, failure) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_published=True, rust_only_release=True)
+        if case in ("rust_host", "no_backup"):
+            labels = {"org.pseudolife.engine": "rust", "org.pseudolife.activation": "fixture",
+                      "org.pseudolife.release": "0.21.0"}
+            state["running"]["Config"]["Labels"].update(labels)
+            accepted = _accepted(env)
+            accepted.parent.mkdir(parents=True)
+            accepted.write_text(json.dumps({"services": {SERVICE: {"labels": labels}}}))
+        if case in ("chroma", "chroma_stuck"):
+            state.update(chroma_pending=True, chroma_stuck=case == "chroma_stuck")
+        if case == "python_newer":
+            state["running_version"] = "0.24.0"
+        if case == "schema_newer":
+            state["running_schema"] = 60
+        if case == "target_too_old":
+            state["target_schema"] = 58
+        if case == "missing_target":
+            state["rust_pull_fails"] = True
+        if case == "pin_unavailable":
+            state["python_pull_fails"] = True
+        if case == "wrong_pin_schema":
+            state["archive_schema"] = 58
+        if case == "file_probe_failed":
+            state["probe_failed"] = True
+        if case in ("bad_config", "config_probe_failed"):
+            state["check_config"] = 3 if case == "bad_config" else 2
+        if case == "no_counter_row":
+            state["import_stuck"] = True
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.25.0", "--daemon-only", "--json", "--health-retries", "1"]
+        if case == "config_probe_failed":
+            args.extend(["--engine", "rust"])
+        if case == "no_backup":
+            args.append("--no-backup")
+        result = run_arm(repo, env, binary, args)
+        report = json.loads(result.stdout)
+        state = json.loads(state_path.read_text())
+        pulls = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
+        rust_target = "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.25.0"
+        completed_hops = stages(state).count("up")
+        if case in ("schema_newer", "target_too_old", "missing_target", "pin_unavailable", "wrong_pin_schema",
+                    "file_probe_failed", "no_backup", "bad_config", "config_probe_failed"):
+            assert result.returncode in (1, 2), report
+            assert completed_hops == 0 and "backup" not in stages(state) and "tag" not in stages(state), report
+            assert all(image in (ARCHIVED_PYTHON, rust_target) for image in pulls), pulls
+            causes = {"schema_newer": "newer", "target_too_old": "schema",
+                      "missing_target": rust_target, "pin_unavailable": "0.23.1",
+                      "wrong_pin_schema": "did not report schema v59", "file_probe_failed": "state volume for legacy files",
+                      "no_backup": "legacy import requires a bank and state backup",
+                      "bad_config": "memory.reranker.model_name", "config_probe_failed": "check this bank's configuration"}
+            assert causes[case] in _report_text(report), report
+        elif case in ("no_counter_row", "chroma_stuck"):
+            assert result.returncode == 1 and completed_hops == 1, report
+            assert report["rollback"]["restore_required"] is True, report
+            assert ("cms_counters" if case == "no_counter_row" else "Chroma") in _report_text(report), report
+        else:
+            assert result.returncode == 0 and completed_hops == 2, report
+            assert pulls == [rust_target, ARCHIVED_PYTHON], pulls
+            assert report["target"] == "0.25.0", report
+            assert report["rollback"]["before_import"]["restore_required"] is True, report
+            assert report["rollback"]["before_import"]["image_id"] == "sha256:validated", report
+
+
 @pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["supported", "unsupported"])
 def test_release_default_imports_legacy_counters_unless_rust_refuses_the_configuration(tmp_path, native, case):
     # With G2-K, a defaulted move on a bank whose counters still need the
     # Python daemon's import takes the import leg, then moves to Rust. The
-    # configuration check runs first, so a configuration Rust refuses falls
-    # back before the Python leg changes anything.
+    # configuration check runs first, so a configuration Rust refuses stops
+    # before the import and never tries a Python image at the selected tag.
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
-        state["rust_published"] = True
+        state.update(rust_published=True, rust_only_release=True, target_schema=59)
         if case == "unsupported":
             state["check_config"] = 3
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary if native else None,
                          ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
                           "--rollback-tag", "pre-default-import"])
-        assert result.returncode == 0, result.stdout + result.stderr
         state = json.loads(state_path.read_text())
         calls = state["calls"]
         check = next(i for i, a in enumerate(calls) if a[:1] == ["run"] and "check-config" in a)
         assert not any(a[:1] == ["fixture-backup"] for a in calls[:check])
         if case == "supported":
-            assert stages(state) == ["pull", "pull", "backup", "tag", "up", "pull", "backup", "tag", "up"]
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert stages(state) == ["pull", "pull", "backup", "tag", "up", "backup", "tag", "up"]
             assert _labels(state_path)["org.pseudolife.engine"] == "rust"
         else:
-            # No Python leg: the ordinary update runs once, on Python.
-            assert stages({"calls": calls[check:]}) == ["pull", "backup", "tag", "up"]
+            assert result.returncode == 2, result.stdout + result.stderr
+            assert stages(state) == ["pull"]
             assert ["image", "rm", "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"] in calls
             assert "memory.reranker.model_name" in result.stdout
             assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
+
+
+def test_release_already_imported_bank_updates_once_and_rerun_is_a_noop(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "imported_weights") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_only_release=True,
+                     chroma_pending=True, chroma_imported=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.25.0", "--daemon-only", "--json", "--health-retries", "1"]
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        state["calls"].clear()
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        report = json.loads(result.stdout)
+        assert result.returncode == 0, report
+        assert len(report["steps"]) == 1 and "already runs 0.25.0" in report["steps"][0], report
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+def test_release_cannot_skip_an_inaccessible_chroma_directory(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(chroma_inaccessible=True, target_schema=59, rust_published=True, rust_only_release=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "0.25.0", "--daemon-only", "--json",
+                                             "--health-retries", "1"])
+        assert result.returncode == 2 and "/data/chromadb" in result.stdout, result.stdout
+        assert "grant the daemon account access" in result.stdout.lower()
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+def test_release_refuses_an_archived_waypoint_with_no_original_recovery_record(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(running_version="0.23.1", running_schema=59, target_version="0.25.0",
+                     target_schema=59, counters_missing=True, rust_only_release=True)
+        labels = {"org.pseudolife.engine": "python", "org.pseudolife.activation": "fixture",
+                  "org.pseudolife.release": "0.23.1"}
+        state["running"]["Config"]["Labels"].update(labels)
+        accepted = _accepted(env)
+        accepted.parent.mkdir(parents=True)
+        accepted.write_text(json.dumps({"services": {SERVICE: {"labels": labels, "image": ARCHIVED_PYTHON}}}))
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "0.25.0", "--daemon-only", "--json",
+                                             "--health-retries", "1"])
+        assert result.returncode == 2 and "without a verified pre-import recovery record" in result.stdout, result.stdout
+        assert stages(json.loads(state_path.read_text())) == []
+
+
+def test_unattended_posts_each_hold_reason_once_per_release(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_only_release=True,
+                     no_board_peer=True)
+        state_path.write_text(json.dumps(state))
+        for tag in ("0.25.0", "0.25.0", "0.26.0"):
+            result = run_arm(repo, env, binary, ["--unattended", "--tag", tag, "--json",
+                                                 "--health-retries", "1"])
+            assert result.returncode == 4, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert not state["deployed"]
+        assert not stages(state)
+        assert not any("provision" in call for call in state["calls"])
+        notices = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+        assert len(notices) == 2
+        log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
+        for tag, notice in zip(("0.25.0", "0.26.0"), notices, strict=True):
+            assert f"release {tag}" in notice and "no Python daemon image" in notice
+            assert f"pseudolife-mcp update --engine rust --tag {tag}" in notice
+            assert log.count(f"pseudolife-mcp update --engine rust --tag {tag}") == 1
+        state.update(wait_for_bridge=True, target_version="0.25.0")
+        state_path.write_text(json.dumps(state))
+        interrupted = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0",
+                                                    "--json", "--health-retries", "1",
+                                                    "--rollback-tag", "attended-fixture"])
+        assert interrupted.returncode == 1 and "health gate" in interrupted.stdout, interrupted.stdout
+        for _ in range(2):
+            held = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json"])
+            assert held.returncode == 4, held.stdout
+        after_bridge = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+        assert after_bridge[:2] == notices and len(after_bridge) == 3
+        assert "release 0.25.0" in after_bridge[2] and "unfinished" in after_bridge[2]
+        log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
+        assert log.count("Original pre-import recovery instructions (saved at ") == 1
+        assert "attended-fixture-pre-import" in log
+        original = json.loads(interrupted.stdout)["rollback"]
+        state["running"]["Id"] = "restored-original"
+        state["running"]["Config"]["Image"] = original["tag"]
+        state_path.write_text(json.dumps(state))
+        interrupted_again = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0",
+                                                          "--json", "--health-retries", "1",
+                                                          "--rollback-tag", "second-attempt"])
+        assert interrupted_again.returncode == 1 and "health gate" in interrupted_again.stdout, interrupted_again.stdout
+        for _ in range(2):
+            held = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json"])
+            assert held.returncode == 4, held.stdout
+        assert len(state_path.with_name("notices.jsonl").read_text().splitlines()) == 3
+        log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
+        assert log.count("Original pre-import recovery instructions (saved at ") == 2
+        assert "second-attempt-pre-import" in log
+
+
+def test_unattended_posts_again_when_release_discovery_is_unavailable(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        first = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0", "--json",
+                                            "--health-retries", "1"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        env["HTTPS_PROXY"] = env["https_proxy"] = env["PSEUDOLIFE_MCP_DAEMON_URL"]
+        for _ in range(2):
+            held = run_arm(repo, env, binary, ["--unattended", "--json"])
+            assert held.returncode == 4, held.stdout + held.stderr
+            assert json.loads(held.stdout).get("target") is None
+        assert state_path.with_name("release-discovery-refused").is_file()
+        notices = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+        assert len(notices) == 2
+        assert all("unfinished" in notice and "pseudolife-mcp update --engine rust`" in notice for notice in notices)
+        state_dir = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-attended-releases")
+        assert not state_dir.exists() or not list(state_dir.iterdir())
+
+
+@pytest.mark.parametrize("manifest_denied", [False, True])
+def test_unattended_published_python_release_keeps_python_on_a_legacy_bank(tmp_path, manifest_denied):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, no_board_peer=True,
+                     python_manifest_denied=manifest_denied)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json",
+                                             "--health-retries", "1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        assert [call[1] for call in state["calls"] if call[:1] == ["pull"]] == [
+            "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.25.0",
+        ]
+        assert not any("provision" in call for call in state["calls"])
+
+
+def test_unattended_rust_host_holds_when_the_bank_needs_the_python_bridge(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        labels = state["running"]["Config"]["Labels"]
+        labels.update({"org.pseudolife.engine": "rust", "org.pseudolife.release": "0.21.0",
+                       "org.pseudolife.activation": "a" * 32})
+        accepted = _accepted(env)
+        accepted.parent.mkdir(parents=True)
+        accepted.write_text(json.dumps({"services": {SERVICE: {"labels": labels}}}))
+        state.update(target_version="0.25.0", target_schema=59, no_board_peer=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json"])
+        assert result.returncode == 4, result.stdout + result.stderr
+        assert not stages(json.loads(state_path.read_text()))
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        notice, = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+        assert "legacy import" in notice
+        assert "pseudolife-mcp update --engine rust --tag 0.25.0" in notice
+
+
+def test_explicit_engine_cannot_override_unattended_engine_policy(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        result = run_arm(repo, env, binary, ["--unattended", "--engine", "rust", "--tag", "0.25.0", "--json"])
+        assert result.returncode == 2 and "--engine cannot be combined with --unattended" in (
+            result.stdout + result.stderr
+        )
+        assert not stages(json.loads(state_path.read_text()))
+
+
+@pytest.mark.parametrize(("interruption", "unattended"), [
+    ("kill", False), ("kill", True), ("timeout", False),
+])
+def test_interrupted_bridge_keeps_original_recovery_on_rerun(tmp_path, interruption, unattended):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_only_release=True,
+                     no_board_peer=True, import_stuck=True, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.25.0", "--daemon-only", "--json"]
+        first = [*args, "--engine", "rust", "--rollback-tag", "original-fixture"]
+        if interruption == "kill":
+            with subprocess.Popen([binary, "update", *first, "--health-retries", "50"],
+                                  cwd=repo, env=env, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE) as child:
+                try:
+                    _await_file(state_path.with_name("bridge-health-requested"), child)
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                    child.communicate(timeout=15)
+        else:
+            failed = run_arm(repo, env, binary, [*first, "--health-retries", "1"])
+            assert failed.returncode == 1 and "health gate" in failed.stdout, failed.stdout
+
+        original = list((Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "backups/pre-import").glob("*.sql.gz"))
+        assert len(original) == 1
+        state = json.loads(state_path.read_text())
+        assert state["archived_python"] and not state.get("imported")
+        state.update(calls=[], wait_for_bridge=False)
+        state_path.write_text(json.dumps(state))
+        retry = ["--tag", "0.25.0", "--json", "--health-retries", "1",
+                 "--rollback-tag", "retry-fixture"]
+        if unattended:
+            state["bridge_health_offline"] = True
+            state_path.write_text(json.dumps(state))
+            for _ in range(2):
+                held = run_arm(repo, env, binary, [*retry, "--unattended"])
+                assert held.returncode == 4, held.stdout + held.stderr
+            notices = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+            assert len(notices) == 1 and "unfinished" in notices[0]
+            assert "pseudolife-mcp update --engine rust --tag 0.25.0" in notices[0]
+            log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
+            assert "original-fixture-pre-import" in log and original[0].name in log
+            state = json.loads(state_path.read_text())
+            assert state["archived_python"] and not stages(state)
+            state["bridge_health_offline"] = False
+            state_path.write_text(json.dumps(state))
+        retry.append("--daemon-only")
+        pending = run_arm(repo, env, binary, retry)
+        assert pending.returncode != 0
+        assert "original-fixture-pre-import" in pending.stdout, pending.stdout
+        assert original[0].name in pending.stdout, pending.stdout
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+        state = json.loads(state_path.read_text())
+        state.update(calls=[], imported=True, fail_rust_recreate=True)
+        state_path.write_text(json.dumps(state))
+        failed = run_arm(repo, env, binary, retry)
+        assert failed.returncode != 0
+        assert "original-fixture-pre-import" in failed.stdout, failed.stdout
+        assert original[0].name in failed.stdout, failed.stdout
+        assert "retry-fixture" in failed.stdout and "to roll back to the imported bank" in failed.stdout
+        assert stages(json.loads(state_path.read_text())).count("backup") == 1
+        assert list(original[0].parent.glob("*.sql.gz")) == original
+
+        state = json.loads(state_path.read_text())
+        state.update(calls=[], fail_rust_recreate=False, provision_exit=47)
+        state_path.write_text(json.dumps(state))
+        failed_again = run_arm(repo, env, binary, retry)
+        assert failed_again.returncode != 0
+        assert "original-fixture-pre-import" in failed_again.stdout, failed_again.stdout
+        assert "to roll back to the imported bank" in failed_again.stdout, failed_again.stdout
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+def test_resume_refuses_a_different_bank_at_the_same_bridge(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_only_release=True,
+                     wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.25.0", "--daemon-only", "--json"]
+        result = run_arm(repo, env, binary, [*args, "--engine", "rust", "--health-retries", "1"])
+        assert result.returncode == 1 and "health gate" in result.stdout, result.stdout
+        state = json.loads(state_path.read_text())
+        state.update(calls=[], wait_for_bridge=False)
+        different = "postgresql://fixture:fixture@pseudolife-pg:5432/different"
+        settings = state["running"]["Config"]["Env"]
+        settings[0] = "PSEUDOLIFE_MCP_DATABASE_URL=" + different
+        state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = different
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, [*args, "--health-retries", "1"])
+        assert "cannot verify the legacy import recovery record" in result.stdout, result.stdout
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+@pytest.mark.parametrize("cut", ["original still running", "removed"])
+def test_interrupted_compose_replacement_keeps_pre_import_recovery(tmp_path, cut):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_published=True,
+                     rust_only_release=True, interrupted_recreate=cut)
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.25.0", "--daemon-only", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--engine", "rust", "--rollback-tag", "original-fixture"])
+        assert first.returncode == 1 and "daemon recreate failed" in first.stdout, first.stdout
+        point = json.loads(first.stdout)["rollback"]
+        assert point["tag"].endswith("original-fixture-pre-import")
+        state = json.loads(state_path.read_text())
+        state.update(calls=[], interrupted_recreate=None)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, [*args, "--rollback-tag", "retry-fixture"])
+        assert result.returncode != 0, result.stdout
+        assert Path(point["backup"]["dump"]).name in result.stdout, result.stdout
+        if cut == "original still running":
+            report = json.loads(result.stdout)
+            steps = "\n".join(report["steps"])
+            assert "The original daemon is still running" in steps
+            assert "pending-import" in steps and "then rerun the update" in steps
+            assert "--pull never" in steps and "pseudolife-mcp restore" not in steps
+            assert report["rollback"]["restore_required"] is False
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+@pytest.mark.parametrize("held_lock", [False, True], ids=["unverified-rust", "busy-update"])
+def test_unattended_does_not_accept_a_matching_version_after_unverified_rust_recreate(tmp_path, held_lock):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, rust_only_release=True,
+                     no_board_peer=True, wait_for_rust=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.25.0", "--json", "--health-retries", "1"]
+        if held_lock:
+            with subprocess.Popen([binary, "update", "--tag", "0.25.0", "--json", "--engine", "rust",
+                                   "--health-retries", "50", "--rollback-tag", "original-fixture"],
+                                  cwd=repo, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+                try:
+                    _await_file(state_path.with_name("rust-health-requested"), child)
+                    before = stages(json.loads(state_path.read_text()))
+                    held = run_arm(repo, env, binary, [*args, "--unattended"])
+                    assert held.returncode == 4, held.stdout + held.stderr
+                    assert "held off: another pseudolife-mcp update is running" in held.stdout
+                    assert not state_path.with_name("notices.jsonl").exists()
+                    assert stages(json.loads(state_path.read_text())) == before
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                    child.communicate(timeout=15)
+            return
+        first = run_arm(repo, env, binary, [*args, "--engine", "rust", "--rollback-tag", "original-fixture"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        original = json.loads(first.stdout)["rollback"]["before_import"]["backup"]["dump"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        state = json.loads(state_path.read_text())
+        state.update(calls=[], wait_for_rust=False)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, [*args, "--unattended"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert Path(original).name in result.stdout, result.stdout
+        assert "to roll back to the imported bank" in result.stdout, result.stdout
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+@pytest.mark.parametrize("mode", ["attended", "unattended", "checkout"])
+def test_rollback_then_update_retires_the_pending_import_pointer(tmp_path, mode):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        original = state["running"]
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0", "--json",
+                                             "--health-retries", "1", "--rollback-tag", "original"])
+        assert result.returncode == 1 and "health gate" in result.stdout, result.stdout
+        rollback = json.loads(result.stdout)["rollback"]
+        pointer = _accepted(env).parent / "pending-import"
+        original_record = pointer.parent / f"import-{pointer.read_text()}.json"
+        assert original_record.is_file()
+        state = json.loads(state_path.read_text())
+        original["Id"] = "restored-daemon"
+        original["Config"]["Image"] = rollback["tag"]
+        state.update(running=original, archived_python=False, deployed=False,
+                     wait_for_bridge=False, imported=True, running_schema=59, calls=[])
+        if mode == "attended":
+            args = ["--engine", "python", "--tag", "0.21.0", "--json"]
+        elif mode == "unattended":
+            # Compose recreated the daemon from the base image after rollback.
+            original.update(Id="replaced-daemon", Image="sha256:later-release")
+            original["Config"]["Image"] = "pseudolife-daemon:0.21.0"
+            args = ["--unattended", "--tag", "0.21.0", "--json"]
+        else:
+            # A validated checkout can select the same image under a new activation.
+            original["Config"]["Image"] = "pseudolife-daemon-rust:checkout"
+            state["target_version"] = "0.21.1"
+            (repo / "pseudolife_memory/storage/schema.py").write_text("SCHEMA_META_VERSION = 59\n")
+            labels = original["Config"]["Labels"]
+            labels.update({"org.pseudolife.engine": "rust", "org.pseudolife.checkout": str(repo),
+                           "org.pseudolife.activation": "c" * 32})
+            selection = repo / "data/update-engine/docker-compose.engine.json"
+            selection.parent.mkdir(parents=True)
+            selection.write_text(json.dumps({"services": {SERVICE: {"labels": labels}}}))
+            args = ["--json", "--daemon-only", "--health-retries", "1"]
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        assert "cannot verify the legacy import recovery record" not in result.stdout, result.stdout
+        assert not pointer.exists()
+        assert original_record.is_file()
+        assert Path(rollback["backup"]["dump"]).is_file()
+        if mode != "checkout":
+            assert result.returncode == (3 if mode == "unattended" else 0), result.stdout
+            assert "backup" not in stages(json.loads(state_path.read_text()))
+        else:
+            assert result.returncode == 0, result.stdout
+            assert json.loads(result.stdout)["mode"] == "checkout", result.stdout
+        state = json.loads(state_path.read_text())
+        state["canonical_missing"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--engine", "python", "--tag", "0.21.0", "--json"])
+        assert result.returncode == 2 and "--engine requires a Docker host" in result.stdout, result.stdout
+
+
+def test_bridge_resume_matches_the_bank_after_a_password_change(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.25.0", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--rollback-tag", "original"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        state = json.loads(state_path.read_text())
+        new_url = "postgresql://fixture:rotated-fixture@pseudolife-pg:5432/fixture"
+        state["running"]["Config"]["Env"][0] = "PSEUDOLIFE_MCP_DATABASE_URL=" + new_url
+        state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = new_url
+        state.update(calls=[], wait_for_bridge=False)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        report = json.loads(result.stdout)
+        assert result.returncode == 0, result.stdout
+        assert report["rollback"]["before_import"] == json.loads(first.stdout)["rollback"]
+
+
+@pytest.mark.parametrize("different_bank", [False, True])
+def test_prior_accepted_source_does_not_retire_an_unfinished_import(tmp_path, different_bank):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        original = state["running"]
+        labels = original["Config"]["Labels"]
+        labels.update({"org.pseudolife.engine": "rust", "org.pseudolife.release": "0.21.0",
+                       "org.pseudolife.activation": "a" * 32})
+        accepted = _accepted(env)
+        accepted.parent.mkdir(parents=True)
+        accepted.write_text(json.dumps({"services": {SERVICE: {"labels": labels}}}))
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        first = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0", "--json",
+                                            "--health-retries", "1", "--rollback-tag", "original"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        state = json.loads(state_path.read_text())
+        original["Id"] = "replacement-with-prior-activation"
+        state.update(running=original, archived_python=False, deployed=False, wait_for_bridge=False, calls=[])
+        if different_bank:
+            new_url = "postgresql://fixture:fixture@pseudolife-pg:5432/different"
+            original["Config"]["Env"][0] = "PSEUDOLIFE_MCP_DATABASE_URL=" + new_url
+            state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = new_url
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "0.21.0", "--daemon-only", "--json"])
+        assert result.returncode != 0, result.stdout
+        assert "pending-import" in result.stdout, result.stdout
+        assert (accepted.parent / "pending-import").is_file()
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+def test_bridge_resume_refuses_a_changed_effective_database_host(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        def set_host(state, addr):
+            url = f"postgresql://fixture:fixture@pseudolife-pg:5432/fixture?hostaddr={addr}"
+            state["running"]["Config"]["Env"][0] = "PSEUDOLIFE_MCP_DATABASE_URL=" + url
+            state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = url
+            state["pg_address"] = addr
+
+        state = json.loads(state_path.read_text())
+        set_host(state, "192.0.2.10")
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.25.0", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--rollback-tag", "original"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        state = json.loads(state_path.read_text())
+        set_host(state, "192.0.2.11")
+        state.update(calls=[], wait_for_bridge=False)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        assert "cannot verify the legacy import recovery record" in result.stdout, result.stdout
+        assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+def test_schema_56_without_weights_needs_no_counter_row_after_import(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "old_schema") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59,
+                     counters_missing=True, rust_only_release=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0", "--json",
+                                             "--health-retries", "1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+def test_resume_cannot_force_the_original_rollback_tag_onto_the_bridge(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(running_version="0.23.1", running_schema=59, target_version="0.25.0",
+                     target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.25.0", "--daemon-only", "--json",
+                "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--rollback-tag", "original"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        point = json.loads(first.stdout)["rollback"]
+        state = json.loads(state_path.read_text())
+        assert state["images"][point["tag"]] == point["image_id"]
+        state.update(calls=[], wait_for_bridge=False)
+        state_path.write_text(json.dumps(state))
+        resumed = run_arm(repo, env, binary, [*args, "--rollback-tag", "original-pre-import",
+                                               "--force-rollback-tag"])
+        assert resumed.returncode != 0, resumed.stdout
+        assert "reserved for the original pre-import rollback" in resumed.stdout, resumed.stdout
+        assert json.loads(state_path.read_text())["images"][point["tag"]] == point["image_id"]
 
 
 @pytest.mark.parametrize("native", [True], ids=["native"])
@@ -1787,7 +2479,7 @@ def test_an_import_leg_update_moves_the_clients_once_after_the_rust_gate(tmp_pat
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
-        state["rust_published"] = True
+        state.update(rust_published=True, rust_only_release=True, target_schema=59)
         state["import_stuck"] = outcome == "rust-leg-fails"
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary if native else None,
@@ -1799,7 +2491,7 @@ def test_an_import_leg_update_moves_the_clients_once_after_the_rust_gate(tmp_pat
             assert len(client_steps) == 1, report["steps"]
             # After the Rust leg's recreation, not between the legs.
             assert report["steps"].index(client_steps[0]) > max(
-                i for i, s in enumerate(report["steps"]) if "pulling ghcr.io/pseudogiant-xr/pseudolife-daemon:" in s)
+                i for i, s in enumerate(report["steps"]) if "recreating the daemon container" in s)
         else:
             assert result.returncode == 1, result.stdout + result.stderr
             assert client_steps == [], report["steps"]
@@ -1816,7 +2508,7 @@ def test_a_failed_import_leg_of_a_defaulted_move_is_the_updates_error(tmp_path, 
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
-        state["rust_published"] = True
+        state.update(rust_published=True, rust_only_release=True, target_schema=59)
         if failure == "python-leg":
             state["python_pull_fails"] = True
         else:
@@ -1829,9 +2521,7 @@ def test_a_failed_import_leg_of_a_defaulted_move_is_the_updates_error(tmp_path, 
         assert "not moving to the rust daemon this time" not in result.stdout
         choice = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json"
         assert not choice.exists(), choice.read_text()
-        calls = json.loads(state_path.read_text())["calls"]
-        # No discard of a pulled image: the host is not falling back.
-        assert not any(a[:2] == ["image", "rm"] for a in calls), calls
+        assert bool(json.loads(result.stdout)["rollback"]) == (failure == "rust-leg")
         assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
@@ -1883,50 +2573,50 @@ def test_an_explicit_python_choice_with_nothing_to_deploy_is_kept(tmp_path, nati
 @pytest.mark.parametrize("failure", ["pending_import", "old_schema"])
 def test_release_rust_imports_legacy_counters_on_python_first(tmp_path, native, failure):
     # G2-K: the Rust daemon never reads memory_state/weights.pt. Update first
-    # moves to the Python daemon at the target, whose startup imports it.
+    # moves to the archived Python daemon, whose startup imports it.
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, failure) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(rust_only_release=True, target_schema=59, list_images=True)
+        state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary if native else None,
                          ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
-                          "--rollback-tag", "pre-import"])
+                          "--keep-rollbacks", "0"])
         assert result.returncode == 0, result.stdout + result.stderr
         state = json.loads(state_path.read_text())
         # The Rust image is pulled first, before the Python leg changes anything.
-        assert stages(state) == ["pull", "pull", "backup", "tag", "up", "pull", "backup", "tag", "up"]
+        assert stages(state) == ["pull", "pull", "backup", "tag", "up", "backup", "tag", "up"]
         pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
         assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1",
-                          "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1",
-                          "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"]
-        assert "moving to the Python daemon 0.21.1 first" in result.stdout
+                          ARCHIVED_PYTHON]
+        assert "archived Python daemon 0.23.1" in result.stdout
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
         # The original image's rollback survives beside the second leg's.
         rollback = json.loads(result.stdout)["rollback"]
         assert rollback["state"] == "tagged"
         assert rollback["before_import"]["state"] == "tagged"
-        assert rollback["before_import"]["tag"].endswith("-pre-import-pre-import")
+        assert rollback["before_import"]["tag"].endswith("-pre-import")
         assert rollback["tag"] != rollback["before_import"]["tag"]
+        assert rollback["before_import"]["tag"] in state["images"] and rollback["tag"] in state["images"]
+        for slot in ("dump", "state_archive"):
+            original = Path(rollback["before_import"]["backup"][slot])
+            assert original.is_file() and original != Path(rollback["backup"][slot])
+            assert original.parent.name == "pre-import"
 
 
 @pytest.mark.parametrize("native", [True], ids=["native"])
-@pytest.mark.parametrize("case", ["rust_host", "unreadable_schema"])
-def test_release_rust_refuses_an_unimportable_bank_without_an_import_leg(tmp_path, native, case):
-    # A Rust daemon never imports weights.pt, and an unreadable schema would
-    # fail the Python daemon too: both refuse before changing anything.
+def test_release_rust_refuses_an_unreadable_schema_without_an_import_leg(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
-    with host(tmp_path, "pending_import" if case == "rust_host" else case) as (repo, env, state_path):
-        if case == "rust_host":
-            state = json.loads(state_path.read_text())
-            state["running"]["Config"]["Labels"]["org.pseudolife.engine"] = "rust"
-            state_path.write_text(json.dumps(state))
+    with host(tmp_path, "unreadable_schema") as (repo, env, state_path):
         result = run_arm(repo, env, binary if native else None,
                          ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
         assert result.returncode == 2, result.stdout + result.stderr
-        assert "nothing was changed" in result.stdout
-        assert "moving to the Python daemon" not in result.stdout
+        assert "nothing was deployed" in result.stdout
+        assert "schema version is unreadable" in result.stdout
         state = json.loads(state_path.read_text())
         assert "backup" not in stages(state) and "up" not in stages(state)
 
@@ -1938,18 +2628,80 @@ def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, 
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
-        state["import_stuck"] = True
+        state.update(import_stuck=True, target_schema=59)
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary if native else None,
                          ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1",
                           "--rollback-tag", "pre-stuck"])
         # The Python leg changed the host, so this is a failure, not a refusal.
         assert result.returncode == 1, result.stdout + result.stderr
-        assert "did not import memory_state/weights.pt" in result.stdout
-        assert "move memory_state/weights.pt aside" in result.stdout
+        assert "did not finish importing the bank's schema and CMS counters" in result.stdout
+        assert json.loads(result.stdout)["rollback"]["restore_required"] is True
+        assert "pseudolife-mcp restore --container " in result.stdout and "fixture-pg" in result.stdout
         state = json.loads(state_path.read_text())
         assert stages(state) == ["pull", "pull", "backup", "tag", "up"]
         assert _labels(state_path)["org.pseudolife.engine"] == "python"
+
+
+
+@pytest.mark.parametrize(("detail", "diagnostic"), [
+    ("could not download https://example.invalid/model?token=fixture-secret (DNS error)", "DNS error"),
+    ("could not write '/home/private-operator/model file': No space left on device", "No space left on device"),
+    ("model checksum mismatch for /home/private-operator/model: expected fixture-secret", "model checksum mismatch"),
+])
+def test_failed_provision_before_import_keeps_the_original_daemon(tmp_path, detail, diagnostic):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_schema=59, target_version="0.24.0", provision_exit=47)
+        state["provision_stderr"] = "read-only file system\n" + "x" * 8192 + "\n" + detail + "\n"
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.24.0", "--daemon-only", "--json", "--health-retries", "1",
+                "--rollback-tag", "pre-stuck"]
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 1, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        assert not report["rollback"]
+        message = "\n".join(report["steps"])
+        assert "nothing was deployed" in message.lower()
+        assert "exit 47" in message and diagnostic in message
+        assert "starting model provision (stdout)" not in message
+        assert "fixture-secret" not in message and "private-operator" not in message
+        assert "read-only file system" not in message
+
+        state = json.loads(state_path.read_text())
+        assert not state["deployed"]
+        assert not {"backup", "tag", "up"}.intersection(stages(state))
+        state.update(calls=[], provision_exit=0)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "pull", "backup", "tag", "up", "backup", "tag", "up"]
+
+
+def test_failed_rust_recreate_after_import_reports_attempt_and_original_rollback(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_schema=59, fail_rust_recreate=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary,
+                         ["--engine", "rust", "--tag", "0.21.1", "--daemon-only", "--json",
+                          "--health-retries", "1", "--rollback-tag", "pre-stuck"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        message = "\n".join(report["steps"])
+        assert "The bank import completed on the Python 0.23.1 bridge at schema v59." in message
+        assert "The Rust replacement was attempted and its health could not be verified." in message
+        assert "The pre-import backups and rollback point are available." in message
+        assert "restore the host and bank from before the import" in message
+        assert "pseudolife-mcp restore --container " in message
+        assert "rerun the same update to finish" not in message
 
 
 @pytest.mark.parametrize("native", [True], ids=["native"])
@@ -1989,22 +2741,22 @@ def test_release_rust_without_an_image_refuses_before_the_import_leg(tmp_path, n
 
 
 @pytest.mark.parametrize("native", [True], ids=["native"])
-def test_release_rust_import_leg_runs_at_the_same_version_with_a_fixed_rollback_tag(tmp_path, native):
-    # The Python daemon already runs the target: it still restarts to import,
-    # and the two legs' rollback tags (same version, same suffix) stay apart.
+def test_release_rust_import_uses_distinct_rollback_tags_when_target_already_runs_on_python(tmp_path, native):
+    # The Python daemon already runs the selected release, but the archived
+    # daemon still imports the bank before the Rust image starts.
     binary = _native_binary()
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path, "pending_import") as (repo, env, state_path):
         state = json.loads(state_path.read_text())
-        state["target_version"] = "0.21.0"
+        state.update(target_version="0.21.0", target_schema=59)
         state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary if native else None,
                          ["--engine", "rust", "--tag", "0.21.0", "--daemon-only", "--json", "--health-retries", "1",
                           "--rollback-tag", "fixed"])
         assert result.returncode == 0, result.stdout + result.stderr
         state = json.loads(state_path.read_text())
-        assert stages(state) == ["pull", "pull", "backup", "tag", "up", "pull", "backup", "tag", "up"]
+        assert stages(state) == ["pull", "pull", "backup", "tag", "up", "backup", "tag", "up"]
         tags = [a[-1] for a in state["calls"] if a[:1] == ["tag"]]
         assert len(tags) == 2 and tags[0] != tags[1], tags
         assert tags[0].endswith("-fixed-pre-import") and tags[1].endswith("-fixed")

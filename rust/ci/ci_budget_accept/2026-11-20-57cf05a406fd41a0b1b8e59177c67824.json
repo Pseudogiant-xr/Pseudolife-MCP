@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "frontend",
+  "before": "317b3fc6be7f40dc",
+  "fingerprint": "a44cb313ac27cab7",
+  "reason": "The job rebuilds the same Console bytes and runs the same Git comparison against the relocated directory."
+}
