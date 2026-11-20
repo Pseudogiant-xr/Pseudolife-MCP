@@ -5500,9 +5500,10 @@ def _freeze_on_master(world):
     ([], "pseudolife_memory/update_cli.py", False),
     ([{"name": "freeze-exception"}], "pseudolife_memory/update_cli.py", True),
     ([{"name": "freeze-exceptions"}], "pseudolife_memory/update_cli.py", False),
-    ([], "pseudolife_memory/web/static/index.html", True),
+    ([], "pseudolife_memory/web/static/index.html", False),
+    ([], "frontend/dist/index.html", True),
     ([], "docs/pseudolife_memory_notes.md", True),
-], ids=["unlabelled", "labelled", "near-miss-label", "console-build", "name-only"])
+], ids=["unlabelled", "labelled", "near-miss-label", "retired-console-path", "console-build", "name-only"])
 def test_a_member_changing_frozen_python_joins_only_with_the_exception_label(world, capsys, labels, path, merged):
     _freeze_on_master(world)
     sha = world.pr(10, {path: "changed\n"})

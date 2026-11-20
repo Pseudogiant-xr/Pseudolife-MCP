@@ -295,7 +295,8 @@ def test_a_pull_request_without_a_head_ref_is_classified_by_its_diff(tmp_path):
 
 @pytest.mark.parametrize("files, frozen", [
     (["pseudolife_memory/update_cli.py", "tests/test_update_cli.py"], True),
-    (["pseudolife_memory/web/static/index.html"], False),
+    (["pseudolife_memory/web/static/index.html"], True),
+    (["frontend/dist/index.html"], False),
     (["docs/pseudolife_memory_notes.md", "ops/tool.py"], False),
     (["rust/daemon/src/main.rs", "pseudolife_memory/compose/docker-compose.yml"], True),
 ], ids=["package", "console-build", "name-only", "release-cut"])

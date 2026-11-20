@@ -43,7 +43,7 @@ these must hold:
 4. **Neither side changes shared ground:** `pyproject.toml`, lock files or
    `.github/workflows/`; `tests/conftest.py`, fixtures or imported test
    helpers; schema, DDL or migrations; generated outputs
-   (`pseudolife_memory/web/static/`).
+   (`frontend/dist/`).
 5. **Neither side's code reaches the other's** only through a dynamic
    import, a subprocess, or HTTP or MCP calls into a daemon whose
    behaviour the other side changed.

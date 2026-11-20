@@ -20,7 +20,7 @@ gate below.
 | Date | Decision (maintainer) | Effect |
 |---|---|---|
 | 2026-11-14 | The bar is that the Rust system works and does what its users need. Matching Python exactly is no longer required. | New Rust work carries its own Rust tests. No new differential rows, source mutants or two-OS recordings against Python. The committed goldens stay as regression snapshots of the Rust behaviour and are re-recorded from Rust when behaviour changes on purpose. |
-| 2026-11-14 | Python is hard-frozen. | Nothing under `pseudolife_memory/` changes again, except the Console build output in `pseudolife_memory/web/static/` until it moves. A defect is fixed in Rust only. The one exception is the already finished program-lookup security fix, which lands as the last Python change. This replaces the soft freeze of 2026-10-23 (D10). |
+| 2026-11-14 | Python is hard-frozen. | Nothing under `pseudolife_memory/` changes again, except the Console build output in `pseudolife_memory/web/static/` until it moves (it has moved to `frontend/dist/`, which ended that exemption). A defect is fixed in Rust only. The one exception is the already finished program-lookup security fix, which lands as the last Python change. This replaces the soft freeze of 2026-10-23 (D10). |
 | 2026-11-14 | The lite tier is dropped. | The embedded PostgreSQL port is not finished and file mode is not ported. A lite bank gets a refusal that names the Docker install, and the partial lite code (`rust/shared/embedded_pg.rs`, `pg_runtime.rs`, `native_provision.rs`) goes with Python. This reverses the lite half of D1. |
 | 2026-11-14 | Banks older than the Rust daemon can open step through 0.23.x. | A bank below schema 57, or one that still keeps counters in `weights.pt` or documents in Chroma, is first updated to 0.23.1, whose Python daemon imports them. Those imports are not ported. |
 | 2026-11-14 | `move` and `tunnel` are rebuilt in Rust as features, after the native client ships. | See their native subsets and remaining deferrals below. |
@@ -102,8 +102,8 @@ request about 140 to 156 hosted minutes (runs 43433514840, 43392781569,
 shards (run 43449162029), and a master push about 230 (runs 43456549508 and
 43456549451).
 
-1. A check fails an ordinary pull request that changes `pseudolife_memory/`,
-   other than the Console build output in `pseudolife_memory/web/static/`.
+1. A check fails an ordinary pull request that changes `pseudolife_memory/`
+   without the `freeze-exception` label for a maintainer-approved exception.
 2. No workflow builds or runs a Python oracle: the judges suite, the frozen
    judge probes, the live arm of each parity shard, `cli-live`, the nightly
    body evidence and the wait-mail capture stop. Golden replays stay.

@@ -63,8 +63,7 @@ Each change waits for hosted CI once, on its batch:
   17 November 2026; manual stress remains the named live-oracle exception.
 - **The `Python freeze` check** (its own workflow, `python-freeze.yml`)
   refuses an ordinary pull request whose net change touches
-  `pseudolife_memory/` outside `pseudolife_memory/web/static/`, the Console
-  build output. It decides on the diff's paths and the exact label
+  `pseudolife_memory/`. It decides on the diff's paths and the exact label
   `freeze-exception`, which marks a change the maintainer ruled an
   exception (the expose security fix, the last release's update bridge);
   it reruns when a label is added or removed or the pull request is
@@ -124,8 +123,8 @@ Each change waits for hosted CI once, on its batch:
   lite tier. The frozen files run too in `test` (`--include-frozen`,
   which `ops/ci_tests.sh` adds to its own pytest when scope's
   `include_frozen` is true) when a change touches `pseudolife_memory/`
-  outside the Console build (once #1546's guard is on master only a
-  freeze-exception change can), when the diff is unreadable, and in the
+  (only a freeze-exception change can), when the diff is unreadable, and in
+  the
   weekly nightly (Sunday UTC, 02:17 AEDT Monday), since the package still
   ships with floor-only dependencies; that run is Linux-only, as the
   Windows and macOS lanes name live files. While a release still publishes
@@ -221,8 +220,8 @@ the Python freeze itself, with master's copy of `rust/ci/python_freeze.py`
 (it refuses when master has none, except for the batch that introduces it:
 when master's history never held the guard, the members are judged with
 the one copy they carry): a member whose merge changes
-`pseudolife_memory/` outside `pseudolife_memory/web/static/` on the batch
-branch without the `freeze-exception` label is dropped with the guard's
+`pseudolife_memory/` on the batch branch without the `freeze-exception`
+label is dropped with the guard's
 refusal, whatever its `Python freeze` check reported; judged on the merge,
 not on a merge-base diff, which a criss-cross history can leave empty.
 `open` and `merge` then refuse a batch holding any commit that is neither
