@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -111,12 +112,34 @@ def base(monkeypatch):
     name = pg.name("pl_cf_mir_boardbase")
     dbstate._BASE_HASHES.clear()
     try:
-        with cold_harness_imports(), psycopg.connect(pg.create(name), autocommit=True) as conn:
+        with psycopg.connect(pg.create(name), autocommit=True) as conn, cold_harness_imports():
             _seed_base(conn)
         yield name
     finally:
         dbstate._BASE_HASHES.clear()
         pg.drop(name)
+
+
+def test_board_base_creation_keeps_the_pytest_database_turn(monkeypatch):
+    import psycopg
+    from rust.harness_support import database_turn
+
+    login = MagicMock()
+    login.exists.return_value = True
+    monkeypatch.setattr(pgdisposable, "LOGIN_FILE", login)
+    monkeypatch.setattr(psycopg, "connect", MagicMock(return_value=MagicMock()))
+    monkeypatch.setitem(base.__wrapped__.__globals__, "_seed_base", lambda conn: None)
+    drop = MagicMock()
+    monkeypatch.setattr(pg, "drop", drop)
+
+    def create(_name):
+        assert sys.modules.get(database_turn.__name__) is database_turn
+        return "fixture-dsn"
+
+    monkeypatch.setattr(pg, "create", create)
+    with closing(base.__wrapped__(monkeypatch)) as fixture:
+        name = next(fixture)
+    drop.assert_called_once_with(name)
 
 
 @pytest.fixture
