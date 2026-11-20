@@ -9,7 +9,7 @@ frontend/public/vendor/*.js -text
 # The Console's committed build output is stored exactly as Vite writes it
 # (LF), so a rebuild on any OS reproduces it byte for byte and CI's
 # rebuild-and-diff check sees no line-ending churn.
-pseudolife_memory/web/static/** -text
+frontend/dist/** -text
 
 # Shell scripts must check out LF everywhere — bash rejects CRLF.
 *.sh text eol=lf

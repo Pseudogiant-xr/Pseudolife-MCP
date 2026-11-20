@@ -13,6 +13,7 @@ import os
 import posixpath
 import re
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
@@ -522,7 +523,14 @@ def test_asgi_auth_gate_invalid_utf8_bearer_is_401_not_500(svc):
         assert st == 200, sent
 
 
-def test_asgi_auth_gate_map_only_closes_gate(svc):
+@pytest.fixture
+def console_dist(monkeypatch):
+    from pseudolife_memory.web import api
+
+    monkeypatch.setattr(api, "STATIC_DIR", Path(__file__).resolve().parents[1] / "frontend/dist")
+
+
+def test_asgi_auth_gate_map_only_closes_gate(svc, console_dist):
     """A token map with no singular token still closes the gate — auth is
     configured, so anonymous callers are rejected."""
     app = build_console_app(stub_mcp, None, lambda: {"status": "ok"},
@@ -534,7 +542,7 @@ def test_asgi_auth_gate_map_only_closes_gate(svc):
     assert call(app, "GET", "/ui/")[0] == 200
 
 
-def test_asgi_static_index(svc):
+def test_asgi_static_index(svc, console_dist):
     st, body = call(_app(svc), "GET", "/ui/")
     assert st == 200 and b"Cortex Console" in body
 

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "00737b599343eefe",
+  "fingerprint": "3167aeba05a54b66",
+  "reason": "The scope excludes the relocated Console notices from the docs-only shortcut, as for the previous package path. The parity matrix, suites and commands stay the same."
+}

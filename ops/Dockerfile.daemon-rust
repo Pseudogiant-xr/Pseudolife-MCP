@@ -40,7 +40,7 @@ COPY rust/daemon/src/storage/schema_meta.rs /app/pseudolife-schema.rs
 COPY --from=runtime-inputs /opt/ort /opt/ort
 COPY --from=builder /opt/pdfium /opt/pdfium
 COPY plugin/hooks /app/plugin/hooks
-COPY pseudolife_memory/web/static /app/static
+COPY frontend/dist /app/static
 COPY --chmod=755 ops/provision-daemon-models.sh /usr/local/bin/provision-daemon-models
 # PSEUDOLIFE_DAEMON_ONNX_DIR=<model-root> and PSEUDOLIFE_DAEMON_RERANK_DIR
 # remain optional overrides; ordinary startup resolves the pinned cache.

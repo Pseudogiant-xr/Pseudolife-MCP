@@ -2,12 +2,28 @@
 from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 import subprocess
+import sys
 from unittest.mock import patch
 import os
 
 import pytest
 
 import run
+
+
+def test_python_daemon_without_static_fixture_uses_module_entry_point(tmp_path):
+    daemon = run.daemons.python_daemon(tmp_path, 8770, {})
+
+    assert daemon.argv == [sys.executable, "-m", "pseudolife_memory.cli", "serve"]
+    assert "PL_HARNESS_STATIC_DIR" not in daemon.env
+
+
+@pytest.mark.parametrize("scenario", [run.StaticBuild, run.Tokens, run.Tokenless])
+def test_python_scenarios_serving_committed_assets_opt_in(tmp_path, scenario):
+    daemon = run.daemons.python_daemon(tmp_path, 8770, scenario().env)
+
+    assert daemon.env["PL_HARNESS_STATIC_DIR"] == str(run.daemons.CONSOLE_DIST)
+    assert daemon.argv[:2] == [sys.executable, "-c"]
 
 
 @pytest.mark.parametrize("reply", [subprocess.CompletedProcess([], 0, b"false\n", b""),

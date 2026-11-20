@@ -181,7 +181,7 @@ DOCS_SUFFIXES = frozenset({
 # The installer copies this checkout file into users' AGENTS.md.
 DOCUMENT_EXCLUSIONS = frozenset({"examples/claude.memory.md"})
 DOCUMENT_DIRECTORY_EXCLUSIONS = ("tests/", "ops/", "plugin/", "pseudolife_memory/", "evals/prompts/",
-                                 ".github/workflows/", ".github/actions/", "frontend/public/")
+                                 ".github/workflows/", ".github/actions/", "frontend/public/", "frontend/dist/")
 # The port's plan pages under rust/ that no Rust or parity job reads; the
 # scope job names them too. A page a job reads (PARITY.md) or one an evidence
 # file hashes (PORTING.md, PORT-STATE.md, PHASE3-READ-PATH.md) stays code.

@@ -1,9 +1,8 @@
 """Guards over the committed build of the Cortex Console.
 
-The Vite/Svelte source lives in ``frontend/``; its build output is committed
-under ``pseudolife_memory/web/static/`` because the Python wheel ships
-``static/**`` and neither the daemon image nor a pip install has Node. The
-daemon serves that directory at ``/ui/``. These tests pin the parts of the
+The Vite/Svelte source lives in ``frontend/`` and the build is committed
+under ``frontend/dist/`` for the daemon images and Python wheel. The daemon
+serves those files at ``/ui/``. These tests pin the parts of the
 output the daemon relies on, so a missing or mis-based build fails here
 rather than as a blank page. They do not compare the build with
 ``frontend/src``: CI's ``frontend`` job rebuilds and diffs it.
@@ -16,8 +15,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-STATIC = ROOT / "pseudolife_memory" / "web" / "static"
 FRONTEND = ROOT / "frontend"
+STATIC = FRONTEND / "dist"
 
 
 def test_console_build_is_committed():
@@ -53,8 +52,7 @@ def test_console_source_declares_base_and_outdir():
     assert config is not None, "frontend/vite.config.* missing"
     src = config.read_text(encoding="utf-8")
     assert re.search(r'^\s*base:\s*"/ui/",', src, re.M), "vite base must be /ui/"
-    assert re.search(r'^\s*outDir:\s*"\.\./pseudolife_memory/web/static",', src, re.M), \
-        "vite outDir must be pseudolife_memory/web/static"
+    assert re.search(r'^\s*outDir:\s*"dist",', src, re.M), "vite outDir must be frontend/dist"
     assert re.search(r"^\s*sourcemap:\s*false,", src, re.M), \
         "source maps would ship local paths in the wheel"
 
@@ -82,8 +80,8 @@ def test_vendored_galaxy_bundle_ships_with_its_licences():
     tail = out.read_text(encoding="utf-8", errors="ignore")[-20_000:]
     assert "Bundled license information" in tail and "Three.js Authors" in tail, \
         "the bundle's end-of-file licence comments are missing"
-    assert (FRONTEND / "public" / "vendor" / "README.md").is_file(), \
-        "the bundle's provenance and licence audit live in vendor/README.md"
+    assert out.with_name("README.md").read_bytes() == src.with_name("README.md").read_bytes(), \
+        "the build altered the bundle's provenance and licence audit"
     assert (STATIC / "assets" / "Geist-LICENSE.txt").is_file(), "the Geist font licence must ship"
 
 

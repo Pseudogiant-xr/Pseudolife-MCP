@@ -6,7 +6,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localIdentifiers } from "./local-ids.mjs";
 
-const out = fileURLToPath(new URL("../../pseudolife_memory/web/static/", import.meta.url));
+const out = fileURLToPath(new URL("../dist/", import.meta.url));
 const TEXT = /\.(html|js|css|json|svg|txt|map)$/i;
 
 const patterns = [
