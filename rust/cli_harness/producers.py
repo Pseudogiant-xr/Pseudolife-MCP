@@ -41,16 +41,16 @@ def doorbell_record(kind: str) -> str:
     return _PAYLOADS["doorbell_records"][kind]
 
 
-def write_digest(path: Path, watermark: int, text: str) -> None:
+def write_digest(path: Path, watermark: int, text: str, *, root: Path) -> None:
     # ``CoordinationAdapter._write_digest``'s body.
-    write_private(path, f"{watermark}\n" + (text + "\n" if text else ""))
+    write_private(path, f"{watermark}\n" + (text + "\n" if text else ""), root=root)
 
 
-def write_ring(path: Path, watermark: int, decision: str, reason: str) -> None:
+def write_ring(path: Path, watermark: int, decision: str, reason: str, *, root: Path) -> None:
     # ``CoordinationAdapter._write_ring``'s body.
-    write_private(path, f"{watermark}\n{decision} {reason}\n")
+    write_private(path, f"{watermark}\n{decision} {reason}\n", root=root)
 
 
-def write_seen(path: Path, watermark: int) -> None:
+def write_seen(path: Path, watermark: int, *, root: Path) -> None:
     # ``CoordinationAdapter._mark_seen``'s body.
-    write_private(path, f"{watermark}\n")
+    write_private(path, f"{watermark}\n", root=root)
