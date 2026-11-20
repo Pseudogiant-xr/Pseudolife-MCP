@@ -378,11 +378,24 @@ async fn daemon_reply(
     mode: Arc<AtomicU8>,
     observed: Arc<AtomicUsize>,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    if request.uri().path() == "/health" && request.method() == "GET" {
+        let body = json!({"status":"ok", "auth_required":true, "version":crate::lifecycle::PACKAGE_VERSION});
+        return Ok(Response::builder()
+            .header("content-type", "application/json")
+            .body(Full::new(Bytes::from(body.to_string())))
+            .unwrap());
+    }
     let auth = request
         .headers()
         .get("authorization")
         .is_some_and(|header| header == "Bearer fixture-daemon-token");
-    assert!(auth && request.uri().path() == "/mcp");
+    assert!(
+        auth && request.uri().path() == "/mcp",
+        "fixture daemon received an unexpected route or missing authentication"
+    );
+    if request.method() == "DELETE" {
+        return Ok(Response::new(Full::new(Bytes::new())));
+    }
     let bytes = request.into_body().collect().await.unwrap().to_bytes();
     let message: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
     let reply = match message["method"].as_str() {
