@@ -1,2 +1,0 @@
-### Changed (2026-11-21 — Native tunnel refresh)
-- Native tunnel update recognizes a verified current launch. A compatible supervisor in the default store can select the installed client for its next stdio session after checking the daemon connection. A failed refresh preserves the running tunnel and its selection. An attached session keeps its client until the tunnel is explicitly stopped and run again.

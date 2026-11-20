@@ -327,11 +327,6 @@ fn refresh_status(root: &Path, name: &str) -> Result<Refresh, Fail> {
     })
 }
 
-fn refresh_idle(root: &Path, name: &str) -> bool {
-    refresh_status(root, name)
-        .is_ok_and(|refresh| !matches!(refresh, Refresh::Pending | Refresh::Unavailable))
-}
-
 /// Why `status` cannot read a profile's verification challenge.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ChallengeIssue {
@@ -403,7 +398,11 @@ struct KeyStatus {
 }
 
 fn setup_command(name: &str, directory: Option<&str>) -> String {
-    let mut command = format!("pseudolife-mcp tunnel setup --profile {name}");
+    tunnel_command("setup", name, directory)
+}
+
+fn tunnel_command(action: &str, name: &str, directory: Option<&str>) -> String {
+    let mut command = format!("pseudolife-mcp tunnel {action} --profile {name}");
     if let Some(directory) = directory {
         command.push_str(&format!(
             " --profile-dir {}",
@@ -430,16 +429,13 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
     };
     match record.liveness {
         Liveness::Running if record.native && updating => format!(
-            "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh it yet"
-        ),
-        Liveness::Running if updating => format!(
-            "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh or stop it yet, so it was left as it is"
+            "tunnel {name} keeps running (process record {file}). Check tunnel status before restarting it"
         ),
         Liveness::Running if record.native => format!(
             "tunnel {name} is running (process record {file}); use tunnel stop to stop its native supervisor"
         ),
         Liveness::Running => format!(
-            "tunnel {name} is running (process record {file}); this client cannot refresh or stop it yet"
+            "tunnel {name} is running (process record {file}). Use the client that started it to stop it"
         ),
         Liveness::Gone => format!(
             "tunnel {name} is not running; its process record {file} is left from a tunnel that stopped and can be deleted"
@@ -626,9 +622,8 @@ fn report(
     text
 }
 
-/// `tunnel update`: select the verified installed shim for the next stdio
-/// session of an owned launch. Idle profiles stay idle and an existing
-/// stdio session keeps its shim. The release updater consumes this report.
+/// `tunnel update`: check the running launch against this runtime and report
+/// how to restart a stale tunnel. The release updater consumes this report.
 fn update(root: &Path) -> Answer {
     update_with_runtime(root, std::env::current_exe().ok().as_deref())
 }
@@ -703,16 +698,6 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
         };
         let record = record::read(record::path(root, name), rows.as_deref());
         let name_q = quoted(name);
-        let live_native = matches!(&unread, Err(true))
-            && record.as_ref().is_some_and(|record| {
-                record.native && record.ready && record.liveness == Liveness::Running
-            });
-        let current = live_native && executable.is_some_and(|exe| current_launch(root, name, exe));
-        let selected = if live_native && !current {
-            runtime::refresh::attempt(root, name)
-        } else {
-            None
-        };
         let (state, running, sentence) = match (&record, unread) {
             (None, Err(true)) => {
                 entries.push(format!(
@@ -729,24 +714,13 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
                 "false",
                 format!("{unread}; it has no tunnel process record, so no tunnel of it runs"),
             ),
-            (Some(record), Err(true)) if current => (
-                "current",
-                "true",
-                format!(
-                    "tunnel {name} is already running on the current runtime (process record {})",
-                    record.path.display()
-                ),
-            ),
-            (Some(record), Err(true)) if selected.is_some() => {
-                use runtime::refresh::Selection;
-                let (state, detail) = match selected.unwrap() {
-                    Ok(Selection::Refreshed) => (
-                        "refreshed",
-                        "selected the installed shim for the next stdio session",
-                    ),
-                    Ok(Selection::Unconfirmed) => (
-                        "stale",
-                        "selected the installed shim but could not sync its record. Check tunnel status before retrying",
+            (Some(record), Err(true))
+                if record.native && record.ready && record.liveness == Liveness::Running =>
+            {
+                let (state, detail) = match check_running_launch(root, name, executable) {
+                    Ok(()) => (
+                        "current",
+                        "already running on the current runtime".to_owned(),
                     ),
                     Err(cause) => ("stale", cause),
                 };
@@ -847,11 +821,51 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
     ))
 }
 
-fn current_launch(root: &Path, name: &str, executable: &Path) -> bool {
-    setup::check_pending(root, name).is_ok()
-        && matches!(setup::validate_previous_key(root, name), Ok(false))
-        && refresh_idle(root, name)
-        && runtime::identity::active(root, name, executable, None).is_ok()
+fn check_running_launch(root: &Path, name: &str, executable: Option<&Path>) -> Result<(), String> {
+    let directory = root.to_str();
+    let status = || bridge::status_command(name, directory);
+    let explain = |failure| match failure {
+        Fail::Detail(detail) => detail,
+        Fail::Tunnel(message) => format!("{message}. Check with `{}`", status()),
+        Fail::Defer => format!(
+            "the private key state could not be read. Check with `{}`",
+            status()
+        ),
+    };
+    setup::check_pending(root, name).map_err(explain)?;
+    if setup::validate_previous_key(root, name).map_err(explain)? {
+        return Err(format!(
+            "the previous key is still retained. Check with `{}`",
+            status()
+        ));
+    }
+    let request = root.join(format!("{name}.reload.json"));
+    if !matches!(occupied(&request), Ok(false)) {
+        return Err(format!(
+            "a legacy refresh request may remain at {}. Check with `{}`",
+            request.display(),
+            status()
+        ));
+    }
+    let executable = executable.ok_or_else(|| {
+        "the installed client executable could not be identified. Run update through the installed launcher".to_owned()
+    })?;
+    runtime::identity::active(root, name, executable, None)
+        .map(|_| ())
+        .map_err(|cause| {
+            if cause == runtime::identity::CHANGED {
+                let stop = tunnel_command("stop", name, directory);
+                let run = tunnel_command("run", name, directory);
+                format!(
+                    "the running launch differs from the current runtime or saved settings. Run `{stop}`, then `{run}` to reconnect the tunnel"
+                )
+            } else {
+                format!(
+                    "the running launch could not be verified against the current runtime and saved settings. Check with `{}`",
+                    status()
+                )
+            }
+        })
 }
 
 fn verify(options: &Options, root: &Path) -> Output {
@@ -1136,9 +1150,8 @@ mod tests {
         assert_eq!(entry["running"], true);
         let detail = report["detail"].as_str().unwrap();
         assert!(
-            detail.contains("tunnel dot keeps running on its current runtime")
-                && detail
-                    .contains("this client cannot refresh or stop it yet, so it was left as it is"),
+            detail.contains("tunnel dot is running")
+                && detail.contains("Use the client that started it to stop it"),
             "{detail}"
         );
         // Still running afterwards: the record and this process are untouched.

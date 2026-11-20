@@ -205,8 +205,8 @@ fn update_tunnels(shim: Option<&Value>, runner: &impl Runner) -> Option<Value> {
 /// The tunnel step over the store at `root`: `None` when it holds no process
 /// record. `launcher` finds the installed native launcher, if any. The
 /// launcher's `tunnel update` reports each saved tunnel without stopping or
-/// starting one; a running tunnel it cannot refresh comes back `stale`, which
-/// this step accepts. The step fails only when that command refuses (an
+/// starting one. A running launch that needs a restart reports `stale` with
+/// instructions, which this step accepts. The step fails only when that command refuses (an
 /// invalid store or profile, whose cause it carries), cannot run, or answers
 /// in a form this step does not know, or when the store cannot be read here.
 fn tunnel_step(
@@ -253,7 +253,7 @@ fn tunnel_step(
         }
         let Some(launcher) = launcher()? else {
             return Ok(Some(
-                json!({"state":"skipped","detail":"running tunnels were not refreshed: no installed native launcher; rerun native setup, then pseudolife-mcp tunnel update"}),
+                json!({"state":"skipped","detail":"cannot check running tunnels because the native launcher is missing. Rerun native setup, then run pseudolife-mcp tunnel update"}),
             ));
         };
         // The command reads the very directory this step scanned: its own
@@ -272,8 +272,8 @@ fn tunnel_step(
             timeout,
             &[],
         );
-        // `stale`: a tunnel keeps running on its current runtime because
-        // this client cannot refresh it yet; nothing failed.
+        // `stale` leaves the running tunnel in place and carries the
+        // tunnel command's restart or inspection instructions.
         let answered = |state: &str| matches!(state, "current" | "stale");
         if let Some(mut report) = output.json().filter(|r| {
             matches!(r["state"].as_str(), Some("current" | "stale" | "failed"))

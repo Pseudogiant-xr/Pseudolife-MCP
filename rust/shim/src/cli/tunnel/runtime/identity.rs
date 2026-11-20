@@ -11,8 +11,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::{
-    OWNER_LOCK, key::Key, launch_id, lock_path, read_record, record, refresh, setup, stage_path,
-    store, vendor,
+    OWNER_LOCK, key::Key, launch_id, lock_path, read_record, record, setup, stage_path, store,
+    vendor,
 };
 
 pub(in crate::cli::tunnel) const CHANGED: &str = "the saved tunnel identity differs from the active launch. Stop and run the tunnel again before verification";
@@ -26,8 +26,7 @@ pub(super) fn compute(
     executable: &Path,
 ) -> Result<String, super::Fail> {
     ensure_signing_key(root).map_err(super::Fail::Tunnel)?;
-    compute_identity(root, profile, key, executable, env!("CARGO_PKG_VERSION"))
-        .map_err(super::Fail::Tunnel)
+    compute_identity(root, profile, key, executable).map_err(super::Fail::Tunnel)
 }
 
 const SIGNING_KEY: &str = ".tunnel-identity-key";
@@ -79,16 +78,8 @@ fn signing_requires_an_existing_owner_only_store_key() {
         "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
     });
     let (_, profile) = store::decode_profile(saved.to_string().as_bytes(), "dot").unwrap();
-    let sign = |root: &Path| {
-        compute_identity(
-            root,
-            &profile,
-            &Key::fixture(),
-            &executable,
-            env!("CARGO_PKG_VERSION"),
-        )
-        .unwrap()
-    };
+    let sign =
+        |root: &Path| compute_identity(root, &profile, &Key::fixture(), &executable).unwrap();
     let original = sign(&first);
     ensure_signing_key(&first).unwrap();
     assert!(original == sign(&first) && original != sign(&second));
@@ -100,7 +91,6 @@ fn compute_identity(
     profile: &store::Profile,
     key: &Key,
     executable: &Path,
-    version: &str,
 ) -> Result<String, &'static str> {
     let mut file = File::open(executable).map_err(|_| UNAVAILABLE)?;
     let mut buffer = [0; 8192];
@@ -120,7 +110,7 @@ fn compute_identity(
     let inputs = json!({
         "schema": 2,
         "runtime_digest": format!("{:x}", hasher.finalize()),
-        "runtime_version": version,
+        "runtime_version": env!("CARGO_PKG_VERSION"),
         "vendor_version": vendor::VERSION,
         "profile": {
             "name": profile.name,
@@ -149,7 +139,7 @@ fn held(path: &Path) -> bool {
     })
 }
 
-pub(super) fn owns_generation(root: &Path, name: &str, stage: &Path) -> bool {
+fn owns_generation(root: &Path, name: &str, stage: &Path) -> bool {
     // Startup and recovery both acquire the profile lock. Only the
     // supervisor holds the second lock for this particular generation.
     setup::check_directory(stage).is_ok()
@@ -157,39 +147,22 @@ pub(super) fn owns_generation(root: &Path, name: &str, stage: &Path) -> bool {
         && held(&lock_path(root, name))
 }
 
-pub(super) fn expected(
+fn expected(
     root: &Path,
     profile: &store::Profile,
     executable: &Path,
-    version: &str,
 ) -> Result<String, &'static str> {
     if profile.state != "ready" {
         return Err(CHANGED);
     }
     let key = Key::load(root, &profile.name).map_err(|_| UNAVAILABLE)?;
-    compute_identity(root, profile, &key, executable, version)
+    compute_identity(root, profile, &key, executable)
 }
 
 pub(in crate::cli::tunnel) fn active(
     root: &Path,
     name: &str,
     executable: &Path,
-    generation: Option<&str>,
-) -> Result<String, &'static str> {
-    active_version(
-        root,
-        name,
-        executable,
-        env!("CARGO_PKG_VERSION"),
-        generation,
-    )
-}
-
-fn active_version(
-    root: &Path,
-    name: &str,
-    executable: &Path,
-    version: &str,
     generation: Option<&str>,
 ) -> Result<String, &'static str> {
     let path = record::path(root, name);
@@ -202,17 +175,13 @@ fn active_version(
     if !record.ready || !owns_generation(root, name, &stage) {
         return Err(UNAVAILABLE);
     }
-    if record.bridge.is_some() {
-        let (selected, protocol) = refresh::selection(&record)?;
-        if !crate::runtime::same_path(selected, executable) || protocol.version != version {
-            return Err(CHANGED);
-        }
-    }
     let profile = store::load(root, name).map_err(|_| UNAVAILABLE)?;
-    let identity = expected(root, &profile, executable, version)?;
+    let identity = expected(root, &profile, executable)?;
     let current = read_record(&path).map_err(|_| UNAVAILABLE)?;
-    if current != record
+    if current.native_launch != record.native_launch
+        || !current.ready
         || record.launch_identity.as_deref() != Some(&identity)
+        || current.launch_identity != record.launch_identity
         || !owns_generation(root, name, &stage)
     {
         return Err(CHANGED);
@@ -227,7 +196,7 @@ pub(in crate::cli::tunnel) fn fixture_identity(
     executable: &Path,
 ) -> String {
     ensure_signing_key(root).unwrap();
-    expected(root, profile, executable, env!("CARGO_PKG_VERSION")).unwrap()
+    expected(root, profile, executable).unwrap()
 }
 
 #[cfg(test)]
@@ -251,9 +220,7 @@ pub(in crate::cli::tunnel) struct Bound {
     pub(in crate::cli::tunnel) identity: String,
     generation: String,
     name: String,
-    pub(in crate::cli::tunnel) executable: PathBuf,
-    version: String,
-    _session: Option<File>,
+    executable: PathBuf,
 }
 
 impl Bound {
@@ -267,34 +234,13 @@ impl Bound {
         if stage_path(root, id) != stage || !owns_generation(root, &profile.name, stage) {
             return Err(UNAVAILABLE);
         }
-        let path = record::path(root, &profile.name);
-        let mut record = read_record(&path).map_err(|_| UNAVAILABLE)?;
-        let session = if record.bridge.is_some() {
-            let gate = refresh::wait_for_gate(stage)?;
-            record = read_record(&path).map_err(|_| UNAVAILABLE)?;
-            Some(gate)
-        } else {
-            None
-        };
-        let (executable, version) = if session.is_some() {
-            let (executable, protocol) = refresh::selection(&record)?;
-            #[cfg(unix)]
-            if rustix::process::geteuid().is_root() {
-                super::trusted_root_paths([executable]).map_err(|_| UNAVAILABLE)?;
-            }
-            (executable.to_owned(), protocol.version.clone())
-        } else {
-            (
-                std::env::current_exe().map_err(|_| UNAVAILABLE)?,
-                env!("CARGO_PKG_VERSION").to_owned(),
-            )
-        };
-        let identity = expected(root, profile, &executable, &version)?;
+        let executable = std::env::current_exe().map_err(|_| UNAVAILABLE)?;
+        let identity = expected(root, profile, &executable)?;
         // The bridge is what gets the vendor ready. Check the record even
         // while starting, but require readiness before accepting a receipt.
+        let record = read_record(&record::path(root, &profile.name)).map_err(|_| UNAVAILABLE)?;
         if record.native_launch != generation
             || record.launch_identity.as_deref() != Some(&identity)
-            || !owns_generation(root, &profile.name, stage)
         {
             return Err(CHANGED);
         }
@@ -304,17 +250,14 @@ impl Bound {
             generation: generation.to_owned(),
             name: profile.name.clone(),
             executable,
-            version,
-            _session: session,
         })
     }
 
     pub(in crate::cli::tunnel) fn expected(&self) -> Result<String, &'static str> {
-        active_version(
+        active(
             &self.root,
             &self.name,
             &self.executable,
-            &self.version,
             Some(&self.generation),
         )
     }

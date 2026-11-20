@@ -20,7 +20,6 @@ mod diagnostics;
 pub(super) mod identity;
 mod key;
 mod process;
-pub(super) mod refresh;
 #[cfg(test)]
 mod tests;
 
@@ -264,22 +263,17 @@ fn try_launch_lock(lock: &File, on_busy: impl FnOnce()) -> Result<(), fs::TryLoc
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct Identity {
     pid: u32,
     exe: PathBuf,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct LaunchRecord {
     native_launch: String,
     #[serde(default)]
     launch_identity: Option<String>,
-    // Runtime pruning reads the top-level executable of a live record.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    executable: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    bridge: Option<refresh::Protocol>,
     spawn_started: Option<bool>,
     supervisor: Identity,
     target: Option<Identity>,
@@ -318,13 +312,6 @@ fn recover_launch(root: &Path, name: &str) -> Result<(), Fail> {
             path.display()
         )));
     }
-    if launch.bridge.is_some()
-        && store::occupied(&directory.join(refresh::BRIDGE_LOCK))
-            .map_err(|_| conflict(root, name))?
-    {
-        // A refresh may still be finishing after its supervisor has died.
-        drop(refresh::wait_for_gate(&directory).map_err(|_| conflict(root, name))?);
-    }
     remove_launch_files(&directory, &format!("{name}.profile.json"))?;
     store::sharing_retry(|| fs::remove_file(&path)).map_err(|_| conflict(root, name))
 }
@@ -349,7 +336,6 @@ fn remove_launch_files(directory: &Path, profile: &str) -> Result<(), Fail> {
         "health.url",
         "stop",
         OWNER_LOCK,
-        refresh::BRIDGE_LOCK,
     ];
     for entry in entries {
         let entry = entry.map_err(|_| blocked())?;
@@ -413,7 +399,6 @@ impl Stage {
             .file;
         owner.try_lock().map_err(|_| UNSAFE_STORE)?;
         stage.owner = Some(owner);
-        state::create(&stage.directory.join(refresh::BRIDGE_LOCK)).map_err(|_| UNSAFE_STORE)?;
         Ok(stage)
     }
 
@@ -442,27 +427,13 @@ impl Stage {
 
 impl Drop for Stage {
     fn drop(&mut self) {
+        drop(self.owner.take());
         if self.retain {
             crate::stderrln!(
                 "Tunnel ownership remains at {}. Check tunnel status.",
                 self.record.display()
             );
             return;
-        }
-        if self.owns_record {
-            let Ok(gate) = refresh::wait_for_gate(&self.directory) else {
-                crate::stderrln!(
-                    "Tunnel ownership remains at {}. Check tunnel status.",
-                    self.record.display()
-                );
-                return;
-            };
-            // Fence out a selector commit before removing the stage or its
-            // record. The generation is no longer exercisable after this.
-            drop(self.owner.take());
-            drop(gate);
-        } else {
-            drop(self.owner.take());
         }
         if let Err(Fail::Detail(message)) = remove_launch_files(&self.directory, &self.profile) {
             crate::stderrln!("{message}");
@@ -534,8 +505,6 @@ async fn supervise(
     let mut record = LaunchRecord {
         native_launch: id.simple().to_string(),
         launch_identity: Some(launch_identity),
-        executable: Some(executable.to_owned()),
-        bridge: Some(refresh::Protocol::current()),
         spawn_started: Some(false),
         supervisor: Identity {
             pid: std::process::id(),

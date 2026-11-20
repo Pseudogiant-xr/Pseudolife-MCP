@@ -1,10 +1,10 @@
 use super::*;
 use std::{io::BufRead, net::TcpListener, thread, time::Instant};
 
-pub(super) struct Home(pub(super) PathBuf);
+struct Home(PathBuf);
 
 impl Home {
-    pub(super) fn new() -> Self {
+    fn new() -> Self {
         let root = std::env::temp_dir().join(format!("tunnel-run-{}", Uuid::new_v4()));
         state::private_dir(&root).unwrap();
         Self(root)
@@ -35,12 +35,12 @@ fn prepared(root: &Path) -> Prepared<'_> {
     }
 }
 
-pub(super) fn launch_fixture(root: &Path) -> Prepared<'_> {
+fn launch_fixture(root: &Path) -> Prepared<'_> {
     state::atomic_create(&root.join("daemon-token"), b"fixture-daemon-token").unwrap();
     prepared(root)
 }
 
-pub(super) fn save_fixture_key(root: &Path, name: &str) -> bool {
+fn save_fixture_key(root: &Path, name: &str) -> bool {
     #[cfg(windows)]
     let stored = {
         let Some(sealed) = super::super::dpapi::seal(b"fixture-runtime-key") else {
@@ -54,7 +54,7 @@ pub(super) fn save_fixture_key(root: &Path, name: &str) -> bool {
     true
 }
 
-pub(super) fn fixture_image(root: &Path, name: &str) -> PathBuf {
+fn fixture_image(root: &Path, name: &str) -> PathBuf {
     let path = root.join(name);
     state::atomic_create(&path, name.as_bytes()).unwrap();
     path
@@ -106,7 +106,7 @@ fn vendor_fixture() {
         let launched = launch(launch_fixture(&root), &exe, STARTUP, |config| {
             fixture_command(&exe, config, "ready")
         });
-        assert!(launched.is_ok(), "{launched:?}");
+        assert!(launched.is_ok());
         return;
     }
     if mode == "legacy-lock" {
@@ -297,8 +297,6 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     let mut stage = Stage::new(&home.0, name, launch).unwrap();
     let record = LaunchRecord {
         native_launch: launch.simple().to_string(),
-        executable: None,
-        bridge: None,
         launch_identity: Some(
             identity::compute(&home.0, &prepared.profile, &prepared.key, &image).unwrap(),
         ),
@@ -316,20 +314,35 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     stage.announce(&record).unwrap();
     let record_path = super::record::path(&home.0, name);
     let original = fs::read(&record_path).unwrap();
-    let check = |expected| {
-        let (text, code) = super::super::update_with_runtime(&home.0, Some(&image)).unwrap();
+    let check = |runtime_image: &Path, expected, guidance: &str| {
+        let (text, code) = super::super::update_with_runtime(&home.0, Some(runtime_image)).unwrap();
         assert_eq!(code, 0);
         let report: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(report["state"], expected);
         assert_eq!(report["profiles"][0]["state"], expected);
         assert_eq!(report["profiles"][0]["running"], true);
+        let detail = report["profiles"][0]["detail"].as_str().unwrap();
+        assert!(detail.contains(guidance), "{detail}");
+        assert!(report["detail"].as_str().unwrap().contains(detail));
         assert!(fs::read(&record_path).unwrap() == original);
     };
-    check("current");
-    check("current");
+    let check_current =
+        |expected| check(&image, expected, "already running on the current runtime");
+    let check_stale = |guidance| check(&image, "stale", guidance);
+    check_current("current");
+    check_current("current");
+    let installed = fixture_image(&home.0, "new-installed-shim");
+    let directory = crate::cli::update::seams::quote(home.0.to_str().unwrap());
+    check(
+        &installed,
+        "stale",
+        &format!(
+            "Run `pseudolife-mcp tunnel stop --profile dot --profile-dir {directory}`, then `pseudolife-mcp tunnel run --profile dot --profile-dir {directory}` to reconnect the tunnel"
+        ),
+    );
     let pending = home.0.join(format!("{name}.reload.json"));
     state::atomic_create(&pending, br#"{"id":"00000000000000000000000000000000"}"#).unwrap();
-    check("stale");
+    check_stale("legacy refresh request may remain");
     fs::remove_file(pending).unwrap();
     let history = home.0.join(format!("{name}.reload.result.json"));
     state::atomic_create(
@@ -337,62 +350,22 @@ fn update_reports_only_an_attested_current_launch_as_current() {
         br#"{"id":"00000000000000000000000000000000","state":"failed"}"#,
     )
     .unwrap();
-    check("current");
+    check_current("current");
     let pending = home.0.join(format!("{name}.key-renewal"));
     state::atomic_create(&pending, b"interrupted renewal fixture").unwrap();
-    check("stale");
+    check_stale("runtime key renewal is incomplete");
     fs::remove_file(pending).unwrap();
     let previous = home.0.join(format!("{name}.key-previous"));
     state::atomic_create(&previous, b"unresolved retained pair fixture").unwrap();
-    check("stale");
+    check_stale("cannot read the retained previous key");
     fs::remove_file(previous).unwrap();
     let token = Path::new(&prepared.profile.token_file);
     state::atomic_write(token, b"changed-fixture-daemon-token", None).unwrap();
-    check("stale");
+    check_stale("differs from the current runtime or saved settings");
     state::atomic_write(token, b"fixture-daemon-token", None).unwrap();
-    check("current");
+    check_current("current");
     drop(stage.owner.take());
-    check("stale");
-}
-
-#[test]
-fn failed_refresh_and_next_session_keep_the_owned_vendor_running() {
-    let home = Home::new();
-    if !save_fixture_key(&home.0, "dot") {
-        return;
-    }
-    let prepared = launch_fixture(&home.0);
-    state::atomic_create(&home.0.join("dot.profile.json"), &prepared.profile_bytes).unwrap();
-    let executable = std::env::current_exe().unwrap();
-    let record_path = record::path(&home.0, "dot");
-    thread::scope(|scope| {
-        let run = scope.spawn(|| {
-            launch(prepared, &executable, STARTUP, |config| {
-                fixture_command(&executable, config, "ready")
-            })
-        });
-        let Some(active) = wait_for_ready(&record_path, || run.is_finished()) else {
-            panic!("fixture did not become ready: {:?}", run.join().unwrap());
-        };
-        let stage = stage_path(&home.0, launch_id(&active.native_launch).unwrap());
-        let rejected = refresh::activate(
-            &home.0,
-            "dot",
-            read_record(&record_path).unwrap(),
-            || Some(executable.clone()),
-            |_| Err("fixture unreachable daemon"),
-        );
-        let observed = read_record(&record_path).unwrap();
-        let running = !run.is_finished();
-        let rebound = store::load(&stage, "dot").ok().is_some_and(|profile| {
-            identity::Bound::capture(&stage, &active.native_launch, &profile).is_ok()
-        });
-        let stopped = stop(&home.0, "dot");
-        assert_eq!(run.join().unwrap(), Ok(("Tunnel dot stopped.\n".into(), 0)));
-        assert!(stopped.is_ok() && running && rebound);
-        assert_eq!(rejected, Err("fixture unreachable daemon"));
-        assert_eq!(observed, active);
-    });
+    check_stale("could not be verified against the current runtime");
 }
 
 #[test]
@@ -573,8 +546,6 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
     let owner = LaunchRecord {
         native_launch: id.simple().to_string(),
         launch_identity: None,
-        executable: None,
-        bridge: None,
         spawn_started: None,
         supervisor: Identity {
             pid: std::process::id(),
@@ -605,7 +576,7 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
         .env(CONFIG_ENV, &home.0)
         .env("PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE", "supervisor")
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::null())
         .spawn()
         .unwrap();
     let path = record::path(&home.0, "dot");
@@ -672,8 +643,6 @@ fn recovery_preserves_unknown_ownership_before_target_publication() {
     let mut launch = LaunchRecord {
         native_launch: id.simple().to_string(),
         launch_identity: None,
-        executable: None,
-        bridge: None,
         spawn_started: Some(true),
         supervisor: Identity {
             pid: u32::MAX,
