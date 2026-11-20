@@ -1216,6 +1216,22 @@ fn exposing_a_target_plans_read_only_and_reuses_an_existing_url() {
 }
 
 #[test]
+fn exposure_resume_advertises_the_mode_that_recreates_its_forward() {
+    let mut record = record::Record {
+        target: "box".into(),
+        expose_port: Some(8765),
+        phase: record::Phase::RolledBack,
+        ..Default::default()
+    };
+    record.flags.target_restored = true;
+    for url in ["", "http://100.64.0.7:8765"] {
+        record.target_url = url.into();
+        let refused = command::held_refusal(std::slice::from_ref(&record), "other", false).unwrap();
+        assert!(refused.contains("move --to box --expose-target --no-keep-tokens --resume"));
+    }
+}
+
+#[test]
 fn explicit_target_files_require_helper_support_and_keep_overlay_order_on_the_wire() {
     let request = Request {
         no_keep_tokens: false,

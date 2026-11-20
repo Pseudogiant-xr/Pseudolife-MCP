@@ -80,14 +80,35 @@ pub(super) fn valid_url(url: &str, port: u16) -> bool {
 }
 
 pub(super) fn port(health_url: &str) -> Result<u16, String> {
-    if super::carry::loopback(health_url)
-        && let Ok(url) = reqwest::Url::parse(health_url)
+    if let Ok(url) = reqwest::Url::parse(health_url)
         && url.scheme() == "http"
+        && url.host_str() == Some("127.0.0.1")
         && let Some(port) = url.port_or_known_default()
     {
         return Ok(port);
     }
-    Err("the target's daemon has no usable loopback HTTP binding for Tailscale Serve; configure that binding or pass --target-url".into())
+    Err("the selected daemon needs a 127.0.0.1 HTTP binding for Tailscale Serve; configure that binding or pass --target-url".into())
+}
+
+pub(super) fn wait_ready(
+    bank: &str,
+    mut get: impl FnMut() -> Option<serde_json::Value>,
+    mut delay: impl FnMut(),
+) -> Result<(), String> {
+    for _ in 0..90 {
+        if let Some(health) = get()
+            && health["status"] == "ok"
+            && health["ready"] != false
+        {
+            return if health["bank"] == bank && health["auth"] == true {
+                Ok(())
+            } else {
+                Err("the target loopback endpoint did not identify the authenticated moved bank; verify the selected daemon and binding".into())
+            };
+        }
+        delay();
+    }
+    Err("the selected target daemon did not become ready for exposure; check its local health endpoint before retrying".into())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +224,35 @@ mod tests {
 
     const PORT: u16 = 8765;
     const URL: &str = "http://100.64.0.7:8765";
+
+    #[test]
+    fn exposure_requires_the_exact_ipv4_forward_destination() {
+        assert_eq!(port("http://127.0.0.1:8765").unwrap(), PORT);
+        assert!(port("http://127.0.0.2:8765").is_err());
+        assert!(port("http://[::1]:8765").is_err());
+    }
+
+    #[test]
+    fn exposure_waits_for_the_authenticated_moved_bank() {
+        let health = |bank, ready| serde_json::json!({"status":"ok", "ready":ready, "auth":true, "bank":bank});
+        let mut replies = [
+            None,
+            Some(health("moved", false)),
+            Some(health("moved", true)),
+        ]
+        .into_iter();
+        let mut waits = 0;
+        wait_ready("moved", || replies.next().flatten(), || waits += 1).unwrap();
+        assert_eq!(waits, 2);
+        assert!(
+            wait_ready(
+                "moved",
+                || Some(health("other", true)),
+                || panic!("wrong bank was retried")
+            )
+            .is_err()
+        );
+    }
 
     #[derive(Default)]
     struct Fixture {

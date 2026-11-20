@@ -899,17 +899,23 @@ file flags off.
 - checkout targets (`--target-checkout`).
 
 **Tailnet exposure during a native move.** Use `--expose-target` to use
-Tailscale Serve on the target's existing loopback HTTP port. A dry run
+Tailscale Serve on the target's existing `127.0.0.1` HTTP port. A dry run
 reads the target's exposure status. An existing forward is reused. If the
 move needs to create a forward, it does so after starting the target
-daemon, then checks that the tailnet URL serves the moved bank before
-committing. The explicit flag authorizes creation of the persistent
-forward. With `--target-url`, the move uses that address.
+daemon and waiting for it to serve the moved bank locally. It then checks
+that the tailnet URL serves the moved bank before committing. The explicit
+flag authorizes creation of the persistent forward. With `--target-url`,
+the move uses that address.
 
 Rollback removes a forward only when its target-side `exposure.json`
 receipt identifies it as created by this move and the target still
 reports the same forward. The recovery output names the receipt and the
 read-only status command if ownership is uncertain.
+
+If rollback cannot restore the target environment or verify its stopped
+daemon, keep the target stopped and gated. Follow the reported next step.
+When the output gives `move-target recovery-commands`, run that command on
+the target to inspect the carry journal and get the recovery instructions.
 
 The rest of this section describes the Python client's move.
 

@@ -998,6 +998,7 @@ fn manual_rollback_withholds_source_recovery_until_target_settings_are_restored(
     let mut record = Record {
         move_id: "20261120-000000-aabbccdd".into(),
         target: "target".into(),
+        remote_folder: "~/move files/fixture".into(),
         ..Record::default()
     };
     record.flags.identities_applied = true;
@@ -1007,6 +1008,9 @@ fn manual_rollback_withholds_source_recovery_until_target_settings_are_restored(
     record.flags.source_stopped = true;
     let instructions = engine::manual_rollback(&record).join("\n");
     assert!(instructions.contains("move --rollback 20261120-000000-aabbccdd"));
+    assert!(instructions.contains(
+        "pseudolife-mcp move-target recovery-commands '~/move files/fixture/carry.json'"
+    ));
     assert!(instructions.contains("target and its moved copy are permanently retired"));
     assert!(!instructions.lines().any(|line| line.starts_with("docker ")));
     assert!(

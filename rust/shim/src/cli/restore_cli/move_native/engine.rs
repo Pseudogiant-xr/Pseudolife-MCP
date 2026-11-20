@@ -2325,10 +2325,10 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
     let at = &record.updated_at;
     let folder = remote_folder(record);
     let (environment, daemon) = if record.flags.identities_applied {
-        let recovery = crate::cli::restore_cli::bank::sh_quote(&format!("{folder}/carry.json"));
+        let recovery = super::carry::recovery_command(&format!("{folder}/carry.json"));
         (
             format!(
-                "Keep the target daemon stopped and gated while restoring its configuration. Before editing the environment file, run this on the target to get the exact head -c and sha256sum check (original_bytes and original_digest in the journal) and, if needed, the recorded docker compose command ending in up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon:\n  pseudolife-mcp move-target recovery-commands {recovery}\nIf the command is not on PATH, use the installed launcher at \"${{XDG_DATA_HOME:-$HOME/.local/share}}/pseudolife-mcp/bin/pseudolife-mcp\" or \"$HOME/.local/bin/pseudolife-mcp\" in its place. If it prints a recreation command, compare the checksum before using the original prefix, check for later edits, and remove only this move's appended # Pseudolife move {} block. If the file is already restored, verify its original settings. Run the printed Compose command only after restoring the environment, and fill in its new verified container ID before running later Docker commands. ",
+                "Keep the target daemon stopped and gated while restoring its configuration. Before editing the environment file, run this on the target to get the exact head -c and sha256sum check (original_bytes and original_digest in the journal) and, if needed, the recorded docker compose command ending in up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon:\n  {recovery}\nIf the command is not on PATH, use the installed launcher at \"${{XDG_DATA_HOME:-$HOME/.local/share}}/pseudolife-mcp/bin/pseudolife-mcp\" or \"$HOME/.local/bin/pseudolife-mcp\" in its place. If it prints a recreation command, compare the checksum before using the original prefix, check for later edits, and remove only this move's appended # Pseudolife move {} block. If the file is already restored, verify its original settings. Run the printed Compose command only after restoring the environment, and fill in its new verified container ID before running later Docker commands. ",
                 record.move_id
             ),
             "<verified-target-daemon-id>",
@@ -2450,6 +2450,9 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
         .iter()
         .any(|undo| undo.step == PROVE_TARGET_STOPPED && undo.ok);
     if identities_pending {
+        let recovery =
+            super::carry::recovery_command(&format!("{}/carry.json", remote_folder(record)));
+        lines.push(format!("If the target environment still needs repair, keep its daemon stopped and gated and run {recovery} on the target to print the recovery steps."));
         lines.push(format!(
             "To finish restoring the target's original environment, restore access to its installed Compose deployment and run pseudolife-mcp move --rollback {} from the source. For manual source recovery, first verify that the target is stopped and gated, or that the target and its moved copy are permanently retired. Keep the source stopped and fenced until then.",
             record.move_id

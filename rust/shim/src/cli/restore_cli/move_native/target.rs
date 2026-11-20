@@ -457,6 +457,15 @@ struct Site2 {
 }
 
 impl super::ops::Site for Site2 {
+    fn wait_exposure_ready(&mut self, port: u16, bank: &str) -> Result<(), String> {
+        let url = format!("http://127.0.0.1:{port}/health");
+        let second = std::time::Duration::from_secs(1);
+        super::exposure::wait_ready(
+            bank,
+            || super::super::http_json(&url, second),
+            || std::thread::sleep(second),
+        )
+    }
     fn expose(
         &mut self,
         action: super::exposure::Action,

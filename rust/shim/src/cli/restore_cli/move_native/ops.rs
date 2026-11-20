@@ -70,6 +70,9 @@ pub(super) trait Site {
     fn expose(&mut self, _: exposure::Action, _: u16) -> Result<exposure::Report, String> {
         Err("this target cannot manage a tailnet forward".into())
     }
+    fn wait_exposure_ready(&mut self, _: u16, _: &str) -> Result<(), String> {
+        Err("this target cannot check daemon readiness for exposure".into())
+    }
 }
 
 /// The claim a move holds on the target.
@@ -1188,27 +1191,30 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
                 .ok()
                 .flatten()
                 .map(|claim| claim.source_bank);
-            let valid = pins.is_some()
-                && bank.is_some()
+            if let Some(bank) = bank
+                && pins.is_some()
                 && site.docker().is_ok_and(|docker| {
                     gather(docker, pins).is_ok_and(|facts| {
                         facts.running
-                            && facts.meta_fingerprint == bank
+                            && facts.meta_fingerprint.as_deref() == Some(bank.as_str())
                             && exposure::port(&facts.health_url).ok() == Some(*port)
                     })
-                });
-            if !valid {
-                failed(
-                    "the selected target daemon cannot be verified as running the moved bank on the requested local port",
-                )
-            } else {
-                match exposure::create(site, &folder, *port) {
+                })
+            {
+                match site
+                    .wait_exposure_ready(*port, &bank)
+                    .and_then(|()| exposure::create(site, &folder, *port))
+                {
                     Ok(url) => Answer {
                         exposure_url: Some(url),
                         ..done()
                     },
                     Err(why) => failed(why),
                 }
+            } else {
+                failed(
+                    "the selected target daemon cannot be verified as running the moved bank on the requested local port",
+                )
             }
         }
         Op::UndoExposure { .. }
