@@ -18,6 +18,7 @@ mod tailscale;
 
 use super::hook_http;
 use super::pyjson::{self, Dict, J};
+use super::restore_cli::move_native::protocol::MOVE_EXPOSURE_REPORT_ENV;
 use args::{Action, Args, Parsed};
 use std::{
     ffi::OsString,
@@ -259,8 +260,6 @@ async fn fetch_health(origin: &str, timeout: Duration) -> Health {
 }
 
 // ── the report ───────────────────────────────────────────────────────────────
-
-pub(in crate::cli) const MOVE_EXPOSURE_REPORT_ENV: &str = "PSEUDOLIFE_MOVE_EXPOSURE_REPORT";
 
 /// `_Report`: the JSON report's fields, and the lines printed without
 /// `--json`.

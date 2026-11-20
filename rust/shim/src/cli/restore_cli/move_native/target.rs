@@ -628,7 +628,7 @@ fn run_expose(
     let mut command = std::process::Command::new(std::env::current_exe().map_err(|_| error)?);
     command
         .args(action.arguments(port))
-        .env(crate::cli::expose::MOVE_EXPOSURE_REPORT_ENV, "1")
+        .env(super::protocol::MOVE_EXPOSURE_REPORT_ENV, "1")
         .stdin(std::process::Stdio::null());
     super::source::no_window(&mut command);
     let result = command.output().map_err(|_| error)?;

@@ -17,6 +17,9 @@ use super::{
     target::Ask,
 };
 
+/// Opts the target's native `expose` subprocess into reporting its move outcome.
+pub(in crate::cli) const MOVE_EXPOSURE_REPORT_ENV: &str = "PSEUDOLIFE_MOVE_EXPOSURE_REPORT";
+
 /// The protocol this client's source speaks for a move's transaction.
 pub(in crate::cli) const PROTOCOL: u32 = 2;
 
