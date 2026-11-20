@@ -14,6 +14,7 @@ arms' post-states can be compared exactly.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import os
 import re
 import sys
@@ -134,13 +135,14 @@ def teardown(name: str) -> None:
               "but the bank is gone; the case keeps its result", file=sys.stderr)
 
 
-def drop(name: str) -> None:
+def drop(name: str, *, admin=None) -> None:
+    """Drop an owned bank, optionally on the caller's open admin connection."""
     import psycopg  # noqa: PLC0415
     from rust.harness_support.database_guard import (  # noqa: PLC0415
         assert_disposable_database, refuse_production_database)
     NAMES.require_owned(name)
     url(name)  # validates the name
-    with _retrying(_admin) as conn:
+    with (nullcontext(admin) if admin is not None else _retrying(_admin)) as conn:
         if not conn.execute(
                 "SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone():
             return

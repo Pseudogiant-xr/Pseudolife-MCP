@@ -118,13 +118,13 @@ def _name(kind: str) -> str:
     return _bank.name(PREFIX + kind)
 
 
-def _drop(name: str) -> None:
+def _drop(name: str, *, admin=None) -> None:
     """``_bank.drop``, waiting out an autovacuum worker the test login may
     not end (it finishes on its own)."""
     import psycopg  # noqa: PLC0415
     for attempt in range(60):
         try:
-            _bank.drop(name)
+            _bank.drop(name, admin=admin)
             return
         except (psycopg.errors.InsufficientPrivilege, psycopg.errors.ObjectInUse):
             if attempt == 59:
@@ -146,11 +146,11 @@ def _copy(source: str, target: str) -> None:
     _require_owned_bank(target)
     refuse_production_database(source)
     refuse_production_database(target)
-    _drop(target)
-    _CREATED.add(target)
     with _bank._admin() as conn:
         if assert_disposable_database(conn) != "postgres":
             raise ValueError("maintainer fixture copy requires the test admin database")
+        _drop(target, admin=conn)
+        _CREATED.add(target)
         conn.execute(f'CREATE DATABASE "{target}" TEMPLATE "{source}"')
 
 

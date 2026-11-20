@@ -173,11 +173,13 @@ def test_maintainer_copy_refuses_wrong_admin_server(maintainer_fixture, monkeypa
     row = maintainer_fixture
     conn = MagicMock()
     conn.execute.return_value.fetchone.return_value = ("pseudolife_bench",)
-    monkeypatch.setattr(row, "_drop", lambda _: None)
+    drop = MagicMock()
+    monkeypatch.setattr(row, "_drop", drop)
     monkeypatch.setattr(_bank, "_admin", lambda: nullcontext(conn))
     with pytest.raises(ValueError, match="requires the test admin database"):
         row._copy(row._name("pending"), row.ARM_DB)
     conn.execute.assert_called_once_with("SELECT current_database()")
+    drop.assert_not_called()
 
 
 def test_maintainer_copy_refuses_another_rows_bank(maintainer_fixture, monkeypatch):
@@ -186,6 +188,57 @@ def test_maintainer_copy_refuses_another_rows_bank(maintainer_fixture, monkeypat
     monkeypatch.setattr(row, "_drop", lambda _: pytest.fail("drop reached with a foreign template"))
     with pytest.raises(ValueError, match="owned maintainer bank"):
         row._copy(unrelated, row.ARM_DB)
+
+
+@pytest.mark.parametrize("operation", ["copy", "prepare", "terminate", "lock"])
+def test_maintainer_successful_fixture_paths_are_import_free(maintainer_fixture, monkeypatch, operation):
+    from contextlib import nullcontext
+    from unittest.mock import MagicMock
+
+    import psycopg
+
+    row = maintainer_fixture
+    conn = MagicMock()
+    process = MagicMock()
+    process.poll.return_value = 0
+    monkeypatch.setattr(row, "_live_code", lambda *_: "observed-hash")
+    monkeypatch.setattr(row.time, "sleep", lambda _: None)
+    if operation == "copy":
+        source = row._name("pending")
+        conn.execute.return_value.fetchone.side_effect = [("postgres",), (1,)]
+        target = MagicMock()
+        target.execute.return_value.fetchone.return_value = (row.ARM_DB,)
+        admin = MagicMock(return_value=nullcontext(conn))
+        monkeypatch.setattr(_bank, "_admin", admin)
+        monkeypatch.setattr(_bank, "_connect", lambda _: nullcontext(target))
+        monkeypatch.setattr(_bank, "_login", lambda: ("pseudolife_test", "fixture"))
+        row._copy(source, row.ARM_DB)
+        admin.assert_called_once_with()
+        target.execute.assert_called_once_with("SELECT current_database()")
+        assert "pg_terminate_backend" in conn.execute.call_args_list[-3].args[0]
+        assert conn.execute.call_args_list[-2].args == (f'DROP DATABASE IF EXISTS "{row.ARM_DB}"',)
+        last = f'CREATE DATABASE "{row.ARM_DB}" TEMPLATE "{source}"'
+    else:
+        conn.execute.return_value.fetchone.return_value = (row.ARM_DB,)
+        monkeypatch.setattr(_bank, "connect", lambda *a, **kw: nullcontext(conn))
+        if operation == "prepare":
+            last = "SELECT 'fixture preparation'"
+            monkeypatch.setattr(row, "ensure", row._name)
+            monkeypatch.setattr(row, "_copy", lambda *args: None)
+            monkeypatch.setattr(_bank, "dump", lambda _: {"prepared": True})
+            case = row.case("fixture-preparation", "pending", [], dsn=False, prepare=(last,))
+            arm = MagicMock()
+            case.setup(arm)
+            arm.state.__setitem__.assert_called_once_with("prepared", {"prepared": True})
+        elif operation == "terminate":
+            row.terminate_during(None, process)
+            last = "SELECT pg_terminate_backend"
+        else:
+            with pytest.raises(psycopg.Rollback):
+                row.lock_during(None, process)
+            last = "LOCK TABLE maintainer_bootstrap"
+    assert conn.execute.call_args_list[0].args == ("SELECT current_database()",)
+    assert conn.execute.call_args.args[0].startswith(last)
 
 
 def test_maintainer_seed_refuses_missing_pending_key(maintainer_fixture, monkeypatch):
@@ -205,20 +258,42 @@ def test_maintainer_seed_refuses_missing_pending_key(maintainer_fixture, monkeyp
 
 @pytest.mark.parametrize("operation", ["redeem", "burn"])
 def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture, monkeypatch, operation):
-    from contextlib import nullcontext
+    from contextlib import contextmanager, nullcontext
     from unittest.mock import MagicMock
 
     row = maintainer_fixture
     conn = MagicMock()
     observed = "fixture-code-hash"
-    conn.execute.return_value.fetchone.side_effect = [(row.ARM_DB,), (observed,)]
-    conn.execute.return_value.rowcount = 1
-    monkeypatch.setattr(_bank, "connect", lambda *a, **kw: nullcontext(conn))
+    response = MagicMock(rowcount=1)
+    response.fetchone.side_effect = [(row.ARM_DB,), (observed,)]
+    in_transaction = False
+    transactions = []
+
+    @contextmanager
+    def transaction():
+        nonlocal in_transaction
+        assert not in_transaction
+        in_transaction = True
+        try:
+            yield
+        finally:
+            in_transaction = False
+
+    def execute(statement, *args):
+        if not isinstance(statement, str) or statement.startswith(("UPDATE ", "LOCK ")):
+            transactions.append(in_transaction)
+        return response
+
+    conn.transaction.side_effect = transaction
+    conn.execute.side_effect = execute
+    connect = MagicMock(return_value=nullcontext(conn))
+    monkeypatch.setattr(_bank, "connect", connect)
     insert = MagicMock(wraps=row._insert_rows)
     monkeypatch.setattr(row, "_insert_rows", insert)
     process = MagicMock()
     process.poll.return_value = None
     getattr(row, operation + "_during")(None, process)
+    connect.assert_called_once_with(row.ARM_DB, autocommit=True)
     updates = [call.args[1] for call in conn.execute.call_args_list if isinstance(call.args[0], str)
                and call.args[0].startswith("UPDATE maintainer_bootstrap")]
     if operation == "redeem":
@@ -227,10 +302,12 @@ def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture,
             "maintainer_nonces", "maintainer_passkeys", "coordination_events",
         ]
         conn.transaction.assert_called_once_with()
+        assert transactions == [True] * 5
     else:
         assert updates == [(observed, row.HOOK_T, attempt) for attempt in range(5)]
         insert.assert_not_called()
         conn.transaction.assert_not_called()
+        assert transactions == [False] * 5
 
 
 def test_foreign_cleanup_refuses_before_connecting(monkeypatch):
