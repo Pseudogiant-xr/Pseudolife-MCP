@@ -129,8 +129,11 @@ these cases are recorded from the candidate, not the oracle:
   nothing. A ready profile without a running record is `not-running`.
   A ready native launch is `current` when its live ownership and identity
   match the installed runtime and saved connection and no key or refresh
-  recovery is needed. Other running or uncertain launches are `stale` and
-  stay in place. A record with no profile beside it is
+  recovery is needed. A compatible native supervisor in the default store
+  can select the verified installed shim for its next stdio session,
+  reported as `refreshed`. The daemon handshake runs before publication.
+  An attached stdio bridge keeps its selection. Other running or uncertain
+  launches are `stale` and stay in place. A record with no profile beside it is
   listed by file name, `leftover` when its process is gone, `stale` when it
   runs or may run. A profile `load` does not read is `unread` (named with
   the reason, the field at fault where there is one), or `stale` when its tunnel runs or may run. The top-level state is `stale` when any entry is, else `current`,

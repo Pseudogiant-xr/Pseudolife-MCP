@@ -1,10 +1,10 @@
 use super::*;
 use std::{io::BufRead, net::TcpListener, thread, time::Instant};
 
-struct Home(PathBuf);
+pub(super) struct Home(pub(super) PathBuf);
 
 impl Home {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let root = std::env::temp_dir().join(format!("tunnel-run-{}", Uuid::new_v4()));
         state::private_dir(&root).unwrap();
         Self(root)
@@ -35,9 +35,23 @@ fn prepared(root: &Path) -> Prepared<'_> {
     }
 }
 
-fn launch_fixture(root: &Path) -> Prepared<'_> {
+pub(super) fn launch_fixture(root: &Path) -> Prepared<'_> {
     state::atomic_create(&root.join("daemon-token"), b"fixture-daemon-token").unwrap();
     prepared(root)
+}
+
+pub(super) fn save_fixture_key(root: &Path, name: &str) -> bool {
+    #[cfg(windows)]
+    let stored = {
+        let Some(sealed) = super::super::dpapi::seal(b"fixture-runtime-key") else {
+            return false;
+        };
+        [b"DPAPI\0".as_slice(), &sealed].concat()
+    };
+    #[cfg(unix)]
+    let stored = b"PLAIN\0fixture-runtime-key";
+    state::atomic_create(&store::key_path(root, name), stored.as_ref()).unwrap();
+    true
 }
 
 const FIXTURE: &str = "cli::tunnel::runtime::tests::vendor_fixture";
@@ -268,21 +282,16 @@ fn update_reports_only_an_attested_current_launch_as_current() {
         &prepared.profile_bytes,
     )
     .unwrap();
-    #[cfg(windows)]
-    let stored = {
-        let Some(sealed) = super::super::dpapi::seal(b"fixture-runtime-key") else {
-            return;
-        };
-        [b"DPAPI\0".as_slice(), &sealed].concat()
-    };
-    #[cfg(unix)]
-    let stored = b"PLAIN\0fixture-runtime-key";
-    state::atomic_create(&store::key_path(&home.0, name), stored.as_ref()).unwrap();
+    if !save_fixture_key(&home.0, name) {
+        return;
+    }
 
     let launch = Uuid::new_v4();
     let mut stage = Stage::new(&home.0, name, launch).unwrap();
     let record = LaunchRecord {
         native_launch: launch.simple().to_string(),
+        executable: None,
+        bridge: None,
         launch_identity: Some(
             identity::compute(&home.0, &prepared.profile, &prepared.key, &executable).unwrap(),
         ),
@@ -330,6 +339,46 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     check("current");
     drop(stage.owner.take());
     check("stale");
+}
+
+#[test]
+fn failed_refresh_and_next_session_keep_the_owned_vendor_running() {
+    let home = Home::new();
+    if !save_fixture_key(&home.0, "dot") {
+        return;
+    }
+    let prepared = launch_fixture(&home.0);
+    state::atomic_create(&home.0.join("dot.profile.json"), &prepared.profile_bytes).unwrap();
+    let executable = std::env::current_exe().unwrap();
+    let record_path = record::path(&home.0, "dot");
+    thread::scope(|scope| {
+        let run = scope.spawn(|| {
+            launch(prepared, &executable, STARTUP, |config| {
+                fixture_command(&executable, config, "ready")
+            })
+        });
+        let Some(active) = wait_for_ready(&record_path, || run.is_finished()) else {
+            panic!("fixture did not become ready: {:?}", run.join().unwrap());
+        };
+        let stage = stage_path(&home.0, launch_id(&active.native_launch).unwrap());
+        let rejected = refresh::activate(
+            &home.0,
+            "dot",
+            read_record(&record_path).unwrap(),
+            || Some(executable.clone()),
+            |_| Err("fixture unreachable daemon"),
+        );
+        let observed = read_record(&record_path).unwrap();
+        let running = !run.is_finished();
+        let rebound = store::load(&stage, "dot").ok().is_some_and(|profile| {
+            identity::Bound::capture(&stage, &active.native_launch, &profile).is_ok()
+        });
+        let stopped = stop(&home.0, "dot");
+        assert_eq!(run.join().unwrap(), Ok(("Tunnel dot stopped.\n".into(), 0)));
+        assert!(stopped.is_ok() && running && rebound);
+        assert_eq!(rejected, Err("fixture unreachable daemon"));
+        assert_eq!(observed, active);
+    });
 }
 
 #[test]
@@ -510,6 +559,8 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
     let owner = LaunchRecord {
         native_launch: id.simple().to_string(),
         launch_identity: None,
+        executable: None,
+        bridge: None,
         spawn_started: None,
         supervisor: Identity {
             pid: std::process::id(),
@@ -607,6 +658,8 @@ fn recovery_preserves_unknown_ownership_before_target_publication() {
     let mut launch = LaunchRecord {
         native_launch: id.simple().to_string(),
         launch_identity: None,
+        executable: None,
+        bridge: None,
         spawn_started: Some(true),
         supervisor: Identity {
             pid: u32::MAX,

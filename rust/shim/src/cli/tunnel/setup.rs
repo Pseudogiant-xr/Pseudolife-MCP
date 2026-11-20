@@ -102,7 +102,7 @@ pub(super) fn save(
     Ok(saved_message(options, root, &profile))
 }
 
-fn verify_connection(profile: &store::Profile) -> Result<CredentialSnapshot, Fail> {
+pub(super) fn verify_connection(profile: &store::Profile) -> Result<CredentialSnapshot, Fail> {
     let provider = CredentialProvider::new(None, Some((&profile.token_file).into()))
         .map_err(|_| Fail::Tunnel(CREDENTIAL))?;
     let snapshot = provider.snapshot().map_err(|_| Fail::Tunnel(CREDENTIAL))?;

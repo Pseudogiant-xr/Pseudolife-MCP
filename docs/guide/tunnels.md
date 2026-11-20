@@ -48,13 +48,19 @@ previous key at the provider.
 
 The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel
-runs. It also answers `tunnel update`, which starts, stops and signals
-nothing. `tunnel update` reports a tunnel that is not running, and names a
+runs. `tunnel update` reports a tunnel that is not running, and names a
 process record left by a stopped tunnel as a file you can delete (a
 `leftover` when no saved profile is beside it). It reports `current` for
 a ready native launch whose identity matches the installed runtime and saved
-connection. Other running or uncertain launches are `stale` and stay in
-place. A record it cannot judge (unreadable, or naming no
+connection. For a compatible launch in the default store, the installed
+launcher can select its verified client for the next stdio session. It checks
+the saved connection with the daemon before committing the new selection.
+The vendor stays running. A failed check leaves the previous selection in
+place. An existing stdio session keeps its client. To replace it, run
+`pseudolife-mcp tunnel stop` and then `pseudolife-mcp tunnel run` with the
+same profile and directory. This restart interrupts the session.
+Other running or uncertain launches are `stale` and stay in place.
+A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native
 client also answers preflight refusals for `tunnel verify` and `tunnel setup`.

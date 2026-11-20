@@ -621,11 +621,9 @@ fn report(
     text
 }
 
-/// `tunnel update`: report each saved profile's tunnel as it is. A running
-/// native launch is current when its identity matches the installed runtime
-/// and saved connection. Other live or uncertain launches are left in place.
-/// Refused only for a store or profile it cannot trust (exit 2), and exit 3
-/// when nothing is saved at all.
+/// `tunnel update`: select the verified installed shim for the next stdio
+/// session of an owned launch. Idle profiles stay idle and an existing
+/// stdio session keeps its shim. The release updater consumes this report.
 fn update(root: &Path) -> Answer {
     // A store this client cannot list is a refusal with its cause, never a
     // deferral: the update step shows the cause to the user.
@@ -696,6 +694,16 @@ fn update(root: &Path) -> Answer {
         };
         let record = record::read(record::path(root, name), rows.as_deref());
         let name_q = quoted(name);
+        let live_native = matches!(&unread, Err(true))
+            && record.as_ref().is_some_and(|record| {
+                record.native && record.ready && record.liveness == Liveness::Running
+            });
+        let current = live_native && current_launch(root, name);
+        let selected = if live_native && !current {
+            runtime::refresh::attempt(root, name)
+        } else {
+            None
+        };
         let (state, running, sentence) = match (&record, unread) {
             (None, Err(true)) => {
                 entries.push(format!(
@@ -712,7 +720,7 @@ fn update(root: &Path) -> Answer {
                 "false",
                 format!("{unread}; it has no tunnel process record, so no tunnel of it runs"),
             ),
-            (Some(record), Err(true)) if current_launch(root, name, record) => (
+            (Some(record), Err(true)) if current => (
                 "current",
                 "true",
                 format!(
@@ -720,6 +728,28 @@ fn update(root: &Path) -> Answer {
                     record.path.display()
                 ),
             ),
+            (Some(record), Err(true)) if selected.is_some() => {
+                use runtime::refresh::Selection;
+                let (state, detail) = match selected.unwrap() {
+                    Ok(Selection::Refreshed) => (
+                        "refreshed",
+                        "selected the installed shim for the next stdio session",
+                    ),
+                    Ok(Selection::Unconfirmed) => (
+                        "stale",
+                        "selected the installed shim but could not sync its record. Check tunnel status before retrying",
+                    ),
+                    Err(cause) => ("stale", cause),
+                };
+                (
+                    state,
+                    "true",
+                    format!(
+                        "tunnel {name} (process record {}): {detail}",
+                        record.path.display()
+                    ),
+                )
+            }
             (Some(record), unread) => {
                 // A stopped tunnel needs nothing and leaves the update
                 // `current`; an unread profile is named so the user can fix it.
@@ -808,11 +838,8 @@ fn update(root: &Path) -> Answer {
     ))
 }
 
-fn current_launch(root: &Path, name: &str, record: &record::Record) -> bool {
-    record.native
-        && record.ready
-        && record.liveness == Liveness::Running
-        && setup::check_pending(root, name).is_ok()
+fn current_launch(root: &Path, name: &str) -> bool {
+    setup::check_pending(root, name).is_ok()
         && matches!(setup::validate_previous_key(root, name), Ok(false))
         && refresh_status(root, name).is_ok_and(|refresh| !refresh.needs_attention())
         && runtime::identity::current(root, name).is_ok()

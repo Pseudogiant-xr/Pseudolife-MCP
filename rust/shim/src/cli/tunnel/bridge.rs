@@ -201,6 +201,7 @@ struct Start {
     root: PathBuf,
     profile: store::Profile,
     verification: Option<ReceiptIdentity>,
+    executable: PathBuf,
 }
 
 /// The `tunnel status` command for this profile, in the store the bridge
@@ -242,22 +243,24 @@ fn prepare(values: &[OsString]) -> Result<Start, String> {
             "the profile's daemon address is not an http(s) origin (no path, query or credentials), which the stdio shim needs, and this client cannot change a saved profile yet; `{command}` names its file"
         ));
     }
-    let (root, verification) = match launch {
+    let (root, verification, executable) = match launch {
         Some(launch) => {
             let scope = identity::Bound::capture(&root, &launch, &profile)?;
             let root = scope.root.clone();
+            let executable = scope.executable.clone();
             let verification = ReceiptIdentity {
                 captured: scope.identity.clone(),
                 current: Arc::new(move || scope.expected()),
             };
-            (root, Some(verification))
+            (root, Some(verification), executable)
         }
-        None => (root, None),
+        None => (root, None, std::env::current_exe().map_err(|_| NO_SHIM)?),
     };
     Ok(Start {
         root,
         profile,
         verification,
+        executable,
     })
 }
 
@@ -321,14 +324,9 @@ pub(super) fn run(values: &[OsString]) -> ExitCode {
 }
 
 async fn serve(start: Start) -> ExitCode {
-    // The runtime the vendor started this bridge from: the same binary, so
-    // the bridge and its shim never straddle a runtime update.
-    let Ok(executable) = std::env::current_exe() else {
-        crate::stderrln!("{NO_SHIM}");
-        return ExitCode::FAILURE;
-    };
+    // The selection and its held session gate travel with the observer.
     let mut command = tokio::process::Command::from(child_command(
-        &executable,
+        &start.executable,
         &start.profile,
         std::env::vars_os(),
     ));
