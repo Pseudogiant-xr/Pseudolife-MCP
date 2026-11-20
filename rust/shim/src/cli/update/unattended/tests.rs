@@ -6,6 +6,33 @@ use std::{
 };
 
 #[test]
+fn concurrent_attended_notices_reserve_the_release_only_once() {
+    let directory = seams::temp_root().join(format!("w66-notice-{}", uuid::Uuid::new_v4()));
+    crate::board::state::private_dir(&directory).unwrap();
+    let marker = directory.join("release.notice");
+    let attempts = 16;
+    let start = std::sync::Barrier::new(attempts);
+    let reserved = std::thread::scope(|scope| {
+        let threads = (0..attempts)
+            .map(|_| {
+                scope.spawn(|| {
+                    start.wait();
+                    reserve_attended_record(&marker).unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .filter(|&reserved| reserved)
+            .count()
+    });
+    fs::remove_file(&marker).unwrap();
+    fs::remove_dir(&directory).unwrap();
+    assert_eq!(reserved, 1);
+}
+
+#[test]
 fn github_discovery_unattended_exits_three_for_incomplete_release() {
     let mut update = Update::new(super::super::Options::parse(vec![]).unwrap());
     update.o.as_json = true;

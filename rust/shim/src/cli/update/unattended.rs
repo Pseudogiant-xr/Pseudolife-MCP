@@ -2,6 +2,7 @@
 use super::{Result, Update, UpdateError, seams};
 use crate::credentials::CredentialProvider;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     cell::RefCell,
     fs::{self, File, OpenOptions},
@@ -219,6 +220,90 @@ fn notice(update: &mut Update, text: &str) {
     }
 }
 
+fn reserve_attended_record(path: &Path) -> std::result::Result<bool, &'static str> {
+    if fs::symlink_metadata(path).is_ok() {
+        return Ok(false);
+    }
+    // Reserve before posting. A crash or a lost response must not make
+    // the next scheduled run post the same notice again.
+    let directory = path.parent().expect("notice directory");
+    crate::board::state::private_dir(directory)?;
+    let record = match crate::board::state::create(path) {
+        Ok(record) => record,
+        Err(_) if fs::symlink_metadata(path).is_ok() => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    record
+        .file
+        .sync_all()
+        .map_err(|_| "notice_state_unavailable")?;
+    #[cfg(unix)]
+    File::open(directory)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|_| "notice_state_unavailable")?;
+    Ok(true)
+}
+
+fn reserve_attended_notice(update: &mut Update, path: &Path) -> bool {
+    match reserve_attended_record(path) {
+        Ok(reserved) => reserved,
+        Err(_) => {
+            update.warn(format!(
+                "cannot save the attended notice record at {}; check directory access",
+                path.display()
+            ));
+            false
+        }
+    }
+}
+
+fn attended_hold(update: &mut Update, target: Option<&str>, reason: &str) -> u8 {
+    let target = target.filter(|tag| super::plain_release(tag));
+    let release = target.map_or_else(|| "this update".to_owned(), |tag| format!("release {tag}"));
+    let command = target.map_or_else(
+        || "pseudolife-mcp update --engine rust".to_owned(),
+        |tag| format!("pseudolife-mcp update --engine rust --tag {tag}"),
+    );
+    let (cause, recovery) = reason
+        .split_once('\n')
+        .map_or((reason, None), |(cause, detail)| (cause, Some(detail)));
+    let id = target.map(|tag| {
+        let hash = Sha256::new()
+            .chain_update(tag)
+            .chain_update([0])
+            .chain_update(cause);
+        format!("{:x}", hash.finalize())
+    });
+    let directory = seams::data_dir().join("unattended-attended-releases");
+    let post = id
+        .as_ref()
+        .is_none_or(|id| reserve_attended_notice(update, &directory.join(format!("{id}.notice"))));
+    let text = format!(
+        "Pseudolife-MCP: {release} needs an attended update. {cause} The installed daemon stays in place. Run `{command}`.{}",
+        if recovery.is_some() {
+            " The unattended update log carries the original pre-import recovery instructions."
+        } else {
+            ""
+        }
+    );
+    if post {
+        update.step(&text);
+    }
+    // A later attempt can leave new recovery instructions for the same cause.
+    if let Some(detail) = recovery
+        && id.as_ref().is_none_or(|id| {
+            let record = format!("{:x}", Sha256::digest(detail));
+            reserve_attended_notice(update, &directory.join(format!("{id}.{record}.recovery")))
+        })
+    {
+        update.step(detail);
+    }
+    if post {
+        notice(update, &text);
+    }
+    4
+}
+
 fn describe(peers: &[Value]) -> String {
     let mut names = peers
         .iter()
@@ -299,6 +384,7 @@ fn run_inner(
     let tier = update.detect_tier()?;
     update.report.tier = tier.clone();
     if tier != "docker" {
+        update.refuse_missing_import_daemon()?;
         if on_shim_runtime() {
             return run_clients(update);
         }
@@ -306,8 +392,15 @@ fn run_inner(
             "unattended updates apply to the Docker tier (a daemon container) or, on a client machine, its shim runtime; this install is neither. Run pseudolife-mcp update yourself. Nothing was changed",
         ));
     }
+    if let Some(reason) = update.attended_resume_reason()? {
+        let latest = update.target_version().ok().flatten();
+        update.report.target = latest.clone();
+        return Ok(attended_hold(update, latest.as_deref(), &reason));
+    }
     let health = update.daemon_health().ok_or_else(|| {
-        UpdateError::usage("the daemon did not answer /health; nothing was changed")
+        update.import_health_error(UpdateError::usage(
+            "the daemon did not answer /health; nothing was changed",
+        ))
     })?;
     update.report.current = health["version"].as_str().map(str::to_owned);
     let Some(latest) = update.target_version()? else {
@@ -322,6 +415,13 @@ fn run_inner(
         ));
     }
     if !version_is_newer(&latest, &current) {
+        if let Err(error) = update.refuse_import_noop(false) {
+            if !busy(&error) {
+                return Err(error);
+            }
+            update.step(format!("held off: {error}"));
+            return Ok(4);
+        }
         update.step(format!(
             "current: {current} is the newest release; nothing to do"
         ));
@@ -370,10 +470,16 @@ fn run_inner(
         }
         Err(error) => return Err(error),
     };
-    let health=update.daemon_health().ok_or_else(||UpdateError::usage("the daemon did not answer /health after the update lock was taken; nothing was changed"))?;
+    if let Some(reason) = update.attended_resume_reason()? {
+        return Ok(attended_hold(update, Some(&latest), &reason));
+    }
+    let health = update.daemon_health().ok_or_else(|| {
+        update.import_health_error(UpdateError::usage("the daemon did not answer /health after the update lock was taken; nothing was changed"))
+    })?;
     let current = health_version(&health)?;
     update.report.current = Some(current.clone());
     if !version_is_newer(&latest, &current) {
+        update.refuse_import_noop(true)?;
         update.step(format!(
             "current: the daemon already runs {current} (another update moved it); nothing to do"
         ));
@@ -385,7 +491,7 @@ fn run_inner(
         return Ok(4);
     }
     update.step(format!(
-        "applying release {latest} unattended: no session is active on the board{}",
+        "checking release {latest} for unattended update: no session is active on the board{}",
         if board.idle > 0 {
             format!(" ({} idle)", board.idle)
         } else {
@@ -405,6 +511,9 @@ fn run_inner(
     );
     update.o.tag = requested_tag;
     if let Err(error) = deployed {
+        if error.attended_required {
+            return Ok(attended_hold(update, Some(&latest), &error.message));
+        }
         let text = if error.exit_code == 4 {
             error.to_string()
         } else {
@@ -489,6 +598,7 @@ fn recheck(board: std::result::Result<Activity, String>, latest: &str) -> Result
             "Pseudolife-MCP: the unattended update to {latest} held off after the backup because {why}; the daemon was not recreated. It tries again at the next scheduled run."
         ),
         exit_code: 4,
+        attended_required: false,
     })
 }
 

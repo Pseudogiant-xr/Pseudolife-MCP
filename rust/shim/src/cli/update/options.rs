@@ -191,6 +191,11 @@ impl Options {
                 "--shadow requires --engine rust --checkout <repo> to start, or --engine python --checkout <repo> to remove; nothing was changed",
             ));
         }
+        if self.engine.is_some() && self.unattended {
+            return Err(UpdateError::usage(
+                "--engine cannot be combined with --unattended. Run pseudolife-mcp update --engine <engine> yourself to choose an engine",
+            ));
+        }
         if (self.engine.is_some() || self.shadow)
             && (self.clients_only || self.all_clients || self.unattended || self.schedule.is_some())
         {
