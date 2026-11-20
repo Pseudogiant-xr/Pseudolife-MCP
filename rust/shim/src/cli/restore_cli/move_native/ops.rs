@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::carry::{self, TargetPins};
+use super::exposure;
 use super::probe::{self, Facts};
 use super::protocol::{Answer, Op, PROTOCOL, Request, State};
 use super::record::valid_id;
@@ -65,6 +66,12 @@ pub(super) trait Site {
     fn restore(&mut self, args: &[String], abort_file: Option<&Path>) -> (i32, String);
     fn carry(&mut self, _: &Op, _: &Path, _: &str, _: Option<&TargetPins>) -> Result<(), String> {
         Err("this target cannot apply carried identities".into())
+    }
+    fn expose(&mut self, _: exposure::Action, _: u16) -> Result<exposure::Report, String> {
+        Err("this target cannot manage a tailnet forward".into())
+    }
+    fn wait_exposure_ready(&mut self, _: u16, _: &str) -> Result<(), String> {
+        Err("this target cannot check daemon readiness for exposure".into())
     }
 }
 
@@ -1165,6 +1172,8 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
                 | Op::Snapshot
                 | Op::Restore
                 | Op::GiveBack
+                | Op::ExposeTarget { .. }
+                | Op::UndoExposure { .. }
         )
     {
         let identities = site.docker().and_then(|docker| {
@@ -1177,6 +1186,45 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
     }
     let mut answer = match op {
         Op::Check { .. } | Op::CarryCheck { .. } => failed("preflight checks are read separately"),
+        Op::ExposeTarget { port } => {
+            let bank = read_claim(&claims)
+                .ok()
+                .flatten()
+                .map(|claim| claim.source_bank);
+            if let Some(bank) = bank
+                && pins.is_some()
+                && site.docker().is_ok_and(|docker| {
+                    gather(docker, pins).is_ok_and(|facts| {
+                        facts.running
+                            && facts.meta_fingerprint.as_deref() == Some(bank.as_str())
+                            && exposure::port(&facts.health_url).ok() == Some(*port)
+                    })
+                })
+            {
+                match site
+                    .wait_exposure_ready(*port, &bank)
+                    .and_then(|()| exposure::create(site, &folder, *port))
+                {
+                    Ok(url) => Answer {
+                        exposure_url: Some(url),
+                        ..done()
+                    },
+                    Err(why) => failed(why),
+                }
+            } else {
+                failed(
+                    "the selected target daemon cannot be verified as running the moved bank on the requested local port",
+                )
+            }
+        }
+        Op::UndoExposure { .. }
+            if pins.is_none() || !request.rollback || !folder.join(ABORTED).is_file() =>
+        {
+            failed("the selected target and its rollback must be verified before undoing exposure")
+        }
+        Op::UndoExposure { port } => {
+            exposure::undo(site, &folder, *port).map_or_else(failed, |()| done())
+        }
         Op::CarryApply {
             expected_pins: expected,
             ..

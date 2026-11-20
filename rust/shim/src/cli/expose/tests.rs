@@ -52,6 +52,7 @@ struct Fake {
     off: Step,
     /// `serve status --json` fails once anything was changed.
     unreadable_after_change: bool,
+    exposure_unsettled: bool,
     changed: Cell<bool>,
     local: Health,
     tailnet: Health,
@@ -91,6 +92,7 @@ impl Fake {
             bg: Step::default(),
             off: Step::default(),
             unreadable_after_change: false,
+            exposure_unsettled: false,
             changed: Cell::new(false),
             local: healthy(),
             tailnet: healthy(),
@@ -174,6 +176,7 @@ impl Fake {
             unreadable: false,
             timed_out: step.timed_out,
             err_before: String::new(),
+            settled: !self.exposure_unsettled,
         }
     }
 }
@@ -608,6 +611,41 @@ fn a_permission_refusal_names_the_fix() {
             permission_fix()
         )
     );
+}
+
+#[test]
+fn move_reports_no_creation_only_after_the_child_has_exited_and_status_is_known() {
+    for (timed_out, unsettled, failure) in [
+        (false, false, Some("permission_denied")),
+        (true, false, Some("serve_not_enabled")),
+        (true, true, None),
+    ] {
+        let mut host = Fake::free();
+        host.exposure_unsettled = unsettled;
+        host.bg = Step {
+            code: 1,
+            err: "Access denied: serve config denied".into(),
+            out: "https://login.tailscale.com/f/serve?fixture".into(),
+            effect: Effect::Nothing,
+            timed_out,
+        };
+        let args = Args {
+            action: Action::Tailscale,
+            port: 8443,
+            json: true,
+            yes: true,
+        };
+        let mut report = Report::new(&args);
+        report.include_move_failure = true;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let report = runtime.block_on(expose(&host, &args, report));
+        let json: Value =
+            serde_json::from_str(&String::from_utf16(&report.stdout).unwrap()).unwrap();
+        assert_eq!(json["move_failure"].as_str(), failure);
+    }
 }
 
 #[test]

@@ -87,6 +87,8 @@ pub(super) struct Baseline {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Flags {
+    pub exposure_started: bool,
+    pub exposure_settled_for_release: bool,
     /// The target's claim was asked for (it names this move once taken).
     pub claimed: bool,
     pub target_timer_paused: bool,
@@ -129,6 +131,8 @@ pub(super) struct Record {
     /// The ssh target, as given to `--to`.
     pub target: String,
     pub target_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expose_port: Option<u16>,
     /// The source bank's fingerprint, which the target must end up serving.
     pub source_bank: String,
     pub phase: Phase,

@@ -13466,8 +13466,29 @@ settings with explicit target files. When using `--no-keep-tokens`, leave the
 file flags off.
 
 **Not available in the native client yet:**
-- `--expose-target`: expose the target yourself and pass `--target-url`;
 - checkout targets (`--target-checkout`).
+
+**Tailnet exposure during a native move.** Use `--expose-target` to use
+Tailscale Serve on the target's existing `127.0.0.1` HTTP port. A dry run
+reads the target's exposure status. An existing forward is reused. If the
+move needs to create a forward, it does so after starting the target
+daemon and waiting for it to serve the moved bank locally. It then checks
+that the tailnet URL serves the moved bank before committing. The explicit
+flag authorizes creation of the persistent forward. With `--target-url`,
+the move uses that address.
+
+Rollback removes a forward when its target-side `exposure.json` receipt
+identifies it as created by this move and the target still reports the
+same forward. Target release settles the receipt before returning the
+target's own bank. Resume keeps the original exposure port and ownership.
+If a receipt is pending, confirm the earlier exposure processes have
+exited and check the port's status. Once the forward is absent, follow
+the printed `move-target settle-exposure` command, then retry recovery.
+
+If rollback cannot restore the target environment or verify its stopped
+daemon, keep the target stopped and gated. Follow the reported next step.
+When the output gives `move-target recovery-commands`, run that command on
+the target to inspect the carry journal and get the recovery instructions.
 
 The rest of this section describes the Python client's move.
 

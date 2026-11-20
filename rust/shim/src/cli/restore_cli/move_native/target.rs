@@ -42,6 +42,8 @@ pub(in crate::cli) struct Ask {
     pub resume_move: String,
     #[serde(default)]
     pub carry: bool,
+    #[serde(default)]
+    pub expose: bool,
 }
 
 /// What the target answers.
@@ -65,6 +67,8 @@ pub(in crate::cli) struct Reply {
     pub supports_carry_execution: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supports_carry_files: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<super::exposure::Status>,
 }
 
 /// What the target host offers the helper: its docker, a health GET, the
@@ -359,6 +363,9 @@ pub(in crate::cli) fn run(arguments: &[std::ffi::OsString]) -> u8 {
     if asked == "recovery-commands" {
         return print_recovery_commands(arguments);
     }
+    if asked == "settle-exposure" {
+        return settle_exposure(arguments);
+    }
     let print = |reply: &Reply| {
         let line = format!(
             "{FRAME}{}\n",
@@ -446,6 +453,67 @@ fn print_recovery_commands(arguments: &[std::ffi::OsString]) -> u8 {
     }
 }
 
+fn settle_exposure(arguments: &[std::ffi::OsString]) -> u8 {
+    fn parse(arguments: &[std::ffi::OsString]) -> Option<(PathBuf, u16)> {
+        let [_, folder, port, confirmed] = arguments else {
+            return None;
+        };
+        if confirmed != "--confirmed-idle" {
+            return None;
+        }
+        let name = folder.to_str()?;
+        let folder = match name.strip_prefix("~/") {
+            Some(rest) => super::command::home()?.join(rest.trim_start_matches('/')),
+            None => PathBuf::from(name),
+        };
+        if !folder.is_absolute()
+            || name.chars().any(char::is_control)
+            || folder
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+        {
+            return None;
+        }
+        let port = port.to_str()?.parse().ok().filter(|port| *port != 0)?;
+        Some((folder, port))
+    }
+    let Some((folder, port)) = parse(arguments) else {
+        eprintln!(
+            "usage: pseudolife-mcp move-target settle-exposure <absolute-move-folder-or-~/> <port> --confirmed-idle"
+        );
+        return 2;
+    };
+    let Some(directory) = super::super::data_dir() else {
+        eprintln!(
+            "move-target: the target's update lock has no home directory; set the target user's home and retry"
+        );
+        return 4;
+    };
+    let mut site = Site2 {
+        docker: None,
+        missing: String::new(),
+    };
+    let result = super::super::with_update_lock(&directory, || {
+        super::exposure::settle_pending(&mut site, &folder, port)
+    });
+    match result {
+        Ok(Ok(())) => {
+            println!(
+                "The exposure receipt is settled. Retry the move's rollback or release from its source."
+            );
+            return 0;
+        }
+        Ok(Err(why)) => eprintln!("move-target: {why}"),
+        Err(super::super::LockRefusal::Busy(pid)) => eprintln!(
+            "move-target: the target's update lock is held (pid {pid}); wait for it to finish, then retry"
+        ),
+        Err(super::super::LockRefusal::Unavailable(_)) => eprintln!(
+            "move-target: the target's update lock could not be acquired; verify its data directory is writable and retry"
+        ),
+    }
+    4
+}
+
 /// The real target host, for protocol 2's operations.
 struct Site2 {
     docker: Option<docker::Real>,
@@ -453,6 +521,22 @@ struct Site2 {
 }
 
 impl super::ops::Site for Site2 {
+    fn wait_exposure_ready(&mut self, port: u16, bank: &str) -> Result<(), String> {
+        let url = format!("http://127.0.0.1:{port}/health");
+        let second = std::time::Duration::from_secs(1);
+        super::exposure::wait_ready(
+            bank,
+            || super::super::http_json(&url, second),
+            || std::thread::sleep(second),
+        )
+    }
+    fn expose(
+        &mut self,
+        action: super::exposure::Action,
+        port: u16,
+    ) -> Result<super::exposure::Report, String> {
+        run_expose(action, port)
+    }
     fn carry(
         &mut self,
         op: &super::protocol::Op,
@@ -534,6 +618,26 @@ impl super::ops::Site for Site2 {
             Err(error) => (1, format!("restore could not be started: {error}")),
         }
     }
+}
+
+fn run_expose(
+    action: super::exposure::Action,
+    port: u16,
+) -> Result<super::exposure::Report, String> {
+    let error = "the target could not run its native expose command; update its client or pass --target-url";
+    let mut command = std::process::Command::new(std::env::current_exe().map_err(|_| error)?);
+    command
+        .args(action.arguments(port))
+        .env(super::protocol::MOVE_EXPOSURE_REPORT_ENV, "1")
+        .stdin(std::process::Stdio::null());
+    super::source::no_window(&mut command);
+    let result = command.output().map_err(|_| error)?;
+    super::exposure::parse(
+        action,
+        result.status.code().unwrap_or(1),
+        &result.stdout,
+        port,
+    )
 }
 
 fn print_answer(answer: &super::protocol::Answer) {
@@ -692,6 +796,18 @@ fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
     reply.supports_carry = ask.carry.then_some(cfg!(target_os = "linux"));
     reply.supports_carry_execution = reply.supports_carry;
     reply.supports_carry_files = reply.supports_carry;
+    if ask.expose
+        && reply.refusals.is_empty()
+        && let Some(facts) = &reply.facts
+    {
+        use super::exposure::{self, Action};
+        let result = exposure::port(&facts.health_url)
+            .and_then(|port| exposure::status(run_expose(Action::Status, port)?, port));
+        match result {
+            Ok(status) => reply.exposure = Some(status),
+            Err(error) => reply.refusals.push(error),
+        }
+    }
     reply
 }
 
