@@ -43,40 +43,130 @@ def test_pair_https_oracle_arm(case, tmp_path):
     assert bool(obs.get("requests")) == (case.id == "https-verified")
 
 
-@pytest.mark.parametrize("refused", [False, True])
-def test_recovery_drop_checks_database_before_terminating(monkeypatch, refused):
-    import contextlib
-    from types import SimpleNamespace
-    import psycopg
-    from pseudolife_memory.storage import schema
-    from cli_harness.rows import coordination_recovery as row
+@pytest.fixture
+def recovery_row():
+    import atexit
+    from importlib.util import module_from_spec
+    from unittest.mock import patch
 
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    from .rows import coordination_recovery
+
+    # The dispatch table may already have loaded the row. Execute its top
+    # level again and keep the blocker active while exercising its callbacks.
+    spec = coordination_recovery.__spec__
+    row = module_from_spec(spec)
+    with cold_harness_imports(), patch.dict(coordination_recovery.normalize.RULES):
+        try:
+            spec.loader.exec_module(row)
+            yield row
+        finally:
+            if cleanup := getattr(row, "_cleanup", None):
+                atexit.unregister(cleanup)
+
+
+@pytest.mark.parametrize("server_name", ["fixture", "pseudolife_memory", "pseudolife_bench", "r1_other"])
+def test_recovery_drop_checks_database_before_terminating(monkeypatch, recovery_row, server_name):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    import psycopg
+    from rust.harness_support.database_guard import ProductionDatabaseError
+
+    row = recovery_row
+    name = row.NAMES.name("r1_fixture", max_length=63)
+    server_name = name if server_name == "fixture" else server_name
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
     calls = []
-    target = object()
 
     def execute(sql, *args):
         calls.append("catalog" if sql.startswith("SELECT 1") else
                      "reap" if "pg_terminate_backend" in sql else "drop")
         return SimpleNamespace(fetchone=lambda: (1,))
 
-    def guard(conn):
-        assert conn is target
+    def target_execute(sql):
+        assert sql == "SELECT current_database()"
         calls.append("guard")
-        if refused:
-            raise RuntimeError("fixture database refused")
+        return SimpleNamespace(fetchone=lambda: (server_name,))
 
-    monkeypatch.setattr(row, "NAMES", SimpleNamespace(require_owned=lambda name: None))
-    monkeypatch.setattr(row, "_CREATED", {"r1_fixture"})
-    monkeypatch.setattr(row, "_url", lambda name: "fixture-only")
-    monkeypatch.setattr(row, "_admin", lambda: contextlib.nullcontext(SimpleNamespace(execute=execute)))
-    monkeypatch.setattr(psycopg, "connect", lambda *args, **kwargs: contextlib.nullcontext(target))
-    monkeypatch.setattr(schema, "assert_disposable_database", guard)
-    if refused:
-        with pytest.raises(RuntimeError, match="fixture database refused"):
-            row._drop("r1_fixture")
+    monkeypatch.setattr(row, "_CREATED", {name})
+    monkeypatch.setattr(row, "_url", lambda _: "fixture-only")
+    monkeypatch.setattr(row, "_admin", lambda: nullcontext(SimpleNamespace(execute=execute)))
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: nullcontext(SimpleNamespace(execute=target_execute)))
+    if server_name != name:
+        with pytest.raises((ProductionDatabaseError, ValueError), match="production bank|different database"):
+            row._drop(name)
         assert calls == ["catalog", "guard"]
-        assert row._CREATED == {"r1_fixture"}
+        assert row._CREATED == {name}
     else:
-        row._drop("r1_fixture")
+        row._drop(name)
         assert calls == ["catalog", "guard", "reap", "drop"]
         assert row._CREATED == set()
+
+
+@pytest.mark.parametrize("server_name", ["pseudolife_memory", "pseudolife_bench", "r1_other"])
+def test_recovery_seed_checks_database_before_writing(monkeypatch, recovery_row, server_name):
+    from unittest.mock import MagicMock
+
+    from rust.harness_support.database_guard import ProductionDatabaseError
+
+    row = recovery_row
+    name = row.NAMES.name("r1_fixture", max_length=63)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    connection = MagicMock()
+    connection.execute.return_value.fetchone.return_value = (server_name,)
+    with pytest.raises((ProductionDatabaseError, ValueError), match="production bank|different database"):
+        row._seed_history(connection, name, "recover")
+    connection.execute.assert_called_once_with("SELECT current_database()")
+    connection.transaction.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["recover", "invited", "invited-denied", "repeat-recover"])
+def test_recovery_bank_setup_runs_without_frozen_imports(monkeypatch, recovery_row, tmp_path, kind):
+    from contextlib import nullcontext
+    from unittest.mock import MagicMock, call
+
+    import psycopg
+
+    row = recovery_row
+    name = row.NAMES.name("r1_coordination_recovery_" + kind.replace("-", "_"), max_length=63)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    admin, target = MagicMock(), MagicMock()
+    admin.execute.return_value.fetchone.return_value = None
+    target.execute.return_value.fetchone.return_value = (name,)
+    monkeypatch.setattr(row, "_admin", lambda: nullcontext(admin))
+    monkeypatch.setattr(row, "_url", lambda _: "fixture-only")
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: nullcontext(target))
+    arm = core.Arm("rust", tmp_path, tmp_path)
+    row._bank_setup(kind)(arm)
+    assert arm.state["bank"] == name
+    assert target.execute.call_args_list[0] == call("SELECT current_database()")
+    assert target.transaction.call_count == 1
+    assert target.execute.call_args_list[-1] == call(
+        "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+    )
+
+
+def test_recovery_reservation_replacement_keeps_both_files(recovery_row, tmp_path):
+    import os
+    from unittest.mock import MagicMock
+
+    reserved = tmp_path / "agent.json"
+    reserved.touch()
+    original = reserved.stat()
+    blocker = MagicMock()
+    blocker.execute.return_value.fetchone.return_value = (True,)
+    arm = core.Arm("rust", tmp_path, tmp_path, state={"blocker": blocker})
+    recovery_row._reservation_race(arm, MagicMock())
+    retained = tmp_path / "original-reservation.json"
+    assert os.path.samestat(retained.stat(), original)
+    assert not os.path.samefile(reserved, retained)
+    assert reserved.read_bytes() == retained.read_bytes() == b""
+    if os.name != "nt":
+        assert reserved.stat().st_mode & 0o777 == 0o600
+    assert arm.state["race_applied"]
+    blocker.close.assert_called_once()
