@@ -38,8 +38,10 @@ def cold_harness_imports():
 
     def owned(name, module):
         if _is_product(name) or name in {
+            "cli_harness.producers",
             "rust.daemon.harness",
             "rust.cli_harness.pg_create",
+            "rust.cli_harness.producers",
             "rust.cli_harness.run_names",
         }:
             return True
