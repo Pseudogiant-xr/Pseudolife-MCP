@@ -2,8 +2,8 @@
 
 Oracle: `pseudolife_memory/tunnel_cli.py`, `tunnel_profiles.py`,
 `tunnel_bridge.py`, `tunnel_runtime.py`, `credentials.py`,
-`doctor_cli.py` at the branch base, run by CPython 3.11.9 (the interpreter
-of every recorded run). Line numbers refer to that tree. Where CPython
+`doctor_cli.py` at the branch base. The oracle snapshots used CPython 3.11.9.
+Line numbers refer to that tree. Where CPython
 versions disagree on an input (`datetime.fromisoformat`), the leaf defers
 rather than pick one.
 
