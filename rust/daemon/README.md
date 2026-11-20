@@ -144,7 +144,10 @@ isolated test login. No embedding model is loaded by these storage cells.
 `src/storage/schema.sql` holds the base DDL. `src/storage/schema_plan.json`
 holds the ordered migrations, schema version and embedding dimension.
 `gen_schema_sql.py --check` checks the version header, final version stamp,
-DDL embedding dimensions and derived `schema_meta.rs` against the plan.
+DDL and refusal-message embedding dimensions and derived `schema_meta.rs`
+against the plan. The generation and executor tests share `PLAN_SHA256` in
+`harness/gen_schema_sql.py`. Update that pin alongside intentional changes
+to the DDL or plan.
 The same run compares Rust post-state with the committed oracle captures in
 `harness/goldens/schema-startup.json`, using the existing golden catalog
 digests and full row values. New relation times must first fit their own arm's

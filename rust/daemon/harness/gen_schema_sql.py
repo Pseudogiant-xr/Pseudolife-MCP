@@ -2,16 +2,23 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from pathlib import Path
 
 STORAGE = Path(__file__).resolve().parents[1] / "src" / "storage"
+PLAN_SHA256 = "541ace8f10c8df08cfaf89c1c6814bf1b02b811e59059861e624099d949f4124"
 
 
 def load_schema_plan(storage: Path = STORAGE) -> dict:
     return json.loads((storage / "schema_plan.json").read_text(encoding="utf-8"))
+
+
+def plan_fingerprint(plan: dict, ddl: str) -> str:
+    payload = json.dumps((plan, ddl), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def render_metadata(storage: Path) -> bytes:
@@ -35,6 +42,12 @@ def render_metadata(storage: Path) -> bytes:
             f"schema.sql embedding dimensions {sorted(dimensions)} must match "
             f"schema_plan.json embedding_dimension {dimension}"
         )
+
+    refusal = plan["embedding_refusal"]
+    refusal_dimensions = set(re.findall(r"\bvector\((\d+)\)", refusal))
+    refusal_dimensions.update(re.findall(r"\b(\d+)-d\b", refusal))
+    if refusal_dimensions != {str(dimension)}:
+        raise ValueError(f"schema_plan.json embedding_refusal must name embedding_dimension {dimension}")
 
     stamp = plan["steps"][-1]
     if (

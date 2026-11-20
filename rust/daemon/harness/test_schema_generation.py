@@ -31,6 +31,11 @@ class SchemaGeneration(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(gen.main(["--check"], storage=gen.STORAGE), 0)
 
+    def test_committed_plan_and_sql_fingerprint(self):
+        plan = gen.load_schema_plan(self.storage)
+        _, _, ddl = self.sql.read_text(encoding="utf-8").partition("\n")
+        self.assertEqual(gen.plan_fingerprint(plan, ddl), gen.PLAN_SHA256)
+
     def test_version_must_be_a_number_in_the_plan(self):
         plan = gen.load_schema_plan(self.storage)
         plan["schema_version"] = str(plan["schema_version"])
@@ -69,6 +74,18 @@ class SchemaGeneration(unittest.TestCase):
         self.metadata.write_text(text.replace(f"i32 = {dimension};", f"i32 = {dimension + 1};"),
                                  encoding="utf-8")
         self.check("stale schema_meta.rs")
+
+    def test_dimension_mismatch_in_embedding_refusal(self):
+        plan = gen.load_schema_plan(self.storage)
+        dimension = plan["embedding_dimension"]
+        refusal = plan["embedding_refusal"]
+        for template in ("vector({})", "{}-d"):
+            with self.subTest(template=template):
+                plan["embedding_refusal"] = refusal.replace(
+                    template.format(dimension), template.format(dimension + 1), 1,
+                )
+                self.plan.write_text(json.dumps(plan), encoding="utf-8")
+                self.check("embedding_refusal must name embedding_dimension")
 
     def test_version_mismatch_in_final_stamp(self):
         plan = gen.load_schema_plan(self.storage)

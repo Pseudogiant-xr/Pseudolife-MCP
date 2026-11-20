@@ -929,7 +929,7 @@ def test_changelog_mentions_current_schema_version() -> None:
            if f.name != "README.md"])
     assert re.search(rf"\bv{schema_version}\b", changelog), (
         f"schema is v{schema_version} but neither CHANGELOG.md nor a "
-        f"changelog.d/ fragment mentions v{SCHEMA_META_VERSION}")
+        f"changelog.d/ fragment mentions v{schema_version}")
 
 
 def test_every_release_tag_has_a_changelog_section() -> None:

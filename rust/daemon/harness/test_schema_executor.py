@@ -4,7 +4,6 @@ The unittest discovery in schema_ci also exercises the comparison's negative
 controls without requiring the executable before the build step.
 """
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,16 +19,13 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[2]))
 import dbstate
 import psycopg
+from gen_schema_sql import PLAN_SHA256, plan_fingerprint as fingerprint
 from rust.harness_support.database_guard import assert_disposable_database
 from rust.harness_support import schema
 from rust.harness_support.schema import ensure_schema
 
-PLAN_SHA256 = "541ace8f10c8df08cfaf89c1c6814bf1b02b811e59059861e624099d949f4124"
-
-
 def plan_fingerprint():
-    payload = json.dumps(schema.load_plan(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return fingerprint(*schema.load_plan())
 
 
 def compare(expected, actual):
