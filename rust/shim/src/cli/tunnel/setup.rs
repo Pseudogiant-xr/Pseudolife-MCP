@@ -33,7 +33,20 @@ use crate::{
 mod resume;
 pub(super) use resume::resume;
 mod renewal;
-pub(super) use renewal::{check_pending, recover_pending};
+pub(super) use renewal::{
+    check_pending, finish_previous_key, has_previous_key, qualify_previous_key, recover_pending,
+    validate_previous_key,
+};
+
+#[cfg(test)]
+pub(super) fn seed_trial(
+    root: &Path,
+    name: &str,
+    old: (&[u8], &[u8]),
+    replacement: (&[u8], &[u8]),
+) -> Result<(), Fail> {
+    renewal::publish(root, name, old, replacement)
+}
 
 const ACCESS: &str = "This tunnel makes the daemon available to the selected OpenAI organization and associated ChatGPT workspace. The host and daemon must stay running for tunnel access.";
 const FULL_CATALOG: &str = "The full catalog also expands tool discovery for the daemon principal's other sessions. Authentication permissions stay the same.";

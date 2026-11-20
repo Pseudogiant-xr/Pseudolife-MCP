@@ -472,9 +472,21 @@ fn setup_renews_a_stopped_profiles_private_key_and_expiry() {
     ];
     let args = [&base[..], &["--key-expires-at", expiry]].concat();
     let old = std::fs::read(&key).unwrap();
+    let profile_path = home.path("tunnels/dot.profile.json");
+    let old_profile = std::fs::read(&profile_path).unwrap();
     let output = run(&home, &args, &[]);
     assert_eq!(output.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Runtime key renewed"));
+    let renewed = String::from_utf8_lossy(&output.stdout);
+    assert!(renewed.contains("Runtime key renewed") && renewed.contains("Revoke it there"));
+    let previous = home.path("tunnels/dot.key-previous");
+    let retained = pseudolife_stdio::board::state::read(&previous, 131072).unwrap();
+    assert!(retained.windows(old.len()).any(|part| part == old));
+    #[cfg(windows)]
+    assert!(
+        !retained
+            .windows(b"fixture-old-key".len())
+            .any(|part| part == b"fixture-old-key")
+    );
     let saved = std::fs::read(&key).unwrap();
     assert!(saved != old);
     #[cfg(unix)]
@@ -505,10 +517,46 @@ fn setup_renews_a_stopped_profiles_private_key_and_expiry() {
     let profile = read_profile();
     assert_eq!(profile["runtime_key_expires_at"], expiry);
     assert_eq!(profile["tunnel_id"], "tunnel_abcd");
+    let status = run(&home, &["status", "--profile-dir", &directory], &[]);
+    assert_eq!(status.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&status.stdout).lines().any(|line| {
+        line.contains("Previous key retained")
+            && line.contains("--restore-key")
+            && line.contains("--discard-previous-key")
+    }));
+    let refused = run(&home, &base, &[]);
+    assert_eq!(refused.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&refused.stderr);
+    assert!(error.contains("--restore-key") && error.contains("--discard-previous-key"));
+    assert_eq!(read_profile()["runtime_key_expires_at"], expiry);
+
+    let restore = run(
+        &home,
+        &["setup", "--profile-dir", &directory, "--restore-key"],
+        &[],
+    );
+    assert_eq!(restore.status.code(), Some(0));
+    assert!(std::fs::read(&key).unwrap() == old);
+    assert!(std::fs::read(&profile_path).unwrap() == old_profile);
+    assert!(!previous.exists());
     let output = run(&home, &base, &[]);
     assert_eq!(output.status.code(), Some(0));
     assert!(read_profile()["runtime_key_expires_at"].is_null());
     assert!(!home.path("tunnels/dot.key-renewal").exists());
+    let replacement_blob = std::fs::read(&key).unwrap();
+    let discard = run(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &directory,
+            "--discard-previous-key",
+        ],
+        &[],
+    );
+    assert_eq!(discard.status.code(), Some(0));
+    assert!(!previous.exists());
+    assert!(std::fs::read(&key).unwrap() == replacement_blob);
 }
 
 #[test]
@@ -587,7 +635,7 @@ fn renewal_refuses_a_held_launch_lock_before_publishing() {
         .any(|sample| error.contains(sample))
     );
     assert!(
-        error.contains("launch ownership"),
+        error.contains("stop the tunnel first"),
         "renewal refusal: {error}"
     );
     assert!(std::fs::read(key).unwrap() == b"opaque prior fixture");
@@ -616,7 +664,13 @@ fn pending_renewal_refuses_reads_and_names_the_recovery_command() {
     }
     let output = run(&home, &["setup", "--profile-dir", &home.dir()], &[]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot recover runtime key renewal"));
+    let error = String::from_utf8_lossy(&output.stderr).replace('\\', "/");
+    assert!(
+        error.contains("cannot recover runtime key renewal")
+            && error.contains("saved key and profile expiry")
+            && error.contains(&format!("remove {}", marker.display()).replace('\\', "/")),
+        "{error}"
+    );
     assert!(marker.exists());
     daemon.assert_untouched();
 }
@@ -698,6 +752,42 @@ fn status_points_to_native_renewal_and_expiry_alone_refuses() {
     assert_eq!(same_expiry.status.code(), Some(0));
     assert_eq!(tree(&home.0), before);
     daemon.assert_untouched();
+}
+
+#[test]
+fn expiry_guidance_names_first_key_steps_when_no_key_is_saved() {
+    for ready in [false, true] {
+        let home = setup_home();
+        let daemon = Listener::new();
+        let mut profile = serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "state": "pending", "consent": true, "runtime_key_expires_at": "2020-01-01T00:00:00Z",
+        });
+        if ready {
+            profile["state"] = serde_json::json!("ready");
+            profile["tunnel_id"] = serde_json::json!("tunnel_abcd");
+        }
+        seed_setup_profile(&home, &profile);
+        let status = run(&home, &["status", "--profile-dir", &home.dir()], &[]);
+        assert_eq!(status.status.code(), Some(0));
+        let stdout = String::from_utf8_lossy(&status.stdout);
+        assert!(!stdout.contains("Renew privately:"));
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line.starts_with("Save the first key's settings:")
+                    && line.contains("--key-expires-at")
+                    && line.contains("--tunnel-id") != ready)
+        );
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line.starts_with("Import the key privately:")
+                    && line.contains("--read-key")
+                    && !line.contains("--key-expires-at"))
+        );
+        daemon.assert_untouched();
+    }
 }
 
 fn expect_setup_deferral_for_saved_authority(record: Option<&str>, autostart: bool) {

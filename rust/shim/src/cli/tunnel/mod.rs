@@ -69,6 +69,8 @@ enum Command {
 struct Setup {
     accept_access: bool,
     read_key: bool,
+    restore_key: bool,
+    discard_previous_key: bool,
     key_file: Option<String>,
     daemon_url: Option<String>,
     token_file: Option<String>,
@@ -153,6 +155,8 @@ fn parse(values: &[OsString]) -> Option<Options> {
             ("--json", Command::Status) => options.json = true,
             ("--accept-access", Command::Setup) => options.setup.accept_access = true,
             ("--read-key", Command::Setup) => options.setup.read_key = true,
+            ("--restore-key", Command::Setup) => options.setup.restore_key = true,
+            ("--discard-previous-key", Command::Setup) => options.setup.discard_previous_key = true,
             _ => {
                 let value = rest.next().filter(|value| !value.starts_with('-'))?;
                 let value = Some((*value).to_owned());
@@ -357,9 +361,13 @@ fn shallow_challenge(root: &Path, name: &str) -> Result<(), Fail> {
 }
 
 fn status(options: &Options, root: &Path) -> Output {
-    setup::check_pending(root, &options.profile)?;
     let profile = store::load(root, &options.profile)?;
     let key = store::key_state(root, &profile.name)?;
+    let key = KeyStatus {
+        readable: key,
+        saved: occupied(&store::key_path(root, &profile.name))?,
+        retained: setup::has_previous_key(root, &profile.name)?,
+    };
     setup::check_pending(root, &profile.name)?;
     let path = record::path(root, &profile.name);
     let table = if occupied(&path).unwrap_or(true) {
@@ -381,6 +389,29 @@ fn status(options: &Options, root: &Path) -> Output {
         report(&profile, key, record.as_ref(), &refresh, cloud, options),
         0,
     ))
+}
+
+struct KeyStatus {
+    readable: Option<bool>,
+    saved: bool,
+    retained: bool,
+}
+
+fn setup_command(name: &str, directory: Option<&str>) -> String {
+    let mut command = format!("pseudolife-mcp tunnel setup --profile {name}");
+    if let Some(directory) = directory {
+        command.push_str(&format!(
+            " --profile-dir {}",
+            crate::cli::update::seams::quote(directory)
+        ));
+    }
+    command
+}
+
+fn previous_key_hint(command: &str) -> String {
+    format!(
+        "Previous key retained until the replacement completes a control-plane poll. Stop the tunnel, then restore with `{command} --restore-key` or discard with `{command} --discard-previous-key`."
+    )
 }
 
 /// What a process record says about the tunnel, in one sentence for a
@@ -439,7 +470,7 @@ fn unknown_cause(why: Option<record::Why>) -> &'static str {
 
 fn report(
     profile: &Profile,
-    key: Option<bool>,
+    key: KeyStatus,
     record: Option<&record::Record>,
     refresh: &Refresh,
     cloud: Option<bridge::Cloud>,
@@ -452,7 +483,7 @@ fn report(
         Some(Liveness::Unknown) => "\"unknown\"",
         Some(Liveness::Gone) | None => "false",
     };
-    let key_json = match key {
+    let key_json = match key.readable {
         Some(present) => bool_text(present),
         None => "\"not_verified\"",
     };
@@ -485,6 +516,8 @@ fn report(
         }
     };
     let name = &profile.name;
+    let command = setup_command(name, options.profile_dir.as_deref());
+    let previous = key.retained.then(|| previous_key_hint(&command));
     if options.json {
         let record_json = record.map_or(String::new(), |record| {
             format!(
@@ -504,8 +537,14 @@ fn report(
                 )
             },
         );
+        let previous = previous.as_ref().map_or_else(String::new, |hint| {
+            format!(
+                ", \"previous_key_retained\": true, \"previous_key_detail\": {}",
+                quoted(hint)
+            )
+        });
         return format!(
-            "{{\"profile\": {name_q}, \"state\": {}, \"catalog\": {}, \"private_key_present\": {key_json}, \"key_expiry\": {expiry}, \"runtime\": {{\"running\": {running_json}, \"profile\": {name_q}, \"ready\": {}, \"key_expiry\": {}{record_json}}}, \"cloud\": {cloud}, \"update\": {}}}\n",
+            "{{\"profile\": {name_q}, \"state\": {}, \"catalog\": {}, \"private_key_present\": {key_json}, \"key_expiry\": {expiry}, \"runtime\": {{\"running\": {running_json}, \"profile\": {name_q}, \"ready\": {}, \"key_expiry\": {}{record_json}}}, \"cloud\": {cloud}, \"update\": {}{previous}}}\n",
             quoted(&profile.state),
             quoted(&profile.catalog),
             bool_text(ready),
@@ -560,15 +599,24 @@ fn report(
         ));
     }
     if expired {
-        let directory = options
-            .profile_dir
-            .as_ref()
-            .map_or_else(String::new, |dir| {
-                format!(" --profile-dir {}", crate::cli::update::seams::quote(dir))
-            });
-        text.push_str(&format!(
-            "Renew privately: pseudolife-mcp tunnel setup --profile {name}{directory} --read-key --key-expires-at <ISO timestamp>.\n"
-        ));
+        if profile.state == "ready" && key.saved {
+            text.push_str(&format!(
+                "Renew privately: {command} --read-key --key-expires-at <ISO timestamp>.\n"
+            ));
+        } else {
+            let id = if profile.tunnel_id.is_none() {
+                " --tunnel-id <tunnel_id>"
+            } else {
+                ""
+            };
+            text.push_str(&format!(
+                "Save the first key's settings: {command}{id} --key-expires-at <ISO timestamp>.\nImport the key privately: {command} --read-key.\n"
+            ));
+        }
+    }
+    if let Some(previous) = previous {
+        text.push_str(&previous);
+        text.push('\n');
     }
     text
 }
@@ -864,6 +912,18 @@ fn setup(options: &Options, root: &Path) -> Output {
     let saved = occupied(&path)?;
     if let Some(recovered) = setup::recover_pending(options, root, &path)? {
         return Ok(recovered);
+    }
+    if settings.restore_key || settings.discard_previous_key {
+        if settings.restore_key == settings.discard_previous_key
+            || settings.has_key_input()
+            || settings.has_profile_settings()
+            || settings.accept_access
+        {
+            return Err(Fail::Tunnel(
+                "use --restore-key or --discard-previous-key by itself with the saved profile",
+            ));
+        }
+        return setup::finish_previous_key(options, root, &path);
     }
     if saved
         && settings.has_key_input()

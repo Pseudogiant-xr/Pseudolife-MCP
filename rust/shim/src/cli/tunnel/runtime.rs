@@ -24,6 +24,7 @@ mod process;
 mod tests;
 
 const STARTUP: Duration = Duration::from_secs(30);
+const TRIAL_STARTUP: Duration = Duration::from_secs(65);
 const STOP: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(100);
 const UNSAFE_STORE: Fail = Fail::Tunnel("check that the tunnel store is an owner-only directory");
@@ -33,6 +34,9 @@ const NOT_READY: Fail = Fail::Tunnel(
 );
 const READINESS_TIMEOUT: Fail = Fail::Tunnel(
     "the tunnel readiness deadline elapsed. Check the daemon, tunnel ID and runtime key before retrying",
+);
+const TRIAL_AUTH: Fail = Fail::Tunnel(
+    "the tunnel control plane refused the replacement key. The previous key is retained. Run tunnel status for the restore and discard commands",
 );
 const CHILD_ERROR: Fail = Fail::Tunnel(
     "the tunnel runtime could not be started or reaped. Check tunnel status before retrying",
@@ -58,7 +62,12 @@ pub(super) fn run(root: &Path, name: &str) -> Output {
     if rustix::process::geteuid().is_root() {
         trusted_root_paths([installed.binary.as_path()])?;
     }
-    launch(prepared, &executable, STARTUP, |config| {
+    let deadline = if prepared.previous_key {
+        TRIAL_STARTUP
+    } else {
+        STARTUP
+    };
+    launch(prepared, &executable, deadline, |config| {
         let mut command = Command::new(installed.binary);
         command
             .args(["run", "--profile-file"])
@@ -94,6 +103,7 @@ struct Prepared<'a> {
     profile: Profile,
     profile_bytes: Vec<u8>,
     key: key::Key,
+    previous_key: bool,
     _locks: (File, File),
 }
 
@@ -144,17 +154,29 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
     }
     let key = key::Key::load(root, name)?;
     verify_credential(&profile, &key)?;
+    let previous_key = setup::validate_previous_key(root, name)?;
     Ok(Prepared {
         root,
         profile,
         profile_bytes: bytes,
         key,
+        previous_key,
         _locks: locks,
     })
 }
 
 pub(super) fn prepare_locks(root: &Path, name: &str) -> Result<(File, File), Fail> {
-    let locks = launch_locks(root, name)?;
+    recover_under_locks(root, name, launch_locks(root, name)?)
+}
+
+pub(super) fn key_change_locks(root: &Path, name: &str) -> Result<(File, File), Fail> {
+    let locks = launch_locks_with(root, name, || {
+        Fail::Tunnel("stop the tunnel first, then retry tunnel setup")
+    })?;
+    recover_under_locks(root, name, locks)
+}
+
+fn recover_under_locks(root: &Path, name: &str, locks: (File, File)) -> Result<(File, File), Fail> {
     let record = record::path(root, name);
     if store::occupied(&record).map_err(|_| conflict(root, name))? {
         recover_launch(root, name)?;
@@ -206,13 +228,25 @@ fn open_lock(root: &Path, name: &str, path: &Path) -> Result<File, Fail> {
 }
 
 fn launch_locks(root: &Path, name: &str) -> Result<(File, File), Fail> {
+    launch_locks_with(root, name, || conflict(root, name))
+}
+
+fn launch_locks_with(
+    root: &Path,
+    name: &str,
+    busy: impl Fn() -> Fail,
+) -> Result<(File, File), Fail> {
     let retry_pause = || std::thread::sleep(Duration::from_millis(25));
+    let lock_error = |error| match error {
+        fs::TryLockError::WouldBlock => busy(),
+        _ => conflict(root, name),
+    };
     let native = open_lock(root, name, &lock_path(root, name))?;
-    try_launch_lock(&native, retry_pause).map_err(|_| conflict(root, name))?;
+    try_launch_lock(&native, retry_pause).map_err(lock_error)?;
     // The retained Python client flocks this file on Unix and locks its
     // first byte on Windows. Rust's Windows whole-file lock overlaps it.
     let legacy = open_lock(root, name, &legacy_lock_path(root, name))?;
-    try_launch_lock(&legacy, retry_pause).map_err(|_| conflict(root, name))?;
+    try_launch_lock(&legacy, retry_pause).map_err(lock_error)?;
     Ok((native, legacy))
 }
 
@@ -520,6 +554,7 @@ async fn supervise(
     let mut stderr = child
         .take_stderr()
         .map(|pipe| tokio::spawn(diagnostics::drain(pipe)));
+    let mut awaiting_poll = prepared.previous_key;
     let result = async {
         let pid = child.id().ok_or(CHILD_ERROR)?;
         record.target = Some(Identity { pid, exe: target });
@@ -544,14 +579,17 @@ async fn supervise(
                     return Err(READINESS_TIMEOUT);
                 }
                 if let Some(url) = health_url(&health) {
-                    let probe = client.get(url).send();
-                    let ready = tokio::select! {
+                    let probe = ready_probe(&client, &url, awaiting_poll);
+                    let (ready, confirmed) = tokio::select! {
                         biased;
                         _ = signals.wait() => return Ok((format!("Tunnel {name} stopped.\n"), 0)),
-                        response = tokio::time::timeout_at(limit, probe) =>
-                            matches!(response, Ok(Ok(response)) if response.status() == reqwest::StatusCode::OK),
+                        response = tokio::time::timeout_at(limit, probe) => response.unwrap_or(Ok((false, false)))?,
                     };
-                    if ready {
+                    if confirmed {
+                        setup::qualify_previous_key(prepared.root, name)?;
+                        awaiting_poll = false;
+                    }
+                    if ready && !awaiting_poll {
                         record.ready = true;
                         stage.announce(&record)?;
                         crate::stderrln!("Tunnel {name} is ready.");
@@ -581,19 +619,25 @@ async fn supervise(
     if notes != 0
         && (result == Err(NOT_READY)
             || result == Err(READINESS_TIMEOUT)
+            || result == Err(TRIAL_AUTH)
             || result.as_ref().is_ok_and(|(_, code)| *code != 0))
         && let Some((log, reason)) = diagnostics::save(prepared.root, name, notes)
     {
         let reason = reason.map_or_else(String::new, |reason| format!(" {reason}"));
+        let retained = if awaiting_poll {
+            " The previous key is retained. Run tunnel status for the restore and discard commands."
+        } else {
+            ""
+        };
         return match result {
             Err(error) => {
-                let cause = if error == READINESS_TIMEOUT {
-                    "the tunnel readiness deadline elapsed"
-                } else {
-                    "the tunnel did not become ready"
+                let cause = match error {
+                    READINESS_TIMEOUT => "the tunnel readiness deadline elapsed",
+                    TRIAL_AUTH => "the tunnel control plane refused the replacement key",
+                    _ => "the tunnel did not become ready",
                 };
                 Err(Fail::Detail(format!(
-                    "{cause}.{reason} Check the runtime diagnostics at {}",
+                    "{cause}.{reason} Check the runtime diagnostics at {}.{retained}",
                     log.display()
                 )))
             }
@@ -606,7 +650,67 @@ async fn supervise(
             )),
         };
     }
+    if awaiting_poll && (result == Err(NOT_READY) || result == Err(READINESS_TIMEOUT)) {
+        return Err(Fail::Tunnel(
+            "the replacement key did not complete a control-plane poll. The previous key is retained. Run tunnel status for the restore and discard commands",
+        ));
+    }
     result
+}
+
+async fn ready_probe(
+    client: &reqwest::Client,
+    url: &str,
+    previous_key: bool,
+) -> Result<(bool, bool), Fail> {
+    let locally_ready = client
+        .get(url)
+        .send()
+        .await
+        .is_ok_and(|response| response.status() == reqwest::StatusCode::OK);
+    if !previous_key {
+        return Ok((locally_ready, false));
+    }
+    let base = url
+        .strip_suffix("/readyz")
+        .expect("validated readiness URL");
+    let Ok(mut response) = client
+        .get(format!("{base}/health/control-plane"))
+        .send()
+        .await
+    else {
+        return Ok((locally_ready, false));
+    };
+    if response.status() != reqwest::StatusCode::OK {
+        return Ok((locally_ready, false));
+    }
+    let mut body = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) if chunk.len() <= 16 * 1024 - body.len() => {
+                body.extend_from_slice(&chunk)
+            }
+            Ok(None) => break,
+            _ => return Ok((locally_ready, false)),
+        }
+    }
+    let Ok(snapshot) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return Ok((locally_ready, false));
+    };
+    if snapshot["schema_version"] != 1 || snapshot["component"] != "control-plane" {
+        return Ok((locally_ready, false));
+    }
+    let details = &snapshot["details"];
+    if matches!(details["http_status"].as_u64(), Some(401 | 403)) {
+        return Err(TRIAL_AUTH);
+    }
+    Ok((
+        locally_ready,
+        snapshot["status"] == "ok"
+            && details["last_success"]
+                .as_str()
+                .is_some_and(|time| chrono::DateTime::parse_from_rfc3339(time).is_ok()),
+    ))
 }
 
 fn health_url(path: &Path) -> Option<String> {

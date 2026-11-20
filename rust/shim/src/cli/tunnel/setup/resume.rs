@@ -1,6 +1,4 @@
-//! Resume an existing profile or import its first runtime key. Each
-//! invocation publishes one file, so interruption cannot separate a key from
-//! the profile it belongs to.
+//! Resume an existing tunnel profile and manage its private runtime key.
 use std::{
     fs::{self, File},
     io::{IsTerminal, Write},
@@ -16,8 +14,8 @@ use super::{
 use crate::{
     board::state,
     cli::tunnel::{
-        Fail, KEY_RENEWAL, Options, Output, Setup, absolute_token, bridge::status_command, record,
-        runtime, store,
+        Fail, KEY_RENEWAL, Options, Output, Setup, absolute_token, bridge::status_command,
+        previous_key_hint, record, runtime, setup_command, store,
     },
     credentials::{CredentialProvider, MAX_TOKEN_BYTES, decode_token},
 };
@@ -52,18 +50,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
         require_no_autostart(&saved)?;
         let key_path = store::key_path(root, &profile.name);
         let old_key = if store::occupied(&key_path)? {
-            let record_path = record::path(root, &profile.name);
-            if store::occupied(&record_path)? {
-                let table = record::table();
-                if !record::read(record_path.clone(), table.as_deref()).is_some_and(|record| {
-                    record.native && record.liveness == record::Liveness::Gone
-                }) {
-                    return Err(Fail::Detail(format!(
-                        "cannot renew the key while a launch may own {}. Stop the tunnel before retrying setup",
-                        record_path.display()
-                    )));
-                }
-            }
+            require_stopped_record(root, &profile.name, "renew the key")?;
             Some(KeyBytes(store::private_read(
                 &key_path,
                 renewal::KEY_LIMIT,
@@ -102,7 +89,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             ));
         }
         if let (Some(old_key), Some(replacement_profile)) = (old_key, replacement_profile) {
-            let _runtime = runtime::prepare_locks(root, &profile.name)?;
+            let _runtime = runtime::key_change_locks(root, &profile.name)?;
             let (_lock, _) = commit_lock(root, path, &original)?;
             if !store::private_read(&key_path, renewal::KEY_LIMIT)
                 .is_ok_and(|bytes| KeyBytes(bytes).0 == old_key.0)
@@ -125,6 +112,12 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
                     0,
                 ));
             }
+            require_no_previous_key(options, root)?;
+            if store::key_state(root, &profile.name)? != Some(true) {
+                return Err(Fail::Tunnel(
+                    "cannot retain the current runtime key. Restore its owner-only file or use the account sign-in that can unlock it, then retry",
+                ));
+            }
             let encoded = encode_key(&key.0)?;
             renewal::publish(
                 root,
@@ -134,7 +127,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             )?;
             return Ok((
                 format!(
-                    "Runtime key renewed for profile {}. Check it with `{status}`.\n",
+                    "Runtime key renewed for profile {}. The previous key is retained until a successful control-plane poll. It can still be valid at the provider. Revoke it there after accepting the replacement. Check it with `{status}`.\n",
                     profile.name
                 ),
                 0,
@@ -247,7 +240,31 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     Ok(saved_message(options, root, &updated))
 }
 
-fn require_no_autostart(saved: &serde_json::Map<String, Value>) -> Result<(), Fail> {
+fn require_no_previous_key(options: &Options, root: &Path) -> Result<(), Fail> {
+    if renewal::has_previous_key(root, &options.profile)? {
+        let command = setup_command(&options.profile, options.profile_dir.as_deref());
+        return Err(Fail::Detail(previous_key_hint(&command)));
+    }
+    Ok(())
+}
+
+fn require_stopped_record(root: &Path, name: &str, action: &str) -> Result<(), Fail> {
+    let path = record::path(root, name);
+    if store::occupied(&path)? {
+        let table = record::table();
+        if !record::read(path.clone(), table.as_deref())
+            .is_some_and(|record| record.native && record.liveness == record::Liveness::Gone)
+        {
+            return Err(Fail::Detail(format!(
+                "cannot {action} while a launch may own {}. Stop the tunnel first, then retry setup",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn require_no_autostart(saved: &serde_json::Map<String, Value>) -> Result<(), Fail> {
     if saved.get("autostart_consent") == Some(&Value::Bool(true)) {
         return Err(Fail::Defer);
     }
