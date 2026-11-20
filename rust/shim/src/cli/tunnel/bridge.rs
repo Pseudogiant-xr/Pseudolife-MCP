@@ -985,14 +985,25 @@ pub(super) struct Cloud {
 }
 
 pub(super) fn cloud_status(root: &Path, name: &str) -> Cloud {
-    let Some(challenge) = read_challenge(root, name) else {
+    let Some(challenge) = current_challenge(root, name) else {
         return Cloud::default();
     };
-    if !identity::current(root, name).is_ok_and(|current| current == challenge.identity) {
-        return Cloud::default();
+    Cloud {
+        successful: successful_calls(root, name, &challenge),
+        current: true,
     }
+}
+
+fn current_challenge(root: &Path, name: &str) -> Option<Challenge> {
+    let challenge = read_challenge(root, name)?;
+    identity::current(root, name)
+        .is_ok_and(|current| current == challenge.identity)
+        .then_some(challenge)
+}
+
+fn successful_calls(root: &Path, name: &str, challenge: &Challenge) -> u8 {
     let directory = root.join(format!("{name}-verification"));
-    let successful = TOOLS
+    TOOLS
         .iter()
         .filter(|tool| {
             let path = directory.join(format!("{}-{tool}.json", challenge.nonce));
@@ -1011,11 +1022,7 @@ pub(super) fn cloud_status(root: &Path, name: &str) -> Cloud {
                     .and_then(Value::as_f64)
                     .is_some_and(|observed| observed.is_finite() && observed >= challenge.created)
         })
-        .count() as u8;
-    Cloud {
-        successful,
-        current: true,
-    }
+        .count() as u8
 }
 
 pub(super) fn begin(root: &Path, name: &str) -> super::Output {
@@ -1029,12 +1036,27 @@ pub(super) fn begin(root: &Path, name: &str) -> super::Output {
         challenge.to_string().as_bytes(),
         None,
     ).map_err(|_| Fail::Tunnel("the verification challenge could not be saved. Check the verification directory and retry"))?;
-    Ok((
+    Ok((challenge_instructions(&nonce), 0))
+}
+
+fn challenge_instructions(nonce: &str) -> String {
+    format!(
+        "In the connected app, call memory_search with query=\"{nonce}\" and memory_agents with action=\"list\" and project=\"{nonce}\". Report success or failure only. Check the receipts with tunnel status.\n"
+    )
+}
+
+pub(super) fn continue_verification(root: &Path, name: &str) -> Option<(String, u8)> {
+    let challenge = current_challenge(root, name)?;
+    let text = if successful_calls(root, name, &challenge) == 2 {
+        "This launch identity is already verified. Its saved verification still applies.\n"
+            .to_owned()
+    } else {
         format!(
-            "In the connected app, call memory_search with query=\"{nonce}\" and memory_agents with action=\"list\" and project=\"{nonce}\". Report success or failure only. Check the receipts with tunnel status.\n"
-        ),
-        0,
-    ))
+            "The saved challenge still applies.\n{}",
+            challenge_instructions(&challenge.nonce)
+        )
+    };
+    Some((text, 0))
 }
 
 /// The profile fields that decide where the bridge's calls go; a receipt is

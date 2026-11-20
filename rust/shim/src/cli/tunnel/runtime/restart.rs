@@ -520,15 +520,12 @@ pub(in crate::cli::tunnel) fn verify(root: &Path, name: &str) -> Output {
         Some(Phase::Pending) if status(root, name).is_some_and(|(state, _)| state == "pending") => {
             Err(Fail::Detail(detail(root, name, Phase::Pending, None)))
         }
-        Some(Phase::RolledBack) => {
-            let cloud = super::super::bridge::cloud_status(root, name);
-            if cloud.current && cloud.successful == 2 {
-                Ok(("The tunnel's previous launch identity is already verified. Its saved verification still applies.\n".into(), 0))
-            } else {
-                super::super::bridge::begin(root, name)
-            }
-        }
+        Some(Phase::RolledBack) => super::super::bridge::continue_verification(root, name)
+            .map_or_else(|| super::super::bridge::begin(root, name), Ok),
         Some(Phase::Refreshed) => {
+            if let Some(current) = super::super::bridge::continue_verification(root, name) {
+                return Ok(current);
+            }
             let (challenge, code) = super::super::bridge::begin(root, name)?;
             Ok((
                 format!(

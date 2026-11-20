@@ -896,7 +896,9 @@ fn tunnel_step_fails_an_invalid_store_with_its_cause() {
     // reason".
     let detail = detail_of(124, "");
     assert!(
-        detail.contains("did not answer tunnel update within 150 s"),
+        detail.contains("did not answer tunnel update within 180 s")
+            && detail.contains("may still finish a refresh it accepted")
+            && detail.contains("pseudolife-mcp tunnel status"),
         "{detail}"
     );
     let detail = detail_of(1, "");

@@ -54,12 +54,19 @@ fn supervised_fixture() {
             std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
         }
         "vendor" => eager_vendor(&path),
-        "updater" => {
+        "updater" | "invalid-updater" => {
             let candidate =
                 crate::runtime::current_runtime(&crate::runtime::default_layout().unwrap())
                     .unwrap();
             let result =
                 super::super::super::update_with_runtime(&path, Some(&candidate.executable()));
+            if mode == "invalid-updater" {
+                assert!(
+                    matches!(result, Err(ref message) if message.contains("z.profile.json")),
+                    "{result:?}"
+                );
+                return;
+            }
             let (text, code) = result.unwrap();
             assert_eq!(code, 0, "{text}");
             assert_eq!(
@@ -339,6 +346,11 @@ impl Scenario {
         state::atomic_create(&token, b"fixture-daemon-token").unwrap();
         let key = fixture_key_bytes(b"fixture-runtime-key");
         let sealed_key = key.is_some();
+        #[cfg(windows)]
+        assert!(
+            sealed_key || std::env::var_os("GITHUB_ACTIONS").is_none(),
+            "hosted Windows must exercise the sealed-key refresh paths"
+        );
         if let Some(key) = key {
             state::atomic_create(&store::key_path(root, "dot"), &key).unwrap();
         }
@@ -504,6 +516,20 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
         fs::read(scenario.root().join("dot-verification/challenge.json")).unwrap(),
         challenge
     );
+    let parsed: serde_json::Value = serde_json::from_slice(&challenge).unwrap();
+    let nonce = parsed["nonce"].as_str().unwrap();
+    fs::remove_file(
+        scenario
+            .root()
+            .join(format!("dot-verification/{nonce}-memory_agents.json")),
+    )
+    .unwrap();
+    let text = restart::verify(scenario.root(), "dot").unwrap().0;
+    assert!(text.contains("The saved challenge still applies") && text.contains(nonce));
+    assert_eq!(
+        fs::read(scenario.root().join("dot-verification/challenge.json")).unwrap(),
+        challenge
+    );
     assert!(!scenario.root().join("overlap").exists());
 }
 
@@ -516,6 +542,21 @@ fn accepted_restart_finishes_after_sender_leaves_and_requires_new_verification()
     }
     let old = scenario.record();
     proof(scenario.root(), old.launch_identity.as_ref().unwrap());
+    let invalid = scenario.root().join("z.profile.json");
+    state::atomic_create(&invalid, &vec![b'x'; RECORD_LIMIT + 1]).unwrap();
+    let executable = std::env::current_exe().unwrap();
+    assert!(
+        Scenario::child(&executable, scenario.root(), "invalid-updater")
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert_eq!(
+        scenario.record().target.unwrap().pid,
+        old.target.as_ref().unwrap().pid
+    );
+    assert!(refresh::read_outcome(scenario.root(), "dot").is_none());
+    fs::remove_file(invalid).unwrap();
     scenario.mode("warming");
     struct Caller(std::process::Child);
     impl Drop for Caller {
@@ -526,7 +567,6 @@ fn accepted_restart_finishes_after_sender_leaves_and_requires_new_verification()
             }
         }
     }
-    let executable = std::env::current_exe().unwrap();
     let mut caller = Caller(
         Scenario::child(&executable, scenario.root(), "updater")
             .spawn()
@@ -553,6 +593,15 @@ fn accepted_restart_finishes_after_sender_leaves_and_requires_new_verification()
             .0
             .contains("needs a new challenge")
     );
+    let challenge_path = scenario.root().join("dot-verification/challenge.json");
+    let new_challenge = fs::read(&challenge_path).unwrap();
+    assert!(
+        restart::verify(scenario.root(), "dot")
+            .unwrap()
+            .0
+            .contains("saved challenge still applies")
+    );
+    assert!(fs::read(challenge_path).unwrap() == new_challenge);
     assert!(!scenario.root().join("overlap").exists());
 }
 

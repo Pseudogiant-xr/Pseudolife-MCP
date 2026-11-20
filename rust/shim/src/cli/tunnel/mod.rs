@@ -704,11 +704,9 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
             .iter()
             .any(|name| occupied(&record::path(root, name)).unwrap_or(true));
     let rows = if any_record { record::table() } else { None };
-    let mut entries = Vec::new();
-    let mut notes = Vec::new();
-    let mut stale = false;
-    let mut refreshed = false;
-    let mut failed = false;
+    let mut profiles = Vec::with_capacity(names.len());
+    // Check every profile for a store refusal before asking any supervisor
+    // to restart. A later invalid profile cannot hide an earlier result.
     for name in &names {
         // A profile in a form this client does not read is named with the
         // reason and still reported by its record; only a refused one stops
@@ -728,6 +726,14 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
                 ));
             }
         };
+        profiles.push((name, unread));
+    }
+    let mut entries = Vec::new();
+    let mut notes = Vec::new();
+    let mut stale = false;
+    let mut refreshed = false;
+    let mut failed = false;
+    for (name, unread) in profiles {
         let record = record::read(record::path(root, name), rows.as_deref());
         let name_q = quoted(name);
         let (state, running, sentence) = match (&record, unread) {
