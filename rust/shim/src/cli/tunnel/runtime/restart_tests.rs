@@ -50,9 +50,9 @@ fn supervised_fixture() {
             );
         }
         "bridge" => {
-            let mut owner = state::create(&path).unwrap().file;
+            let owner = state::create(&path.with_extension("lock")).unwrap().file;
             owner.try_lock().unwrap();
-            owner.write_all(b"bridge attached").unwrap();
+            state::atomic_create(&path, b"bridge attached").unwrap();
             std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
         }
         "vendor" => eager_vendor(&path),
@@ -103,10 +103,9 @@ fn eager_vendor(config: &Path) {
         panic!("overlapping vendor pollers");
     }
     for entry in fs::read_dir(root).unwrap().flatten().filter(|entry| {
-        entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with("bridge-attached-")
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        name.starts_with("bridge-attached-") && name.ends_with(".lock")
     }) {
         let previous_bridge = state::open_with_write(&entry.path(), true).unwrap();
         if previous_bridge.file.try_lock().is_err() {
