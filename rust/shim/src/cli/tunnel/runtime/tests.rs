@@ -40,18 +40,16 @@ fn launch_fixture(root: &Path) -> Prepared<'_> {
     prepared(root)
 }
 
-fn save_fixture_key(root: &Path, name: &str) -> bool {
+fn fixture_key_bytes(key: &[u8]) -> Option<Vec<u8>> {
     #[cfg(windows)]
-    let stored = {
-        let Some(sealed) = super::super::dpapi::seal(b"fixture-runtime-key") else {
-            return false;
-        };
-        [b"DPAPI\0".as_slice(), &sealed].concat()
-    };
+    {
+        let sealed = super::super::dpapi::seal(key)?;
+        Some([b"DPAPI\0".as_slice(), &sealed].concat())
+    }
     #[cfg(unix)]
-    let stored = b"PLAIN\0fixture-runtime-key";
-    state::atomic_create(&store::key_path(root, name), stored.as_ref()).unwrap();
-    true
+    {
+        Some([b"PLAIN\0".as_slice(), key].concat())
+    }
 }
 
 fn fixture_image(root: &Path, name: &str) -> PathBuf {
@@ -289,9 +287,12 @@ fn update_reports_only_an_attested_current_launch_as_current() {
         &prepared.profile_bytes,
     )
     .unwrap();
-    if !save_fixture_key(&home.0, name) {
+    let Some(replacement_key) = fixture_key_bytes(b"fixture-runtime-key") else {
         return;
-    }
+    };
+    let previous_key = fixture_key_bytes(b"previous-fixture-runtime-key").unwrap();
+    let key_path = store::key_path(&home.0, name);
+    state::atomic_create(&key_path, &replacement_key).unwrap();
 
     let launch = Uuid::new_v4();
     let mut stage = Stage::new(&home.0, name, launch).unwrap();
@@ -342,7 +343,8 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     );
     let pending = home.0.join(format!("{name}.reload.json"));
     state::atomic_create(&pending, br#"{"id":"00000000000000000000000000000000"}"#).unwrap();
-    check_stale("legacy refresh request may remain");
+    check_current("current");
+    assert!(pending.is_file());
     fs::remove_file(pending).unwrap();
     let history = home.0.join(format!("{name}.reload.result.json"));
     state::atomic_create(
@@ -358,7 +360,19 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     let previous = home.0.join(format!("{name}.key-previous"));
     state::atomic_create(&previous, b"unresolved retained pair fixture").unwrap();
     check_stale("cannot read the retained previous key");
+    fs::remove_file(&previous).unwrap();
+    state::atomic_write(&key_path, &previous_key, None).unwrap();
+    setup::seed_trial(
+        &home.0,
+        name,
+        (&prepared.profile_bytes, &previous_key),
+        (&prepared.profile_bytes, &replacement_key),
+    )
+    .unwrap();
+    check_stale("the previous key is still retained");
+    assert!(previous.is_file());
     fs::remove_file(previous).unwrap();
+    check_current("current");
     let token = Path::new(&prepared.profile.token_file);
     state::atomic_write(token, b"changed-fixture-daemon-token", None).unwrap();
     check_stale("differs from the current runtime or saved settings");

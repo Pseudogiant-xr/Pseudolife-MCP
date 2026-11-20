@@ -434,6 +434,9 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
         Liveness::Running if record.native => format!(
             "tunnel {name} is running (process record {file}); use tunnel stop to stop its native supervisor"
         ),
+        Liveness::Running if updating => format!(
+            "the Python client started tunnel {name} (process record {file}). The native client cannot verify or restart that launch and left it running. Use the Python client that started it to stop it"
+        ),
         Liveness::Running => format!(
             "tunnel {name} is running (process record {file}). Use the client that started it to stop it"
         ),
@@ -839,14 +842,6 @@ fn check_running_launch(root: &Path, name: &str, executable: Option<&Path>) -> R
             status()
         ));
     }
-    let request = root.join(format!("{name}.reload.json"));
-    if !matches!(occupied(&request), Ok(false)) {
-        return Err(format!(
-            "a legacy refresh request may remain at {}. Check with `{}`",
-            request.display(),
-            status()
-        ));
-    }
     let executable = executable.ok_or_else(|| {
         "the installed client executable could not be identified. Run update through the installed launcher".to_owned()
     })?;
@@ -1150,8 +1145,9 @@ mod tests {
         assert_eq!(entry["running"], true);
         let detail = report["detail"].as_str().unwrap();
         assert!(
-            detail.contains("tunnel dot is running")
-                && detail.contains("Use the client that started it to stop it"),
+            detail.contains("the Python client started tunnel dot")
+                && detail.contains("cannot verify or restart that launch and left it running")
+                && detail.contains("Use the Python client that started it to stop it"),
             "{detail}"
         );
         // Still running afterwards: the record and this process are untouched.
