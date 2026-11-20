@@ -62,13 +62,12 @@ const HELP: &str = concat!(
     "Recovery:\n",
     "  pseudolife-mcp move --rollback MOVE-ID [--yes] [--json]\n",
     "  pseudolife-mcp move --release-target MOVE-ID [--target-gone] [--yes] [--json]\n",
-    "  Use --resume on the original move command to retry after a rollback.\n",
+    "  To retry a move rolled back after its restore, rerun it with --resume.\n",
 );
 const REQUIRED: &str = "pseudolife-mcp move: error: the following arguments are required: --to\n";
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 \
                        (no path, query or credentials)\n";
-const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
 const BAD_DEPLOY_PATH: &str = "move: target environment, compose and work directory paths must contain no control characters\n";
 /// The options that take a value, each as the next argument.
 const VALUE_OPTIONS: [&str; 6] = [
@@ -99,8 +98,6 @@ pub(super) struct Context {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Decision {
-    /// Native help on stdout, exit 0.
-    Help,
     /// One refusal on stderr, exit 2 (`EXIT_USAGE`): argparse's usage error
     /// or one of `main` / `Mover.run`'s messages.
     Refuse(String),
@@ -132,7 +129,8 @@ fn py_isspace(c: char) -> bool {
 
 /// Each option once, a value as the next argument. A value that starts with
 /// `-`, a joined `--opt=value`, an abbreviation, a repeat, a positional or a
-/// missing value is argparse's business and defers.
+/// missing value returns `None`: the native parsers and `usage_problem`
+/// answer those.
 fn parse(arguments: &[String]) -> Option<Args<'_>> {
     let mut args = Args::default();
     let mut seen: Vec<&str> = Vec::new();
@@ -279,13 +277,6 @@ pub(super) fn utf8_argv() -> bool {
 /// check, `main`'s `--to` check, then `Mover.run`'s `--to` and
 /// `--target-checkout` checks.
 pub(super) fn decide(arguments: &[String], context: &Context) -> Decision {
-    // Help wins wherever it appears, as argparse's does.
-    if arguments
-        .iter()
-        .any(|argument| argument == "--help" || argument == "-h")
-    {
-        return Decision::Help;
-    }
     // Outside UTF-8 decoding CPython sees other characters than these.
     if !context.utf8_argv && !arguments.iter().all(|argument| argument.is_ascii()) {
         return Decision::Defer;
@@ -305,8 +296,8 @@ pub(super) fn decide(arguments: &[String], context: &Context) -> Decision {
     if to.is_empty() || to.chars().any(py_isspace) {
         return Decision::Refuse(BAD_TO.to_owned());
     }
-    // Mover.run's refusals go through its report: under --json that is a
-    // JSON document carrying a fresh move id on stdout, which defers.
+    // Under --json the native transaction parser answers this one, with
+    // the same text.
     if to.chars().any(|c| c < ' ') {
         return if args.json {
             Decision::Defer
@@ -314,18 +305,8 @@ pub(super) fn decide(arguments: &[String], context: &Context) -> Decision {
             Decision::Refuse(BAD_TO.to_owned())
         };
     }
-    // `checkout.rstrip("/") or DEFAULT` keeps any CR or LF; NUL cannot
-    // arrive in argv.
-    if args
-        .checkout
-        .is_some_and(|path| path.contains(['\n', '\r']))
-    {
-        return if args.json {
-            Decision::Defer
-        } else {
-            Decision::Refuse(BAD_CHECKOUT.to_owned())
-        };
-    }
+    // Any `--target-checkout` passes on: the native refusal says the
+    // option is not supported, which is the cause whatever its value.
     if args
         .deployment_paths
         .iter()
@@ -403,6 +384,14 @@ fn usage_problem(arguments: &[OsString]) -> Option<String> {
         .map(|word| option_name(word))
         .find(|name| RECOVERY.contains(name))
     {
+        // `--release-target` beside `--to` is most likely `--target-release`.
+        if recovery == "--release-target" && words.iter().any(|word| option_name(word) == "--to") {
+            return Some(
+                "--release-target MOVE-ID is the recovery form that gives a rolled-back \
+                 move's target its own bank back; for a move, the flag is --target-release"
+                    .to_owned(),
+            );
+        }
         return Some(recovery_problem(&words, recovery));
     }
     forward_problem(&words)
@@ -416,13 +405,18 @@ fn option_name(word: &str) -> &str {
     }
 }
 
-/// A word shown back only when it is a plain option spelling; anything
-/// else (a value, a path, a pasted secret) is named by its position.
+/// A word shown back only when it is spelled like an option: one or two
+/// dashes, then lowercase ASCII letters and dashes. Anything else (a value,
+/// a path, a pasted secret, which carry digits or capitals) is named by its
+/// position.
 fn shown(word: &str, index: usize) -> String {
+    let body = word
+        .strip_prefix("--")
+        .or_else(|| word.strip_prefix('-'))
+        .unwrap_or("");
     let plain = word.len() <= 40
-        && word.starts_with('-')
-        && word.bytes().any(|b| b != b'-')
-        && word.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        && body.starts_with(|c: char| c.is_ascii_lowercase())
+        && body.bytes().all(|b| b.is_ascii_lowercase() || b == b'-');
     if plain {
         word.to_owned()
     } else {
@@ -442,6 +436,14 @@ fn forward_problem(words: &[&str]) -> Option<String> {
         let takes_value = VALUE_OPTIONS.contains(&name);
         if !takes_value && !FLAGS.contains(&name) {
             return Some(unknown(word, index));
+        }
+        // Whatever its spelling or value, the option itself is the cause.
+        if name == "--target-checkout" {
+            return Some(
+                "--target-checkout is not supported: native move needs an installed release \
+                 deployment on the target; omit --target-checkout"
+                    .to_owned(),
+            );
         }
         if name != word {
             return Some(if takes_value {
@@ -478,10 +480,18 @@ fn forward_problem(words: &[&str]) -> Option<String> {
     })
 }
 
+/// Options that are neither forward options nor recovery forms, for the
+/// abbreviation check.
+const OTHER_OPTIONS: [&str; 2] = ["--target-gone", "--help"];
+
 fn unknown(word: &str, index: usize) -> String {
-    if word == "--target-gone" {
-        return "--target-gone applies only to the recovery form pseudolife-mcp move --release-target MOVE-ID --target-gone"
-            .to_owned();
+    match option_name(word) {
+        "--target-gone" => {
+            return "--target-gone applies only to the recovery form pseudolife-mcp move --release-target MOVE-ID --target-gone"
+                .to_owned();
+        }
+        "--help" => return "--help takes no value; run pseudolife-mcp move --help".to_owned(),
+        _ => {}
     }
     if !word.starts_with('-') {
         return format!(
@@ -494,6 +504,7 @@ fn unknown(word: &str, index: usize) -> String {
         .iter()
         .chain(&FLAGS)
         .chain(&RECOVERY)
+        .chain(&OTHER_OPTIONS)
         .copied()
         .filter(|option| name.len() > 2 && option.starts_with(name))
         .collect();
@@ -572,8 +583,22 @@ fn recovery_problem(words: &[&str], recovery: &str) -> String {
     format!("{recovery} takes only {takes}; see pseudolife-mcp move --help")
 }
 
+/// Help wins wherever it appears, as argparse's does, even beside argv that
+/// is not valid Unicode.
+pub(super) fn wants_help(arguments: &[OsString]) -> bool {
+    arguments
+        .iter()
+        .any(|argument| argument == "--help" || argument == "-h")
+}
+
 /// A missing answer passes the arguments to the native transaction parser.
 pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
+    if wants_help(&arguments) {
+        return Some(settle(
+            0,
+            emit(&mut io::stdout().lock(), &super::text_bytes(HELP)),
+        ));
+    }
     let arguments = arguments
         .into_iter()
         .map(OsString::into_string)
@@ -584,10 +609,6 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     };
     match decide(&arguments, &context) {
         Decision::Defer => None,
-        Decision::Help => Some(settle(
-            0,
-            emit(&mut io::stdout().lock(), &super::text_bytes(HELP)),
-        )),
         Decision::Refuse(text) => Some(settle(
             2,
             emit(&mut io::stderr().lock(), &super::text_bytes(&text)),
@@ -726,8 +747,14 @@ mod tests {
             &["--to=box", "--help"],
             &["--rollback", "--help"],
         ] {
-            assert_eq!(decide(&argv(items), &plain()), Decision::Help, "{items:?}");
+            let arguments: Vec<OsString> = items.iter().map(OsString::from).collect();
+            assert!(wants_help(&arguments), "{items:?}");
         }
+        let plain_argv: Vec<OsString> = ["--to", "box", "--hel"]
+            .iter()
+            .map(OsString::from)
+            .collect();
+        assert!(!wants_help(&plain_argv));
     }
 
     #[test]
@@ -754,9 +781,10 @@ mod tests {
         );
         let checkout = &["--to", "a\u{1}b", "--target-checkout", "x\ny"][..];
         assert_eq!(decide(&argv(checkout), &plain()), refuse(BAD_TO));
-        for path in ["x\ny", "x\r", "\r/"] {
+        // Any checkout passes on to the native "not supported" refusal.
+        for path in ["x\ny", "x\r", "\r/", "/srv/pl"] {
             let items = &["--to", "box", "--target-checkout", path][..];
-            assert_eq!(decide(&argv(items), &plain()), refuse(BAD_CHECKOUT));
+            assert_eq!(decide(&argv(items), &plain()), Decision::Defer);
         }
         let json = &["--to", "box", "--target-checkout", "x\n", "--json"][..];
         assert_eq!(decide(&argv(json), &plain()), Decision::Defer);
@@ -796,7 +824,27 @@ mod tests {
             ),
             (
                 &["--target", "x", "--to", "box"],
-                "--target could be --target-checkout or --target-url or --target-env-file or --target-compose-file or --target-work-dir or --target-release; write the full option name",
+                "--target could be --target-checkout or --target-url or --target-env-file or --target-compose-file or --target-work-dir or --target-release or --target-gone; write the full option name",
+            ),
+            (
+                &["--he"],
+                "--he is short for --help; write the full option name",
+            ),
+            (
+                &["--help=x"],
+                "--help takes no value; run pseudolife-mcp move --help",
+            ),
+            (
+                &["--to", "box", "--target-gone=1"],
+                "--target-gone applies only to the recovery form pseudolife-mcp move --release-target MOVE-ID --target-gone",
+            ),
+            (
+                &["--to", "box", "--yes", "-AbC123def456"],
+                "argument 4 is not a move option; see pseudolife-mcp move --help",
+            ),
+            (
+                &["--to", "box", "--release-target"],
+                "--release-target MOVE-ID is the recovery form that gives a rolled-back move's target its own bank back; for a move, the flag is --target-release",
             ),
             (
                 &["--to", "box", "--bogus"],
@@ -825,6 +873,14 @@ mod tests {
             (
                 &["--to", "-oProxy=x"],
                 "--to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -",
+            ),
+            (
+                &["--to", "box", "--target-checkout", "-x"],
+                "--target-checkout is not supported: native move needs an installed release deployment on the target; omit --target-checkout",
+            ),
+            (
+                &["--target-checkout=/srv", "--to", "box"],
+                "--target-checkout is not supported: native move needs an installed release deployment on the target; omit --target-checkout",
             ),
             (
                 &["--to", "box", "--target-url", "-x"],

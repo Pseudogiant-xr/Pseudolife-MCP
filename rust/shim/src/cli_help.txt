@@ -48,8 +48,8 @@ modes:
                  without a token and never replacing another serve;
                  `expose off` removes only that forward, `expose status`
                  prints the client URL
-  move           move this host's Docker-tier bank to another Docker-tier
-                 checkout host over key-based ssh (`move --to <ssh-target>`):
+  move           move this host's Docker-tier bank to an installed release on
+                 another host over key-based ssh (`move --to <ssh-target>`):
                  final backup from the stopped daemon, database fence,
                  restore and row-count check on the target, one start there,
                  then this machine's clients re-pointed; the source is

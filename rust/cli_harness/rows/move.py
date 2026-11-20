@@ -281,10 +281,11 @@ def _url_cases() -> list[Case]:
             out.append(case)
     return out
 
-# Cases whose argv passes validation: the oracle never runs them.
-# Valid argv the native move answers itself (its dry run, or its own
-# refusals) is tested in Rust (`tests/cli_move_contract.rs`,
-# `restore_cli/move_native/tests.rs`), not compared: see move.md.
+# Cases whose argv the oracle would accept: the oracle never runs them, and
+# their goldens are recorded from the candidate. Valid argv the native move
+# answers itself (its dry run, or its own refusals) is tested in Rust
+# (`tests/cli_move_contract.rs`, `restore_cli/move_native/tests.rs`): see
+# move.md.
 ORACLE_NOT_RUN = ("defer-joined-to", "defer-abbreviation", "defer-repeated-flag")
 
 

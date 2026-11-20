@@ -20,7 +20,6 @@ const TO_VALUE: &str = "move: --to needs the target host as ssh takes it, such a
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
-const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
 const URL_REQUIRED: &str = "move: --target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765. Nothing was changed\n";
 const NO_CHECKOUT: &str = "move: --target-checkout is not supported: move goes to an installed (release) Docker bank on the target, with the native pseudolife-mcp client there; drop --target-checkout. Nothing was changed\n";
 const NO_SSH: &str = "move: no ssh program is on PATH (only absolute PATH entries are searched); install the OpenSSH client, then retry. Nothing was changed\n";
@@ -226,6 +225,22 @@ fn valid_argv_gets_the_native_answer_without_a_connection() {
         // anything is changed or asked.
         (&DRY[..DRY.len() - 1], 4, NO_SSH),
         (&[&DRY[..DRY.len() - 1], &["--yes"]].concat(), 4, NO_SSH),
+        // Repeated compose files are overlays in order, not a repeat.
+        (
+            &[
+                "--to",
+                "root@box",
+                "--target-url",
+                "http://100.64.0.2:8765",
+                "--target-compose-file",
+                "/srv/pl/compose.yml",
+                "--target-compose-file",
+                "/srv/pl/compose.override.yml",
+                "--dry-run",
+            ],
+            4,
+            NO_SSH,
+        ),
     ] {
         let output = run(&home.0, &url, "80", args);
         assert_answer(&output, code, "", stderr);
@@ -370,7 +385,66 @@ fn non_unicode_argv_is_named_by_position() {
         "",
         "move: argument 2 is not valid Unicode text; retype it. Nothing was changed\n",
     );
+    // Help still answers beside such an argument.
+    let help = cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+        .arg("move")
+        .arg("--to")
+        .arg(std::ffi::OsStr::from_bytes(b"b\xff"))
+        .arg("--help")
+        .current_dir(&home.0)
+        .env("HOME", &home.0)
+        .env("PATH", &home.0)
+        .output()
+        .unwrap();
+    assert_eq!(help.status.code(), Some(0), "{help:?}");
+    assert!(help.stdout.starts_with(b"usage: pseudolife-mcp move"));
+    assert!(help.stderr.is_empty());
     assert!(listing(&home.0).is_empty());
+}
+
+#[test]
+fn usage_refusals_come_before_any_move_record_is_read() {
+    let home = Home::new("unreadable-records");
+    let (socket, url) = listener();
+    // A moves folder that cannot be listed: any read of the records fails.
+    let state = home.0.join(".pseudolife-mcp");
+    fs::create_dir(&state).unwrap();
+    fs::write(state.join("moves"), b"not a folder").unwrap();
+    // The controls: well-formed command lines read the records and fail on
+    // the planted file, so a refusal below that reads them would say so.
+    for control in [
+        rollback(&home.0, &url, &["--rollback", MOVE_ID]),
+        run(&home.0, &url, "80", DRY),
+    ] {
+        let stderr = String::from_utf8_lossy(&control.stderr);
+        assert_eq!(control.status.code(), Some(4), "{control:?}");
+        assert!(
+            // Windows reports a record under a file as absent, not unreadable.
+            stderr.contains("cannot read")
+                || stderr.contains("cannot be listed")
+                || stderr.contains("has no record of move"),
+            "{control:?}"
+        );
+    }
+    let nothing = ". Nothing was changed\n";
+    for (args, problem) in [
+        (
+            &["--to", "root@box", "extra"][..],
+            "argument 3 is neither an option nor an option's value; each value follows its option, such as --to user@box",
+        ),
+        (
+            &["--rollback"],
+            "--rollback needs the id of the move to recover, as --rollback MOVE-ID (the failed move printed it)",
+        ),
+        (
+            &["--release-target", MOVE_ID, "--dry-run"],
+            "--dry-run cannot be used with --release-target, which takes only a move id, --target-gone, --yes and --json",
+        ),
+    ] {
+        let want = format!("move: {problem}{nothing}");
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", &want);
+    }
+    assert_quiet(&socket);
 }
 
 #[test]
@@ -462,13 +536,14 @@ fn refusals_before_any_effect() {
         (&["--to", "root\u{1c}box", "--json"], BAD_TO),
         (&["--to", "root\u{1}box"], BAD_TO),
         (&["--to", "a b", "--target-url", "http://box:8765/"], BAD_TO),
+        // Whatever its value, --target-checkout is refused as unsupported.
         (
             &["--to", "root@box", "--target-checkout", "/srv/x\ny"],
-            BAD_CHECKOUT,
+            NO_CHECKOUT,
         ),
         (
             &["--to", "root@box", "--target-checkout", "\r//"],
-            BAD_CHECKOUT,
+            NO_CHECKOUT,
         ),
     ] {
         assert_answer(&run(&home.0, &url, "80", args), 2, "", stderr);
