@@ -37,8 +37,8 @@ import pgdisposable
 import psycopg
 from psycopg import sql
 from schema_cases import clock_diffs
-from session_fixture import EPISODES
-from rust.harness_support.database_guard import assert_disposable_database
+from startup_fixture import FIDELITY_CASES, LOAD_CLOCK, seed_bank
+from rust.harness_support.bank_fixture import assert_fixture_database
 
 pg = pgdisposable.Slice.from_env("pgs")
 # Multi-band presets and retention policies other than balanced are retired
@@ -59,9 +59,6 @@ ZERO_TIME_CONFIG = """memory:
     bands:
       - {name: hot, max_entries: 1, retention_policy: balanced}
 """
-LOAD_CLOCK = 1000.0
-FIDELITY_CASES = ("zero-timestamp-seating", "surprise-real-text-rounding",
-                  "startup-tags-non-string-preservation")
 CASES = (
     "empty", "seeded", "record-highwater", "preset-rename", "deep-overflow",
     "malformed-highwater-bool", "malformed-highwater-short",
@@ -100,12 +97,6 @@ STALE_FAILURES = {
     "stale-cortex-dims": {"count": 2, "dims": [768]},
     "stale-combined-dims": {"count": 4, "dims": [384, 768]},
 }
-DIMENSION_FIXTURES = {
-    "stale-entry-dims": ("entries",),
-    "stale-cortex-dims": ("facts",),
-    "stale-combined-dims": ("entries", "facts"),
-    "world-lesson-dims-accepted": ("world_facts", "lessons"),
-}
 NORMALIZERS = {
     "error": "named coordination-highwater, five loader/column failures, and stale-dimension wording; exact typed count/dims retained",
     "restart.meta.writer_lease_epoch": "removed only for idempotence; increment checked separately",
@@ -133,146 +124,6 @@ def plain(value):
     if hasattr(value, "tolist"):
         return plain(value.tolist())
     return value
-
-
-def seed(storage, case):
-    """Shipped storage producers alone create fixture rows; never raw INSERTs."""
-    if case == "empty":
-        return
-    import torch
-    from pseudolife_memory.memory.cortex import CortexRecord, CortexStore
-    from pseudolife_memory.memory.lessons import LessonRecord
-    from pseudolife_memory.memory.titans_memory import MemoryEntry
-    from pseudolife_memory.memory.world_cortex import WorldRecord
-    from pseudolife_memory.storage import sync
-
-    def vector(index, dimension=1024):
-        if case == "clock-retry":
-            return None
-        result = torch.zeros(dimension, dtype=torch.float32, device="cpu")
-        result[index] = 1.0
-        return result
-
-    if case in FIDELITY_CASES:
-        surprises = (0.50005, 0.00005, 0.12325, 0.87505) if case == "surprise-real-text-rounding" else (0.0,)
-        timestamps = (0.0, LOAD_CLOCK - 100) if case == "zero-timestamp-seating" else (LOAD_CLOCK,) * len(surprises)
-        for index, timestamp in enumerate(timestamps):
-            embedding = vector(0)
-            if case == "surprise-real-text-rounding":
-                # band.retrieve uses torch.topk, with no stable-order guarantee for ties.
-                # Distinct cosines keep this cell about REAL surprise serialization.
-                # https://docs.pytorch.org/docs/stable/generated/torch.topk.html
-                embedding[0], embedding[1] = (
-                    (1.0, 0.0), (0.8, 0.6), (0.6, 0.8), (0.0, 1.0),
-                )[index]
-            row = sync.entry_to_row(MemoryEntry(
-                text=f"Fidelity entry {index}", embedding=embedding,
-                timestamp=LOAD_CLOCK, access_count=1, source="agent",
-                bank="hot" if case == "zero-timestamp-seating" else "flat",
-                surprise_score=surprises[index] if len(surprises) > 1 else surprises[0],
-                tags=["valid", 7, True] if case == "startup-tags-non-string-preservation" else [],
-            ))
-            # insert_entry accepts zero directly; MemoryEntry construction would replace it.
-            row["ts"] = timestamp
-            storage.insert_entry(row)
-        return
-
-    for index, ended in enumerate((1010.25, None, None)):
-        storage.upsert_episode({
-            "id": EPISODES[index], "title": f"Episode {index}",
-            "hint": "startup fixture", "started_at": 1000.25 + index,
-            "ended_at": ended, "closed_by_new_start": index == 0,
-            "session_key": f"session-{index}",
-            "parent_id": EPISODES[1] if index == 2 else None,
-        })
-    # deep-overflow keeps its name and golden key: with multi-band layouts
-    # retired (R11) it seeds nine entries into the one custom band of two,
-    # so it pins how an over-capacity single band hydrates, no longer the
-    # overflow walk between bands.
-    count = 0 if case == "clock-retry" else 9 if case == "deep-overflow" else 5
-    for index in range(count):
-        dimension = (384 if index < 2 and case in {"stale-entry-dims", "stale-combined-dims"}
-                     else 1024)
-        entry = MemoryEntry(
-            text=f"Startup entry {index}", embedding=vector(index, dimension),
-            surprise_score=0.125 + index / 16, timestamp=1000.25 + index,
-            access_count=index, source="agent", bank="working",
-            superseded_at=1011.25 if index == 0 else None,
-            superseded_by_text="Startup entry 1" if index == 0 else None,
-            last_logical_turn=index, episode_id=EPISODES[2],
-            episode_title="Episode 2", tags=["startup", f"tag-{index}"],
-            slots=[("Fixture", "entry", str(index), "+")],
-            authority="observation" if index % 2 else None,
-            distortion_tolerance="episodic" if index % 2 else None,
-            dream_state="acknowledged" if index == 0 else "pending",
-        )
-        storage.insert_entry(sync.entry_to_row(entry))
-
-    stamp = dict(tx_time=1002.25, valid_time=999.25,
-                 writer_id="fixture-writer", session_id="fixture-session")
-    cortex_dimension = 768 if case in {"stale-cortex-dims", "stale-combined-dims"} else 1024
-    facts = [
-        CortexRecord("Fixture", "mode", "old", status="superseded",
-                     superseded_by_value="new", superseded_at=1003.25,
-                     hlc_phys=100, hlc_logical=7, **stamp),
-        CortexRecord("Fixture", "mode", "new", confidence=0.8125,
-                     supersedes_value="old", embedding=vector(20, cortex_dimension),
-                     support={"user", "agent"}, provenance={EPISODES[1], EPISODES[2]},
-                     asserted_at=1002.25, last_confirmed=1003.25,
-                     hlc_phys=101, hlc_logical=0, stance="per fixture",
-                     authority="directive", distortion_tolerance="constraint", **stamp),
-        CortexRecord("Fixture", "tools", "alpha", kind="member",
-                     embedding=vector(21, cortex_dimension), hlc_phys=100, hlc_logical=8, **stamp),
-        CortexRecord("Fixture", "tools", "beta", kind="member",
-                     support={"action"}, hlc_phys=100, hlc_logical=9, **stamp),
-        CortexRecord("Fixture", "tools", "retired", kind="member", status="removed",
-                     superseded_at=1004.25, hlc_phys=100, hlc_logical=10, **stamp),
-    ]
-    storage.replace_slot_facts({record.key for record in facts},
-                               [sync._record_to_row(record) for record in facts])
-    world = [
-        WorldRecord("External", "release", "old", status="superseded",
-                    superseded_by_value="new", superseded_at=1005.25,
-                    hlc_phys=101, hlc_logical=1, **stamp),
-        WorldRecord("External", "release", "new", confidence=0.75,
-                    source_url="https://example.com/release", source_quote="Fixture release",
-                    retrieved_at=1005.25, content_hash="fixture-content",
-                    embedding=vector(22, 512 if case == "world-lesson-dims-accepted" else 1024),
-                    supersedes_value="old",
-                    hlc_phys=102, hlc_logical=1, **stamp),
-    ]
-    storage.replace_slot_world_facts({record.key for record in world},
-                                     [sync._world_record_to_row(record) for record in world])
-    lessons = [
-        LessonRecord("Fixture task", "approach", "check input", about="fixture-tool",
-                     confidence=0.875, outcome="correction", polarity="-",
-                     origin="agent", support={"agent"}, provenance={"signal-1"},
-                     embedding=vector(23, 256 if case == "world-lesson-dims-accepted" else 1024),
-                     asserted_at=1006.25, last_confirmed=1007.25,
-                     hlc_phys=102, hlc_logical=6, **stamp),
-    ]
-    storage.replace_slot_lessons({record.key for record in lessons},
-                                 [sync._lesson_record_to_row(record) for record in lessons])
-    storage.meta_set("active_session_pointer", {"session_id": "session-2", "ts": 1008.25})
-    storage.meta_set("episode_tombstones", {
-        "swept": {"session_key": "session-old", "ended_at": 997.25, "title": "Swept"},
-        "empty-title": {"session_key": "session-empty", "ended_at": None, "title": None},
-        "ignored": {"title": "no session key"},
-    })
-    storage.meta_set("deferred_empty_roots", {EPISODES[1]: 1009.25, "zero": None})
-    log = CortexStore()
-    log._log(facts[0], facts[1].value, facts[1].confidence, 1003.25,
-             "supersede", "newer_wins", writer_id=stamp["writer_id"], session_id=stamp["session_id"])
-    storage.meta_set("cortex_supersession_log", log.supersession_log)
-    storage.meta_set("cortex_dream_cursor", 1007.25)
-    durable = {
-        "malformed-highwater-bool": True,
-        "malformed-highwater-short": [1],
-        "malformed-highwater-negative": [-1, 0],
-        "malformed-highwater-component": [1, True],
-        "malformed-highwater-float": [1.5, 0],
-    }.get(case, [103, 2] if case != "record-highwater" else [101, 99])
-    storage.meta_set("coordination_hlc_highwater", durable)
 
 
 def python_hydrate(storage, config_path, resident_service=None):
@@ -379,22 +230,11 @@ def python_hydrate(storage, config_path, resident_service=None):
     return {"ok": True, **snapshot}
 
 
-def oracle_cell(seed_case=None):
+def oracle_cell():
     from pseudolife_memory.storage.postgres import PostgresStorage
     storage = None
     try:
         storage = PostgresStorage(os.environ["PL_PGS_STARTUP_DSN"])
-        if seed_case:
-            if seed_case in DIMENSION_FIXTURES:
-                # Fault injection on this cell's empty owned template only:
-                # remove the typmod so shipped producer APIs can write legacy
-                # vector lengths. The additive constructor permits vector.
-                for table in DIMENSION_FIXTURES[seed_case]:
-                    assert_disposable_database(storage.conn)
-                    storage.conn.execute(sql.SQL("ALTER TABLE {} ALTER COLUMN embedding TYPE vector").format(
-                        sql.Identifier(table)))
-            seed(storage, seed_case)
-            return
         try:
             result = python_hydrate(storage, os.environ["PL_PGS_CONFIG"])
         except Exception as error:
@@ -403,8 +243,6 @@ def oracle_cell(seed_case=None):
             if details is not None:
                 result["stale_dims"] = details
     except Exception as error:
-        if seed_case:
-            raise
         result = {"ok": False, "error": str(error)}
     finally:
         if storage is not None:
@@ -413,12 +251,12 @@ def oracle_cell(seed_case=None):
         json.dumps(result, allow_nan=False), encoding="utf-8")
 
 
-def invoke(binary, kind, dsn, home, output, seed_case=None, mutant=None, case=None):
+def invoke(binary, kind, dsn, home, output, mutant=None, case=None):
     env = daemons.base_env(home, {
         "PL_PGS_STARTUP_DSN": dsn, "PL_PGS_STARTUP_OUT": str(output),
         "PL_PGS_CONFIG": str(home / "data" / "config.yaml"),
         "PL_HARNESS_SLICE": "pgs", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-        "PL_PGS_CASE": case or seed_case or "",
+        "PL_PGS_CASE": case or "",
     })
     # Prevent an unrelated harness invocation leaking a bank or output path.
     for key in list(env):
@@ -429,8 +267,6 @@ def invoke(binary, kind, dsn, home, output, seed_case=None, mutant=None, case=No
             env.pop(key)
     if kind == "python":
         argv = [sys.executable, str(Path(__file__).resolve()), "--oracle-cell"]
-        if seed_case:
-            argv += ["--seed-cell", seed_case]
     else:
         argv = [str(binary), "--exact", "startup::tests::db_startup_inputs_dump", "--nocapture"]
         if mutant:
@@ -443,8 +279,6 @@ def invoke(binary, kind, dsn, home, output, seed_case=None, mutant=None, case=No
                            f"{run.stdout[-1500:]} {run.stderr[-1500:]}")
     if kind == "rust" and "1 passed" not in run.stdout:
         raise RuntimeError("Rust startup probe did not run exactly one passing test")
-    if seed_case:
-        return None, window
     result = json.loads(output.read_text(encoding="utf-8"))
     if type(result.get("ok")) is not bool:
         raise RuntimeError(f"{kind} startup probe omitted its boolean ok field")
@@ -567,7 +401,7 @@ def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
     """One case on cloned banks. With ``oracle`` the Python service starts
     beside Rust and each stage compares the two; without it (golden checking)
     only Rust starts, and ``expected`` (the case's committed snapshot and
-    database stages) is its expectation. Python seeds the template either way."""
+    database stages) is its expectation. Both modes use the same fixture rows."""
     arms = ("python", "rust") if oracle else ("rust",)
     names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []
@@ -576,14 +410,14 @@ def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
             root = Path(scratch)
             config = (ZERO_TIME_CONFIG if case == "zero-timestamp-seating" else
                       CUSTOM_CONFIG if case in {"preset-rename", "deep-overflow"} else None)
-            homes = [daemons.make_home(root, kind, config) for kind in ("seed", *arms)]
+            homes = [daemons.make_home(root, kind, config) for kind in arms]
             template = pg.create(names[0])
             created.append(names[0])
-            invoke(binary, "python", template, homes[0], root / "seed.json", seed_case=case)
+            seed_bank(template, case)
             if case in REQUIRED_FAILURES:
                 table, column, _, _ = REQUIRED_FAILURES[case]
                 with psycopg.connect(template, autocommit=True) as conn:
-                    assert_disposable_database(conn)
+                    assert_fixture_database(conn)
                     conn.execute(sql.SQL("ALTER TABLE {} DROP COLUMN {}").format(
                         sql.Identifier(table), sql.Identifier(column)))
             before = dbstate.dump(template)
@@ -595,7 +429,7 @@ def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
             result["stages"] = []
             for restart in range(2):
                 outputs, states, windows = [], [], []
-                for kind, dsn, home in zip(arms, dsns, homes[1:]):
+                for kind, dsn, home in zip(arms, dsns, homes):
                     output, window = invoke(binary, kind, dsn, home, root / f"{kind}-{restart}.json", mutant=mutant, case=case)
                     outputs.append(output)
                     states.append(dbstate.dump(dsn))  # immediately after each arm
@@ -705,7 +539,6 @@ def main(argv=None):
                                   "run unless --write")
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--seed-cell", choices=CASES, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
@@ -720,7 +553,7 @@ def main(argv=None):
     if pg.SLICE != "pgs":
         parser.error("startup cells require PL_HARNESS_SLICE=pgs")
     if args.oracle_cell:
-        oracle_cell(args.seed_cell)
+        oracle_cell()
         return 0
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
