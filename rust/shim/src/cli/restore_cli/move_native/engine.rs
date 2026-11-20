@@ -2272,7 +2272,7 @@ fn manual_target_selection(record: &Record) -> Option<String> {
         Some(format!(
             "On the target, substitute the daemon ID saved in {}/carry.json (pins.daemon) for <verified-target-daemon-id>. Verify that Docker returns that full ID for the expected Compose service. If the journal was never created, the selected daemon ID was {}. If a recreation began without recording its replacement, verify the original Compose project and its volumes before proceeding.",
             remote_folder(record),
-            selected
+            pins.daemon
         ))
     } else {
         Some(format!(
@@ -2306,7 +2306,7 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
         let recovery = crate::cli::restore_cli::bank::sh_quote(&format!("{folder}/carry.json"));
         (
             format!(
-                "Keep the target daemon stopped and gated while restoring its configuration. Remove only this move's appended # Pseudolife move {} block from the target's environment file. On the target, print the exact head -c and sha256sum check (original_bytes and original_digest in the journal) and the exact recorded docker compose command ending in up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon:\n  pseudolife-mcp move-target recovery-commands {recovery}\nCompare the checksum before using the original prefix. Check for later edits and preserve them. If the file is already restored, verify its original settings. Run the printed Compose command only after restoring the environment, and fill in its new verified container ID before running later Docker commands. ",
+                "Keep the target daemon stopped and gated while restoring its configuration. Before editing the environment file, run this on the target to get the exact head -c and sha256sum check (original_bytes and original_digest in the journal) and, if needed, the recorded docker compose command ending in up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon:\n  pseudolife-mcp move-target recovery-commands {recovery}\nIf the command is not on PATH, use the installed launcher at \"${{XDG_DATA_HOME:-$HOME/.local/share}}/pseudolife-mcp/bin/pseudolife-mcp\" or \"$HOME/.local/bin/pseudolife-mcp\" in its place. If it prints a recreation command, compare the checksum before using the original prefix, check for later edits, and remove only this move's appended # Pseudolife move {} block. If the file is already restored, verify its original settings. Run the printed Compose command only after restoring the environment, and fill in its new verified container ID before running later Docker commands. ",
                 record.move_id
             ),
             "<verified-target-daemon-id>",

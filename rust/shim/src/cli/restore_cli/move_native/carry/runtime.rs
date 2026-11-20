@@ -76,18 +76,27 @@ fn read_journal(path: &Path) -> Result<Option<Journal>, String> {
 pub(in crate::cli::restore_cli::move_native) fn recovery_commands(
     path: &Path,
 ) -> Result<String, String> {
-    let journal = read_journal(path).ok().flatten().ok_or(
-        "cannot read the target carry journal; locate the move's carry.json before continuing",
-    )?;
-    render_recovery_commands(&journal)
+    match read_journal(path) {
+        Ok(Some(journal)) => render_recovery_commands(&journal),
+        Ok(None) => Err(format!(
+            "no carry journal at {path:?}. If this is the move's intact folder, the move never changed the environment file and there is nothing to restore there. Otherwise locate the move's carry.json."
+        )),
+        Err(_) => Err(format!(
+            "cannot read or parse the target carry journal at {path:?}. Verify the file before continuing."
+        )),
+    }
 }
 
 fn render_recovery_commands(journal: &Journal) -> Result<String, String> {
     use crate::cli::restore_cli::bank::sh_quote;
 
     let deployment = &journal.deployment;
-    let invalid =
-        "the carry journal's deployment could not be verified; keep the daemon stopped and gated";
+    let invalid = concat!(
+        "the carry journal's deployment could not be verified. Keep the daemon stopped and gated. ",
+        "Restore the original environment by hand using deployment.env_file, original_bytes and ",
+        "original_digest from the journal. Verify the deployment, then recreate the daemon ",
+        "stopped using its recorded deployment.args."
+    );
     deployment
         .check_binding(&journal.original_pins)
         .map_err(|_| invalid)?;
@@ -124,15 +133,23 @@ fn render_recovery_commands(journal: &Journal) -> Result<String, String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
+    let checksum = format!(
+        "Verify the original prefix (expected SHA-256 {expected}):\n  head -c {} {} | sha256sum",
+        journal.original_bytes,
+        sh_quote(env),
+    );
+    if journal.restored {
+        return Ok(format!(
+            "The carry journal records that the original environment was restored. Keep the daemon stopped and gated while you verify it.\n{checksum}"
+        ));
+    }
     let compose = args
         .iter()
         .map(|arg| sh_quote(arg))
         .collect::<Vec<_>>()
         .join(" ");
     Ok(format!(
-        "Verify the original prefix (expected SHA-256 {expected}):\n  head -c {} {} | sha256sum\nAfter restoring the original env, use a shell with no Compose or Pseudolife setting overrides and recreate the selected daemon stopped:\n  PSEUDOLIFE_IMAGE_TAG={} docker {compose} up --no-start --no-deps --no-build --pull never --force-recreate {DAEMON_SERVICE}",
-        journal.original_bytes,
-        sh_quote(env),
+        "{checksum}\nAfter restoring the original environment, check for exported overrides in the shell where you will run Compose:\n  bash -c 'compgen -e' | grep -E '^(COMPOSE_|PSEUDOLIFE_)'\nThe check should print nothing. If it lists any names, unset each listed variable in this shell and run the check again. If the check reports an error, resolve it before continuing.\nThen recreate the selected daemon stopped:\n  PSEUDOLIFE_IMAGE_TAG={} docker {compose} up --no-start --no-deps --no-build --pull never --force-recreate {DAEMON_SERVICE}",
         sh_quote(&deployment.tag)
     ))
 }
@@ -586,8 +603,7 @@ fn container_matches(container: &Value, identities: &Identities) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn manual_recovery_commands_render_the_hex_digest_and_ordered_deployment() {
+    fn manual_recovery_journal() -> Journal {
         let deployment = Deployment {
             args: [
                 "compose",
@@ -618,7 +634,7 @@ mod tests {
             ..Default::default()
         };
         pins.deployment_digest = Some(deployment.digest(&pins).unwrap());
-        let mut journal = Journal {
+        Journal {
             deployment,
             original_pins: pins.clone(),
             pins,
@@ -628,7 +644,12 @@ mod tests {
             appended_bytes: 0,
             appended_digest: [0; 32],
             restored: false,
-        };
+        }
+    }
+
+    #[test]
+    fn manual_recovery_commands_render_the_hex_digest_and_ordered_deployment() {
+        let mut journal = manual_recovery_journal();
         let lines = render_recovery_commands(&journal).unwrap();
         assert!(lines.contains(&format!("expected SHA-256 {}", "a7".repeat(32))));
         assert!(lines.contains("head -c 17 '/srv/recovery/private env' | sha256sum"));
@@ -638,6 +659,40 @@ mod tests {
         journal.original_pins.deployment_digest =
             Some(journal.deployment.digest(&journal.original_pins).unwrap());
         assert!(render_recovery_commands(&journal).is_err());
+    }
+
+    #[test]
+    fn manual_recovery_for_an_unverified_deployment_names_the_manual_steps() {
+        let mut journal = manual_recovery_journal();
+        journal.deployment.args.push("--profile".into());
+        let error = render_recovery_commands(&journal).unwrap_err();
+        assert!(error.contains("stopped and gated"));
+        assert!(error.contains("deployment.env_file"));
+        assert!(error.contains("original_bytes"));
+        assert!(error.contains("original_digest"));
+        assert!(error.contains("deployment.args"));
+    }
+
+    #[test]
+    fn manual_recreation_prints_the_shell_override_check_before_the_command() {
+        let lines = render_recovery_commands(&manual_recovery_journal()).unwrap();
+        let check = lines
+            .find("  bash -c 'compgen -e' | grep -E '^(COMPOSE_|PSEUDOLIFE_)'\n")
+            .unwrap_or_else(|| panic!("{lines}"));
+        assert!(lines.contains("The check should print nothing. If it lists any names, unset each listed variable in this shell and run the check again."));
+        assert!(check < lines.find("  PSEUDOLIFE_IMAGE_TAG=").unwrap());
+    }
+
+    #[test]
+    fn a_restored_carry_journal_only_asks_to_verify_the_original_prefix() {
+        let mut journal = manual_recovery_journal();
+        journal.restored = true;
+        let lines = render_recovery_commands(&journal).unwrap();
+        assert!(
+            lines.contains("The carry journal records that the original environment was restored.")
+        );
+        assert!(lines.contains("head -c 17 '/srv/recovery/private env' | sha256sum"));
+        assert!(!lines.contains("--force-recreate"));
     }
 
     #[cfg(target_os = "linux")]

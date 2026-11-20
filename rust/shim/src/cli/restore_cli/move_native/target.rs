@@ -1,7 +1,7 @@
 //! `pseudolife-mcp move-target <protocol>`: the target half of a move's
 //! preflight, run by the source over ssh.
 //!
-//! Hidden: users never run it. It reads one JSON request on stdin (what the
+//! The protocol form reads one JSON request on stdin (what the
 //! source is: its schema, PostgreSQL version and bank fingerprint, and the
 //! work directory the move would use), checks this host's bank without
 //! changing anything, and prints one line, [`FRAME`] then a JSON reply.
@@ -9,6 +9,7 @@
 //! prints. The reply carries verdicts and facts, never a secret. It exits 0
 //! whatever it found (the verdicts say), 3 for a protocol it does not
 //! speak, and never 255, which the source reads as ssh's own failure.
+//! The local `recovery-commands` form prints manual instructions from a carry journal.
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 

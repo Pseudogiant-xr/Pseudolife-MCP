@@ -58,22 +58,21 @@ impl TargetFiles {
             self.clone_from(recorded);
             return Ok(());
         }
-        let selection = if recorded.is_empty() {
-            "installed labels (no explicit file flags)".to_owned()
-        } else {
-            recorded
-                .env
-                .iter()
-                .map(|path| format!("--target-env-file {path:?}"))
-                .chain(
-                    recorded
-                        .compose
-                        .iter()
-                        .map(|path| format!("--target-compose-file {path:?}")),
-                )
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
+        if recorded.is_empty() {
+            return Err("resume uses the recorded target file selection: installed labels (no explicit file flags). Omit the file flags to reuse it".into());
+        }
+        let selection = recorded
+            .env
+            .iter()
+            .map(|path| format!("--target-env-file {path:?}"))
+            .chain(
+                recorded
+                    .compose
+                    .iter()
+                    .map(|path| format!("--target-compose-file {path:?}")),
+            )
+            .collect::<Vec<_>>()
+            .join(" ");
         Err(format!(
             "resume uses the recorded target file selection: {selection}. Omit the file flags to reuse it, or repeat the recorded paths with exactly the same spelling and order"
         ))
@@ -668,6 +667,18 @@ mod tests {
             assert!(message.contains(r#"--target-compose-file "/srv/deployment/base.yml""#));
             assert!(message.contains("exactly the same spelling and order"));
         }
+    }
+
+    #[test]
+    fn resume_with_an_empty_recorded_selection_only_asks_to_omit_file_flags() {
+        let mut requested = TargetFiles {
+            env: Some("~/deployment/private.env".into()),
+            ..TargetFiles::default()
+        };
+        assert_eq!(
+            requested.resume_from(&TargetFiles::default()).unwrap_err(),
+            "resume uses the recorded target file selection: installed labels (no explicit file flags). Omit the file flags to reuse it"
+        );
     }
 
     #[test]
