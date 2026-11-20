@@ -1,6 +1,6 @@
 """Probe a trusted commit with the Python package omitted from its Git archive.
 
-On Linux, use a Python 3.11+ tooling environment and run
+On Linux, use a Python 3.11.4+ tooling environment and run
     python rust/ci/package_absent.py HEAD
 Install the tooling dependencies you want to test with (including PyYAML for
 the budget check). A Python environment that can import the package is refused.
@@ -25,7 +25,7 @@ import tarfile
 import tempfile
 import time
 
-from package_consumers import ACTIVE, CATEGORIES, EVALS, PACKAGE, ROOT, TESTING
+from package_consumers import ACTIVE, CATEGORIES, PACKAGE, ROOT, TESTING
 
 
 PER_PROBE_SECONDS = 12
@@ -98,7 +98,7 @@ def plan(checkout: Path) -> list[Probe]:
         Probe(ACTIVE, "script", "rust/ci/pr_precheck_run.py", ("--help",)),
         Probe(TESTING, "script", "rust/cli_harness/__main__.py", ("--help",)),
         Probe(TESTING, "script", "rust/daemon/harness/run.py", ("--help",)),
-        Probe(EVALS, "module", "evals.rust_port.cli_dispatch", ("--help",)),
+        Probe(TESTING, "module", "evals.rust_port.cli_dispatch", ("--help",)),
         *(Probe(TESTING, "import", f"tests/{filename}") for filename in fixtures),
         *live,
     ]

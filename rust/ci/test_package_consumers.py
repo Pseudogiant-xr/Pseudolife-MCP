@@ -26,6 +26,76 @@ def test_new_consumer_needs_a_rule(known_rule):
     assert [hit.location for hit in missing] == ["elsewhere/new.py:1 (python-import)"]
 
 
+@pytest.mark.parametrize("path", ("new-area/new-guide.md", "new-area/llms-new.txt"))
+def test_documentation_fallback_cannot_classify_code(path):
+    rules = ledger.load_rules(ledger.ROOT)
+    direct = ledger.scan(path, "Run python -m pseudolife_memory.cli to check the client.")
+    indirect = ledger.scan(path, "Run python new_tool.py to check the client.",
+                           frozenset({"new_tool.py"}))
+    for hits in (direct, indirect):
+        assert hits == [ledger.Consumer(path, 1, "documentation")]
+        assert ledger.classify(hits, rules)[0] == []
+    code = ledger.scan("new-area/new_tool.py", "from pseudolife_memory import cli")
+    assert code == [ledger.Consumer("new-area/new_tool.py", 1, "python-import")]
+    assert ledger.classify(code, rules)[0] == code
+
+
+@pytest.mark.parametrize(("path", "category"), [
+    ("evals/rust_port/phase1_ci.py", ledger.TESTING),
+    ("evals/prompts/live.md", ledger.ACTIVE),
+    ("evals/results/old.md", ledger.HISTORY),
+    ("evals/unresolved_driver.py", ledger.EVALS),
+])
+def test_eval_classes(path, category):
+    source = ("python -m pseudolife_memory.cli" if path.endswith(".md")
+              else "from pseudolife_memory import cli")
+    hit, = ledger.scan(path, source)
+    rule = next(rule for rule in ledger.load_rules(ledger.ROOT) if rule.matches(hit))
+    assert rule.category == category
+
+
+@pytest.mark.parametrize(("path", "source", "kind"), [
+    ("install.sh", 'pipx install --force "$repo"; then', "command"),
+    ("install.sh", 'python3 -m pip install --user --upgrade "$repo"; then', "command"),
+    ("install.sh", 'python -m pip install --user --upgrade "$repo"; then', "command"),
+    ("install.ps1", "pipx install --force $repo 2>&1 | Out-Host", "command"),
+    ("install.ps1", "& $exe @exeArgs -m pip install --user --upgrade $repo 2>&1 | Out-Host", "command"),
+    ("tool.sh", 'pip install -e ./', "command"),
+    ("tool.sh", 'pip install -e "./[dev]"', "command"),
+    ("tool.sh", 'pip install "${repo}"', "command"),
+    ("tool.ps1", 'pip install "$env:GITHUB_WORKSPACE"', "command"),
+    (".github/workflows/new.yml", 'run: pip install "$GITHUB_WORKSPACE"', "workflow-install"),
+    (".github/workflows/new.yml", 'run: pip install "${{ github.workspace }}"', "workflow-install"),
+    ("tool.sh", "pip install dist/*.whl", "command"),
+    ("tool.ps1", r"pip install .\dist\pseudolife_mcp-0.24-py3-none-any.whl", "command"),
+    ("tool.sh", 'uv pip install -e "./"', "command"),
+    ("tool.sh", 'uv tool install "$repo"', "command"),
+    ("tool.sh", "uv sync --frozen", "command"),
+    (".github/workflows/new.yml", "run: uv run pytest", "workflow-install"),
+    ("Dockerfile", "COPY . /app", "docker-copy"),
+    ("Dockerfile", 'COPY ["./", "/app"]', "docker-copy"),
+    ("Dockerfile", "ADD . .", "docker-copy"),
+])
+def test_checkout_install_and_copy_forms(path, source, kind):
+    assert ledger.scan(path, source) == [ledger.Consumer(path, 1, kind)]
+
+
+def test_invalid_docker_copy_names_the_source():
+    with pytest.raises(ValueError, match=r"ops/Dockerfile\.new:2: invalid COPY/ADD"):
+        ledger.scan("ops/Dockerfile.new", "FROM scratch\nCOPY ['.', '/app']")
+
+
+def test_inventory_reaches_checkout_commands_without_package_markers(tmp_path, monkeypatch):
+    sources = {"Dockerfile": "ADD . .", "tool.ps1": "UV SYNC --frozen"}
+    for path, source in sources.items():
+        (tmp_path / path).write_text(source, encoding="utf-8")
+    monkeypatch.setattr(ledger, "tracked_files", lambda root: iter(sources))
+    assert ledger.inventory(tmp_path) == [
+        ledger.Consumer("Dockerfile", 1, "docker-copy"),
+        ledger.Consumer("tool.ps1", 1, "command"),
+    ]
+
+
 def test_removed_consumer_stays_green(known_rule):
     hits = ledger.scan("tools/old.py", "from pseudolife_memory import cli\n")
     assert ledger.classify(hits, [known_rule]) == ([], [])
@@ -66,6 +136,9 @@ def test_consumer_syntax(path, source, kind):
     ("tool.rs", '// repo.join("pyproject.toml") used to locate the checkout'),
     ("tool.rs", "let quote = '\"'; // Python writer: pseudolife_memory/web/api.py:42"),
     ("Dockerfile", 'COPY frontend/dist /app/pseudolife_memory/web/static'),
+    ("Dockerfile", "COPY --from=builder . /app"),
+    ("tool.sh", "uv run --no-project --with pytest pytest"),
+    ("tool.sh", "pip install ../other-project"),
     (".github/workflows/build.yml", "run: python -m pip install torch"),
 ])
 def test_prose_and_unrelated_inputs_are_not_consumers(path, source):

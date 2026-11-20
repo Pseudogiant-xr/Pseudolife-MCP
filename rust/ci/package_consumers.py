@@ -3,7 +3,8 @@
 Run python rust/ci/package_consumers.py to see path, line, kind and class.
 If a new dependency is intentional, add a narrowly scoped glob and kind with
 a reason to package_consumers.toml. Unused rules only appear as report notes.
-The batch harness runs the guard through its existing rust/ci pytest selection.
+The batch harness and the hosted eval parity shard both run the guard through
+their existing rust/ci pytest selections.
 For the manual package-absent check, run package_absent.py --help.
 
 This is a static inventory of recognizable source and command forms. Computed
@@ -39,19 +40,22 @@ PACKAGE_COMMAND = re.compile(
     rf"(?<!\S)-m\s+{MODULE}|['\"]-m['\"](?:\.into\(\))?\s*,\s*['\"]{MODULE}['\"]"
     rf"|\b(?:cat|cp|type|python[23]?|python\.exe)\s+['\"]?[^'\"\s]*{PACKAGE_PATH}"
 )
+ROOT_VARIABLE = r"(?:repo(?:_?root)?|root|gate|github_workspace|workspace)"
 INSTALL = re.compile(
-    r"\b(?:pip[3x]?|uv\s+pip)\s+install\b[^#\n]*?"
-    r"(?:\s|=)['\"]?(?:\.(?:\[[^]]+\])?|/app|\$(?:root|gate)\[[^]]+\]"
-    r"|pseudolife-mcp(?:\[[^]]+\])?(?:[<>=!~][^'\"\s]+)?)"
-    r"(?=['\"\s;&|]|$)"
+    r"\b(?:pip[3x]?(?:\.exe)?|uv\s+(?:pip|tool))\s+install\b[^#\n;&|]*?"
+    rf"""(?:\s|=)['"]?(?:(?:\.[/\\]?|/app|\$(?:(?:env:)?{ROOT_VARIABLE}|\{{{ROOT_VARIABLE}\}}"""
+    r"""|\{\{\s*github\.workspace\s*\}\}))(?:\[[^]\n]+\])?"""
+    r"""|pseudolife-mcp(?:\[[^]\n]+\])?(?:[<>=!~][^'"\s;&|]+)?"""
+    r"""|(?:\.[/\\])?dist[/\\][^'"\s;&|]+\.whl)(?=['"\s;&|\x60]|$)""",
+    re.I,
 )
+UV_PROJECT = re.compile(r"\buv(?:\.exe)?\s+(?:sync|run)\b(?![^#\n;&|]*\s--no-project\b)", re.I)
 BUILD = re.compile(r"\bpython[23]?\s+-m\s+build(?:\s|$)")
 PYPI = re.compile(r"\bpypi\.org/(?:pypi|project)/pseudolife-mcp(?:[/'\"]|$)")
 PYTHON_RECIPE = re.compile(rf"(?m)^\s*(?:from\s+{MODULE}\s+import\b|import\s+{MODULE})")
 QUOTED_PACKAGE = re.compile(rf"""["']{PACKAGE}["']""")
 DOC_SCRIPT = re.compile(r"\bpython[23]?\s+(?:\./)?([\w./-]+\.py)(?=[\s\x60'\";]|$)")
 DOC_SUFFIXES = {".md", ".rst"}
-DOC_NAMES = {"llms.txt", "llms-full.txt"}
 SOURCE_SUFFIXES = {".py", ".rs", ".sh", ".ps1", ".yml", ".yaml", ".toml"}
 CONFIG_NAMES = {"server.json", "launch.json", ".mcp.json"}
 KINDS = {"command", "docker-copy", "documentation", "metadata", "path",
@@ -89,6 +93,14 @@ class Rule:
 
 def module_name(name: str | None) -> bool:
     return bool(name and re.fullmatch(MODULE, name))
+
+
+def is_documentation(path: PurePosixPath | Path) -> bool:
+    return path.suffix in DOC_SUFFIXES or fnmatchcase(path.name, "llms*.txt")
+
+
+def installs_package(text: str) -> bool:
+    return bool(INSTALL.search(text) or UV_PROJECT.search(text))
 
 
 def python_hits(source: str):
@@ -149,7 +161,7 @@ def python_hits(source: str):
 
 
 def literal_hits(line: int, value: str, command_kind: str):
-    if PACKAGE_COMMAND.search(value) or INSTALL.search(value):
+    if PACKAGE_COMMAND.search(value) or installs_package(value):
         yield line, command_kind
     elif re.search(PACKAGE_PATH, value):
         yield line, "path"
@@ -157,11 +169,18 @@ def literal_hits(line: int, value: str, command_kind: str):
         yield line, "metadata"
 
 
-def docker_sources(arguments: str) -> list[str]:
-    arguments = re.sub(r"^(?:--\S+\s+)+", "", arguments)
+def docker_sources(arguments: str) -> tuple[bool, list[str]]:
+    flags = re.match(r"(?:--\S+\s+)*", arguments)[0]
+    arguments = arguments[len(flags):]
     if arguments.startswith("["):
-        return json.loads(arguments)[:-1]
-    return shlex.split(arguments, comments=True)[:-1]
+        tokens = json.loads(arguments)
+        if not isinstance(tokens, list) or not all(isinstance(token, str) for token in tokens):
+            raise ValueError("expected an array of paths")
+    else:
+        tokens = shlex.split(arguments, comments=True)
+    if len(tokens) < 2:
+        raise ValueError("expected a source and a destination")
+    return not any(flag.startswith("--from=") for flag in flags.split()), tokens[:-1]
 
 
 def embedded_python_hits(source: str):
@@ -237,7 +256,7 @@ def rust_hits(source: str, python_scripts: frozenset[str]):
 def scan(path: str, source: str, python_scripts: frozenset[str] = frozenset()) -> list[Consumer]:
     source = source.replace("\r\n", "\n")
     parts = PurePosixPath(path)
-    doc = parts.suffix in DOC_SUFFIXES or parts.name in DOC_NAMES
+    doc = is_documentation(parts)
     workflow = path.startswith(".github/workflows/")
     docker = "Dockerfile" in parts.name
     if path.startswith(PACKAGE + "/") or parts.suffix in {".log", ".jsonl"}:
@@ -248,18 +267,24 @@ def scan(path: str, source: str, python_scripts: frozenset[str] = frozenset()) -
         hits = list(rust_hits(source, python_scripts))
     elif doc:
         hits = [(line, "documentation") for line, text in enumerate(source.splitlines(), 1)
-                if PACKAGE_COMMAND.search(text) or INSTALL.search(text)
+                if PACKAGE_COMMAND.search(text) or installs_package(text)
                 or any(match[1] in python_scripts for match in DOC_SCRIPT.finditer(text))]
     elif workflow or docker or parts.suffix in SOURCE_SUFFIXES or parts.name in CONFIG_NAMES:
         hits = list(embedded_python_hits(source))
         for line, text in logical_lines(source, "#"):
             copy = re.match(r"(?i)(?:COPY|ADD)\s+(.*)", text) if docker else None
             if copy:
-                for value in docker_sources(copy[1]):
-                    if value.strip("/\\") == PACKAGE or re.search(PACKAGE_PATH, value) or re.search(METADATA_PATH, value):
+                try:
+                    from_context, sources = docker_sources(copy[1])
+                except ValueError as error:
+                    raise ValueError(f"{path}:{line}: invalid COPY/ADD: {error}") from error
+                for value in sources:
+                    if (from_context and value.rstrip("/\\") == "."
+                            or value.strip("/\\") == PACKAGE
+                            or re.search(PACKAGE_PATH, value) or re.search(METADATA_PATH, value)):
                         hits.append((line, "docker-copy"))
                 continue
-            if workflow and (INSTALL.search(text) or BUILD.search(text)):
+            if workflow and (installs_package(text) or BUILD.search(text)):
                 hits.append((line, "workflow-install"))
                 continue
             hits.extend(literal_hits(line, text, "command"))
@@ -286,9 +311,10 @@ def inventory(root: Path) -> list[Consumer]:
     hits = []
     for path in tracked_files(root):
         target = root / path
-        doc = target.suffix in DOC_SUFFIXES or target.name in DOC_NAMES
+        doc = is_documentation(target)
+        docker = "Dockerfile" in target.name
         if not (doc or target.suffix in SOURCE_SUFFIXES or target.name in CONFIG_NAMES
-                or "Dockerfile" in target.name):
+                or docker):
             continue
         if target.is_symlink():
             continue
@@ -296,9 +322,10 @@ def inventory(root: Path) -> list[Consumer]:
             source = target.read_bytes()
         except FileNotFoundError:
             continue  # A tracked consumer can be removed before it leaves the index.
-        if b"\x00" in source or not any(marker in source for marker in
-                                       (b"python", b"pseudolife", b"pyproject.toml",
-                                        b"requirements.lock.txt", b"pip", b"/app")):
+        lowered = source.lower()
+        if b"\x00" in source or not (docker or any(marker in lowered for marker in
+                                                   (b"python", b"pseudolife", b"pyproject.toml",
+                                                    b"requirements.lock.txt", b"pip", b"uv"))):
             continue
         decoded = source.decode("utf-8-sig", "replace")
         if doc or target.suffix == ".rs":

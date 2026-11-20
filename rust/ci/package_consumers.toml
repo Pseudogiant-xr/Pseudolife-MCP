@@ -2,10 +2,22 @@
 # "*" also spans directories. Keep exceptions ahead of their enclosing area.
 
 [[rules]]
-globs = ["evals/results/*", "evals/subagent_tier_bench/results/*", "evals/prompts/*"]
+globs = ["evals/results/*", "evals/subagent_tier_bench/results/*"]
 kinds = ["command", "documentation", "metadata", "path", "python-import"]
 class = "historical evidence"
-reason = "Recorded commands and prompt examples preserve the provenance of earlier runs."
+reason = "Recorded commands preserve the provenance of earlier runs."
+
+[[rules]]
+globs = ["evals/rust_port/*"]
+kinds = ["command", "documentation", "metadata", "path", "python-import"]
+class = "retained test tooling"
+reason = "The PR precheck and hosted parity tooling use this harness."
+
+[[rules]]
+globs = ["evals/prompts/*"]
+kinds = ["documentation"]
+class = "active dependency"
+reason = "The Rust daemon embeds these production prompt assets."
 
 [[rules]]
 globs = ["evals/*"]
@@ -14,7 +26,7 @@ class = "awaits the retained-evals decision"
 reason = "Eval drivers and their instructions depend on the maintainer's retention decision."
 
 [[rules]]
-globs = ["CHANGELOG.md", "changelog.d/*.md", "docs/specs/*.md", "docs/superpowers/*.md", "docs/runbooks/raglite-runs-*.md", "rust/PORT*.md", "rust/daemon/FORWARD-*.md", "rust/dossiers/*.md", "rust/parity/*.md", "rust/producer-census.md"]
+globs = ["CHANGELOG.md", "changelog.d/*.md", "docs/specs/*.md", "docs/superpowers/*.md", "docs/runbooks/raglite-runs-*.md", "rust/PORT*.md", "rust/daemon/FORWARD-*.md", "rust/dossiers/*.md", "rust/parity/*.md"]
 kinds = ["documentation"]
 class = "historical evidence"
 reason = "Plans, audit reports, release notes and parity receipts preserve old commands."
@@ -51,9 +63,15 @@ reason = "Native paths can launch the Python CLI or still direct operators to Py
 
 [[rules]]
 globs = ["rust/shim/src/*_tests.rs", "rust/shim/src/*/tests.rs", "rust/shim/tests/*.rs", "rust/shim/tests/*.py", "rust/daemon/src/*_tests.rs", "rust/daemon/test_*.py", "rust/extractor_harness/test_*.py"]
-kinds = ["command", "metadata", "path", "python-import", "rust-include"]
+kinds = ["command", "metadata", "path", "python-import"]
 class = "retained test tooling"
 reason = "Native tests exercise old runtime shapes or pin artifacts against Python source and locks."
+
+[[rules]]
+globs = ["rust/daemon/src/native/pdfium_tests.rs"]
+kinds = ["rust-include"]
+class = "retained test tooling"
+reason = "The PDFium test embeds the Python requirements lock to check the pin."
 
 [[rules]]
 globs = ["rust/daemon/harness/*.py", "rust/cli_harness/*.py", "rust/harness_support/test_*.py"]
@@ -116,13 +134,25 @@ class = "active dependency"
 reason = "Installers, operator tools and test launchers still use Python entry points, source or metadata."
 
 [[rules]]
+globs = ["ops/selfhosted/setup-linux-runner.sh"]
+kinds = ["command"]
+class = "active dependency"
+reason = "Runner provisioning installs the published Python CLI used by lease checks."
+
+[[rules]]
 globs = [".claude/launch.json", "examples/.mcp.json", ".github/ISSUE_TEMPLATE/*.yml"]
 kinds = ["command", "metadata"]
 class = "active dependency"
 reason = "Example and contributor configuration still names the Python package or entry point."
 
 [[rules]]
-globs = [".claude/skills/*.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md", "docs/dev/*.md", "docs/guide/*.md", "docs/i18n/*.md", "frontend/README.md", "llms*.txt", "plugin/README.md", "rust/DEV.*", "rust/daemon/README.md", "rust/cli_harness/*.md", "rust/extractor_harness/README.md"]
+globs = [".claude/skills/*.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md", "docs/dev/*.md", "docs/guide/*.md", "docs/i18n/*.md", "frontend/README.md", "llms*.txt", "plugin/README.md", "rust/DEV.md", "rust/daemon/README.md", "rust/cli_harness/*.md", "rust/extractor_harness/README.md", "rust/producer-census.md"]
 kinds = ["documentation"]
 class = "active dependency"
 reason = "Contributor and operator instructions still show package-backed commands or install steps."
+
+[[rules]]
+globs = ["*"]
+kinds = ["documentation"]
+class = "active dependency"
+reason = "Documented commands remain visible for retirement even when docs-only changes skip the guard."
