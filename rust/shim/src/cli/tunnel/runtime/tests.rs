@@ -100,7 +100,7 @@ fn vendor_fixture() {
         let launched = launch(launch_fixture(&root), &exe, STARTUP, |config| {
             fixture_command(&exe, config, "ready")
         });
-        assert!(launched.is_ok());
+        assert!(launched.is_ok(), "{launched:?}");
         return;
     }
     if mode == "legacy-lock" {
@@ -591,7 +591,7 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
         .env(CONFIG_ENV, &home.0)
         .env("PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE", "supervisor")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .unwrap();
     let path = record::path(&home.0, "dot");
