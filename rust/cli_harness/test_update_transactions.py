@@ -332,7 +332,10 @@ elif a[:1]==["pull"]:
                or not rust and s.get("python_pull_fails")
                or not rust and not archived and s.get("rust_only_release")))
  if code==0 and (rust or archived):s["images"].setdefault(a[-1],"sha256:replacement")
-elif a[:2]==["manifest","inspect"]: code=0 if s.get("rust_published") else 1
+elif a[:2]==["manifest","inspect"]:
+ if "-rust:" in a[-1]:code=0 if s.get("rust_published") else 1
+ elif s.get("python_manifest_denied"):code=1;out="unauthorized: authentication required"
+ elif s.get("rust_only_release"):code=1;out="manifest unknown"
 elif a[:1]==["run"] and any(m in a for m in ("--probe-access","--list-root-owned","--repair-ownership")):
  # The ownership helpers (cli::ownership), answering in hex as the script
  # does: an entry the row made unusable stays so until a repair of its root
@@ -620,7 +623,7 @@ def host(tmp_path, failure="", mode="release"):
             self.wfile.write(body)
 
         def do_POST(self):
-            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            request = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             current = json.loads(state_path.read_text())
             if self.path == "/api/coordination/register":
                 payload = {"agent_id": "fixture-address", "credential": "fixture-key"}
@@ -629,6 +632,10 @@ def host(tmp_path, failure="", mode="release"):
                 # callback inside deploy_release can observe this transition.
                 active = not current.get("no_board_peer") and any(a[:1] == ["fixture-backup"] for a in current["calls"])
                 payload = {"agents": [{"agent_id": "fixture-peer", "task": "working"}] if active else []}
+            elif self.path == "/api/daemon-notice":
+                with state_path.with_name("notices.jsonl").open("a", encoding="utf-8") as notices:
+                    notices.write(json.dumps(json.loads(request)["text"]) + "\n")
+                payload = {"recipients": 1}
             else:
                 payload = {"recipients": 1}
             body = json.dumps(payload).encode()
@@ -1942,7 +1949,7 @@ def test_release_refuses_an_archived_waypoint_with_no_original_recovery_record(t
         assert stages(json.loads(state_path.read_text())) == []
 
 
-def test_unattended_release_can_import_a_legacy_bank_from_python(tmp_path):
+def test_unattended_rust_only_release_holds_and_posts_once_per_release(tmp_path):
     binary = _native_binary()
     if not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
@@ -1952,13 +1959,92 @@ def test_unattended_release_can_import_a_legacy_bank_from_python(tmp_path):
         state.update(target_version="0.25.0", target_schema=59, rust_only_release=True,
                      no_board_peer=True)
         state_path.write_text(json.dumps(state))
+        for tag in ("0.25.0", "0.25.0", "0.26.0"):
+            result = run_arm(repo, env, binary, ["--unattended", "--tag", tag, "--json",
+                                                 "--health-retries", "1"])
+            assert result.returncode == 4, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert not state["deployed"]
+        assert not stages(state)
+        assert not any("provision" in call for call in state["calls"])
+        notices = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+        assert len(notices) == 2
+        log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
+        for tag, notice in zip(("0.25.0", "0.26.0"), notices, strict=True):
+            assert f"release {tag}" in notice and "no Python daemon image" in notice
+            assert f"pseudolife-mcp update --engine rust --tag {tag}" in notice
+            assert log.count(f"pseudolife-mcp update --engine rust --tag {tag}") == 1
+        state.update(wait_for_bridge=True, target_version="0.25.0")
+        state_path.write_text(json.dumps(state))
+        interrupted = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0",
+                                                    "--json", "--health-retries", "1",
+                                                    "--rollback-tag", "attended-fixture"])
+        assert interrupted.returncode == 1 and "health gate" in interrupted.stdout, interrupted.stdout
+        for _ in range(2):
+            held = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json"])
+            assert held.returncode == 4, held.stdout
+        assert len(state_path.with_name("notices.jsonl").read_text().splitlines()) == 2
+        log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
+        assert log.count("Original pre-import recovery instructions (saved at ") == 1
+        assert "attended-fixture-pre-import" in log
+
+
+@pytest.mark.parametrize("manifest_denied", [False, True])
+def test_unattended_published_python_release_keeps_python_on_a_legacy_bank(tmp_path, manifest_denied):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, no_board_peer=True,
+                     python_manifest_denied=manifest_denied)
+        state_path.write_text(json.dumps(state))
         result = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json",
                                              "--health-retries", "1"])
         assert result.returncode == 0, result.stdout + result.stderr
-        assert stages(json.loads(state_path.read_text())) == [
-            "pull", "pull", "backup", "tag", "up", "backup", "tag", "up",
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        assert [call[1] for call in state["calls"] if call[:1] == ["pull"]] == [
+            "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.25.0",
         ]
+        assert not any("provision" in call for call in state["calls"])
+
+
+def test_unattended_rust_host_holds_when_the_bank_needs_the_python_bridge(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        labels = state["running"]["Config"]["Labels"]
+        labels.update({"org.pseudolife.engine": "rust", "org.pseudolife.release": "0.21.0",
+                       "org.pseudolife.activation": "a" * 32})
+        accepted = _accepted(env)
+        accepted.parent.mkdir(parents=True)
+        accepted.write_text(json.dumps({"services": {SERVICE: {"labels": labels}}}))
+        state.update(target_version="0.25.0", target_schema=59, no_board_peer=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json"])
+        assert result.returncode == 4, result.stdout + result.stderr
+        assert not stages(json.loads(state_path.read_text()))
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        notice, = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+        assert "legacy import" in notice
+        assert "pseudolife-mcp update --engine rust --tag 0.25.0" in notice
+
+
+def test_explicit_engine_cannot_override_unattended_engine_policy(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        result = run_arm(repo, env, binary, ["--unattended", "--engine", "rust", "--tag", "0.25.0", "--json"])
+        assert result.returncode == 2 and "--engine cannot be combined with --unattended" in (
+            result.stdout + result.stderr
+        )
+        assert not stages(json.loads(state_path.read_text()))
 
 
 @pytest.mark.parametrize(("interruption", "unattended"), [
@@ -1999,9 +2085,17 @@ def test_interrupted_bridge_keeps_original_recovery_on_rerun(tmp_path, interrupt
         retry = ["--tag", "0.25.0", "--json", "--health-retries", "1",
                  "--rollback-tag", "retry-fixture"]
         if unattended:
-            retry.append("--unattended")
-        else:
-            retry.append("--daemon-only")
+            for _ in range(2):
+                held = run_arm(repo, env, binary, [*retry, "--unattended"])
+                assert held.returncode == 4, held.stdout + held.stderr
+            notices = [json.loads(line) for line in state_path.with_name("notices.jsonl").read_text().splitlines()]
+            assert len(notices) == 1 and "unfinished" in notices[0]
+            assert "pseudolife-mcp update --engine rust --tag 0.25.0" in notices[0]
+            log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
+            assert "original-fixture-pre-import" in log and original[0].name in log
+            state = json.loads(state_path.read_text())
+            assert state["archived_python"] and not stages(state)
+        retry.append("--daemon-only")
         pending = run_arm(repo, env, binary, retry)
         assert pending.returncode != 0
         assert "original-fixture-pre-import" in pending.stdout, pending.stdout

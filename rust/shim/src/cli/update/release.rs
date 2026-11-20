@@ -336,6 +336,17 @@ impl ImportRecovery {
         }
     }
 
+    fn attended_resume_reason(&self) -> String {
+        format!(
+            "An unfinished Python {IMPORT_VERSION} bridge from an attended update is still in place.\nOriginal pre-import recovery instructions (saved at {}):\nOriginal image tag {}.\n{}",
+            self.path.display(),
+            self.original.rollback["tag"]
+                .as_str()
+                .unwrap_or("recorded in the recovery file"),
+            self.original.commands.join("\n")
+        )
+    }
+
     fn pending_disposition(
         &self,
         activation: &str,
@@ -1085,6 +1096,18 @@ impl Update {
         }
     }
 
+    pub(super) fn attended_resume_reason(&self) -> Result<Option<String>> {
+        if let Err(error) = fs::symlink_metadata(ImportRecovery::pending_path())
+            && error.kind() == std::io::ErrorKind::NotFound
+        {
+            return Ok(None);
+        }
+        Ok(self
+            .inspect_active_import(false)?
+            .filter(|record| record.on_bridge)
+            .map(|record| record.attended_resume_reason()))
+    }
+
     pub fn deploy_release(
         &mut self,
         current: Option<String>,
@@ -1144,6 +1167,11 @@ impl Update {
         } else {
             "python"
         };
+        if self.o.unattended && selected == "python" && self.python_manifest_missing(&target) {
+            return Err(UpdateError::attended(
+                "The release has no Python daemon image.",
+            ));
+        }
         let (choice, defaulted, probe_legacy) = match self.o.engine.clone() {
             Some(engine) => (engine, false, false),
             None => self.default_choice(selected, &labels, &target),
@@ -1325,6 +1353,11 @@ impl Update {
                         "the bank is at schema v{schema}, newer than the archived Python daemon's v{IMPORT_SCHEMA}; restore a verified pre-migration backup at v{IMPORT_SCHEMA} or earlier before retrying; nothing was deployed"
                     )));
                 }
+                if self.o.unattended {
+                    return Err(UpdateError::attended(
+                        "The bank needs a legacy import before Rust can open it.",
+                    ));
+                }
                 if self.o.no_backup {
                     return Err(UpdateError::usage(
                         "legacy import requires a bank and state backup; retry without --no-backup; nothing was deployed",
@@ -1380,6 +1413,19 @@ impl Update {
             before_recreate,
         )?;
         Ok(())
+    }
+
+    fn python_manifest_missing(&self, target: &str) -> bool {
+        let image = format!("{PYTHON_IMAGE}:{target}");
+        let (code, output) = self.docker_call(&["manifest", "inspect", &image]);
+        code != 0
+            && output.lines().any(|line| {
+                let lower = line.trim().to_ascii_lowercase();
+                let reason = lower
+                    .strip_prefix("error response from daemon: ")
+                    .unwrap_or(&lower);
+                reason.starts_with("no such manifest:") || reason.starts_with("manifest unknown")
+            })
     }
 
     fn release_disk(&mut self, prepared: &PreparedRelease) -> Result<Option<String>> {
@@ -1549,6 +1595,9 @@ impl Update {
         previous: Option<String>,
         before_recreate: Option<&mut dyn FnMut() -> Result<()>>,
     ) -> Result<()> {
+        if self.o.unattended && recovery.on_bridge {
+            return Err(UpdateError::attended(recovery.attended_resume_reason()));
+        }
         self.report.rollback = recovery.original.rollback.clone();
         if recovery.original_running {
             self.report.rollback["restore_required"] = json!(false);
@@ -2563,11 +2612,7 @@ impl Update {
             || self.o.allow_auth_change
             || DEFAULT_ENGINE == selected
         {
-            return (
-                selected.to_owned(),
-                false,
-                self.o.unattended && selected == "python",
-            );
+            return (selected.to_owned(), false, false);
         }
         let chosen = labels[engine::ACTIVATION_LABEL]
             .as_str()

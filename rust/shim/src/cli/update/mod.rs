@@ -235,18 +235,28 @@ fn client_release_target(health: Option<&Value>, tag: Option<&str>) -> Result<St
 pub(crate) struct UpdateError {
     pub message: String,
     pub exit_code: u8,
+    pub(super) attended_required: bool,
 }
 impl UpdateError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             exit_code: 1,
+            attended_required: false,
         }
     }
     pub fn usage(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             exit_code: 2,
+            attended_required: false,
+        }
+    }
+    pub(super) fn attended(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            exit_code: 4,
+            attended_required: true,
         }
     }
 }

@@ -1220,6 +1220,7 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
     let kept = |e: UpdateError, built: bool| UpdateError {
         message: kept_note(&e.message, &rollback, built.then_some(image.as_str())),
         exit_code: e.exit_code,
+        attended_required: e.attended_required,
     };
     let activation = uuid::Uuid::new_v4().simple().to_string();
     let service = json!({"image":image,"build":{"dockerfile":format!("ops/Dockerfile.daemon{}",if choice=="rust"{"-rust"}else{""})},"labels":{ENGINE_LABEL:choice,CHECKOUT_LABEL:repo,ACTIVATION_LABEL:activation}});

@@ -221,6 +221,11 @@ impl Options {
             ));
         }
         if self.unattended {
+            if self.engine.is_some() {
+                return Err(UpdateError::usage(
+                    "--engine cannot be combined with --unattended. Run pseudolife-mcp update --engine <engine> yourself to choose an engine",
+                ));
+            }
             for (flag, set) in [
                 ("--no-backup", self.no_backup),
                 ("--clients-only", self.clients_only),
