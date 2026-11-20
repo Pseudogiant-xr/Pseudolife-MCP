@@ -125,21 +125,23 @@ these cases are recorded from the candidate, not the oracle:
   `NTE_BAD_KEY_STATE` (measured on the Windows dev VM, 16 November 2026). Cases seeded by `key()` call `set_key`,
   which a key-based SSH logon cannot seal; record them in a logon signed in
   at the machine.
-- `update` never stops on a record or a key and starts, stops or signals
-  nothing. A ready profile without a running record is `not-running`.
+- `update` never signals a process. It can ask a compatible supervisor to
+  replace its own vendor child. A ready profile without a running record is
+  `not-running`.
   A ready native launch is `current` when its live ownership and identity
   match the client running the check and saved settings and there is no
   interrupted key renewal or retained previous key. A Python refresh request
   does not affect the native check. A compatible supervisor can reconnect
-  on the verified installed shim and records `refreshed`, `rolled-back` or
-  `failed` after a `pending` refresh. A pre-protocol native launch still
-  gives explicit restart guidance. Other running or uncertain launches are
+  on the verified installed shim and records `refreshed` only after the
+  running vendor and its bound bridge are ready. A failed candidate can
+  report `rolled-back` or `failed`. The supervisor refuses to retry a build
+  it already rolled back. A pre-protocol native launch or a changed vendor
+  version gives explicit restart guidance. Other running or uncertain launches are
   `stale` and stay in place. A Python-supervised launch names the Python
   client as the client to use to stop it. A record with no profile beside it is
   listed by file name, `leftover` when its process is gone, `stale` when it
   runs or may run. A profile `load` does not read is `unread` (named with
-  the reason, the field at fault where there is one), or `stale` when its tunnel runs or may run. The top-level state is `stale` when any entry is, else `current`,
-  exit 0; the top-level `detail` carries one sentence per record. A store
+  the reason, the field at fault where there is one), or `stale` when its tunnel runs or may run. The top-level state is `failed` for a failed refresh (exit 2), otherwise `stale`, `refreshed` or `current` (exit 0). The top-level `detail` carries one sentence per record. A store
   `list` cannot read is refused (exit 2) naming the directory or the entry
   it stopped on, instead of deferring; so are a directory that is not
   owner-only and an invalid profile file name.

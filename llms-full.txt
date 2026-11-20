@@ -9022,7 +9022,7 @@ directory (`~/.pseudolife-mcp/tunnel`) exists or `http_proxy` /
 Linux desktop defaults (`--no-open` works;
 [Signing in to the Console](#signing-in-to-the-console)). `move` checks
 and plans a move with `--dry-run` but refuses to perform one
-([Moving a bank](remote-bank.md#moving-a-bank)). The native tunnel step reports a verified matching launch as `current`. A compatible supervisor can reconnect on the verified installed shim and reports `refreshed` after local readiness. It first checks the saved daemon connection while the old process serves the tunnel, then confirms that its owned process exits before starting the replacement. A failed check leaves the running child alone. A candidate that fails readiness triggers a rollback to the previous shim when the supervisor can prove the candidate stopped. Older foreground supervisors need the stop and run commands in the report. Restart an older service-managed launch through its manager. See [Tunnels](tunnels.md) for how to handle Python-supervised launches and cloud verification. The tunnel step exits 2 if it cannot safely read the store or a profile, or if a refresh cannot restart or verify shutdown of the child. The outer update reports that failure with exit 5.
+([Moving a bank](remote-bank.md#moving-a-bank)). The native tunnel step reports a verified matching launch as `current`. A compatible supervisor can reconnect on the verified installed shim. It reports `refreshed` after the live vendor answers its local readiness probe and the bridge acknowledges the signed launch. It checks the candidate's readiness protocol and saved daemon connection before interrupting the old process. A failed check leaves the running child alone. A candidate that fails readiness triggers a rollback to the previous shim when the supervisor confirms the candidate exited. Reports of a refusal, successful rollback or a reply deadline with the launch still owned are `stale` and exit 0. Older foreground supervisors and vendor version changes need the stop and run commands in the report. Restart an older service-managed launch through its manager. See [Tunnels](tunnels.md) for Python-supervised launches and cloud verification. The tunnel step exits 2 if it cannot safely read the store or a profile, or if a refresh fails to restore the launch or verify shutdown of the child. The outer update reports that failure with exit 5.
 
 **Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
 checkout. Run inside one, a 0.16.x updater can record the wrong version in the
@@ -13883,16 +13883,27 @@ process record left by a stopped tunnel as a file you can delete (a
 `leftover` when no saved profile is beside it). It reports `current` for
 a ready native launch whose identity matches the client running the check and
 the saved settings. After an installed client update, a compatible native
-supervisor verifies and pins the installed shim and checks the saved daemon
-connection while its current vendor process serves the tunnel. It then stops
-its owned vendor process, confirms exit, and starts the new launch. This
-reconnects the tunnel and interrupts its current session. If the candidate
-fails before local readiness, the supervisor tries its previous shim. Status
-shows the outcome and whether you need a new verification challenge. A
-rollback to the same identity preserves saved verification.
+supervisor verifies and pins the installed shim and checks its readiness
+protocol and saved daemon connection while the current tunnel serves. It
+then stops its owned vendor process, confirms exit, and starts the new
+launch. As with a plain `tunnel run`, readiness requires the vendor to
+remain alive, answer its local readiness probe, and have a bridge that
+accepted the signed launch and started the stdio shim. This reconnects the
+tunnel and interrupts its current session. A refused preflight leaves the
+previous tunnel serving.
+
+If the candidate fails readiness, the supervisor tries the previous shim
+after confirming the replacement exited. A successful rollback can mean a
+second reconnect and preserves verification for the previous identity.
+Further updates skip that failed build for the same launch. If rollback
+fails, status says the tunnel stopped and gives the run command. If the
+supervisor cannot confirm a child's exit, it blocks recovery until exit
+can be established. Status also shows when a refreshed launch needs a new
+verification challenge.
 
 An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
 followed by `pseudolife-mcp tunnel run` for the same profile and directory.
+Use the same commands when the updated client pins a different vendor version.
 If a service or scheduled task started that supervisor, restart the existing
 registration through its manager. A Python-supervised tunnel stays running
 until stopped with the Python client that started it. Then use native

@@ -53,16 +53,27 @@ process record left by a stopped tunnel as a file you can delete (a
 `leftover` when no saved profile is beside it). It reports `current` for
 a ready native launch whose identity matches the client running the check and
 the saved settings. After an installed client update, a compatible native
-supervisor verifies and pins the installed shim and checks the saved daemon
-connection while its current vendor process serves the tunnel. It then stops
-its owned vendor process, confirms exit, and starts the new launch. This
-reconnects the tunnel and interrupts its current session. If the candidate
-fails before local readiness, the supervisor tries its previous shim. Status
-shows the outcome and whether you need a new verification challenge. A
-rollback to the same identity preserves saved verification.
+supervisor verifies and pins the installed shim and checks its readiness
+protocol and saved daemon connection while the current tunnel serves. It
+then stops its owned vendor process, confirms exit, and starts the new
+launch. As with a plain `tunnel run`, readiness requires the vendor to
+remain alive, answer its local readiness probe, and have a bridge that
+accepted the signed launch and started the stdio shim. This reconnects the
+tunnel and interrupts its current session. A refused preflight leaves the
+previous tunnel serving.
+
+If the candidate fails readiness, the supervisor tries the previous shim
+after confirming the replacement exited. A successful rollback can mean a
+second reconnect and preserves verification for the previous identity.
+Further updates skip that failed build for the same launch. If rollback
+fails, status says the tunnel stopped and gives the run command. If the
+supervisor cannot confirm a child's exit, it blocks recovery until exit
+can be established. Status also shows when a refreshed launch needs a new
+verification challenge.
 
 An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
 followed by `pseudolife-mcp tunnel run` for the same profile and directory.
+Use the same commands when the updated client pins a different vendor version.
 If a service or scheduled task started that supervisor, restart the existing
 registration through its manager. A Python-supervised tunnel stays running
 until stopped with the Python client that started it. Then use native

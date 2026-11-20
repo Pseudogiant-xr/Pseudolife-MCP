@@ -1,2 +1,3 @@
 ### Added (2026-11-21 — Supervised native tunnel refresh)
 - Native updates can reconnect running tunnels on the installed shim when the supervisor supports refresh. The supervisor checks the saved daemon first, then confirms its old child exited. It tries the previous shim if the replacement fails readiness. Status reports the outcome and whether the active launch needs a new verification challenge.
+- Native tunnel launches require a live bridge acknowledgment as well as vendor readiness. Refresh keeps the previous launch active when the installed shim cannot confirm a compatible protocol, and skips a build this supervisor already rolled back.
