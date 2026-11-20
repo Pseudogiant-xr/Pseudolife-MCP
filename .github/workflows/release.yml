@@ -1,13 +1,16 @@
 # PyPI release via Trusted Publishing (OIDC — no stored token).
 #
 # Trigger: publishing a GitHub release (a deliberate act, not a raw tag
-# push). Flow: guard that the release tag matches pyproject.toml AND
-# server.json (both version fields) → build sdist+wheel → twine check →
-# build the five native archives, assemble and verify SHA256SUMS, attach them
-# to the release → publish, gated on the `pypi` environment (configure it in
-# Settings → Environments with a required reviewer, so every upload pauses
-# for one-click human approval). PyPI waits for the native assets because the
-# updaters learn a release exists from PyPI and then download its archives.
+# push). The `guards` job checks the release tag, pyproject.toml, both
+# server.json version fields and both native crate versions. Afterward, the
+# `build` job builds and twine-checks the sdist and wheel in parallel with
+# building, verifying and attaching the native assets. A failed wheel build
+# can leave native assets on the public release before approval.
+# `publish` requires both the wheel build and native attachment to succeed.
+# The `pypi` environment pauses that job for human approval (Settings →
+# Environments → Required reviewers). PyPI announces the release to older
+# clients. Native discovery waits for release-ready after protected publication
+# and the image jobs succeed.
 #
 # PyPI side (one-time): project pseudolife-mcp → Settings → Publishing →
 # add Trusted Publisher: owner Pseudogiant-xr, repo Pseudolife-MCP,
@@ -15,7 +18,7 @@
 #
 # PyPI never accepts a same-version re-upload — a failed run after upload
 # or a version mistake means cutting a .postN, so all version guards live
-# in the `build` job and fail fast BEFORE anything is built or uploaded
+# in the `guards` job and fail fast BEFORE anything is built or uploaded
 # (moved server.json's guard here from the `registry` job, issue #185 — it
 # used to run after the irreversible publish, so a mismatch burned a
 # release number instead of failing before anything shipped).
@@ -38,12 +41,10 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  guards:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Guards + build only read the repo; the write scopes live on the jobs
-    # that need them (publish: id-token, images: packages, registry: id-token).
     permissions:
       contents: read
     steps:
@@ -82,6 +83,20 @@ jobs:
       - name: Guard — native crate versions must match the release
         run: python rust/ci/release_assets.py version
 
+  build:
+    if: github.event_name == 'release'
+    needs: guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Build sdist + wheel
         run: |
           python -m pip install -U pip build twine
@@ -96,15 +111,13 @@ jobs:
 
   publish:
     if: github.event_name == 'release'
-    # PyPI is what tells `pseudolife-mcp update` (and the 0.23.x bridge) that a
-    # release exists, and it cannot be unpublished: it waits until the native
-    # archives and SHA256SUMS are on the GitHub release, so a failed native
-    # build stops the release here, before anything irreversible.
+    # Older clients learn of the release through PyPI. Keep the archives
+    # and SHA256SUMS available before the irreversible wheel upload.
     needs: [build, rust-assets-publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The `pypi` environment carries the Trusted Publisher binding and the
-    # required-reviewer pause; id-token is the OIDC credential.
+    # This is the shared approval gate for PyPI, GHCR, readiness and the
+    # registry. The environment also binds PyPI's Trusted Publisher.
     environment:
       name: pypi
       url: https://pypi.org/project/pseudolife-mcp/
@@ -137,6 +150,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      daemon-digest: ${{ steps.daemon.outputs.digest }}
+      pg-digest: ${{ steps.pg.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -166,6 +182,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push the daemon image
+        id: daemon
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -183,6 +200,7 @@ jobs:
             ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon:latest
 
       - name: Build and push the pg image
+        id: pg
         uses: docker/build-push-action@v6
         with:
           context: ops
@@ -210,6 +228,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.daemon.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -228,6 +248,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push the Rust daemon image
+        id: daemon
         # Cold, fresh BuildKit builder (no Cargo/layer cache), Linux dev box,
         # 2026-11-02 at 5c680dfa: 266s including load. Bound the hosted build
         # at 35m, leaving 10m of the job timeout for setup/login/inspection.
@@ -251,11 +272,10 @@ jobs:
 
   rust-assets:
     name: Native release / ${{ matrix.target }}
-    needs: build
-    # The status function admits the build-only dispatch after build is skipped;
-    # a release builds them once the version guards in build passed. The
-    # installers download these archives, so every release carries them.
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.build.result == 'success')) }}
+    needs: guards
+    # The status function admits the build-only dispatch after guards is skipped.
+    # A release builds the archives once the version guards pass.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.guards.result == 'success')) }}
     permissions:
       contents: read
     strategy:
@@ -327,11 +347,10 @@ jobs:
           if-no-files-found: error
 
   rust-assets-publish:
-    # Before PyPI: the GitHub release is already public (publishing it starts
-    # this workflow), so attaching its assets publishes nothing new; PyPI and
-    # everything after it wait for this job.
-    needs: [build, rust-assets-bundle]
-    if: ${{ !cancelled() && github.event_name == 'release' && needs.build.result == 'success' && needs.rust-assets-bundle.result == 'success' }}
+    # Attach archives ahead of PyPI for older updaters. The release-ready
+    # job announces this version to native discovery after the image jobs.
+    needs: [guards, rust-assets-bundle]
+    if: ${{ !cancelled() && github.event_name == 'release' && needs.guards.result == 'success' && needs.rust-assets-bundle.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -354,6 +373,30 @@ jobs:
         # Verify existing release bytes, then upload only missing assets.
         run: python rust/ci/release_assets.py publish
 
+  release-ready:
+    needs: [publish, images, rust-image]
+    # Existing Rust Docker hosts need the Rust image before discovery offers this tag.
+    if: >-
+      ${{ !cancelled() && github.event_name == 'release'
+      && needs.publish.result == 'success' && needs.images.result == 'success'
+      && needs.rust-image.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Attach the release readiness marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAEMON_IMAGE_DIGEST: ${{ needs.images.outputs.daemon-digest }}
+          PG_IMAGE_DIGEST: ${{ needs.images.outputs.pg-digest }}
+          RUST_IMAGE_DIGEST: ${{ needs.rust-image.outputs.digest }}
+        run: python rust/ci/release_assets.py publish-ready
+
   registry:
     if: github.event_name == 'release'
     needs: publish
@@ -372,7 +415,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The server.json version guard now runs in the `build` job, before the
+      # The server.json version guard runs in the `guards` job, before the
       # PyPI publish (issue #185) — it used to run here, downstream of the
       # irreversible upload, so a mismatch burned a release number instead of
       # failing fast.

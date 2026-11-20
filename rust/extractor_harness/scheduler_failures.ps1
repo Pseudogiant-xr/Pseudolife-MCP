@@ -126,7 +126,7 @@ if ($Case -in @('LateLauncherChild','LateOldRuntimeRecorded','LateLegacyUnseen',
     $kind = 'codex'
     $arguments = '"extractor-shim" "codex" "--env-file" "' + $settings + '"'
     $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
-    foreach ($functionName in @('Test-SamePath','Test-NativeInvocation','Get-NativeTaskCode','Get-RegisteredInvocation','Assert-ShimRegistration','Get-OwnedTaskProcesses','Stop-CapturedProcess','Get-TaskRegistration','Get-TaskOwnership','Wait-TaskStopped','Remove-OwnedTask')) {
+    foreach ($functionName in @('Test-SamePath','Test-NativeInvocation','Get-NativeTaskCode','Get-RegisteredInvocation','Assert-ShimRegistration','Get-OwnedTaskProcesses','Stop-CapturedProcess','Read-RootScheduledTask','Get-TaskRegistration','Get-TaskOwnership','Wait-TaskStopped','Remove-OwnedTask')) {
         $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         if ($definition) { Invoke-Expression $definition.Extent.Text }
     }
@@ -360,7 +360,7 @@ if ($Case -like 'Process*') {
 }
 if ($Case -in @('InitialForeignTask','DeleteReplacedTask','TaskQueryFailure','StopQueryFailure','RemovalQueryFailure','TaskAbsent')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
-    foreach ($functionName in @('Get-RegisteredInvocation','Get-TaskRegistration','Get-TaskOwnership','Wait-TaskStopped','Remove-OwnedTask')) {
+    foreach ($functionName in @('Get-RegisteredInvocation','Read-RootScheduledTask','Get-TaskRegistration','Get-TaskOwnership','Wait-TaskStopped','Remove-OwnedTask')) {
         $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
         if ($definition) { Invoke-Expression $definition.Extent.Text }
     }

@@ -42,6 +42,7 @@ struct Host {
     du: String,
     tables: String,
     counts: String,
+    token_hashes: Option<String>,
     /// `docker version` fails with this stderr.
     engine: Option<&'static str>,
     /// The bank holds one `retrieval_events` table, with its daemon's
@@ -51,13 +52,14 @@ struct Host {
 
 fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
     json!({
+        "Id": "1".repeat(64),
         "Image": "sha256:0123456789abcdef",
         "State": {"Running": running},
         "Config": {
             "Env": [format!("PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife:{SECRET}@pseudolife-pg:5432/pseudolife_memory"), "PSEUDOLIFE_MCP_TOKEN=tok-secret", "PSEUDOLIFE_MCP_DATA_DIR=/data", "PATH=/bin"],
             "User": "pseudolife",
             "Image": "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.25.0",
-            "Labels": {"com.docker.compose.project": project, "com.docker.compose.project.working_dir": dir, "com.docker.compose.project.config_files": format!("{dir}/docker-compose.yml")}
+            "Labels": {"com.docker.compose.project": project, "com.docker.compose.service": "pseudolife-daemon", "com.docker.compose.project.working_dir": dir, "com.docker.compose.project.config_files": format!("{dir}/docker-compose.yml")}
         },
         "HostConfig": {"RestartPolicy": {"Name": "unless-stopped"}, "PortBindings": {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8765"}]}},
         "NetworkSettings": {"Networks": {"stack": {"IPAddress": "10.0.0.3"}}},
@@ -67,9 +69,10 @@ fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
 
 fn pg_doc(project: &str) -> Value {
     json!({
+        "Id": "2".repeat(64),
         "Name": "/pseudolife-mcp-postgres",
         "State": {"Running": true},
-        "Config": {"Labels": {"com.docker.compose.project": project}},
+        "Config": {"Labels": {"com.docker.compose.project": project, "com.docker.compose.service": "pseudolife-pg"}},
         "NetworkSettings": {"Networks": {"stack": {"Aliases": ["pseudolife-pg"], "IPAddress": "10.0.0.2"}}},
         "Mounts": [{"Type": "volume", "Destination": "/var/lib/postgresql", "Source": "/var/lib/docker/volumes/pseudolife-mcp-bank/_data"}]
     })
@@ -95,6 +98,7 @@ impl Host {
             du: "2048\t/data".into(),
             tables: r#"["entries","facts","meta"]"#.into(),
             counts: "0|0|0".into(),
+            token_hashes: None,
             engine: None,
             warmup_row: false,
         }
@@ -114,14 +118,20 @@ impl Docker for Host {
         self.calls.push(args.to_vec());
         let a: Vec<&str> = args.iter().map(String::as_str).collect();
         match a.as_slice() {
-            ["inspect", name] => match self.docs.get(*name) {
-                Some(doc) => ok(&json!([doc]).to_string()),
-                None => Ran {
-                    code: 1,
-                    stderr: format!("Error: No such object: {name}").into_bytes(),
-                    ..Ran::default()
-                },
-            },
+            ["inspect", name] | ["inspect", "--type=container", name] => {
+                match self.docs.get(*name).or_else(|| {
+                    self.docs
+                        .values()
+                        .find(|doc| doc["Id"].as_str() == Some(*name))
+                }) {
+                    Some(doc) => ok(&json!([doc]).to_string()),
+                    None => Ran {
+                        code: 1,
+                        stderr: format!("Error: No such object: {name}").into_bytes(),
+                        ..Ran::default()
+                    },
+                }
+            }
             ["exec", _, "du", "-sk", "/data"] => ok(&self.du),
             ["version", ..] if self.engine.is_some() => Ran {
                 code: 1,
@@ -138,7 +148,15 @@ impl Docker for Host {
                     .unwrap_or_default();
                 // The count query names the meta keys it skips, so it is
                 // matched first.
-                if sql.starts_with("SELECT (SELECT count(*)") {
+                if sql.starts_with("SELECT token_hash FROM principals") {
+                    self.token_hashes.as_ref().map_or_else(
+                        || Ran {
+                            code: 1,
+                            ..Ran::default()
+                        },
+                        |hashes| ok(hashes),
+                    )
+                } else if sql.starts_with("SELECT (SELECT count(*)") {
                     // A daemon's own warm-up row counts only when the query
                     // does not skip it.
                     let skips = sql.contains("\"retrieval_events\" WHERE NOT (query_text = 'warmup probe' AND session_id IS NULL AND episode_id IS NULL AND served = '[]'::jsonb)");
@@ -235,6 +253,9 @@ struct Wire {
     runs: Vec<(String, String, Vec<u8>)>,
     /// What the helper answers a `state` request (a resume's preflight).
     state: Option<protocol::State>,
+    supports_carry: Option<bool>,
+    supports_carry_execution: Option<bool>,
+    supports_carry_files: Option<bool>,
 }
 
 impl Remote for Wire {
@@ -261,12 +282,28 @@ impl Remote for Wire {
             Link::Helper => {
                 let request: protocol::Request = serde_json::from_slice(stdin).unwrap();
                 let answer = match request.op {
-                    protocol::Op::Check { ask } => protocol::Answer {
-                        protocol: protocol::PROTOCOL,
-                        ok: true,
-                        check: Some(target::answer(&mut self.far, &ask)),
-                        ..protocol::Answer::default()
-                    },
+                    protocol::Op::Check { ask } => {
+                        let mut check = target::answer(&mut self.far, &ask);
+                        check.supports_carry = self.supports_carry;
+                        check.supports_carry_execution = self.supports_carry_execution;
+                        check.supports_carry_files = self.supports_carry_files;
+                        protocol::Answer {
+                            protocol: protocol::PROTOCOL,
+                            ok: true,
+                            check: Some(check),
+                            ..protocol::Answer::default()
+                        }
+                    }
+                    protocol::Op::CarryCheck { populated, .. } => {
+                        assert_eq!(populated, [true, false, false, false]);
+                        assert!(request.move_id.is_empty());
+                        protocol::Answer {
+                            protocol: protocol::PROTOCOL,
+                            ok: true,
+                            carry_deployment: Some([7; 32]),
+                            ..protocol::Answer::default()
+                        }
+                    }
                     // Only a resume's preflight reads the target's state.
                     protocol::Op::State { .. } => protocol::Answer {
                         protocol: protocol::PROTOCOL,
@@ -343,6 +380,9 @@ fn world() -> Both {
             helper_exit: 0,
             runs: Vec::new(),
             state: None,
+            supports_carry: None,
+            supports_carry_execution: None,
+            supports_carry_files: None,
         },
         local_health: Some(health(SOURCE_ID, 60)),
         reached: Ok(health(TARGET_ID, 60)),
@@ -371,17 +411,17 @@ fn words(items: &[&str]) -> Vec<OsString> {
 fn read_only(argv: &[String]) -> bool {
     let a: Vec<&str> = argv.iter().map(String::as_str).collect();
     match a.as_slice() {
-        ["inspect", _] => true,
+        ["inspect", _] | ["inspect", "--type=container", _] => true,
         ["version", "--format", "{{.Server.Version}}"] => true,
-        ["exec", "pseudolife-mcp-daemon", "du", "-sk", "/data"] => true,
-        [
-            "exec",
-            "-e",
-            options,
-            "pseudolife-mcp-postgres",
-            "env",
-            rest @ ..,
-        ] if *options == READ_ONLY => {
+        ["exec", selector, "du", "-sk", "/data"]
+            if *selector == "pseudolife-mcp-daemon" || probe::container_id(selector) =>
+        {
+            true
+        }
+        ["exec", "-e", options, selector, "env", rest @ ..]
+            if *options == READ_ONLY
+                && (*selector == "pseudolife-mcp-postgres" || probe::container_id(selector)) =>
+        {
             let Some(at) = rest.iter().position(|w| *w == "psql") else {
                 return false;
             };
@@ -502,6 +542,7 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
         );
     }
     assert_eq!(document_of(&plan)["changed"], json!(false));
+    assert_eq!(document_of(&plan)["executable"], json!(true));
     assert_eq!(document_of(&plan)["target_url_tied"], json!(true));
 }
 
@@ -520,6 +561,54 @@ type Change<T> = Box<dyn Fn(&mut T)>;
 
 fn document_of(plan: &Plan) -> Value {
     document(plan)
+}
+
+#[test]
+fn source_requires_both_immutable_container_ids() {
+    for (name, role) in [
+        ("pseudolife-mcp-daemon", "daemon"),
+        ("pseudolife-mcp-postgres", "PostgreSQL"),
+    ] {
+        for bad_id in ["", "not-an-immutable-id"] {
+            let mut world = world();
+            world.here.docs.get_mut(name).unwrap()["Id"] = json!(bad_id);
+            let why = preflight(&mut world, &request()).unwrap_err();
+            assert!(
+                why.contains(role) && why.contains("immutable Docker container ID"),
+                "{why}"
+            );
+            assert!(world.wire.runs.is_empty());
+            assert!(world.here.calls.iter().all(|call| read_only(call)));
+        }
+    }
+}
+
+#[test]
+fn carried_execution_refuses_missing_or_invalid_source_ids_before_ssh() {
+    let mut request = request();
+    request.no_keep_tokens = false;
+    request.dry_run = false;
+    for name in ["pseudolife-mcp-daemon", "pseudolife-mcp-postgres"] {
+        for id in ["", &"z".repeat(64)] {
+            let mut world = world();
+            world.here.docs.get_mut(name).unwrap()["Id"] = json!(id);
+            assert!(
+                preflight(&mut world, &request)
+                    .unwrap_err()
+                    .contains("immutable Docker container ID")
+            );
+            assert!(world.wire.runs.is_empty());
+        }
+    }
+}
+
+#[test]
+fn keeping_target_tokens_produces_an_executable_plan_on_a_carry_capable_target() {
+    let mut world = world();
+    world.wire.supports_carry_execution = Some(true);
+    let plan = preflight(&mut world, &request()).unwrap();
+    assert_eq!(document(&plan)["executable"], true);
+    assert_eq!(world.wire.runs.len(), 1);
 }
 
 #[test]
@@ -961,6 +1050,337 @@ fn the_helper_answers_a_protocol_it_does_not_speak_with_3_never_255() {
 }
 
 #[test]
+fn default_dry_run_admits_a_plan_for_carried_identities() {
+    let mut request = argv::parse(&words(&[
+        "--to",
+        "u@box",
+        "--target-url",
+        "https://box.example.com",
+        "--dry-run",
+    ]))
+    .expect("canonical move arguments");
+    assert!(!request.no_keep_tokens);
+    assert_eq!(argv::refusal(&request), None);
+    request.dry_run = false;
+    assert_eq!(argv::refusal(&request), None);
+}
+
+#[test]
+fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
+    const SENTINEL: &str = "fixture-sentinel-do-not-emit";
+    let request = Request {
+        no_keep_tokens: false,
+        ..request()
+    };
+    let mut current = world();
+    let bearer = current.here.docs.get_mut("pseudolife-mcp-daemon").unwrap()["Config"]["Env"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|entry| {
+            entry
+                .as_str()
+                .is_some_and(|value| value.starts_with("PSEUDOLIFE_MCP_TOKEN="))
+        })
+        .expect("the inspected daemon has a bearer setting");
+    *bearer = json!(format!("PSEUDOLIFE_MCP_TOKEN={SENTINEL}"));
+    current.wire.supports_carry = Some(true);
+    let Ok(plan) = preflight(&mut current, &request) else {
+        panic!("expected a carried-bearer preflight plan");
+    };
+    assert!(plan.checked_carry);
+    assert_eq!(current.wire.runs.len(), 2);
+    assert!(
+        current
+            .here
+            .calls
+            .iter()
+            .any(|args| args == &["inspect", "--type=container", &"1".repeat(64)])
+    );
+    for (target, argv, stdin) in &current.wire.runs {
+        assert!(!target.contains(SENTINEL) && !argv.contains(SENTINEL));
+        assert!(
+            !stdin
+                .windows(SENTINEL.len())
+                .any(|window| window == SENTINEL.as_bytes())
+        );
+    }
+    assert!(
+        !current
+            .here
+            .calls
+            .iter()
+            .flatten()
+            .any(|arg| arg.contains(SENTINEL))
+    );
+    assert!(
+        !current
+            .wire
+            .far
+            .docker
+            .calls
+            .iter()
+            .flatten()
+            .any(|arg| arg.contains(SENTINEL))
+    );
+    let output = render(&plan, true);
+    assert!(!output.contains(SENTINEL) && !document(&plan).to_string().contains(SENTINEL));
+    assert_read_only(&current);
+    assert!(output.contains("add --no-keep-tokens"));
+    assert!(!output.contains("The move would, in this order"));
+    assert!(!output.contains("run it without --dry-run to move"));
+    assert!(steps(&plan).is_empty());
+    assert_eq!(document(&plan)["executable"], false);
+    let execution = Request {
+        dry_run: false,
+        ..request.clone()
+    };
+    current.wire.runs.clear();
+    assert!(
+        preflight(&mut current, &execution)
+            .unwrap_err()
+            .contains("only supports carried-identity preflight")
+    );
+    assert_eq!(current.wire.runs.len(), 1);
+    current.wire.supports_carry_execution = Some(true);
+    let plan = preflight(&mut current, &execution).unwrap();
+    assert_eq!(document(&plan)["executable"], true);
+    assert!(
+        steps(&plan)
+            .iter()
+            .any(|step| step.contains("apply the carried bearer settings"))
+    );
+    let mut old = world();
+    assert!(
+        preflight(&mut old, &request)
+            .unwrap_err()
+            .contains("update the target client")
+    );
+    assert_eq!(old.wire.runs.len(), 1);
+    let mut unsupported = world();
+    unsupported.wire.supports_carry = Some(false);
+    let error = preflight(&mut unsupported, &request).unwrap_err();
+    assert!(error.contains("Linux Docker target") && error.contains("--no-keep-tokens"));
+    assert_eq!(unsupported.wire.runs.len(), 1);
+}
+
+#[test]
+fn explicit_target_files_require_helper_support_and_keep_overlay_order_on_the_wire() {
+    let request = Request {
+        no_keep_tokens: false,
+        target_files: carry::TargetFiles {
+            env: Some("~/export/stack.env".into()),
+            compose: vec!["/export/base.yaml".into(), "~/export/overlay.yaml".into()],
+        },
+        ..request()
+    };
+    assert!(argv::refusal(&request).is_none());
+    let mut world = world();
+    world.wire.supports_carry = Some(true);
+    world.wire.supports_carry_execution = Some(true);
+    assert!(
+        preflight(&mut world, &request)
+            .unwrap_err()
+            .contains("does not support explicit")
+    );
+    assert_eq!(world.wire.runs.len(), 1);
+
+    world.wire.runs.clear();
+    world.wire.supports_carry_files = Some(true);
+    assert!(preflight(&mut world, &request).unwrap().carry_executable);
+    let wire: Value = serde_json::from_slice(&world.wire.runs[1].2).unwrap();
+    assert_eq!(wire["files"]["env"], "~/export/stack.env");
+    assert_eq!(
+        wire["files"]["compose"],
+        json!(["/export/base.yaml", "~/export/overlay.yaml"])
+    );
+    assert_eq!(wire["populated"], json!([true, false, false, false]));
+    assert!(!String::from_utf8_lossy(&world.wire.runs[1].2).contains("tok-secret"));
+}
+
+#[test]
+fn explicit_target_files_refuse_unresolved_target_paths_before_any_effect() {
+    for value in [
+        "stack.env",
+        "/export/../stack.env",
+        "/export/line\n.env",
+        "",
+    ] {
+        let request = Request {
+            no_keep_tokens: false,
+            target_files: carry::TargetFiles {
+                env: Some(value.into()),
+                compose: Vec::new(),
+            },
+            ..request()
+        };
+        assert!(
+            argv::refusal(&request)
+                .unwrap()
+                .contains("must name absolute files")
+        );
+    }
+}
+
+#[test]
+fn carrying_requires_a_numeric_loopback_verification_endpoint() {
+    let request = Request {
+        dry_run: false,
+        no_keep_tokens: false,
+        ..request()
+    };
+    let mut world = world();
+    world.wire.supports_carry = Some(true);
+    world.wire.supports_carry_execution = Some(true);
+    world
+        .wire
+        .far
+        .docker
+        .docs
+        .get_mut("pseudolife-mcp-daemon")
+        .unwrap()["HostConfig"]["PortBindings"]["8765/tcp"][0]["HostIp"] = json!("192.0.2.10");
+    assert!(
+        preflight(&mut world, &request)
+            .unwrap_err()
+            .contains("no loopback daemon endpoint")
+    );
+    assert_eq!(world.wire.runs.len(), 1);
+    let dry = Request {
+        dry_run: true,
+        ..request
+    };
+    let plan = preflight(&mut world, &dry).unwrap();
+    let json = document(&plan);
+    assert_eq!(json["executable"], false);
+    let reason = "The target needs a loopback or wildcard daemon binding";
+    assert!(render(&plan, true).contains(reason));
+    assert!(
+        json["carried_identities"]
+            .as_str()
+            .unwrap()
+            .contains(reason)
+    );
+    assert!(carry::loopback("http://127.0.0.1:12345"));
+    assert!(carry::loopback("http://[::1]:12345"));
+    assert!(!carry::loopback("http://localhost:12345"));
+}
+
+#[test]
+fn carry_check_rejects_bad_replies_and_names_the_fix() {
+    let request = Request {
+        no_keep_tokens: false,
+        ..request()
+    };
+    let source = Facts {
+        auth: Some(true),
+        daemon: "pseudolife-mcp-daemon".into(),
+        ..Facts::default()
+    };
+    for (reply, expected) in [
+        (
+            "PSEUDOLIFE-MOVE-TARGET {broken",
+            "cannot check carried identities",
+        ),
+        (
+            "PSEUDOLIFE-MOVE-TARGET {\"protocol\":2,\"ok\":false,\"error\":\"fixture refusal\"}",
+            "fixture refusal",
+        ),
+        (
+            "PSEUDOLIFE-MOVE-TARGET {\"protocol\":2,\"ok\":false,\"error\":\"\"}",
+            "cannot check carried identities",
+        ),
+        ("no frame", "cannot check carried identities"),
+        (
+            "PSEUDOLIFE-MOVE-TARGET {\"protocol\":99,\"ok\":true}",
+            "cannot check carried identities",
+        ),
+    ] {
+        let mut world = world();
+        world.wire.link = Link::Prints(reply, 0);
+        assert!(
+            check_carry(&mut world, &request, &source, None)
+                .unwrap_err()
+                .contains(expected),
+            "{reply}"
+        );
+    }
+}
+
+#[test]
+fn carry_source_requires_reported_authentication_before_inspection() {
+    let mut host = Host::new(SOURCE_ID);
+    let mut source = Facts {
+        daemon: "pseudolife-mcp-daemon".into(),
+        ..Facts::default()
+    };
+    for auth in [None, Some(false)] {
+        source.auth = auth;
+        assert!(
+            carry::source(&mut host, &source)
+                .unwrap_err()
+                .contains("does not report bearer authentication")
+        );
+    }
+    assert!(host.calls.is_empty());
+}
+
+#[test]
+fn carry_source_checks_stored_bearers_locally_and_names_distinct_failures() {
+    use crate::credentials::CredentialError;
+    use sha2::{Digest, Sha256};
+    let mut host = Host::new(SOURCE_ID);
+    let daemon = "pseudolife-mcp-daemon";
+    host.docs.get_mut(daemon).unwrap()["Config"]["Env"] = json!(["PSEUDOLIFE_MCP_DATA_DIR=/data"]);
+    let source = Facts {
+        auth: Some(true),
+        daemon: daemon.into(),
+        pg: "pseudolife-mcp-postgres".into(),
+        db: "pseudolife_memory".into(),
+        user: "pseudolife".into(),
+        port: 5432,
+        ..Facts::default()
+    };
+    const TOKEN: &str = "fixture-stored-bearer";
+    let digest = format!("{:x}", Sha256::digest(TOKEN));
+    let token = || Ok(Some(TOKEN.to_owned()));
+    host.token_hashes = Some(digest.clone());
+    assert_eq!(
+        carry::source_with_token(&mut host, &source, token),
+        Ok([false; 4])
+    );
+    host.token_hashes = Some("other-hash".into());
+    assert!(
+        carry::source_with_token(&mut host, &source, token)
+            .unwrap_err()
+            .contains("does not match an active source principal")
+    );
+    host.token_hashes = None;
+    assert!(
+        carry::source_with_token(&mut host, &source, token)
+            .unwrap_err()
+            .contains("hashes could not be read")
+    );
+    assert!(
+        carry::source_with_token(&mut host, &source, || Ok(None))
+            .unwrap_err()
+            .contains("set PSEUDOLIFE_MCP_TOKEN_FILE")
+    );
+    assert!(
+        carry::source_with_token(&mut host, &source, || Err(CredentialError("unreadable")))
+            .unwrap_err()
+            .contains("could not read its configured bearer")
+    );
+    assert!(host.calls.iter().all(|argv| read_only(argv)));
+    assert!(
+        !host
+            .calls
+            .iter()
+            .flatten()
+            .any(|arg| arg.contains(TOKEN) || arg.contains(&digest))
+    );
+}
+
+#[test]
 fn argv_refusals_come_before_any_effect_in_order() {
     let refused = |items: &[&str]| argv::refusal(&argv::parse(&words(items)).unwrap());
     let base = [
@@ -1006,13 +1426,10 @@ fn argv_refusals_come_before_any_effect_in_order() {
     );
     starts(
         &[&base[..], &["--target-env-file", "/x/.env"]].concat(),
-        "--target-env-file and --target-compose-file are not available in the native client yet",
+        "--target-env-file and --target-compose-file apply only when carrying bearer settings",
     );
     starts(&without("--target-url"), "--target-url is required");
-    starts(
-        &without("--no-keep-tokens"),
-        "carrying the source's tokens to the target is not available",
-    );
+    assert_eq!(refused(&without("--no-keep-tokens")), None);
     starts(
         &[&base[..], &["--target-work-dir", "rel/dir"]].concat(),
         "--target-work-dir must be an absolute path",
@@ -1201,9 +1618,21 @@ fn an_ssh_timeout_ends_the_run_even_when_a_child_keeps_its_pipes_open() {
 }
 
 #[test]
+fn source_daemon_and_postgres_must_be_from_the_same_project() {
+    let mut world = world();
+    world.here.docs.get_mut("pseudolife-mcp-postgres").unwrap()["Config"]["Labels"]["com.docker.compose.project"] =
+        json!("other-stack");
+    let error = preflight(&mut world, &request()).unwrap_err();
+    assert!(error.contains("different Compose projects"));
+    assert!(world.wire.runs.is_empty());
+}
+
+#[test]
 fn a_daemon_the_gate_cannot_stop_and_an_unauthenticated_target_are_refused() {
     let facts = |dir: &str| Facts {
         daemon: "pseudolife-mcp-daemon".into(),
+        daemon_id: "1".repeat(64),
+        pg_id: "2".repeat(64),
         data_dir: dir.into(),
         ..Facts::default()
     };
@@ -1243,6 +1672,13 @@ impl Docker for OpsHost {
             ["inspect", "-f", "{{.State.Running}}", _] => {
                 ok(if self.running { "true" } else { "false" })
             }
+            [
+                "inspect",
+                "--type=container",
+                "-f",
+                "{{.Id}} {{.State.Running}}",
+                id,
+            ] => ok(&format!("{id} {}", self.running)),
             [.., "-c", "test -e /data/move.json"] => Ran {
                 code: if self.gated { 0 } else { 1 },
                 ..Ran::default()
@@ -1300,6 +1736,7 @@ impl OpsSite {
             move_id: MOVE.into(),
             work_dir: String::new(),
             rollback: true,
+            pins: None,
             op,
         };
         super::ops::perform(self, &request, &mut std::io::empty())
@@ -1335,6 +1772,67 @@ impl Drop for OpsSite {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.home);
     }
+}
+
+#[test]
+fn target_operation_stays_on_the_pinned_daemon_after_name_substitution() {
+    use protocol::{Op, PROTOCOL, Request};
+    let mut site = OpsSite::new(TARGET_ID);
+    assert!(
+        site.act(Op::Claim {
+            source_bank: fp(SOURCE_ID),
+            resume: false
+        })
+        .ok
+    );
+    let expected = "1".repeat(64);
+    let original = site.docker.host.docs["pseudolife-mcp-daemon"].clone();
+    site.docker
+        .host
+        .docs
+        .insert("original-daemon".into(), original);
+    site.docker
+        .host
+        .docs
+        .get_mut("pseudolife-mcp-daemon")
+        .unwrap()["Id"] = json!("3".repeat(64));
+    let request = Request {
+        protocol: PROTOCOL,
+        move_id: MOVE.into(),
+        work_dir: String::new(),
+        rollback: true,
+        pins: Some(carry::TargetPins {
+            daemon: expected.clone(),
+            postgres: "2".repeat(64),
+            project: "pseudolife-stack".into(),
+            ..Default::default()
+        }),
+        op: Op::Stop,
+    };
+    let answer = super::ops::perform(&mut site, &request, &mut std::io::empty());
+    assert!(answer.ok, "{}", answer.error);
+    assert!(
+        site.docker
+            .host
+            .calls
+            .iter()
+            .any(|args| args == &["stop", "-t", "120", &expected])
+    );
+    assert!(
+        !site
+            .docker
+            .host
+            .calls
+            .iter()
+            .any(|args| args == &["stop", "-t", "120", "pseudolife-mcp-daemon"])
+    );
+
+    let substitute = site.docker.host.docs["pseudolife-mcp-daemon"].clone();
+    site.docker.host.docs.insert(expected, substitute);
+    site.docker.host.calls.clear();
+    let answer = super::ops::perform(&mut site, &request, &mut std::io::empty());
+    assert!(!answer.ok);
+    assert!(site.docker.host.calls.iter().all(|args| args[0] != "stop"));
 }
 
 impl super::ops::Site for OpsSite {
@@ -1503,12 +2001,12 @@ fn a_resume_is_refused_before_any_change_when_the_gated_bank_took_writes() {
     // As the rollback left it: the resume goes ahead.
     let mut both = world();
     both.wire.state = Some(reading(3, true));
-    assert_eq!(resume_check(&mut both, &request), Ok(()));
+    assert_eq!(resume_check(&mut both, &request, None), Ok(()));
     // A write in place since, or the gate gone: refused, naming the way out.
     for state in [reading(4, true), reading(3, false)] {
         let mut both = world();
         both.wire.state = Some(state.clone());
-        let why = resume_check(&mut both, &request).unwrap_err();
+        let why = resume_check(&mut both, &request, None).unwrap_err();
         assert!(
             why.contains(&format!("pseudolife-mcp move --release-target {MOVE}")),
             "{state:?}: {why}"
@@ -1518,7 +2016,7 @@ fn a_resume_is_refused_before_any_change_when_the_gated_bank_took_writes() {
     request.resume_baseline = None;
     let mut both = world();
     both.wire.state = Some(reading(3, true));
-    assert!(resume_check(&mut both, &request).is_err());
+    assert!(resume_check(&mut both, &request, None).is_err());
 }
 
 #[test]

@@ -34,19 +34,23 @@ def bank():
                                   "create it once on the daemon host with `pseudolife-mcp test-login "
                                   "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     import psycopg
-    from pseudolife_memory.storage.schema import ensure_schema
+    from rust.harness_support.import_blocker import cold_harness_imports
     pg = pgdisposable.Slice("w2e")
     name = pg.name("pl_cf_w2e_judge_settle")
     dsn = pg.create(name)
-    with psycopg.connect(dsn, autocommit=True) as conn:
-        conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        ensure_schema(conn)  # every migration: the judge columns are among them
-        conn.execute("INSERT INTO entities (canonical, display, created_at) VALUES "
-                     "('alpha-node', 'Alpha Node', 1.0), ('alpha-service', 'Alpha Service', 1.0), "
-                     "('beta-node', 'Beta Node', 1.0), ('beta-store', 'Beta Store', 1.0), "
-                     "('real-one', 'Real One', 1.0), ('real-two', 'Real Two', 1.0)")
-        yield conn
-    pg.drop(name)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            with cold_harness_imports():
+                from rust.harness_support.schema import ensure_schema
+
+                ensure_schema(conn)  # every migration: the judge columns are among them
+            conn.execute("INSERT INTO entities (canonical, display, created_at) VALUES "
+                         "('alpha-node', 'Alpha Node', 1.0), ('alpha-service', 'Alpha Service', 1.0), "
+                         "('beta-node', 'Beta Node', 1.0), ('beta-store', 'Beta Store', 1.0), "
+                         "('real-one', 'Real One', 1.0), ('real-two', 'Real Two', 1.0)")
+            yield conn
+    finally:
+        pg.drop(name)
 
 
 def holds(conn, sql: str) -> bool:

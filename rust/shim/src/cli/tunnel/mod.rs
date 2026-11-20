@@ -1,6 +1,5 @@
-//! `pseudolife-mcp tunnel`: the read-only subset (`tunnel_cli.py`). Saved
-//! profiles are read, never written; every path that would write, start a
-//! process, open a socket or decrypt a Windows key defers before any effect.
+//! `pseudolife-mcp tunnel`: profile setup, status, and read-only checks of
+//! the saved tunnel runtime, plus the vendor client's stdio bridge.
 use std::{
     ffi::OsString,
     io::{self, Write},
@@ -18,6 +17,8 @@ mod doctor_section;
 #[cfg(windows)]
 mod dpapi;
 mod record;
+mod runtime;
+mod setup;
 mod store;
 mod syntax;
 mod vendor;
@@ -32,6 +33,7 @@ use syntax::{Admit, json_loads, refresh_id};
 #[derive(Debug, PartialEq)]
 pub(super) enum Fail {
     Tunnel(&'static str),
+    Detail(String),
     Defer,
 }
 
@@ -43,6 +45,7 @@ fn answer(output: Output) -> Option<Answer> {
     match output {
         Ok(printed) => Some(Ok(printed)),
         Err(Fail::Tunnel(message)) => Some(Err(message.to_owned())),
+        Err(Fail::Detail(message)) => Some(Err(message)),
         Err(Fail::Defer) => None,
     }
 }
@@ -58,16 +61,53 @@ enum Command {
     Update,
     Verify,
     Setup,
+    Run,
+    Stop,
 }
 
 #[derive(Default)]
 struct Setup {
+    accept_access: bool,
+    read_key: bool,
+    key_file: Option<String>,
     daemon_url: Option<String>,
     token_file: Option<String>,
     tunnel_id: Option<String>,
     organization_id: Option<String>,
     catalog: Option<String>,
     key_expires_at: Option<String>,
+}
+
+impl Setup {
+    fn profile_fields(&self) -> [(&'static str, &Option<String>); 4] {
+        [
+            ("tunnel_id", &self.tunnel_id),
+            ("organization_id", &self.organization_id),
+            ("minimum_catalog", &self.catalog),
+            ("runtime_key_expires_at", &self.key_expires_at),
+        ]
+    }
+
+    fn edit(&self, payload: &mut Map<String, Value>) {
+        for (field, value) in self.profile_fields() {
+            if let Some(value) = value {
+                payload.insert(field.into(), Value::String(value.clone()));
+            }
+        }
+    }
+
+    fn has_profile_settings(&self) -> bool {
+        self.daemon_url.is_some()
+            || self.token_file.is_some()
+            || self
+                .profile_fields()
+                .iter()
+                .any(|(_, value)| value.is_some())
+    }
+
+    fn has_key_input(&self) -> bool {
+        self.read_key || self.key_file.is_some()
+    }
 }
 
 struct Options {
@@ -88,6 +128,8 @@ fn parse(values: &[OsString]) -> Option<Options> {
         "update" => Command::Update,
         "verify" => Command::Verify,
         "setup" => Command::Setup,
+        "run" => Command::Run,
+        "stop" => Command::Stop,
         _ => return None,
     };
     let mut options = Options {
@@ -106,7 +148,8 @@ fn parse(values: &[OsString]) -> Option<Options> {
         seen.push(option);
         match (*option, command) {
             ("--json", Command::Status) => options.json = true,
-            ("--accept-access", Command::Setup) => {}
+            ("--accept-access", Command::Setup) => options.setup.accept_access = true,
+            ("--read-key", Command::Setup) => options.setup.read_key = true,
             _ => {
                 let value = rest.next().filter(|value| !value.starts_with('-'))?;
                 let value = Some((*value).to_owned());
@@ -116,6 +159,7 @@ fn parse(values: &[OsString]) -> Option<Options> {
                     ("--profile-dir", _) => options.profile_dir = value,
                     ("--daemon-url", Command::Setup) => s.daemon_url = value,
                     ("--token-file", Command::Setup) => s.token_file = value,
+                    ("--key-file", Command::Setup) => s.key_file = value,
                     ("--tunnel-id", Command::Setup) => s.tunnel_id = value,
                     ("--organization-id", Command::Setup) => s.organization_id = value,
                     ("--key-expires-at", Command::Setup) => s.key_expires_at = value,
@@ -168,16 +212,26 @@ fn outcome(options: &Options) -> Option<Answer> {
     // `update` runs unattended inside `pseudolife-mcp update`, which shows
     // its refusal: a root it cannot open is named, never deferred.
     let root = match root {
-        Err(_) if options.command == Command::Update => {
+        Err(_)
+            if matches!(
+                options.command,
+                Command::Update | Command::Run | Command::Stop
+            ) =>
+        {
             return Some(Err(store::UNSAFE_ROOT.to_owned()));
         }
         root => root.ok()?,
     };
+    if matches!(options.command, Command::Status | Command::Setup) {
+        setup::warn_for_stages(&root);
+    }
     answer(match options.command {
         Command::Status => status(options, &root),
         Command::Update => return Some(update(&root)),
         Command::Verify => verify(options, &root),
         Command::Setup => setup(options, &root),
+        Command::Run => runtime::run(&root, &options.profile),
+        Command::Stop => runtime::stop(&root, &options.profile),
     })
 }
 
@@ -228,7 +282,7 @@ impl Refresh {
 fn private_object(path: &Path) -> Result<Option<Map<String, Value>>, Fail> {
     match store::private_read(path, 65536) {
         Err(Fail::Defer) => Err(Fail::Defer),
-        Err(Fail::Tunnel(_)) => Ok(None),
+        Err(Fail::Tunnel(_) | Fail::Detail(_)) => Ok(None),
         Ok(data) => match json_loads(&data) {
             Admit::Yes(Value::Object(map)) => Ok(Some(map)),
             Admit::Yes(_) | Admit::No => Ok(None),
@@ -290,7 +344,7 @@ fn challenge_issue(root: &Path, name: &str) -> Option<ChallengeIssue> {
         Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 100 => {
             Some(ChallengeIssue::Deep)
         }
-        Ok(_) | Err(Fail::Tunnel(_)) => None,
+        Ok(_) | Err(Fail::Tunnel(_) | Fail::Detail(_)) => None,
         Err(Fail::Defer) => Some(ChallengeIssue::Form),
     }
 }
@@ -313,8 +367,20 @@ fn status(options: &Options, root: &Path) -> Output {
     // verification_status is constant: nothing verified, no current challenge.
     shallow_challenge(root, &profile.name)?;
     let refresh = refresh_status(root, &profile.name)?;
+    let cloud = match &record {
+        Some(record) if record.native => Some(bridge::cloud_status(root, &profile.name)),
+        Some(record) if record.liveness != Liveness::Gone => None,
+        _ => Some(bridge::Cloud::default()),
+    };
     Ok((
-        report(&profile, key, record.as_ref(), &refresh, options.json),
+        report(
+            &profile,
+            key,
+            record.as_ref(),
+            &refresh,
+            cloud,
+            options.json,
+        ),
         0,
     ))
 }
@@ -329,8 +395,14 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
         ""
     };
     match record.liveness {
+        Liveness::Running if record.native && updating => format!(
+            "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh it yet"
+        ),
         Liveness::Running if updating => format!(
             "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh or stop it yet, so it was left as it is"
+        ),
+        Liveness::Running if record.native => format!(
+            "tunnel {name} is running (process record {file}); use tunnel stop to stop its native supervisor"
         ),
         Liveness::Running => format!(
             "tunnel {name} is running (process record {file}); this client cannot refresh or stop it yet"
@@ -372,6 +444,7 @@ fn report(
     key: Option<bool>,
     record: Option<&record::Record>,
     refresh: &Refresh,
+    cloud: Option<bridge::Cloud>,
     as_json: bool,
 ) -> String {
     let running = record.map(|record| record.liveness);
@@ -414,9 +487,6 @@ fn report(
         }
     };
     let name = &profile.name;
-    // A running tunnel's cloud verification is bound to its launch, which
-    // this client does not read: not checked, rather than "not verified".
-    let cloud_checked = matches!(running, None | Some(Liveness::Gone));
     if as_json {
         let record_json = record.map_or(String::new(), |record| {
             format!(
@@ -425,11 +495,17 @@ fn report(
                 quoted(&record_sentence(name, record, false)),
             )
         });
-        let cloud = if cloud_checked {
-            "{\"verified\": false, \"successful_calls\": 0, \"challenge_current\": false}"
-        } else {
-            "\"not_checked\""
-        };
+        let cloud = cloud.as_ref().map_or_else(
+            || "\"not_checked\"".into(),
+            |cloud| {
+                format!(
+                    "{{\"verified\": {}, \"successful_calls\": {}, \"challenge_current\": {}}}",
+                    cloud.successful == 2,
+                    cloud.successful,
+                    cloud.current
+                )
+            },
+        );
         return format!(
             "{{\"profile\": {name_q}, \"state\": {}, \"catalog\": {}, \"private_key_present\": {key_json}, \"key_expiry\": {expiry}, \"runtime\": {{\"running\": {running_json}, \"profile\": {name_q}, \"ready\": {}, \"key_expiry\": {}{record_json}}}, \"cloud\": {cloud}, \"update\": {}}}\n",
             quoted(&profile.state),
@@ -446,11 +522,20 @@ fn report(
         Some(Liveness::Gone) | None => "False",
     };
     let shown_ready = if ready { "True" } else { "False" };
-    let cloud = if cloud_checked {
-        "cloud verified=False (0/2 calls)"
-    } else {
-        "cloud verification not checked by this client"
-    };
+    let cloud = cloud.as_ref().map_or_else(
+        || "cloud verification not checked by this client".into(),
+        |cloud| {
+            format!(
+                "cloud verified={} ({}/2 calls)",
+                if cloud.successful == 2 {
+                    "True"
+                } else {
+                    "False"
+                },
+                cloud.successful
+            )
+        },
+    );
     let mut text = format!(
         "Profile {name}: {}; runtime running={shown_running}, ready={shown_ready}; {cloud}.\n",
         profile.state
@@ -477,9 +562,8 @@ fn report(
         ));
     }
     if expired {
-        text.push_str(&format!(
-            "Renew privately: tunnel setup --profile {name} --read-key --key-expires-at <ISO timestamp>.\n"
-        ));
+        text.push_str(KEY_RENEWAL);
+        text.push('\n');
     }
     text
 }
@@ -513,6 +597,7 @@ fn update(root: &Path) -> Answer {
             "{message} (tunnel directory {}); fix that, then retry",
             root.display()
         ),
+        Fail::Detail(message) => message,
         Fail::Defer => store::list_refusal(root),
     };
     let present = exists(root).map_err(unreadable)?;
@@ -549,6 +634,7 @@ fn update(root: &Path) -> Answer {
                 store::profile_file(root, name).display(),
                 store::unread_reason(root, name)
             )),
+            Err(Fail::Detail(message)) => return Err(message),
             Err(Fail::Tunnel(reason)) => {
                 return Err(format!(
                     "{reason}: {}; fix that file or move it out of the tunnel directory, then retry",
@@ -667,10 +753,13 @@ fn verify(options: &Options, root: &Path) -> Output {
     if profile.state != "ready" || !store::key_present(root, &profile.name)? {
         return Err(Fail::Tunnel(UNFINISHED));
     }
-    // begin_challenge computes the launch identity before writing anything;
-    // without a process record its private read fails first. With a record
-    // the challenge would be written: deferred.
+    // A native challenge needs an active native record. Legacy launch
+    // identities are outside this path.
     if occupied(&root.join(format!("{}.process.json", profile.name)))? {
+        if record::read(record::path(root, &profile.name), None).is_some_and(|record| record.native)
+        {
+            return bridge::begin(root, &profile.name);
+        }
         return Err(Fail::Defer);
     }
     Err(Fail::Tunnel(store::UNAVAILABLE))
@@ -756,31 +845,60 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
     Ok((selected, token))
 }
 
-/// `_setup` up to `profile.validate()`: its refusals. A profile that
-/// validates would run the daemon handshake next, so it defers.
+const KEY_RENEWAL: &str = "Runtime key renewal requires the Python client. Rerun the release installer with PSEUDOLIFE_SHIM_ENGINE=python, then use that client's tunnel setup with --read-key and --key-expires-at.";
+
 fn setup(options: &Options, root: &Path) -> Output {
     let path = store::profile_path(root, &options.profile)?;
-    if occupied(&path)? {
-        return Err(Fail::Defer);
+    let settings = &options.setup;
+    if settings.read_key && settings.key_file.is_some() {
+        return Err(Fail::Tunnel(
+            "use either --read-key or --key-file for private key intake",
+        ));
     }
-    let (url, token) = discover(&options.setup)?;
+    let saved = occupied(&path)?;
+    if saved && settings.has_key_input() && settings.key_expires_at.is_some() {
+        return Err(Fail::Tunnel(
+            if occupied(&store::key_path(root, &options.profile))? {
+                KEY_RENEWAL
+            } else {
+                "save the expiry with tunnel setup --key-expires-at first, then import the private key with --read-key or --key-file in a separate invocation"
+            },
+        ));
+    }
+    if settings.has_key_input() && (settings.has_profile_settings() || settings.accept_access) {
+        return Err(if saved {
+            Fail::Defer
+        } else {
+            Fail::Tunnel(
+                "save profile settings first, then use --read-key or --key-file in a separate setup invocation",
+            )
+        });
+    }
+    if saved {
+        if !settings.has_profile_settings() && !settings.has_key_input() && !settings.accept_access
+        {
+            return Err(Fail::Defer);
+        }
+        return setup::resume(options, root, &path);
+    }
+    if settings.has_key_input() {
+        return Err(Fail::Tunnel(
+            "save a tunnel profile with a tunnel ID before importing its private runtime key",
+        ));
+    }
+    let explicit = truthy(&settings.daemon_url).is_some() && truthy(&settings.token_file).is_some();
+    let (url, token) = discover(settings)?;
     let mut payload = Map::new();
     payload.insert("name".into(), Value::String(options.profile.clone()));
     payload.insert("daemon_url".into(), Value::String(url));
     payload.insert("token_file".into(), Value::String(token));
-    let s = &options.setup;
-    for (key, value) in [
-        ("tunnel_id", &s.tunnel_id),
-        ("organization_id", &s.organization_id),
-        ("minimum_catalog", &s.catalog),
-        ("runtime_key_expires_at", &s.key_expires_at),
-    ] {
-        if let Some(value) = value {
-            payload.insert(key.into(), Value::String(value.clone()));
-        }
+    settings.edit(&mut payload);
+    if explicit {
+        setup::save(options, root, &path, payload)
+    } else {
+        store::validate(&payload)?;
+        Err(Fail::Defer)
     }
-    store::validate(&payload)?;
-    Err(Fail::Defer)
 }
 
 #[cfg(test)]
@@ -1308,6 +1426,20 @@ mod tests {
         ]));
         assert!(ok(&["update", "--profile-dir", "d"]));
         assert!(ok(&["verify", "--profile", ""]));
+        assert!(
+            parse(&argv(&["setup", "--read-key"]))
+                .unwrap()
+                .setup
+                .read_key
+        );
+        assert_eq!(
+            parse(&argv(&["setup", "--key-file", "k"]))
+                .unwrap()
+                .setup
+                .key_file
+                .as_deref(),
+            Some("k")
+        );
         assert!(ok(&[
             "setup",
             "--accept-access",
@@ -1328,8 +1460,8 @@ mod tests {
             &["update", "--json"],
             &["verify", "--accept-access"],
             &["setup", "--catalog", "all"],
-            &["setup", "--read-key"],
-            &["setup", "--key-file", "k"],
+            &["setup", "--read-key", "--read-key"],
+            &["setup", "--key-file"],
             &["setup", "--start"],
             &["setup", "--open-browser", "keys"],
             &["status", "-h"],

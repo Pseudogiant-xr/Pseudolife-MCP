@@ -40,9 +40,7 @@ each exists because it was violated at least once.
    test-only changes exempt), because direct edits conflict with every open
    PR and `tests/test_changelog_fragments.py` checks only a fragment's
    format, not that you added one.
-2. **Any change to `pseudolife_memory/storage/schema.py`, and every schema
-   bump, follows the `schema-bump` skill**, and its Rust schema and Parity
-   checks are green before merge.
+2. **Changes to the native schema DDL or startup plan and every schema bump follow the `schema-bump` skill**, and the Rust schema and Parity checks are green before merge.
 3. **Local validation before opening a PR:** run the touched and dependent
    tests ("Running tests") with the bench Postgres up and record head,
    selected files and result in the PR's Verification section, since a
@@ -229,7 +227,7 @@ touched, with no retrofit sweep.
   and `shim-tests` on its head before `open` pushes it (`build` prints each
   and handles `cargo check`), because that costs less than one CI run and
   the suite never collects `rust/`.
-- Nothing is fixed inside a batch except the one generated census commit (a
+- Nothing is fixed inside a batch except the generated census commit (a
   conflicting member or a red batch's culprit is dropped with a comment,
   and a census-only conflict is regenerated and a compatible budget-only
   one normalized, not a drop), and it merges with a merge commit, never
@@ -320,8 +318,7 @@ touched, with no retrofit sweep.
 - The homelab hypervisor carries the controller (the only host of agent
   sessions there), Linux dev boxes and a Windows dev VM (read
   `docs/dev/dev-machines.md` before first use); names, addresses, lease
-  names and database settings stay in private config and the memory bank,
-  never in the tree.
+  names and database settings stay in private config and the memory bank.
 - A PR cites a dev-machine run by role ("Windows dev VM", "Linux dev box"),
   never by name or address, with commit, command and result.
 - **They are development tools, not merge gates, except that**

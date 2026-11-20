@@ -67,16 +67,16 @@ def test_health_golden_host_adjustment_without_package(blocked):
 def test_seed_paths_without_package_or_connections(blocked, monkeypatch):
     import mcp_run
     import principal_fixtures as fixtures
-    from rust.harness_support import database_guard, schema
+    from rust.harness_support import bank_fixture, database_guard, schema
     conn = MagicMock()
     conn.__enter__.return_value = conn
     conn.execute.return_value.fetchall.return_value = []
     conn.execute.return_value.fetchone.return_value = ("uses",)
     monkeypatch.setattr(fixtures.psycopg, "connect", Mock(return_value=conn))
-    monkeypatch.setattr(fixtures, "ensure_schema", Mock())
+    monkeypatch.setattr(bank_fixture, "ensure_schema", Mock())
     monkeypatch.setattr(schema, "ensure_schema", Mock())
-    monkeypatch.setattr(fixtures, "assert_disposable_database", Mock())
     bank = run.pg.PREFIX + "fixture"
+    monkeypatch.setattr(bank_fixture, "assert_disposable_database", lambda conn: bank)
     monkeypatch.setattr(database_guard, "assert_disposable_database", lambda conn: bank)
     for name in ("tokens", "pairing", "stamped", "json-float-shortest-ties", "null-embedding",
                  "unconstrained-dims", "console-signin", "console-passkey-signin"):
@@ -88,19 +88,53 @@ def test_seed_paths_without_package_or_connections(blocked, monkeypatch):
 def test_fixture_guards_precede_connections_and_writes(blocked, monkeypatch):
     import principal_fixtures as fixtures
     from rust.harness_support.database_guard import ProductionDatabaseError
-    connect = Mock()
+    connect = MagicMock()
     monkeypatch.setattr(fixtures.psycopg, "connect", connect)
     for dsn in ("dbname=pseudolife_memory", "postgresql://localhost/pseudolife_memory"):
         with pytest.raises(ProductionDatabaseError):
             fixtures.prepare_bank(dsn)
     with pytest.raises(ValueError, match="explicit disposable database"):
         fixtures.prepare_bank("dbname=''")
+    with pytest.raises(ValueError, match="require a disposable harness database"), \
+            pytest.MonkeyPatch.context() as patch:
+        patch.setattr(connect, "side_effect", AssertionError("connected before bench name refusal"))
+        fixtures.prepare_bank("dbname=pseudolife_memory_bench")
     connect.assert_not_called()
+    server = MagicMock()
+    server.execute.return_value.fetchone.return_value = ("pseudolife_memory",)
+    connect.return_value.__enter__.return_value = server
+    with pytest.raises(ProductionDatabaseError):
+        fixtures.prepare_bank("dbname=pl_cf_w1a_fixture")
+    server.execute.assert_called_once_with("SELECT current_database()")
     conn = Mock()
-    monkeypatch.setattr(fixtures, "assert_disposable_database", Mock(side_effect=ProductionDatabaseError))
+    conn.execute.return_value.fetchone.return_value = ("pseudolife_memory",)
     with pytest.raises(ProductionDatabaseError):
         fixtures.seed_principal(conn, "fixture", token="synthetic")
-    conn.execute.assert_not_called()
+    conn.execute.assert_called_once_with("SELECT current_database()")
+
+
+@pytest.mark.parametrize("entry", ["prepare_bank", "seed_principal", "seed_stored"])
+def test_principal_seed_refuses_bench_before_writing(entry, monkeypatch):
+    import mcp_run
+    import principal_fixtures as fixtures
+    from rust.harness_support import bank_fixture, schema
+
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchone.return_value = ("pseudolife_memory_bench",)
+    monkeypatch.setattr(fixtures.psycopg, "connect", Mock(return_value=conn))
+    ensure_schema = Mock()
+    monkeypatch.setattr(bank_fixture, "ensure_schema", ensure_schema)
+    monkeypatch.setattr(schema, "ensure_schema", ensure_schema)
+    with pytest.raises(ValueError, match="require a disposable harness database"):
+        if entry == "prepare_bank":
+            fixtures.prepare_bank("dbname=pl_cf_w1a_fixture")
+        elif entry == "seed_principal":
+            fixtures.seed_principal(conn, "fixture")
+        else:
+            mcp_run.seed_stored("dbname=pl_cf_w2g_fixture")
+    conn.execute.assert_called_once_with("SELECT current_database()")
+    ensure_schema.assert_not_called()
 
 
 def test_environment_vectors_and_wrong_parser_control(blocked):

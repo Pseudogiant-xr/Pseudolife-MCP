@@ -101,6 +101,8 @@ pub(super) struct Flags {
     pub marker_written: bool,
     pub gate_written: bool,
     pub target_restored: bool,
+    /// The target may have changed its Compose environment or container.
+    pub identities_applied: bool,
     /// Set before the gate is lifted and the target started: from here the
     /// target may be running, and the rollback stops and re-gates it.
     pub gate_lifting: bool,
@@ -133,6 +135,7 @@ pub(super) struct Record {
     /// Set inside the commit window, right after `moved.json` reached the
     /// stopped source.
     pub committed: bool,
+    pub carried_identities: bool,
     pub flags: Flags,
     /// The target daemon's restart policy before the move paused it.
     pub target_policy: String,
@@ -166,6 +169,13 @@ pub(super) struct Record {
     pub source: super::probe::Facts,
     /// The target daemon's image, for the manual rollback's gate command.
     pub target_image: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_pins: Option<super::carry::TargetPins>,
+    #[serde(default, skip_serializing_if = "super::carry::TargetFiles::is_empty")]
+    pub target_files: super::carry::TargetFiles,
+    /// The most recent daemon ID verified by the target, including after recreation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified_target_daemon: Option<String>,
     /// The move's folder on the target, and what its files took at the last
     /// reading.
     pub remote_folder: String,

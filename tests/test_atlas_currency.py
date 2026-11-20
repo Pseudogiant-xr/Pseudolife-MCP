@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from rust.daemon.harness.gen_schema_sql import load_schema_plan
+
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS_DIR = ROOT / "docs" / "atlas"
 ATLAS_JSON = ATLAS_DIR / "atlas.json"
@@ -62,11 +64,11 @@ def test_meta_matches_shipped_version(atlas: dict) -> None:
 
 
 def test_meta_matches_schema_version(atlas: dict) -> None:
-    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+    schema_version = load_schema_plan()["schema_version"]
 
-    assert atlas["meta"]["schema"] == SCHEMA_META_VERSION, (
+    assert atlas["meta"]["schema"] == schema_version, (
         f"atlas meta.schema {atlas['meta']['schema']} != SCHEMA_META_VERSION "
-        f"{SCHEMA_META_VERSION} — re-verify the storage cards and update "
+        f"{schema_version} — re-verify the storage cards and update "
         "docs/atlas/atlas.json meta (schema bump checklist)"
     )
 
@@ -101,12 +103,12 @@ def test_viewer_loads_canonical_json() -> None:
 
 
 def test_migration_list_covers_every_schema_version(atlas: dict) -> None:
-    """The schema.py storage card's "Additive migrations: vNN ..." line must
+    """The schema storage card's "Additive migrations: vNN ..." line must
     name every version from where the list starts through the version the
     codebase actually ships (SCHEMA_META_VERSION) — otherwise a schema bump
     that forgets to touch the atlas (issue #184: v30/v31 went missing)
     silently stops being caught."""
-    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+    schema_version = load_schema_plan()["schema_version"]
 
     node = next(n for n in atlas["nodes"] if n["id"] == "schemaN")
     migrations_line = next(
@@ -118,12 +120,12 @@ def test_migration_list_covers_every_schema_version(atlas: dict) -> None:
     )
     versions = sorted(int(v) for v in re.findall(r"\bv(\d+)\b", migrations_line))
     assert versions, "no vNN entries found in the migrations line"
-    expected = list(range(versions[0], SCHEMA_META_VERSION + 1))
+    expected = list(range(versions[0], schema_version + 1))
     missing = [v for v in expected if v not in versions]
     assert not missing, (
         f"schemaN migration list is missing v{missing} (SCHEMA_META_VERSION="
-        f"{SCHEMA_META_VERSION}) — describe the migration(s) from "
-        "pseudolife_memory/storage/schema.py and add them to docs/atlas/"
+        f"{schema_version}) — describe the migration(s) from "
+        "the native schema and add them to docs/atlas/"
         "atlas.json"
     )
 

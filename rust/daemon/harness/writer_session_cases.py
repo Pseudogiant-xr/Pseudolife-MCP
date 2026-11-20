@@ -1,22 +1,21 @@
-"""Writer-session probe, reconnect and handover through the actual Python and
-native services.
+"""Writer-session probe, reconnect and handover through the native service.
 
-Each arm starts its service on a clone of one seeded bank, then: the writer
+The service starts on a clone of a seeded bank. The writer
 session is killed and the next call must reconnect and keep the resident
 copy (``death``); it is killed again while a second writer takes and drops
 the bank, so the reconnect must flag the handover and the service re-read the
 bank (``handover``); it is killed a third time while a second writer holds
 the lease, so the call and ``/health``'s database probe are refused
 (``held``) until the holder leaves and the retry window passes
-(``released``). Both arms use the same second-writer helpers (this script's
-``--other-writer`` and ``--hold-lease``), and every phase dumps the bank.
-Python's recovery and curation preamble other than the rehydrate under test
-is inert, as in ``clock_retry_cases.py``. The native embedder loads the
-existing four-dimensional offline ONNX fixture.
+(``released``). Each phase compares the whole bank with the expected changes
+to its writer epoch and board clock. ``--oracle`` also compares the frozen
+Python service on its own clone. The native embedder loads the offline ONNX
+fixture.
 """
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 import re
@@ -39,7 +38,9 @@ import dbstate
 import pgdisposable
 import startup_cases as startup
 import psycopg
-from pseudolife_memory.storage.schema import assert_disposable_database
+from psycopg.types.json import Jsonb
+from session_fixture import EPOCH_META_KEY, HLC_META_KEY, seed_bank, with_meta
+from rust.harness_support.database_guard import assert_disposable_database
 
 pg = pgdisposable.Slice.from_env("pgs")
 PHASES = ("initial", "death", "handover", "held", "released")
@@ -64,6 +65,8 @@ PAST_PROBE = 1.1
 # Past _LEASE_RETRY_SECONDS (5 s).
 PAST_LEASE_RETRY = 5.1
 MUTANTS = ("writer-no-reconnect", "writer-epoch-unchecked")
+PHASE_EPOCH_INCREMENTS = dict(zip(PHASES, (1, 2, 4, 5, 6)))
+WRITER_LEASE_KEY = "pseudolife-bank-writer"
 
 
 def _dsn() -> str:
@@ -89,33 +92,44 @@ def dump_phase(phase):
 OTHER_WRITER_HLC = [4102444800000, 3]
 
 
+@contextmanager
+def second_writer():
+    """Own the same session-level lock and advance the durable writer epoch."""
+    dsn = _dsn()
+    name = psycopg.conninfo.conninfo_to_dict(dsn)["dbname"]
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        if assert_disposable_database(conn) != name:
+            raise ValueError("writer fixture connected to a different database")
+        with conn.transaction():
+            conn.execute("SET LOCAL lock_timeout = '5s'")
+            conn.execute("SELECT pg_advisory_lock(hashtextextended(%s, 0))", (WRITER_LEASE_KEY,))
+            changed = conn.execute("UPDATE public.meta SET value = to_jsonb((value #>> '{}')::bigint + 1) "
+                                   "WHERE key = %s", (EPOCH_META_KEY,))
+            if changed.rowcount != 1:
+                raise ValueError("writer fixture is missing its writer lease epoch")
+        yield conn
+
+
 def other_writer():
     """A second writer takes the bank's lease, leaves a board clock mark far
     ahead of the wall clock (as its board sends would), and leaves."""
-    from pseudolife_memory.storage.coordination import HLC_META_KEY
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    storage = PostgresStorage(_dsn())
-    try:
-        storage.set_meta(HLC_META_KEY, OTHER_WRITER_HLC)
-    finally:
-        storage.close()
+    with second_writer() as conn:
+        conn.execute("UPDATE public.meta SET value = %s WHERE key = %s", (Jsonb(OTHER_WRITER_HLC), HLC_META_KEY))
 
 
 def hold_lease():
     """A second writer holds the lease until the gate file is removed."""
-    from pseudolife_memory.storage.postgres import PostgresStorage
     gate = Path(os.environ["PL_PGS_WRITER_GATE"])
     ready = gate.with_suffix(".ready")
-    storage = PostgresStorage(_dsn())
     try:
-        ready.write_text("held", encoding="utf-8")
-        deadline = time.monotonic() + 120
-        while gate.exists():
-            if time.monotonic() > deadline:
-                raise TimeoutError("the lease gate was never released")
-            time.sleep(0.05)
+        with second_writer():
+            ready.write_text("held", encoding="utf-8")
+            deadline = time.monotonic() + 120
+            while gate.exists():
+                if time.monotonic() > deadline:
+                    raise TimeoutError("the lease gate was never released")
+                time.sleep(0.05)
     finally:
-        storage.close()
         ready.unlink(missing_ok=True)
 
 
@@ -141,15 +155,9 @@ def kill(storage):
             time.sleep(0.02)
 
 
-def oracle_cell(seed_only=False):
+def oracle_cell():
     from pseudolife_memory.storage.postgres import PostgresStorage
     storage = PostgresStorage(_dsn())
-    if seed_only:
-        try:
-            startup.seed(storage, "clock-retry")
-        finally:
-            storage.close()
-        return
     import torch
     from pseudolife_memory.memory.hlc import HybridLogicalClock
     from pseudolife_memory.service import MemoryService
@@ -258,7 +266,14 @@ def runtime_library():
     return next(root.glob("libonnxruntime.so.*"))
 
 
-def invoke(binary, kind, dsn, home, model, phases, output, gate, seed_only=False, mutant=None):
+class ProbeFailure(RuntimeError):
+    def __init__(self, kind, run):
+        super().__init__(f"{kind} writer session cell exit {run.returncode}: "
+                         f"{run.stdout[-1800:]} {run.stderr[-1800:]}")
+        self.run = run
+
+
+def invoke(binary, kind, dsn, home, model, phases, output, gate, mutant=None):
     env = daemons.base_env(home, {
         "PL_HARNESS_SLICE": "pgs", "PL_PGS_WRITER_DSN": dsn,
         "PL_PGS_WRITER_CONFIG": str(home / "data" / "config.yaml"),
@@ -273,58 +288,90 @@ def invoke(binary, kind, dsn, home, model, phases, output, gate, seed_only=False
             env.pop(key)
     if kind == "python":
         command = [sys.executable, str(Path(__file__).resolve()), "--oracle-cell"]
-        if seed_only:
-            command.append("--seed-cell")
     else:
         command = [str(binary), "--exact", "service::tests::db_writer_session_phases", "--nocapture"]
         if mutant:
             env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
     run = subprocess.run(command, cwd=REPO, env=env, capture_output=True, text=True, timeout=300)
     if run.returncode:
-        raise RuntimeError(f"{kind} writer session cell exit {run.returncode}: "
-                           f"{run.stdout[-1800:]} {run.stderr[-1800:]}")
+        raise ProbeFailure(kind, run)
     if kind == "rust" and "1 passed" not in run.stdout:
         raise RuntimeError("native writer session probe did not execute one passing test")
-    return None if seed_only else json.loads(output.read_text(encoding="utf-8"))
+    return json.loads(output.read_text(encoding="utf-8"))
 
 
-def expectations(result):
-    """What each phase must show, whatever the two arms agree on."""
-    phases = {phase["phase"]: phase["observed"] for phase in result.get("phases", [])}
-    if tuple(phases) != PHASES:
-        return [f"phases {list(phases)} != {list(PHASES)}"]
+def expectations(result, seed_epoch):
+    """Check the native service's complete phase observations."""
+    records = result.get("phases", [])
+    names = tuple(phase["phase"] for phase in records)
+    if names != PHASES:
+        return [f"phases {list(names)} != {list(PHASES)}"]
+    phases = {phase["phase"]: phase["observed"] for phase in records}
     differences = []
 
     def expect(phase, key, value):
         differences.extend(dbstate.diff(value, phases[phase][key], f"/{phase}/{key}"))
 
-    e0 = phases["initial"]["epoch"]
     # Each against the stores the previous successful phase served.
     kept = dict.fromkeys(("bank", "world", "cortex"), True)
     dropped = dict.fromkeys(("bank", "world", "cortex"), False)
-    for phase in ("death", "handover", "released"):
+    for phase, same in (("initial", kept), ("death", kept), ("handover", dropped), ("released", dropped)):
         expect(phase, "ok", True)
-        expect(phase, "session_replaced", True)
+        expect(phase, "error", None)
+        expect(phase, "session_replaced", phase != "initial")
+        expect(phase, "same_as_before", same)
         expect(phase, "health_db", "ok")
         expect(phase, "resident_invalidated", None)
-    expect("death", "same_as_before", kept)
-    expect("death", "epoch", e0 + 1)
-    expect("handover", "same_as_before", dropped)
-    expect("handover", "epoch", e0 + 3)
+        expect(phase, "epoch", seed_epoch + PHASE_EPOCH_INCREMENTS[phase])
     expect("held", "ok", False)
-    expect("held", "epoch", e0 + 3)
+    # The old resident session still reports the handover epoch while the
+    # second writer owns the newer epoch in PostgreSQL.
+    expect("held", "epoch", seed_epoch + PHASE_EPOCH_INCREMENTS["handover"])
+    expect("held", "same_as_before", None)
+    expect("held", "session_replaced", None)
+    expect("held", "resident_invalidated", None)
     lease = "another process holds the writer lease on bank "
     if not str(phases["held"]["error"]).startswith(lease):
         differences.append("/held/error: expected the writer-lease refusal")
     if phases["held"]["health_db"] != f"error: {phases['held']['error']}":
         differences.append("/held/health_db: expected the same refusal while the holder is there")
-    expect("released", "same_as_before", dropped)
-    expect("released", "epoch", e0 + 5)
     return differences
 
 
-def cell(binary, number, result, mutant=None):
-    names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(3)]
+def expected_state(before, phase):
+    """The second writer's HLC and the epoch are the only durable changes."""
+    values = {EPOCH_META_KEY: startup.epoch(before) + PHASE_EPOCH_INCREMENTS[phase]}
+    if phase in ("handover", "held", "released"):
+        values[HLC_META_KEY] = OTHER_WRITER_HLC
+    return with_meta(before, **values)
+
+
+def mutant_witness(mutant, run, phases, before):
+    # Both compiled controls stop the Rust probe before the handover dump.
+    # Require its intended panic and two complete preceding observations.
+    if run.returncode != 101 or "1 failed" not in run.stdout:
+        return None
+    if {path.stem for path in phases.glob("*.json")} != {"initial", "death"}:
+        return None
+    if mutant == "writer-no-reconnect":
+        marker = "a live session to kill"
+        # The dead session never acquired a new epoch.
+        death = "initial"
+    else:
+        marker = "assertion failed: current.tick_hlc() > (4_102_444_800_000, 3)"
+        death = "death"
+    if marker not in run.stderr:
+        return None
+    for phase, expected in (("initial", "initial"), ("death", death)):
+        actual = json.loads((phases / f"{phase}.json").read_text(encoding="utf-8"))
+        if dbstate.diff(expected_state(before, expected), actual):
+            return None
+    return marker
+
+
+def cell(binary, number, result, mutant=None, oracle=False):
+    arms = ("python", "rust") if oracle else ("rust",)
+    names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []
     try:
         with tempfile.TemporaryDirectory(prefix="pl-pgs-writer-session-") as scratch:
@@ -332,29 +379,40 @@ def cell(binary, number, result, mutant=None):
             from embedding_fixture import create
             model = root / "model"
             create(model)
-            homes = [daemons.make_home(root, name, CONFIG) for name in ("seed", "python", "rust")]
+            homes = [daemons.make_home(root, name, CONFIG) for name in arms]
             template = pg.create(names[0])
             created.append(names[0])
-            invoke(binary, "python", template, homes[0], model, root / "seed-db", root / "seed.json",
-                   root / "seed.gate", seed_only=True)
+            seed_bank(template, highwater=[103, 2])
+            before = dbstate.dump(template)
             dsns = []
             for name in names[1:]:
                 dsns.append(pg.create(name, template=names[0]))
                 created.append(name)
             outputs, states = [], []
-            for kind, dsn, home in zip(("python", "rust"), dsns, homes[1:]):
+            for kind, dsn, home in zip(arms, dsns, homes):
                 phases = root / f"{kind}-db"
-                output = invoke(binary, kind, dsn, home, model, phases, root / f"{kind}.json",
-                                root / f"{kind}.gate", mutant=mutant)
+                try:
+                    output = invoke(binary, kind, dsn, home, model, phases, root / f"{kind}.json",
+                                    root / f"{kind}.gate", mutant=mutant)
+                except ProbeFailure as error:
+                    if mutant:
+                        result["mutant_witness"] = mutant_witness(mutant, error.run, phases, before)
+                    raise
                 # Each arm has its own bank, which the lease refusal names.
                 bank = psycopg.conninfo.conninfo_to_dict(dsn)["dbname"]
                 outputs.append(json.loads(json.dumps(output).replace(f"'{bank}'", "'<bank>'")))
                 states.append({phase: json.loads((phases / f"{phase}.json").read_text()) for phase in PHASES})
-            result["observed"] = dict(zip(("python", "rust"), (normalized(o) for o in outputs)))
-            result["observed_diffs"] = compare_phases(*outputs)
-            result["expectation_diffs"] = [f"{kind}{difference}" for kind, output in zip(("python", "rust"), outputs)
-                                           for difference in expectations(output)]
-            result["db_diffs"] = {phase: dbstate.diff(states[0][phase], states[1][phase]) for phase in PHASES}
+            result["observed"] = dict(zip(arms, (normalized(o) for o in outputs)))
+            result["observed_diffs"] = compare_phases(*outputs) if oracle else []
+            result["expectation_diffs"] = [f"{kind}{difference}" for kind, output in zip(arms, outputs)
+                                           for difference in expectations(output, startup.epoch(before))]
+            result["db_diffs"] = {
+                kind: {phase: dbstate.diff(expected_state(before, phase), state[phase]) for phase in PHASES}
+                for kind, state in zip(arms, states)
+            }
+            if oracle:
+                result["db_diffs"]["oracle_comparison"] = {
+                    phase: dbstate.diff(states[0][phase], states[1][phase]) for phase in PHASES}
     finally:
         for name in reversed(created):
             try:
@@ -365,7 +423,8 @@ def cell(binary, number, result, mutant=None):
 
 def failed(result):
     return bool(result.get("error") or result.get("cleanup_errors") or result.get("observed_diffs")
-                or result.get("expectation_diffs") or any(result.get("db_diffs", {}).values()))
+                or result.get("expectation_diffs") or any(
+                    diffs for arm in result.get("db_diffs", {}).values() for diffs in arm.values()))
 
 
 def main(argv=None):
@@ -373,9 +432,9 @@ def main(argv=None):
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--mutants", action="store_true")
+    parser.add_argument("--oracle", action="store_true", help="also compare the frozen Python service")
     parser.add_argument("--dump-db", choices=PHASES, help=argparse.SUPPRESS)
     parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--seed-cell", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--other-writer", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--hold-lease", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -401,7 +460,7 @@ def main(argv=None):
         hold_lease()
         return 0
     if args.oracle_cell:
-        oracle_cell(args.seed_cell)
+        oracle_cell()
         return 0
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
@@ -410,7 +469,7 @@ def main(argv=None):
               "declared_noop_callbacks": [*NOOP_CALLBACKS, "curation_safety.recover_slot_curation"]}
     number = time.time_ns()
     try:
-        cell(args.rust_test_bin.resolve(), number, result)
+        cell(args.rust_test_bin.resolve(), number, result, oracle=args.oracle)
     except Exception as error:
         result["error"] = str(error)
     if args.mutants and not failed(result):
@@ -421,11 +480,10 @@ def main(argv=None):
                 cell(args.rust_test_bin.resolve(), number + 1000 * index, mutant, name)
             except Exception as error:
                 mutant["error"] = str(error)
-            caught = bool(mutant.get("observed_diffs") or mutant.get("expectation_diffs")
-                          or any(mutant.get("db_diffs", {}).values()) or mutant.get("error"))
+            witness = mutant.get("mutant_witness")
+            caught = bool(witness and not mutant.get("cleanup_errors"))
             result["mutants"][name] = {"caught": caught, "error": mutant.get("error"),
-                                       "observed_diffs": mutant.get("observed_diffs", [])[:8],
-                                       "expectation_diffs": mutant.get("expectation_diffs", [])[:8]}
+                                       "witness": witness, "cleanup_errors": mutant.get("cleanup_errors", [])}
     args.out.write_text(json.dumps(result, indent=2, allow_nan=False), encoding="utf-8")
     mutants_ok = (not args.mutants or set(result.get("mutants", {})) == set(MUTANTS)) and all(
         m["caught"] for m in result.get("mutants", {}).values())

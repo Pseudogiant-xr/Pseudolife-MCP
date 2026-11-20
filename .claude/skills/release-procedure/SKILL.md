@@ -132,17 +132,29 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    top-level dirs, the `mcp-name` marker in METADATA,
    no identifiers (grep the METADATA for the guard list).
 3. **PyPI**: publishing the GitHub release triggers
-   `.github/workflows/release.yml` (Trusted Publishing — OIDC, no token):
-   the `build` job guards tag == pyproject version **and** both `server.json`
-   version fields == tag (issue #185 moved the server.json guard here, from
-   the `registry` job below, so a mismatch fails before anything builds or
-   uploads — it used to run after the irreversible PyPI publish and burn a
-   release number), then builds and twine-checks. The five native
-   archives are then built, verified and attached to the GitHub release
-   (with `SHA256SUMS`) before the `publish` job waits for the user's
-   one-click approval on the `pypi` environment: the updaters learn a
-   release exists from PyPI and then download its archives, so a failed
-   native build stops the release before PyPI. Manual `twine upload
+   `.github/workflows/release.yml` (Trusted Publishing — OIDC, no token).
+   The `guards` job checks the tag against the pyproject version and both
+   `server.json` version fields, and checks that both native crate versions
+   match. These checks run before either build or any upload (issue #185).
+   Afterward, the `build` job builds and twine-checks the sdist and wheel
+   while the native jobs build, verify and attach the five native CLI
+   archives, Compose bundle and `SHA256SUMS`. The `publish` job asks for
+   approval in the `pypi` environment after both paths succeed, so a failed
+   native build or attachment still stops the release before PyPI. Existing
+   PyPI-based updaters can obtain the archives once the wheel becomes
+   visible. Native GitHub discovery waits for `RELEASE-READY.json`, which
+   the workflow attaches only after the approved `publish` job and both
+   image jobs succeed, so the daemon, PostgreSQL and Rust daemon images
+   are all published. A manual wheel upload does not create the readiness
+   marker.
+   If the wheel build fails, the native assets can still attach to the
+   public release before approval. Explicit tags and daemons with the
+   original GitHub discovery rule can see the assets. PyPI upload, image
+   and registry publication, and the readiness marker wait for a
+   successful wheel build and the approval it enables. If the wheel build
+   cannot be made to pass by re-running the failed job, abandon the version
+   as step 5 describes, because its native assets are already public.
+   Manual `twine upload
    dist/*` remains the fallback. PyPI never accepts a same-version
    re-upload — metadata-only fixes are a `.postN`.
 4. **MCP registry — automated.** The `registry` job in `release.yml` runs
@@ -152,7 +164,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    for PyPI to actually serve the new version, checks the marker survived
    into the published description, publishes, then confirms the registry
    serves it as latest — the `server.json` version check itself already
-   happened in `build`, above. Publishing the GitHub release is now the
+   happened in `guards`, above. Publishing the GitHub release is now the
    single action that lands all four surfaces.
    *Manual fallback* (`mcp-publisher login github` then `publish`, from the
    repo root) if the job is ever broken — note the binary is often not on
@@ -183,41 +195,68 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    daemon is the default Docker engine, so confirm before the release that
    this variable is still `true`: with the image published, install and
    release-mode `pseudolife-mcp update` select it (`--engine python` keeps
-   or switches back to Python); without it, a host that never chose an
-   engine stays on Python and `--engine rust` stops at its `docker pull`
-   with nothing changed. The Rust image gets only the explicit version
+   or switches back to Python); without it, no readiness marker is attached,
+   so the native client's unpinned update and check report nothing newer and
+   a daemon with the readiness rule gives no notice; clients that discover
+   through PyPI, and `--tag <version>`, still reach the release, where a host
+   that never chose an engine stays on Python and `--engine rust` stops at its
+   `docker pull` with nothing changed. The Rust image gets only the explicit version
    tag; the workflow pushes no `latest` for it.
    The five native CLI archives, `SHA256SUMS` and
-   `pseudolife-compose-<version>.tar.gz` publish with every release before
-   `publish` (no variable), once `build`'s guards passed; the installers download the archive
-   for their host, so check after the run that all seven assets are on
-   the release (`gh release view v<version> --json assets`). Verify a published image with
+   `pseudolife-compose-<version>.tar.gz` attach to the release after
+   `guards` passes, independently of the wheel build and ahead of
+   `publish`. The installers download the archive for their host.
+
+   After the run, use `gh release view v<version> --json assets` to check that
+   the five native CLI archives, Compose bundle, `SHA256SUMS` and
+   `RELEASE-READY.json` each appear once with state `uploaded` and a positive
+   size. Use `gh release download v<version> --pattern RELEASE-READY.json` to
+   verify the marker's version and commit match the tag and its digests match
+   the published daemon, PostgreSQL and Rust images.
+   `PSEUDOLIFE_PUBLISH_RUST_DAEMON` must be `true`: with it off the Rust image
+   job is skipped, no marker is attached, and native clients and daemons never
+   learn of the release. The build-only dispatch verifies the archive bundle
+   and skips the marker job.
+
+   Verify a published image with
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
    and flip its GHCR package to public after the first release that runs
    the job, as for the Python image.
 
    Run the build-only `release.yml` workflow dispatch on the candidate
-   first: all five target binaries must compile and execute their version
-   command after unpacking, and the complete compose/checksum artifact must
-   pass verification. Dispatch never invokes PyPI, GHCR, the registry or
-   GitHub asset publication. After an enabled release, inspect the Rust
-   image digest, download the six archives plus `SHA256SUMS`, and verify
-   every checksum and the archive-root layout in
-   [the asset contract](../../../docs/dev/release-assets.md). The Rust
-   GHCR package needs public visibility after its first approved push.
-   The build job checks native crate versions before PyPI publication.
+   first. The native build and bundle jobs must compile and execute the
+   version command for each unpacked target binary and verify the complete
+   Compose and checksum artifact. The native matrix checks the crate
+   versions. Dispatch skips `guards`, the wheel build, PyPI, GHCR, the
+   registry, GitHub asset attachment and the readiness marker. After an
+   enabled release, inspect the Rust image digest, download the six
+   archives plus `SHA256SUMS`, and verify every checksum and the archive-root
+   layout in [the asset contract](../../../docs/dev/release-assets.md).
+   The Rust GHCR package needs public visibility after its first approved
+   push. On a release, `guards` checks native crate versions before either
+   build starts.
    If native asset attachment stops after a partial upload, rerun the
    asset publication job with the same complete artifact. It requires the
    exact file set and checksums, downloads and verifies already published
    assets (including `SHA256SUMS`), and uploads only missing ones. It never
    replaces existing bytes; investigate a mismatch before publication.
-   Rerun a failed release with "Re-run failed jobs", never "Re-run all
-   jobs": rebuilt archives need not be byte-identical, so the attachment
-   would refuse the new `SHA256SUMS` and PyPI could not follow until the
-   attached assets are deleted. The archives are attached before the PyPI
-   approval, so to abandon a version after rejecting that approval, delete
-   the GitHub release (or its assets): otherwise a checkout of that tag
-   installs its native client although PyPI never got it.
+   Use "Re-run failed jobs" to reuse the successful build outputs. Never use
+   "Re-run all jobs": rebuilt archives need not be byte-identical, so the
+   attachment refuses the new `SHA256SUMS` and PyPI cannot follow until the
+   attached assets are deleted. Asset and
+   marker publication verifies any existing intended bytes and uploads only
+   missing assets. A differing existing marker requires a maintainer decision
+   before any removal. If the marker job fails in a way a re-run cannot clear
+   (it runs the tagged commit's own script, so a fault in it repeats), the
+   maintainer chooses between attaching a hand-built `RELEASE-READY.json` with
+   `gh release upload` after checking the three images by hand, and cutting a
+   patch release. If approval is declined, the marker stays absent and native
+   GitHub discovery withholds the release. Older consumers and explicit tags
+   still use their existing routes. To abandon a version after declining approval,
+   delete the GitHub release or its assets: its archives are already attached,
+   so a version-pinned native client install still downloads them and daemons
+   with the original GitHub rule still announce it, and while it stays GitHub's
+   latest release, current native discovery sees nothing newer.
    Missing opt-in assets are a failed native publication, not permission
    to enable a fallback or change the default engine; keep installation
    and update readiness as release prerequisites.

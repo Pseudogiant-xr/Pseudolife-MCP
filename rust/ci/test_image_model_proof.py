@@ -13,6 +13,19 @@ def instance(tmp_path):
     return proof.Proof("image:fixture", "pg:fixture", tmp_path / "models", tmp_path, False)
 
 
+def test_proof_reaches_fixture_setup_without_the_product_package(tmp_path, monkeypatch):
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    trial = instance(tmp_path)
+
+    def reached_container(*args, **kwargs):
+        raise RuntimeError("reached disposable container setup")
+
+    monkeypatch.setattr(trial, "container", reached_container)
+    with cold_harness_imports(), pytest.raises(RuntimeError, match="reached disposable container setup"):
+        trial.run()
+
+
 def test_every_container_has_network_none(tmp_path, monkeypatch):
     trial = instance(tmp_path)
     calls = []

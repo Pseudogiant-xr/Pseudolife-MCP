@@ -12,8 +12,9 @@ the procedure behind it.
 
 Each change waits for hosted CI once, on its batch:
 
-- **An ordinary pull request** (any head branch but `integrate/*`) runs the
-  fast lanes only. In `ci.yml`: `scope`, `guards`, `lock-resolve` and
+- **An ordinary pull request** (any head branch but `integrate/*`) without a
+  docs-only scope decision runs the fast lanes only. In `ci.yml`: `scope`,
+  `guards`, `lock-resolve` and
   `frontend`; the `test` job and the lite OS lanes are skipped. In
   `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest and
   the selected early parity replay described below),
@@ -75,15 +76,7 @@ Each change waits for hosted CI once, on its batch:
   member's own run can be absent, queued or cancelled. A pull request that
   edits `python-freeze.yml` runs its own edited workflow, which review
   catches; admission does not depend on it.
-  Because nothing under `pseudolife_memory/` may change, two routine
-  changes are exceptions too while they still edit the package, and carry
-  the label, applied by the maintainer or by the conductor acting on a
-  maintainer ruling (the maintainer is confirming this): a version cut (the
-  0.23.1 cut, #1490, bumped `pseudolife_memory/compose/docker-compose.yml`;
-  the `release-procedure` skill says so) and a schema bump, until the
-  schema has a Rust-owned source (the Rust job's `gen_schema_sql.py
-  --check` builds `rust/daemon/src/storage/schema.sql` from
-  `pseudolife_memory/storage/schema.py`).
+  A version cut that still edits the frozen package requires the label, applied by the maintainer or by the conductor acting on a maintainer ruling. Follow the `release-procedure` skill. Schema changes use the Rust daemon's DDL and plan. The Rust job's `gen_schema_sql.py --check` checks those inputs and the derived metadata.
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
   pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend
@@ -100,7 +93,8 @@ Each change waits for hosted CI once, on its batch:
 - **A batch pull request** (from `integrate/*`) runs everything its diff
   needs, exactly as every pull request did before 2026-10-21 (the
   Rust-only and documentation-only scope skips still apply).
-- **A master push** skips what its batch already passed on the same code.
+- **A docs-only change runs only the documentation checks in CI and Rust shim**, as a pull request and as a push to master: the `scope` decision, the doc guards, and the tests selected for the touched paths (tests under `tests/` whose code mentions a touched file's name, and the readers listed for its file or directory). No suite, lite lane, Rust job, lock-resolve or frontend job runs, and the required checks report as skipped. Both workflows decide with the Rust documentation predicate; when they cannot prove a change is docs-only (a missing, empty or unreadable range, a force push, an ambiguous API result) it runs the lanes it had before this shortcut. The generated producer census is eligible alongside docs on pull requests and merge groups only; documentation can stale it until the next batch regenerates it, and Rust shim reports that drift in the push's Scope job summary. The nightly still runs the lanes a docs push skipped.
+- **A master push from an integration batch** skips what that batch already passed on the same code.
   `ops/integrate.py merge` merges a batch with a merge commit only while
   master is its base or an ancestor of its head, so the commit pushed to
   master has the batch head's tree. Each scope job runs
@@ -163,10 +157,13 @@ Each change waits for hosted CI once, on its batch:
 ## Docs-only pull requests
 
 A docs-only pull request may be merged straight onto master without a
-batch. "Docs-only" is the definition in `CLAUDE.md` ("Docs-only changes"):
-every path in the diff passes `is_docs` in `rust/ci/parity_scope.py`, so
-Markdown under a code directory (`evals/`, `plugin/`, most of `rust/`) is
-not docs-only. All of these hold first:
+batch. "Docs-only" here is what the command below enforces: every path in
+the diff passes `is_documentation_path` in `rust/ci/parity_scope.py`. That
+is not the `is_docs` test of `CLAUDE.md` ("Docs-only changes"), which
+decides the local suite: Markdown under `rust/` or `evals/` can merge
+directly although most of it is not docs-only there, and nothing under
+`tests/`, `ops/`, `plugin/` or `pseudolife_memory/` can. All of these hold
+first:
 
 - It is independent: nothing it says depends on a pull request that is
   still open. One that documents unmerged work joins the batch that carries
@@ -176,17 +173,32 @@ not docs-only. All of these hold first:
   identical tree ("Stacked local gates"), so a direct merge at that point
   costs the open batch a rebuild and a fresh gate. Wait for the batch to
   merge, or add the pull request to the next one.
-- Its review pass is recorded, the doc guards passed at its head, and every
-  check at its head was read and is green on the current merge ref.
-- It is merged with a merge commit, never squash, pinned to the head that
-  was checked so a push after the checks is refused (`gh pr merge <n>
-  --merge --match-head-commit <full sha>`).
+- Its review pass is recorded.
 
-What it costs: the push to master runs the whole push matrix, because the
-push workflows do not skip a docs-only diff. Measured on 18 November 2026 on
-the first such merge (#1741): `test`, both lite lanes and the Rust jobs all
-started. Until they skip it, each direct merge spends about one hosted run
-on the account's 20 slots, so do not merge one shortly before a batch opens.
+Run `python ops/integrate.py merge-docs <pr>` from the clone holding the
+batch worktrees, during your turn to update master. Serialize it with
+batch builds, opens, merges and other updates to master.
+
+- The command checks that the pull request is open, non-draft, targets
+  master and is mergeable. It checks that no batch is open or built locally.
+- It requires both the pull request diff and the proposed master push to
+  be docs-only by master's CI classifier (`is_documentation_path` in
+  `rust/ci/parity_scope.py`).
+- The required checks must have reported and each latest check must be
+  finished with none failed. `SUCCESS`, `SKIPPED` and `NEUTRAL` qualify.
+- It runs the CI documentation guards and selected reader tests locally
+  in a disposable worktree at GitHub's test merge.
+- After the guards, it rechecks the batch state and checks, and requires the
+  base and head to match the tested pair. It pins the checked head in the
+  merge request and uses a regular GitHub merge commit. It then verifies
+  the landed commit's parents and tree.
+
+What it costs: a few hosted minutes for the doc guards. A push the workflows
+cannot classify as docs-only keeps the lanes it had before this shortcut,
+which can be the whole push matrix and about one hosted run on the account's
+20 slots, so do not merge one of those shortly before a batch opens.
+Do not start a direct merge shortly before a batch is built. Leave time
+for the local doc guards.
 
 Who merges: the maintainer, or a session the maintainer delegated merges to
 in their own words. A policy change (any change to a rule that governs how
@@ -1035,9 +1047,10 @@ raw `gh pr merge`, so this script is the only path there. That rule lives
 in the maintainer's own configuration, not in this repository: a Codex
 session, or any other harness, has no such block and relies on the written
 rule (CLAUDE.md, "Shipping checklist" item 4): a batch merges through
-`python ops/integrate.py merge`, a docs-only pull request merges directly
-only under "Docs-only pull requests" above, and a merge under the
-`merge-forward` skill's exceptions is made by hand, by the maintainer.
+`python ops/integrate.py merge`, a direct docs merge uses
+`python ops/integrate.py merge-docs <pr>` under
+[Docs-only pull requests](#docs-only-pull-requests), and only a merge under
+the `merge-forward` skill's exceptions is made by hand, by the maintainer.
 
 The maintainer runs it, or the session the maintainer delegated merging
 to.

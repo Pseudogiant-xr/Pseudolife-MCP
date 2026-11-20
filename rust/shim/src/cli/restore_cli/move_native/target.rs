@@ -39,6 +39,8 @@ pub(in crate::cli) struct Ask {
     /// bank behind its gate.
     #[serde(default)]
     pub resume_move: String,
+    #[serde(default)]
+    pub carry: bool,
 }
 
 /// What the target answers.
@@ -54,6 +56,14 @@ pub(in crate::cli) struct Reply {
     pub free_bytes: Option<u64>,
     /// `systemctl --user is-enabled pseudolife-update.timer`'s answer.
     pub update_timer: String,
+    /// Protocol 2 helpers predating carried identities omit this capability.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_carry: Option<bool>,
+    /// Preflight-only helpers omit this even when they support CarryCheck.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_carry_execution: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_carry_files: Option<bool>,
 }
 
 /// What the target host offers the helper: its docker, a health GET, the
@@ -201,7 +211,7 @@ pub(super) fn answer<P: Place>(place: &mut P, ask: &Ask) -> Reply {
                 )),
                 _ => {}
             }
-            if facts.auth == Some(false) {
+            if facts.auth == Some(false) && !ask.carry {
                 refuse.push(format!(
                     "the target daemon at {}/health does not require authentication (auth false); move keeps the target's own tokens, so it would serve the moved bank to anyone who reaches it; turn authentication on there (set PSEUDOLIFE_MCP_TOKEN), then retry",
                     facts.health_url
@@ -404,6 +414,35 @@ struct Site2 {
 }
 
 impl super::ops::Site for Site2 {
+    fn carry(
+        &mut self,
+        op: &super::protocol::Op,
+        folder: &Path,
+        id: &str,
+        pins: Option<&super::carry::TargetPins>,
+    ) -> Result<(), String> {
+        use super::{carry, protocol::Op};
+        let home = self.home();
+        let docker = self.docker()?;
+        match op {
+            Op::CarryApply {
+                identities,
+                expected_pins,
+                files,
+            } => carry::apply(
+                docker,
+                folder,
+                id,
+                identities,
+                expected_pins,
+                files,
+                home.as_deref(),
+            ),
+            Op::CarryVerify { identities } => carry::verify(docker, folder, identities, pins),
+            Op::CarryUndo => carry::undo(docker, folder, id, pins),
+            _ => Err("unrecognized carried identity operation".into()),
+        }
+    }
     type D = docker::Real;
     fn docker(&mut self) -> Result<&mut docker::Real, String> {
         self.docker.as_mut().ok_or_else(|| self.missing.clone())
@@ -522,18 +561,52 @@ fn run_ops() -> u8 {
         print_answer(&answer);
         return 0;
     }
-    let mut site = Site2 { docker, missing };
+    let answer = answer_op(&request, Site2 { docker, missing }, &mut reader);
+    print_answer(&answer);
+    0
+}
+
+fn answer_op(
+    request: &super::protocol::Request,
+    mut site: Site2,
+    reader: &mut dyn Read,
+) -> super::protocol::Answer {
+    use super::protocol::{Answer, Op, PROTOCOL};
+    let refuse = |error: String| Answer {
+        protocol: PROTOCOL,
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        error,
+        ..Answer::default()
+    };
+    if let Op::CarryCheck { populated, files } = &request.op {
+        use super::ops::Site;
+        let mut answer = refuse(String::new());
+        let home = site.home();
+        match site.docker().and_then(|docker| {
+            super::carry::target(
+                docker,
+                *populated,
+                request.pins.as_ref(),
+                files,
+                home.as_deref(),
+            )
+        }) {
+            Ok(digest) => {
+                answer.ok = true;
+                answer.carry_deployment = digest;
+            }
+            Err(why) => answer.error = why,
+        }
+        return answer;
+    }
     let needs_lock = takes_lock(&request.op);
-    let answer = if needs_lock {
+    if needs_lock {
         let Some(directory) = super::super::data_dir() else {
-            print_answer(&refuse(
-                "the target has no home directory for its update lock".to_owned(),
-            ));
-            return 0;
+            return refuse("the target has no home directory for its update lock".to_owned());
         };
         let _ = crate::board::state::private_dir(&directory);
         match super::super::with_update_lock(&directory, || {
-            super::ops::perform(&mut site, &request, &mut reader)
+            super::ops::perform(&mut site, request, reader)
         }) {
             Ok(answer) => answer,
             Err(super::super::LockRefusal::Busy(pid)) => Answer {
@@ -561,10 +634,8 @@ fn run_ops() -> u8 {
             ))
         }
     } else {
-        super::ops::perform(&mut site, &request, &mut reader)
-    };
-    print_answer(&answer);
-    0
+        super::ops::perform(&mut site, request, reader)
+    }
 }
 
 /// Whether the helper takes the target's update lock around `op`: every
@@ -578,12 +649,43 @@ fn takes_lock(op: &super::protocol::Op) -> bool {
 }
 
 fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
-    answer(here, ask)
+    let mut reply = answer(here, ask);
+    reply.supports_carry = ask.carry.then_some(cfg!(target_os = "linux"));
+    reply.supports_carry_execution = reply.supports_carry;
+    reply.supports_carry_files = reply.supports_carry;
+    reply
 }
 
 #[cfg(test)]
 mod lock_tests {
-    use super::super::protocol::Op;
+    use super::super::protocol::{Op, PROTOCOL, Request};
+
+    #[test]
+    fn carry_check_dispatches_read_only_without_entering_the_move_transaction() {
+        let op = Op::CarryCheck {
+            populated: [true, false, false, false],
+            files: Default::default(),
+        };
+        assert!(!super::takes_lock(&op));
+        let request = Request {
+            protocol: PROTOCOL,
+            op,
+            move_id: String::new(),
+            work_dir: String::new(),
+            rollback: false,
+            pins: None,
+        };
+        // The transaction's perform rejects the empty move id before it
+        // looks for Docker. Only the read-only dispatcher returns this error.
+        let missing = "fixture Docker unavailable".to_owned();
+        let site = super::Site2 {
+            docker: None,
+            missing: missing.clone(),
+        };
+        let answer = super::answer_op(&request, site, &mut std::io::empty());
+        assert!(!answer.ok);
+        assert_eq!(answer.error, missing);
+    }
 
     #[test]
     fn abort_waits_for_the_targets_lock_and_restores_take_it_themselves() {

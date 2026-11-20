@@ -4,7 +4,6 @@ The unittest discovery in schema_ci also exercises the comparison's negative
 controls without requiring the executable before the build step.
 """
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,16 +19,13 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[2]))
 import dbstate
 import psycopg
+from gen_schema_sql import PLAN_SHA256, plan_fingerprint as fingerprint
 from rust.harness_support.database_guard import assert_disposable_database
 from rust.harness_support import schema
 from rust.harness_support.schema import ensure_schema
 
-PLAN_SHA256 = "21fe09e91cf0494b6d7dd667cd27fa04211defd21efc8ef65da9cff0323ba882"
-
-
 def plan_fingerprint():
-    payload = json.dumps(schema.load_plan(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return fingerprint(*schema.load_plan())
 
 
 def compare(expected, actual):
@@ -152,6 +148,28 @@ class ComparisonControls(unittest.TestCase):
             changed[key] = {}
             with self.subTest(section=key), self.assertRaisesRegex(AssertionError, "mismatch"):
                 compare(state, changed)
+
+
+class RefusalFixtureControls(unittest.TestCase):
+    def test_refusal_seed_rejects_non_disposable_server_name_before_writes(self):
+        from unittest.mock import MagicMock
+
+        import schema_cases
+        from rust.harness_support.database_guard import PRODUCTION_DATABASE_ENV
+
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.execute.return_value.fetchone.return_value = ("ordinary_bank",)
+        with patch.object(schema_cases.pg, "create", return_value="fixture-dsn"), \
+                patch.object(schema_cases.pg, "drop") as drop, \
+                patch.object(schema_cases.psycopg, "connect", return_value=connection), \
+                patch.dict(sys.modules, {"pseudolife_memory.storage.postgres": None}), \
+                patch.dict(os.environ, {PRODUCTION_DATABASE_ENV: "configured_bank"}), \
+                self.assertRaisesRegex(ValueError, "bank fixtures require a disposable harness database"):
+            schema_cases.refusal_cell(Path("unused"), 1, "99")
+        connection.execute.assert_called_once_with("SELECT current_database()")
+        connection.transaction.assert_not_called()
+        drop.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -19,8 +19,21 @@ flowchart TD
     H -. changed credentials or connection .-> F
 ```
 
-**With the native client**, tunnels are not available yet: it cannot set
-up, start, stop or refresh one. It answers `tunnel status` for a profile it
+**With the native client**, `tunnel setup` can save a profile using an
+explicit `--daemon-url` and owner-only `--token-file` after `--accept-access`
+and an authenticated daemon check. Resume the prepared profile with
+`--tunnel-id`, then import its first runtime key in a separate setup command
+using `--read-key` at a terminal or an owner-only `--key-file`. Use
+`pseudolife-mcp tunnel run` to keep a prepared tunnel in the foreground.
+In another terminal, `pseudolife-mcp tunnel stop` asks that native
+supervisor to stop its runtime. Pass the same `--profile` and
+`--profile-dir` in both commands if you selected a different profile or
+store. Use the same client to manage a running tunnel. The Python client's
+status can report a native launch as stopped, and Python stop leaves that
+launch running. Key renewal, background start and refresh still require
+the Python client.
+
+The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel
 runs. It also answers `tunnel update`, which starts, stops and signals
 nothing. `tunnel update` reports a tunnel that is not running, and names a
@@ -30,20 +43,21 @@ runs, or may run, as `stale`: it is left as it is, because this client
 cannot refresh it yet. A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native
-client also answers the refusals of `tunnel verify` and `tunnel setup`
-before they would change anything. Every other step stops with
+client also answers preflight refusals for `tunnel verify` and `tunnel setup`.
+Operations it defers stop with
 `pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and exit 1,
-having changed nothing. That covers setup itself, `start`, `run`, `stop`,
-`doctor`, `service`, the cloud verification, `status` of a profile in a
+having changed nothing. That covers guided setup and unsupported saved-profile
+edits, `start`,
+`doctor`, `service`, verification of a Python-owned launch, `status` of a profile in a
 form it does not read or beside a verification or refresh file in a form
-it does not read, and `verify` while a process record exists or with a
+it does not read, and `verify` with a
 Windows (DPAPI) key it cannot unseal in this session. On Windows it unseals
 the saved key to check it: a damaged key file is no usable key, and a key
 sealed by another account, or read over a logon without the account's
 credentials (such as a key-based SSH logon), is reported as `not_verified`.
 `pseudolife-mcp doctor` lists saved tunnels and names only steps this client
-runs. On a host that runs a tunnel, keep the Python
-client, which an update does unless you opt in with
+runs. If your tunnel relies on background start or refresh, keep the
+Python client. An update keeps it unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how

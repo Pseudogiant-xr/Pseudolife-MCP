@@ -538,14 +538,14 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLgpBUEkga2V5IGV4cGlyeTogMjAyMC0wMS0wMVQwMDowMDowMFouClJlbmV3IHByaXZhdGVseTogdHVubmVsIHNldHVwIC0tcHJvZmlsZSBkb3QgLS1yZWFkLWtleSAtLWtleS1leHBpcmVzLWF0IDxJU08gdGltZXN0YW1wPi4K",
+   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLgpBUEkga2V5IGV4cGlyeTogMjAyMC0wMS0wMVQwMDowMDowMFouClJ1bnRpbWUga2V5IHJlbmV3YWwgcmVxdWlyZXMgdGhlIFB5dGhvbiBjbGllbnQuIFJlcnVuIHRoZSByZWxlYXNlIGluc3RhbGxlciB3aXRoIFBTRVVET0xJRkVfU0hJTV9FTkdJTkU9cHl0aG9uLCB0aGVuIHVzZSB0aGF0IGNsaWVudCdzIHR1bm5lbCBzZXR1cCB3aXRoIC0tcmVhZC1rZXkgYW5kIC0ta2V5LWV4cGlyZXMtYXQuCg==",
    "stderr": "",
    "window": [
-    1791588232.1026607,
-    1791588232.5173445
+    1795098585.3277543,
+    1795098585.3315098
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -4116,6 +4116,12 @@
   }
  },
  "recorded_from_candidate": {
+  "status-expired-text": {
+   "commit": "744d3ad553a6108ed15514a79f9b2c7b7e48715e",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "a120123c0a1db8f348859e9e774edb45ff5cc055fb77ca4aaa89597ae525b335"
+  },
   "status-process-record": {
    "commit": "1827ebaa0d0365d0dffc7d83300ec4815c4fdfda",
    "rust_tree": "clean",

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "scope",
+  "before": "fea2d407b8bf12cd",
+  "fingerprint": "c7803649087495de",
+  "reason": "Select documentation guards and readers using an exact Git diff and local source scan. The same runner and shallow checkout remain. Only a documentation candidate triggers reader enumeration and the push association read."
+}

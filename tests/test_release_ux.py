@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+from rust.daemon.harness.gen_schema_sql import load_schema_plan
 from tests.helpers import (
     invoke_tool as _invoke,
     reload_mcp_filemode as _reload,
@@ -311,19 +312,19 @@ def test_readme_schema_version_matches_code() -> None:
     21) when hand-edited. Every explicit 'current schema' claim must match
     ``SCHEMA_META_VERSION`` — the capabilities table in the README, and the
     DSN row that moved to docs/guide/configuration.md."""
-    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+    schema_version = load_schema_plan()["schema_version"]
 
     text = _README.read_text(encoding="utf-8")
     claims = re.findall(r"\| Schema version \| v(\d+)", text)
     assert claims, "README capabilities table must state the schema version"
-    assert all(int(c) == SCHEMA_META_VERSION for c in claims), (
-        f"README says schema v{claims}, code says v{SCHEMA_META_VERSION}")
+    assert all(int(c) == schema_version for c in claims), (
+        f"README says schema v{claims}, code says v{schema_version}")
     config_page = _DOCS_GUIDE / "configuration.md"
     conf = config_page.read_text(encoding="utf-8")
     dsn = re.findall(r"source of truth \(schema v(\d+)\)", conf)
     assert dsn, "docs/guide/configuration.md must state the schema in the DSN row"
-    assert all(int(c) == SCHEMA_META_VERSION for c in dsn), (
-        f"configuration.md DSN row says v{dsn}, code says v{SCHEMA_META_VERSION}")
+    assert all(int(c) == schema_version for c in dsn), (
+        f"configuration.md DSN row says v{dsn}, code says v{schema_version}")
 
 
 def test_schema_version_history_table_reaches_current() -> None:
@@ -333,7 +334,7 @@ def test_schema_version_history_table_reaches_current() -> None:
     a bump with a forgotten history row would pass the suite silently and
     the table would stop at v28 forever. The table must have a row for the
     current version and no gaps from v11 (its first row) upward."""
-    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+    schema_version = load_schema_plan()["schema_version"]
 
     conf = (_DOCS_GUIDE / "configuration.md").read_text(encoding="utf-8")
     section = conf.split("## Schema version history", 1)
@@ -342,10 +343,10 @@ def test_schema_version_history_table_reaches_current() -> None:
     rows = [int(v) for v in re.findall(r"^\| v(\d+) \|", section[1],
                                        flags=re.MULTILINE)]
     assert rows, "the history table must hold | vNN | rows"
-    assert max(rows) == SCHEMA_META_VERSION, (
+    assert max(rows) == schema_version, (
         f"history table stops at v{max(rows)}, code is at "
-        f"v{SCHEMA_META_VERSION} — add the missing row")
-    assert sorted(rows) == list(range(min(rows), SCHEMA_META_VERSION + 1)), (
+        f"v{schema_version} — add the missing row")
+    assert sorted(rows) == list(range(min(rows), schema_version + 1)), (
         f"history table has gaps: {sorted(rows)}")
 
 
@@ -917,7 +918,7 @@ def test_changelog_mentions_current_schema_version() -> None:
     bump of ``SCHEMA_META_VERSION`` forces a matching ``vNN`` mention in
     CHANGELOG.md — old mentions accumulate harmlessly; only the current
     version is checked."""
-    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+    schema_version = load_schema_plan()["schema_version"]
 
     # Pending changelog.d/ fragments count: the bump's entry lives there
     # until the release folds it into CHANGELOG.md (2026-10-09).
@@ -926,9 +927,9 @@ def test_changelog_mentions_current_schema_version() -> None:
         + [f.read_text(encoding="utf-8")
            for f in sorted((_README.parent / "changelog.d").glob("*.md"))
            if f.name != "README.md"])
-    assert re.search(rf"\bv{SCHEMA_META_VERSION}\b", changelog), (
-        f"schema is v{SCHEMA_META_VERSION} but neither CHANGELOG.md nor a "
-        f"changelog.d/ fragment mentions v{SCHEMA_META_VERSION}")
+    assert re.search(rf"\bv{schema_version}\b", changelog), (
+        f"schema is v{schema_version} but neither CHANGELOG.md nor a "
+        f"changelog.d/ fragment mentions v{schema_version}")
 
 
 def test_every_release_tag_has_a_changelog_section() -> None:

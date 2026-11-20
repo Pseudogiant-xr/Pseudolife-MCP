@@ -36,8 +36,10 @@ curl --fail --silent --show-error http://127.0.0.1:8765/health
 ```
 
 Healthy Python reports `"status":"ok"`, `"ready":true`, and the same schema
-version as `SCHEMA_META_VERSION` in the checkout's
-`pseudolife_memory/storage/schema.py`. A read-only shadow cannot migrate an
+version as `SCHEMA_META_VERSION` in the checkout's frozen
+`pseudolife_memory/storage/schema.py`. The Rust shadow requires the bank's
+version to match `schema_version` in
+`rust/daemon/src/storage/schema_plan.json`. A read-only shadow cannot migrate an
 older bank: arrange the active writer's ordinary update separately before
 continuing. A pre-v57 bank also needs its Python counters import completed.
 Do not change engines as a way to repair a schema mismatch.

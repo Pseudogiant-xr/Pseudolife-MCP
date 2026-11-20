@@ -1,18 +1,21 @@
-"""Seed state through the oracle's own writers, not hand-built bytes.
-
-The harness imports the oracle checkout's modules (``use_oracle`` puts its
-source first on ``sys.path``) and calls the functions that write these files
-in production: the coordination adapter's private atomic writer and its
-digest renderer.
-"""
+"""Load captured CLI payloads and seed them through the private writer."""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from pathlib import Path
 
+# Direct and isolated CLI launches put only <repo>/rust on the import path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+try:
+    from rust.harness_support.private_fixture import write_private
+finally:
+    sys.path.pop(0)
+
 _SOURCE: Path | None = None
+_PAYLOADS = json.loads(Path(__file__).with_name("producer_payloads.json").read_text(encoding="utf-8"))
 
 
 def use_oracle(source: Path) -> None:
@@ -20,11 +23,6 @@ def use_oracle(source: Path) -> None:
     _SOURCE = source
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
-
-
-def _adapter_module():
-    import pseudolife_memory.coordination_adapter as module  # noqa: PLC0415
-    return module
 
 
 def digest_key(session_id: str) -> str:
@@ -35,48 +33,24 @@ def digest_dir(home: Path) -> Path:
     return home / ".pseudolife-mcp" / "digests"
 
 
-def _writer():
-    module = _adapter_module()
-    adapter = module.CoordinationAdapter.__new__(module.CoordinationAdapter)
-    adapter._digest_write_reported = False
-    return adapter
+def wait_mail_digest() -> str:
+    return _PAYLOADS["wait_mail_digest"]
 
 
-def write_private(path: Path, body: str) -> None:
-    """``CoordinationAdapter._write_private``: private dir, temp, replace."""
-    if not _writer()._write_private(path, body):
-        raise RuntimeError(f"producer could not write {path}")
+def doorbell_record(kind: str) -> str:
+    return _PAYLOADS["doorbell_records"][kind]
 
 
-def render(count: int, preview: list[dict], maintainer: int = 0) -> str:
-    """The real renderer with its clock read in UTC, so the seeded bytes (and
-    the goldens recorded from them) are the same in every timezone."""
-    import time  # noqa: PLC0415
-    module = _adapter_module()
-    original = module.time.localtime
-    module.time.localtime = time.gmtime
-    try:
-        return module.render_digest(count, preview, maintainer)
-    finally:
-        module.time.localtime = original
-
-
-def write_digest(path: Path, watermark: int, text: str) -> None:
+def write_digest(path: Path, watermark: int, text: str, *, root: Path) -> None:
     # ``CoordinationAdapter._write_digest``'s body.
-    write_private(path, f"{watermark}\n" + (text + "\n" if text else ""))
+    write_private(path, f"{watermark}\n" + (text + "\n" if text else ""), root=root)
 
 
-def write_ring(path: Path, watermark: int, decision: str, reason: str) -> None:
+def write_ring(path: Path, watermark: int, decision: str, reason: str, *, root: Path) -> None:
     # ``CoordinationAdapter._write_ring``'s body.
-    write_private(path, f"{watermark}\n{decision} {reason}\n")
+    write_private(path, f"{watermark}\n{decision} {reason}\n", root=root)
 
 
-def write_seen(path: Path, watermark: int) -> None:
+def write_seen(path: Path, watermark: int, *, root: Path) -> None:
     # ``CoordinationAdapter._mark_seen``'s body.
-    write_private(path, f"{watermark}\n")
-
-
-def preview(message_id: str, sender: str, excerpt: str, created_at: float = 1_791_500_000.0,
-            agent: str = "0123456789abcdef0123456789abcdef") -> dict:
-    return {"message_id": message_id, "sender_label": sender, "created_at": created_at,
-            "sender_agent_id": agent, "excerpt": excerpt}
+    write_private(path, f"{watermark}\n", root=root)

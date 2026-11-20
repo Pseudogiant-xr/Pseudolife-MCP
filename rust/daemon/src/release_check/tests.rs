@@ -13,6 +13,7 @@ fn response(status: u16, headers: &[(&str, &str)], body: &str) -> reqwest::Respo
 
 fn complete_release() -> Value {
     let names = [
+        "RELEASE-READY.json",
         "SHA256SUMS",
         "pseudolife-compose-0.25.0.tar.gz",
         "pseudolife-mcp-0.25.0-aarch64-apple-darwin.tar.gz",
@@ -25,6 +26,36 @@ fn complete_release() -> Value {
         "tag_name": "v0.25.0", "draft": false, "prerelease": false,
         "assets": names.map(|name| json!({"name": name, "state": "uploaded", "size": 100}))
     })
+}
+
+#[tokio::test]
+async fn github_release_notice_requires_one_uploaded_nonempty_ready_marker() {
+    let complete = complete_release();
+    let mut noticed = Vec::new();
+    for condition in ["missing", "uploading", "duplicate", "empty"] {
+        let mut data = complete.clone();
+        let assets = data["assets"].as_array_mut().unwrap();
+        assert_eq!(assets[0]["name"], "RELEASE-READY.json");
+        match condition {
+            "missing" => {
+                assets.remove(0);
+            }
+            "uploading" => assets[0]["state"] = json!("starter"),
+            "duplicate" => assets.push(assets[0].clone()),
+            "empty" => assets[0]["size"] = json!(0),
+            _ => unreachable!(),
+        }
+        let result = fetch(200, &[], &data.to_string()).await;
+        if !update_notice("0.24.0", result.latest.as_deref(), None, "pl").is_empty() {
+            noticed.push(condition);
+        }
+    }
+    assert!(
+        noticed.is_empty(),
+        "noticed invalid ready markers: {noticed:?}"
+    );
+    let latest = fetch(200, &[], &complete.to_string()).await.latest;
+    assert!(!update_notice("0.24.0", latest.as_deref(), None, "pl").is_empty());
 }
 
 async fn fetch(status: u16, headers: &[(&str, &str)], body: &str) -> FetchResult {
@@ -57,7 +88,7 @@ async fn incomplete_releases_wait_for_the_complete_uploaded_set() {
     let result = fetch(200, &[], &absent.to_string()).await;
     assert!(result.latest.is_none());
     assert_eq!(result.delay(21600.0, false), 21600.0);
-    for index in 0..7 {
+    for index in 0..complete["assets"].as_array().unwrap().len() {
         let mut partial = complete.clone();
         partial["assets"].as_array_mut().unwrap().remove(index);
         let result = fetch(200, &[], &partial.to_string()).await;

@@ -66,13 +66,13 @@ Unicode, not starting with `-`.
 Each of these was a case of this row while the native command deferred:
 
 - Every argv that passes the checks above: the native module answers it.
-  Without `--dry-run` it refuses, naming it; with `--dry-run` it refuses, in
-  this order, `--target-checkout`, `--expose-target`, `--resume`,
-  `--target-env-file` / `--target-compose-file`, a missing `--target-url`,
-  carried tokens (no `--no-keep-tokens`) and a relative `--target-work-dir`
-  (exit 2), and otherwise runs the read-only preflight (exit 0 with the
-  plan, or 4 with its refusal). The oracle would contact the live daemon,
-  so these never ran it; `tests/cli_move_contract.rs` pins each answer.
+  On Linux targets, `--dry-run` checks both bearer modes. It checks carried
+  bearer settings against the installed Compose files or the original files
+  supplied explicitly, without sending the source values. Execution requires
+  an execution-capable target helper and a loopback daemon endpoint for
+  carried-bearer verification. Checkout targets, automatic exposure, a
+  missing `--target-url`, and relative paths outside `~/` are refused (exit 2).
+  The oracle would contact the live daemon, so these use the Rust tests.
 - `--target-url` values whose validity differs between Python releases
   (bracketed hosts, empty userinfo, empty or `+`/leading-zero ports, `_` or
   non-ASCII in a host): the native client decides them

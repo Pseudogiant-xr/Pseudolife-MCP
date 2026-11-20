@@ -42,7 +42,7 @@ def test_a_full_rust_run_is_what_a_batch_starts():
     # the Python freeze (14 November 2026).
     assert pull_request_reachable(workflow) == ["scope", "rust", "fixtures", "candidate",
                                                 "candidate-harness", "parity-pool", "parity-checks",
-                                                "daemon-image", "parity"]
+                                                "daemon-image", "parity", "parity-windows"]
     names = reachable_names(workflow)
     assert "Parity checks / windows-latest / cli-store" in names
     assert not [name for name in names if "h5-" in name or "cli-live" in name or "judges" in name]

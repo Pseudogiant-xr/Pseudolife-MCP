@@ -15,6 +15,16 @@ import pytest
 import daemons
 import run
 from principal_fixtures import env_auth, environment_principal
+from rust.harness_support.test_readiness import (  # noqa: F401
+    test_cold_import_blocker_rejects_product_and_evicts_cached_fixture,
+    test_cold_import_restores_namespace_binding,
+    test_harness_imports_without_product_package,
+    test_read_health_bypasses_proxies_and_preserves_http_errors,
+    test_ready_requires_success_and_true,
+    test_stage_completion_is_distinct_from_readiness,
+    test_timeout_diagnostics_distinguish_unanswered_malformed_and_pending,
+    test_transport_failure_propagates_to_the_harness,
+)
 
 # Collected by the existing security-admission step, without a workflow change.
 from test_principal_fixtures import (  # noqa: F401
@@ -27,8 +37,19 @@ from test_principal_fixtures import (  # noqa: F401
     test_runner_guard_keeps_slice_restriction_without_package,
     test_seed_paths_without_package_or_connections,
     test_signer_vectors_and_bad_signature_control,
+    test_principal_seed_refuses_bench_before_writing,
     test_static_contract_is_package_independent_and_detects_wrong_headers,
 )
+
+
+def test_fixture_controls_are_imported_for_parity():
+    import test_principal_fixtures
+    from rust.harness_support import test_readiness
+
+    for source in (test_readiness, test_principal_fixtures):
+        missing = sorted(name for name, test in vars(source).items()
+                         if name.startswith("test_") and globals().get(name) is not test)
+        assert not missing, f"import {source.__name__} tests in the principal parity module: {', '.join(missing)}"
 
 
 def store_bearers(scn) -> list[str]:

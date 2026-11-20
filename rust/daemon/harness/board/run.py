@@ -12,10 +12,8 @@ Rust arm, and a step can use what earlier steps returned on its own arm
 (credentials, ids). Per step it compares the status, the headers clients
 read and the body by value after the rule-based normalizers in ``norm.py``.
 After every write it dumps the board's tables on both arms and diffs them
-row for row. After every scenario it checks each arm's audit chain with
-Python's own ``verify_audit_chain``, recomputes every row's hash with
-Python's ``audit_hash``, and requires every stored payload to equal
-Python's ``_canonical`` of itself byte for byte.
+row for row. After every scenario the harness checks each arm's audit chain,
+recomputes the row hashes, and requires byte-identical canonical payload text.
 
 Exit status: 0 only when no step, no state and no chain check differs.
 """
@@ -42,6 +40,9 @@ sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(REPO))
 import daemons  # noqa: E402
 from rust.harness_support import readiness  # noqa: E402
+from rust.harness_support.audit_oracle import (  # noqa: E402
+    audit_hash, canonical_payload, verify_audit_chain,
+)
 import pgdisposable  # noqa: E402
 from board import scenarios as S  # noqa: E402
 from board.norm import Normalizer, Windows  # noqa: E402
@@ -326,8 +327,32 @@ def cut_note(scenario: str, more: int) -> str:
     return f"  (CHAIN [{scenario}]: +{more} more problems; --out holds them all)"
 
 
+def _read_audit_events(conn) -> list[dict]:
+    """Read hash inputs with round-trip float precision, including legacy banks."""
+    from psycopg.rows import dict_row, tuple_row
+
+    with conn.transaction():
+        conn.execute("SET LOCAL extra_float_digits = 3")
+        with conn.cursor(row_factory=tuple_row) as cur:
+            cur.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE "
+                "attrelid=to_regclass('coordination_events') AND attname='body' "
+                "AND attnum>0 AND NOT attisdropped)"
+            )
+            has_body = cur.fetchone()[0]
+        body = "body, body_salt" if has_body else "NULL::text AS body, NULL::text AS body_salt"
+        with conn.cursor(name="coordination_audit", row_factory=dict_row) as cur:
+            cur.itersize = 1000
+            cur.execute(
+                "SELECT seq, event, actor, principal, agent_id, recipient_agent_id, "
+                "project, task, message_id, payload, created_at, hlc, prev_hash, hash, "
+                f"{body} FROM coordination_events ORDER BY seq"
+            )
+            return list(cur)
+
+
 def chain_check(dsn: str) -> list[str]:
-    """Python's verifier, hash and canonical form over every row of a chain.
+    """Check the frozen audit rules against each row of a chain.
 
     Under a real-bank base the verifier still walks the whole chain, since a
     link is only checkable against its neighbours, and it already fails on
@@ -335,13 +360,11 @@ def chain_check(dsn: str) -> list[str]:
     reports skip the rows still equal to the base, which neither daemon
     wrote in this run and which both arms hold alike."""
     import psycopg
-    from pseudolife_memory.storage.coordination import (
-        _canonical, audit_events, audit_hash, verify_audit_chain)
     import dbstate
     base = dbstate._base_hashes(dsn)
     problems, unchanged = [], set()
     with psycopg.connect(dsn, autocommit=True) as conn:
-        rows = [dict(r) for r in audit_events(conn)]
+        rows = _read_audit_events(conn)
         if base is not None:
             known = base.get("public.coordination_events", ())
             unchanged = {seq for seq, digest in conn.execute(
@@ -354,7 +377,7 @@ def chain_check(dsn: str) -> list[str]:
             continue
         if audit_hash(r["prev_hash"], r) != r["hash"]:
             problems.append(f"seq {r['seq']}: audit_hash differs")
-        if r["payload"] != _canonical(json.loads(r["payload"])):
+        if r["payload"] != canonical_payload(json.loads(r["payload"])):
             problems.append(f"seq {r['seq']}: payload is not Python's canonical text: {r['payload'][:200]}")
     return problems
 

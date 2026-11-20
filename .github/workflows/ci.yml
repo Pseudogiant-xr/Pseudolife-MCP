@@ -65,6 +65,7 @@
 # nothing). A lane the batch skipped runs, except that a Rust-only batch's
 # push skips the Python lanes too since the Python freeze (scope, below).
 # The nightly stays the full backstop; no required check reads a push run.
+# A direct documentation-only push also runs only the fast lanes and guards.
 #
 # Merge queue (docs/specs/2026-10-19-merge-queue.md): `merge_group` runs the
 # same jobs under the same check names, so the ruleset's required `test` check
@@ -122,10 +123,12 @@ jobs:
       actions: read
       pull-requests: read
     outputs:
-      python: ${{ steps.scope.outputs.python }}
+      python: ${{ steps.docs.outputs.decision == 'docs' && 'false' || steps.scope.outputs.python }}
+      docs: ${{ steps.docs.outputs.decision }}
+      docs_tests: ${{ steps.docs.outputs.docs_tests }}
       # true for a batch, push or merge group whose change is Rust-only: the
       # guards job then also runs the live tests that read rust/ files.
-      rust_only: ${{ steps.scope.outputs.rust_only }}
+      rust_only: ${{ steps.docs.outputs.decision != 'docs' && steps.scope.outputs.rust_only || '' }}
       # true when the frozen package's own tests must run too (the Classify
       # step says when). Only `test` reads it, and ops/ci_tests.sh turns it
       # into --include-frozen on its own pytest command line: an argument,
@@ -246,6 +249,17 @@ jobs:
             echo "rust_only=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Select documentation checks
+        id: docs
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
+        # Save the legacy verdict first. This classifier can fetch an
+        # older before object in a shallow checkout to prove a docs push.
+        run: python3 -m rust.ci.docs_scope ci
+
   guards:
     # Runs only when `scope` skips the Python lanes: the guards that scan
     # every tracked file and pin the release docs, so an ordinary or
@@ -295,6 +309,7 @@ jobs:
           pip install -e .[dev]
 
       - name: Tree-wide guards
+        if: needs.scope.outputs.docs != 'docs'
         # Every test file that reads CHANGELOG.md, plus the tracked-tree
         # scans (the wall-clock budget guard covers rust/ tests, so Rust-only
         # PRs, which skip the test job, still run it). The disposable-database guard scans every tracked .py file,
@@ -318,6 +333,12 @@ jobs:
           tests/test_integrate_script.py::test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness
           tests/test_integrate_script.py::test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips
 
+      - name: Documentation guards and readers
+        if: needs.scope.outputs.docs == 'docs'
+        env:
+          DOC_TESTS: ${{ needs.scope.outputs.docs_tests }}
+        run: python -m rust.ci.docs_scope tests
+
       - name: Live tests that read rust/ files
         # Since the Python freeze a Rust-only batch skips the Python lanes on
         # its pull request and its master push, so every live test that
@@ -336,7 +357,7 @@ jobs:
           tests/test_integrate_snapshot_admission.py tests/test_move_cli.py tests/test_operator_engine_transport.py
           tests/test_harness_database_turn.py tests/test_harness_database_turn_native.py tests/test_harness_selection.py
           tests/test_pdfium_pin.py tests/test_prune_worktrees.py tests/test_rehearse_activation.py
-          tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_schema_version_guard.py
+          tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_rust_release_image.py tests/test_schema_version_guard.py
           tests/test_update_engine.py tests/test_suite_classes.py
           tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
           tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
@@ -358,7 +379,7 @@ jobs:
     # The Python must be the image's (tests/test_check_lock_resolves.py pins
     # it to the FROM line).
     needs: scope
-    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
+    if: ${{ !cancelled() && needs.scope.outputs.docs != 'docs' && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'lock-resolve') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -906,9 +927,13 @@ jobs:
     # empty scope runs the suite instead of skipping it.
     if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-macos') }}
     runs-on: macos-latest
-    # Curated like the Windows lane: the hook and installer surface needs no
-    # embedding model, so this is minutes, not the full suite.
-    timeout-minutes: 25
+    # The hook and installer tests need no embedding model. Batch #1745
+    # attempt 2 (2026-11-19) hit 25 minutes after 2m57s of setup, a 4m13s
+    # native build and 18m01s of tests, with the last progress line at 69%.
+    # At that pace the tests would take about 26 minutes, or 33 minutes
+    # with setup and build. Round up from that projection plus 10% for
+    # uneven test durations and job cleanup.
+    timeout-minutes: 37
 
     steps:
       - uses: actions/checkout@v4
@@ -1224,7 +1249,7 @@ jobs:
     # Never scoped by the diff; skips a same-tree batch pass on push or a
     # same-SHA successful push on schedule, and runs when scope fails.
     needs: scope
-    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
+    if: ${{ !cancelled() && needs.scope.outputs.docs != 'docs' && needs.scope.outputs.push_passed != 'true' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'frontend') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

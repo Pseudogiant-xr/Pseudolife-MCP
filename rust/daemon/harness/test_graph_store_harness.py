@@ -1,18 +1,17 @@
 """Rejecting controls for the store harness's semantic clock comparison."""
 import copy
 from contextlib import ExitStack
-import importlib.abc
+import importlib
 import os
 import json
 from pathlib import Path
-import runpy
 import tempfile
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
 import graph_store
 from graph_store import ClockState, catalog_shape, digest, response_diff, strict_json, wall_time
+from rust.harness_support.import_blocker import cold_harness_imports
 
 
 def state(clock=1.0):
@@ -199,33 +198,21 @@ class ClockControls(unittest.TestCase):
 
 class IndependentFixtures(unittest.TestCase):
     def test_seed_and_replay_import_without_product(self):
-        class Block(importlib.abc.MetaPathFinder):
-            def find_spec(self, fullname, *args):
-                if fullname == "pseudolife_memory" or fullname.startswith("pseudolife_memory."):
-                    raise AssertionError("product imported: " + fullname)
-
-        saved = {n: m for n, m in sys.modules.items() if n == "graph_fixtures" or n == "pseudolife_memory"
-                 or n.startswith("pseudolife_memory.")}
-        guard = Block()
-        sys.meta_path.insert(0, guard)
-        for name in saved:
-            del sys.modules[name]
-        try:
-            # Execute the module body again: a cached graph_store import
-            # would hide a new top-level dependency from the blocker.
-            replay = runpy.run_path(graph_store.__file__)
+        with cold_harness_imports():
+            replay = importlib.import_module("graph_store")
+            replay.operations("read")  # Lazy graph_read_profile import.
+            importlib.import_module("graph_read_compare")
+            importlib.import_module("candidate_record")
             import graph_fixtures
-            with patch("graph_fixtures.connect") as connection, patch("graph_fixtures.ensure_schema"):
+            with patch("graph_fixtures.connect") as connection, patch("rust.harness_support.bank_fixture.ensure_schema"):
+                conn = connection.return_value.__enter__.return_value
+                conn.execute.return_value.fetchone.return_value = ("pl_cf_w3h_fixture",)
                 graph_fixtures.seed("disposable fixture")
-                self.assertGreater(connection.return_value.__enter__.return_value.execute.call_count, 20)
-            with patch.object(replay["pg"], "create", side_effect=RuntimeError("reached disposable setup")), \
-                    patch.object(replay["pg"], "drop"):
+                self.assertGreater(conn.execute.call_count, 20)
+            with patch.object(replay.pg, "create", side_effect=RuntimeError("reached disposable setup")), \
+                    patch.object(replay.pg, "drop"):
                 with self.assertRaisesRegex(RuntimeError, "reached disposable setup"):
-                    replay["run"](Path("unused"), "golden")
-        finally:
-            sys.meta_path.remove(guard)
-            sys.modules.pop("graph_fixtures", None)
-            sys.modules.update(saved)
+                    replay.run(Path("unused"), "golden")
 
     def test_seed_guards_target_before_open_and_connection_before_writes(self):
         import graph_fixtures as fixture
@@ -241,6 +228,24 @@ class IndependentFixtures(unittest.TestCase):
                 fixture.seed("postgresql://localhost/pl_cf_w3h_fixture")
             connect.return_value.execute.assert_not_called()
             connect.return_value.close.assert_called_once()
+
+    def test_graph_seeds_refuse_bench_before_writing(self):
+        import graph_fixtures as fixture
+        from unittest.mock import call
+
+        for entry in (fixture.seed, fixture.ReadFixture):
+            with self.subTest(entry=entry.__name__), \
+                    patch.object(fixture.psycopg, "connect") as connect, \
+                    patch.object(fixture, "ensure_schema") as schema, \
+                    patch("rust.harness_support.bank_fixture.ensure_schema") as bank_schema:
+                conn = connect.return_value
+                conn.__enter__.return_value = conn
+                conn.execute.return_value.fetchone.return_value = ("pseudolife_memory_bench",)
+                with self.assertRaisesRegex(ValueError, "require a disposable harness database"):
+                    entry("dbname=pl_cf_w3h_fixture")
+                self.assertEqual(conn.execute.call_args_list, [call("SELECT current_database()")] * 2)
+                schema.assert_not_called()
+                bank_schema.assert_not_called()
 
     def test_collation_changes_only_the_recorded_inverse_relation(self):
         from graph_fixtures import ReadFixture

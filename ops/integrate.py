@@ -19,6 +19,7 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
     python ops/integrate.py open --suite <suite.json> --harness <harness.json> --shim-tests <shim.json>
                                               # push it, open its PR
     python ops/integrate.py merge             # merge the open batch PR, once green
+    python ops/integrate.py merge-docs <pr>   # merge an independent docs-only PR
 
 A pull request joins by carrying the `ready-to-batch` label. `build` runs
 in a clean checkout whose HEAD is origin/master, merges each labelled head
@@ -43,8 +44,9 @@ branch for bisecting and is recorded in the plan, and `open` refuses it.
 Only derived metadata conflicts are resolved, no member code is edited
 and nothing force-pushes. `merge` merges the batch pull request `open` published,
 with a merge commit, only while its head is the built head, every check on
-it finished without a failure and master has not moved past it; every merge
-is an admin bypass, so this is the check GitHub does not make. Needs git
+it finished without a failure and master has not moved past it; the batch
+merge uses the admin bypass, so this is the check GitHub does not make.
+`merge-docs` uses GitHub's regular merge path between batches. Needs git
 2.38+ (`git merge-tree --write-tree`) and an authenticated `gh`.
 """
 
@@ -896,6 +898,20 @@ def _failed_at_cancel_step(steps: list, names: list[str], index: int) -> bool:
     return failed == [index + 2] and ran[index + 2][1] == "failure"
 
 
+def _static_parity_peer(gate_id: str, jobs: dict) -> str | None:
+    """Match the same verdict split into two static required check names."""
+    systems = {"parity": "ubuntu-latest", "parity-windows": "windows-latest"}
+    if gate_id not in systems or not systems.keys() <= jobs.keys():
+        return None
+    for job_id, system in systems.items():
+        job = jobs[job_id]
+        if job.get("name") != f"Parity / {system}" or job.get("runs-on") != system or "strategy" in job:
+            return None
+    common = [{k: v for k, v in jobs[job_id].items() if k not in ("name", "runs-on")}
+              for job_id in systems]
+    return next(job_id for job_id in systems if job_id != gate_id) if common[0] == common[1] else None
+
+
 def _gate_cancelled(check: dict, runs: dict, probes: dict,
                     local: dict[str, dict]) -> tuple[bool | None, str]:
     """Whether a FAILURE check is a gate that failed only because jobs it
@@ -909,8 +925,10 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
       job of that file, or the downgrade is refused;
     - that step is, by position and name, the only one that failed, on this
       leg and on every other failed leg of the gate in the run attempt,
-      whether the rollup lists that leg or not (`_failed_at_cancel_step`),
-      or the leg ran no step at all in an attempt that itself concluded
+      whether the rollup lists that leg or not (`_failed_at_cancel_step`).
+      The two static Parity jobs count as legs only when their verdict
+      definitions agree and both match the checkout's cancel contract.
+      A leg may also run no step at all in an attempt that concluded
       `cancelled` (cancelled while starting, so it gave no verdict);
     - no other job in the run attempt failed, timed out or needs action
       (the report-only check aside, REPORT_ONLY_CHECK), and none the gate
@@ -969,16 +987,23 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
         shape = _gate_steps(data, gate_id, local.get(str(check.get("workflowName"))))
         if not _is_gate(definition) or shape is None:
             return False, ""                # no gate, or none that names a cancel
-        names, index = shape
+        shapes = {gate_id: shape}
+        peer = _static_parity_peer(gate_id, defs)
+        if peer is not None:
+            peer_shape = _gate_steps(data, peer, local.get(str(check.get("workflowName"))))
+            if peer_shape is not None:
+                shapes[peer] = peer_shape
         if any(not owners(str(other["name"])) for other in listed):
             return False, ""                # the run is not this file's
-        legs = [str(meta["id"])] + [
-            str(other["id"]) for other in listed
-            if owners(str(other["name"])) == {gate_id} and other.get("id") != meta.get("id")
+        legs = [(str(meta["id"]), gate_id)] + [
+            (str(other["id"]), next(iter(named))) for other in listed
+            if len(named := owners(str(other["name"]))) == 1 and named <= shapes.keys()
+            and other.get("id") != meta.get("id")
             and other.get("conclusion") is not None
             and other.get("conclusion") not in _NO_VERDICT]
         stepless = []
-        for leg in legs:
+        for leg, owner in legs:
+            names, index = shapes[owner]
             what = f"job {leg}"
             leg_meta = job_meta(leg)
             steps = leg_meta.get("steps")
@@ -997,7 +1022,7 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
         cancelled = []
         for other in listed:
             named = owners(str(other["name"]))
-            if other.get("id") == meta.get("id") or named == {gate_id}:
+            if other.get("id") == meta.get("id") or (len(named) == 1 and named <= shapes.keys()):
                 continue                    # a leg of this gate, read above
             if _report_only({"workflowName": check.get("workflowName"),
                              "name": other.get("name")}):
@@ -1106,13 +1131,16 @@ def _changed(sha: str, base: str) -> set[str]:
     return set(_out("diff", "--name-only", "--no-renames", f"{base}...{sha}").splitlines())
 
 
-def _open_batches() -> list[tuple[int, str, str, str]]:
+def _open_batches(*, complete: bool = False) -> list[tuple[int, str, str, str]]:
     """(number, branch, url, head sha) of every open pull request from an
     `integrate/` branch of this repository, however named. A fork's branch
     can carry any name, so fork pull requests are not batches."""
-    rows = json.loads(gh("pr", "list", "--state", "open", "--limit", "500", "--json",
+    rows = json.loads(gh("pr", "list", "--state", "open", "--limit", str(OPEN_PR_LIMIT), "--json",
                          "number,headRefName,url,headRefOid,isCrossRepository")
                       or "[]")
+    if complete and len(rows) >= OPEN_PR_LIMIT:
+        raise Refusal("the open pull request listing reached its limit; a batch could be missing. "
+                      f"Use a batch for this pull request or retry below {OPEN_PR_LIMIT} open PRs")
     return [(r["number"], r["headRefName"], r.get("url", ""), r.get("headRefOid", ""))
             for r in rows
             if r.get("headRefName", "").startswith(PREFIX)
@@ -4056,12 +4084,10 @@ def _merge_plan() -> Plan:
                       "stays on the batch branch. A batch opened before `open` kept its "
                       "plan has none: the maintainer merges it by hand after the checks "
                       "in docs/dev/merge-batches.md (\"Merging it\"), or close it and "
-                      "build again. A pull request from any other branch is never "
-                      f"merged directly: label it `{LABEL}` and let a batch carry it")
+                      "build again. For an independent docs-only pull request, use `merge-docs`")
     if not branch.startswith(PREFIX) or not plan.branch.startswith(PREFIX):
-        raise Refusal(f"{branch} is not an `{PREFIX}` batch branch; only a batch pull "
-                      "request merges. A pull request from any other branch is never "
-                      f"merged directly: label it `{plan.label}` and let a batch carry it")
+        raise Refusal(f"{branch} is not an `{PREFIX}` batch branch; run `merge` from the "
+                      "batch checkout, or use `merge-docs` for an independent docs-only PR")
     if plan.branch != branch:
         raise Refusal(f"the plan found for {branch} is for {plan.branch}; nothing was "
                       "merged. Run `merge` on the checkout where that batch was built "
@@ -4343,6 +4369,208 @@ def merge(args: argparse.Namespace) -> int:
     return 0
 
 
+DOCS_SCOPE = "rust/ci/docs_scope.py"
+DOCS_SCOPE_FILES = (DOCS_SCOPE, CI_SCOPE_CODE, "ops/ci_batch_passed.py", CENSUS)
+
+
+def _docs_pr_view(number: int) -> dict:
+    view = json.loads(gh("pr", "view", str(number), "--json",
+                         "state,isDraft,baseRefName,baseRefOid,headRefName,headRefOid,"
+                         "mergeable,mergeStateStatus,statusCheckRollup"))
+    if view.get("state") != "OPEN":
+        raise Refusal(f"#{number} is {str(view.get('state')).lower()}; name an open docs PR")
+    if view.get("isDraft") is not False:
+        raise Refusal(f"#{number} is a draft; mark it ready for review first")
+    if view.get("baseRefName") != BASE:
+        raise Refusal(f"#{number} targets {view.get('baseRefName')}; retarget it to {BASE} first")
+    if (view.get("headRefName") or "").startswith(PREFIX):
+        raise Refusal(f"#{number} has an integration branch name; use `merge` for a batch, "
+                      "or move an ordinary pull request to a docs branch")
+    if view.get("mergeable") == "CONFLICTING":
+        raise Refusal(f"#{number} conflicts with {BASE}; resolve the conflict in the PR first")
+    if view.get("mergeable") != "MERGEABLE":
+        raise Refusal(f"GitHub has not reported mergeability for #{number}; wait for it and retry")
+    red, waiting = _merge_checks(view.get("statusCheckRollup"))
+    if red:
+        raise Refusal(f"CI failed on #{number}: {', '.join(red)}; fix the failing checks and retry")
+    if waiting:
+        raise Refusal(f"CI on #{number} has not finished ({', '.join(waiting)}); wait for all checks and retry")
+    if view.get("mergeStateStatus") not in ("CLEAN", "UNSTABLE"):
+        raise Refusal(f"GitHub reports #{number} as {view.get('mergeStateStatus')}; resolve the "
+                      "merge requirement shown on the pull request and retry")
+    return view
+
+
+def _refuse_docs_during_batch(master: str) -> None:
+    remedy = "wait for it to finish, or add this pull request to the next batch"
+    if batches := _open_batches(complete=True):
+        number, branch, _, _ = batches[0]
+        raise Refusal(f"batch #{number} ({branch}) is open; {remedy}")
+    for _, directory in _worktree_plan_dirs():
+        for prefix in (PREFIX, STACKED_PREFIX):
+            plans = directory if prefix == PREFIX else directory / prefix
+            for path in sorted(plans.glob("*.json")):
+                branch = prefix + path.stem
+                head = _branch_head(branch)
+                if not head or _is_ancestor(head, master):
+                    continue
+                try:
+                    plan = Plan.load(branch, path)
+                except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                    raise Refusal(f"cannot read the local plan for {branch}; resolve the batch plan first") from None
+                if not plan or plan.branch != branch or plan.head != head or plan.pr:
+                    continue
+                if prefix == PREFIX and plan.base_sha != master:
+                    continue  # `open` already refuses this plan.
+                if prefix == STACKED_PREFIX and (
+                        not plan.stacked_parent
+                        or all(_is_ancestor(member.sha, master) for member in plan.merged)
+                        or _stack_parent_view(plan.stacked_parent.number).get("state") == "CLOSED"):
+                    continue
+                raise Refusal(f"batch {branch} is built locally; {remedy}")
+
+
+def _docs_preview(number: int, master: str, head: str) -> str:
+    ref = f"refs/pull/{number}/merge"
+    if git("fetch", "-q", "--no-tags", REMOTE, ref, check=False).returncode != 0:
+        raise Refusal(f"cannot fetch GitHub's test merge for #{number}; wait for it to be ready and retry")
+    preview = _out("rev-parse", "FETCH_HEAD")
+    if _out("rev-list", "--parents", "-n", "1", preview).split() != [preview, master, head]:
+        raise Refusal(f"GitHub's test merge for #{number} has a different base or head; wait for it to refresh and retry")
+    return preview
+
+
+_DOCS_SCOPE_RUNNER = """import json, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+from rust.ci import docs_scope
+docs_scope.ROOT = pathlib.Path.cwd()
+fork, head, master, preview = sys.argv[2:]
+def docs_only(old, new):
+    paths, regular = docs_scope.changed_paths(old, new)
+    return regular and bool(paths) and all(map(docs_scope.is_documentation_path, paths))
+print(json.dumps([docs_only(fork, head), docs_only(master, preview)]))
+"""
+
+# The classified preview can only change regular documentation paths, so
+# the selector and tests in this disposable checkout are master's code.
+_DOCS_TEST_RUNNER = """import os, subprocess, sys
+sys.path.insert(0, os.getcwd())
+from rust.ci import docs_scope
+paths, _ = docs_scope.changed_paths(sys.argv[1])
+tests = docs_scope.doc_tests(paths)
+sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                          "-m", "not real_model", *tests]))
+"""
+
+
+def _docs_scope(master: str, head: str, preview: str) -> tuple[bool, bool]:
+    """Judge the whole PR diff and the proposed master push with master's CI reader."""
+    if not _out("ls-tree", master, "--", DOCS_SCOPE):
+        raise Refusal(f"{BASE} has no shared CI docs scope yet; use an integration batch")
+    forks = git("merge-base", "--all", master, head, check=False).stdout.splitlines()
+    if len(forks) != 1:
+        raise Refusal(f"the PR and {BASE} do not have a single merge base; merge {BASE} into the PR and retry")
+    with tempfile.TemporaryDirectory(prefix="integrate-docs-scope-") as tmp:
+        for path in DOCS_SCOPE_FILES:
+            target = Path(tmp) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(_out("show", f"{master}:{path}") + "\n", encoding="utf-8")
+        result = _run([sys.executable, "-I", "-S", "-c", _DOCS_SCOPE_RUNNER,
+                       tmp, forks[0], head, master, preview], check=False,
+                      cwd=_out("rev-parse", "--show-toplevel"))
+    try:
+        if result.returncode:
+            raise ValueError(result.stderr.strip())
+        pull, merged = json.loads(result.stdout)
+        if type(pull) is not bool or type(merged) is not bool:
+            raise ValueError("expected two Boolean verdicts")
+    except (TypeError, ValueError) as exc:
+        raise Refusal(f"cannot read the shared CI docs scope: {exc}; fix the scope on {BASE} "
+                      "before using merge-docs") from None
+    return pull, merged
+
+
+def _docs_guards(number: int, master: str, preview: str) -> bool:
+    with tempfile.TemporaryDirectory(prefix="integrate-docs-") as temporary:
+        root = Path(temporary) / "tree"
+        git("-c", f"core.hooksPath={Path(temporary) / 'no-hooks'}", "worktree", "add",
+            "-q", "--detach", str(root), preview)
+        try:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            env = {key: value for key, value in os.environ.items() if key.upper() in CENSUS_ENV}
+            env.update({name: str(home) for name in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA")})
+            env["PSEUDOLIFE_TEST_PG_HOST_PORT"] = "127.0.0.1:1"
+            result = _run([sys.executable, "-I", "-S", "-c", _DOCS_TEST_RUNNER, master],
+                          cwd=root, env=env, check=False)
+            if result.returncode:
+                raise Refusal(f"doc guards failed on the test merge of #{number} (pytest exit "
+                              f"{result.returncode}); fix the failure below and retry\n"
+                              f"{result.stdout}{result.stderr}")
+            census = _census_run(root, "--ci-check", event={"before": master})
+            if census.returncode:
+                raise Refusal(f"the producer census check failed on the test merge of #{number}; "
+                              f"use a batch to regenerate the census\n{census.stdout}{census.stderr}")
+            return any(line.startswith("producer census is stale (report only)")
+                       for line in census.stdout.splitlines())
+        finally:
+            git("worktree", "remove", "--force", str(root))
+
+
+def merge_docs(args: argparse.Namespace) -> int:
+    number = args.pr
+    view = _docs_pr_view(number)
+    _, master = _preflight(require_master=False)
+    if view.get("baseRefOid") != master:
+        raise Refusal(f"{BASE} moved while #{number} was read; retry against the new base")
+    _refuse_docs_during_batch(master)
+    head = _fetch_head(number)
+    if view.get("headRefOid") != head:
+        raise Refusal(f"#{number}'s head changed while it was fetched; retry on the new head")
+    preview = _docs_preview(number, master, head)
+    pull_is_docs, merge_is_docs = _docs_scope(master, head, preview)
+    if not pull_is_docs:
+        raise Refusal(f"#{number}'s whole diff is not docs-only; use an integration batch")
+    if not merge_is_docs:
+        raise Refusal(f"#{number}'s test merge into {BASE} is not docs-only; use an integration batch")
+    print(f"Merge only after confirming #{number} is independent of other open pull requests.")
+    census_drift = _docs_guards(number, master, preview)
+    _refuse_docs_during_batch(master)
+    current = _docs_pr_view(number)
+    if (current.get("baseRefOid"), current.get("headRefOid")) != (master, head):
+        raise Refusal(f"the base or head of #{number} changed during the doc guards; retry on the new tree")
+    master_ref = f"refs/heads/{BASE}"
+    if _out("ls-remote", "--exit-code", REMOTE, master_ref) != f"{master}\t{master_ref}":
+        raise Refusal(f"{BASE} changed after the doc guards for #{number}; retry on the new tree")
+    # GitHub can pin the PR head, but not the base. Only the operator of
+    # the serialized master merge flow runs this command. The direct REST
+    # endpoint performs one regular merge or fails, without queuing it.
+    try:
+        result = json.loads(gh("api", "--method", "PUT", f"repos/{{owner}}/{{repo}}/pulls/{number}/merge",
+                               "-f", "merge_method=merge", "-f", f"sha={head}"))
+    except (Refusal, ValueError) as exc:
+        raise Refusal(f"could not confirm the regular merge of #{number}: {exc}; check its state on "
+                      "GitHub before retrying") from None
+    commit = result.get("sha") if isinstance(result, dict) else None
+    if (not isinstance(commit, str) or not re.fullmatch("[0-9a-f]{40}", commit)
+            or result.get("merged") is not True):
+        raise Refusal(f"GitHub did not confirm the merge of #{number}; check its state on GitHub before retrying")
+    print(f"merged #{number} into {BASE} as {commit}")
+    try:
+        git("fetch", "-q", REMOTE, BASE)
+        if not _is_ancestor(commit, f"{REMOTE}/{BASE}"):
+            raise Refusal(f"the merge is missing from fetched {REMOTE}/{BASE}")
+        parents = _out("rev-list", "--parents", "-n", "1", commit).split()
+        if parents != [commit, master, head] or _tree(commit) != _tree(preview):
+            raise Refusal("the merge landed on a different tree from the one the doc guards tested")
+    except Refusal as exc:
+        print(f"integrate: {exc}. Check master CI at {commit} immediately.", file=sys.stderr)
+        return 1
+    if census_drift:
+        print("This merge leaves the producer census stale. The next integration batch regenerates it.")
+    return 0
+
+
 def _stacked_status(master: str) -> None:
     prefix = f"refs/heads/{STACKED_PREFIX}"
     branches = {ref.removeprefix("refs/heads/") for ref in
@@ -4441,16 +4669,18 @@ def main(argv: list[str] | None = None) -> int:
                               help="explicit bounded wait for a held database turn (default: refuse immediately)")
     sub.add_parser("suite", help="run the built batch's full suite on the remote "
                                  "machine (its head travels as a bundle)")
-    sub.add_parser("merge", help="merge the published batch pull request once every "
-                                 "check on its built head passed; the one path to "
-                                 "master")
+    sub.add_parser("merge", help="merge the published batch pull request once its checks passed")
+    docs = sub.add_parser("merge-docs", help="merge an independent docs-only pull request between batches")
+    docs.add_argument("pr", type=int, metavar="PR", help="pull request number")
     args = parser.parse_args(argv)
     if hasattr(args, "lock_wait_seconds") and args.lock_wait_seconds < 0:
         parser.error("--lock-wait-seconds must be nonnegative")
     if hasattr(args, "database_turn_wait_seconds") and not 0 <= args.database_turn_wait_seconds <= 86400:
         parser.error("--database-turn-wait-seconds must be between 0 and 86400")
+    if args.command == "merge-docs" and args.pr < 1:
+        parser.error("PR must be a positive pull request number")
     commands = {"status": status, "build": build, "suite": suite, "open": open_, "merge": merge,
-                "harness": harness, "shim-tests": shim_tests}
+                "merge-docs": merge_docs, "harness": harness, "shim-tests": shim_tests}
     try:
         return commands[args.command](args)
     except Refusal as exc:

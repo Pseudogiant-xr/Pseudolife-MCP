@@ -47,6 +47,7 @@ pub(super) struct Profile {
     pub organization_id: Option<String>,
     pub state: String,
     pub catalog: String,
+    pub runtime_version: Option<String>,
     pub expires_at: Option<(String, DateTime<Utc>)>,
 }
 
@@ -144,9 +145,13 @@ fn open_private(path: &Path) -> io::Result<File> {
         // The CRT's os.open shares read and write, never delete.
         options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
     }
+    sharing_retry(|| options.open(path))
+}
+
+pub(super) fn sharing_retry<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     let mut attempt = 0;
     loop {
-        match options.open(path) {
+        match operation() {
             // _sharing_retry: a transient Windows sharing violation clears.
             Err(error)
                 if cfg!(windows)
@@ -216,7 +221,14 @@ pub(super) fn profile_path(root: &Path, name: &str) -> Result<PathBuf, Fail> {
 /// `ProfileStore.load(name)`.
 pub(super) fn load(root: &Path, name: &str) -> Result<Profile, Fail> {
     let data = private_read(&profile_path(root, name)?, 65536)?;
-    let payload = match json_loads(&data) {
+    decode_profile(&data, name).map(|(_, profile)| profile)
+}
+
+pub(super) fn decode_profile(
+    data: &[u8],
+    name: &str,
+) -> Result<(Map<String, Value>, Profile), Fail> {
+    let payload = match json_loads(data) {
         Admit::Yes(Value::Object(payload)) => payload,
         Admit::Yes(_) | Admit::No => return Err(Fail::Tunnel(INVALID_PROFILE)),
         Admit::Defer => return Err(Fail::Defer),
@@ -231,7 +243,7 @@ pub(super) fn load(root: &Path, name: &str) -> Result<Profile, Fail> {
     if profile.name != name {
         return Err(Fail::Tunnel(INVALID_PROFILE));
     }
-    Ok(profile)
+    Ok((payload, profile))
 }
 
 /// The profile file a person would look for, even when its path cannot be
@@ -434,6 +446,7 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
         organization_id: id("organization_id"),
         state: state.to_owned(),
         catalog: catalog.to_owned(),
+        runtime_version: id("runtime_version"),
         expires_at,
     })
 }
@@ -455,12 +468,12 @@ pub(super) fn key_present(root: &Path, name: &str) -> Result<bool, Fail> {
 pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
     let path = match checked_path(&root.join(format!("{name}.key"))) {
         Ok(path) => path,
-        Err(Fail::Tunnel(_)) => return Ok(Some(false)),
+        Err(Fail::Tunnel(_) | Fail::Detail(_)) => return Ok(Some(false)),
         Err(Fail::Defer) => return Err(Fail::Defer),
     };
     let data = match private_read(&path, 16384) {
         Ok(data) => data,
-        Err(Fail::Tunnel(_)) => return Ok(Some(false)),
+        Err(Fail::Tunnel(_) | Fail::Detail(_)) => return Ok(Some(false)),
         Err(Fail::Defer) => return Err(Fail::Defer),
     };
     let (prefix, encoded) = match data.iter().position(|b| *b == 0) {
@@ -677,6 +690,22 @@ pub(super) fn owner_only_directory(root: &Path, _info: &Metadata) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn sharing_retry_accepts_a_move_after_transient_contention() {
+        let mut attempts = 0;
+        let result = sharing_retry(|| {
+            attempts += 1;
+            if attempts == 1 {
+                Err(io::Error::from_raw_os_error(32))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(attempts, 2);
+    }
 
     fn payload(text: &str) -> Map<String, Value> {
         serde_json::from_str(text).unwrap()

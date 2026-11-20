@@ -325,47 +325,26 @@ at boot can neither finish nor undo it.
 A change that *can't* be expressed additively doesn't get an exception. It
 ships two things instead:
 
-- a **startup refusal** — the daemon detects the mismatch and stops rather
-  than write into a bank it can no longer write correctly (see
-  `_refuse_on_embedding_dim_mismatch` in
-  `pseudolife_memory/storage/schema.py`, added for the v25 embedding-dimension
-  change);
+- a **startup refusal** that detects the mismatch before startup writes, as the dimension guard in `rust/daemon/src/storage/schema.rs` does for a bank created before the v25 embedding-dimension change
 - a **human-gated script under `ops/`** that does the real migration offline —
   backup first, daemon stopped (`ops/migrate_embeddings.py` re-embeds every
   row before moving the columns).
 
 Never a silent half-migration at boot.
 
-A bump also touches seven places, and they land in the same change or the
-guard tests go red:
+A bump updates the native inputs and the release and transfer guards in the same change.
 
-- `SCHEMA_META_VERSION` in `pseudolife_memory/storage/schema.py`;
+- Under `rust/daemon/src/storage/`, update `schema_plan.json` with the new `schema_version`, final version stamp and affected ordered steps. Set the matching header and apply any base DDL changes in `schema.sql`. Run `python rust/daemon/harness/gen_schema_sql.py` to derive `schema_meta.rs`, then run it with `--check`.
 - the capabilities table in `README.md`;
 - the DSN row *and* the schema version-history table in
   `docs/guide/configuration.md` (both pinned by `tests/test_release_ux.py`);
-- the single `CURRENT_SCHEMA` literal in `tests/test_schema_version.py` — no
-  per-version file and no `>=` relaxation pass; the ladder is gap-checked by
-  `tests/test_release_ux.py` and `tests/test_atlas_currency.py`. Whatever
-  behaviour the bump adds gets a test **beside its consumer**, or a row in
-  `tests/test_schema_ddl_shape.py` if it is pure DDL shape — never a new
-  `tests/test_schema_vNN.py`;
+- Update the single `CURRENT_SCHEMA` literal in `tests/test_schema_version.py`. Keep the exact pin and the history gap checks in `tests/test_release_ux.py` and `tests/test_atlas_currency.py`. Test the changed behaviour beside its consumer, or extend the native startup checks for a DDL-only change.
 - a changelog fragment (`changelog.d/`) that names `vNN`;
 - `docs/atlas/atlas.json` `meta.schema` (pinned by
   `tests/test_atlas_currency.py`) — re-verify the affected storage cards,
   don't just renumber;
-- the two literal meta-version pins in `tests/test_migrate_embeddings.py`,
-  then `python ops/gen_llms_txt.py` if any doc changed
-  (`tests/test_llms_txt.py` pins the generated file);
-- the Rust side: `python rust/daemon/harness/gen_schema_sql.py` (then
-  `--check`), the shim's transfer schema literals in
-  `rust/shim/src/cli/transfer/{export,import}.rs` and `transfer.rs`
-  (pinned to `SCHEMA_META_VERSION` by `tests/test_schema_version.py`), the
-  schema-startup golden, and every parity golden that digests the table
-  catalog or dumps a bank (dream cursors, the daemon `run.py` rows, graph
-  store, principals, and the CLI harness rows under
-  `rust/cli_harness/goldens/` whose cases dump or export the bank:
-  transfer, invite, maintainer at least), re-recorded on both OSes;
-  the parity register (`rust/parity/`) names the pin.
+- Run `python ops/gen_llms_txt.py` after editing the README or user guide pages that it harvests (`tests/test_llms_txt.py` checks the generated file).
+- Update the shim's `BUILD_SCHEMA` literal in `rust/shim/src/cli/transfer/export.rs`. Follow the `schema-bump` skill to re-record affected startup and harness goldens from the Rust candidate and replay them on both operating systems.
 
 ## Licensing of contributions
 

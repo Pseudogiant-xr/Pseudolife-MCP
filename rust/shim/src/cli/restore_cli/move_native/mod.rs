@@ -10,6 +10,7 @@
 //! takes no update lock, creates no move record and writes no file on
 //! either host.
 mod argv;
+mod carry;
 mod command;
 mod engine;
 #[cfg(test)]
@@ -82,10 +83,13 @@ trait World {
 /// What a dry run found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Plan {
+    target_pins: Option<carry::TargetPins>,
     pub to: String,
     pub target_url: String,
     pub source: Facts,
     pub target: Reply,
+    pub checked_carry: bool,
+    pub carry_executable: bool,
     /// Whether --target-url answered with the target's own fingerprint. A
     /// fresh target has none, and its URL is matched by release and schema
     /// only.
@@ -116,6 +120,15 @@ pub(super) fn gate_refusal(host: &str, facts: &Facts) -> Option<String> {
 fn source_refusal(facts: &Facts) -> Option<String> {
     if let Some(why) = gate_refusal("source", facts) {
         return Some(why);
+    }
+    if !probe::container_id(&facts.daemon_id) {
+        return Some("the source daemon has no immutable Docker container ID; restore access to the source Docker stack and retry move --dry-run".into());
+    }
+    if !probe::container_id(&facts.pg_id) {
+        return Some("the source PostgreSQL has no immutable Docker container ID; restore access to the source Docker stack and retry move --dry-run".into());
+    }
+    if facts.compose_project != facts.pg_compose_project {
+        return Some("the source daemon and PostgreSQL belong to different Compose projects; restore the matching source stack and retry move --dry-run".into());
     }
     if !source::valid_database(&facts.db) {
         return Some(format!(
@@ -184,6 +197,53 @@ fn last_line(bytes: &[u8]) -> String {
         .to_owned()
 }
 
+const CARRY_CHECK_UNAVAILABLE: &str = "the target client cannot check carried identities; update the target client to the same native release, then retry move --dry-run";
+
+fn check_carry<W: World>(
+    world: &mut W,
+    request: &Request,
+    source: &Facts,
+    pins: Option<carry::TargetPins>,
+) -> Result<Option<[u8; 32]>, String> {
+    if request.no_keep_tokens {
+        return Ok(None);
+    }
+    let populated = carry::source(world.docker()?, source)?;
+    let check = protocol::Request {
+        protocol: protocol::PROTOCOL,
+        move_id: String::new(),
+        work_dir: String::new(),
+        rollback: false,
+        pins,
+        op: protocol::Op::CarryCheck {
+            populated,
+            files: request.target_files.clone(),
+        },
+    };
+    let mut body =
+        serde_json::to_vec(&check).map_err(|_| "cannot prepare the move's identity check")?;
+    body.push(b'\n');
+    let ran = world.remote()?.run(
+        &request.to,
+        &remote::sh(&script(protocol::PROTOCOL)),
+        &body,
+        PROBE_TIME,
+    );
+    let reply = String::from_utf8_lossy(&ran.stdout);
+    let answer = reply
+        .lines()
+        .find_map(|line| line.strip_prefix(FRAME))
+        .and_then(|json| serde_json::from_str::<protocol::Answer>(json).ok())
+        .filter(|answer| answer.protocol == protocol::PROTOCOL);
+    match answer {
+        Some(answer) if answer.ok => Ok(answer.carry_deployment),
+        Some(answer) if !answer.error.trim().is_empty() => Err(answer.error),
+        Some(_) => Err(CARRY_CHECK_UNAVAILABLE.into()),
+        _ if ran.lost() => Err("SSH lost the target during the identity check; restore SSH access and retry move --dry-run".into()),
+        _ => Err(CARRY_CHECK_UNAVAILABLE.into()),
+    }
+}
+
 /// Check both hosts; the plan, or the first reason a move cannot go ahead.
 fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String> {
     let target_url = request.target_url.clone().unwrap_or_default();
@@ -215,6 +275,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         work_dir: request.target_work_dir.clone().unwrap_or_default(),
         need_bytes: need,
         resume_move: request.resume_move.clone(),
+        carry: !request.no_keep_tokens,
     };
     // Protocol 2's `check`: the same checks protocol 1 answers, from a
     // helper that can also run the move, so an older target is refused here.
@@ -223,6 +284,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         move_id: String::new(),
         work_dir: ask.work_dir.clone(),
         rollback: false,
+        pins: None,
         op: protocol::Op::Check { ask },
     };
     let mut body = serde_json::to_vec(&ask).map_err(|e| e.to_string())?;
@@ -291,6 +353,16 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     if reply.protocol != PROTOCOL {
         return Err(skew(&reply.version, reply.protocol));
     }
+    if !request.no_keep_tokens {
+        match reply.supports_carry {
+            Some(true) => {}
+            Some(false) => return Err("checking carried identities requires a Linux Docker target; pass --no-keep-tokens to check a move using the target's bearer settings".into()),
+            None => return Err(CARRY_CHECK_UNAVAILABLE.into()),
+        }
+        if !request.target_files.is_empty() && reply.supports_carry_files != Some(true) {
+            return Err("the target client does not support explicit Compose and environment files; update it to the same native client release and retry".into());
+        }
+    }
     if !reply.refusals.is_empty() {
         return Err(reply.refusals.join("; "));
     }
@@ -299,56 +371,104 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
             "the native move helper on {to} sent no facts about its bank; update both clients so they match, then retry"
         ));
     };
+    let mut target_pins = carry::TargetPins::from_facts(target);
+    let can_carry = !request.no_keep_tokens
+        && reply.supports_carry_execution == Some(true)
+        && target_pins.is_some()
+        && carry::loopback(&target.health_url);
+    if !request.no_keep_tokens && !request.dry_run && !can_carry {
+        return Err(if reply.supports_carry_execution != Some(true) {
+            "the target client only supports carried-identity preflight; update the target client to an execution-capable release or pass --no-keep-tokens".into()
+        } else if target_pins.is_none() {
+            "the target has no immutable Docker container IDs for one Compose project; update the target client and check its Docker stack".into()
+        } else {
+            "the target has no loopback daemon endpoint for carried-bearer verification; configure a loopback or wildcard binding, or pass --no-keep-tokens".into()
+        });
+    }
     // A resumed move's target is stopped behind its gate: its URL answers
     // only once the move starts it, and the move checks it then (before the
     // commit point).
-    if !request.resume_move.is_empty() {
-        resume_check(world, request)?;
-        return Ok(Plan {
-            to,
-            target_url,
-            source,
-            target: reply.clone(),
-            url_tied: false,
-        });
-    }
-    let health = format!("{}/health", argv::base(&target_url));
-    let answer = world.reach(&health).map_err(|why| {
+    let resuming = !request.resume_move.is_empty();
+    let url_tied = if resuming {
+        false
+    } else {
+        let health = format!("{}/health", argv::base(&target_url));
+        let answer = world.reach(&health).map_err(|why| {
         format!(
             "--target-url {target_url} does not answer from this host ({why}); name the URL clients will use to reach the target's daemon, check that it is exposed there, then retry"
         )
     })?;
-    let reached = answer.get("bank").and_then(Value::as_str);
-    if reached != target.bank.as_deref() {
-        return Err(format!(
-            "--target-url {target_url} reaches a daemon whose bank ({}) is not the target's ({}); name the URL of {to}'s daemon, then retry",
-            reached.unwrap_or("none"),
-            target.bank.as_deref().unwrap_or("none")
-        ));
-    }
-    // A fresh target has no fingerprint to match: the daemon reached must
-    // at least answer as the target's does (its version and schema).
-    if target.bank.is_none() {
-        let version = answer
-            .get("version")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let schema = answer.get("schema").and_then(Value::as_i64);
-        if version != target.version || schema != target.schema {
+        let reached = answer.get("bank").and_then(Value::as_str);
+        if reached != target.bank.as_deref() {
             return Err(format!(
-                "--target-url {target_url} reaches a daemon (version {version:?}, schema {schema:?}) that does not answer as {to}'s does (version {:?}, schema {:?}); name the URL of {to}'s daemon, then retry",
-                target.version, target.schema
+                "--target-url {target_url} reaches a daemon whose bank ({}) is not the target's ({}); name the URL of {to}'s daemon, then retry",
+                reached.unwrap_or("none"),
+                target.bank.as_deref().unwrap_or("none")
             ));
         }
+        // A fresh target has no fingerprint to match: the daemon reached must
+        // at least answer as the target's does (its version and schema).
+        if target.bank.is_none() {
+            let version = answer
+                .get("version")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let schema = answer.get("schema").and_then(Value::as_i64);
+            if version != target.version || schema != target.schema {
+                return Err(format!(
+                    "--target-url {target_url} reaches a daemon (version {version:?}, schema {schema:?}) that does not answer as {to}'s does (version {:?}, schema {:?}); name the URL of {to}'s daemon, then retry",
+                    target.version, target.schema
+                ));
+            }
+        }
+        target.bank.is_some()
+    };
+    let deployment = check_carry(world, request, &source, target_pins.clone())?;
+    if can_carry && !request.dry_run && deployment.is_none() {
+        return Err("the target client did not verify its installed deployment for execution; update the client or pass --no-keep-tokens".into());
     }
-    let url_tied = target.bank.is_some();
+    if let Some(pins) = &mut target_pins {
+        pins.deployment_digest = deployment;
+    }
+    if resuming {
+        resume_check(world, request, target_pins.clone())?;
+    }
     Ok(Plan {
         to,
         target_url,
+        checked_carry: !request.no_keep_tokens,
+        target_pins,
+        carry_executable: can_carry && deployment.is_some(),
         source,
         target: reply,
         url_tied,
     })
+}
+
+fn carry_result(plan: &Plan) -> &'static str {
+    if plan.carry_executable {
+        "Carried bearer settings were verified."
+    } else if plan.target.supports_carry_execution == Some(true) {
+        if plan
+            .target
+            .facts
+            .as_ref()
+            .and_then(carry::TargetPins::from_facts)
+            .is_none()
+        {
+            "Carried bearer settings were verified. Execution needs immutable target Docker container IDs. Update the target client and check its Docker stack."
+        } else if plan
+            .target_pins
+            .as_ref()
+            .is_none_or(|pins| pins.deployment_digest.is_none())
+        {
+            "Carried bearer settings were verified. Update the target client to verify its installed deployment for execution, or pass --no-keep-tokens."
+        } else {
+            "Carried bearer settings were verified. The target needs a loopback or wildcard daemon binding to apply them safely. To move with its existing credentials, remove --dry-run and add --no-keep-tokens."
+        }
+    } else {
+        "Carried bearer settings were verified. The target client only supports preflight for carrying. To move with its existing credentials, remove --dry-run and add --no-keep-tokens."
+    }
 }
 
 /// The plan as text.
@@ -398,6 +518,11 @@ fn render(plan: &Plan, dry_run: bool) -> String {
         plan.target.work_dir,
         sized(plan.target.free_bytes)
     ));
+    if plan.checked_carry && !plan.carry_executable {
+        out.push_str(carry_result(plan));
+        out.push('\n');
+        return out;
+    }
     out.push_str(if dry_run {
         "The move would, in this order:\n"
     } else {
@@ -418,6 +543,9 @@ fn render(plan: &Plan, dry_run: bool) -> String {
 
 /// The steps a move would take, as the plan prints them.
 fn steps(plan: &Plan) -> Vec<String> {
+    if plan.checked_carry && !plan.carry_executable {
+        return Vec::new();
+    }
     let t = plan.target.facts.clone().unwrap_or_default();
     let timer = match plan.target.update_timer.as_str() {
         "enabled" => "pause the target's unattended update (enabled now) and restore it at the end"
@@ -465,15 +593,20 @@ fn steps(plan: &Plan) -> Vec<String> {
         ),
         "stop the target daemon, check its bank is still empty, and archive its own state".to_owned(),
         "gate the target (/data/move.json), restore it from those files, and check the restored bank's identity and row counts".to_owned(),
-        "keep the target's own tokens (--no-keep-tokens)".to_owned(),
+        if plan.checked_carry {
+            "apply the carried bearer settings and check the rendered Compose configuration before starting the target daemon".to_owned()
+        } else {
+            "keep the target's own tokens (--no-keep-tokens)".to_owned()
+        },
         format!(
             "lift the gate, start the target once, and wait until {} serves the moved bank",
             plan.target_url
         ),
         "write /data/moved.json into the stopped source: the commit point, after which the move is not rolled back".to_owned(),
         format!(
-            "re-point this machine's clients to {} (a client holding this host's token needs one of the target's: the report names the command)",
-            plan.target_url
+            "re-point this machine's clients to {}{}",
+            plan.target_url,
+            if plan.checked_carry { " with their carried credentials" } else { " (a client holding this host's token needs one of the target's: the report names the command)" }
         ),
     ]);
     steps
@@ -481,16 +614,21 @@ fn steps(plan: &Plan) -> Vec<String> {
 
 /// The plan as one JSON document.
 fn document(plan: &Plan) -> Value {
-    json!({
+    let mut value = json!({
         "dry_run": true,
         "changed": false,
         "to": plan.to,
         "target_url": plan.target_url,
         "target_url_tied": plan.url_tied,
+        "executable": !plan.checked_carry || plan.carry_executable,
         "source": plan.source,
         "target": plan.target,
         "steps": steps(plan),
-    })
+    });
+    if plan.checked_carry {
+        value["carried_identities"] = json!(carry_result(plan));
+    }
+    value
 }
 
 /// The real hosts.
@@ -555,7 +693,11 @@ fn say(stdout: bool, text: &str) -> bool {
 /// Before a resume changes anything: the target's gated bank must still be
 /// as the move's last rollback left it (gated, with no write since), or the
 /// resume would replace writes that exist nowhere else.
-fn resume_check<W: World>(world: &mut W, request: &Request) -> Result<(), String> {
+fn resume_check<W: World>(
+    world: &mut W,
+    request: &Request,
+    pins: Option<carry::TargetPins>,
+) -> Result<(), String> {
     let mut tables: Vec<String> = request
         .resume_baseline
         .as_ref()
@@ -567,6 +709,7 @@ fn resume_check<W: World>(world: &mut W, request: &Request) -> Result<(), String
         move_id: request.resume_move.clone(),
         work_dir: request.target_work_dir.clone().unwrap_or_default(),
         rollback: false,
+        pins,
         op: protocol::Op::State { tables },
     };
     let mut body = serde_json::to_vec(&ask).map_err(|e| e.to_string())?;
@@ -673,6 +816,16 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
                     request.target_work_dir =
                         (!earlier.work_dir.is_empty()).then(|| earlier.work_dir.clone());
                     request.resume_move = earlier.move_id.clone();
+                    if earlier.carried_identities && request.no_keep_tokens {
+                        return Some(finish(&request, Err("the previous attempt carried bearer settings; resume it without --no-keep-tokens".into())));
+                    }
+                    if !request.target_files.is_empty()
+                        && request.target_files != earlier.target_files
+                    {
+                        return Some(finish(&request, Err("resume uses the original target files; drop --target-env-file and --target-compose-file or repeat the original paths".into())));
+                    }
+                    request.target_files.clone_from(&earlier.target_files);
+                    request.no_keep_tokens |= !earlier.carried_identities;
                     request.resume_baseline = earlier.gated_baseline.clone();
                     request.resume_target_was_running = earlier.target_was_running;
                 }
