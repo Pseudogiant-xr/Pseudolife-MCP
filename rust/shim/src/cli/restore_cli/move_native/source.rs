@@ -164,15 +164,15 @@ fn write_moved_marker(
 }
 
 /// The real hosts.
-pub(super) struct Live<D: Docker = docker::Real> {
+pub(super) struct Live<D: Docker = docker::Real, R: Remote = remote::Ssh> {
     pub docker: D,
-    pub ssh: remote::Ssh,
+    pub ssh: R,
     pub source: Facts,
     pub to: String,
     pub store: Files,
 }
 
-impl<D: Docker> Live<D> {
+impl<D: Docker, R: Remote> Live<D, R> {
     fn daemon(&self) -> &str {
         self.source.daemon_selector()
     }
@@ -289,7 +289,7 @@ impl<D: Docker> Live<D> {
     }
 }
 
-impl<D: Docker> Hosts for Live<D> {
+impl<D: Docker, R: Remote> Hosts for Live<D, R> {
     fn source_stop(&mut self) -> Result<(), String> {
         self.require_daemon()?;
         let daemon = self.daemon().to_owned();
@@ -619,10 +619,27 @@ impl<D: Docker> Hosts for Live<D> {
         let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
         // The helper's answer counts even if ssh then failed.
         if let Some(framed) = stdout.lines().find_map(|line| line.strip_prefix(FRAME)) {
-            return serde_json::from_str(framed)
-                .map_err(|_| format!("the helper on {to} answered something unreadable"));
+            let answer: Answer = serde_json::from_str(framed)
+                .map_err(|_| format!("the helper on {to} answered something unreadable"))?;
+            if request.op.carries_secret() {
+                // A malformed or modified helper could echo its input.
+                // Accept its verdict without displaying or recording its text.
+                return Ok(Answer {
+                    ok: answer.protocol == super::protocol::PROTOCOL && answer.ok,
+                    busy: answer.busy,
+                    error: "the target could not apply or verify the carried settings; check its installed Compose deployment and rerun move --rollback".into(),
+                    ..Answer::default()
+                });
+            }
+            return Ok(answer);
         }
         if ran.lost() {
+            if request.op.carries_secret() {
+                return Err(
+                    "SSH lost the identity request; restore SSH access and rerun move --rollback"
+                        .into(),
+                );
+            }
             return Err(remote::lost(&to, &ran));
         }
         Err(format!(
@@ -694,6 +711,76 @@ mod tests {
         calls: Vec<Vec<String>>,
         inspected_id: String,
         running: bool,
+    }
+
+    #[test]
+    fn live_carry_replies_cannot_put_the_bearer_in_an_error_or_record() {
+        struct Echo;
+
+        impl Remote for Echo {
+            fn run(&mut self, _: &str, command: &str, stdin: &[u8], _: Duration) -> remote::Ran {
+                let value: serde_json::Value = serde_json::from_slice(stdin).unwrap();
+                let bearer = value["identities"]["values"][0].as_str().unwrap();
+                assert!(!command.contains(bearer));
+                let answer = Answer {
+                    protocol: super::super::protocol::PROTOCOL,
+                    error: bearer.into(),
+                    detail: bearer.into(),
+                    state: Some(super::super::protocol::State {
+                        folder: bearer.into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                };
+                remote::Ran {
+                    stdout: format!("{FRAME}{}\n", serde_json::to_string(&answer).unwrap())
+                        .into_bytes(),
+                    ..Default::default()
+                }
+            }
+        }
+
+        let mut live = Live {
+            docker: RecordingDocker::default(),
+            ssh: Echo,
+            source: Facts::default(),
+            to: "fixture-target".into(),
+            store: Files::under_home(std::path::Path::new("unused-test-home")),
+        };
+        let fixture = super::super::carry::fixture;
+        let mut record = Record::default();
+        for op in [
+            Op::CarryApply {
+                identities: fixture().settings(),
+                expected_pins: Default::default(),
+            },
+            Op::CarryVerify {
+                identities: fixture(),
+            },
+        ] {
+            let request = Request {
+                protocol: super::super::protocol::PROTOCOL,
+                move_id: String::new(),
+                work_dir: String::new(),
+                rollback: false,
+                pins: None,
+                op,
+            };
+            let answer = live.target(&request, None).unwrap();
+            assert!(!answer.ok && answer.state.is_none() && answer.detail.is_empty());
+            assert!(answer.error.contains("could not apply or verify"));
+            assert!(!answer.error.contains("test-fixture-bearer"));
+            record.rollback.push(super::super::record::Undo {
+                step: request.op.name().into(),
+                ok: answer.ok,
+                detail: answer.error,
+            });
+        }
+        assert!(
+            !serde_json::to_string(&record)
+                .unwrap()
+                .contains("test-fixture-bearer")
+        );
     }
 
     impl Docker for RecordingDocker {

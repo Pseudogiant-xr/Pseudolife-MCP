@@ -1304,6 +1304,46 @@ def test_the_gates_of_one_run_read_the_run_once(world, capsys):
     assert len(reads) == 2, reads
 
 
+def test_static_parity_siblings_share_a_verdict_only_while_their_definitions_match():
+    jobs = integrate._workflow(WORKFLOW, "fixture workflow")["jobs"]
+    assert integrate._static_parity_peer("parity", jobs) == "parity-windows"
+    assert integrate._static_parity_peer("parity-windows", jobs) == "parity"
+    jobs["parity-windows"]["timeout-minutes"] += 1
+    assert integrate._static_parity_peer("parity", jobs) is None
+
+
+def test_a_failing_static_parity_peer_with_a_different_definition_keeps_a_member_out(world, capsys):
+    timeout_alias = "timeout-minutes: *parity_timeout"
+    assert WORKFLOW.count(timeout_alias) == 1
+    workflow = WORKFLOW.replace(timeout_alias, "timeout-minutes: 6")
+    # Only Ubuntu is in the rollup. The Windows failure must be found in
+    # the attempt listing even though both legs have cancellation-shaped steps.
+    _gate_world(world, rollup=["509"], head_workflow=workflow, checkout_workflow=workflow)
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("job", GATES, ids=["windows", "ubuntu"])
+@pytest.mark.parametrize("sibling_conclusion", ["success", "cancelled", "failure"],
+                         ids=["own-failure", "cancelled-sibling", "cancel-step-sibling"])
+def test_a_static_parity_verdict_failure_keeps_a_member_out(world, capsys, job, sibling_conclusion):
+    sibling = next(gate for gate in GATES if gate != job)
+    # Report one verdict at a time. The run attempt is the only source for a
+    # second failure when the rollup shows the cancellation-shaped sibling.
+    rollup = [sibling] if sibling_conclusion == "failure" else [job]
+    _gate_world(world, _with(_RUN_1059, **{f"j{sibling}": sibling_conclusion}), rollup=rollup)
+    world.gh.actions_jobs[job]["steps"] = _steps([
+        ("Set up job", "success"), (CANCEL_STEP, "skipped"),
+        (VERDICT_STEP, "failure"), ("Complete job", "success"),
+    ])
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("run, rollup", [
     # A needed shard failed: a real failure, though the gate's rollup row is
     # all that names it here (and a cancel stopped the other shard).
@@ -1593,7 +1633,7 @@ def test_a_failed_gate_leg_the_rollup_omits_is_read_too(world, capsys, sibling, 
 # Text edits to the head's rust.yml (the checkout keeps the real one).
 TOP_DEFAULTS = ("\njobs:\n", "\ndefaults:\n  run:\n    working-directory: nowhere\njobs:\n")
 TOP_ENV = ("\nenv:\n", "\nenv:\n  BASH_ENV: ./broken.sh\n")
-GATE_NAME = "    name: Parity / ${{ matrix.os }}\n"
+GATE_NAME = "    name: Parity / ubuntu-latest\n"
 
 
 def _gate_key(text: str) -> tuple[str, str]:
@@ -1607,8 +1647,8 @@ def _gate_key(text: str) -> tuple[str, str]:
     (_gate_key("    env:\n      BASH_ENV: ./broken.sh\n"), False),
     (_gate_key("    container: ubuntu:24.04\n"), False),
     (_gate_key("    services:\n      db:\n        image: postgres:16\n"), False),
-    (("    timeout-minutes: 5\n    steps:\n      # A cancelled",
-      "    timeout-minutes: 6\n    steps:\n      # A cancelled"), False),
+    (("    timeout-minutes: &parity_timeout 5\n    steps: &parity_verdict_steps\n      # A cancelled",
+      "    timeout-minutes: &parity_timeout 6\n    steps: &parity_verdict_steps\n      # A cancelled"), False),
     # A change outside the gate and the workflow's defaults and env.
     (("    name: Rust daemon / disposable image\n",
       "    name: Rust daemon / disposable image\n    timeout-minutes: 61\n"), True),
@@ -5297,12 +5337,12 @@ def _rust_job_pytest_paths() -> list[str]:
     return paths
 
 
-def test_harness_agreement_guards_run_on_every_pull_request():
+def test_harness_agreement_guards_run_for_non_docs_guard_lanes():
     import yaml
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     step, = [s for s in workflow["jobs"]["guards"]["steps"]
              if s.get("name") == "Tree-wide guards"]
-    assert "if" not in step
+    assert step["if"] == "needs.scope.outputs.docs != 'docs'"
     for name in ("test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness",
                  "test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips"):
         assert f"tests/test_integrate_script.py::{name}" in step["run"].split()

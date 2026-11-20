@@ -134,19 +134,17 @@ def main(argv: list[str] | None = None) -> int:
 
         output = args.out.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
+        command = [sys.executable, str(HERE / "schema_cases.py"), "--rust-test-bin", str(binary),
+                   "--all-versions", "--out", str(output)]
         if args.record_candidate:
             # The golden's cases only; check the written golden afterwards.
-            command = [sys.executable, str(HERE / "run.py"), "schema", "--rust-test-bin", str(binary),
-                       "--all-versions", "--record-candidate", *(["--write"] if args.write else []),
-                       "--out", str(output)]
-            return subprocess.run(command, cwd=REPO, env=env).returncode
-        command = [sys.executable, str(HERE / "run.py"), "schema", "--rust-test-bin", str(binary),
-                   "--all-versions", "--refusals", "--mutants", "--out", str(output)]
-        command.append("--record-goldens" if args.record_goldens else "--check-goldens")
-        return subprocess.run(
-            command,
-            cwd=REPO, env=env,
-        ).returncode
+            command.append("--record-candidate")
+            if args.write:
+                command.append("--write")
+        else:
+            command.extend(["--refusals", "--mutants",
+                            "--record-goldens" if args.record_goldens else "--check-goldens"])
+        return subprocess.run(command, cwd=REPO, env=env).returncode
     except ValueError as exc:
         print(f"schema CI refused: {exc}", file=sys.stderr)
         return 1

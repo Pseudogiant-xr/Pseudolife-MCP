@@ -2120,6 +2120,37 @@ def test_digest_removal_waits_out_a_reader_holding_the_file(tmp_path):
     assert not digest.exists()
 
 
+def test_mail_payload_is_available_with_frozen_imports_blocked():
+    from cli_harness.rows import mail
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    with cold_harness_imports():
+        body = mail._body()
+    assert "m-0001 from reviewer (01234567, 22:53)" in body
+    assert "merged — ünïcödé ✓ and  nbsp" in body
+
+
+def test_doorbell_payloads_supply_matching_prompt_and_record_without_python(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from cli_harness.rows import hook
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    writes = []
+    monkeypatch.setattr(hook.p, "write_private", lambda path, text: writes.append(text))
+    expected = {"doorbell-positive": 2, "doorbell-positive-maintainer": 3,
+                "doorbell-legacy-record": None}
+    with cold_harness_imports():
+        cases = {case.id: case for case in hook._finish(hook._doorbell_cases())}
+        for name, version in expected.items():
+            case = cases[name]
+            case.setup(SimpleNamespace(home=tmp_path))
+            record = json.loads(writes[-1])
+            assert record.get("version") == version
+            assert json.loads(case.stdin)["prompt"] == record["text"]
+
+
 @pytest.mark.parametrize("held", ["digest", "ring"])
 def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatch, held):
     """digest-advances-later replaces the digest and ring while the Python
@@ -2144,6 +2175,80 @@ def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatc
         reader.close()
     assert paths["digest"].read_bytes().startswith(b"8\n")
     assert paths["ring"].read_bytes() == b"8\nrung urgent\n"
+
+
+def test_private_marker_writer_runs_with_frozen_imports_blocked(tmp_path):
+    from types import SimpleNamespace
+
+    from cli_harness import producers
+    from cli_harness.rows import hook, mail
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    path = tmp_path / "digests" / "pending"
+    with cold_harness_imports():
+        producers.write_private(path, "first\n")
+        producers.write_private(path, "second ✓\n")
+        mail.seed()(SimpleNamespace(home=tmp_path / "mail"))
+        hook.seed_pending("maintainer")(SimpleNamespace(home=tmp_path / "hook"))
+    assert path.read_bytes() == "second ✓\n".encode()
+    assert list(path.parent.iterdir()) == [path]
+    assert mail._paths(tmp_path / "mail")["digest"].read_bytes() == ("7\n" + mail._body() + "\n").encode()
+    assert hook._bell(tmp_path / "hook", "bell-pending").read_bytes() == producers.doorbell_record("maintainer").encode()
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert path.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_refused_private_replace_preserves_the_previous_marker(tmp_path, monkeypatch):
+    from cli_harness import producers
+
+    path = tmp_path / "digests" / "pending"
+    producers.write_private(path, "previous\n")
+
+    def refuse_replace(source, destination):
+        raise PermissionError("fixture reader holds the file")
+
+    monkeypatch.setattr(os, "replace", refuse_replace)
+    with pytest.raises(RuntimeError, match="producer could not write"):
+        producers.write_private(path, "next\n")
+    assert path.read_bytes() == b"previous\n"
+    assert list(path.parent.iterdir()) == [path]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink fixture")
+def test_private_marker_writer_refuses_a_linked_parent(tmp_path):
+    from cli_harness import producers
+
+    target = tmp_path / "target"
+    target.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(target, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="producer could not write"):
+        producers.write_private(alias / "pending", "must not reach the target\n")
+    assert list(target.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL fallback")
+@pytest.mark.parametrize("same_owner", [True, False])
+def test_windows_fixture_acl_retries_only_for_the_current_owner(tmp_path, monkeypatch, same_owner):
+    from rust.harness_support import _windows_fixture_acl as acl
+
+    requested_owner = []
+
+    def set_security(path, object_type, flags, owner, group, dacl, sacl):
+        requested_owner.append(owner is not None)
+        return 5 if owner is not None else 0
+
+    monkeypatch.setattr(acl, "_set_security", set_security)
+    monkeypatch.setattr(acl, "_owner_matches", lambda path, user: same_owner)
+    if same_owner:
+        acl.secure_windows_file(tmp_path / "fixture")
+        assert requested_owner == [True, False]
+    else:
+        with pytest.raises(OSError) as failure:
+            acl.secure_windows_file(tmp_path / "fixture")
+        assert failure.value.winerror == 5
+        assert requested_owner == [True]
 
 
 def test_tls_fixture_is_warm_before_an_arm_connects(monkeypatch):

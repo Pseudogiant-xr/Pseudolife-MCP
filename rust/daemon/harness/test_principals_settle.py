@@ -42,12 +42,14 @@ from test_principal_fixtures import (  # noqa: F401
 )
 
 
-def test_readiness_controls_are_imported_for_parity():
+def test_fixture_controls_are_imported_for_parity():
+    import test_principal_fixtures
     from rust.harness_support import test_readiness
 
-    tests = {name: test for name, test in vars(test_readiness).items() if name.startswith("test_")}
-    missing = [name for name, test in tests.items() if globals().get(name) is not test]
-    assert not missing, f"import readiness tests in the principal parity module: {', '.join(sorted(missing))}"
+    for source in (test_readiness, test_principal_fixtures):
+        missing = sorted(name for name, test in vars(source).items()
+                         if name.startswith("test_") and globals().get(name) is not test)
+        assert not missing, f"import {source.__name__} tests in the principal parity module: {', '.join(missing)}"
 
 
 def store_bearers(scn) -> list[str]:
