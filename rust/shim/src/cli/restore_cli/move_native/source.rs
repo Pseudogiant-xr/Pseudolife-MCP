@@ -753,6 +753,7 @@ mod tests {
             Op::CarryApply {
                 identities: fixture().settings(),
                 expected_pins: Default::default(),
+                files: Default::default(),
             },
             Op::CarryVerify {
                 identities: fixture(),

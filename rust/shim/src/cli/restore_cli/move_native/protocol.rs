@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    carry::{Identities, TargetPins},
+    carry::{Identities, TargetFiles, TargetPins},
     target::Ask,
 };
 
@@ -31,12 +31,16 @@ pub(in crate::cli) enum Op {
     /// Check target Compose interpolation without sending source bearer values.
     CarryCheck {
         populated: [bool; 4],
+        #[serde(default, skip_serializing_if = "TargetFiles::is_empty")]
+        files: TargetFiles,
     },
     CarryApply {
         identities: Identities,
         /// The restore's expected selection. Keep it distinct from the
         /// request's pins because the operation is flattened on the wire.
         expected_pins: TargetPins,
+        #[serde(default, skip_serializing_if = "TargetFiles::is_empty")]
+        files: TargetFiles,
     },
     CarryVerify {
         identities: Identities,
@@ -246,6 +250,7 @@ mod tests {
             op: Op::CarryApply {
                 identities: super::super::carry::fixture(),
                 expected_pins: pins,
+                files: TargetFiles::default(),
             },
         };
         let wire = serde_json::to_vec(&request).unwrap();
