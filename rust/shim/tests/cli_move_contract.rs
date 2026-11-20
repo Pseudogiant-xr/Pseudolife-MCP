@@ -22,7 +22,7 @@ const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
 const URL_REQUIRED: &str = "move: --target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765. Nothing was changed\n";
-const NO_CHECKOUT: &str = "move: --target-checkout is not supported: move goes to an installed (release) Docker bank on the target, with the native pseudolife-mcp client there; drop --target-checkout. Nothing was changed\n";
+const NO_CHECKOUT: &str = "move: --target-checkout selects a checkout rebuild and stopped handover. Native move requires an installed release Docker deployment and the native client on the target. Retry against that deployment with --target-release and omit --target-checkout. Nothing was changed\n";
 const NO_SSH: &str = "move: no ssh program is on PATH (only absolute PATH entries are searched); install the OpenSSH client, then retry. Nothing was changed\n";
 /// A dry run that passes every argv check.
 const DRY: &[&str] = &[

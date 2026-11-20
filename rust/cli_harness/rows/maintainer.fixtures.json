@@ -1,0 +1,99 @@
+{
+  "baseline": "00964cbeb",
+  "hooks": {
+    "burn": {
+      "rows": {},
+      "status": {
+        "credential_id": null,
+        "failed_attempts": 5,
+        "used_at": null
+      }
+    },
+    "redeem": {
+      "rows": {
+        "coordination_events": [
+          {"actor": "daemon", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782867600, "event": "maintainer_key", "hash": "30265ddfbf4c3a666e6ec6a9cefb8602b6ed44e841c4d3ec9f06e250304ddd4a", "hlc": "", "message_id": null, "payload": "{\"by\":\"bootstrap\",\"change\":\"enrol\",\"credential_id\":\"deskKeyHookAAAAAAAAAAA\",\"label\":\"desk key\",\"path\":\"console\",\"revoked\":null}", "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000", "principal": "", "project": "", "recipient_agent_id": null, "seq": 1, "task": ""}
+        ],
+        "maintainer_nonces": [
+          {"expires_at": 1782867720, "nonce": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"}
+        ],
+        "maintainer_passkeys": [
+          {"active_from": null, "alg": -7, "created_at": 1782867600, "credential_id": "deskKeyHookAAAAAAAAAAA", "enrolled_by": "bootstrap", "flagged_at": null, "label": "desk key", "last_used_at": null, "public_key": "\\xa5010203262001215820a72595596a51511ca2c28e6e3b5667a8c2de5411f5f4914757af371bdaf41a0a2258203f3aa7a7408d764a82b3ae648ca501f405ac31fef5edbddc2172a4ac89c4a0aa", "revoked_at": null, "revoked_by": null, "sign_count": 1, "signs_in_as": null, "state": "pending"}
+        ]
+      },
+      "status": {
+        "credential_id": "deskKeyHookAAAAAAAAAAA",
+        "failed_attempts": 0,
+        "used_at": 1782867600
+      }
+    }
+  },
+  "seeds": {
+    "fresh": {
+      "meta": [
+        {"key": "maintainer_secret_v1", "value": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92"}
+      ]
+    },
+    "pending": {
+      "coordination_events": [
+        {"actor": "daemon", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782864000, "event": "maintainer_key", "hash": "d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26", "hlc": "", "message_id": null, "payload": "{\"by\":\"bootstrap\",\"change\":\"enrol\",\"credential_id\":\"-pendingKeyAAAAAAAAAAA\",\"label\":\"laptop\",\"path\":\"console\",\"revoked\":null}", "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000", "principal": "", "project": "", "recipient_agent_id": null, "seq": 1, "task": ""}
+      ],
+      "maintainer_bootstrap": [
+        {"code_hash": "591ed83b5b3fbb75b60272a4d15e7e1fd052c70475a4a1c18d5b5c8b4eec1405", "credential_id": "-pendingKeyAAAAAAAAAAA", "expires_at": 1782864600, "failed_attempts": 0, "used_at": 1782864000}
+      ],
+      "maintainer_nonces": [
+        {"expires_at": 1782864120, "nonce": "147b6e0ee91979ef78eeaf2ab6aa7ba6"}
+      ],
+      "maintainer_passkeys": [
+        {"active_from": null, "alg": -7, "created_at": 1782864000, "credential_id": "-pendingKeyAAAAAAAAAAA", "enrolled_by": "bootstrap", "flagged_at": null, "label": "laptop", "last_used_at": null, "public_key": "\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a", "revoked_at": null, "revoked_by": null, "sign_count": 1, "signs_in_as": null, "state": "pending"}
+      ],
+      "meta": [
+        {"key": "maintainer_secret_v1", "value": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3"}
+      ]
+    },
+    "rich": {
+      "coordination_events": [
+        {"actor": "daemon", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782864000, "event": "maintainer_key", "hash": "b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5", "hlc": "", "message_id": null, "payload": "{\"by\":\"bootstrap\",\"change\":\"enrol\",\"credential_id\":\"-dashKeyAAAAAAAAAAAAAA\",\"label\":\"laptop\",\"path\":\"console\",\"revoked\":null}", "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000", "principal": "", "project": "", "recipient_agent_id": null, "seq": 1, "task": ""},
+        {"actor": "operator", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782864060, "event": "maintainer_key", "hash": "785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82", "hlc": "", "message_id": null, "payload": "{\"by\":\"host\",\"change\":\"confirm\",\"credential_id\":\"-dashKeyAAAAAAAAAAAAAA\",\"label\":\"laptop\",\"path\":\"host\",\"revoked\":null}", "prev_hash": "b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5", "principal": "", "project": "", "recipient_agent_id": null, "seq": 2, "task": ""},
+        {"actor": "maintainer", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782864120, "event": "maintainer_key", "hash": "bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44", "hlc": "", "message_id": null, "payload": "{\"by\":\"-dashKeyAAAAAAAAAAAAAA\",\"change\":\"add\",\"credential_id\":\"phoneKey_quarantineAAA\",\"label\":\"Tom's phone ☎\",\"path\":\"console\",\"revoked\":null}", "prev_hash": "785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82", "principal": "", "project": "", "recipient_agent_id": null, "seq": 3, "task": ""},
+        {"actor": "maintainer", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782864180, "event": "maintainer_key", "hash": "bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf", "hlc": "", "message_id": null, "payload": "{\"by\":\"-dashKeyAAAAAAAAAAAAAA\",\"change\":\"add\",\"credential_id\":\"twinAB1keyDAAAAAAAAAAA\",\"label\":\"it's \\\"twin\\\"\",\"path\":\"console\",\"revoked\":null}", "prev_hash": "bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44", "principal": "", "project": "", "recipient_agent_id": null, "seq": 4, "task": ""},
+        {"actor": "maintainer", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782864240, "event": "maintainer_key", "hash": "beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7", "hlc": "", "message_id": null, "payload": "{\"by\":\"-dashKeyAAAAAAAAAAAAAA\",\"change\":\"add\",\"credential_id\":\"twinAB2keyEAAAAAAAAAAA\",\"label\":\"twin two\",\"path\":\"console\",\"revoked\":null}", "prev_hash": "bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf", "principal": "", "project": "", "recipient_agent_id": null, "seq": 5, "task": ""},
+        {"actor": "maintainer", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782864300, "event": "maintainer_key", "hash": "435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed", "hlc": "", "message_id": null, "payload": "{\"by\":\"-dashKeyAAAAAAAAAAAAAA\",\"change\":\"add\",\"credential_id\":\"cancelXdRevokedAAAAAAA\",\"label\":\"spare\",\"path\":\"console\",\"revoked\":null}", "prev_hash": "beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7", "principal": "", "project": "", "recipient_agent_id": null, "seq": 6, "task": ""},
+        {"actor": "maintainer", "agent_id": "", "body": null, "body_salt": null, "created_at": 1782864360, "event": "maintainer_key", "hash": "f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676", "hlc": "", "message_id": null, "payload": "{\"by\":\"-dashKeyAAAAAAAAAAAAAA\",\"change\":\"cancel\",\"credential_id\":\"cancelXdRevokedAAAAAAA\",\"label\":\"spare\",\"path\":\"console\",\"revoked\":null}", "prev_hash": "435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed", "principal": "", "project": "", "recipient_agent_id": null, "seq": 7, "task": ""}
+      ],
+      "maintainer_bootstrap": [
+        {"code_hash": "b9601048e512f3054fa55dfa928844bf7b4e4d1ebd0bf6b2e901e98eb920d95f", "credential_id": "-dashKeyAAAAAAAAAAAAAA", "expires_at": 1782864600, "failed_attempts": 0, "used_at": 1782864000}
+      ],
+      "maintainer_nonces": [
+        {"expires_at": 1782864300, "nonce": "367842e165988e9c41b75add97bf73e1"},
+        {"expires_at": 1782864120, "nonce": "385e2d4a87601c285778092b3e9fa86e"},
+        {"expires_at": 1782864360, "nonce": "3ce4f2376e9abe66e554d44e2fe22726"},
+        {"expires_at": 1782864240, "nonce": "664b7acc3125179ba6d588f1005a8872"},
+        {"expires_at": 1782864420, "nonce": "85a5b004fe571bf91d598e20e1c50e94"},
+        {"expires_at": 1782864360, "nonce": "9451dffd167f6ba15935fb79917aad2f"},
+        {"expires_at": 1782864300, "nonce": "958e72f2235ec222957676cb93b9e359"},
+        {"expires_at": 1782864480, "nonce": "9e889231ad7087dd9772c485e7ba0018"},
+        {"expires_at": 1782864240, "nonce": "c058897a0aaebb23928a7c8a12caa3bc"},
+        {"expires_at": 1782864420, "nonce": "efb07e6d96b033f1dcfbffb99a8d05f9"}
+      ],
+      "maintainer_passkeys": [
+        {"active_from": 1782950520, "alg": -7, "created_at": 1782864120, "credential_id": "phoneKey_quarantineAAA", "enrolled_by": "-dashKeyAAAAAAAAAAAAAA", "flagged_at": null, "label": "Tom's phone ☎", "last_used_at": null, "public_key": "\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef", "revoked_at": null, "revoked_by": null, "sign_count": 1, "signs_in_as": null, "state": "active"},
+        {"active_from": 1782950580, "alg": -7, "created_at": 1782864180, "credential_id": "twinAB1keyDAAAAAAAAAAA", "enrolled_by": "-dashKeyAAAAAAAAAAAAAA", "flagged_at": null, "label": "it's \"twin\"", "last_used_at": null, "public_key": "\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6", "revoked_at": null, "revoked_by": null, "sign_count": 1, "signs_in_as": null, "state": "active"},
+        {"active_from": 1782864060, "alg": -7, "created_at": 1782864000, "credential_id": "-dashKeyAAAAAAAAAAAAAA", "enrolled_by": "bootstrap", "flagged_at": 1782864420, "label": "laptop", "last_used_at": 1782864360, "public_key": "\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db", "revoked_at": null, "revoked_by": null, "sign_count": 6, "signs_in_as": null, "state": "active"},
+        {"active_from": 1782950700, "alg": -7, "created_at": 1782864300, "credential_id": "cancelXdRevokedAAAAAAA", "enrolled_by": "-dashKeyAAAAAAAAAAAAAA", "flagged_at": null, "label": "spare", "last_used_at": null, "public_key": "\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df", "revoked_at": 1782864360, "revoked_by": "-dashKeyAAAAAAAAAAAAAA", "sign_count": 1, "signs_in_as": null, "state": "revoked"},
+        {"active_from": 1782950640, "alg": -7, "created_at": 1782864240, "credential_id": "twinAB2keyEAAAAAAAAAAA", "enrolled_by": "-dashKeyAAAAAAAAAAAAAA", "flagged_at": null, "label": "twin two", "last_used_at": null, "public_key": "\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0", "revoked_at": null, "revoked_by": null, "sign_count": 1, "signs_in_as": null, "state": "active"}
+      ],
+      "meta": [
+        {"key": "maintainer_secret_v1", "value": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7"}
+      ]
+    },
+    "stale": {
+      "maintainer_bootstrap": [
+        {"code_hash": "7f3160ea5cdf832a8dffedb8aa716dc7950c0922e569ce865dbeca96b3e8b989", "credential_id": null, "expires_at": 1782864600, "failed_attempts": 0, "used_at": null}
+      ],
+      "meta": [
+        {"key": "maintainer_secret_v1", "value": "0191e9aca9c8b455107a16cbc0656383d68520410b4811873c256a37624ed80d"}
+      ]
+    }
+  }
+}

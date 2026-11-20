@@ -494,13 +494,23 @@ fn settle_exposure(arguments: &[std::ffi::OsString]) -> u8 {
         missing: String::new(),
     };
     let result = super::super::with_update_lock(&directory, || {
-        super::exposure::settle_pending(&mut site, &folder, port)
+        super::exposure::settle_idle(&mut site, &folder, port)
     });
     match result {
         Ok(Ok(())) => {
-            println!(
-                "The exposure receipt is settled. Retry the move's rollback or release from its source."
-            );
+            if let Some(id) = folder
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|id| super::record::valid_id(id))
+            {
+                println!(
+                    "The exposure receipt is settled. On the source, retry pseudolife-mcp move --rollback {id}, or pseudolife-mcp move --release-target {id} if rollback is already complete."
+                );
+            } else {
+                println!(
+                    "The exposure receipt is settled. Retry the move's rollback or release from its source."
+                );
+            }
             return 0;
         }
         Ok(Err(why)) => eprintln!("move-target: {why}"),

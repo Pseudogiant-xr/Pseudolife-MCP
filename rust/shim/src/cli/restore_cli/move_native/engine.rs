@@ -1594,6 +1594,7 @@ impl<H: Hosts> Back<'_, H> {
     /// release already gave back.
     fn release(&mut self) -> Outcome {
         const SETTLE_EXPOSURE: &str = "settle the target exposure receipt";
+        const CHECK_EXPOSURE: &str = "check the target exposure receipt";
         let id = self.record.move_id.clone();
         let to = self.record.target.clone();
         let bank = self.record.source_bank.clone();
@@ -1604,11 +1605,20 @@ impl<H: Hosts> Back<'_, H> {
                 detail: why.clone(),
             });
             back.save();
+            if step == CHECK_EXPOSURE {
+                let resort = close_source_record(&back.record);
+                return Outcome {
+                    code: EXIT_INCOMPLETE,
+                    message: format!(
+                        "release did not finish: {why}.\n  After addressing the reported issue, rerun pseudolife-mcp move --release-target {id}.\n  If recovery cannot continue, {resort}. Renaming the record may leave this move's tailnet forward on the target without a source record tracking it. Check and settle the exposure before starting any daemon there. Preserve any forward another move is using."
+                    ),
+                };
+            }
             if step == SETTLE_EXPOSURE {
                 return Outcome {
                     code: EXIT_INCOMPLETE,
                     message: format!(
-                        "giving {to} back its own bank did not finish: {why}. Keep the target stopped and gated until its exposure is settled."
+                        "giving {to} back its own bank did not finish: {why}. Keep the target stopped and gated until its exposure is settled, then rerun pseudolife-mcp move --release-target {id}."
                     ),
                 };
             }
@@ -1673,9 +1683,11 @@ impl<H: Hosts> Back<'_, H> {
         // Neither this move's claim nor its bank: nothing of this host's bank
         // is there, and nothing there is this move's to change.
         if !ours && !holds_bank {
-            if self.record.expose_port.is_some() && !self.record.flags.exposure_settled_for_release
+            if let Some(port) = self.record.expose_port
+                && !self.record.flags.exposure_settled_for_release
+                && let Err(why) = self.op(Op::CheckExposureReceipt { port })
             {
-                return unfinished(self, SETTLE_EXPOSURE, "this move no longer holds the target claim and has an unsettled exposure receipt; verify the target's claim before retrying release".into());
+                return unfinished(self, CHECK_EXPOSURE, why);
             }
             return self.nothing_there(&state);
         }
@@ -2345,8 +2357,17 @@ fn manual_target_selection(record: &Record) -> Option<String> {
     }
 }
 
-/// The last way to close a record whose target keeps refusing: on this
-/// host, by hand, with what it leaves on the target.
+/// Close only the source record by hand.
+fn close_source_record(record: &Record) -> String {
+    format!(
+        "the last resort is on this host: rename {} to record.json.closed, which closes this host's record of move {} so it no longer holds this host",
+        Path::new(&record.local_dir).join("record.json").display(),
+        record.move_id
+    )
+}
+
+/// The last way to close a record whose target keeps refusing, including
+/// what it leaves on the target.
 fn last_resort(record: &Record) -> String {
     let exposure = if record.expose_port.is_some() && !record.flags.exposure_settled_for_release {
         ". First settle the recorded exposure before starting any daemon on that target."
@@ -2354,9 +2375,8 @@ fn last_resort(record: &Record) -> String {
         ""
     };
     format!(
-        "if that cannot be put right there, the last resort is on this host: rename {} to record.json.closed, which closes this host's record of move {} so it no longer holds this host. {} then stays as it is, gated and perhaps claimed, until whoever runs it gives it back its own bank and then removes the gate ({}) and the claim (ssh {} rm -f {}); never the gate first, or the copy of this host's bank behind it would start there{exposure}",
-        Path::new(&record.local_dir).join("record.json").display(),
-        record.move_id,
+        "if that cannot be put right there, {}. {} then stays as it is, gated and perhaps claimed, until whoever runs it gives it back its own bank and then removes the gate ({}) and the claim (ssh {} rm -f {}); never the gate first, or the copy of this host's bank behind it would start there{exposure}",
+        close_source_record(record),
         record.target,
         gate_removal(record),
         record.target,
