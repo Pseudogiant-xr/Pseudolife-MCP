@@ -29,12 +29,13 @@ FAILURE_OUTCOMES = (
 VERSION = r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:(?:a|b|rc|\.dev)[0-9]{1,4})?"
 ARCHIVE_NAMES = {
     target: re.compile(
-        rf"pseudolife-mcp-{VERSION}-{target}"
+        rf"pseudolife-mcp-(?P<version>{VERSION})-{target}"
         + (r"\.zip" if platform == "windows-x64" else r"\.tar\.gz")
     )
     for platform, target in TARGETS.items()
 }
 COMPOSE_NAME = re.compile(rf"pseudolife-compose-{VERSION}\.tar\.gz")
+CHECKSUM_ROW = re.compile(r"([0-9a-fA-F]{64}) [ *](\S+)")
 CELL_FIELDS = {"schema", "scenario", "platform", "status"}
 RUN_FIELDS = {"commit", "archive", "sha256", "machine_role", "commands", "outcome", "cleanup"}
 
@@ -110,8 +111,8 @@ LINUX_RECOVERY = (
 )
 FAILURE_PROBES = {
     "windows": ("<locked-file>", "<interrupted-refresh>"),
-    "linux": ("<child-interruption>", "<interrupted-publication>", "<interrupted-refresh>"),
-    "macos": ("<cancelled-launch>", "<failed-launch>", "<interrupted-refresh>"),
+    "linux": ("<locked-file>", "<child-interruption>", "<interrupted-publication>", "<interrupted-refresh>"),
+    "macos": ("<locked-file>", "<cancelled-launch>", "<failed-launch>", "<interrupted-refresh>"),
 }
 LOCAL_BANK = (
     "A local bank needs its own Docker engine. The project, network, three container names and "
@@ -120,7 +121,10 @@ LOCAL_BANK = (
 )
 USER_SERVICES = {
     "linux": "A non-client-only install changes the real user service manager.",
-    "windows": "A non-client-only install changes the real task scheduler. The installer also writes the real user PATH.",
+    "windows": (
+        "A non-client-only install changes the real task scheduler. The installer also writes the real user PATH. "
+        "Use a Windows host without the py launcher, which can resolve outside the staged search path."
+    ),
     "macos": "Legacy tunnel migration reaches the real launchd login domain. Native unattended schedule setup is unavailable.",
 }
 LINUX_INSTALL_EFFECTS = (
@@ -141,6 +145,18 @@ FIRST_LINUX_PROBE = (
 
 class RecordError(ValueError):
     """The record cannot be published or counted."""
+
+
+@dataclass(frozen=True)
+class Candidate:
+    commit: str
+    digests: dict[str, str]
+
+    def verify(self, record: dict) -> None:
+        if record["commit"] != self.commit:
+            raise RecordError("record was made for a different commit")
+        if self.digests.get(record["archive"]) != record["sha256"]:
+            raise RecordError("archive SHA-256 does not match its SHA256SUMS row")
 
 
 def cells():
@@ -190,6 +206,25 @@ def describe(scenario: str, platform: str) -> None:
 
 def known_archive(name: str) -> bool:
     return any(pattern.fullmatch(name) for pattern in (*ARCHIVE_NAMES.values(), COMPOSE_NAME))
+
+
+def read_manifest(path: Path) -> dict[str, str]:
+    entries = {}
+    try:
+        lines = path.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        raise RecordError("cannot read ASCII SHA256SUMS") from None
+    for line in lines:
+        match = CHECKSUM_ROW.fullmatch(line)
+        if not match or not known_archive(match[2]):
+            raise RecordError("SHA256SUMS contains an invalid release asset row")
+        digest, name = match.groups()
+        if name in entries:
+            raise RecordError("SHA256SUMS contains a duplicate asset name")
+        entries[name] = digest.lower()
+    if not entries:
+        raise RecordError("SHA256SUMS has no release assets")
+    return entries
 
 
 def _digest(value: object, digits: int) -> bool:
@@ -253,8 +288,9 @@ def _validate(record: object) -> tuple[str, str]:
         or cleanup.keys() != {"done", "verified"}
         or not all(type(value) is bool for value in cleanup.values())
         or (not cleanup["done"] and cleanup["verified"])
-        or (status == "pass" and not cleanup["verified"])
     ):
+        raise RecordError("cleanup requires boolean done and verified fields, with verification only after completion")
+    if status == "pass" and not cleanup["verified"]:
         raise RecordError("a pass requires completed and verified cleanup")
     _validate_commands(record)
     return scenario, platform
@@ -281,17 +317,26 @@ def _unique_keys(pairs: list) -> dict:
     return result
 
 
-def read_ledger(folder: Path) -> dict[tuple[str, str], str]:
+def read_ledger(folder: Path, candidate: Candidate | None = None) -> dict[tuple[str, str], str]:
     rows = {}
+    versions = set()
     names = {_filename(*cell): cell for cell in cells()}
     for path in sorted(folder.iterdir()):
         if path.name not in names:
-            raise RecordError("unexpected filename in record folder")
+            raise RecordError(f"unexpected ledger filename {ascii(path.name)}; expected <scenario>--<platform>.json")
         if path.is_symlink() or not path.is_file():
             raise RecordError("record must be a regular JSON file")
         try:
-            record = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_keys)
+            payload = path.read_text(encoding="utf-8")
+            if payload.startswith("\ufeff"):
+                raise RecordError("UTF-8 byte-order mark; save the row as UTF-8 without a BOM")
+            record = json.loads(payload, object_pairs_hook=_unique_keys)
             cell = _validate(record)
+            if record["status"] != "not yet run":
+                if candidate is not None:
+                    candidate.verify(record)
+                target = TARGETS[cell[1]]
+                versions.add(ARCHIVE_NAMES[target].fullmatch(record["archive"])["version"])
         except RecordError as error:
             raise RecordError(f"{path.name}: {error}") from None
         except (UnicodeError, ValueError, RecursionError):
@@ -299,6 +344,8 @@ def read_ledger(folder: Path) -> dict[tuple[str, str], str]:
         if cell != names[path.name]:
             raise RecordError(f"{path.name}: filename must match its scenario and platform")
         rows[cell] = record["status"]
+    if len(versions) > 1:
+        raise RecordError("observed rows use different archive versions")
     for scenario, platform in cells():
         if (scenario, platform) not in rows:
             raise RecordError(f"{scenario} / {platform} has no row")
@@ -308,8 +355,12 @@ def read_ledger(folder: Path) -> dict[tuple[str, str], str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="action", required=True)
-    for action in ("init", "check"):
-        actions.add_parser(action).add_argument("folder", type=Path)
+    actions.add_parser("init").add_argument("folder", type=Path)
+    check = actions.add_parser("check")
+    check.add_argument("folder", type=Path)
+    check.add_argument("--commit", help="full candidate commit SHA")
+    check.add_argument("--manifest", type=Path, help="trusted candidate SHA256SUMS file")
+    check.add_argument("--require-pass", action="store_true", help="require a passing record in every cell")
     scenario = actions.add_parser("describe")
     scenario.add_argument("scenario", choices=SCENARIOS)
     scenario.add_argument("platform", choices=TARGETS)
@@ -323,7 +374,12 @@ def main(argv: list[str] | None = None) -> int:
             for cell in cells():
                 write_record(args.folder, pending(*cell))
             return 0
-        rows = read_ledger(args.folder)
+        candidate = None
+        if args.commit is not None or args.manifest is not None:
+            if not _digest(args.commit, 40) or args.manifest is None:
+                raise RecordError("candidate binding requires --commit with a full lowercase Git SHA and --manifest")
+            candidate = Candidate(args.commit, read_manifest(args.manifest))
+        rows = read_ledger(args.folder, candidate)
     except RecordError as error:
         print(f"installed acceptance: {error}", file=sys.stderr)
         return 1
@@ -337,6 +393,9 @@ def main(argv: list[str] | None = None) -> int:
         print(" | ".join(f"{column:<20}" for column in columns).rstrip())
     counts = tuple(sum(value == status for value in rows.values()) for status in STATUSES)
     print("{} passed, {} failed, {} not yet run. Not yet run does not count as a pass.".format(*counts))
+    if args.require_pass and counts[0] != len(rows):
+        print("installed acceptance: --require-pass requires a passing record for every cell", file=sys.stderr)
+        return 1
     return 0
 
 

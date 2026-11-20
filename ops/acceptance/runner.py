@@ -6,13 +6,12 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
-import re
 import shutil
 import stat
 import subprocess
 import tempfile
 
-from .matrix import known_archive
+from .matrix import RecordError, read_manifest
 
 
 TOOLS = frozenset(
@@ -21,9 +20,13 @@ TOOLS = frozenset(
     "shasum sha256sum sort stat tar tail tr uname wc".split()
 )
 WINDOWS_EXTENSIONS = (".exe", ".com", ".bat", ".cmd")
-CHECKSUM_ROW = re.compile(r"([0-9a-fA-F]{64}) [ *](\S+)")
 STAND_IN = """\
 set -eCu
+for name in PSEUDOLIFE_SHIM_RUNTIMES PSEUDOLIFE_SHIM_LAUNCHER PSEUDOLIFE_SHIM_USER_BIN XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS PSEUDOLIFE_MCP_TOKEN SystemRoot windir; do
+    if declare -p "$name" >/dev/null 2>&1; then
+        exit 3
+    fi
+done
 for name in python python3 pip py; do
     if command -v "$name" >/dev/null; then
         exit 2
@@ -62,23 +65,6 @@ def _directory_identity(path: Path) -> tuple[int, int]:
     if not stat.S_ISDIR(entry.st_mode) or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
         raise PreparationError("owned directory was replaced by a link or other entry")
     return entry.st_dev, entry.st_ino
-
-
-def _manifest(source: Path) -> dict[str, str]:
-    entries = {}
-    try:
-        lines = (source / "SHA256SUMS").read_text(encoding="ascii").splitlines()
-    except (OSError, UnicodeError):
-        raise PreparationError("read the release's ASCII SHA256SUMS before staging archives") from None
-    for line in lines:
-        match = CHECKSUM_ROW.fullmatch(line)
-        if not match or not known_archive(match[2]):
-            raise PreparationError("SHA256SUMS contains an invalid release asset row")
-        digest, name = match.groups()
-        if name in entries:
-            raise PreparationError("SHA256SUMS contains a duplicate asset name")
-        entries[name] = digest.lower()
-    return entries
 
 
 def _sha256(path: Path) -> str:
@@ -156,12 +142,17 @@ class DisposableHome:
             "PATH": self.root / "bin",
             "PSEUDOLIFE_NATIVE_ARCHIVE_URL": self.archives,
         }
-        return {
+        env = {
             **{name: str(path) for name, path in folders.items()},
             "LC_ALL": "C",
             "PATHEXT": ";".join(WINDOWS_EXTENSIONS),
             "NoDefaultCurrentDirectoryInExePath": "1",
         }
+        if os.name == "nt":
+            windows_root = os.environ.get("SystemRoot") or os.environ.get("windir")
+            if windows_root:
+                env.update(SystemRoot=windows_root, windir=windows_root)
+        return env
 
     def prepare_path(self, tools: dict[str, Path]) -> Path:
         """Copy caller-selected tools by allowlisted name into a fresh search path."""
@@ -187,7 +178,10 @@ class DisposableHome:
     def prepare_archives(self, source: Path, names: list[str]) -> Path:
         """Stage selected release assets only after checking the copied bytes."""
         self._check_ownership()
-        manifest = _manifest(source)
+        try:
+            manifest = read_manifest(source / "SHA256SUMS")
+        except RecordError as error:
+            raise PreparationError(str(error)) from None
         if not names or len(set(names)) != len(names) or any(name not in manifest for name in names):
             raise PreparationError("select distinct archive names present in SHA256SUMS")
         with tempfile.TemporaryDirectory(prefix="archives-", dir=self.root) as directory:

@@ -11,6 +11,7 @@ from ops.acceptance import matrix, runner
 
 
 CELL = "clean-install", "linux-x64"
+OTHER_CELL = "clean-install", "linux-arm64"
 ARCHIVE = "pseudolife-mcp-0.24.0-x86_64-unknown-linux-gnu.tar.gz"
 OTHER_ARCHIVE = "pseudolife-mcp-0.24.0-aarch64-unknown-linux-gnu.tar.gz"
 REDIRECTED = (
@@ -22,18 +23,18 @@ CLEARED = (
 )
 
 
-def completed():
-    scenario, platform = CELL
+def completed(cell=CELL, archive=ARCHIVE):
+    scenario, platform = cell
     return {
         **matrix.pending(scenario, platform),
         "status": "pass",
         "commit": "a" * 40,
-        "archive": ARCHIVE,
+        "archive": archive,
         "sha256": "b" * 64,
         "machine_role": "disposable VM",
         "commands": [
-            {"command": command, "exit_code": 0}
-            for command in matrix.commands(scenario, platform)
+            {"command": step.command, "exit_code": int(step.expect_refusal)}
+            for step in matrix._steps(scenario, platform)
         ],
         "outcome": matrix.SCENARIOS[scenario].outcome,
         "cleanup": {"done": True, "verified": True},
@@ -70,6 +71,73 @@ def test_complete_ledger_counts_only_passes(tmp_path, capsys):
     )
 
 
+def test_candidate_commit_and_manifest_match_each_observed_record(tmp_path, capsys):
+    records = tmp_path / "records"
+    records.mkdir()
+    record = completed()
+    ledger(records, record)
+    manifest = tmp_path / "SHA256SUMS"
+    manifest.write_text(f"{record['sha256']}  {ARCHIVE}\n", encoding="ascii")
+    args = ["check", str(records), "--manifest", str(manifest)]
+    assert matrix.main([*args, "--commit", record["commit"]]) == 0
+    assert "1 passed" in capsys.readouterr().out
+    assert matrix.main([*args, "--commit", "c" * 40]) == 1
+    assert "record was made for a different commit" in capsys.readouterr().err
+    manifest.write_text(f"{'d' * 64}  {ARCHIVE}\n{record['sha256']}  {OTHER_ARCHIVE}\n", encoding="ascii")
+    assert matrix.main([*args, "--commit", record["commit"]]) == 1
+    assert "archive SHA-256 does not match" in capsys.readouterr().err
+
+
+def test_mixed_versions_fail_even_with_matching_manifest_rows(tmp_path, capsys):
+    records = tmp_path / "records"
+    records.mkdir()
+    different_version = OTHER_ARCHIVE.replace("0.24.0", "0.25.0")
+    rows = {CELL: completed(), OTHER_CELL: completed(OTHER_CELL, different_version)}
+    for cell in matrix.cells():
+        matrix.write_record(records, rows.get(cell, matrix.pending(*cell)))
+    manifest = tmp_path / "SHA256SUMS"
+    manifest.write_text(
+        "".join(f"{record['sha256']}  {record['archive']}\n" for record in rows.values()),
+        encoding="ascii",
+    )
+    assert matrix.main(["check", str(records), "--commit", "a" * 40, "--manifest", str(manifest)]) == 1
+    assert "observed rows use different archive versions" in capsys.readouterr().err
+
+
+def test_require_pass_rejects_pending_and_failed_rows(tmp_path, capsys):
+    record = completed()
+    record.update(status="fail", outcome=matrix.FAILURE_OUTCOMES[0])
+    ledger(tmp_path, record)
+    assert matrix.main(["check", str(tmp_path), "--require-pass"]) == 1
+    output = capsys.readouterr()
+    assert "0 passed, 1 failed, 24 not yet run." in output.out
+    assert "requires a passing record for every cell" in output.err
+
+
+def test_bound_gate_accepts_a_complete_passing_ledger(tmp_path, capsys):
+    records = tmp_path / "records"
+    records.mkdir()
+    manifest_rows = {}
+    for cell in matrix.cells():
+        platform = cell[1]
+        suffix = ".zip" if platform == "windows-x64" else ".tar.gz"
+        name = f"pseudolife-mcp-0.24.0-{matrix.TARGETS[platform]}{suffix}"
+        record = completed(cell, name)
+        matrix.write_record(records, record)
+        manifest_rows[name] = record["sha256"]
+    manifest = tmp_path / "SHA256SUMS"
+    manifest.write_text("".join(f"{digest}  {name}\n" for name, digest in manifest_rows.items()), encoding="ascii")
+    args = ["check", str(records), "--require-pass", "--commit", "a" * 40, "--manifest", str(manifest)]
+    assert matrix.main(args) == 0
+    assert "25 passed, 0 failed, 0 not yet run." in capsys.readouterr().out
+
+
+def test_binding_requires_both_commit_and_manifest(tmp_path, capsys):
+    ledger(tmp_path)
+    assert matrix.main(["check", str(tmp_path), "--commit", "a" * 40]) == 1
+    assert "requires --commit" in capsys.readouterr().err
+
+
 def test_init_writes_explicit_pending_rows(tmp_path, capsys):
     folder = tmp_path / "records"
     assert matrix.main(["init", str(folder)]) == 0
@@ -92,6 +160,7 @@ def test_describe_shows_host_effects_and_the_bounded_linux_candidate(capsys):
     assert matrix.main(["describe", "upgrade-and-rollback", "windows-x64"]) == 0
     output = capsys.readouterr().out
     assert "changes the real task scheduler" in output
+    assert "Windows host without the py launcher" in output
     assert "--client-only" not in output
 
 
@@ -109,6 +178,21 @@ def test_malformed_record_fails_checker_without_echoing_fields(tmp_path, capsys)
     assert matrix.main(["check", str(tmp_path)]) == 1
     error = capsys.readouterr().err
     assert "duplicate JSON key" in error and "private" not in error
+
+
+def test_checker_names_stray_file_and_utf8_bom(tmp_path, capsys):
+    ledger(tmp_path)
+    stray = tmp_path / ".DS_Store"
+    stray.write_text("private contents", encoding="utf-8")
+    assert matrix.main(["check", str(tmp_path)]) == 1
+    error = capsys.readouterr().err
+    assert ".DS_Store" in error and "<scenario>--<platform>.json" in error
+    assert "private contents" not in error
+    stray.unlink()
+    row = tmp_path / "clean-install--linux-x64.json"
+    row.write_text(row.read_text(encoding="utf-8"), encoding="utf-8-sig")
+    assert matrix.main(["check", str(tmp_path)]) == 1
+    assert f"{row.name}: UTF-8 byte-order mark" in capsys.readouterr().err
 
 
 def test_duplicate_cell_under_another_filename_is_malformed(tmp_path, capsys):
@@ -141,6 +225,7 @@ def test_inconsistent_pass_is_malformed(tmp_path, change):
         record["commands"][0]["exit_code"] = 7
     elif change == "platform":
         record["platform"] = "windows-x64"
+        record["archive"] = "pseudolife-mcp-0.24.0-x86_64-pc-windows-msvc.zip"
     else:
         record[change] = "not a digest"
     with pytest.raises(matrix.RecordError):
@@ -189,6 +274,23 @@ def test_archive_manifest_refuses_duplicate_names(tmp_path):
             home.prepare_archives(source, [ARCHIVE])
 
 
+def test_archive_folder_refuses_missing_selected_asset(tmp_path):
+    source, _, _ = release_folder(tmp_path)
+    (source / ARCHIVE).unlink()
+    with runner.DisposableHome(tmp_path) as home:
+        with pytest.raises(runner.PreparationError, match="selected release archive is missing"):
+            home.prepare_archives(source, [ARCHIVE])
+        assert not home.archives.exists()
+
+
+def test_writer_preserves_existing_row(tmp_path):
+    row = matrix.write_record(tmp_path, matrix.pending(*CELL))
+    before = row.read_bytes()
+    with pytest.raises(FileExistsError):
+        matrix.write_record(tmp_path, completed())
+    assert row.read_bytes() == before
+
+
 def test_cleanup_refuses_path_it_did_not_create(tmp_path):
     other = tmp_path / "unowned"
     other.mkdir()
@@ -233,6 +335,8 @@ def test_disposable_environment_and_allowlisted_tools(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(source))
     for name in REDIRECTED + CLEARED:
         monkeypatch.setenv(name, str(tmp_path / name))
+    monkeypatch.setenv("SystemRoot", r"C:\Windows")
+    monkeypatch.setenv("windir", r"C:\Windows")
     suffix = ".exe" if os.name == "nt" else ""
     for name in ("tar", "claude", "codex", "gemini", "python", "python3", "pip", "py"):
         (source / (name + suffix)).write_bytes(b"fixture")
@@ -244,6 +348,10 @@ def test_disposable_environment_and_allowlisted_tools(tmp_path, monkeypatch):
         env = home.environment()
         assert env["PATH"] == str(path)
         assert not set(CLEARED) & env.keys()
+        if os.name == "nt":
+            assert env["SystemRoot"] == env["windir"] == r"C:\Windows"
+        else:
+            assert "SystemRoot" not in env and "windir" not in env
         for key in (*REDIRECTED, "APPDATA", "LOCALAPPDATA", "TMPDIR"):
             assert Path(env[key]).is_relative_to(home.root)
         with monkeypatch.context() as search:
@@ -264,10 +372,12 @@ def test_path_refuses_python_even_when_supplied_as_a_tool(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="stand-in uses Bash on a POSIX host")
-def test_run_installer_only_executes_the_stand_in(tmp_path):
+def test_run_installer_only_executes_the_stand_in(tmp_path, monkeypatch):
     bash, tar = shutil.which("bash"), shutil.which("tar")
     assert bash and tar
     source, _, _ = release_folder(tmp_path)
+    for name in (*REDIRECTED, *CLEARED, "SystemRoot", "windir"):
+        monkeypatch.setenv(name, str(tmp_path / name))
     with runner.DisposableHome(tmp_path) as home:
         home.prepare_path({"bash": Path(bash), "tar": Path(tar)})
         home.prepare_archives(source, [ARCHIVE])
