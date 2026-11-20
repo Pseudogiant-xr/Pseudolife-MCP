@@ -663,6 +663,75 @@ impl Drop for Temp {
     }
 }
 
+fn checkout_schema_fixture() -> (Temp, PathBuf) {
+    let repo = Temp::new();
+    fs::write(
+        repo.0.join("pyproject.toml"),
+        "[project]\nversion = \"0.99.1\"\n",
+    )
+    .unwrap();
+    let plan = repo.0.join("rust/daemon/src/storage/schema_plan.json");
+    fs::create_dir_all(plan.parent().unwrap()).unwrap();
+    (repo, plan)
+}
+
+#[test]
+fn checkout_schema_reads_native_plan_without_python() {
+    let (repo, plan) = checkout_schema_fixture();
+    fs::write(plan, br#"{"format":1,"schema_version":71,"steps":[]}"#).unwrap();
+    assert_eq!(
+        engine::checkout_version_schema(&repo.0).unwrap(),
+        ("0.99.1".to_owned(), 71),
+    );
+}
+
+#[test]
+fn checkout_schema_names_missing_native_plan() {
+    let (repo, _) = checkout_schema_fixture();
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(
+        refused
+            .message
+            .contains("cannot read rust/daemon/src/storage/schema_plan.json")
+    );
+    assert!(refused.message.contains("Restore that file and retry."));
+}
+
+#[test]
+fn checkout_schema_refuses_non_integer_version() {
+    let (repo, plan) = checkout_schema_fixture();
+    for data in [
+        "not JSON",
+        "{}",
+        r#"{"schema_version":"59"}"#,
+        r#"{"schema_version":59.5}"#,
+        r#"{"schema_version":9223372036854775808}"#,
+    ] {
+        fs::write(&plan, data).unwrap();
+        let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+        assert_eq!(refused.exit_code, 2);
+        assert!(
+            refused.message.contains("positive integer schema_version"),
+            "{data}"
+        );
+    }
+}
+
+#[test]
+fn checkout_schema_refuses_non_positive_version() {
+    let (repo, plan) = checkout_schema_fixture();
+    for version in [0, -1] {
+        fs::write(&plan, format!(r#"{{"schema_version":{version}}}"#)).unwrap();
+        let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+        assert_eq!(refused.exit_code, 2);
+        assert!(
+            refused.message.contains("positive integer schema_version"),
+            "{version}"
+        );
+    }
+}
+
 #[test]
 #[ignore = "subprocess fixture for command-tree timeout"]
 fn native_update_timeout_child() {
