@@ -299,7 +299,7 @@ def test_a_pull_request_without_a_head_ref_is_classified_by_its_diff(tmp_path):
     (["frontend/dist/index.html"], False),
     (["docs/pseudolife_memory_notes.md", "ops/tool.py"], False),
     (["rust/daemon/src/main.rs", "pseudolife_memory/compose/docker-compose.yml"], True),
-], ids=["package", "console-build", "name-only", "release-cut"])
+], ids=["package", "retired-console-path", "console-build", "name-only", "release-cut"])
 @pytest.mark.parametrize("event", ["push", "merge_group"])
 def test_a_change_to_the_frozen_package_runs_its_tests_too(tmp_path, event, files, frozen):
     # Only a freeze-exception change can touch the package; its lanes then
