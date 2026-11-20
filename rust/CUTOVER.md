@@ -124,8 +124,15 @@ What remains after that is the Rust build and test, mostly on Windows.
    `rust/daemon/src/static_files.rs` read it).
 2. Whatever still reads `pseudolife_memory/storage/schema.py` (the schema
    generator, the native updater's engine switch) reads a Rust source.
-3. A last PyPI release carries a deprecation note; the Python daemon image
-   stops publishing; `server.json` points at what the native install offers.
+3. After proving native installation and upgrade, publish one final PyPI
+   bridge wheel with a deprecation note, then stop publishing wheels. Keep
+   the current PyPI-backed MCP Registry listing frozen and mark it deprecated
+   with a pointer to native installation once that route is proven. A native
+   registry bundle is separate work. Keep publishing the Python daemon image
+   until the legacy import (#1778) lands and retain the pinned 0.23.1 image
+   afterward. After the last wheel, the maintainer creates a dedicated
+   release environment with required reviewers and release-tag protection
+   before a workflow references it.
 4. `pseudolife_memory/`, the tests that only test it, the oracle harness code
    under `rust/` and `evals/rust_port/`, the partial lite-tier code under
    `rust/shared/`, and the Python lanes are deleted.
