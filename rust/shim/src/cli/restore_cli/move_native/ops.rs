@@ -1093,6 +1093,9 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
     };
     let folder = base.join(&request.move_id);
     let op = &request.op;
+    if let Op::CheckExposureReceipt { port } = op {
+        return exposure::check_release_receipt(&folder, *port).map_or_else(failed, |()| done());
+    }
     if op.changes() {
         // A --target-work-dir the user named keeps its own permissions: only
         // folders this move creates are made private to this user.
@@ -1185,7 +1188,9 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
         }
     }
     let mut answer = match op {
-        Op::Check { .. } | Op::CarryCheck { .. } => failed("preflight checks are read separately"),
+        Op::Check { .. } | Op::CarryCheck { .. } | Op::CheckExposureReceipt { .. } => {
+            failed("read-only checks are answered separately")
+        }
         Op::ExposeTarget { port } => {
             let bank = read_claim(&claims)
                 .ok()

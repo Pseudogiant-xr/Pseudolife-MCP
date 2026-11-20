@@ -443,8 +443,28 @@ impl Model {
             }
             Op::ExposeTarget { port } => {
                 assert!(h.target_serves_clone() && h.fenced);
-                h.exposure_owned = true;
-                answer.exposure_url = Some(format!("http://100.64.0.7:{port}"));
+                let result = match &mut self.exposure_fixture {
+                    Some((folder, fixture)) => super::exposure::create(fixture, &folder.0, *port),
+                    None => Ok(format!("http://100.64.0.7:{port}")),
+                };
+                match result {
+                    Ok(url) => {
+                        h.exposure_owned = true;
+                        answer.exposure_url = Some(url);
+                    }
+                    Err(why) => {
+                        answer.ok = false;
+                        answer.error = why;
+                    }
+                }
+            }
+            Op::CheckExposureReceipt { port } => {
+                if let Some((folder, _)) = &self.exposure_fixture
+                    && let Err(why) = super::exposure::check_release_receipt(&folder.0, *port)
+                {
+                    answer.ok = false;
+                    answer.error = why;
+                }
             }
             Op::UndoExposure { port } => {
                 assert!(request.rollback && h.aborted.as_deref() == Some(request.move_id.as_str()));
@@ -735,9 +755,7 @@ impl Hosts for Model {
             });
         }
         let fault = self.enter(&what);
-        if matches!(request.op, Op::ExposeTarget { .. })
-            && matches!(fault, Some(Fault::Killed | Fault::Refused))
-        {
+        if matches!(request.op, Op::ExposeTarget { .. }) && fault == Some(Fault::Killed) {
             self.hosts.exposure_pending = true;
         }
         let result = match fault {
@@ -953,11 +971,19 @@ fn a_lost_exposure_reply_rolls_back_the_transfer_without_leaving_the_owned_forwa
         Fault::Refused,
     ] {
         let mut model = Model::new();
-        model.fault = Some((call, fault));
-        let _ = engine::execute(&mut model, &exposed, ID);
+        if fault == Fault::Refused {
+            use super::exposure::tests::{Fixture, Folder};
+            model.exposure_fixture = Some((Folder::new(), Fixture::with_clean_refusal()));
+        } else {
+            model.fault = Some((call, fault));
+        }
+        let result = engine::execute(&mut model, &exposed, ID);
+        if fault == Fault::Refused {
+            assert_eq!(result.code, engine::EXIT_ROLLED_BACK, "{result:?}");
+        }
         let mut recovery = later(&model);
         let outcome = engine::roll_back(&mut recovery, model.record.unwrap());
-        if matches!(fault, Fault::Killed | Fault::Refused) {
+        if fault == Fault::Killed {
             assert_eq!(outcome.code, engine::EXIT_INCOMPLETE, "{fault:?}");
             assert!(recovery.hosts.exposure_pending);
         }
@@ -1889,6 +1915,55 @@ fn release_settles_the_exposure_receipt_before_returning_the_target_bank() {
                 .unwrap();
             assert!(settled < give_back);
         }
+    }
+}
+
+#[test]
+fn release_closes_a_detached_move_with_a_settled_receipt() {
+    use super::exposure::{
+        self,
+        tests::{Fixture, Folder},
+    };
+
+    for ownership in ["absent", "removed", "borrowed", "owned"] {
+        let mut model = parked_move();
+        let mut record = model.record.take().unwrap();
+        record.expose_port = Some(8765);
+        record.flags.exposure_started = true;
+        model.hosts.bank = Bank::Empty;
+        model.hosts.claim = None;
+        model.hosts.gated = false;
+        model.hosts.target_running = true;
+        let folder = Folder::new();
+        let mut fixture = Fixture::default();
+        if ownership == "borrowed" {
+            fixture.url = Some("http://100.64.0.7:8765".into());
+        }
+        if ownership != "absent" {
+            exposure::create(&mut fixture, &folder.0, 8765).unwrap();
+        }
+        if ownership == "removed" {
+            exposure::undo(&mut fixture, &folder.0, 8765).unwrap();
+        }
+        model.exposure_fixture = Some((folder, fixture));
+        let before = model.hosts.clone();
+        let result = engine::release_target(&mut model, record);
+        if ownership == "owned" {
+            assert_eq!(result.code, engine::EXIT_INCOMPLETE, "{result:?}");
+            assert!(result.message.contains("record.json.closed"));
+            assert!(result.message.contains("settle-exposure"));
+            assert!(!result.message.contains("Keep the target stopped and gated"));
+        } else {
+            assert_eq!(result.code, engine::EXIT_OK, "{ownership}: {result:?}");
+            assert_eq!(model.record.unwrap().phase, Phase::Released);
+        }
+        assert_eq!(model.hosts, before);
+        assert!(
+            model
+                .log
+                .iter()
+                .any(|line| line.ends_with("target check-exposure-receipt"))
+        );
     }
 }
 
