@@ -146,6 +146,7 @@ pub(super) struct Plan {
     pub target_pins: Option<super::carry::TargetPins>,
     pub target_files: super::carry::TargetFiles,
     pub target_url: String,
+    pub expose_port: Option<u16>,
     pub work_dir: String,
     pub source_bank: String,
     pub source_policy: String,
@@ -557,6 +558,19 @@ impl<H: Hosts> Run<'_, H> {
                 None,
             )?;
         }
+        if let Some(port) = plan.expose_port {
+            self.step("expose the selected target daemon on its tailnet")?;
+            self.mark(|flags| flags.exposure_started = true)?;
+            let answer = self.target(Op::ExposeTarget { port }, None)?;
+            self.record.target_url = answer
+                .exposure_url
+                .filter(|url| super::exposure::valid_url(url, port))
+                .map(|url| super::argv::base(&url).to_owned())
+                .ok_or_else(|| {
+                    Stop::new("the target helper did not return the selected tailnet URL")
+                })?;
+            self.save()?;
+        }
         self.step("wait for the target to serve the moved bank")?;
         self.wait_identity()?;
         // And from the target itself: its daemon runs, ungated, on this bank
@@ -603,7 +617,7 @@ impl<H: Hosts> Run<'_, H> {
     }
 
     fn wait_identity(&mut self) -> Result<(), Stop> {
-        let url = format!("{}/health", self.plan.target_url);
+        let url = format!("{}/health", self.record.target_url);
         let mut waited = Duration::ZERO;
         loop {
             self.check_interrupt()?;
@@ -618,7 +632,7 @@ impl<H: Hosts> Run<'_, H> {
                 if ok && bank.is_some() {
                     return Err(Stop::new(format!(
                         "{} serves bank {}, not the moved bank {}",
-                        self.plan.target_url,
+                        self.record.target_url,
                         bank.unwrap_or_default(),
                         self.plan.source_bank
                     )));
@@ -627,7 +641,7 @@ impl<H: Hosts> Run<'_, H> {
             if waited >= IDENTITY_WAIT {
                 return Err(Stop::new(format!(
                     "{} did not serve the moved bank within {} seconds",
-                    self.plan.target_url,
+                    self.record.target_url,
                     IDENTITY_WAIT.as_secs()
                 )));
             }
@@ -678,7 +692,7 @@ impl<H: Hosts> Run<'_, H> {
                 .follow_ups
                 .push(format!("ssh {to} rm -f {}", claim_path()));
         }
-        if let Err(why) = self.hosts.repoint(&plan.target_url) {
+        if let Err(why) = self.hosts.repoint(&self.record.target_url) {
             self.record
                 .follow_ups
                 .push(repoint_line(&self.record, &why));
@@ -800,6 +814,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
         move_id: id.to_owned(),
         target: plan.to.clone(),
         target_url: plan.target_url.clone(),
+        expose_port: plan.expose_port,
         source_bank: plan.source_bank.clone(),
         target_policy: plan.target_policy.clone(),
         source_policy: plan.source_policy.clone(),
@@ -822,6 +837,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
     // gate: the record says so from the start, so a rollback keeps that
     // bank gated, keeps the claim, and never starts it as the target's own.
     record.flags.target_restored = plan.resume;
+    record.flags.exposure_started = plan.resume && plan.expose_port.is_some();
     let mut run = Run {
         hosts,
         plan,
@@ -842,7 +858,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
                 "moved: the bank {} now lives on {} ({}); this host's daemon stays stopped behind /data/moved.json. Once the moved bank is checked, {}",
                 plan.source_bank,
                 plan.to,
-                plan.target_url,
+                record.target_url,
                 files_line(record)
             );
             if record.follow_ups.is_empty() {
@@ -1238,6 +1254,13 @@ impl<H: Hosts> Back<'_, H> {
         if !aborted {
             complete = false;
         }
+        if flags.exposure_started
+            && aborted
+            && let Some(port) = self.record.expose_port
+        {
+            let result = self.op(Op::UndoExposure { port }).map(|_| ());
+            complete &= self.attempt("remove the tailnet forward created for the move", result);
+        }
         let mut proved = !needs_proof;
         // Writes a resume found in the gated bank before it would replace it.
         let mut parked: Option<String> = self.record.parked_writes.clone();
@@ -1479,8 +1502,13 @@ impl<H: Hosts> Back<'_, H> {
             self.record.phase = Phase::RolledBack;
             self.save();
             let note = if restored {
+                let resume = if self.record.expose_port.is_some() {
+                    "--expose-target --resume"
+                } else {
+                    "--resume"
+                };
                 format!(
-                    "; the target keeps the restored bank stopped behind /data/move.json, and its claim ({} on {}). Rerun the move with --resume to finish it, or give {} back its own bank with pseudolife-mcp move --release-target {}",
+                    "; the target keeps the restored bank stopped behind /data/move.json, and its claim ({} on {}). Rerun the move with {resume} to finish it, or give {} back its own bank with pseudolife-mcp move --release-target {}",
                     claim_path(),
                     self.record.target,
                     self.record.target,
@@ -1522,7 +1550,7 @@ impl<H: Hosts> Back<'_, H> {
         }
         self.record.phase = Phase::RollbackIncomplete;
         self.save();
-        let why = match (&parked, &unresolved) {
+        let mut why = match (&parked, &unresolved) {
             (Some(tables), _) => format!(
                 "some undo steps failed, and the target took writes while it served, which are not in the source ({tables}); they are in the stopped, gated target bank on {}, and nothing was deleted",
                 self.record.target
@@ -1548,6 +1576,16 @@ impl<H: Hosts> Back<'_, H> {
                 format!("these undo steps failed: {}", failed.join("; "))
             }
         };
+        if (parked.is_some() || unresolved.is_some())
+            && let Some(failure) = self.record.rollback.iter().rev().find(|undo| {
+                undo.step == "remove the tailnet forward created for the move" && !undo.ok
+            })
+        {
+            why.push_str(&format!(
+                ". The target also reported that {}",
+                failure.detail
+            ));
+        }
         self.incomplete(reason, &why, false)
     }
 
@@ -1555,6 +1593,7 @@ impl<H: Hosts> Back<'_, H> {
     /// run did, a rerun finishes it, and never restores over a bank the
     /// release already gave back.
     fn release(&mut self) -> Outcome {
+        const SETTLE_EXPOSURE: &str = "settle the target exposure receipt";
         let id = self.record.move_id.clone();
         let to = self.record.target.clone();
         let bank = self.record.source_bank.clone();
@@ -1565,6 +1604,14 @@ impl<H: Hosts> Back<'_, H> {
                 detail: why.clone(),
             });
             back.save();
+            if step == SETTLE_EXPOSURE {
+                return Outcome {
+                    code: EXIT_INCOMPLETE,
+                    message: format!(
+                        "giving {to} back its own bank did not finish: {why}. Keep the target stopped and gated until its exposure is settled."
+                    ),
+                };
+            }
             let resort = if step == "read the target's state" {
                 String::new()
             } else {
@@ -1626,6 +1673,10 @@ impl<H: Hosts> Back<'_, H> {
         // Neither this move's claim nor its bank: nothing of this host's bank
         // is there, and nothing there is this move's to change.
         if !ours && !holds_bank {
+            if self.record.expose_port.is_some() && !self.record.flags.exposure_settled_for_release
+            {
+                return unfinished(self, SETTLE_EXPOSURE, "this move no longer holds the target claim and has an unsettled exposure receipt; verify the target's claim before retrying release".into());
+            }
             return self.nothing_there(&state);
         }
         self.record.phase = Phase::Releasing;
@@ -1663,6 +1714,18 @@ impl<H: Hosts> Back<'_, H> {
                 }
                 took.push("put /data/move.json in front of the moved copy");
             }
+        }
+        if let Some(port) = self.record.expose_port
+            && !self.record.flags.exposure_settled_for_release
+        {
+            if !self.abort() {
+                return unfinished(self, SETTLE_EXPOSURE, "the target did not confirm that earlier move steps stopped; retry release when the target can confirm the abort".into());
+            }
+            if let Err(why) = self.op(Op::UndoExposure { port }) {
+                return unfinished(self, SETTLE_EXPOSURE, why);
+            }
+            self.record.flags.exposure_settled_for_release = true;
+            self.save();
         }
         self.hosts
             .say("release: restore the target's own bank (its restore keeps the moved bank in a safety backup)");
@@ -2285,8 +2348,13 @@ fn manual_target_selection(record: &Record) -> Option<String> {
 /// The last way to close a record whose target keeps refusing: on this
 /// host, by hand, with what it leaves on the target.
 fn last_resort(record: &Record) -> String {
+    let exposure = if record.expose_port.is_some() && !record.flags.exposure_settled_for_release {
+        ". First settle the recorded exposure before starting any daemon on that target."
+    } else {
+        ""
+    };
     format!(
-        "if that cannot be put right there, the last resort is on this host: rename {} to record.json.closed, which closes this host's record of move {} so it no longer holds this host. {} then stays as it is, gated and perhaps claimed, until whoever runs it gives it back its own bank and then removes the gate ({}) and the claim (ssh {} rm -f {}); never the gate first, or the copy of this host's bank behind it would start there",
+        "if that cannot be put right there, the last resort is on this host: rename {} to record.json.closed, which closes this host's record of move {} so it no longer holds this host. {} then stays as it is, gated and perhaps claimed, until whoever runs it gives it back its own bank and then removes the gate ({}) and the claim (ssh {} rm -f {}); never the gate first, or the copy of this host's bank behind it would start there{exposure}",
         Path::new(&record.local_dir).join("record.json").display(),
         record.move_id,
         record.target,
@@ -2303,10 +2371,10 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
     let at = &record.updated_at;
     let folder = remote_folder(record);
     let (environment, daemon) = if record.flags.identities_applied {
-        let recovery = crate::cli::restore_cli::bank::sh_quote(&format!("{folder}/carry.json"));
+        let recovery = super::carry::recovery_command(&format!("{folder}/carry.json"));
         (
             format!(
-                "Keep the target daemon stopped and gated while restoring its configuration. Before editing the environment file, run this on the target to get the exact head -c and sha256sum check (original_bytes and original_digest in the journal) and, if needed, the recorded docker compose command ending in up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon:\n  pseudolife-mcp move-target recovery-commands {recovery}\nIf the command is not on PATH, use the installed launcher at \"${{XDG_DATA_HOME:-$HOME/.local/share}}/pseudolife-mcp/bin/pseudolife-mcp\" or \"$HOME/.local/bin/pseudolife-mcp\" in its place. If it prints a recreation command, compare the checksum before using the original prefix, check for later edits, and remove only this move's appended # Pseudolife move {} block. If the file is already restored, verify its original settings. Run the printed Compose command only after restoring the environment, and fill in its new verified container ID before running later Docker commands. ",
+                "Keep the target daemon stopped and gated while restoring its configuration. Before editing the environment file, run this on the target to get the exact head -c and sha256sum check (original_bytes and original_digest in the journal) and, if needed, the recorded docker compose command ending in up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon:\n  {recovery}\nIf the command is not on PATH, use the installed launcher at \"${{XDG_DATA_HOME:-$HOME/.local/share}}/pseudolife-mcp/bin/pseudolife-mcp\" or \"$HOME/.local/bin/pseudolife-mcp\" in its place. If it prints a recreation command, compare the checksum before using the original prefix, check for later edits, and remove only this move's appended # Pseudolife move {} block. If the file is already restored, verify its original settings. Run the printed Compose command only after restoring the environment, and fill in its new verified container ID before running later Docker commands. ",
                 record.move_id
             ),
             "<verified-target-daemon-id>",
@@ -2391,6 +2459,17 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
     let to = &record.target;
     let mut lines = Vec::new();
     let daemon = manual_target_daemon(record);
+    if f.exposure_started
+        && let Some(port) = record.expose_port
+    {
+        let receipt = crate::cli::restore_cli::bank::sh_quote(&format!(
+            "{}/exposure.json",
+            remote_folder(record)
+        ));
+        lines.push(format!(
+            "On the target, check {receipt} and run pseudolife-mcp expose status --port {port} --json. Use pseudolife-mcp expose off --port {port} only when the receipt says this move owns the forward and the reported URL still matches."
+        ));
+    }
     if (f.gate_lifting
         || f.target_started
         || f.target_restored
@@ -2420,6 +2499,9 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
         .iter()
         .any(|undo| undo.step == PROVE_TARGET_STOPPED && undo.ok);
     if identities_pending {
+        let recovery =
+            super::carry::recovery_command(&format!("{}/carry.json", remote_folder(record)));
+        lines.push(format!("If the target environment still needs repair, keep its daemon stopped and gated and run {recovery} on the target to print the recovery steps."));
         lines.push(format!(
             "To finish restoring the target's original environment, restore access to its installed Compose deployment and run pseudolife-mcp move --rollback {} from the source. For manual source recovery, first verify that the target is stopped and gated, or that the target and its moved copy are permanently retired. Keep the source stopped and fenced until then.",
             record.move_id
