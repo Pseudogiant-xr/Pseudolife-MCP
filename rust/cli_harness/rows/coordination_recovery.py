@@ -176,7 +176,7 @@ def _dump(conn):
 def _bank_after(kind):
     def after(arm, obs):
         import psycopg
-        from pseudolife_memory.storage.coordination import audit_hash, verify_audit_chain
+        from rust.harness_support.audit_oracle import audit_hash, verify_audit_chain
         name = arm.state["bank"]
         if kind == "reservation-race":
             assert arm.state.get("race_applied"), "reservation-race barrier was not exercised"
