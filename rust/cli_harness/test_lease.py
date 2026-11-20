@@ -2,11 +2,82 @@
 
 import base64
 import json
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from . import compare
 from .rows.lease import T0  # registers the row's named rules
+
+
+def test_lease_cases_load_without_the_frozen_package():
+    # Collection already imports the lease module to register its comparison
+    # rules. Start a fresh interpreter to exercise its top-level imports too.
+    script = """\
+import sys
+sys.path.insert(0, sys.argv[1])
+from rust.harness_support.import_blocker import cold_harness_imports
+with cold_harness_imports():
+    from rust.cli_harness.rows import load
+    assert any(case.id == "check-held" for case in load("lease"))
+    assert any(case.id == "break-held" for case in load("lease_operator"))
+"""
+    repo = Path(__file__).resolve().parents[2]
+    child = subprocess.run([sys.executable, "-I", "-S", "-c", script, str(repo)],
+                           capture_output=True, text=True, timeout=15)
+    assert child.returncode == 0, child.stderr
+
+
+def test_local_lease_board_uses_the_closed_endpoint_without_the_frozen_package():
+    from rust.harness_support.import_blocker import cold_harness_imports
+    from . import core
+    from .rows.lease import Board
+
+    with cold_harness_imports():
+        board = Board(bank=False)
+        assert board.url == core.DEAD_DAEMON_URL
+        board.close()
+
+
+def test_local_lease_pid_normalizes_without_the_frozen_package():
+    from rust.harness_support.import_blocker import cold_harness_imports
+    from .rows.lease_operator import fixture_pid
+
+    obs = {"fixture_pid": 2468, "stdout": base64.b64encode(b"watch pid 2468\n").decode(), "stderr": ""}
+    with cold_harness_imports():
+        fixture_pid(obs)
+    assert base64.b64decode(obs["stdout"]) == b"watch pid <PID>\n"
+
+
+@pytest.mark.parametrize("state,held", [("absent", None), ("free", False), ("held", True)])
+def test_local_lease_fixture_without_the_frozen_package(tmp_path, monkeypatch, state, held):
+    from rust.harness_support.import_blocker import cold_harness_imports
+    from . import producers
+    from .rows import lease
+
+    # The old holder child loaded the supplied oracle checkout as PYTHONPATH.
+    oracle = tmp_path / "oracle"
+    package = oracle / "pseudolife_memory"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('raise AssertionError("child imported the oracle")\n')
+    monkeypatch.setattr(producers, "_SOURCE", oracle)
+    arm = SimpleNamespace(home=tmp_path, state={}, daemon=SimpleNamespace(locals=[]))
+    path = tmp_path / "locks" / "lease-claim_a_b-1881fa03.lock"
+    try:
+        with cold_harness_imports():
+            lease._local(state, name="claim:a/b")(arm)
+            from .lease_fixture import probe
+
+            assert probe(path) is held
+            assert path.exists() is (state != "absent")
+    finally:
+        for holder in arm.daemon.locals:
+            holder.stop()
+    if state == "held":
+        assert probe(path) is False
 
 
 @pytest.mark.parametrize("want,got", [(False, 0), (True, 1), (1, 1.0)])
@@ -35,6 +106,17 @@ def observation(hour, field, age):
            "seed_offsets": {str(T0): 0, str(T0 + 60): 0}}
     out[field] = base64.b64encode(text.encode()).decode()
     return out
+
+
+@pytest.mark.parametrize("seconds,age", [(-30, "0s"), (31, "31s"), (61, "1m"),
+                                         (3661, "1h01m"), (90001, "1d01h")])
+def test_holder_age_normalizes_without_the_frozen_package(seconds, age):
+    from rust.harness_support.import_blocker import cold_harness_imports
+    from . import normalize
+
+    with cold_harness_imports():
+        result = normalize.apply(observation(seconds / 3600, "stdout", age), ("lease-seeded-clock",), None)
+    assert base64.b64decode(result["stdout"]) == b'queued behind codex for <held-age>, purpose "peer work"\n'
 
 
 @pytest.mark.parametrize("field", ["stdout", "stderr"])
