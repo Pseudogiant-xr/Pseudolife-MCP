@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 HERE = Path(__file__).resolve().parent
@@ -20,6 +21,7 @@ import schema_ci
 import session_fixture
 import startup_ci
 import startup_cases
+import startup_fixture
 import test_schema_executor
 import writer_session_cases
 
@@ -30,12 +32,21 @@ def script(command):
 
 
 class SessionFixtureControls(unittest.TestCase):
-    def test_clock_and_writer_entry_points_import_with_frozen_storage_blocked(self):
-        with patch.dict(sys.modules, {"pseudolife_memory.storage.schema": None,
-                                      "pseudolife_memory.storage.postgres": None}), \
+    def test_entry_points_import_with_the_frozen_package_blocked(self):
+        class FrozenPackageBlocker:
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "pseudolife_memory" or fullname.startswith("pseudolife_memory."):
+                    raise ImportError(f"frozen package import blocked: {fullname}")
+
+        with patch.dict(sys.modules, {"pseudolife_memory": None}), \
+                patch.object(sys, "meta_path", [FrozenPackageBlocker(), *sys.meta_path]), \
                 patch.object(sys, "path", sys.path.copy()):
-            sys.modules.pop("startup_cases", None)
-            for name in ("clock_retry_cases.py", "writer_session_cases.py"):
+            for name in tuple(sys.modules):
+                if name.startswith("pseudolife_memory."):
+                    del sys.modules[name]
+            for name in ("startup_cases", "session_fixture", "startup_fixture"):
+                sys.modules.pop(name, None)
+            for name in ("startup_cases.py", "clock_retry_cases.py", "writer_session_cases.py"):
                 with self.subTest(name=name):
                     runpy.run_path(str(HERE / name))
 
@@ -48,7 +59,16 @@ class SessionFixtureControls(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "require a disposable harness database"):
             session_fixture.seed_bank("fixture-dsn", highwater="malformed")
         conn.execute.assert_called_once_with("SELECT current_database()")
-        conn.transaction.assert_not_called()
+
+    def test_startup_seed_refuses_a_non_disposable_server_name_before_writing(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = ("ordinary_bank",)
+        with patch.dict(os.environ, {"_PSEUDOLIFE_PRODUCTION_DB": "configured_bank"}), \
+                patch.object(startup_fixture.psycopg, "connect", return_value=conn), \
+                self.assertRaisesRegex(ValueError, "require a disposable harness database"):
+            startup_fixture.seed_bank("fixture-dsn", "stale-entry-dims")
+        conn.execute.assert_called_once_with("SELECT current_database()")
 
     def test_second_writer_refuses_an_uninitialized_writer_epoch(self):
         conn = MagicMock()
@@ -280,9 +300,7 @@ class GoldenChecking(unittest.TestCase):
         the services it started, in order. A template seed is not a start."""
         started = []
 
-        def invoke(binary, kind, dsn, home, *args, seed_case=None, seed_only=False, **kwargs):
-            if seed_case or seed_only:
-                return None, [0.0, 0.0]
+        def invoke(binary, kind, dsn, home, *args, **kwargs):
             started.append(kind)
             if module is clock_retry_cases:
                 phases = Path(args[1])
@@ -293,7 +311,7 @@ class GoldenChecking(unittest.TestCase):
             return {"ok": True, "startup": {}, "entries": []}, [0.0, 0.0]
 
         with patch.object(module, "invoke", invoke), \
-                patch.object(module, "seed_bank", create=True), \
+                patch.object(module, "seed_bank"), \
                 patch.object(module.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
                 patch.object(module.pg, "drop", lambda name, *args: None), \
                 patch.object(module.dbstate, "dump", empty_state), \
@@ -318,8 +336,8 @@ class GoldenChecking(unittest.TestCase):
         def rust_open(binary, dsn, refusal=None):
             opened.append("rust")
 
-        import pseudolife_memory.storage.postgres as postgres
-        with patch.object(postgres, "PostgresStorage", Storage), \
+        with patch.dict(sys.modules, {"pseudolife_memory.storage.postgres":
+                                      SimpleNamespace(PostgresStorage=Storage)}), \
                 patch.object(test_schema_executor, "check_equivalence", return_value={}), \
                 patch.object(schema_cases, "rust_open", rust_open), \
                 patch.object(schema_cases.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \

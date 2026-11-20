@@ -11,12 +11,34 @@ rather than as a blank page. They do not compare the build with
 from __future__ import annotations
 
 import re
+import runpy
+import sys
+import tomllib
+from glob import glob
 from html.parser import HTMLParser
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
 STATIC = FRONTEND / "dist"
+
+
+def test_python_wheel_maps_every_console_file(monkeypatch):
+    package = "pseudolife_memory.web.static"
+    setup_options = {}
+    setuptools = SimpleNamespace(find_namespace_packages=lambda **kwargs: [], setup=setup_options.update)
+    monkeypatch.setitem(sys.modules, "setuptools", setuptools)
+    runpy.run_path(str(ROOT / "setup.py"))
+
+    assert package in setup_options["packages"]
+    assert setup_options["package_dir"][package] == "frontend/dist"
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    patterns = config["tool"]["setuptools"]["package-data"][package]
+    packaged = {name for pattern in patterns for name in glob(pattern, root_dir=STATIC, recursive=True)
+                if (STATIC / name).is_file()}
+    expected = {str(path.relative_to(STATIC)) for path in STATIC.rglob("*") if path.is_file()}
+    assert expected and packaged == expected
 
 
 def test_console_build_is_committed():

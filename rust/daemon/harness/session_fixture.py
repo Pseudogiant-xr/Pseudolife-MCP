@@ -1,5 +1,6 @@
 """Disposable resident rows for the clock-retry and writer-session probes."""
 from copy import deepcopy
+import json
 
 import psycopg
 from psycopg import sql
@@ -82,21 +83,42 @@ _META = {
 }
 
 
+def insert_rows(conn, table, rows):
+    """Insert typed fixture rows on the caller's already guarded connection."""
+    columns = tuple(rows[0])
+    statement = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+        sql.Identifier("public", table), sql.SQL(", ").join(map(sql.Identifier, columns)),
+        sql.SQL(", ").join(sql.SQL("%s::vector") if column == "embedding" else sql.Placeholder()
+                           for column in columns),
+    )
+    for row in rows:
+        values = []
+        for column in columns:
+            value = row[column]
+            if column == "embedding" and value is not None:
+                value = json.dumps(value)
+            elif column in {"support", "provenance", "tags", "slots"}:
+                value = Jsonb(value)
+            values.append(value)
+        conn.execute(statement, values)
+
+
+def write_resident_rows(conn, *, highwater, embeddings=None):
+    """Write the shared resident rows, with optional vectors for hydration."""
+    embeddings = embeddings or {}
+    for table, rows in _ROWS.items():
+        vectors = embeddings.get(table, {})
+        insert_rows(conn, table, tuple(dict(row, embedding=vectors[index]) if index in vectors else row
+                                       for index, row in enumerate(rows)))
+    for key, value in dict(_META, **{HLC_META_KEY: highwater}).items():
+        conn.execute("INSERT INTO public.meta (key, value) VALUES (%s, %s)", (key, Jsonb(value)))
+
+
 def seed_bank(dsn, *, highwater):
     """Install the captured inputs in one transaction on a new fixture bank."""
     with psycopg.connect(dsn) as conn:
         initialize_bank(conn)
-        for table, rows in _ROWS.items():
-            columns = tuple(rows[0])
-            statement = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
-                sql.Identifier("public", table), sql.SQL(", ").join(map(sql.Identifier, columns)),
-                sql.SQL(", ").join(sql.Placeholder() for _ in columns),
-            )
-            for row in rows:
-                conn.execute(statement, [Jsonb(row[key]) if key in {"support", "provenance"} else row[key]
-                                         for key in columns])
-        for key, value in dict(_META, **{HLC_META_KEY: highwater}).items():
-            conn.execute("INSERT INTO public.meta (key, value) VALUES (%s, %s)", (key, Jsonb(value)))
+        write_resident_rows(conn, highwater=highwater)
 
 
 def with_meta(state, **values):
