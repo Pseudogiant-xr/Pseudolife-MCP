@@ -173,25 +173,52 @@ SHIM_COMMANDS = {
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }
-# The scope step's documentation-only rule, which Python's re cannot take
-# verbatim (its lookbehind is variable-width); tests check both agree.
+# The documentation-only rule shared by workflow scope and parity selection.
 CODE_DIRS = re.compile(r"(?i)(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/")
-CODE_SUFFIX = re.compile(r"\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)$")
+DOCS_SUFFIXES = frozenset({
+    ".adoc", ".gif", ".html", ".jpeg", ".jpg", ".json", ".md", ".pdf", ".png", ".rst", ".svg", ".txt", ".webp",
+})
+# The installer copies this checkout file into users' AGENTS.md.
+DOCUMENT_EXCLUSIONS = frozenset({"examples/claude.memory.md"})
+DOCUMENT_DIRECTORY_EXCLUSIONS = ("tests/", "ops/", "plugin/", "pseudolife_memory/", "evals/prompts/",
+                                 ".github/workflows/", ".github/actions/", "frontend/public/")
 # The port's plan pages under rust/ that no Rust or parity job reads; the
 # scope job names them too. A page a job reads (PARITY.md) or one an evidence
 # file hashes (PORTING.md, PORT-STATE.md, PHASE3-READ-PATH.md) stays code.
 RUST_PLAN_DOCS = frozenset({"rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md"})
 
 
+def plain_path(path: str) -> bool:
+    return path.isascii() and all(c not in '"\\' and 32 <= ord(c) < 127 for c in path)
+
+
+def is_documentation_excluded(path: str) -> bool:
+    lower = path.lower()
+    return lower in DOCUMENT_EXCLUSIONS or lower.startswith(DOCUMENT_DIRECTORY_EXCLUSIONS)
+
+
+def is_documentation_path(path: str) -> bool:
+    """Recognize a path eligible for docs-only CI with its reader tests."""
+    lower = path.lower()
+    if not plain_path(path) or is_documentation_excluded(path):
+        return False
+    suffix = PurePosixPath(path).suffix.lower()
+    if lower.startswith("docs/"):
+        return path.startswith("docs/") and suffix in DOCS_SUFFIXES
+    return path in ("llms.txt", "llms-full.txt") or suffix == ".md"
+
+
 def is_docs(path: str) -> bool:
-    """A file no Rust or parity job reads (CLAUDE.md "Docs-only changes")."""
+    """Classify paths for legacy Rust job, parity and golden-replay selection."""
+    if not plain_path(path):
+        return False
     if path in RUST_PLAN_DOCS:
         return True
+    if path.lower().startswith("docs/"):
+        return path.startswith("docs/") and PurePosixPath(path).suffix.lower() in DOCS_SUFFIXES
     if CODE_DIRS.match(path):
         return False
-    if re.fullmatch(r'[^/"].*\.md', path) or re.fullmatch(r"llms(-full)?\.txt", path):
-        return True
-    return path.startswith("docs/") and not CODE_SUFFIX.search(path)
+    return bool(re.fullmatch(r'[^/"].*\.md|llms(?:-full)?\.txt', path))
 
 
 def reached(path: str) -> tuple[str, ...]:

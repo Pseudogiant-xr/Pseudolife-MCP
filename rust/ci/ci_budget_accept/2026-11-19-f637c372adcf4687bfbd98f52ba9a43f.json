@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "e870c1b9a74bdfee",
+  "fingerprint": "00737b599343eefe",
+  "reason": "The helper fingerprint covers the shared docs classifier. Excluding installer and public Console inputs from docs-only scope and adding the reranker reader change scope and guards. Legacy parity suite selection, shard steps, runner settings and per-shard limits remain the same."
+}

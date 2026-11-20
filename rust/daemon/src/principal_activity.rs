@@ -317,8 +317,8 @@ pub async fn write_batch(
 
 #[cfg(test)]
 mod tests {
-    //! Golden sequences from the Python recorder
-    //! (`harness/gen_principal_activity_goldens.py`).
+    //! Frozen golden snapshot reproduced at d81bba3a2. It has no regeneration
+    //! path. Change it only with a stated reason.
     use super::*;
     use serde_json::Value;
     use std::sync::Arc;

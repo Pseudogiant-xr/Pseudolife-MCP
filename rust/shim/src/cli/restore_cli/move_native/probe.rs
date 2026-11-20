@@ -196,10 +196,18 @@ pub(super) fn apply_health(facts: &mut Facts, answer: &Value) {
 /// Read the bank under the installer's container names on this host; the
 /// caller reads `/health` at `health_url` and applies it.
 pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
+    gather_at(docker, bank::DAEMON_CONTAINER, bank::PG_CONTAINER)
+}
+
+pub(super) fn gather_at<D: Docker>(
+    docker: &mut D,
+    daemon: &str,
+    pg: &str,
+) -> Result<Facts, String> {
     let mut bank = Bank {
         docker,
-        pg: bank::PG_CONTAINER.to_owned(),
-        daemon: bank::DAEMON_CONTAINER.to_owned(),
+        pg: pg.to_owned(),
+        daemon: daemon.to_owned(),
     };
     // Whether this user can use Docker at all, with Docker's own reason when
     // not (a socket it may not open, an engine that is down): the shared
@@ -275,6 +283,11 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
         pg_sources: sources(&pg_doc, |_| true),
         ..Facts::default()
     };
+    if (container_id(daemon) && facts.daemon_id != daemon)
+        || (container_id(pg) && facts.pg_id != pg)
+    {
+        return Err("Docker did not return the pinned deployment's container IDs".into());
+    }
     bank.pg = facts.pg_selector().to_owned();
     let (user, port, db) = (chosen.user.clone(), chosen.port, chosen.db.clone());
     let meta = query(
@@ -489,8 +502,8 @@ pub(super) fn used_tables<D: Docker>(
 ) -> Result<Vec<(String, i64)>, String> {
     let mut bank = Bank {
         docker,
-        pg: facts.pg.clone(),
-        daemon: facts.daemon.clone(),
+        pg: facts.pg_selector().to_owned(),
+        daemon: facts.daemon_selector().to_owned(),
     };
     let listed = query(
         &mut bank,

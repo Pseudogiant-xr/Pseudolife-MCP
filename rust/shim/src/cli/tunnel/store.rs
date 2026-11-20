@@ -47,6 +47,7 @@ pub(super) struct Profile {
     pub organization_id: Option<String>,
     pub state: String,
     pub catalog: String,
+    pub runtime_version: Option<String>,
     pub expires_at: Option<(String, DateTime<Utc>)>,
 }
 
@@ -445,6 +446,7 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
         organization_id: id("organization_id"),
         state: state.to_owned(),
         catalog: catalog.to_owned(),
+        runtime_version: id("runtime_version"),
         expires_at,
     })
 }

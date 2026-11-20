@@ -210,7 +210,7 @@ fn exit_code(status: std::process::ExitStatus) -> i32 {
 
 /// The allowlisted part of `vars` (names compared without case on Windows,
 /// where the environment ignores it).
-fn probe_environment(
+pub(super) fn probe_environment(
     vars: impl IntoIterator<Item = (OsString, OsString)>,
 ) -> Vec<(OsString, OsString)> {
     vars.into_iter()

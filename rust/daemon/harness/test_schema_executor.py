@@ -154,5 +154,27 @@ class ComparisonControls(unittest.TestCase):
                 compare(state, changed)
 
 
+class RefusalFixtureControls(unittest.TestCase):
+    def test_refusal_seed_rejects_non_disposable_server_name_before_writes(self):
+        from unittest.mock import MagicMock
+
+        import schema_cases
+        from rust.harness_support.database_guard import PRODUCTION_DATABASE_ENV
+
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.execute.return_value.fetchone.return_value = ("ordinary_bank",)
+        with patch.object(schema_cases.pg, "create", return_value="fixture-dsn"), \
+                patch.object(schema_cases.pg, "drop") as drop, \
+                patch.object(schema_cases.psycopg, "connect", return_value=connection), \
+                patch.dict(sys.modules, {"pseudolife_memory.storage.postgres": None}), \
+                patch.dict(os.environ, {PRODUCTION_DATABASE_ENV: "configured_bank"}), \
+                self.assertRaisesRegex(ValueError, "bank fixtures require a disposable harness database"):
+            schema_cases.refusal_cell(Path("unused"), 1, "99")
+        connection.execute.assert_called_once_with("SELECT current_database()")
+        connection.transaction.assert_not_called()
+        drop.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
