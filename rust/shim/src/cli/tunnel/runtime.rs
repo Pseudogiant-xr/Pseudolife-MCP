@@ -134,6 +134,7 @@ fn prepare<'a>(root: &'a Path, name: &str) -> Result<Prepared<'a>, Fail> {
             "the saved daemon URL needs an HTTP origin. Repoint it with tunnel setup before running",
         ));
     }
+    key::Key::require_file(root, name)?;
     let locks = locks.map_or_else(|| prepare_locks(root, name), Ok)?;
     setup::check_pending(root, name)?;
     if !store::private_read(&path, RECORD_LIMIT).is_ok_and(|current| current == bytes) {

@@ -111,7 +111,9 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             }
             CredentialProvider::new(None, Some((&profile.token_file).into()))
                 .and_then(|provider| provider.require_current(&daemon))
-                .map_err(|_| Fail::Tunnel(CHANGED))?;
+                .map_err(|_| Fail::Tunnel(
+                    "daemon credential changed during runtime key renewal; retry with the current token file"
+                ))?;
             if profile.expires_at.as_ref().map(|(text, _)| text) == setup.key_expires_at.as_ref()
                 && runtime::saved_key_matches(root, &profile.name, &key.0)
             {

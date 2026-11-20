@@ -69,11 +69,17 @@ fn signing_requires_an_existing_owner_only_store_key() {
         assert!(mac(root).is_err());
         ensure_signing_key(root).unwrap();
     }
-    let sign = |root: &Path| {
-        let mut signer = mac(root).unwrap();
-        signer.update(b"same launch fields");
-        signer.finalize().into_bytes()
-    };
+    let token = first.join("token");
+    let executable = first.join("runtime");
+    crate::board::state::atomic_create(&token, b"fixture-daemon-token").unwrap();
+    crate::board::state::atomic_create(&executable, b"fixture runtime binary").unwrap();
+    let saved = json!({
+        "name": "dot", "daemon_url":"http://127.0.0.1:9", "token_file": token,
+        "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+    });
+    let (_, profile) = store::decode_profile(saved.to_string().as_bytes(), "dot").unwrap();
+    let sign =
+        |root: &Path| compute_identity(root, &profile, &Key::fixture(), &executable).unwrap();
     let original = sign(&first);
     ensure_signing_key(&first).unwrap();
     assert!(original == sign(&first) && original != sign(&second));

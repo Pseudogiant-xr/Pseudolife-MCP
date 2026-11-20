@@ -108,7 +108,7 @@ fn assert_deferred(home: &Home, args: &[&str], env: &[(&str, &str)]) {
     assert_eq!(output.status.code(), Some(1), "{args:?}");
     assert!(output.stdout.is_empty(), "{args:?}");
     assert_eq!(output.stderr, native_text(DEFERRED), "{args:?}");
-    assert_eq!(tree(&home.0), before, "{args:?} changed the home");
+    assert!(tree(&home.0) == before, "{args:?} changed the home");
 }
 
 fn assert_refused(home: &Home, args: &[&str], env: &[(&str, &str)], message: &str) {
@@ -117,7 +117,7 @@ fn assert_refused(home: &Home, args: &[&str], env: &[(&str, &str)], message: &st
     assert_eq!(output.status.code(), Some(2), "{args:?}");
     assert!(output.stdout.is_empty(), "{args:?}");
     assert_eq!(output.stderr, native_text(message), "{args:?}");
-    assert_eq!(tree(&home.0), before, "{args:?} changed the home");
+    assert!(tree(&home.0) == before, "{args:?} changed the home");
 }
 
 #[test]
@@ -576,7 +576,16 @@ fn renewal_refuses_a_held_launch_lock_before_publishing() {
         &[],
     );
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("launch ownership"));
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        ![SETUP_BEARER, "replacement fixture", "opaque prior fixture"]
+            .iter()
+            .any(|sample| error.contains(sample))
+    );
+    assert!(
+        error.contains("launch ownership"),
+        "renewal refusal: {error}"
+    );
     assert!(std::fs::read(key).unwrap() == b"opaque prior fixture");
     assert!(!root.join("dot.key-renewal").exists());
 }

@@ -10,10 +10,7 @@ use sha2::{Digest, Sha256};
 
 use super::resume::{KeyBytes, commit_lock};
 use super::{PROFILE_LIMIT, check_directory, publish_new, stage_and_publish, sync_directory};
-use crate::{
-    board::state,
-    cli::tunnel::{Fail, Options, runtime, store, syntax},
-};
+use crate::cli::tunnel::{Fail, Options, runtime, store, syntax};
 
 pub(super) const KEY_LIMIT: usize = 16 * 1024;
 const MAGIC: &[u8; 4] = b"PKR1";
@@ -53,39 +50,21 @@ fn digest(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-struct Saved {
-    bytes: KeyBytes,
-    identity: Vec<u128>,
-}
-
-impl Saved {
-    fn read(path: &Path, limit: usize) -> Result<Self, Fail> {
-        let identity = state::open(path).map_err(|_| Fail::Defer)?.identity;
-        let bytes = KeyBytes(store::private_read(path, limit)?);
-        if !state::open(path).is_ok_and(|file| file.identity == identity) {
-            return Err(Fail::Defer);
-        }
-        Ok(Self { bytes, identity })
+fn replace(path: &Path, saved: &[u8], next: &[u8]) -> Result<(), Fail> {
+    if saved == next {
+        return Ok(());
     }
-
-    fn replace(self, path: &Path, bytes: &[u8]) -> Result<(), Fail> {
-        if self.bytes.0 == bytes {
-            return Ok(());
-        }
-        stage_and_publish(
-            path,
-            |file| file.write_all(bytes),
-            |stage| {
-                if !state::open(path).is_ok_and(|file| file.identity == self.identity)
-                    || !store::private_read(path, self.bytes.0.len())
-                        .is_ok_and(|bytes| KeyBytes(bytes).0 == self.bytes.0)
-                {
-                    return Err(Fail::Defer);
-                }
-                store::sharing_retry(|| fs::rename(stage, path)).map_err(|_| Fail::Defer)
-            },
-        )
-    }
+    stage_and_publish(
+        path,
+        |file| file.write_all(next),
+        |stage| {
+            if !store::private_read(path, saved.len()).is_ok_and(|bytes| KeyBytes(bytes).0 == saved)
+            {
+                return Err(Fail::Defer);
+            }
+            store::sharing_retry(|| fs::rename(stage, path)).map_err(|_| Fail::Defer)
+        },
+    )
 }
 
 pub(super) fn publish(
@@ -160,22 +139,19 @@ fn settle(root: &Path, name: &str, marker: &Path) -> Result<(), Fail> {
     }
     let profile_path = store::profile_path(root, name)?;
     let key_path = store::key_path(root, name);
-    let saved_profile = Saved::read(&profile_path, PROFILE_LIMIT).map_err(|_| invalid())?;
-    let saved_key = Saved::read(&key_path, KEY_LIMIT).map_err(|_| invalid())?;
+    let saved_profile =
+        KeyBytes(store::private_read(&profile_path, PROFILE_LIMIT).map_err(|_| invalid())?);
+    let saved_key = KeyBytes(store::private_read(&key_path, KEY_LIMIT).map_err(|_| invalid())?);
     for (saved, next, prior) in [
         (&saved_profile, profile, &head[4..36]),
         (&saved_key, key, &head[36..68]),
     ] {
-        if saved.bytes.0 != next && digest(&saved.bytes.0).as_slice() != prior {
+        if saved.0 != next && digest(&saved.0).as_slice() != prior {
             return Err(invalid());
         }
     }
-    saved_key
-        .replace(&key_path, key)
-        .map_err(|_| interrupted(marker))?;
-    saved_profile
-        .replace(&profile_path, profile)
-        .map_err(|_| interrupted(marker))?;
+    replace(&key_path, &saved_key.0, key).map_err(|_| interrupted(marker))?;
+    replace(&profile_path, &saved_profile.0, profile).map_err(|_| interrupted(marker))?;
     store::sharing_retry(|| fs::remove_file(marker)).map_err(|_| interrupted(marker))?;
     sync_directory(root)
 }
@@ -209,6 +185,7 @@ pub(in crate::cli::tunnel) fn recover_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::state;
 
     #[test]
     fn committed_renewal_recovers_at_each_publication_boundary() {
@@ -254,6 +231,13 @@ mod tests {
             }
             let options = super::super::super::parse(&["setup".into()]).unwrap();
             if published == 0 {
+                let journal = store::private_read(&marker, 131072).unwrap();
+                let mut damaged = journal.clone();
+                damaged[HEADER + new_profile.len() + prefix.len()] ^= 1;
+                state::atomic_write(&marker, &damaged, None).unwrap();
+                assert!(recover_pending(&options, &root, &profile).is_err());
+                assert!(marker.exists() && fs::read(&key).unwrap() == old_key);
+                state::atomic_write(&marker, &journal, None).unwrap();
                 state::atomic_write(&key, b"unrelated fixture", None).unwrap();
                 assert!(recover_pending(&options, &root, &profile).is_err());
                 assert!(marker.exists() && fs::read(&profile).unwrap() == old_profile.as_bytes());

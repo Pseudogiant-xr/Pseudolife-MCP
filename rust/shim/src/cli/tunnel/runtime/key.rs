@@ -1,7 +1,7 @@
 //! The vendor consumes a file reference at startup. On Windows serve it
 //! through a local owner-only pipe so the saved DPAPI blob is the only
 //! persistent copy of the key.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use super::super::{Fail, store};
@@ -30,19 +30,19 @@ impl Key {
         Self(b"fixture-runtime-key".to_vec())
     }
 
-    pub(super) fn load(root: &Path, name: &str) -> Result<Self, Fail> {
+    pub(super) fn require_file(root: &Path, name: &str) -> Result<PathBuf, Fail> {
         let path = store::key_path(root, name);
-        let invalid = || {
-            Fail::Detail(format!(
-                "cannot read a private runtime key at {}. Check the key and the account running the tunnel",
-                path.display()
-            ))
-        };
-        if !store::occupied(&path).map_err(|_| invalid())? {
+        if !store::occupied(&path).map_err(|_| invalid(&path))? {
             return Err(Fail::Detail(format!(
                 "profile {name} has no runtime key. Import its private key with tunnel setup before running it"
             )));
         }
+        Ok(path)
+    }
+
+    pub(super) fn load(root: &Path, name: &str) -> Result<Self, Fail> {
+        let path = Self::require_file(root, name)?;
+        let invalid = || invalid(&path);
         let data = Self(store::private_read(&path, 16384).map_err(|_| invalid())?);
         #[cfg(windows)]
         {
@@ -86,6 +86,13 @@ impl Key {
             _task: tokio_util::task::AbortOnDropHandle::new(task),
         })
     }
+}
+
+fn invalid(path: &Path) -> Fail {
+    Fail::Detail(format!(
+        "cannot read a private runtime key at {}. Check the key and the account running the tunnel",
+        path.display()
+    ))
 }
 
 pub(super) struct Staged {
