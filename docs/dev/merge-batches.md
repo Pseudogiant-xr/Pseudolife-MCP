@@ -76,15 +76,7 @@ Each change waits for hosted CI once, on its batch:
   member's own run can be absent, queued or cancelled. A pull request that
   edits `python-freeze.yml` runs its own edited workflow, which review
   catches; admission does not depend on it.
-  Because nothing under `pseudolife_memory/` may change, two routine
-  changes are exceptions too while they still edit the package, and carry
-  the label, applied by the maintainer or by the conductor acting on a
-  maintainer ruling (the maintainer is confirming this): a version cut (the
-  0.23.1 cut, #1490, bumped `pseudolife_memory/compose/docker-compose.yml`;
-  the `release-procedure` skill says so) and a schema bump, until the
-  schema has a Rust-owned source (the Rust job's `gen_schema_sql.py
-  --check` builds `rust/daemon/src/storage/schema.sql` from
-  `pseudolife_memory/storage/schema.py`).
+  A version cut that still edits the frozen package requires the label, applied by the maintainer or by the conductor acting on a maintainer ruling. Follow the `release-procedure` skill. Schema changes use the Rust daemon's DDL and plan. The Rust job's `gen_schema_sql.py --check` checks those inputs and the derived metadata.
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
   pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend
