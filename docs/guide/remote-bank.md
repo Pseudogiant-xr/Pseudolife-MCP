@@ -917,6 +917,12 @@ target's own bank. Resume keeps the original exposure port and ownership.
 If a receipt is pending, confirm the earlier exposure processes have
 exited and check the port's status. Once the forward is absent, follow
 the printed `move-target settle-exposure` command, then retry recovery.
+If the target holds neither the moved bank nor this move's claim,
+release checks the receipt before closing the source record. An owned or
+pending receipt needs settlement. `move-target settle-exposure` also accepts
+an owned receipt once the forward is absent and the earlier exposure
+processes have exited. Leave the forward in place while another move
+holds the target claim.
 
 If rollback cannot restore the target environment or verify its stopped
 daemon, keep the target stopped and gated. Follow the reported next step.
