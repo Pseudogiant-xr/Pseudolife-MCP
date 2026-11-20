@@ -1654,10 +1654,15 @@ def test_release_default_never_applies_to_unattended_or_auth_change_runs(tmp_pat
         result = run_arm(repo, env, binary if native else None, args)
         assert result.returncode == 0, result.stdout + result.stderr
         state = json.loads(state_path.read_text())
-        # The update ran, on the Python daemon, without asking about Rust.
+        # A scheduled update may check whether the target Python image exists
+        # before it decides whether to hold. Neither flag selects Rust.
         assert "up" in stages(state), stages(state)
         assert not any(a[:1] == ["pull"] and "-rust:" in a[-1] for a in state["calls"]), result.stdout
-        assert not any(a[:2] == ["manifest", "inspect"] for a in state["calls"])
+        manifests = [a[2:] for a in state["calls"] if a[:2] == ["manifest", "inspect"]]
+        if flag == "--unattended":
+            assert all(ref == ["ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.1"] for ref in manifests), manifests
+        else:
+            assert not manifests
         assert "default since G2" not in result.stdout
         assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
