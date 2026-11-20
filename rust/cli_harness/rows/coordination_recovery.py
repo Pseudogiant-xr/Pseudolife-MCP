@@ -1,8 +1,8 @@
 """CLI-COORDINATION-RECOVERY: offline gates plus disposable restored histories.
 
-Non-bank cases record the real Python CLI. Live bank cases seed via the
-oracle's own CoordinationStore, run both executables, validate each chain
-with the oracle, then compare all affected rows. No daemon is started.
+Non-bank cases replay recordings from the Python CLI. Live bank cases load
+captured histories, run both executables, validate each chain, then compare
+all affected rows. No daemon is started.
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
+from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
+
 from .. import core, normalize
 from ..run_names import RunNames
 
@@ -25,6 +27,20 @@ ID_A = "aaaaaaaa000000000000000000000001"
 ID_B = "aaaaaaaa000000000000000000000002"
 NAMES = RunNames()
 _CREATED = set()
+_HISTORY = Path(__file__).with_name("coordination_recovery.fixtures.json")
+_SEED_TABLES = (
+    "coordination_agents",
+    "coordination_messages",
+    "coordination_leases",
+    "coordination_lease_waiters",
+    "coordination_events",
+    "principals",
+)
+_SEQUENCE_POSITIONS = {
+    "coordination_lease_fence": [1, True],
+    "coordination_lease_waiters_ticket_seq": [1, True],
+    "coordination_wakes_wake_id_seq": [1, False],
+}
 
 
 def _setup(text=DISABLED, existing=False, repository=False):
@@ -38,11 +54,22 @@ def _setup(text=DISABLED, existing=False, repository=False):
     return setup
 
 
-def _url(name):
-    from tests.pg_defaults import default_login
+def _require_owned(name):
     NAMES.require_owned(name)
     if not re.fullmatch(r"r1_[a-z0-9_]+", name):
         raise ValueError("recovery fixtures require an owned r1_ database")
+
+
+def _assert_fixture_database(conn, name):
+    _require_owned(name)
+    if assert_disposable_database(conn) != name:
+        raise ValueError("server reported a different database from the owned recovery fixture")
+
+
+def _url(name):
+    from tests.pg_defaults import default_login
+
+    _require_owned(name)
     user, password = default_login()[:2]
     if user != "pseudolife_test":
         raise RuntimeError("recovery fixtures require the disposable test login")
@@ -57,8 +84,8 @@ def _admin():
 
 def _drop(name):
     import psycopg
-    from pseudolife_memory.storage.schema import assert_disposable_database, refuse_production_database
-    NAMES.require_owned(name)
+
+    _require_owned(name)
     refuse_production_database(name)
     with _admin() as conn:
         if not conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone():
@@ -66,7 +93,8 @@ def _drop(name):
             return
         try:
             with psycopg.connect(_url(name), autocommit=True) as target:
-                assert_disposable_database(target)
+                if assert_disposable_database(target) != name:
+                    raise ValueError("server reported a different database from the owned recovery fixture")
         except psycopg.OperationalError:
             # A concurrently dropped database is gone already; a half-dropped
             # database cannot accept connections but still needs its DROP.
@@ -93,22 +121,65 @@ def _cleanup():
 atexit.register(_cleanup)
 
 
-class Storage:
-    def __init__(self, conn):
-        self.conn = conn
+def _validate_history(history, variant):
+    expected_rows = {
+        "coordination_agents": 2,
+        "coordination_messages": 1,
+        "coordination_leases": 1,
+        "coordination_events": {"recover": 6, "repeat-recover": 8}.get(variant, 7),
+    }
+    if variant == "recover":
+        expected_rows["coordination_lease_waiters"] = 1
+    invited = variant in ("invited", "invited-denied")
+    if invited:
+        expected_rows["principals"] = 1
+    if ({table: len(rows) for table, rows in history["rows"].items()} != expected_rows
+            or history["sequences"] != _SEQUENCE_POSITIONS):
+        raise ValueError(f"incomplete recovery history for {variant}")
+    if invited:
+        principal, = history["rows"]["principals"]
+        if principal["principal"] != "paired" or principal["board"] is not (variant == "invited"):
+            raise ValueError(f"wrong paired owner in recovery history for {variant}")
 
-    @contextlib.contextmanager
-    def _txn(self):
-        with self.conn.transaction():
-            yield
+
+def _seed_history(conn, name, kind):
+    from psycopg import sql
+    from psycopg.types.json import Json
+    from rust.harness_support.schema import load_plan
+
+    _assert_fixture_database(conn, name)
+    _, ddl = load_plan()
+    # Extract the two standalone sections used by the restored bank. Loading
+    # the entire schema would add tables and metadata absent from that bank.
+    _, coordination = ddl.split("CREATE TABLE IF NOT EXISTS coordination_agents (", 1)
+    coordination, principals = coordination.split("CREATE TABLE IF NOT EXISTS principals (", 1)
+    principals, _ = principals.split("CREATE TABLE IF NOT EXISTS maintainer_passkeys (", 1)
+    variant = {
+        "unrevoked": "recover",
+        "ambiguous": "rebind",
+        "wrong-owner": "rebind",
+        "owner-mismatch": "rebind",
+        "old": "rebind",
+        "reservation-race": "rebind",
+    }.get(kind, kind)
+    history = json.loads(_HISTORY.read_text(encoding="utf-8"))["variants"][variant]
+    _validate_history(history, variant)
+    with conn.transaction():
+        conn.execute("CREATE TABLE IF NOT EXISTS coordination_agents (" + coordination)
+        if kind in ("invited", "invited-denied"):
+            conn.execute("CREATE TABLE IF NOT EXISTS principals (" + principals)
+        for table in _SEED_TABLES:
+            if rows := history["rows"].get(table):
+                identifier = sql.Identifier("public", table)
+                conn.execute(sql.SQL("INSERT INTO {} SELECT * FROM json_populate_recordset(NULL::{}, %s)")
+                             .format(identifier, identifier), (Json(rows),))
+        for sequence, (value, called) in history["sequences"].items():
+            conn.execute("SELECT setval(%s::regclass, %s, %s)", ("public." + sequence, value, called))
 
 
 def _bank_setup(kind):
     def setup(arm):
         import psycopg
-        from unittest import mock
-        from pseudolife_memory.storage.coordination import CoordinationStore, COORDINATION_SCHEMA_SQL
-        from pseudolife_memory.storage.schema import assert_disposable_database
         from ..pg_create import create_from_default_template
 
         name = NAMES.name("r1_coordination_recovery_" + kind.replace("-", "_"), max_length=63)
@@ -119,37 +190,7 @@ def _bank_setup(kind):
         arm.state["bank"] = name
         _setup()(arm)
         with psycopg.connect(_url(name), autocommit=True) as conn:
-            assert_disposable_database(conn)
-            conn.execute(COORDINATION_SCHEMA_SQL)
-            store = CoordinationStore(Storage(conn), clock=lambda: 1000.0)
-            owner = "paired" if kind in ("invited", "invited-denied") else "alice"
-            # Fixed ids and credentials come through the oracle's own writer.
-            import uuid
-            ids = iter([uuid.UUID(ID_A), uuid.UUID(ID_B)] + [uuid.UUID(int=n) for n in range(3, 100)])
-            with mock.patch("pseudolife_memory.storage.coordination.uuid.uuid4",
-                            side_effect=lambda: next(ids)), \
-                 mock.patch("pseudolife_memory.storage.coordination.secrets.token_urlsafe",
-                            return_value="fixture-mailbox-credential"), \
-                 mock.patch("pseudolife_memory.storage.coordination.secrets.token_hex",
-                            side_effect=lambda n: "ab" * n):
-                a = store.register(owner, project="recovery", task="fixture")
-                b = store.register(owner, project="recovery", task="fixture")
-                store.attach(owner, b["agent_id"], b["credential"], attachment_id="old", wake_enabled=True)
-                store.send(owner, a["agent_id"], a["credential"], to=b["agent_id"],
-                           text="pending mail survives restore", request_id="r1-pending")
-                store.acquire_lease(owner, a["agent_id"], a["credential"], name="r1-resource", ttl=120)
-                store.acquire_lease(owner, b["agent_id"], b["credential"], name="r1-resource", ttl=120)
-                if kind not in ("recover", "unrevoked"):
-                    store.recover()
-                if kind == "repeat-recover":
-                    store.recover()
-            if kind in ("invited", "invited-denied"):
-                from pseudolife_memory import principal_store
-                from pseudolife_memory.storage.schema import PRINCIPALS_SCHEMA_SQL
-                conn.execute(PRINCIPALS_SCHEMA_SQL)
-                with mock.patch.object(principal_store, "_NOW", "1000.0"), \
-                     mock.patch.object(principal_store, "new_pairing_code", return_value="0123456789AB"):
-                    principal_store.create_invite(conn, "paired", tier=None, board=kind=="invited", ttl_seconds=60, replace=False)
+            _seed_history(conn, name, kind)
             if kind == "owner-mismatch":
                 (arm.home / "config.yaml").write_text(DISABLED.replace("alice, daemon", "alice, bob, daemon"), encoding="utf-8")
             if kind == "old":
@@ -162,8 +203,13 @@ def _bank_setup(kind):
             arm.state["before"] = _dump(conn)
         if kind == "reservation-race":
             blocker = psycopg.connect(_url(name), autocommit=True)
-            blocker.execute("SELECT pg_advisory_lock(78421013)")
-            arm.state["blocker"] = blocker
+            try:
+                _assert_fixture_database(blocker, name)
+                blocker.execute("SELECT pg_advisory_lock(78421013)")
+                arm.state["blocker"] = blocker
+            except BaseException:
+                blocker.close()
+                raise
     return setup
 
 
@@ -230,9 +276,16 @@ def _reservation_race(arm, proc):
                 reserved.rename(arm.home / "original-reservation.json")
                 # The inode changes while the original empty reservation
                 # remains live, so filesystem reuse cannot hide the race.
-                from pseudolife_memory.private_state import open_private
-                fd = open_private(reserved, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fd)
+                fd = os.open(reserved, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                try:
+                    if os.name == "nt":
+                        from rust.harness_support._windows_fixture_acl import secure_windows_file
+
+                        secure_windows_file(reserved)
+                    else:
+                        os.fchmod(fd, 0o600)
+                finally:
+                    os.close(fd)
                 arm.state["race_applied"] = True
                 break
             if proc.poll() is not None:
