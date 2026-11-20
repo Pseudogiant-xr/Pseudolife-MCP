@@ -151,6 +151,37 @@ def test_recovery_bank_setup_runs_without_frozen_imports(monkeypatch, recovery_r
     )
 
 
+@pytest.mark.parametrize("damage,reason", [
+    ("principals", "incomplete recovery history"),
+    ("coordination_lease_fence", "incomplete recovery history"),
+    ("board", "wrong paired owner"),
+])
+def test_recovery_seed_refuses_an_incomplete_history(monkeypatch, recovery_row, tmp_path, damage, reason):
+    import json
+    from unittest.mock import MagicMock
+
+    row = recovery_row
+    name = row.NAMES.name("r1_fixture", max_length=63)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    history = json.loads(row._HISTORY.read_text(encoding="utf-8"))
+    variant = history["variants"]["invited"]
+    if damage == "principals":
+        del variant["rows"]["principals"]
+    elif damage == "board":
+        variant["rows"]["principals"][0]["board"] = False
+    else:
+        del variant["sequences"][damage]
+    broken = tmp_path / "history.json"
+    broken.write_text(json.dumps(history), encoding="utf-8")
+    monkeypatch.setattr(row, "_HISTORY", broken)
+    connection = MagicMock()
+    connection.execute.return_value.fetchone.return_value = (name,)
+    with pytest.raises(ValueError, match=reason):
+        row._seed_history(connection, name, "invited")
+    connection.transaction.assert_not_called()
+
+
 def test_recovery_reservation_replacement_keeps_both_files(recovery_row, tmp_path):
     import os
     from unittest.mock import MagicMock
@@ -166,7 +197,13 @@ def test_recovery_reservation_replacement_keeps_both_files(recovery_row, tmp_pat
     assert os.path.samestat(retained.stat(), original)
     assert not os.path.samefile(reserved, retained)
     assert reserved.read_bytes() == retained.read_bytes() == b""
-    if os.name != "nt":
+    if os.name == "nt":
+        from .rows.test_login import _permissions
+
+        assert _permissions(reserved) == {
+            "owner": "<me>", "protected": True, "aces": ["(A;;FA;;;OW)"],
+        }
+    else:
         assert reserved.stat().st_mode & 0o777 == 0o600
     assert arm.state["race_applied"]
     blocker.close.assert_called_once()

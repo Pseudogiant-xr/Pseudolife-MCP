@@ -36,6 +36,11 @@ _SEED_TABLES = (
     "coordination_events",
     "principals",
 )
+_SEQUENCE_POSITIONS = {
+    "coordination_lease_fence": [1, True],
+    "coordination_lease_waiters_ticket_seq": [1, True],
+    "coordination_wakes_wake_id_seq": [1, False],
+}
 
 
 def _setup(text=DISABLED, existing=False, repository=False):
@@ -88,7 +93,8 @@ def _drop(name):
             return
         try:
             with psycopg.connect(_url(name), autocommit=True) as target:
-                _assert_fixture_database(target, name)
+                if assert_disposable_database(target) != name:
+                    raise ValueError("server reported a different database from the owned recovery fixture")
         except psycopg.OperationalError:
             # A concurrently dropped database is gone already; a half-dropped
             # database cannot accept connections but still needs its DROP.
@@ -115,6 +121,27 @@ def _cleanup():
 atexit.register(_cleanup)
 
 
+def _validate_history(history, variant):
+    expected_rows = {
+        "coordination_agents": 2,
+        "coordination_messages": 1,
+        "coordination_leases": 1,
+        "coordination_events": {"recover": 6, "repeat-recover": 8}.get(variant, 7),
+    }
+    if variant == "recover":
+        expected_rows["coordination_lease_waiters"] = 1
+    invited = variant in ("invited", "invited-denied")
+    if invited:
+        expected_rows["principals"] = 1
+    if ({table: len(rows) for table, rows in history["rows"].items()} != expected_rows
+            or history["sequences"] != _SEQUENCE_POSITIONS):
+        raise ValueError(f"incomplete recovery history for {variant}")
+    if invited:
+        principal, = history["rows"]["principals"]
+        if principal["principal"] != "paired" or principal["board"] is not (variant == "invited"):
+            raise ValueError(f"wrong paired owner in recovery history for {variant}")
+
+
 def _seed_history(conn, name, kind):
     from psycopg import sql
     from psycopg.types.json import Json
@@ -136,8 +163,7 @@ def _seed_history(conn, name, kind):
         "reservation-race": "rebind",
     }.get(kind, kind)
     history = json.loads(_HISTORY.read_text(encoding="utf-8"))["variants"][variant]
-    if history["rows"].keys() - set(_SEED_TABLES):
-        raise ValueError("recovery fixture contains a table outside the seed order")
+    _validate_history(history, variant)
     with conn.transaction():
         conn.execute("CREATE TABLE IF NOT EXISTS coordination_agents (" + coordination)
         if kind in ("invited", "invited-denied"):
