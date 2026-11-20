@@ -16,7 +16,8 @@ use std::{
     process::{Command, Output},
 };
 
-const DEFERRED: &str = "pseudolife-stdio: mode 'move' is deferred in this candidate\n";
+const INVALID_ARGUMENTS: &str =
+    "move: invalid arguments. Use --help for supported forms and pass option values separately.\n";
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
@@ -286,7 +287,7 @@ fn an_ssh_planted_in_the_working_directory_is_never_run() {
 }
 
 #[test]
-fn argparse_shapes_defer() {
+fn unsupported_argument_shapes_receive_native_usage() {
     let home = Home::new("shapes");
     let (socket, url) = listener();
     for args in [
@@ -298,11 +299,16 @@ fn argparse_shapes_defer() {
         &["--yes", "--yes", "--to", "root@box"],
         &["--to", "root@box", "extra"],
     ] {
-        assert_answer(&run(&home.0, &url, "80", args), 1, "", DEFERRED);
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", INVALID_ARGUMENTS);
     }
-    assert_answer(&run(&home.0, &url, "100", &["--help"]), 1, "", DEFERRED);
-    assert_answer(&run(&home.0, &url, "100", &[]), 1, "", DEFERRED);
+    let narrow_help = run(&home.0, &url, "80", &["--help"]);
+    let wide_help = run(&home.0, &url, "100", &["--help"]);
+    assert_eq!(wide_help.status.code(), Some(0));
+    assert!(wide_help.stderr.is_empty());
+    assert_eq!(narrow_help.stdout, wide_help.stdout);
+    assert_answer(&run(&home.0, &url, "100", &[]), 2, "", INVALID_ARGUMENTS);
     assert_quiet(&socket);
+    assert!(listing(&home.0).is_empty());
 }
 
 #[test]
