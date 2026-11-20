@@ -122,7 +122,7 @@ class = "active dependency"
 reason = "Example and contributor configuration still names the Python package or entry point."
 
 [[rules]]
-globs = [".claude/skills/*.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md", "docs/dev/*.md", "docs/guide/*.md", "docs/i18n/*.md", "frontend/README.md", "llms*.txt", "plugin/README.md", "rust/DEV.md", "rust/daemon/README.md", "rust/cli_harness/*.md", "rust/extractor_harness/README.md"]
+globs = [".claude/skills/*.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md", "docs/dev/*.md", "docs/guide/*.md", "docs/i18n/*.md", "frontend/README.md", "llms*.txt", "plugin/README.md", "rust/DEV.*", "rust/daemon/README.md", "rust/cli_harness/*.md", "rust/extractor_harness/README.md"]
 kinds = ["documentation"]
 class = "active dependency"
 reason = "Contributor and operator instructions still show package-backed commands or install steps."
