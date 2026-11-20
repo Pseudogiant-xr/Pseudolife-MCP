@@ -55,6 +55,10 @@ pub(in crate::cli) enum Op {
     UndoExposure {
         port: u16,
     },
+    /// Check settlement of a move that no longer holds the target.
+    CheckExposureReceipt {
+        port: u16,
+    },
     /// Claim the target for this move: refused while another move holds it.
     Claim {
         source_bank: String,
@@ -121,7 +125,10 @@ impl Op {
     pub(in crate::cli) fn changes(&self) -> bool {
         !matches!(
             self,
-            Self::Check { .. } | Self::CarryCheck { .. } | Self::State { .. }
+            Self::Check { .. }
+                | Self::CarryCheck { .. }
+                | Self::State { .. }
+                | Self::CheckExposureReceipt { .. }
         )
     }
 
@@ -134,6 +141,7 @@ impl Op {
             Self::CarryUndo => "carry-undo",
             Self::ExposeTarget { .. } => "expose-target",
             Self::UndoExposure { .. } => "undo-exposure",
+            Self::CheckExposureReceipt { .. } => "check-exposure-receipt",
             Self::Claim { .. } => "claim",
             Self::State { .. } => "state",
             Self::TimerPause => "timer-pause",
