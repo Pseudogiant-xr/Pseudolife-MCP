@@ -1,15 +1,22 @@
 //! Own the launched child and its process group or Windows job.
 use std::{io, time::Duration};
 
+#[cfg(unix)]
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use tokio::process::Command;
 
 pub(super) struct Child {
+    #[cfg(unix)]
     child: Box<dyn ChildWrapper>,
+    #[cfg(windows)]
+    child: tokio::process::Child,
+    #[cfg(windows)]
+    job: std::os::windows::io::OwnedHandle,
     signalled: bool,
 }
 
 impl Child {
+    #[cfg(unix)]
     pub(super) fn spawn(command: Command) -> io::Result<Self> {
         #[cfg(target_os = "linux")]
         let command = {
@@ -19,18 +26,29 @@ impl Child {
         };
         let mut command = CommandWrap::from(command);
         command.wrap(KillOnDrop);
-        #[cfg(unix)]
         command.wrap(process_wrap::tokio::ProcessGroup::leader());
-        #[cfg(windows)]
-        {
-            // Leave Ctrl-C with the foreground supervisor. The Windows
-            // job still owns the child and its descendants.
-            let mut flags = process_wrap::tokio::CreationFlags(Default::default());
-            flags.0.0 = windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
-            command.wrap(flags).wrap(process_wrap::tokio::JobObject);
-        }
         Ok(Self {
             child: command.spawn()?,
+            signalled: false,
+        })
+    }
+
+    #[cfg(windows)]
+    pub(super) fn spawn(mut command: Command) -> io::Result<Self> {
+        use crate::runtime::windows_job;
+        use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_SUSPENDED};
+        let job = windows_job::create_contained()?;
+        command
+            .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED)
+            .kill_on_drop(true);
+        let mut child = command.spawn()?;
+        if let Err(error) = windows_job::assign_and_resume(&job, &child) {
+            let _ = child.start_kill();
+            return Err(error);
+        }
+        Ok(Self {
+            child,
+            job,
             signalled: false,
         })
     }
@@ -40,7 +58,10 @@ impl Child {
     }
 
     pub(super) fn take_stderr(&mut self) -> Option<tokio::process::ChildStderr> {
-        self.child.stderr().take()
+        #[cfg(unix)]
+        return self.child.stderr().take();
+        #[cfg(windows)]
+        self.child.stderr.take()
     }
 
     pub(super) fn exit_code(&mut self) -> io::Result<Option<u8>> {
@@ -76,7 +97,11 @@ impl Child {
         if self.signalled {
             return Ok(());
         }
-        match self.child.start_kill() {
+        #[cfg(unix)]
+        let killed = self.child.start_kill();
+        #[cfg(windows)]
+        let killed = crate::runtime::windows_job::terminate(&self.job);
+        match killed {
             Ok(()) => {}
             #[cfg(unix)]
             Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {}
@@ -87,13 +112,21 @@ impl Child {
     }
 
     pub(super) async fn close(mut self) -> io::Result<()> {
-        #[cfg(target_os = "linux")]
-        let group = self.id();
+        #[cfg(unix)]
+        let group = self
+            .id()
+            .ok_or_else(|| io::Error::other("no owned group"))?;
         self.kill()?;
         tokio::time::timeout(Duration::from_secs(5), async {
             self.child.wait().await?;
-            #[cfg(target_os = "linux")]
-            while group.is_some_and(|group| !group_is_empty(group)) {
+            loop {
+                #[cfg(unix)]
+                let empty = group_is_empty(group);
+                #[cfg(windows)]
+                let empty = crate::runtime::windows_job::is_empty(&self.job)?;
+                if empty {
+                    break;
+                }
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
             Ok::<(), io::Error>(())
@@ -101,6 +134,15 @@ impl Child {
         .await??;
         Ok(())
     }
+}
+
+#[cfg(target_os = "macos")]
+fn group_is_empty(group: u32) -> bool {
+    use rustix::process::{Pid, test_kill_process_group};
+    i32::try_from(group)
+        .ok()
+        .and_then(Pid::from_raw)
+        .is_some_and(|group| matches!(test_kill_process_group(group), Err(rustix::io::Errno::SRCH)))
 }
 
 impl Drop for Child {

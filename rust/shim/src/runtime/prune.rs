@@ -438,6 +438,16 @@ fn literal_paths(text: &str) -> Result<Vec<String>> {
 /// Only directories with a verified native marker are candidates:
 /// legacy Python runtimes and malformed/incomplete directories remain intact.
 pub fn remove_unused(layout: &Layout, evidence: Result<Evidence>) -> Value {
+    remove_unused_with(layout, evidence, |processes| {
+        tunnel_runtimes(layout, &default_tunnel_root(), processes)
+    })
+}
+
+fn remove_unused_with(
+    layout: &Layout,
+    evidence: Result<Evidence>,
+    recheck_tunnels: impl Fn(&[Process]) -> Result<BTreeSet<PathBuf>>,
+) -> Value {
     let mut removed = Vec::new();
     let mut held = Vec::new();
     let mut kept = Vec::new();
@@ -495,6 +505,16 @@ pub fn remove_unused(layout: &Layout, evidence: Result<Evidence>) -> Value {
         // update locks. A launch cannot select an old directory concurrently.
         if current_runtime(layout).is_some_and(|r| r.sequence == runtime.sequence)
             || read_runtime(path).is_err()
+        {
+            kept.push(path.clone());
+            continue;
+        }
+        // A refresh can publish an unproven spawn after the initial scan
+        // and release its usage pin. Our exclusive pin now fences all new
+        // users of this image, so check the current record before removal.
+        if recheck_tunnels(&evidence.processes)
+            .ok()
+            .is_none_or(|paths| paths.iter().any(|p| same_path(p, path)))
         {
             kept.push(path.clone());
             continue;

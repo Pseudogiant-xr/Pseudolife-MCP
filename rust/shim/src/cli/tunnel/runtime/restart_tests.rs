@@ -50,7 +50,9 @@ fn supervised_fixture() {
             );
         }
         "bridge" => {
-            state::atomic_create(&path, b"bridge attached").unwrap();
+            let mut owner = state::create(&path).unwrap().file;
+            owner.try_lock().unwrap();
+            owner.write_all(b"bridge attached").unwrap();
             std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
         }
         "vendor" => eager_vendor(&path),
@@ -100,6 +102,23 @@ fn eager_vendor(config: &Path) {
         state::atomic_write(&root.join("overlap"), b"more than one vendor poller", None).unwrap();
         panic!("overlapping vendor pollers");
     }
+    for entry in fs::read_dir(root).unwrap().flatten().filter(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("bridge-attached-")
+    }) {
+        let previous_bridge = state::open_with_write(&entry.path(), true).unwrap();
+        if previous_bridge.file.try_lock().is_err() {
+            state::atomic_write(
+                &root.join("overlap"),
+                b"previous bridge still running",
+                None,
+            )
+            .unwrap();
+            panic!("a previous bridge was still alive when the next vendor started");
+        }
+    }
     let config: serde_json::Value = serde_json::from_slice(&fs::read(config).unwrap()).unwrap();
     let reference = config["control_plane"]["api_key"].as_str().unwrap();
     let mut key = Vec::new();
@@ -127,9 +146,11 @@ fn eager_vendor(config: &Path) {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    wait_until(|| attached.exists());
+    wait_until(|| {
+        store::private_read(&attached, 32).is_ok_and(|bytes| bytes == b"bridge attached")
+    });
     let mode = || fs::read_to_string(signal("scenario")).unwrap_or_default();
-    if mode() == "both-fail" || candidate && mode() == "rollback" {
+    if mode() == "both-fail" {
         // The eager fixture's vendor exits when its configured bridge ends.
         drop(bridge.stdin.take());
         assert!(bridge.wait().unwrap().success());
@@ -166,11 +187,39 @@ fn eager_vendor(config: &Path) {
                 stream,
                 "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             );
+            if candidate && mode() == "rollback" && status == "200 OK" {
+                // Prove that a 200 racing the vendor's exit cannot settle.
+                drop(stream);
+                drop(bridge.stdin.take());
+                assert!(bridge.wait().unwrap().success());
+                return;
+            }
         }
         thread::sleep(Duration::from_millis(10));
     }
     drop(bridge.stdin.take());
     let _ = bridge.wait();
+}
+
+pub(in crate::cli::tunnel::runtime) async fn before_settling_readiness(
+    root: &Path,
+    record: &LaunchRecord,
+    child: &mut process::Child,
+) {
+    if record
+        .refresh
+        .as_ref()
+        .is_some_and(|capability| capability.image.path.starts_with(root.join("runtimes")))
+        && fs::read_to_string(root.join("scenario")).is_ok_and(|mode| mode == "rollback")
+    {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while child.exit_code().unwrap().is_none() {
+                tokio::time::sleep(POLL).await;
+            }
+        })
+        .await
+        .expect("fixture should exit after sending readiness");
+    }
 }
 
 struct Daemon {
@@ -485,11 +534,27 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
     );
     drop(ticket);
     assert_eq!(scenario.record().target.unwrap().pid, old_pid);
+    scenario.daemon.mode.store(0, Ordering::SeqCst);
+    let fence = identity::verification_fence(scenario.root(), "dot").unwrap();
+    let ticket = scenario.submit(&scenario.candidate);
+    assert_eq!(
+        scenario.outcome(&ticket, Phase::Refused).cause,
+        Some(Cause::VerificationBusy)
+    );
+    drop(ticket);
+    drop(fence);
+    assert_eq!(scenario.record().target.unwrap().pid, old_pid);
     scenario.daemon.mode.store(2, Ordering::SeqCst);
     let before = scenario.daemon.observed.load(Ordering::SeqCst);
     let ticket = scenario.submit(&scenario.candidate);
     wait_until(|| scenario.daemon.observed.load(Ordering::SeqCst) > before);
     assert_eq!(scenario.record().target.unwrap().pid, old_pid);
+    let poller =
+        state::open_with_write(&scenario.root().join("fixture-poller.lock"), true).unwrap();
+    assert!(matches!(
+        poller.file.try_lock_shared(),
+        Err(fs::TryLockError::WouldBlock)
+    ));
     drop(ticket);
     scenario.daemon.mode.store(0, Ordering::SeqCst);
     let stage = stage_path(scenario.root(), launch_id(&old.native_launch).unwrap());

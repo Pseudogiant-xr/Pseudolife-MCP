@@ -69,6 +69,7 @@ pub(super) enum Cause {
     DaemonHandshake,
     CandidateChanged,
     StateUnavailable,
+    VerificationBusy,
     CandidateStartup,
     OldChildUnproven,
     CandidateChildUnproven,
@@ -77,14 +78,17 @@ pub(super) enum Cause {
     Stopped,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Outcome {
     id: String,
     generation: String,
+    request_epoch: String,
+    candidate: String,
     pub(super) phase: Phase,
     previous_identity: String,
     pub(super) active_identity: Option<String>,
+    active_epoch: Option<String>,
     pub(super) cause: Option<Cause>,
 }
 
@@ -98,21 +102,69 @@ impl Outcome {
         Self {
             id: request.id.clone(),
             generation: request.generation.clone(),
+            request_epoch: request.epoch.clone(),
+            candidate: request.candidate.clone(),
             phase,
             previous_identity: request.identity.clone(),
             active_identity,
+            active_epoch: None,
             cause,
         }
     }
 
-    pub(super) fn for_record(&self, record: &LaunchRecord) -> bool {
+    pub(super) fn bind(mut self, record: &LaunchRecord) -> Self {
+        self.active_epoch = record.refresh.as_ref().map(|refresh| refresh.epoch.clone());
+        self
+    }
+
+    pub(super) fn for_generation(&self, record: &LaunchRecord) -> bool {
         self.generation == record.native_launch
+    }
+
+    pub(super) fn for_record(&self, record: &LaunchRecord) -> bool {
+        if !self.for_generation(record) {
+            return false;
+        }
+        let Some(capability) = &record.refresh else {
+            return false;
+        };
+        if self.phase == Phase::Pending {
+            return true;
+        }
+        if self.active_epoch.as_deref() != Some(capability.epoch.as_str()) {
+            return false;
+        }
+        match self.phase {
+            Phase::Failed => !record.ready && self.active_identity.is_none(),
+            Phase::Refreshed => {
+                record.ready
+                    && self.active_identity.is_some()
+                    && self.active_identity == record.launch_identity
+                    && capability.image.digest == self.candidate
+            }
+            Phase::RolledBack | Phase::Refused => {
+                record.ready
+                    && self.active_identity == record.launch_identity
+                    && self.active_identity.as_deref() == Some(self.previous_identity.as_str())
+            }
+            Phase::Pending => unreachable!(),
+        }
     }
 
     pub(super) fn for_ticket(&self, ticket: &Ticket) -> bool {
         self.generation == ticket.request.generation
             && self.id == ticket.request.id
             && self.previous_identity == ticket.request.identity
+            && self.request_epoch == ticket.request.epoch
+            && self.candidate == ticket.request.candidate
+    }
+
+    pub(super) fn same_request(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.generation == other.generation
+            && self.request_epoch == other.request_epoch
+            && self.candidate == other.candidate
+            && self.previous_identity == other.previous_identity
     }
 
     pub(super) fn state(&self) -> &'static str {
@@ -130,17 +182,77 @@ fn result_path(root: &Path, name: &str) -> PathBuf {
     root.join(format!("{name}.native-refresh.json"))
 }
 
+pub(super) fn saved_outcome(root: &Path, name: &str) -> Option<Outcome> {
+    store::private_read(&result_path(root, name), LIMIT)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Outcome>(&bytes).ok())
+        .filter(valid_outcome)
+}
+
 pub(super) fn read_outcome(root: &Path, name: &str) -> Option<Outcome> {
-    let bytes = store::private_read(&result_path(root, name), LIMIT).ok()?;
-    let result: Outcome = serde_json::from_slice(&bytes).ok()?;
-    (launch_id(&result.id).is_some()
-        && launch_id(&result.generation).is_some()
-        && crate::runtime::valid_digest(&result.previous_identity)
-        && result
-            .active_identity
-            .as_deref()
-            .is_none_or(crate::runtime::valid_digest))
-    .then_some(result)
+    let saved = saved_outcome(root, name);
+    let fallback = super::read_record(&super::record::path(root, name))
+        .ok()
+        .and_then(|record| {
+            record
+                .refresh_outcome
+                .as_ref()
+                .filter(|outcome| valid_outcome(outcome) && outcome.for_record(&record))
+                .cloned()
+        });
+    // A terminal state can be committed to the supervisor's process record
+    // if the standalone journal is held open. Use that matching commit.
+    if let Some(fallback) = fallback
+        && saved
+            .as_ref()
+            .is_none_or(|saved| saved.phase == Phase::Pending && saved.same_request(&fallback))
+    {
+        return Some(fallback);
+    }
+    saved
+}
+
+pub(super) fn repair_outcome(root: &Path, name: &str, record: &LaunchRecord) -> Result<(), Fail> {
+    if let Some(outcome) = record.refresh_outcome.as_ref()
+        && saved_outcome(root, name)
+            .is_none_or(|saved| saved.phase == Phase::Pending && saved.same_request(outcome))
+    {
+        if !valid_outcome(outcome) || !outcome.for_record(record) {
+            return Err(super::UNSAFE_STORE);
+        }
+        write_outcome(root, name, outcome)?;
+    }
+    Ok(())
+}
+
+fn valid_outcome(result: &Outcome) -> bool {
+    let identifiers = [&result.id, &result.generation, &result.request_epoch]
+        .into_iter()
+        .all(|id| launch_id(id).is_some());
+    let digests = [&result.previous_identity, &result.candidate]
+        .into_iter()
+        .all(|digest| crate::runtime::valid_digest(digest));
+    let active = result
+        .active_identity
+        .as_deref()
+        .is_some_and(crate::runtime::valid_digest);
+    let epoch = result.active_epoch.as_deref().and_then(launch_id).is_some();
+    identifiers
+        && digests
+        && match result.phase {
+            Phase::Pending => {
+                result.active_epoch.is_none()
+                    && result.active_identity.is_none()
+                    && result.cause.is_none()
+            }
+            Phase::Refreshed => epoch && active && result.cause.is_none(),
+            Phase::RolledBack | Phase::Refused => {
+                epoch
+                    && result.active_identity.as_deref() == Some(result.previous_identity.as_str())
+                    && result.cause.is_some()
+            }
+            Phase::Failed => epoch && result.active_identity.is_none() && result.cause.is_some(),
+        }
 }
 
 pub(super) fn write_outcome(root: &Path, name: &str, outcome: &Outcome) -> Result<(), Fail> {
@@ -401,6 +513,7 @@ mod tests {
             },
             target: None,
             ready: true,
+            refresh_outcome: None,
             refresh: Some(Capability {
                 epoch: Uuid::new_v4().simple().to_string(),
                 image: Image {
@@ -531,6 +644,83 @@ mod tests {
         );
     }
 
+    #[test]
+    fn abandoned_refresh_publication_is_cleaned_only_without_an_active_publisher() {
+        let (home, record) = setup();
+        let stage = Stage::new(&home.0, "dot", launch_id(&record.native_launch).unwrap()).unwrap();
+        let directory = stage.directory.clone();
+        let abandoned = directory.join(format!(".tunnel-setup-{}", Uuid::new_v4().simple()));
+        state::atomic_create(&abandoned, b"unpublished request fixture").unwrap();
+        let publisher = state::create(&directory.join(PUBLISHER)).unwrap().file;
+        publisher.try_lock().unwrap();
+        assert!(super::super::remove_launch_files(&directory, &stage.profile).is_err());
+        assert!(abandoned.is_file());
+        drop(publisher);
+        drop(stage);
+        assert!(!directory.exists());
+    }
+
+    #[test]
+    fn a_matching_process_record_recovers_the_terminal_outcome() {
+        let (home, mut record) = setup();
+        let request = fixture_request(&record);
+        let mut stage =
+            Stage::new(&home.0, "dot", launch_id(&record.native_launch).unwrap()).unwrap();
+        write_outcome(
+            &home.0,
+            "dot",
+            &Outcome::new(&request, Phase::Pending, None, None),
+        )
+        .unwrap();
+        let capability = record.refresh.as_mut().unwrap();
+        capability.image.digest.clone_from(&request.candidate);
+        capability.epoch = Uuid::new_v4().simple().to_string();
+        record.launch_identity = Some("e".repeat(64));
+        let done = Outcome::new(
+            &request,
+            Phase::Refreshed,
+            record.launch_identity.clone(),
+            None,
+        )
+        .bind(&record);
+        assert!(done.for_record(&record));
+        record.refresh_outcome = Some(done.clone());
+        stage.announce(&record).unwrap();
+        assert_eq!(
+            read_outcome(&home.0, "dot").unwrap().phase,
+            Phase::Refreshed
+        );
+        assert_eq!(saved_outcome(&home.0, "dot").unwrap().phase, Phase::Pending);
+
+        record.refresh.as_mut().unwrap().epoch = Uuid::new_v4().simple().to_string();
+        stage.announce(&record).unwrap();
+        assert!(!done.for_record(&record));
+        assert_eq!(read_outcome(&home.0, "dot").unwrap().phase, Phase::Pending);
+        record.refresh.as_mut().unwrap().epoch = done.active_epoch.clone().unwrap();
+        record.refresh.as_mut().unwrap().image.digest = "d".repeat(64);
+        assert!(!done.for_record(&record));
+        record
+            .refresh
+            .as_mut()
+            .unwrap()
+            .image
+            .digest
+            .clone_from(&request.candidate);
+        assert!(
+            !Outcome {
+                active_identity: None,
+                ..done.clone()
+            }
+            .for_record(&record)
+        );
+        stage.announce(&record).unwrap();
+        repair_outcome(&home.0, "dot", &record).unwrap();
+        assert_eq!(
+            saved_outcome(&home.0, "dot").unwrap().phase,
+            Phase::Refreshed
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn refresh_outcome_retries_sharing_and_leaves_committed_state_when_still_held() {
@@ -542,7 +732,8 @@ mod tests {
         let request = fixture_request(&record);
         let path = result_path(&home.0, "dot");
         let pending = Outcome::new(&request, Phase::Pending, None, None);
-        let done = Outcome::new(&request, Phase::Refreshed, Some("c".repeat(64)), None);
+        let done =
+            Outcome::new(&request, Phase::Refreshed, Some("c".repeat(64)), None).bind(&record);
         write_outcome(&home.0, "dot", &pending).unwrap();
 
         let blocking_reader = state::open(&path).unwrap();

@@ -165,6 +165,22 @@ fn held(path: &Path) -> bool {
     })
 }
 
+pub(in crate::cli::tunnel) fn verification_fence(
+    root: &Path,
+    name: &str,
+) -> Result<fs::File, &'static str> {
+    let refused = "tunnel verification or refresh holds the profile. Check tunnel status and retry";
+    store::profile_path(root, name).map_err(|_| refused)?;
+    setup::check_directory(root).map_err(|_| refused)?;
+    let path = root.join(format!("{name}.native-verify.lock"));
+    let fence = crate::board::state::open_with_write(&path, true)
+        .or_else(|_| crate::board::state::create(&path))
+        .map_err(|_| refused)?
+        .file;
+    fence.try_lock().map_err(|_| refused)?;
+    Ok(fence)
+}
+
 pub(super) fn owns_generation(root: &Path, name: &str, stage: &Path) -> bool {
     // Startup and recovery both acquire the profile lock. Only the
     // supervisor holds the second lock for this particular generation.

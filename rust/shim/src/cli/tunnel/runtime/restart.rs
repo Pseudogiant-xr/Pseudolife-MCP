@@ -133,16 +133,43 @@ fn publish(session: &Session<'_>, outcome: &Outcome) -> Result<(), Fail> {
 
 fn report(
     session: &Session<'_>,
+    stage: &mut Stage,
+    record: &mut LaunchRecord,
     request: &Request,
     phase: Phase,
-    active: Option<String>,
     cause: Option<Cause>,
 ) {
-    let outcome = Outcome::new(request, phase, active, cause);
+    let name = &session.profile.name;
+    let active = (phase != Phase::Failed)
+        .then(|| record.launch_identity.clone())
+        .flatten();
+    if phase == Phase::Failed {
+        record.ready = false;
+    }
+    let outcome = Outcome::new(request, phase, active, cause).bind(record);
     if publish(session, &outcome).is_err() {
+        let accepted = phase != Phase::Refused
+            || refresh::saved_outcome(session.root, name)
+                .is_some_and(|saved| saved.phase == Phase::Pending && saved.same_request(&outcome));
+        if accepted {
+            record.refresh_outcome = Some(outcome);
+            if stage.announce(record).is_ok() {
+                return;
+            }
+        }
         crate::stderrln!(
             "Tunnel refresh outcome could not be saved. Check tunnel status for the current launch."
         );
+    } else {
+        record.refresh_outcome = None;
+    }
+}
+
+pub(super) fn flush_outcome(session: &Session<'_>, record: &mut LaunchRecord) {
+    if record.refresh_outcome.is_some()
+        && refresh::repair_outcome(session.root, &session.profile.name, record).is_ok()
+    {
+        record.refresh_outcome = None;
     }
 }
 
@@ -194,9 +221,10 @@ pub(super) async fn handle(
         Err(cause) => {
             report(
                 session,
+                stage,
+                record,
                 &request,
                 Phase::Refused,
-                record.launch_identity.clone(),
                 Some(cause),
             );
             return Ok(Some(running));
@@ -205,9 +233,10 @@ pub(super) async fn handle(
     if stop_marker(&stage.directory, session.id).unwrap_or(true) {
         report(
             session,
+            stage,
+            record,
             &request,
             Phase::Refused,
-            record.launch_identity.clone(),
             Some(Cause::Stopped),
         );
         return Ok(Some(running));
@@ -215,6 +244,20 @@ pub(super) async fn handle(
     if !matches!(running.child.exit_code(), Ok(None)) {
         return Ok(Some(running));
     }
+    let verification = match identity::verification_fence(session.root, name) {
+        Ok(fence) => fence,
+        Err(_) => {
+            report(
+                session,
+                stage,
+                record,
+                &request,
+                Phase::Refused,
+                Some(Cause::VerificationBusy),
+            );
+            return Ok(Some(running));
+        }
+    };
     if !claim.sender_live() {
         crate::stderrln!(
             "Tunnel refresh refused: the refresh request is stale because its sender exited before acceptance."
@@ -238,9 +281,10 @@ pub(super) async fn handle(
         let _ = stage.announce(record);
         report(
             session,
+            stage,
+            record,
             &request,
             Phase::Refused,
-            record.launch_identity.clone(),
             Some(Cause::StateUnavailable),
         );
         if let Fail::Detail(detail) = error {
@@ -248,12 +292,13 @@ pub(super) async fn handle(
         }
         return Ok(Some(running));
     }
+    drop(verification);
     if running
         .finish(session.root, name, stage, stopped(name), false)
         .await
         .is_err()
     {
-        return unproven(session, &request, Cause::OldChildUnproven);
+        return unproven(session, stage, record, &request, Cause::OldChildUnproven);
     }
     // Even after the old vendor stops, keep its image pinned until the
     // candidate has proved readiness or the rollback has settled.
@@ -274,21 +319,28 @@ pub(super) async fn handle(
     match attempted {
         Ok(Some(candidate)) => {
             *pin = Some(prepared.candidate.pin);
-            report(
-                session,
-                &request,
-                Phase::Refreshed,
-                record.launch_identity.clone(),
-                None,
-            );
+            report(session, stage, record, &request, Phase::Refreshed, None);
             return Ok(Some(candidate));
         }
         Ok(None) => {
-            report(session, &request, Phase::Failed, None, Some(Cause::Stopped));
+            report(
+                session,
+                stage,
+                record,
+                &request,
+                Phase::Failed,
+                Some(Cause::Stopped),
+            );
             return Ok(None);
         }
         Err(_) if stage.retain => {
-            return unproven(session, &request, Cause::CandidateChildUnproven);
+            return unproven(
+                session,
+                stage,
+                record,
+                &request,
+                Cause::CandidateChildUnproven,
+            );
         }
         Err(_) => {}
     }
@@ -305,24 +357,39 @@ pub(super) async fn handle(
         Ok(Some(restored)) => {
             report(
                 session,
+                stage,
+                record,
                 &request,
                 Phase::RolledBack,
-                record.launch_identity.clone(),
                 Some(Cause::CandidateStartup),
             );
             Ok(Some(restored))
         }
         Ok(None) => {
-            report(session, &request, Phase::Failed, None, Some(Cause::Stopped));
+            report(
+                session,
+                stage,
+                record,
+                &request,
+                Phase::Failed,
+                Some(Cause::Stopped),
+            );
             Ok(None)
         }
-        Err(_) if stage.retain => unproven(session, &request, Cause::RollbackChildUnproven),
+        Err(_) if stage.retain => unproven(
+            session,
+            stage,
+            record,
+            &request,
+            Cause::RollbackChildUnproven,
+        ),
         Err(_) => {
             report(
                 session,
+                stage,
+                record,
                 &request,
                 Phase::Failed,
-                None,
                 Some(Cause::RollbackStartup),
             );
             Err(Fail::Detail(detail(
@@ -348,10 +415,12 @@ fn change_image(record: &mut LaunchRecord, image: Image, identity: String, epoch
 
 fn unproven(
     session: &Session<'_>,
+    stage: &mut Stage,
+    record: &mut LaunchRecord,
     request: &Request,
     cause: Cause,
 ) -> Result<Option<RunningChild>, Fail> {
-    report(session, request, Phase::Failed, None, Some(cause));
+    report(session, stage, record, request, Phase::Failed, Some(cause));
     Err(Fail::Detail(detail(
         session.root,
         &session.profile.name,
@@ -383,6 +452,7 @@ fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String
                 Some(Cause::DaemonHandshake) => "the authenticated daemon handshake failed",
                 Some(Cause::CandidateChanged) => "the installed runtime could not be verified or changed during preflight",
                 Some(Cause::Stopped) => "a stop was requested",
+                Some(Cause::VerificationBusy) => "verification holds the profile",
                 _ => "the launch state could not be saved",
             };
             format!("refresh was refused because {reason}. This refresh left the running child alone. Check with `{}`", status())
@@ -436,6 +506,30 @@ pub(in crate::cli::tunnel) fn attempt(
             refresh::read_outcome(root, name).filter(|outcome| outcome.for_ticket(&ticket))
             && outcome.phase != Phase::Pending
         {
+            let live = read_record(&record::path(root, name)).ok();
+            let verified = live.as_ref().is_some_and(|record| {
+                outcome.for_record(record)
+                    && launch_id(&record.native_launch).is_some_and(|id| {
+                        identity::owns_generation(root, name, &stage_path(root, id))
+                    })
+            });
+            let identity_matches = !matches!(outcome.phase, Phase::Refreshed | Phase::RolledBack)
+                || identity::current(root, name).ok() == outcome.active_identity;
+            if outcome.phase != Phase::Failed && !(verified && identity_matches)
+                || outcome.phase == Phase::Failed
+                    && live
+                        .as_ref()
+                        .is_some_and(|record| !outcome.for_record(record))
+            {
+                return Some(Report {
+                    state: "stale",
+                    running: "\"unknown\"",
+                    detail: format!(
+                        "the refresh result could not be matched to the current launch. Check with `{}`",
+                        super::super::bridge::status_command(name, root.to_str())
+                    ),
+                });
+            }
             let (state, running) = match outcome.phase {
                 Phase::Refreshed => ("refreshed", "true"),
                 Phase::RolledBack | Phase::Refused => ("stale", "true"),
@@ -497,11 +591,16 @@ pub(in crate::cli::tunnel) fn status(root: &Path, name: &str) -> Option<(&'stati
                     .to_owned(),
             ));
         }
-    } else if record
-        .as_ref()
-        .is_some_and(|record| !outcome.for_record(record))
-    {
-        return None;
+    } else if let Some(record) = &record {
+        if !outcome.for_generation(record) {
+            return None;
+        }
+        if !outcome.for_record(record) {
+            return Some((
+                "failed",
+                "the saved refresh result does not match the current launch".to_owned(),
+            ));
+        }
     }
     Some((
         outcome.state(),

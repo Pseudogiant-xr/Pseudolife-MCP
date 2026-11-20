@@ -1026,6 +1026,7 @@ fn successful_calls(root: &Path, name: &str, challenge: &Challenge) -> u8 {
 }
 
 pub(super) fn begin(root: &Path, name: &str) -> super::Output {
+    let _fence = identity::verification_fence(root, name).map_err(Fail::Tunnel)?;
     let identity = identity::current(root, name).map_err(Fail::Tunnel)?;
     let directory = store::checked_path(&root.join(format!("{name}-verification")))?;
     crate::board::state::private_dir(&directory).map_err(|_| Fail::Tunnel(RECEIPT_FAILED))?;

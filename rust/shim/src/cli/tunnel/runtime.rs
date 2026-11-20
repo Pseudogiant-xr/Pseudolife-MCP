@@ -301,6 +301,8 @@ struct LaunchRecord {
     ready: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     refresh: Option<refresh::Capability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh_outcome: Option<refresh::Outcome>,
 }
 
 const OWNER_LOCK: &str = "supervisor.lock";
@@ -335,6 +337,7 @@ fn recover_launch(root: &Path, name: &str) -> Result<(), Fail> {
             path.display()
         )));
     }
+    refresh::repair_outcome(root, name, &launch).map_err(|_| conflict(root, name))?;
     remove_launch_files(&directory, &format!("{name}.profile.json"))?;
     store::sharing_retry(|| fs::remove_file(&path)).map_err(|_| conflict(root, name))
 }
@@ -364,6 +367,7 @@ fn remove_launch_files(directory: &Path, profile: &str) -> Result<(), Fail> {
         refresh::PUBLISHER,
     ];
     let mut senders = Vec::new();
+    let mut stages = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_| blocked())?;
         let name = entry.file_name();
@@ -375,8 +379,29 @@ fn remove_launch_files(directory: &Path, profile: &str) -> Result<(), Fail> {
         }
         if refresh::sender_file(name) {
             senders.push(entry.path());
+        } else if setup::publication_stage(name) && state::open(&entry.path()).is_ok() {
+            stages.push(entry.path());
         } else if !known.contains(&name) {
             return Err(blocked());
+        }
+    }
+    if !stages.is_empty() {
+        let publication = directory.join(refresh::PUBLISHER);
+        let _publisher = if store::occupied(&publication).map_err(|_| blocked())? {
+            let lock = state::open_with_write(&publication, true)
+                .map_err(|_| blocked())?
+                .file;
+            lock.try_lock().map_err(|_| blocked())?;
+            Some(lock)
+        } else {
+            None
+        };
+        for staged in stages {
+            if let Err(error) = store::sharing_retry(|| fs::remove_file(&staged))
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(blocked());
+            }
         }
     }
     for path in known
@@ -461,6 +486,17 @@ impl Stage {
 
 impl Drop for Stage {
     fn drop(&mut self) {
+        if self.owns_record
+            && let (Some(root), Some(name)) = (
+                self.record.parent(),
+                self.profile.strip_suffix(".profile.json"),
+            )
+            && let Ok(record) = read_record(&self.record)
+            && record.native_launch == self.launch
+            && refresh::repair_outcome(root, name, &record).is_err()
+        {
+            self.retain = true;
+        }
         drop(self.owner.take());
         if self.retain {
             crate::stderrln!(
@@ -575,6 +611,7 @@ async fn supervise(
             epoch: Uuid::new_v4().simple().to_string(),
             image,
         }),
+        refresh_outcome: None,
     };
     // Publish ownership before staging the private runtime key.
     stage.announce(&record)?;
@@ -609,6 +646,7 @@ async fn supervise(
     // Hold the selected image through its bridge lifetime and a possible rollback.
     let mut image_pin = None;
     loop {
+        restart::flush_outcome(&session, &mut record);
         let Some(mut running) = active.take() else {
             return stopped(name);
         };
@@ -769,6 +807,14 @@ impl Session<'_> {
                         awaiting_poll = false;
                     }
                     if ready && !awaiting_poll {
+                        #[cfg(test)]
+                        tests::restart_cases::before_settling_readiness(self.root, record, &mut running.child).await;
+                        if stop_marker(&stage.directory, self.id)? {
+                            return Ok(false);
+                        }
+                        if running.child.exit_code().map_err(|_| CHILD_ERROR)?.is_some() {
+                            return Err(NOT_READY);
+                        }
                         record.ready = true;
                         stage.announce(record)?;
                         crate::stderrln!("Tunnel {name} is ready.");

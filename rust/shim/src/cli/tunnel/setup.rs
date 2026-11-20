@@ -388,11 +388,7 @@ pub(super) fn warn_for_stages(root: &Path) {
     let mut stages: Vec<_> = entries
         .filter_map(Result::ok)
         .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .and_then(|name| name.strip_prefix(STAGE_PREFIX))
-                .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            entry.file_name().to_str().is_some_and(publication_stage)
                 && entry.file_type().is_ok_and(|kind| kind.is_file())
         })
         .map(|entry| entry.path())
@@ -404,6 +400,11 @@ pub(super) fn warn_for_stages(root: &Path) {
             stage.display()
         );
     }
+}
+
+pub(super) fn publication_stage(name: &str) -> bool {
+    name.strip_prefix(STAGE_PREFIX)
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 fn prepare_directory(root: &Path) -> Result<(), Fail> {
