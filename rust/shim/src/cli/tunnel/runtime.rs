@@ -20,6 +20,7 @@ mod diagnostics;
 pub(super) mod identity;
 mod key;
 mod process;
+pub(super) mod readiness;
 mod refresh;
 pub(super) mod restart;
 #[cfg(test)]
@@ -303,6 +304,8 @@ struct LaunchRecord {
     refresh: Option<refresh::Capability>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     refresh_outcome: Option<refresh::Outcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bridge_attempt: Option<readiness::Attempt>,
 }
 
 const OWNER_LOCK: &str = "supervisor.lock";
@@ -377,7 +380,7 @@ fn remove_launch_files(directory: &Path, profile: &str) -> Result<(), Fail> {
         {
             return Err(blocked());
         }
-        if refresh::sender_file(name) {
+        if refresh::sender_file(name) || readiness::lock_name(name) {
             senders.push(entry.path());
         } else if setup::publication_stage(name) && state::open(&entry.path()).is_ok() {
             stages.push(entry.path());
@@ -526,6 +529,7 @@ fn bridge_command(
     directory: &Path,
     name: &str,
     launch: Uuid,
+    attempt: &str,
 ) -> Result<String, Fail> {
     let quote = |path: &Path| -> Result<String, Fail> {
         let text = path
@@ -541,14 +545,16 @@ fn bridge_command(
     if std::env::var_os(tests::restart_cases::FIXTURE_ENV).as_deref()
         == Some(std::ffi::OsStr::new("supervisor"))
     {
+        let fixture = std::env::current_exe().map_err(|_| CHILD_ERROR)?;
         return Ok(format!(
-            "{} --exact {} --nocapture",
-            quote(executable)?,
-            tests::restart_cases::FIXTURE
+            "{} --exact {} --nocapture --selected-image {} --bridge-attempt {attempt}",
+            quote(&fixture)?,
+            tests::restart_cases::FIXTURE,
+            quote(executable)?
         ));
     }
     Ok(format!(
-        "{} tunnel shim --profile {name} --profile-dir {} --launch-id {}",
+        "{} tunnel shim --profile {name} --profile-dir {} --launch-id {} --bridge-attempt {attempt}",
         quote(executable)?,
         quote(directory)?,
         launch.simple(),
@@ -596,6 +602,7 @@ async fn supervise(
     identity::ensure_signing_key(root).map_err(Fail::Tunnel)?;
     let launch_identity =
         identity::sign_image(root, &profile, &key, &image).map_err(Fail::Tunnel)?;
+    let supervisor = std::env::current_exe().map_err(|_| CHILD_ERROR)?;
     let mut stage = Stage::new(root, name, id)?;
     let mut record = LaunchRecord {
         native_launch: id.simple().to_string(),
@@ -603,7 +610,7 @@ async fn supervise(
         spawn_started: Some(false),
         supervisor: Identity {
             pid: std::process::id(),
-            exe: executable.to_owned(),
+            exe: crate::cli::update::seams::command_path(supervisor),
         },
         target: None,
         ready: false,
@@ -612,6 +619,7 @@ async fn supervise(
             image,
         }),
         refresh_outcome: None,
+        bridge_attempt: None,
     };
     // Publish ownership before staging the private runtime key.
     stage.announce(&record)?;
@@ -710,6 +718,7 @@ impl Session<'_> {
         stage: &Stage,
         executable: &Path,
         key: &key::Key,
+        attempt: &str,
     ) -> Result<key::Staged, Fail> {
         let staged_key = key.stage(&stage.directory)?;
         let mut control = json!({
@@ -724,7 +733,7 @@ impl Session<'_> {
             "health": {"listen_addr": "127.0.0.1:0", "url_file": stage.directory.join("health.url")},
             "admin_ui": {"open_browser": false},
             "log": {"level": "info", "format": "json"},
-            "mcp": {"commands": [{"channel": "main", "command": bridge_command(executable, &stage.directory, &self.profile.name, self.id)?}]}
+            "mcp": {"commands": [{"channel": "main", "command": bridge_command(executable, &stage.directory, &self.profile.name, self.id, attempt)?}]}
         });
         let path = stage.config();
         let bytes = serde_json::to_vec(&config).map_err(|_| UNSAFE_STORE)?;
@@ -757,9 +766,13 @@ impl Session<'_> {
             return Err(NOT_READY);
         }
         let executable = &record.refresh.as_ref().ok_or(CHILD_ERROR)?.image.path;
-        let staged_key = self.configure(stage, executable, key)?;
+        let launch_identity = record.launch_identity.as_deref().ok_or(CHILD_ERROR)?;
+        let attempt = readiness::Attempt::new(self.root, &record.native_launch, launch_identity)
+            .map_err(Fail::Tunnel)?;
+        let staged_key = self.configure(stage, executable, key, &attempt.id)?;
         // A crash between spawn and publication of the target is ambiguous.
         record.ready = false;
+        record.bridge_attempt = Some(attempt.clone());
         record.target = None;
         record.spawn_started = Some(true);
         stage.announce(record)?;
@@ -806,7 +819,7 @@ impl Session<'_> {
                         setup::qualify_previous_key(self.root, name)?;
                         awaiting_poll = false;
                     }
-                    if ready && !awaiting_poll {
+                    if ready && !awaiting_poll && attempt.held(&stage.directory) {
                         #[cfg(test)]
                         tests::restart_cases::before_settling_readiness(self.root, record, &mut running.child).await;
                         if stop_marker(&stage.directory, self.id)? {
@@ -814,6 +827,9 @@ impl Session<'_> {
                         }
                         if running.child.exit_code().map_err(|_| CHILD_ERROR)?.is_some() {
                             return Err(NOT_READY);
+                        }
+                        if !attempt.held(&stage.directory) {
+                            continue;
                         }
                         record.ready = true;
                         stage.announce(record)?;

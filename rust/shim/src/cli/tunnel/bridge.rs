@@ -45,7 +45,11 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWrite
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::{Fail, runtime::identity, store, syntax};
+use super::{
+    Fail,
+    runtime::{identity, readiness},
+    store, syntax,
+};
 
 const USAGE: &str = "tunnel shim is started by the tunnel runtime, not by hand: it needs --profile <name>, and --profile-dir <directory> for a store other than the default";
 const NO_SHIM: &str =
@@ -175,9 +179,16 @@ const TOOLS: [&str; 2] = ["memory_search", "memory_agents"];
 
 /// `--profile <name>` (required) and `--profile-dir <directory>`, each once,
 /// in any order.
-fn parse(values: &[OsString]) -> Option<(String, Option<String>, Option<String>)> {
+struct BridgeArgs {
+    profile: String,
+    directory: Option<String>,
+    launch: Option<String>,
+    attempt: Option<String>,
+}
+
+fn parse(values: &[OsString]) -> Option<BridgeArgs> {
     let values: Vec<&str> = values.iter().map(|v| v.to_str()).collect::<Option<_>>()?;
-    let (mut profile, mut directory, mut launch) = (None, None, None);
+    let (mut profile, mut directory, mut launch, mut attempt) = (None, None, None, None);
     let mut rest = values.iter();
     while let Some(option) = rest.next() {
         let value = rest
@@ -187,13 +198,22 @@ fn parse(values: &[OsString]) -> Option<(String, Option<String>, Option<String>)
             "--profile" => &mut profile,
             "--profile-dir" => &mut directory,
             "--launch-id" => &mut launch,
+            "--bridge-attempt" => &mut attempt,
             _ => return None,
         };
         if slot.replace((*value).to_owned()).is_some() {
             return None;
         }
     }
-    Some((profile?, directory, launch))
+    if attempt.is_some() && launch.is_none() {
+        return None;
+    }
+    Some(BridgeArgs {
+        profile: profile?,
+        directory,
+        launch,
+        attempt,
+    })
 }
 
 /// What the bridge was started with: the store and its validated profile.
@@ -201,6 +221,7 @@ struct Start {
     root: PathBuf,
     profile: store::Profile,
     verification: Option<ReceiptIdentity>,
+    readiness: Option<PathBuf>,
 }
 
 /// The `tunnel status` command for this profile, in the store the bridge
@@ -218,7 +239,12 @@ pub(super) fn status_command(name: &str, directory: Option<&str>) -> String {
 }
 
 fn prepare(values: &[OsString]) -> Result<Start, String> {
-    let (name, directory, launch) = parse(values).ok_or(USAGE)?;
+    let BridgeArgs {
+        profile: name,
+        directory,
+        launch,
+        attempt,
+    } = parse(values).ok_or(USAGE)?;
     let root = store::store_root(directory.as_deref()).map_err(|_| store::UNSAFE_ROOT)?;
     let command = status_command(&name, directory.as_deref());
     let status = format!("`{command}` names the cause");
@@ -242,22 +268,24 @@ fn prepare(values: &[OsString]) -> Result<Start, String> {
             "the profile's daemon address is not an http(s) origin (no path, query or credentials), which the stdio shim needs, and this client cannot change a saved profile yet; `{command}` names its file"
         ));
     }
-    let (root, verification) = match launch {
+    let (root, verification, readiness) = match launch {
         Some(launch) => {
-            let scope = identity::Bound::capture(&root, &launch, &profile)?;
+            let scope = identity::Bound::capture(&root, &launch, &profile, attempt.as_deref())?;
             let root = scope.root.clone();
+            let readiness = scope.readiness.clone();
             let verification = ReceiptIdentity {
                 captured: scope.identity.clone(),
                 current: Arc::new(move || scope.expected()),
             };
-            (root, Some(verification))
+            (root, Some(verification), readiness)
         }
-        None => (root, None),
+        None => (root, None, None),
     };
     Ok(Start {
         root,
         profile,
         verification,
+        readiness,
     })
 }
 
@@ -298,6 +326,18 @@ fn child_command(
 }
 
 pub(super) fn run(values: &[OsString]) -> ExitCode {
+    if matches!(values, [flag] if flag == readiness::QUERY) {
+        let response = readiness::protocol_response();
+        return if std::io::stdout()
+            .lock()
+            .write_all(response.as_bytes())
+            .is_ok()
+        {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
     let start = match prepare(values) {
         Ok(start) => start,
         Err(message) => {
@@ -348,6 +388,15 @@ async fn serve(start: Start) -> ExitCode {
         crate::stderrln!("{NO_SHIM}");
         return ExitCode::FAILURE;
     };
+    // prepare() has authenticated this attempt. Publish no bytes and hold
+    // the owner-only acknowledgment only for this bridge's forwarding life.
+    let readiness = match start.readiness.as_deref().map(readiness::hold).transpose() {
+        Ok(readiness) => readiness,
+        Err(message) => {
+            crate::stderrln!("{message}");
+            return ExitCode::FAILURE;
+        }
+    };
     let mut observer = Observer::new(
         start.root,
         &start.profile,
@@ -365,6 +414,7 @@ async fn serve(start: Start) -> ExitCode {
         gate,
     )
     .await;
+    drop(readiness);
     let spoke = match relayed {
         Ok(spoke) => spoke,
         Err(error) => {

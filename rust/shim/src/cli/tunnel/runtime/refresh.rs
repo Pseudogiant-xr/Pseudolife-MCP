@@ -68,6 +68,7 @@ pub(super) enum Cause {
     ProfileChanged,
     DaemonHandshake,
     CandidateChanged,
+    BridgeProtocol,
     StateUnavailable,
     VerificationBusy,
     CandidateStartup,
@@ -514,6 +515,7 @@ mod tests {
             target: None,
             ready: true,
             refresh_outcome: None,
+            bridge_attempt: None,
             refresh: Some(Capability {
                 epoch: Uuid::new_v4().simple().to_string(),
                 image: Image {

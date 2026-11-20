@@ -76,6 +76,16 @@ async fn preflight(
     if candidate.image.digest != request.candidate || candidate.image.digest == previous.digest {
         return Err(Cause::CandidateChanged);
     }
+    // The fixture-only driver uses tiny images for the repeated state-machine
+    // tests. The production-bridge fixture takes the same probe as users.
+    #[cfg(test)]
+    let mock_bridge = std::env::var(super::tests::restart_cases::FIXTURE_ENV)
+        .is_ok_and(|mode| mode == "supervisor");
+    #[cfg(not(test))]
+    let mock_bridge = false;
+    if !mock_bridge && !readiness::query(&candidate.image.path).await {
+        return Err(Cause::BridgeProtocol);
+    }
     verify_image(previous)?;
     let key = saved_key(session)?;
     let profile = session.profile;
@@ -451,11 +461,16 @@ fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String
                 Some(Cause::ProfileChanged) => "its saved profile or credential no longer matches the launch",
                 Some(Cause::DaemonHandshake) => "the authenticated daemon handshake failed",
                 Some(Cause::CandidateChanged) => "the installed runtime could not be verified or changed during preflight",
+                Some(Cause::BridgeProtocol) => "the installed runtime did not confirm readiness protocol v1",
                 Some(Cause::Stopped) => "a stop was requested",
                 Some(Cause::VerificationBusy) => "verification holds the profile",
                 _ => "the launch state could not be saved",
             };
-            format!("refresh was refused because {reason}. This refresh left the running child alone. Check with `{}`", status())
+            if cause == Some(Cause::BridgeProtocol) {
+                format!("refresh was refused because {reason}. The old tunnel is still running. Install a runtime that supports readiness protocol v1 and retry update")
+            } else {
+                format!("refresh was refused because {reason}. This refresh left the running child alone. Check with `{}`", status())
+            }
         }
     }
 }

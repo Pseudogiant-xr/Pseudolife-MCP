@@ -287,9 +287,11 @@ pub(in crate::cli::tunnel) fn current(root: &Path, name: &str) -> Result<String,
 pub(in crate::cli::tunnel) struct Bound {
     pub(in crate::cli::tunnel) root: PathBuf,
     pub(in crate::cli::tunnel) identity: String,
+    pub(in crate::cli::tunnel) readiness: Option<PathBuf>,
     generation: String,
     name: String,
     executable: PathBuf,
+    attempt: Option<String>,
 }
 
 impl Bound {
@@ -297,6 +299,7 @@ impl Bound {
         stage: &Path,
         generation: &str,
         profile: &store::Profile,
+        requested_attempt: Option<&str>,
     ) -> Result<Self, &'static str> {
         let id = launch_id(generation).ok_or(UNAVAILABLE)?;
         let root = stage.parent().ok_or(UNAVAILABLE)?;
@@ -320,16 +323,35 @@ impl Bound {
         {
             return Err(CHANGED);
         }
+        let readiness = match (&record.bridge_attempt, requested_attempt) {
+            (None, None) => None,
+            (Some(attempt), Some(requested)) => {
+                attempt.validate(root, generation, &identity, requested)?;
+                Some(attempt.path(stage))
+            }
+            _ => return Err("the bridge and supervisor disagree on readiness protocol"),
+        };
         Ok(Self {
             root: root.to_owned(),
             identity,
             generation: generation.to_owned(),
             name: profile.name.clone(),
             executable,
+            readiness,
+            attempt: requested_attempt.map(str::to_owned),
         })
     }
 
     pub(in crate::cli::tunnel) fn expected(&self) -> Result<String, &'static str> {
+        let record = read_record(&record::path(&self.root, &self.name)).map_err(|_| UNAVAILABLE)?;
+        if record
+            .bridge_attempt
+            .as_ref()
+            .map(|attempt| attempt.id.as_str())
+            != self.attempt.as_deref()
+        {
+            return Err(CHANGED);
+        }
         active(
             &self.root,
             &self.name,

@@ -13,6 +13,8 @@ pub(in crate::cli::tunnel::runtime) const FIXTURE_ENV: &str = "PSEUDOLIFE_TEST_S
 pub(in crate::cli::tunnel::runtime) const FIXTURE: &str =
     "cli::tunnel::runtime::tests::restart_cases::supervised_fixture";
 const FIXTURE_PATH: &str = "PSEUDOLIFE_TEST_SUPERVISED_FIXTURE_PATH";
+const FIXTURE_IMAGE: &str = "PSEUDOLIFE_TEST_SUPERVISED_IMAGE";
+const FIXTURE_ACK: &str = "PSEUDOLIFE_TEST_SUPERVISED_ACK";
 
 fn command(executable: &Path, mode: &str, path: &Path) -> std::process::Command {
     let mut child = std::process::Command::new(executable);
@@ -33,14 +35,15 @@ fn supervised_fixture() {
     let path = PathBuf::from(std::env::var_os(FIXTURE_PATH).unwrap());
     let executable = std::env::current_exe().unwrap();
     match mode.as_str() {
-        "supervisor" => {
+        "supervisor" | "production-supervisor" => {
             let plain_fixture = !store::key_path(&path, "dot").is_file();
             let prepared = if plain_fixture {
                 fixture_prepared(&path)
             } else {
                 prepare(&path, "dot").unwrap()
             };
-            let output = launch(prepared, &executable, STARTUP, |config| {
+            let image = PathBuf::from(std::env::var_os(FIXTURE_IMAGE).unwrap());
+            let output = launch(prepared, &image, STARTUP, |config| {
                 Command::from(command(&executable, "vendor", config))
             });
             assert!(
@@ -52,6 +55,8 @@ fn supervised_fixture() {
         "bridge" => {
             let owner = state::create(&path.with_extension("lock")).unwrap().file;
             owner.try_lock().unwrap();
+            let ack = PathBuf::from(std::env::var_os(FIXTURE_ACK).unwrap());
+            let _ack = readiness::hold(&ack).unwrap();
             state::atomic_create(&path, b"bridge attached").unwrap();
             std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
         }
@@ -96,7 +101,8 @@ fn fixture_prepared(root: &Path) -> Prepared<'_> {
 }
 
 fn eager_vendor(config: &Path) {
-    let root = config.parent().unwrap().parent().unwrap();
+    let stage = config.parent().unwrap();
+    let root = stage.parent().unwrap();
     let poller = state::open_with_write(&root.join("fixture-poller.lock"), true).unwrap();
     if poller.file.try_lock().is_err() {
         state::atomic_write(&root.join("overlap"), b"more than one vendor poller", None).unwrap();
@@ -127,28 +133,12 @@ fn eager_vendor(config: &Path) {
         .unwrap();
     assert!(key == b"fixture-runtime-key");
     let expression = config["mcp"]["commands"][0]["command"].as_str().unwrap();
-    let suffix = format!("' --exact {FIXTURE} --nocapture");
-    let path = PathBuf::from(
-        expression
-            .strip_prefix('\'')
-            .unwrap()
-            .strip_suffix(&suffix)
-            .unwrap()
-            .replace("'\\''", "'"),
-    );
-    let candidate = path.starts_with(root.join("runtimes"));
-    let signal = |name: &str| root.join(name);
-    let attached = signal(&format!("bridge-attached-{}", Uuid::new_v4()));
-    let mut bridge = command(&path, "bridge", &attached)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    wait_until(|| {
-        store::private_read(&attached, 32).is_ok_and(|bytes| bytes == b"bridge attached")
-    });
-    let mode = || fs::read_to_string(signal("scenario")).unwrap_or_default();
+    let mode = || fs::read_to_string(root.join("scenario")).unwrap_or_default();
+    let (mut bridge, candidate, rejected) = if expression.contains(" --selected-image ") {
+        mock_bridge(root, stage, expression)
+    } else {
+        production_bridge(root, stage, expression, &mode())
+    };
     if mode() == "both-fail" {
         // The eager fixture's vendor exits when its configured bridge ends.
         drop(bridge.stdin.take());
@@ -164,7 +154,7 @@ fn eager_vendor(config: &Path) {
     .unwrap();
     let deadline = Instant::now() + FIXTURE_WATCHDOG;
     while Instant::now() < deadline {
-        if bridge.try_wait().unwrap().is_some() {
+        if !rejected && bridge.try_wait().unwrap().is_some() {
             return;
         }
         if let Ok((mut stream, _)) = listener.accept() {
@@ -198,6 +188,110 @@ fn eager_vendor(config: &Path) {
     }
     drop(bridge.stdin.take());
     let _ = bridge.wait();
+}
+
+fn mock_bridge(root: &Path, stage: &Path, expression: &str) -> (std::process::Child, bool, bool) {
+    let (invocation, attempt) = expression.rsplit_once(" --bridge-attempt ").unwrap();
+    let separator = format!("' --exact {FIXTURE} --nocapture --selected-image '");
+    let (actual, selected) = invocation
+        .strip_prefix('\'')
+        .unwrap()
+        .split_once(&separator)
+        .unwrap();
+    let unquote = |value: &str| PathBuf::from(value.replace("'\\''", "'"));
+    let selected = unquote(selected.strip_suffix('\'').unwrap());
+    let attached = root.join(format!("bridge-attached-{}", Uuid::new_v4()));
+    let bridge = command(&unquote(actual), "bridge", &attached)
+        .env(FIXTURE_ACK, readiness::lock_path(stage, attempt))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    wait_until(|| {
+        store::private_read(&attached, 32).is_ok_and(|bytes| bytes == b"bridge attached")
+    });
+    (bridge, selected.starts_with(root.join("runtimes")), false)
+}
+
+fn production_bridge(
+    root: &Path,
+    stage: &Path,
+    expression: &str,
+    mode: &str,
+) -> (std::process::Child, bool, bool) {
+    let (invocation, attempt) = expression.rsplit_once(" --bridge-attempt ").unwrap();
+    let (exe, directory) = invocation
+        .strip_prefix('\'')
+        .unwrap()
+        .split_once("' tunnel shim --profile dot --profile-dir '")
+        .unwrap();
+    let (directory, generation) = directory.split_once("' --launch-id ").unwrap();
+    let exe = PathBuf::from(exe.replace("'\\''", "'"));
+    let directory = PathBuf::from(directory.replace("'\\''", "'"));
+    assert!(crate::runtime::same_path(stage, &directory));
+    let candidate = exe.starts_with(root.join("runtimes"));
+    let rejected = candidate && mode == "bridge-refused";
+    let supplied = if rejected {
+        Uuid::new_v4().simple().to_string()
+    } else {
+        attempt.to_owned()
+    };
+    let mut bridge = std::process::Command::new(&exe);
+    bridge
+        .args(["tunnel", "shim", "--profile", "dot", "--profile-dir"])
+        .arg(directory)
+        .args(["--launch-id", generation, "--bridge-attempt", &supplied])
+        .env_clear()
+        .envs(vendor::probe_environment(std::env::vars_os()))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut bridge = bridge.spawn().unwrap();
+    if rejected {
+        assert!(!bridge.wait().unwrap().success());
+        // Simulate the pinned vendor returning 200 while its asynchronous
+        // bridge-exit shutdown has yet to finish.
+        state::atomic_create(&root.join(format!("bridge-refusal-{attempt}")), b"").unwrap();
+    } else {
+        let mut stdout = std::io::BufReader::new(bridge.stdout.take().unwrap());
+        let input = bridge.stdin.as_mut().unwrap();
+        let mut call = |value: serde_json::Value| {
+            writeln!(input, "{value}").unwrap();
+            input.flush().unwrap();
+            let mut line = String::new();
+            assert!(stdout.read_line(&mut line).unwrap() != 0);
+            serde_json::from_str::<serde_json::Value>(&line).unwrap()
+        };
+        let reply = call(
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize", "params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"fixture","version":"1"}}}),
+        );
+        assert!(reply["result"].is_object() && reply["id"] == 1);
+        writeln!(
+            input,
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}}"
+        )
+        .unwrap();
+        let mut line = String::new();
+        writeln!(
+            input,
+            "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}}"
+        )
+        .unwrap();
+        input.flush().unwrap();
+        assert!(stdout.read_line(&mut line).unwrap() != 0);
+        let reply: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert!(
+            reply["id"] == 2
+                && reply["result"]["tools"]
+                    .as_array()
+                    .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "fixture"))
+        );
+        // Leave stdout connected so the production bridge can forward.
+        bridge.stdout = Some(stdout.into_inner());
+        state::atomic_create(&root.join(format!("bridge-rpc-{attempt}")), b"").unwrap();
+    }
+    (bridge, candidate, rejected)
 }
 
 pub(in crate::cli::tunnel::runtime) async fn before_settling_readiness(
@@ -320,6 +414,7 @@ async fn daemon_reply(
         .unwrap())
 }
 
+#[track_caller]
 fn wait_until(mut done: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(40);
     while !done() {
@@ -331,14 +426,48 @@ fn wait_until(mut done: impl FnMut() -> bool) {
     }
 }
 
-fn install_candidate(root: &Path, source: &Path, sequence: u32) -> refresh::Image {
+fn production_executable() -> Option<PathBuf> {
+    let expected = std::env::var_os("GITHUB_ACTIONS").is_some()
+        || std::env::var_os("W62_REQUIRE_PRODUCTION_BRIDGE").is_some();
+    let executable = std::env::current_exe().unwrap();
+    let binary = executable
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join(if cfg!(windows) {
+            "pseudolife-stdio.exe"
+        } else {
+            "pseudolife-stdio"
+        });
+    if !binary.is_file() {
+        assert!(
+            !expected,
+            "the production bridge test needs the built CLI binary beside the unit test artifacts"
+        );
+        eprintln!("production bridge fixture needs a built pseudolife-stdio binary");
+        return None;
+    }
+    if fixture_key_bytes(b"fixture-runtime-key").is_none() {
+        assert!(
+            std::env::var_os("GITHUB_ACTIONS").is_none(),
+            "hosted Windows must run the production bridge with a sealed key"
+        );
+        return None;
+    }
+    Some(binary)
+}
+
+fn install_candidate(root: &Path, source: Option<&Path>, sequence: u32) -> refresh::Image {
     let layout = root.join("runtimes");
     let dir = layout.join(format!("{sequence:06}"));
     state::private_dir(&layout).unwrap();
     state::private_dir(&dir).unwrap();
     let path = dir.join(crate::runtime::BINARY);
     let mut output = state::create(&path).unwrap().file;
-    std::io::copy(&mut File::open(source).unwrap(), &mut output).unwrap();
+    if let Some(source) = source {
+        std::io::copy(&mut File::open(source).unwrap(), &mut output).unwrap();
+    }
     output.write_all(&sequence.to_le_bytes()).unwrap();
     #[cfg(unix)]
     {
@@ -385,10 +514,18 @@ struct Scenario {
 
 impl Scenario {
     fn start() -> Self {
+        Self::start_with_bridge(None)
+    }
+
+    fn start_with_bridge(production: Option<&Path>) -> Self {
         let home = Home::new();
         let root = &home.0;
         let executable = std::env::current_exe().unwrap();
-        let candidate = install_candidate(root, &executable, 1);
+        let candidate = install_candidate(root, production, 1);
+        let mock_image = root.join("original-image");
+        if production.is_none() {
+            state::atomic_create(&mock_image, b"original image fixture").unwrap();
+        }
         let daemon = Daemon::start();
         let token = root.join("daemon-token");
         state::atomic_create(&token, b"fixture-daemon-token").unwrap();
@@ -411,7 +548,13 @@ impl Scenario {
         .unwrap();
         state::atomic_create(&root.join("fixture-poller.lock"), b"").unwrap();
         state::atomic_create(&root.join("scenario"), b"ready").unwrap();
-        let supervisor = Self::child(&executable, root, "supervisor")
+        let mode = if production.is_some() {
+            "production-supervisor"
+        } else {
+            "supervisor"
+        };
+        let supervisor = Self::child(&executable, root, mode)
+            .env(FIXTURE_IMAGE, production.unwrap_or(&mock_image))
             .spawn()
             .unwrap();
         let mut scenario = Self {
@@ -690,4 +833,62 @@ fn unsuccessful_rollback_leaves_durable_stopped_outcome_with_run_command() {
         "{detail}"
     );
     assert!(!scenario.root().join("overlap").exists());
+}
+
+#[test]
+fn production_bridge_serves_initialize_and_tools_list_after_refresh() {
+    let Some(binary) = production_executable() else {
+        return;
+    };
+    let scenario = Scenario::start_with_bridge(Some(&binary));
+    let old = scenario.record().bridge_attempt.unwrap();
+    assert!(
+        scenario
+            .root()
+            .join(format!("bridge-rpc-{}", old.id))
+            .is_file()
+    );
+    let ticket = scenario.submit(&scenario.candidate);
+    scenario.outcome(&ticket, refresh::Phase::Refreshed);
+    let record = scenario.record();
+    let new = record.bridge_attempt.unwrap();
+    let stage = stage_path(scenario.root(), launch_id(&record.native_launch).unwrap());
+    assert_ne!(old.id, new.id);
+    assert!(!old.held(&stage) && new.held(&stage));
+    assert!(
+        scenario
+            .root()
+            .join(format!("bridge-rpc-{}", new.id))
+            .is_file()
+    );
+}
+
+#[test]
+fn vendor_ready_without_production_bridge_ack_rolls_back() {
+    let Some(binary) = production_executable() else {
+        return;
+    };
+    let scenario = Scenario::start_with_bridge(Some(&binary));
+    let old = scenario.record();
+    scenario.mode("bridge-refused");
+    let ticket = scenario.submit(&scenario.candidate);
+    let result = scenario.outcome(&ticket, refresh::Phase::RolledBack);
+    assert_eq!(result.active_identity, old.launch_identity);
+    assert!(
+        fs::read_dir(scenario.root())
+            .unwrap()
+            .flatten()
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("bridge-refusal-"))
+    );
+    let rolled_back = scenario.record().bridge_attempt.unwrap();
+    assert_ne!(rolled_back.id, old.bridge_attempt.unwrap().id);
+    assert!(
+        scenario
+            .root()
+            .join(format!("bridge-rpc-{}", rolled_back.id))
+            .is_file()
+    );
 }
