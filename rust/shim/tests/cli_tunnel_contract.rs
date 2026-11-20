@@ -559,7 +559,7 @@ fn renewal_refuses_a_held_launch_lock_before_publishing() {
     let key = root.join("dot.key");
     let replacement = home.path("new-key-fixture");
     state(&key, b"opaque prior fixture").unwrap();
-    state(&replacement, b"replacement fixture").unwrap();
+    state(&replacement, b"fixture-replacement-key").unwrap();
     let lock = pseudolife_stdio::board::state::create(&root.join("dot.native-run.lock"))
         .unwrap()
         .file;
@@ -578,9 +578,13 @@ fn renewal_refuses_a_held_launch_lock_before_publishing() {
     assert_eq!(output.status.code(), Some(2));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
-        ![SETUP_BEARER, "replacement fixture", "opaque prior fixture"]
-            .iter()
-            .any(|sample| error.contains(sample))
+        ![
+            SETUP_BEARER,
+            "fixture-replacement-key",
+            "opaque prior fixture"
+        ]
+        .iter()
+        .any(|sample| error.contains(sample))
     );
     assert!(
         error.contains("launch ownership"),
