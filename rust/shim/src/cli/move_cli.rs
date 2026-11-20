@@ -64,10 +64,13 @@ const HELP: &str = concat!(
     "  pseudolife-mcp move --release-target MOVE-ID [--target-gone] [--yes] [--json]\n",
     "  To retry a move rolled back after its restore, rerun it with --resume.\n",
 );
-/// Why `--target-checkout` is refused, whatever its spelling or value: the
-/// transaction parser's refusal (`restore_cli/move_native/argv.rs`) and the
-/// usage path here print this one text.
-pub(super) const TARGET_CHECKOUT_REFUSAL: &str = "--target-checkout selects a checkout rebuild and stopped handover. Native move requires an installed release Docker deployment and the native client on the target. Retry against that deployment with --target-release and omit --target-checkout";
+/// Why `--target-checkout` is refused on the usage path, whatever its
+/// spelling or value: the same text as the transaction parser's refusal in
+/// `restore_cli/move_native/argv.rs`. It is a copy, not an import, because
+/// this leaf imports no other command module (`rust/ci/parity_scope.py`
+/// and the leaf scan in `tests/cli_move_contract.rs`); that contract test
+/// requires both paths to print the one text.
+const TARGET_CHECKOUT_REFUSAL: &str = "--target-checkout selects a checkout rebuild and stopped handover. Native move requires an installed release Docker deployment and the native client on the target. Retry against that deployment with --target-release and omit --target-checkout";
 const REQUIRED: &str = "pseudolife-mcp move: error: the following arguments are required: --to\n";
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 \

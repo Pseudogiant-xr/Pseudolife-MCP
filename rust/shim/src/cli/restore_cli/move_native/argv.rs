@@ -105,7 +105,8 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
         );
     }
     let text = if request.target_checkout.is_some() {
-        crate::cli::move_cli::TARGET_CHECKOUT_REFUSAL.to_owned()
+        "--target-checkout selects a checkout rebuild and stopped handover. Native move requires an installed release Docker deployment and the native client on the target. Retry against that deployment with --target-release and omit --target-checkout"
+            .to_owned()
     } else if request.no_keep_tokens && !request.target_files.is_empty() {
         "--target-env-file and --target-compose-file apply only when carrying bearer settings; drop the file flags to keep the target's existing settings".to_owned()
     } else if request
