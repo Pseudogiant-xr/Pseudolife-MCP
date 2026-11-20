@@ -300,7 +300,7 @@ mod tests {
         assert!(std::panic::catch_unwind(|| run(|_| panic!("interrupt before commit"))).is_err());
         assert_eq!(read_record(&stage.record).unwrap(), initial);
         let token = home.0.join("daemon-token");
-        state::atomic_write(&token, b"moved fixture credential", None).unwrap();
+        state::atomic_write(&token, b"moved-fixture-credential", None).unwrap();
         assert_eq!(
             run(|_| panic!("a different connection cannot refresh")),
             Err(CHANGED)
