@@ -1,0 +1,158 @@
+# First matching glob and kind wins. Globs match repo-relative paths with "/".
+# "*" also spans directories. Keep exceptions ahead of their enclosing area.
+
+[[rules]]
+globs = ["evals/results/*", "evals/subagent_tier_bench/results/*"]
+kinds = ["command", "documentation", "metadata", "path", "python-import"]
+class = "historical evidence"
+reason = "Recorded commands preserve the provenance of earlier runs."
+
+[[rules]]
+globs = ["evals/rust_port/*"]
+kinds = ["command", "documentation", "metadata", "path", "python-import"]
+class = "retained test tooling"
+reason = "The PR precheck and hosted parity tooling use this harness."
+
+[[rules]]
+globs = ["evals/prompts/*"]
+kinds = ["documentation"]
+class = "active dependency"
+reason = "The Rust daemon embeds these production prompt assets."
+
+[[rules]]
+globs = ["evals/*"]
+kinds = ["command", "documentation", "metadata", "path", "python-import"]
+class = "awaits the retained-evals decision"
+reason = "Eval drivers and their instructions depend on the maintainer's retention decision."
+
+[[rules]]
+globs = ["CHANGELOG.md", "changelog.d/*.md", "docs/specs/*.md", "docs/superpowers/*.md", "docs/runbooks/raglite-runs-*.md", "rust/PORT*.md", "rust/daemon/FORWARD-*.md", "rust/dossiers/*.md", "rust/parity/*.md"]
+kinds = ["documentation"]
+class = "historical evidence"
+reason = "Plans, audit reports, release notes and parity receipts preserve old commands."
+
+[[rules]]
+globs = ["rust/shim/src/cli/update/engine.rs", "rust/shim/src/cli/update/release.rs"]
+kinds = ["command"]
+class = "intentional legacy compatibility"
+reason = "The updater probes schema source inside a running legacy Python image."
+
+[[rules]]
+globs = ["rust/shim/src/runtime/registrations.rs"]
+kinds = ["path", "command"]
+class = "intentional legacy compatibility"
+reason = "Registration migration recognizes installed Python modules and launcher arguments."
+
+[[rules]]
+globs = ["rust/shim/src/cli/installer/codex_hooks/definitions.rs", "rust/shim/src/cli/update/clients/codex.rs"]
+kinds = ["command"]
+class = "active dependency"
+reason = "Approved launcher definitions still print the Python repair command."
+
+[[rules]]
+globs = ["rust/shim/src/cli/update/*.rs", "rust/shim/src/cli/installer/*.rs"]
+kinds = ["metadata"]
+class = "active dependency"
+reason = "Native install and update use Python release metadata, version or checkout markers."
+
+[[rules]]
+globs = ["rust/shim/src/cli/update/mod.rs", "rust/shim/src/cli/maintainer/setup/system.rs", "rust/shim/src/cli/connect/discover.rs", "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/pg/resolution.rs", "rust/shim/src/setup/codex.rs", "rust/shim/src/lifecycle.rs", "rust/daemon/src/service.rs", "rust/daemon/src/storage/schema.rs"]
+kinds = ["command"]
+class = "active dependency"
+reason = "Native paths can launch the Python CLI or still direct operators to Python helpers."
+
+[[rules]]
+globs = ["rust/shim/src/*_tests.rs", "rust/shim/src/*/tests.rs", "rust/shim/tests/*.rs", "rust/shim/tests/*.py", "rust/daemon/src/*_tests.rs", "rust/daemon/test_*.py", "rust/extractor_harness/test_*.py"]
+kinds = ["command", "metadata", "path", "python-import"]
+class = "retained test tooling"
+reason = "Native tests exercise old runtime shapes or pin artifacts against Python source and locks."
+
+[[rules]]
+globs = ["rust/daemon/src/native/pdfium_tests.rs"]
+kinds = ["rust-include"]
+class = "retained test tooling"
+reason = "The PDFium test embeds the Python requirements lock to check the pin."
+
+[[rules]]
+globs = ["rust/daemon/harness/*.py", "rust/cli_harness/*.py", "rust/harness_support/test_*.py"]
+kinds = ["command", "metadata", "path", "python-import"]
+class = "retained test tooling"
+reason = "Harnesses, recorders and fixtures still access Python source or exercise oracle paths."
+
+[[rules]]
+globs = ["tests/test_*.py", "tests/*fixtures.py", "tests/*helpers.py", "tests/pg_defaults.py", "tests/suite_*.py", "tests/conftest.py", "tests/fake_embedder.py", "tests/maintainer_authenticator.py", "tests/native_helper_standin.py"]
+kinds = ["command", "metadata", "path", "python-import"]
+class = "retained test tooling"
+reason = "The suite, including opt-in frozen tests, still imports or models Python components."
+
+[[rules]]
+globs = ["rust/ci/package_consumers.*"]
+kinds = ["metadata"]
+class = "retained test tooling"
+reason = "The inventory recognizes metadata filenames without reading those files as inputs."
+
+[[rules]]
+globs = ["rust/ci/test_*.py", "rust/test_*.py"]
+kinds = ["command", "metadata", "path", "python-import"]
+class = "retained test tooling"
+reason = "Guard tests use Python paths as inputs or validate contract generation against Python."
+
+[[rules]]
+globs = ["rust/ci/*oracle.py", "rust/ci/pr_precheck*.py", "rust/ci/release_assets.py", "rust/*_census.py", "rust/contract_inventory.py"]
+kinds = ["command", "metadata", "path", "python-import"]
+class = "active dependency"
+reason = "Prechecks, contract inventories and release tooling still reference package sources or metadata."
+
+[[rules]]
+globs = [".github/workflows/ci.yml", ".github/workflows/rust.yml", ".github/workflows/release.yml"]
+kinds = ["metadata", "workflow-install"]
+class = "active dependency"
+reason = "Hosted workflows install the checkout, build the wheel or depend on its metadata."
+
+[[rules]]
+globs = [".github/workflows/ci.yml"]
+kinds = ["python-import"]
+class = "active dependency"
+reason = "Hosted Windows tests start embedded PostgreSQL through a Python package import."
+
+[[rules]]
+globs = ["ops/Dockerfile.daemon", "ops/Dockerfile.daemon-*"]
+kinds = ["command", "docker-copy", "metadata", "path"]
+class = "active dependency"
+reason = "Image build and launch instructions still copy or run Python package inputs."
+
+[[rules]]
+globs = ["pyproject.toml", "setup.py", "server.json", ".github/dependabot.yml"]
+kinds = ["metadata"]
+class = "active dependency"
+reason = "Packaging configuration declares the local package, managed dependencies or published artifact."
+
+[[rules]]
+globs = ["ops/*.py", "ops/install*.sh", "ops/install*.ps1", "ops/*suite.sh", "ops/*suite.ps1", "ops/rust-harness-remote.ps1"]
+kinds = ["command", "metadata", "path", "python-import"]
+class = "active dependency"
+reason = "Installers, operator tools and test launchers still use Python entry points, source or metadata."
+
+[[rules]]
+globs = ["ops/selfhosted/setup-linux-runner.sh"]
+kinds = ["command"]
+class = "active dependency"
+reason = "Runner provisioning installs the published Python CLI used by lease checks."
+
+[[rules]]
+globs = [".claude/launch.json", "examples/.mcp.json", ".github/ISSUE_TEMPLATE/*.yml"]
+kinds = ["command", "metadata"]
+class = "active dependency"
+reason = "Example and contributor configuration still names the Python package or entry point."
+
+[[rules]]
+globs = [".claude/skills/*.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md", "docs/dev/*.md", "docs/guide/*.md", "docs/i18n/*.md", "frontend/README.md", "llms*.txt", "plugin/README.md", "rust/DEV.md", "rust/daemon/README.md", "rust/cli_harness/*.md", "rust/extractor_harness/README.md", "rust/producer-census.md"]
+kinds = ["documentation"]
+class = "active dependency"
+reason = "Contributor and operator instructions still show package-backed commands or install steps."
+
+[[rules]]
+globs = ["*"]
+kinds = ["documentation"]
+class = "active dependency"
+reason = "Documented commands remain visible for retirement even when docs-only changes skip the guard."
