@@ -8,18 +8,18 @@
     "docs/README.md": "344f55f1081ec2899af8136ae9428c6e53ea6b9dd9e3ba43e263ab636b705807",
     "docs/atlas/README.md": "77897a89250cf80f9f3fe707f8f681bc6d8e6233908270cfd1a107471cb82e88",
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
-    "docs/atlas/atlas.json": "58525c896dae613c9a9c4bfc98bc33c291b2ac8f0c87377877f4803340fbf19e",
+    "docs/atlas/atlas.json": "31481a70346a7f8f33b63624ca309c6c43849b5f67237948b16afa6a46d0f1f7",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
     "docs/dev/dev-machines.md": "0083269f909fda4a7fad6e4663d84129e228788d8d28233cbbf4cfd52a321754",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
-    "docs/dev/merge-batches.md": "37440c179e852fd5d25fa0929b90ab5be3b965322c1cc56e20875a9f2f4c32cc",
+    "docs/dev/merge-batches.md": "d6c724dfc6059596b60778a80ce5e6e4244d8780d9600948cd93890b9bc3ddd2",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "02104e3aaac74c9b578e007f6b37b16e59a163d4ff9adafd920844e805bec3f7",
-    "docs/dev/python-retirement.md": "d1b3c0841aca57f1c780f263005a98429969e55696cbbc039f966d06af0d7bb9",
-    "docs/dev/release-assets.md": "9ab29f58686b66058d42e3e6ddb2fb3290564112c3790916fbf5edcea4f7d767",
-    "docs/dev/run-rust-beside-python.md": "12d52aa9774f05ae699cd67277173b04ff1b837b1772c2c96700b2fb0b110b15",
+    "docs/dev/python-retirement.md": "753402145461ce9a45cefefe225c150b2a3f41e8372a2df14d70ddef877603d3",
+    "docs/dev/release-assets.md": "dca16d906c41015e08b4863b0aedfd9e31c2f37e854b6fa2ac1a5c73be15e767",
+    "docs/dev/run-rust-beside-python.md": "d469218a5dde03c87c769867bfcdb198193f3e1a27761c9ae1cc200491d8739e",
     "docs/dev/worktree-retention.md": "21ba0e48574bb6be98d456c9725a6d3746a99891d667cef8d8ed76c984819f8e",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "e8509e0c6567426a88fad7c301b0f06ac8d69d19f9724ffe9a4643ece7f7d6e4",
@@ -271,7 +271,7 @@
     "ops/install.sh": "b0b5bd48a03c71719aebf0fb729759d9fc06f6a8b540c23e031e9b797d7672e1",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "5945cfb31ea25e7bf9764af80b80d78d797150bffcc6d294f81b71ac676b00ca",
+    "ops/integrate.py": "19715309f5eb8b8c3f4f65ceab12713cd1c034168a152f2c907349058bded616",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -11123,7 +11123,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/release-assets.md:195",
+          "location": "docs/dev/release-assets.md:206",
           "shape": {
             "argv_source": "update --engine rust",
             "channel": "argv",
@@ -11140,27 +11140,6 @@
           "evidence": "documented",
           "location": "docs/dev/run-rust-beside-python.md:101",
           "shape": {
-            "argv_source": "update --engine rust --shadow --checkout .",
-            "channel": "argv",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "--checkout": {
-                "expression": "."
-              },
-              "--engine": {
-                "expression": "rust"
-              },
-              "--shadow": {
-                "expression": "value not established"
-              }
-            }
-          }
-        },
-        {
-          "evidence": "documented",
-          "location": "docs/dev/run-rust-beside-python.md:177",
-          "shape": {
             "argv_source": "update --engine python --shadow --checkout .",
             "channel": "argv",
             "complete": true,
@@ -11180,7 +11159,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/run-rust-beside-python.md:55",
+          "location": "docs/dev/run-rust-beside-python.md:103",
           "shape": {
             "argv_source": "update --engine rust --shadow --checkout .",
             "channel": "argv",
@@ -11201,7 +11180,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/run-rust-beside-python.md:99",
+          "location": "docs/dev/run-rust-beside-python.md:179",
           "shape": {
             "argv_source": "update --engine python --shadow --checkout .",
             "channel": "argv",
@@ -11213,6 +11192,27 @@
               },
               "--engine": {
                 "expression": "python"
+              },
+              "--shadow": {
+                "expression": "value not established"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/dev/run-rust-beside-python.md:57",
+          "shape": {
+            "argv_source": "update --engine rust --shadow --checkout .",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "--checkout": {
+                "expression": "."
+              },
+              "--engine": {
+                "expression": "rust"
               },
               "--shadow": {
                 "expression": "value not established"
@@ -47446,7 +47446,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/run-rust-beside-python.md:152",
+          "location": "docs/dev/run-rust-beside-python.md:154",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58977,7 +58977,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:662",
+          "location": "docs/dev/merge-batches.md:671",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59124,7 +59124,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:625",
+          "location": "docs/dev/merge-batches.md:634",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59139,7 +59139,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:634",
+          "location": "docs/dev/merge-batches.md:643",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59229,7 +59229,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:3634",
+          "location": "ops/integrate.py:3639",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59244,7 +59244,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:3655",
+          "location": "ops/integrate.py:3660",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59664,6 +59664,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "docs/atlas/atlas.json:1644",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/integrate.py:4503",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -62593,7 +62606,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/dev/run-rust-beside-python.md:147",
+          "location": "docs/dev/run-rust-beside-python.md:149",
           "method": null,
           "shape": {
             "channel": "body",
@@ -78473,7 +78486,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:638",
+      "location": "docs/dev/merge-batches.md:647",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY",
       "shape": {
         "channel": "environment",
@@ -78487,7 +78500,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:654",
+      "location": "docs/dev/merge-batches.md:663",
       "name": "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
       "shape": {
         "channel": "environment",
@@ -78693,7 +78706,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/run-rust-beside-python.md:47",
+      "location": "docs/dev/run-rust-beside-python.md:49",
       "name": "PSEUDOLIFE_SHADOW_PORT",
       "shape": {
         "channel": "environment",
@@ -83916,7 +83929,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:176",
+      "location": "ops/integrate.py:178",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -87497,7 +87510,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/dev/run-rust-beside-python.md:178",
+      "location": "docs/dev/run-rust-beside-python.md:180",
       "method": null,
       "name": "/health",
       "shape": {
@@ -87525,7 +87538,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/dev/run-rust-beside-python.md:56",
+      "location": "docs/dev/run-rust-beside-python.md:58",
       "method": null,
       "name": "/health",
       "shape": {
@@ -87539,7 +87552,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/dev/run-rust-beside-python.md:57",
+      "location": "docs/dev/run-rust-beside-python.md:59",
       "method": null,
       "name": "/health",
       "shape": {
@@ -93083,7 +93096,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:547",
+      "location": "docs/dev/merge-batches.md:556",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -93099,7 +93112,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:549",
+      "location": "docs/dev/merge-batches.md:558",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -93115,7 +93128,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:639",
+      "location": "docs/dev/merge-batches.md:648",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED",
       "shape": {
         "channel": "environment",
@@ -93131,7 +93144,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:644",
+      "location": "docs/dev/merge-batches.md:653",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -94107,7 +94120,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "ops/integrate.py:172",
+      "location": "ops/integrate.py:174",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -96210,7 +96223,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:3645",
+      "location": "ops/integrate.py:3650",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -96226,7 +96239,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:3656",
+      "location": "ops/integrate.py:3661",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -97830,45 +97843,45 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:101",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:104",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "docs/dev/merge-batches.md:15",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:638",
+      "location": "docs/dev/merge-batches.md:647",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_TEST_BINARY"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:654",
+      "location": "docs/dev/merge-batches.md:663",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_CARGO_TARGET_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:662",
+      "location": "docs/dev/merge-batches.md:671",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_SLOTS"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:88",
+      "location": "docs/dev/merge-batches.md:80",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:971",
+      "location": "docs/dev/merge-batches.md:93",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/merge-batches.md:96",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/merge-batches.md:980",
       "reason": "forwarded parameters"
     },
     {
@@ -98021,25 +98034,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:147",
+      "location": "docs/dev/run-rust-beside-python.md:149",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/facts"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:152",
+      "location": "docs/dev/run-rust-beside-python.md:154",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:178",
+      "location": "docs/dev/run-rust-beside-python.md:180",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:178",
+      "location": "docs/dev/run-rust-beside-python.md:180",
       "reason": "request target supplied dynamically or external"
     },
     {
@@ -98055,30 +98068,30 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:47",
+      "location": "docs/dev/run-rust-beside-python.md:49",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SHADOW_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:56",
+      "location": "docs/dev/run-rust-beside-python.md:58",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:56",
+      "location": "docs/dev/run-rust-beside-python.md:58",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:57",
+      "location": "docs/dev/run-rust-beside-python.md:59",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/run-rust-beside-python.md:57",
+      "location": "docs/dev/run-rust-beside-python.md:59",
       "reason": "request target supplied dynamically or external"
     },
     {
@@ -118739,9 +118752,15 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/integrate.py:176",
+      "location": "ops/integrate.py:178",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_RUST_CHECK_WHERE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/integrate.py:4503",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
