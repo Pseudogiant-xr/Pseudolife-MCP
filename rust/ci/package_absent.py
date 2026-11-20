@@ -96,7 +96,7 @@ def plan(checkout: Path) -> list[Probe]:
         Probe(ACTIVE, "script", "rust/ci/ci_budget.py", ("check",)),
         Probe(ACTIVE, "script", "rust/producer_census.py", ("--check",)),
         Probe(ACTIVE, "script", "rust/ci/pr_precheck_run.py", ("--help",)),
-        Probe(TESTING, "module", "rust.cli_harness", ("--help",)),
+        Probe(TESTING, "script", "rust/cli_harness/__main__.py", ("--help",)),
         Probe(TESTING, "script", "rust/daemon/harness/run.py", ("--help",)),
         Probe(EVALS, "module", "evals.rust_port.cli_dispatch", ("--help",)),
         *(Probe(TESTING, "import", f"tests/{filename}") for filename in fixtures),
@@ -151,12 +151,15 @@ def probe_env(directory: Path, git: str) -> dict[str, str]:
         "CUDA_VISIBLE_DEVICES": "-1",
         "HF_HUB_OFFLINE": "1",
         "BROWSER": str(bin_dir / "no-browser"),
+        "CLI_HARNESS_PYCACHE_PREFIX": str(home / "empty-pycache"),
     }
 
 
 def run_probe(probe: Probe, checkout: Path, env: dict[str, str], seconds: float) -> tuple[int, str]:
-    command = [sys.executable, "-I", "-B", "-c", BOOTSTRAP,
-               PACKAGE, probe.mode, probe.target, *probe.arguments]
+    command = [sys.executable, "-I", "-B"]
+    if probe.target == "rust/cli_harness/__main__.py":
+        command.extend(("-X", f"pycache_prefix={env['CLI_HARNESS_PYCACHE_PREFIX']}"))
+    command.extend(("-c", BOOTSTRAP, PACKAGE, probe.mode, probe.target, *probe.arguments))
     try:
         result = subprocess.run(command, cwd=checkout, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, errors="replace",

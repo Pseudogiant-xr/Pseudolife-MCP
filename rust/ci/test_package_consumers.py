@@ -80,6 +80,27 @@ def test_recipe_names_a_package_dependent_script():
     ]
 
 
+@pytest.mark.parametrize(("path", "source", "line"), [
+    (".github/workflows/new.yml",
+     "run: python -c \"from pseudolife_memory import cli\"", 1),
+    (".github/workflows/new.yml",
+     "run: |\n  python - <<'PY'\n  import pseudolife_memory\n  PY\n", 3),
+    (".github/workflows/new.yml",
+     "run: |\r\n  python - <<'PY'\r\n  import pseudolife_memory\r\n  PY\r\n", 3),
+    ("ops/unclassified.sh",
+     "\"$loopback_py\" -c 'import sys\nfrom pseudolife_memory import cli\n' \"$repo\"", 2),
+    ("ops/unclassified.ps1",
+     '& $python -c "import sys; from pseudolife_memory import cli" $repo', 1),
+])
+def test_embedded_python_is_an_unclassified_consumer(path, source, line):
+    hit = ledger.Consumer(path, line, "python-import")
+    assert ledger.classify(ledger.scan(path, source), []) == ([hit], [])
+
+
+def test_embedded_python_does_not_scan_shell_prose():
+    assert ledger.scan("tool.sh", "echo 'from pseudolife_memory import cli'\n") == []
+
+
 def test_probe_plan_uses_live_suite_manifest(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/suite_classes.txt").write_text(
@@ -89,3 +110,4 @@ def test_probe_plan_uses_live_suite_manifest(tmp_path):
     assert "import tests/test_old.py" not in labels
     assert "import tests/conftest.py" in labels
     assert "script rust/ci/ci_budget.py check" in labels
+    assert "script rust/cli_harness/__main__.py --help" in labels

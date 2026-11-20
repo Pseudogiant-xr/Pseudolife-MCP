@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shlex
 import subprocess
+from textwrap import dedent
 import tomllib
 
 
@@ -56,6 +57,12 @@ CONFIG_NAMES = {"server.json", "launch.json", ".mcp.json"}
 KINDS = {"command", "docker-copy", "documentation", "metadata", "path",
          "python-import", "rust-include", "workflow-install"}
 CATEGORIES = (ACTIVE, TESTING, LEGACY, HISTORY, EVALS)
+PYTHON_BIN = r"""(?<![\w.-])(?:python(?:[23](?:\.\d+)?)?(?:\.exe)?|\$\w*(?:python|_py)\w*)['"]?"""
+INLINE_PYTHON = re.compile(rf"""{PYTHON_BIN}[ \t]+-c[ \t]+(?P<quote>['"])
+    (?P<code>(?:\\.|(?!(?P=quote)).)*)(?P=quote)""", re.I | re.S | re.X)
+HEREDOC_PYTHON = re.compile(rf"""{PYTHON_BIN}[ \t]+(?:-[ \t]*)?<<-?[ \t]*['"]?
+    (?P<end>[a-z_]\w*)['"]?[^\n]*\n(?P<code>.*?)^[ \t]*(?P=end)[ \t]*$""",
+    re.I | re.M | re.S | re.X)
 
 
 @dataclass(frozen=True, order=True)
@@ -157,6 +164,25 @@ def docker_sources(arguments: str) -> list[str]:
     return shlex.split(arguments, comments=True)[:-1]
 
 
+def embedded_python_hits(source: str):
+    for pattern in (INLINE_PYTHON, HEREDOC_PYTHON):
+        for match in pattern.finditer(source):
+            line_start = source.rfind("\n", 0, match.start()) + 1
+            if source[line_start:match.start()].lstrip().startswith("#"):
+                continue
+            code = match["code"]
+            if PACKAGE not in code:
+                continue
+            start = source.count("\n", 0, match.start("code"))
+            try:
+                yield from ((start + line, kind) for line, kind in python_hits(dedent(code))
+                            if kind == "python-import")
+            except SyntaxError:
+                # Shell interpolation can leave the original text incomplete.
+                for statement in PYTHON_RECIPE.finditer(code):
+                    yield start + code.count("\n", 0, statement.start()) + 1, "python-import"
+
+
 def logical_lines(source: str, comment: str):
     """Join shell/Docker/PowerShell continuations and skip full-line comments."""
     pending = ""
@@ -209,6 +235,7 @@ def rust_hits(source: str, python_scripts: frozenset[str]):
 
 
 def scan(path: str, source: str, python_scripts: frozenset[str] = frozenset()) -> list[Consumer]:
+    source = source.replace("\r\n", "\n")
     parts = PurePosixPath(path)
     doc = parts.suffix in DOC_SUFFIXES or parts.name in DOC_NAMES
     workflow = path.startswith(".github/workflows/")
@@ -224,7 +251,7 @@ def scan(path: str, source: str, python_scripts: frozenset[str] = frozenset()) -
                 if PACKAGE_COMMAND.search(text) or INSTALL.search(text)
                 or any(match[1] in python_scripts for match in DOC_SCRIPT.finditer(text))]
     elif workflow or docker or parts.suffix in SOURCE_SUFFIXES or parts.name in CONFIG_NAMES:
-        hits = []
+        hits = list(embedded_python_hits(source))
         for line, text in logical_lines(source, "#"):
             copy = re.match(r"(?i)(?:COPY|ADD)\s+(.*)", text) if docker else None
             if copy:
