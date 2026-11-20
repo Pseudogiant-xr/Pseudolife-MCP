@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "scope",
+  "before": "58e9c623d9cdbae6",
+  "fingerprint": "f90255a5ebc73bc1",
+  "reason": "The same Ubuntu scope job shares the exact path and reader decision with CI. The push census report applies only after an affirmative docs decision; no checkout depth, dependency or runner is added."
+}

@@ -17,6 +17,7 @@ mod doctor_section;
 #[cfg(windows)]
 mod dpapi;
 mod record;
+mod runtime;
 mod setup;
 mod store;
 mod syntax;
@@ -60,6 +61,8 @@ enum Command {
     Update,
     Verify,
     Setup,
+    Run,
+    Stop,
 }
 
 #[derive(Default)]
@@ -125,6 +128,8 @@ fn parse(values: &[OsString]) -> Option<Options> {
         "update" => Command::Update,
         "verify" => Command::Verify,
         "setup" => Command::Setup,
+        "run" => Command::Run,
+        "stop" => Command::Stop,
         _ => return None,
     };
     let mut options = Options {
@@ -207,7 +212,12 @@ fn outcome(options: &Options) -> Option<Answer> {
     // `update` runs unattended inside `pseudolife-mcp update`, which shows
     // its refusal: a root it cannot open is named, never deferred.
     let root = match root {
-        Err(_) if options.command == Command::Update => {
+        Err(_)
+            if matches!(
+                options.command,
+                Command::Update | Command::Run | Command::Stop
+            ) =>
+        {
             return Some(Err(store::UNSAFE_ROOT.to_owned()));
         }
         root => root.ok()?,
@@ -220,6 +230,8 @@ fn outcome(options: &Options) -> Option<Answer> {
         Command::Update => return Some(update(&root)),
         Command::Verify => verify(options, &root),
         Command::Setup => setup(options, &root),
+        Command::Run => runtime::run(&root, &options.profile),
+        Command::Stop => runtime::stop(&root, &options.profile),
     })
 }
 
@@ -355,8 +367,20 @@ fn status(options: &Options, root: &Path) -> Output {
     // verification_status is constant: nothing verified, no current challenge.
     shallow_challenge(root, &profile.name)?;
     let refresh = refresh_status(root, &profile.name)?;
+    let cloud = match &record {
+        Some(record) if record.native => Some(bridge::cloud_status(root, &profile.name)),
+        Some(record) if record.liveness != Liveness::Gone => None,
+        _ => Some(bridge::Cloud::default()),
+    };
     Ok((
-        report(&profile, key, record.as_ref(), &refresh, options.json),
+        report(
+            &profile,
+            key,
+            record.as_ref(),
+            &refresh,
+            cloud,
+            options.json,
+        ),
         0,
     ))
 }
@@ -371,8 +395,14 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
         ""
     };
     match record.liveness {
+        Liveness::Running if record.native && updating => format!(
+            "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh it yet"
+        ),
         Liveness::Running if updating => format!(
             "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh or stop it yet, so it was left as it is"
+        ),
+        Liveness::Running if record.native => format!(
+            "tunnel {name} is running (process record {file}); use tunnel stop to stop its native supervisor"
         ),
         Liveness::Running => format!(
             "tunnel {name} is running (process record {file}); this client cannot refresh or stop it yet"
@@ -414,6 +444,7 @@ fn report(
     key: Option<bool>,
     record: Option<&record::Record>,
     refresh: &Refresh,
+    cloud: Option<bridge::Cloud>,
     as_json: bool,
 ) -> String {
     let running = record.map(|record| record.liveness);
@@ -456,9 +487,6 @@ fn report(
         }
     };
     let name = &profile.name;
-    // A running tunnel's cloud verification is bound to its launch, which
-    // this client does not read: not checked, rather than "not verified".
-    let cloud_checked = matches!(running, None | Some(Liveness::Gone));
     if as_json {
         let record_json = record.map_or(String::new(), |record| {
             format!(
@@ -467,11 +495,17 @@ fn report(
                 quoted(&record_sentence(name, record, false)),
             )
         });
-        let cloud = if cloud_checked {
-            "{\"verified\": false, \"successful_calls\": 0, \"challenge_current\": false}"
-        } else {
-            "\"not_checked\""
-        };
+        let cloud = cloud.as_ref().map_or_else(
+            || "\"not_checked\"".into(),
+            |cloud| {
+                format!(
+                    "{{\"verified\": {}, \"successful_calls\": {}, \"challenge_current\": {}}}",
+                    cloud.successful == 2,
+                    cloud.successful,
+                    cloud.current
+                )
+            },
+        );
         return format!(
             "{{\"profile\": {name_q}, \"state\": {}, \"catalog\": {}, \"private_key_present\": {key_json}, \"key_expiry\": {expiry}, \"runtime\": {{\"running\": {running_json}, \"profile\": {name_q}, \"ready\": {}, \"key_expiry\": {}{record_json}}}, \"cloud\": {cloud}, \"update\": {}}}\n",
             quoted(&profile.state),
@@ -488,11 +522,20 @@ fn report(
         Some(Liveness::Gone) | None => "False",
     };
     let shown_ready = if ready { "True" } else { "False" };
-    let cloud = if cloud_checked {
-        "cloud verified=False (0/2 calls)"
-    } else {
-        "cloud verification not checked by this client"
-    };
+    let cloud = cloud.as_ref().map_or_else(
+        || "cloud verification not checked by this client".into(),
+        |cloud| {
+            format!(
+                "cloud verified={} ({}/2 calls)",
+                if cloud.successful == 2 {
+                    "True"
+                } else {
+                    "False"
+                },
+                cloud.successful
+            )
+        },
+    );
     let mut text = format!(
         "Profile {name}: {}; runtime running={shown_running}, ready={shown_ready}; {cloud}.\n",
         profile.state
@@ -710,10 +753,13 @@ fn verify(options: &Options, root: &Path) -> Output {
     if profile.state != "ready" || !store::key_present(root, &profile.name)? {
         return Err(Fail::Tunnel(UNFINISHED));
     }
-    // begin_challenge computes the launch identity before writing anything;
-    // without a process record its private read fails first. With a record
-    // the challenge would be written: deferred.
+    // A native challenge needs an active native record. Legacy launch
+    // identities are outside this path.
     if occupied(&root.join(format!("{}.process.json", profile.name)))? {
+        if record::read(record::path(root, &profile.name), None).is_some_and(|record| record.native)
+        {
+            return bridge::begin(root, &profile.name);
+        }
         return Err(Fail::Defer);
     }
     Err(Fail::Tunnel(store::UNAVAILABLE))
@@ -811,7 +857,13 @@ fn setup(options: &Options, root: &Path) -> Output {
     }
     let saved = occupied(&path)?;
     if saved && settings.has_key_input() && settings.key_expires_at.is_some() {
-        return Err(Fail::Tunnel(KEY_RENEWAL));
+        return Err(Fail::Tunnel(
+            if occupied(&store::key_path(root, &options.profile))? {
+                KEY_RENEWAL
+            } else {
+                "save the expiry with tunnel setup --key-expires-at first, then import the private key with --read-key or --key-file in a separate invocation"
+            },
+        ));
     }
     if settings.has_key_input() && (settings.has_profile_settings() || settings.accept_access) {
         return Err(if saved {

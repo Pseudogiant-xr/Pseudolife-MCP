@@ -346,8 +346,10 @@ def test_the_fast_lanes_skip_every_suite_lane_and_keep_guards():
         assert jobs[name]["if"] == ("${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' "
                                     f"&& !contains({BATCH_PASSED}, '{name}') }}}}"), name
     assert jobs["guards"]["if"] == "needs.scope.outputs.python == 'false'"
-    # Cheap lanes are never scoped by the diff: reuse a same-tree batch on
-    # push or an exact successful push on schedule; failed scope still runs.
+    # Docs skip these jobs. Other changes retain the same-tree batch reuse
+    # on push and the exact successful-push reuse on schedule.
     for name in ("lock-resolve", "frontend"):
         assert jobs[name]["needs"] == "scope", name
-        assert jobs[name]["if"] == f"${{{{ !cancelled() && needs.scope.outputs.push_passed != 'true' && !contains({BATCH_PASSED}, '{name}') }}}}", name
+        assert jobs[name]["if"] == (
+            f"${{{{ !cancelled() && needs.scope.outputs.docs != 'docs' && needs.scope.outputs.push_passed != 'true' "
+            f"&& !contains({BATCH_PASSED}, '{name}') }}}}"), name

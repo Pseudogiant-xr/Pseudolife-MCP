@@ -84,27 +84,20 @@ env:
 jobs:
   scope:
     # Decides whether this run needs the Rust, candidate, parity and image
-    # jobs. Only a pull request or merge group whose every changed file is
-    # documentation skips them (a pull request's merge commit vs its base
-    # parent; a merge group's master tip, fetched here, to its head): Markdown, llms.txt /
-    # llms-full.txt, and non-script files under docs/ (CLAUDE.md "Docs-only
-    # changes"), none of them under rust/, evals/, pseudolife_memory/,
-    # plugin/, ops/, tests/ or .github/, except the port's plan pages that no
-    # job reads or evidence file hashes (rust/CUTOVER.md, rust/DEV.md, rust/SEMANTICS-CHECKLIST.md;
-    # parity_scope.RUST_PLAN_DOCS, whose test fails once code reads one). A
-    # recount in CUTOVER.md on 2026-11-02 (#1108) otherwise ran the whole
-    # Rust and parity matrix. An empty or unreadable diff runs
-    # everything. A failed scope job runs the Rust and candidate jobs, but
-    # the parity matrix comes from scope's parity output, so parity-checks
-    # and the Parity gate then fail (closed) and the run needs a rerun. On
+    # jobs. A documentation-only pull request, merge group or direct
+    # master push skips them (CLAUDE.md "Docs-only changes", rust/ci/docs_scope.py).
+    # An empty or unreadable diff runs everything. On a push a classifier
+    # crash leaves empty scope outputs and the other scope steps still run,
+    # so the docs shortcut stays off. A failure of the scope job itself
+    # can still leave the parity matrix unavailable. On
     # 2026-10-16 a CLAUDE.md-only PR
     # (#782) queued the whole ~33-job matrix behind the account's 20-job cap.
     # No hosted step here reads docs outside rust/, and the W2-D docs seed
     # runs locally, not in CI. The producer census does scan docs, so
     # ops/integrate.py build commits a regenerated rust/producer-census.json
-    # to a batch that changes them; beside docs that file still counts as
-    # docs-only, and the master push that merges the batch (which runs the
-    # Rust job) checks its currency.
+    # to a batch that changes them. The regenerated census beside docs
+    # counts as docs-only on a pull request or merge group. A direct
+    # docs-only push reports currency in the Scope job summary.
     #
     # Master pushes (2026-10-24): a batch merges with a merge commit whose
     # tree is its head's (ops/integrate.py merge refuses otherwise), so
@@ -127,6 +120,7 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
+      docs: ${{ steps.scope.outputs.docs }}
       full: ${{ steps.scope.outputs.full }}
       parity: ${{ steps.parity.outputs.parity }}
       parity_selfhosted: ${{ steps.parity.outputs.selfhosted }}
@@ -163,46 +157,21 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 -m ops.ci_push_passed --workflow .github/workflows/rust.yml --github-output "$GITHUB_OUTPUT"
+        # A docs-only push succeeds without Rust coverage. In that case
+        # the nightly runs everything on master's tip.
+        run: >-
+          python3 -m ops.ci_push_passed --workflow .github/workflows/rust.yml --github-output "$GITHUB_OUTPUT"
+          --require-job-passed 'Rust / ubuntu-latest' --require-job-passed 'Rust / windows-latest'
 
       - name: Classify the change
         id: scope
-        shell: pwsh
+        continue-on-error: ${{ github.event_name == 'push' }}
         env:
           EVENT_NAME: ${{ github.event_name }}
           MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
-        run: |
-          $ordinary = $env:EVENT_NAME -ceq 'pull_request' -and $env:HEAD_REF -and -not $env:HEAD_REF.StartsWith('integrate/', [System.StringComparison]::Ordinal)
-          $full = 'true'
-          $docs = '^(rust/(CUTOVER|DEV|SEMANTICS-CHECKLIST)\.md|(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml))))$'
-          $rust = 'true'
-          $base = $null
-          if ($env:EVENT_NAME -ceq 'pull_request') {
-            $base = 'HEAD^1'
-          } elseif ($env:EVENT_NAME -ceq 'merge_group' -and $env:MERGE_GROUP_BASE_REF -ceq 'refs/heads/master') {
-            # Master's current tip, not merge_group.base_sha: that may be the
-            # queue entry ahead, which need not pass on its own, so every
-            # unmerged entry must count. Anything else runs everything.
-            git fetch --no-tags --depth=1 origin refs/heads/master
-            if ($LASTEXITCODE -eq 0) { $base = 'FETCH_HEAD' }
-          }
-          if ($base) {
-            $files = @(git diff --no-renames --name-only $base HEAD)
-            if ($LASTEXITCODE -eq 0 -and $files.Count -gt 0) {
-              $files | Write-Output
-              # The producer census ops/integrate.py build regenerates for
-              # changed docs keeps a docs-only diff docs-only; alone, it runs.
-              $code = @($files | Where-Object { $_ -cnotmatch $docs -and $_ -cne 'rust/producer-census.json' })
-              if ($code.Count -eq 0 -and @($files | Where-Object { $_ -cmatch $docs }).Count -gt 0) { $rust = 'false' }
-              if ($ordinary) { $full = 'false' }
-            }
-          }
-          Write-Output "full=$full"
-          "full=$full" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Output "rust=$rust"
-          "rust=$rust" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          exit 0
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -m rust.ci.docs_scope rust
       # The parity matrix (rust/ci/parity_scope.py). The nightly, manual CI
       # and merge groups run every suite; a master push runs every suite less
       # the pairs its merged batch passed (see below). A pull request
@@ -1611,24 +1580,22 @@ jobs:
           retention-days: 30
   parity:
     # Only a PR, a merge group, a master push or a weekday nightly may skip
-    # the CLI source matrix; the Sunday weekly run and manual CI require it to
-    # pass, never a skip or failure. A nightly reusing a successful push on
+    # parity checks; manual CI requires them to pass. A nightly reusing a successful push on
     # the exact SHA skips the Rust and parity jobs. A PR or merge group that
-    # scope classified as documentation-only skips the Rust, candidate and
+    # scope classified as documentation-only, or a direct docs-only master
+    # push, skips the Rust, candidate and
     # parity jobs, a PR scope marked not full (any branch but integrate/*)
     # skips the candidate and parity jobs, and a master push whose merged
     # batch passed every parity pair (parity_any false) skips parity-checks;
     # any other skip still fails.
-    if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')
-    name: Parity / ${{ matrix.os }}
-    needs: [scope, rust, candidate, parity-checks]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
-    steps:
+    # Static job names let GitHub report both required contexts even when
+    # the docs decision skips these jobs before runner allocation.
+    if: &parity_condition always() && (needs.scope.result != 'success' || needs.scope.outputs.docs != 'true') && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')
+    name: Parity / ubuntu-latest
+    needs: &parity_needs [scope, rust, candidate, parity-checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: &parity_timeout 5
+    steps: &parity_verdict_steps
       # A cancelled needed job fails this step and skips the verdict, the
       # same result the verdict gives it, so the failed step names the cause:
       # ops/integrate.py admits such a head as cancelled, not failing.
@@ -1643,7 +1610,7 @@ jobs:
           GATE_EVENT: ${{ github.event_name }}
         run: |
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
-          $docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
+          $docsOnly = $env:GATE_EVENT -cin @('pull_request', 'merge_group', 'push') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
           $fastPr = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.full -ceq 'false'
           $pushPassed = $env:GATE_EVENT -ceq 'schedule' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.push_passed -ceq 'true'
           $noPairs = $env:GATE_EVENT -ceq 'push' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.parity_any -ceq 'false'
@@ -1654,6 +1621,14 @@ jobs:
               exit 1
             }
           }
+
+  parity-windows:
+    if: *parity_condition
+    name: Parity / windows-latest
+    needs: *parity_needs
+    runs-on: windows-latest
+    timeout-minutes: *parity_timeout
+    steps: *parity_verdict_steps
 
   # A stress loop (mode=stress): run one selection on N fresh hosted runners
   # and report every iteration (rust/ci/stress.py). It compares against this

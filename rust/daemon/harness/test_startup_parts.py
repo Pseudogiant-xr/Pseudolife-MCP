@@ -545,9 +545,9 @@ class CandidateRecording(unittest.TestCase):
 
     def test_schema_ci_records_the_schema_golden_from_the_candidate(self):
         code, commands = self.drive(schema_ci, "--record-candidate", "--write")
-        schema = [c for c in commands if script(c) == "run.py"]
+        schema = [c for c in commands if script(c) == "schema_cases.py"]
         self.assertEqual(len(schema), 1)
-        self.assertTrue({"schema", "--all-versions", "--record-candidate", "--write"} <= set(schema[0]))
+        self.assertTrue({"--all-versions", "--record-candidate", "--write"} <= set(schema[0]))
         self.assertFalse({"--refusals", "--mutants", "--check-goldens", "--record-goldens"} & set(schema[0]))
         self.assertEqual(code, 1)
 

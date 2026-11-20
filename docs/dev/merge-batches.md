@@ -12,8 +12,9 @@ the procedure behind it.
 
 Each change waits for hosted CI once, on its batch:
 
-- **An ordinary pull request** (any head branch but `integrate/*`) runs the
-  fast lanes only. In `ci.yml`: `scope`, `guards`, `lock-resolve` and
+- **An ordinary pull request** (any head branch but `integrate/*`) without a
+  docs-only scope decision runs the fast lanes only. In `ci.yml`: `scope`,
+  `guards`, `lock-resolve` and
   `frontend`; the `test` job and the lite OS lanes are skipped. In
   `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest and
   the selected early parity replay described below),
@@ -100,7 +101,8 @@ Each change waits for hosted CI once, on its batch:
 - **A batch pull request** (from `integrate/*`) runs everything its diff
   needs, exactly as every pull request did before 2026-10-21 (the
   Rust-only and documentation-only scope skips still apply).
-- **A master push** skips what its batch already passed on the same code.
+- **A docs-only change runs only the documentation checks in CI and Rust shim**, as a pull request and as a push to master: the `scope` decision, the doc guards, and the tests selected for the touched paths (tests under `tests/` whose code mentions a touched file's name, and the readers listed for its file or directory). No suite, lite lane, Rust job, lock-resolve or frontend job runs, and the required checks report as skipped. Both workflows decide with the Rust documentation predicate; when they cannot prove a change is docs-only (a missing, empty or unreadable range, a force push, an ambiguous API result) it runs the lanes it had before this shortcut. The generated producer census is eligible alongside docs on pull requests and merge groups only; documentation can stale it until the next batch regenerates it, and Rust shim reports that drift in the push's Scope job summary. The nightly still runs the lanes a docs push skipped.
+- **A master push from an integration batch** skips what that batch already passed on the same code.
   `ops/integrate.py merge` merges a batch with a merge commit only while
   master is its base or an ancestor of its head, so the commit pushed to
   master has the batch head's tree. Each scope job runs
@@ -180,11 +182,10 @@ under `docs/`. All of these hold first:
 - It is merged with a merge commit (`gh pr merge <n> --merge`), never
   squash.
 
-What it costs: the push to master runs the whole push matrix, because the
-push workflows do not skip a docs-only diff. Measured on 18 November 2026 on
-the first such merge (#1741): `test`, both lite lanes and the Rust jobs all
-started. Until they skip it, each direct merge spends about one hosted run
-on the account's 20 slots, so do not merge one shortly before a batch opens.
+What it costs: a few hosted minutes for the doc guards. A push the workflows
+cannot classify as docs-only keeps the lanes it had before this shortcut,
+which can be the whole push matrix and about one hosted run on the account's
+20 slots, so do not merge one of those shortly before a batch opens.
 
 Who merges: the maintainer, or a session the maintainer delegated merges to
 in their own words. A change to `CLAUDE.md` or another policy page is

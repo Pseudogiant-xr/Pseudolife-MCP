@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+import golden_values
 import run
 
 
@@ -30,7 +31,7 @@ def test_golden_float_token_mutant(tmp_path, monkeypatch, expected, mutant):
 
 
 def test_recording_is_portable_idempotent_and_keeps_only_exact_tokens(monkeypatch):
-    monkeypatch.setattr(run, "_machine_paths", lambda: ["/private/home"])
+    monkeypatch.setattr(golden_values, "_machine_paths", lambda: ["/private/home"])
     raw = '{"path": "/private/home/data", "free": "<free text>", "a.b": [1.00, 9007199254740993]}'
     oracle = {"status": 200, "headers": {}, "json": json.loads(raw), "raw": raw}
     recorded = run.golden_scrub(oracle)

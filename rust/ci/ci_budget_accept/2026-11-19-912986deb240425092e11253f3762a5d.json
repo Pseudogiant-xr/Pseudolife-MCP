@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "frontend",
+  "before": "1917ccf176734abe",
+  "fingerprint": "317b3fc6be7f40dc",
+  "reason": "Docs-only scope skips this existing job. Inputs, steps, setup and runner remain the same when the job runs."
+}
