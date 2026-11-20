@@ -17,6 +17,11 @@ use crate::cli::update::seams;
 mod runtime;
 pub(super) use runtime::{apply, loopback, recorded_pins, recovery_commands, undo, verify};
 
+pub(super) fn recovery_command(journal: &str) -> String {
+    let journal = super::super::bank::sh_quote(journal);
+    format!("pseudolife-mcp move-target recovery-commands {journal}")
+}
+
 const KEYS: [&str; 4] = [
     "PSEUDOLIFE_MCP_TOKEN",
     "PSEUDOLIFE_MCP_TOKENS",
