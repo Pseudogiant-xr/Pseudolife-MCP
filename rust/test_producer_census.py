@@ -32,7 +32,7 @@ def test_balanced_objects_keep_nested_values_and_quoted_commas():
 
 def test_console_helpers_methods_and_bodies_are_not_route_mentions():
     text = 'function X(e,t){return R(`GET`,e,{params:t})} function Y(e,t={}){return R(`POST`,e,{body:t})} X(`/api/facts`,{limit:1000}); Y(`/api/facts/set`,{entity:e, value:null}); // /api/search'
-    calls = census.console_calls(text, "pseudolife_memory/web/static/assets/demo.js")
+    calls = census.console_calls(text, "frontend/dist/assets/demo.js")
     assert [(c["name"], c["method"]) for c in calls] == [("/api/facts", "GET"), ("/api/facts/set", "POST")]
     assert calls[1]["shape"]["parameters"]["value"] == {"literal": None}
 
@@ -377,7 +377,7 @@ def test_current_tree_census_has_real_producer_floors():
     result = census.snapshot()
     surface = {item["id"]: item for item in result["surface"]}
     console = [producer for item in result["surface"] if item["kind"] == "route" for producer in item["producers"]
-               if producer["location"].startswith("pseudolife_memory/web/static/")]
+               if producer["location"].startswith("frontend/dist/")]
     # The 2026-10-10 shipped index-DNrrQi0Q.js has 51 call/plan records;
     # a floor of 40 catches substantial loss while allowing normal bundle changes.
     assert len(console) >= 40

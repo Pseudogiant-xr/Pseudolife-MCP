@@ -20,7 +20,7 @@ gate below.
 | Date | Decision (maintainer) | Effect |
 |---|---|---|
 | 2026-11-14 | The bar is that the Rust system works and does what its users need. Matching Python exactly is no longer required. | New Rust work carries its own Rust tests. No new differential rows, source mutants or two-OS recordings against Python. The committed goldens stay as regression snapshots of the Rust behaviour and are re-recorded from Rust when behaviour changes on purpose. |
-| 2026-11-14 | Python is hard-frozen. | Nothing under `pseudolife_memory/` changes again, except the Console build output in `pseudolife_memory/web/static/` until it moves. A defect is fixed in Rust only. The one exception is the already finished program-lookup security fix, which lands as the last Python change. This replaces the soft freeze of 2026-10-23 (D10). |
+| 2026-11-14 | Python is hard-frozen. | Nothing under `pseudolife_memory/` changes again, except the Console build output in `pseudolife_memory/web/static/` until it moves (it has moved to `frontend/dist/`, which ended that exemption). A defect is fixed in Rust only. The one exception is the already finished program-lookup security fix, which lands as the last Python change. This replaces the soft freeze of 2026-10-23 (D10). |
 | 2026-11-14 | The lite tier is dropped. | The embedded PostgreSQL port is not finished and file mode is not ported. A lite bank gets a refusal that names the Docker install, and the partial lite code (`rust/shared/embedded_pg.rs`, `pg_runtime.rs`, `native_provision.rs`) goes with Python. This reverses the lite half of D1. |
 | 2026-11-14 | Banks older than the Rust daemon can open step through 0.23.1. | Release-mode `update` detects a bank below schema 57, counters still awaiting import from `weights.pt`, or a Chroma store without a completed import. It backs up the bank and state, starts the digest-pinned Python 0.23.1 daemon, verifies the import, then installs the selected Rust release. |
 | 2026-11-14 | `move` and `tunnel` are rebuilt in Rust as features, after the native client ships. | See their native subsets and remaining deferrals below. |
@@ -79,7 +79,7 @@ The command exits at that point without starting the Python client.
 | `test-login` | Help, argument checks, admin-URL and container setup, and private credential staging run natively. Preflight refusals name the failed condition. (#1727) | — |
 | `maintainer` | Guided setup and administration (`enrol-code`, `confirm`, `revoke`, `reset`, `list`) run natively. Invalid arguments and database settings receive named refusals. (#1730) | — |
 | `move` | On Linux Docker targets, preflight checks both bearer modes. Carried moves can use explicit original files. `--expose-target` can reuse a target tailnet forward or create one with a recovery receipt. Rollback and target release run natively. | Remaining checkout shapes and final recovery proofs. |
-| `tunnel` | Status, read-only update reporting, the native bridge, explicit setup and continuation of a prepared profile, and private key import and renewal. Interrupted renewal can recover in setup. `tunnel run` supervises one foreground launch, `tunnel stop` requests its shutdown, and verification receipts are bound to the current native launch identity. | Background start, service registration and refresh recovery. |
+| `tunnel` | Native setup creates and resumes prepared profiles and imports or renews private keys. A renewal retains the previous pair until the replacement completes a control-plane poll. Setup can recover interrupted writes and explicitly restore or discard a retained pair. `tunnel run` supervises a foreground launch, `tunnel stop` requests shutdown, and verification binds receipts to the current native launch identity. | Background start, service registration, refresh and restart. |
 | `embedded` | A plain refusal: retired with file mode. | Nothing. |
 | `backup`, `restore`, `export`, `import`, `invite`, `maintainer`, `lease`, `board-audit` on a lite bank | One refusal that names the Docker install and the 0.23.x pip release that still opens the bank (`cli/retired.rs`). | Nothing. |
 | Edge shapes in `tunnel` and `move` | The named deferral is still reachable. `tunnel` can defer on unsupported arguments, a profile directory it cannot open outside `update`, or work its `status`, `verify` and `setup` paths cannot complete. `move` can defer when its rollback, target-release, preflight and transaction parsers cannot handle the invocation. | Give supported operations a native result and other calls a refusal with the cause and remedy. |
@@ -102,8 +102,8 @@ request about 140 to 156 hosted minutes (runs 43433514840, 43392781569,
 shards (run 43449162029), and a master push about 230 (runs 43456549508 and
 43456549451).
 
-1. A check fails an ordinary pull request that changes `pseudolife_memory/`,
-   other than the Console build output in `pseudolife_memory/web/static/`.
+1. A check fails an ordinary pull request that changes `pseudolife_memory/`
+   without the `freeze-exception` label for a maintainer-approved exception.
 2. No workflow builds or runs a Python oracle: the judges suite, the frozen
    judge probes, the live arm of each parity shard, `cli-live`, the nightly
    body evidence and the wait-mail capture stop. Golden replays stay.
@@ -118,10 +118,9 @@ What remains after that is the Rust build and test, mostly on Windows.
 
 ### 3. Delete Python
 
-1. The Console build output moves out of `pseudolife_memory/web/static`
-   (`frontend/vite.config.ts` writes it; `ops/Dockerfile.daemon-rust`,
-   `ops/Dockerfile.daemon` and the static-file tests in
-   `rust/daemon/src/static_files.rs` read it).
+1. The committed Console build lives in `frontend/dist/`. Both daemon
+   images and the static-file tests read it there. The Python wheel maps it
+   to the package's static directory at build time.
 2. Whatever still reads `pseudolife_memory/storage/schema.py` (the schema
    generator, the native updater's engine switch) reads a Rust source.
 3. After proving native installation and upgrade, publish one final PyPI

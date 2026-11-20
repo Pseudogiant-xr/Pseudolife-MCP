@@ -3,5 +3,5 @@ node_modules/
 .svelte-kit/
 *.log
 *.tsbuildinfo
-# The build goes to ../pseudolife_memory/web/static/ and IS committed.
-dist/
+# Keep the Console build despite the repository-wide dist/ ignore.
+!/dist/

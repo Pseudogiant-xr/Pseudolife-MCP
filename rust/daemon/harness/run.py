@@ -609,7 +609,7 @@ def stale_declared_cases() -> list[str]:
 def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
     a = [auth] if auth else []
     js = ("Content-Type", "application/json")
-    static = REPO / "pseudolife_memory" / "web" / "static"
+    static = daemons.CONSOLE_DIST
     css, = re.findall(r'href="(/ui/assets/[^"/]+\.css)"',
                       (static / "index.html").read_text(encoding="utf-8"))
     assert (static / css.removeprefix("/ui/")).is_file(), "Console stylesheet is missing"
@@ -684,6 +684,7 @@ class Tokens(Scenario):
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT,
+                    "PL_HARNESS_STATIC_DIR": str(daemons.CONSOLE_DIST),
                     "PSEUDOLIFE_MCP_TOKENS": f"{T_ALICE}:Alice, {T_COLON}:bob, junk, x:default"}
 
     def prepare_template(self, dsn: str) -> None:
@@ -758,6 +759,7 @@ class Tokens(Scenario):
 class Tokenless(Scenario):
     """No token: open loopback mode and the browser gate."""
     name = "tokenless"
+    env = {"PL_HARNESS_STATIC_DIR": str(daemons.CONSOLE_DIST)}
 
     def cases(self):
         c = gate_cases(None)
@@ -1560,10 +1562,11 @@ class StaticBuild(Scenario):
     start_stages = ()  # no database: never initializes
     unreachable_database = True
     read_only_bank = True
-    env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
+    env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT,
+           "PL_HARNESS_STATIC_DIR": str(daemons.CONSOLE_DIST)}
 
     def cases(self):
-        root = REPO / "pseudolife_memory" / "web" / "static"
+        root = daemons.CONSOLE_DIST
         assert not (root / "next").exists(), "the oracle has no /ui/next build"
         c = [case("root " + method, method, "/") for method in ("GET", "POST", "PUT")]
         c += [case("static " + path, "GET", path) for path in
@@ -1884,7 +1887,7 @@ def rust_env(extra: dict[str, str]) -> dict[str, str]:
                 "PSEUDOLIFE_DAEMON_ORT_THREADS"):
         if os.environ.get(key):
             out.setdefault(key, os.environ[key])
-    out.setdefault("PSEUDOLIFE_DAEMON_STATIC_DIR", str(REPO / "pseudolife_memory" / "web" / "static"))
+    out.setdefault("PSEUDOLIFE_DAEMON_STATIC_DIR", str(daemons.CONSOLE_DIST))
     return out
 
 

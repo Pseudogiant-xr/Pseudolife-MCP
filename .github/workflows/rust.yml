@@ -1315,13 +1315,10 @@ jobs:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-principals-${{ runner.os }}
           path: ${{ runner.temp }}/principal-*.json
           if-no-files-found: error
-      # In the single cli job these steps ran after the MCP step had pinned
-      # pydantic for the Python oracle; the seeders still import the frozen
-      # package, so keep the same pin.
-      - name: Keep the oracle's pydantic pin for the startup steps
+      - name: Install the startup model fixture dependencies
         id: startup_setup
         if: matrix.suite == 'cli-startup'
-        run: python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
+        run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
       - name: Daemon schema startup parity
         if: matrix.suite == 'cli-startup'
         timeout-minutes: 10
@@ -1358,8 +1355,6 @@ jobs:
         timeout-minutes: 26
         shell: pwsh
         run: |
-          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $testName = if ($IsWindows) { 'pseudolife-daemon-storage-test.exe' } else { 'pseudolife-daemon-storage-test' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/storage-test' $testName)).Path
           if (-not $IsWindows) { chmod +x $candidate }
@@ -1370,8 +1365,6 @@ jobs:
         timeout-minutes: 26
         shell: pwsh
         run: |
-          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $testName = if ($IsWindows) { 'pseudolife-daemon-storage-test.exe' } else { 'pseudolife-daemon-storage-test' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/storage-test' $testName)).Path
           if (-not $IsWindows) { chmod +x $candidate }

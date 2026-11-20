@@ -8,9 +8,8 @@ Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md). The
 project is solo-maintained and best-effort: issues are read and most get an
 answer, but there is no response-time commitment.
 
-The Python package is frozen since 14 November 2026: a pull request that
-changes anything under `pseudolife_memory/` (other than the Console build
-output in `pseudolife_memory/web/static/`) fails the `Python freeze` check
+The Python package is frozen since 14 November 2026. A pull request that
+changes anything under `pseudolife_memory/` fails the `Python freeze` check
 and is refused by the batch tool, unless it carries the `freeze-exception`
 label, which marks an exception the maintainer ruled on. Fix a defect
 found there in the Rust code under `rust/` instead.

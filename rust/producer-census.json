@@ -8,16 +8,16 @@
     "docs/README.md": "344f55f1081ec2899af8136ae9428c6e53ea6b9dd9e3ba43e263ab636b705807",
     "docs/atlas/README.md": "77897a89250cf80f9f3fe707f8f681bc6d8e6233908270cfd1a107471cb82e88",
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
-    "docs/atlas/atlas.json": "31481a70346a7f8f33b63624ca309c6c43849b5f67237948b16afa6a46d0f1f7",
+    "docs/atlas/atlas.json": "d4d367d635f36cbe15974b42862a02c667ec4c46aa363df0c3425eb5c5c05b23",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
     "docs/dev/dev-machines.md": "0083269f909fda4a7fad6e4663d84129e228788d8d28233cbbf4cfd52a321754",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
-    "docs/dev/merge-batches.md": "d6c724dfc6059596b60778a80ce5e6e4244d8780d9600948cd93890b9bc3ddd2",
+    "docs/dev/merge-batches.md": "35aad388e6d1c5c1a58594f00d0691902fc7010567bddbba78594f31501dddb9",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "02104e3aaac74c9b578e007f6b37b16e59a163d4ff9adafd920844e805bec3f7",
-    "docs/dev/python-retirement.md": "a2db1ea09959312a0474164daef8d992548b53afadb89db8a06357af1ddd84f9",
+    "docs/dev/python-retirement.md": "bb14bb5b2f9e938ae7f0c422c914930eeaff71d70ac822d88f43e69a3c1fb1e4",
     "docs/dev/release-assets.md": "dca16d906c41015e08b4863b0aedfd9e31c2f37e854b6fa2ac1a5c73be15e767",
     "docs/dev/run-rust-beside-python.md": "d469218a5dde03c87c769867bfcdb198193f3e1a27761c9ae1cc200491d8739e",
     "docs/dev/worktree-retention.md": "21ba0e48574bb6be98d456c9725a6d3746a99891d667cef8d8ed76c984819f8e",
@@ -35,7 +35,7 @@
     "docs/guide/remote-bank.md": "662191157bc916f26dfeaa738aaf973896b448579060f10a95febd3ca71d05e2",
     "docs/guide/retrieval.md": "9d5825f277e8f7facf4f2387e24f263d60692f2b9d56c40c04405128ddfcb8ba",
     "docs/guide/security-posture.md": "5996f4cef7908476b81cf9957a95bc762a1d02bcfafa24f66ba691a22d1f0505",
-    "docs/guide/tunnels.md": "faf8a82c4c2b88928e874ad5774a48b358d2bc35f2bed1da51b694a5bda96736",
+    "docs/guide/tunnels.md": "a956848202c835dd8b7129268cb140336cb7c7d5a974d599311e0d9ab6d62f3f",
     "docs/i18n/README.es.md": "469eef4e5dbd6109eff09a9bad6d7e17e1f7001039d467295dd50ad98f6ae59f",
     "docs/i18n/README.ja.md": "110b86c9e0351f014391cd4dc03246494c42264a836b730754af2e308258fff1",
     "docs/i18n/README.ko.md": "287f61ef5828d1a065ddaf8a176d973df343fbd796a3f80bd03d66e6d162fb01",
@@ -221,9 +221,13 @@
     "examples/CLAUDE.memory.md": "608f6691e4ce902427f8b4ea071d761d618a7d0803a131161a33889a3f4173b5",
     "examples/commands/dream.md": "a3482ef8ab9589d36e4b2368e3416e0497f51eaef83e0a29e2eff777af3c2129",
     "examples/hook-instructions.md": "96356a8fbfc27a3123f5dd9aacde2421ed2c14c40b31ac12c2a6b23f05c5b87e",
+    "frontend/dist/assets/Geist-LICENSE.txt": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137",
+    "frontend/dist/assets/index-CWP6PB_i.js": "81fe776d09744f879e49be51971799d8d290ab831186e98e20a7da378c360cf5",
+    "frontend/dist/index.html": "11d0a84baee68201fd461ff99c696434fc76c276a5ef6155bd8292ddb25761c9",
+    "frontend/dist/theme.js": "f2399e3aaa94b61d639937aab791511ef83efb27276330b82324a21be9eea17e",
     "ops/.env.example": "13c3d741b4553f01cfa9be8990f1109fa5fe48c92a6e826c0eeae2fb39aeaa2a",
-    "ops/Dockerfile.daemon": "91924b87f19bf50e14e6764687ee13b0dc3aa2ba3edd89dba521203260e91166",
-    "ops/Dockerfile.daemon-rust": "d01cd1898b7a2daec3b85cf2eb7796623c773d926536ef65044a2dc89ffe683b",
+    "ops/Dockerfile.daemon": "f6df7ae912c5fe79045bf65386d7a9085e7b31f675be62ccd2dab73994ab2932",
+    "ops/Dockerfile.daemon-rust": "5dd59a2e612dfe2413b01f2c1780d95e886910657d46040f11d74f4a2aa403f7",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.mirror-runner": "b71046c9947e25a2c63cb95c6675621e2f3b6ba935853f73b283c89efa304342",
     "ops/Dockerfile.pg": "ff8b83d3a569807d851eed7219063514d7f5405c8280fe7b6d3e40e56ab2b401",
@@ -347,10 +351,6 @@
     "pseudolife_memory/utils/config.py": "72f527f3926bb3ec87300cf3414adfed7b583285cc7a0bc6307734d30f55f197",
     "pseudolife_memory/web/api.py": "56c42c40090f1460696576c995007e211b22d12fda256acb3e85da5a35b6f52d",
     "pseudolife_memory/web/routes.py": "5c40b6df4a1b6db200bf84a93c6a83ab2f3ab1d98e0bed02f0de4f9102793d20",
-    "pseudolife_memory/web/static/assets/Geist-LICENSE.txt": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137",
-    "pseudolife_memory/web/static/assets/index-CWP6PB_i.js": "81fe776d09744f879e49be51971799d8d290ab831186e98e20a7da378c360cf5",
-    "pseudolife_memory/web/static/index.html": "11d0a84baee68201fd461ff99c696434fc76c276a5ef6155bd8292ddb25761c9",
-    "pseudolife_memory/web/static/theme.js": "f2399e3aaa94b61d639937aab791511ef83efb27276330b82324a21be9eea17e",
     "rust/contract-inventory.json": "27555edf13a3f8c27cae2c68fa0cf6e5d11f5695fe3ecb28563a6cb97f1d09cc",
     "rust/shim/src/argv.rs": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb",
     "rust/shim/src/board.rs": "335ab008a3d3cfb6e21e3903311de2b15f6d94d836dc4547c139cb1b927fb5e5",
@@ -579,17 +579,17 @@
     "rust/shim/src/cli/tunnel/bridge.rs": "adcb0a4d97449d09b3c92577eabca795b3dc030164997ee820d10295bd7d0296",
     "rust/shim/src/cli/tunnel/doctor_section.rs": "fcbe0884033a67447c86036776ac9195a030b20b42ad2791a6ad74d92440342a",
     "rust/shim/src/cli/tunnel/dpapi.rs": "5c643af4ba0b6225c2301822852b3f6fde9cf86f36a2d256ea05702b7f4842b0",
-    "rust/shim/src/cli/tunnel/mod.rs": "6795e0af02af346a9f26fe68e7b06b4cdede7bd692e9619224a4ef5f805aca94",
+    "rust/shim/src/cli/tunnel/mod.rs": "74addd84291753a98416442cbce5613c84666695cbf3608be7ed07694b6db7e6",
     "rust/shim/src/cli/tunnel/record.rs": "a6b5433cbbe967f595822ef79e26d7d56074ea04ff3c0efd5fe920e051bf2b8d",
-    "rust/shim/src/cli/tunnel/runtime.rs": "b272f922eb50339c86661063f988420d513d02c6bbdccf83c292e2b0a91fe008",
+    "rust/shim/src/cli/tunnel/runtime.rs": "e20c82e0b55ccfd41f70f9e2681872aa5b6cadd304b6f728b5d0eea8c052058d",
     "rust/shim/src/cli/tunnel/runtime/diagnostics.rs": "bab29aed4daff5b3f880fd03ee0c1f0b47dd046b1f4938931884f0c3bdd7346f",
     "rust/shim/src/cli/tunnel/runtime/identity.rs": "a0300447a04d7182090bfaabd2bc19147bbc560abfac432a8a1c07af9f27ee24",
     "rust/shim/src/cli/tunnel/runtime/key.rs": "30d5619ce2c106c2e1d8d99ace529ef1e84ea97c5ec0f0c35fe3811f3801b063",
     "rust/shim/src/cli/tunnel/runtime/process.rs": "5711345055037bc48909fc601970399c29b19bd1bf187e97ca3ebf7c017adbbe",
-    "rust/shim/src/cli/tunnel/runtime/tests.rs": "bc2b3bd531331ae94a96f6b9c2650ae3934abb9a1fd04ba481c179edd4f46f5a",
-    "rust/shim/src/cli/tunnel/setup.rs": "2f61a0c33a5db92e6ee03ad5ed64fb052e5e2dc39eeb50ce2678a553301c1a8f",
-    "rust/shim/src/cli/tunnel/setup/renewal.rs": "3b1047c84a78d120b1a78d3c6e0152d4a83cf735404b51ebdc3d02384725881a",
-    "rust/shim/src/cli/tunnel/setup/resume.rs": "df29c8a5f26531a2b3c7d57537047f658ae364845445b18711465b13a9d50ad2",
+    "rust/shim/src/cli/tunnel/runtime/tests.rs": "9c2e670d302204941bc5cd2318129f08c3549571e5b2aaff1482743cbaf1b6c3",
+    "rust/shim/src/cli/tunnel/setup.rs": "d5da9e47b3921fbb19daf9c52a307985d6e7f9f287894e85c596c3d34ba4afd6",
+    "rust/shim/src/cli/tunnel/setup/renewal.rs": "a363a716d0df412bfadf98513b8b4aa5b904d2d855946ad4b3b01695c10f67b9",
+    "rust/shim/src/cli/tunnel/setup/resume.rs": "fe169d306e815e8029d06a7459c0bb7b61db4a77b6ac0a2e2702aa126ba037dd",
     "rust/shim/src/cli/tunnel/store.rs": "3d082c9a744ce286f148d3fa93c4d3a884e96443f97e2fb78006d4c2ee1df97b",
     "rust/shim/src/cli/tunnel/syntax.rs": "bafbf6307fdd29df5be69c3c4f42296284480e3cef37f92147b36101c38353de",
     "rust/shim/src/cli/tunnel/vendor.rs": "05a1901a79a6191dc43e73522032839187c5c69907bcd42cdb21ef630a663661",
@@ -601,7 +601,7 @@
     "rust/shim/src/cli/update/clients/plugin.rs": "0368c717c63f22d40d24502e65d49e677cab29f0a1ee2adf3cbf29609cf6b274",
     "rust/shim/src/cli/update/clients/tests.rs": "569bec8bb807b840029301bcd35c7bc5f251310b2dad99fc51d69c4d337859f8",
     "rust/shim/src/cli/update/disk.rs": "f2a49f6a8571441504a42b9eddbb22836f00e0d6753b290975c4969b771eeaef",
-    "rust/shim/src/cli/update/engine.rs": "89602f8365b1771fdc8915e72d7fa8ec6aa4cf41861890746d2ed3c19d45718e",
+    "rust/shim/src/cli/update/engine.rs": "e1151e51d5adb722fd91225cee3094fd32e978bf47b838f7869301728c9971c1",
     "rust/shim/src/cli/update/mod.rs": "d09ec76dd78096d0c9c3cefd8d952f9c694b934d79d583b3e9bb8fc13ec1f0a7",
     "rust/shim/src/cli/update/options.rs": "eaadad222da56a406b92e8542ca69221bdf750679fa8ec07b5beeb68126f5738",
     "rust/shim/src/cli/update/ownership.rs": "73af60f0184fe573688ff11ef9ac9947447b990152d1b775fcbc724057ac904a",
@@ -609,7 +609,7 @@
     "rust/shim/src/cli/update/seams.rs": "fed71e52b1420ef7c903ae24d7cce44548d1e4f57e5fcafde31f21fdd069a8fd",
     "rust/shim/src/cli/update/shadow.rs": "55a71add1c6a9d7b26109dc5fdceac6fee7883b537708d38aa5f850f77e77656",
     "rust/shim/src/cli/update/signals.rs": "4fcf9f838e8ff5f6116227429e6bac7e6f7ad5a1ac65128994b32b414242d8dc",
-    "rust/shim/src/cli/update/tests.rs": "5d3ec6be88f9097bf3643ca7f60d69edd3309a3d8dd2c5e5c39fefa3eac55248",
+    "rust/shim/src/cli/update/tests.rs": "de165c00a406ee3976e157e740f92bba0f7d93a4d82da063f53b2ea9f0782fa5",
     "rust/shim/src/cli/update/tunnel_guard.rs": "e56a4f29343886df521d434b9bcab21e588657effa650810c186e8f57c42a560",
     "rust/shim/src/cli/update/unattended.rs": "47f94cac131dc6da4ecb65726252fb27cde9c52069c5974f6649180c3c8c0073",
     "rust/shim/src/cli/update/unattended/reschedule.rs": "fb2b3d8021a00181f48c3c37dd9ff08860d3624fa2853be858d8c83e7a2f8cf9",
@@ -678,7 +678,7 @@
   },
   "scopes": [
     "plugin",
-    "pseudolife_memory/web/static",
+    "frontend/dist",
     "evals/claude_shim.py",
     "evals/codex_shim.py",
     "rust/shim/src",
@@ -3244,19 +3244,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/setup.rs:44",
-          "shape": {
-            "argv_source": "doctor , then retry setup\";",
-            "channel": "argv",
-            "complete": false,
-            "expression": ", then retry setup\";",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "rust/shim/src/cli/update/clients/codex.rs:786",
           "shape": {
             "argv_source": "doctor reports the manual hook bundle present.\".into();",
@@ -3499,7 +3486,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:65",
+          "location": "docs/guide/tunnels.md:71",
           "shape": {
             "argv_source": "doctor",
             "channel": "argv",
@@ -7923,7 +7910,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:160",
+          "location": "ops/Dockerfile.daemon:164",
           "shape": {
             "argv": [
               {
@@ -9059,7 +9046,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:102",
+          "location": "docs/guide/tunnels.md:108",
           "shape": {
             "argv_source": "tunnel setup --tunnel-id <tunnel_id>",
             "channel": "argv",
@@ -9099,7 +9086,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:90",
+          "location": "docs/guide/tunnels.md:96",
           "shape": {
             "argv_source": "tunnel setup --daemon-url http://127.0.0.1:8765 --token-file <private-token-file> --accept-access",
             "channel": "argv",
@@ -9421,22 +9408,16 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:570",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:401",
           "shape": {
-            "argv_source": "tunnel setup --profile {name}{directory} --read-key --key-expires-at <ISO timestamp>.\\n\"",
+            "argv_source": "tunnel setup --profile {name}\");",
             "channel": "argv",
             "complete": false,
-            "expression": "setup --profile {name}{directory} --read-key --key-expires-at <ISO timestamp>.\\n\"",
+            "expression": "setup --profile {name}\");",
             "omitted_optional": null,
             "parameters": {
-              "--key-expires-at": {
-                "expression": "<ISO"
-              },
               "--profile": {
-                "expression": "{name}{directory}"
-              },
-              "--read-key": {
-                "expression": "value not established"
+                "expression": "{name}\");"
               }
             }
           }
@@ -9444,18 +9425,27 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/setup.rs:156",
+          "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:251",
           "shape": {
-            "argv_source": "tunnel setup --profile {name}{directory} {flag}\\n\"",
+            "argv_source": "tunnel setup --restore-key\")",
             "channel": "argv",
             "complete": false,
-            "expression": "setup --profile {name}{directory} {flag}\\n\"",
+            "expression": "setup --restore-key\")",
             "omitted_optional": null,
-            "parameters": {
-              "--profile": {
-                "expression": "{name}{directory}"
-              }
-            }
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/tunnel/setup/renewal.rs:279",
+          "shape": {
+            "argv_source": "tunnel setup --discard-previous-key` for the same profile and directory\",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "setup --discard-previous-key` for the same profile and directory\",",
+            "omitted_optional": null,
+            "parameters": {}
           }
         },
         {
@@ -9520,7 +9510,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:107",
+          "location": "docs/guide/tunnels.md:113",
           "shape": {
             "argv_source": "tunnel setup --read-key",
             "channel": "argv",
@@ -9535,7 +9525,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:113",
+          "location": "docs/guide/tunnels.md:119",
           "shape": {
             "argv_source": "tunnel start",
             "channel": "argv",
@@ -9546,7 +9536,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:128",
+          "location": "docs/guide/tunnels.md:134",
           "shape": {
             "argv_source": "tunnel verify",
             "channel": "argv",
@@ -9557,7 +9547,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:136",
+          "location": "docs/guide/tunnels.md:142",
           "shape": {
             "argv_source": "tunnel status",
             "channel": "argv",
@@ -9568,7 +9558,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:137",
+          "location": "docs/guide/tunnels.md:143",
           "shape": {
             "argv_source": "tunnel doctor --json",
             "channel": "argv",
@@ -9583,7 +9573,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:165",
+          "location": "docs/guide/tunnels.md:171",
           "shape": {
             "argv_source": "tunnel update",
             "channel": "argv",
@@ -9594,7 +9584,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:172",
+          "location": "docs/guide/tunnels.md:178",
           "shape": {
             "argv_source": "tunnel update",
             "channel": "argv",
@@ -9605,7 +9595,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:239",
+          "location": "docs/guide/tunnels.md:245",
           "shape": {
             "argv_source": "tunnel service remove",
             "channel": "argv",
@@ -9638,7 +9628,22 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:80",
+          "location": "docs/guide/tunnels.md:44",
+          "shape": {
+            "argv_source": "tunnel setup --restore-key",
+            "channel": "argv",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "--restore-key": {
+                "expression": "value not established"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/guide/tunnels.md:86",
           "shape": {
             "argv_source": "tunnel setup",
             "channel": "argv",
@@ -11921,7 +11926,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:159",
+          "location": "docs/guide/tunnels.md:165",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -26342,7 +26347,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_agents",
-          "location": "docs/guide/tunnels.md:130",
+          "location": "docs/guide/tunnels.md:136",
           "mapping_source": "pseudolife_memory/coordination.py:835",
           "shape": {
             "channel": "body",
@@ -30520,7 +30525,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:147",
+          "location": "ops/Dockerfile.daemon:151",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30610,7 +30615,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:146",
+          "location": "ops/Dockerfile.daemon:150",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30648,7 +30653,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:149",
+          "location": "ops/Dockerfile.daemon:153",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30738,7 +30743,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:148",
+          "location": "ops/Dockerfile.daemon:152",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38204,7 +38209,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1323",
+          "location": "rust/shim/src/cli/update/tests.rs:1392",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41050,7 +41055,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:848",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:896",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43644,7 +43649,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:464",
+          "location": "rust/shim/src/cli/update/engine.rs:474",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43657,7 +43662,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:468",
+          "location": "rust/shim/src/cli/update/engine.rs:478",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43822,81 +43827,6 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1099",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1103",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1130",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1134",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1164",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "rust/shim/src/cli/update/tests.rs:1168",
           "shape": {
             "channel": "environment",
@@ -43912,7 +43842,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1178",
+          "location": "rust/shim/src/cli/update/tests.rs:1172",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -43927,7 +43857,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1183",
+          "location": "rust/shim/src/cli/update/tests.rs:1199",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -43942,7 +43872,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1197",
+          "location": "rust/shim/src/cli/update/tests.rs:1203",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -43957,7 +43887,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1201",
+          "location": "rust/shim/src/cli/update/tests.rs:1233",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -43972,37 +43902,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1217",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1221",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "fixture"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1244",
+          "location": "rust/shim/src/cli/update/tests.rs:1237",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -44032,7 +43932,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1273",
+          "location": "rust/shim/src/cli/update/tests.rs:1252",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -44047,7 +43947,112 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1276",
+          "location": "rust/shim/src/cli/update/tests.rs:1266",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:1270",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:1286",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:1290",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:1313",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:1316",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:1342",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "fixture"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/update/tests.rs:1345",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -48269,6 +48274,32 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:3",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/.env.example:91",
           "shape": {
             "channel": "environment",
@@ -49634,32 +49665,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:3",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "rust/shim/src/board.rs:377",
           "shape": {
             "channel": "environment",
@@ -50245,7 +50250,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:824",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:872",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50258,7 +50263,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:229",
+          "location": "rust/shim/src/cli/update/engine.rs:239",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50271,7 +50276,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:245",
+          "location": "rust/shim/src/cli/update/engine.rs:255",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50284,7 +50289,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:407",
+          "location": "rust/shim/src/cli/update/engine.rs:417",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50336,7 +50341,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1316",
+          "location": "rust/shim/src/cli/update/tests.rs:1385",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51012,6 +51017,32 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "docs/atlas/atlas.json:437",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:3",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51869,32 +51900,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:3",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "rust/shim/src/cli/connect/net.rs:192",
           "shape": {
             "channel": "environment",
@@ -52064,7 +52069,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:234",
+          "location": "rust/shim/src/cli/update/engine.rs:244",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -52077,7 +52082,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/engine.rs:408",
+          "location": "rust/shim/src/cli/update/engine.rs:418",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -52167,7 +52172,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/update/tests.rs:1093",
+          "location": "rust/shim/src/cli/update/tests.rs:1162",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54184,7 +54189,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:823",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:871",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56245,7 +56250,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:117",
+          "location": "ops/Dockerfile.daemon:121",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58927,7 +58932,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:671",
+          "location": "docs/dev/merge-batches.md:670",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59074,7 +59079,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:634",
+          "location": "docs/dev/merge-batches.md:633",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59089,7 +59094,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:643",
+          "location": "docs/dev/merge-batches.md:642",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61607,7 +61612,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -61920,7 +61925,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -61998,7 +62003,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:27",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:27",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62008,7 +62013,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62074,7 +62079,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62117,7 +62122,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62227,7 +62232,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:27",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:27",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62325,7 +62330,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62465,7 +62470,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:26",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:26",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62510,7 +62515,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:26",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:26",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62585,7 +62590,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62672,7 +62677,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62689,7 +62694,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63094,7 +63099,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63295,7 +63300,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:22",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:22",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63348,7 +63353,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63484,7 +63489,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:13",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:13",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63700,7 +63705,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63710,7 +63715,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64068,7 +64073,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64082,7 +64087,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64799,7 +64804,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64861,7 +64866,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64954,7 +64959,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:13",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:13",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65013,7 +65018,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65033,7 +65038,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65112,7 +65117,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65192,7 +65197,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65295,7 +65300,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65541,7 +65546,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65599,7 +65604,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65811,7 +65816,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:27",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:27",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -65900,7 +65905,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -66201,7 +66206,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -66873,7 +66878,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -66919,7 +66924,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67014,7 +67019,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -67076,7 +67081,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67191,7 +67196,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67243,7 +67248,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67382,7 +67387,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67414,7 +67419,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67545,7 +67550,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67573,7 +67578,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67590,7 +67595,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67708,7 +67713,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67788,7 +67793,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67840,7 +67845,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67883,7 +67888,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67914,7 +67919,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -68047,7 +68052,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -69436,7 +69441,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/tunnels.md:130",
+          "location": "docs/guide/tunnels.md:136",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -78450,7 +78455,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:647",
+      "location": "docs/dev/merge-batches.md:646",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY",
       "shape": {
         "channel": "environment",
@@ -78464,7 +78469,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:663",
+      "location": "docs/dev/merge-batches.md:662",
       "name": "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
       "shape": {
         "channel": "environment",
@@ -85779,7 +85784,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:332",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:432",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE",
       "shape": {
         "channel": "environment",
@@ -85793,7 +85798,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:43",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:44",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG",
       "shape": {
         "channel": "environment",
@@ -85807,7 +85812,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:471",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:571",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE",
       "shape": {
         "channel": "environment",
@@ -85821,7 +85826,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:71",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:72",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE",
       "shape": {
         "channel": "environment",
@@ -85835,7 +85840,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:80",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:81",
       "name": "PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE",
       "shape": {
         "channel": "environment",
@@ -86801,6 +86806,118 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/cancel",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/challenge",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "e",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/enrol",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "e",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/enrol",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/repudiate",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/revoke",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/role",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/send",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
       "location": "ops/setup-codex-coordination.py:52",
       "name": "/api/coordination/agents",
       "shape": {
@@ -86821,118 +86938,6 @@
         "channel": "query",
         "complete": false,
         "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/cancel",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/challenge",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "e",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/enrol",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "e",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/enrol",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/repudiate",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/revoke",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/role",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/send",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
         "parameters": {}
       }
     },
@@ -87291,6 +87296,20 @@
       "evidence": "static",
       "kind": "route",
       "location": "rust/shim/src/cli/pairing/net.rs:90",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:156",
       "method": "GET",
       "name": "/health",
       "shape": {
@@ -88482,7 +88501,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/tunnels.md:285",
+      "location": "docs/guide/tunnels.md:291",
       "method": null,
       "name": "/api/docs/guides/secure-mcp-tunnels",
       "shape": {
@@ -90190,7 +90209,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/Dockerfile.daemon:155",
+      "location": "ops/Dockerfile.daemon:159",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91730,20 +91749,6 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/tunnel/setup.rs:211",
-      "method": null,
-      "name": "/mcp",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
       "location": "rust/shim/src/cli/update/mod.rs:225",
       "method": null,
       "name": "/health",
@@ -91814,7 +91819,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/tests.rs:1540",
+      "location": "rust/shim/src/cli/update/tests.rs:1609",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91828,7 +91833,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/update/tests.rs:1543",
+      "location": "rust/shim/src/cli/update/tests.rs:1612",
       "method": null,
       "name": "/health",
       "shape": {
@@ -93084,7 +93089,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:556",
+      "location": "docs/dev/merge-batches.md:555",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -93100,7 +93105,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:558",
+      "location": "docs/dev/merge-batches.md:557",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -93116,7 +93121,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:648",
+      "location": "docs/dev/merge-batches.md:647",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED",
       "shape": {
         "channel": "environment",
@@ -93132,7 +93137,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:653",
+      "location": "docs/dev/merge-batches.md:652",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -93676,7 +93681,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/tunnels.md:235",
+      "location": "docs/guide/tunnels.md:241",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -93692,7 +93697,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/tunnels.md:238",
+      "location": "docs/guide/tunnels.md:244",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -93708,7 +93713,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/tunnels.md:68",
+      "location": "docs/guide/tunnels.md:74",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -96691,7 +96696,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/tests.rs:1591",
+      "location": "rust/shim/src/cli/update/tests.rs:1660",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
@@ -96707,7 +96712,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/update/tests.rs:1594",
+      "location": "rust/shim/src/cli/update/tests.rs:1663",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
@@ -96771,7 +96776,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
       "method": "GET",
       "name": "/api/maintainer",
       "shape": {
@@ -96783,7 +96788,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
       "method": "GET",
       "name": "/api/maintainer/inbox",
       "shape": {
@@ -96799,7 +96804,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
       "method": "GET",
       "name": "/api/maintainer/sent",
       "shape": {
@@ -97820,40 +97825,40 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:647",
+      "location": "docs/dev/merge-batches.md:646",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_TEST_BINARY"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:663",
+      "location": "docs/dev/merge-batches.md:662",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_CARGO_TARGET_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:671",
+      "location": "docs/dev/merge-batches.md:670",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_SLOTS"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:80",
+      "location": "docs/dev/merge-batches.md:79",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:93",
+      "location": "docs/dev/merge-batches.md:92",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:96",
+      "location": "docs/dev/merge-batches.md:95",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:980",
+      "location": "docs/dev/merge-batches.md:979",
       "reason": "forwarded parameters"
     },
     {
@@ -103032,19 +103037,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/tunnels.md:102",
+      "location": "docs/guide/tunnels.md:108",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/tunnels.md:130",
+      "location": "docs/guide/tunnels.md:136",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:agents"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/tunnels.md:285",
+      "location": "docs/guide/tunnels.md:291",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/docs/guides/secure-mcp-tunnels"
     },
@@ -103056,7 +103061,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/tunnels.md:90",
+      "location": "docs/guide/tunnels.md:96",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
@@ -112801,6 +112806,163 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:1",
+      "reason": "forwarded parameters, request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:10",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:11",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:13",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:16",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:19",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/cancel"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/challenge"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/enrol"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/repudiate"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/revoke"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/role"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/send"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:22",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:26",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:27",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:3",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:3",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:31",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:39",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:46",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/facts/set"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/.env.example:112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
@@ -112986,13 +113148,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon:155",
+      "location": "ops/Dockerfile.daemon:159",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon:160",
+      "location": "ops/Dockerfile.daemon:164",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:serve"
     },
@@ -121865,163 +122027,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:1",
-      "reason": "forwarded parameters, request target supplied dynamically or external"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:10",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:11",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:13",
-      "reason": "built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:16",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:19",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/cancel"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/challenge"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/enrol"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/repudiate"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/revoke"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/role"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/send"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:22",
-      "reason": "built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:26",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:27",
-      "reason": "built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:3",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:3",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:31",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:39",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:46",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:POST /api/facts/set"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "rust/shim/src/board.rs:100",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
@@ -126585,75 +126590,75 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:570",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:401",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:823",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:871",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:824",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:872",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:848",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:896",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:332",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:156",
       "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
+      "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:43",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:471",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:71",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:80",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/setup.rs:156",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:251",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/setup.rs:211",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:432",
       "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/mcp"
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/setup.rs:44",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:44",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:571",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:72",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/runtime/tests.rs:81",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/setup/renewal.rs:279",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:doctor"
+      "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
@@ -126842,43 +126847,43 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:229",
+      "location": "rust/shim/src/cli/update/engine.rs:239",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:234",
+      "location": "rust/shim/src/cli/update/engine.rs:244",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:245",
+      "location": "rust/shim/src/cli/update/engine.rs:255",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:407",
+      "location": "rust/shim/src/cli/update/engine.rs:417",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:408",
+      "location": "rust/shim/src/cli/update/engine.rs:418",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:464",
+      "location": "rust/shim/src/cli/update/engine.rs:474",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/engine.rs:468",
+      "location": "rust/shim/src/cli/update/engine.rs:478",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
@@ -127110,25 +127115,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/tests.rs:1316",
+      "location": "rust/shim/src/cli/update/tests.rs:1385",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/tests.rs:1323",
+      "location": "rust/shim/src/cli/update/tests.rs:1392",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/tests.rs:1540",
+      "location": "rust/shim/src/cli/update/tests.rs:1609",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/update/tests.rs:1543",
+      "location": "rust/shim/src/cli/update/tests.rs:1612",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },

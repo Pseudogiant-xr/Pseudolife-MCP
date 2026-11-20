@@ -23,6 +23,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = "pseudolife-daemon"
+CHECKOUT_SCHEMA_PLAN = "rust/daemon/src/storage/schema_plan.json"
 FILES = ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-daemon.yml",
          "docker-compose.rust-shadow.yml", "docker-compose.rust-ghcr.yml", "Dockerfile.extractor")
 ARCHIVED_PYTHON = ("ghcr.io/pseudogiant-xr/pseudolife-daemon@sha256:"
@@ -550,8 +551,9 @@ def host(tmp_path, failure="", mode="release"):
     (ops / ".env").write_text("PSEUDOLIFE_MCP_TOKEN=fixture-bearer\n")
     repo = ops.parent
     (repo / "pyproject.toml").write_text('[project]\nversion = "0.21.1"\n')
-    (repo / "pseudolife_memory/storage").mkdir(parents=True)
-    (repo / "pseudolife_memory/storage/schema.py").write_text("SCHEMA_META_VERSION = 58\n")
+    plan = repo / CHECKOUT_SCHEMA_PLAN
+    plan.parent.mkdir(parents=True)
+    plan.write_text(json.dumps({"schema_version": 58}), encoding="utf-8")
     programs = home / "programs"
     programs.mkdir()
     docker = _program(programs / "docker", DOCKER)
@@ -2317,7 +2319,7 @@ def test_rollback_then_update_retires_the_pending_import_pointer(tmp_path, mode)
             # A validated checkout can select the same image under a new activation.
             original["Config"]["Image"] = "pseudolife-daemon-rust:checkout"
             state["target_version"] = "0.21.1"
-            (repo / "pseudolife_memory/storage/schema.py").write_text("SCHEMA_META_VERSION = 59\n")
+            (repo / CHECKOUT_SCHEMA_PLAN).write_text(json.dumps({"schema_version": 59}), encoding="utf-8")
             labels = original["Config"]["Labels"]
             labels.update({"org.pseudolife.engine": "rust", "org.pseudolife.checkout": str(repo),
                            "org.pseudolife.activation": "c" * 32})

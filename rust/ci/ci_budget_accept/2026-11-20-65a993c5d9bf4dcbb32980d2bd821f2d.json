@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "2fa00fdcb13d556e",
+  "fingerprint": "57b17d53c98b6e14",
+  "reason": "The guard job removes the retired activation rehearsal test and keeps the rest of the test selection."
+}
