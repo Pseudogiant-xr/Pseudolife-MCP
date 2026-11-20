@@ -68,4 +68,4 @@ def test_explicit_fixture_artifacts_override_callers_real_model(monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_DAEMON_ONNX_DIR", "/real-model")
     monkeypatch.setenv("ORT_DYLIB_PATH", "/real-runtime")
     fixture = {"PSEUDOLIFE_DAEMON_ONNX_DIR": "/fixture-model", "ORT_DYLIB_PATH": "/fixture-runtime"}
-    assert run.rust_env(fixture) == {**fixture, "PSEUDOLIFE_DAEMON_STATIC_DIR": str(run.REPO / "pseudolife_memory/web/static")}
+    assert run.rust_env(fixture) == {**fixture, "PSEUDOLIFE_DAEMON_STATIC_DIR": str(run.REPO / "frontend/dist")}

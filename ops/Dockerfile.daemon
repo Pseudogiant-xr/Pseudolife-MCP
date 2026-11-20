@@ -109,7 +109,11 @@ RUN --mount=type=cache,id=pseudolife-hf,target=/tmp/hf-cache,sharing=locked \
 COPY README.md /app/
 COPY pseudolife_memory /app/pseudolife_memory
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    --mount=type=bind,source=setup.py,target=/app/setup.py \
+    --mount=type=bind,source=frontend/dist,target=/app/frontend/dist \
     env -u PIP_NO_CACHE_DIR pip install --no-deps "/app" && pip check
+# The daemon imports the package from its /app working directory.
+COPY frontend/dist /app/pseudolife_memory/web/static
 # The plugin's hook scripts this build ships with: /health publishes their
 # digest so a cached plugin at the same version but with different hooks can
 # be told apart at session start (pseudolife_memory/plugin_hooks.py).

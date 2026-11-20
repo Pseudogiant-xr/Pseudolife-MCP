@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
+CONSOLE_DIST = REPO / "frontend" / "dist"
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 from rust.harness_support import readiness  # noqa: E402

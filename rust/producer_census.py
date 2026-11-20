@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "rust/producer-census.json"
 INVENTORY = "rust/contract-inventory.json"
 CURRENCY_INPUTS = {"rust/producer_census.py", "rust/producer-census.json", INVENTORY}
-SCOPES = ("plugin", "pseudolife_memory/web/static", "evals/claude_shim.py",
+SCOPES = ("plugin", "frontend/dist", "evals/claude_shim.py",
           "evals/codex_shim.py", "rust/shim/src", "ops", "examples", "docs")
 EXTENSIONS = {".py", ".sh", ".ps1", ".bat", ".cmd", ".md", ".js", ".json", ".example",
               ".yaml", ".yml", ".toml", ".rs", ".html", ".txt"}

@@ -350,7 +350,7 @@ def test_docs_guard_selection_keeps_the_named_guards_and_touched_readers(repo, t
 @pytest.mark.parametrize("code", ["helper.py", "docs/example.py", "tests/guide.md",
                                   "ops/usage.md", "plugin/hooks/usage.md", ".github/workflows/notes.md",
                                   "evals/prompts/sonnet_extractor_v5.md", "examples/CLAUDE.memory.md",
-                                  "frontend/public/vendor/README.md"])
+                                  "frontend/public/vendor/README.md", "frontend/dist/vendor/README.md"])
 def test_code_paths_cannot_use_the_docs_selection(repo, code):
     _, _, commit = repo
     head = commit("docs/status.md", code)

@@ -31,5 +31,8 @@ evals
 !evals/prompts/sonnet_extractor_v5.md
 tests
 examples
-frontend
+# The daemon images copy only the committed Console build.
+frontend/*
+!frontend/dist
+!frontend/dist/**
 unsloth_compiled_cache
