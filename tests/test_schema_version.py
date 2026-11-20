@@ -24,7 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+from rust.daemon.harness.gen_schema_sql import load_schema_plan
+
+SCHEMA_META_VERSION = load_schema_plan()["schema_version"]
 
 # Bump this literal in the same commit that bumps SCHEMA_META_VERSION.
 CURRENT_SCHEMA = 59
@@ -46,12 +48,12 @@ change:
      storage cards rather than only renumbering
      (pinned by tests/test_atlas_currency.py, which also gap-checks the
      schemaN migration list).
-  5. tests/test_migrate_embeddings.py — the two `assert meta[0] == NN`
-     literal pins.
-  6. `python ops/gen_llms_txt.py` after any README/docs/guide edit
+  5. `python ops/gen_llms_txt.py` after any README/docs/guide edit
      (tests/test_llms_txt.py pins the generated llms-full.txt).
-  7. The Rust side: `python rust/daemon/harness/gen_schema_sql.py` (then
-     `--check`), the shim's transfer schema literals (pinned below by
+  6. The version header in schema.sql and the final version stamp in
+     schema_plan.json. Derive schema_meta.rs with
+     `python rust/daemon/harness/gen_schema_sql.py`, then run its `--check`.
+     Update the shim's transfer schema literals (pinned below by
      test_rust_shim_transfer_pins_the_same_schema_version), the schema
      startup golden, and every parity golden that digests the catalog or
      dumps a bank (dream cursors, daemon run.py rows, graph store,
@@ -71,7 +73,7 @@ def test_schema_meta_version_is_pinned():
 
 
 # The native export still carries a schema-version literal. Import reuses
-# the daemon's generated SQL, plan and metadata instead. The v56 bump
+# the daemon's native SQL, plan and metadata instead. The v56 bump
 # (2026-10-17) left them at 55 and every Parity export/import row refused
 # the bank; this pins them so the next bump fails here first.
 _SHIM = Path(__file__).resolve().parents[1] / "rust" / "shim" / "src" / "cli"
@@ -90,7 +92,7 @@ def test_rust_shim_transfer_pins_the_same_schema_version(path, pattern):
         f"{SCHEMA_META_VERSION}: bump the literal with the schema")
 
 
-def test_rust_shim_import_reuses_generated_native_schema():
+def test_rust_shim_import_reuses_native_schema():
     source = (_SHIM / "transfer" / "schema.rs").read_text(encoding="utf-8")
     for artifact in ("schema_meta.rs", "schema.sql", "schema_plan.json"):
         assert f'"../../../../daemon/src/storage/{artifact}"' in source
