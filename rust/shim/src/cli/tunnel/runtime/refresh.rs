@@ -515,6 +515,10 @@ mod tests {
         let mut claim = Claim::take(&stage.directory).unwrap().unwrap();
         assert!(!stage.directory.join(REQUEST).exists());
         assert!(Claim::take(&stage.directory).unwrap().is_none());
+        assert!(matches!(
+            submit(&home.0, "dot", &record, image),
+            Err("another refresh caller is already waiting for this launch")
+        ));
         assert_eq!(
             claim.read(&home.0, "dot", &record),
             Ok(ticket.request.clone())

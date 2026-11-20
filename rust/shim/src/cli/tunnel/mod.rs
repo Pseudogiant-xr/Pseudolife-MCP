@@ -614,7 +614,7 @@ fn report(
         .as_ref()
         .map_or("unknown; check Platform key settings", |(text, _)| text);
     text.push_str(&format!("API key expiry: {shown}.\n"));
-    if refresh.needs_attention() {
+    if refresh.needs_attention() && native_refresh.is_none() {
         text.push_str(&format!(
             "Last tunnel refresh: {}; needs attention. Inspect tunnel doctor before retrying the update.\n",
             refresh.state()

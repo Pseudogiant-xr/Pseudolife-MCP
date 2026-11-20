@@ -283,11 +283,24 @@ pub fn tunnel_runtimes(
         if ids.is_empty() && record.get("snapshot").is_some_and(|v| !v.is_null()) {
             return Err("tunnel snapshot has no process identity; no runtime was removed".into());
         }
-        if !record_keeps_runtime(&record, processes) {
+        let refresh = record.get("refresh").filter(|value| !value.is_null());
+        let uncertain_spawn = refresh.is_some()
+            && record["native_launch"].is_string()
+            && record["spawn_started"] == true
+            && record["target"].is_null();
+        if !uncertain_spawn && !record_keeps_runtime(&record, processes) {
             continue;
         }
         // Native supervisors may pin a runtime directly. No profile credentials
         // or remote endpoints are read while determining local dependencies.
+        if let Some(refresh) = refresh {
+            let path = refresh["image"]["path"]
+                .as_str()
+                .ok_or("native tunnel refresh image is unreadable; no runtime was removed")?;
+            if let Some(runtime) = registrations::runtime_path(Path::new(path), layout) {
+                pinned.insert(runtime);
+            }
+        }
         for key in ["executable", "runtime_path", "interpreter"] {
             if let Some(path) = record.get(key).and_then(Value::as_str)
                 && let Some(runtime) = registrations::runtime_path(Path::new(path), layout)

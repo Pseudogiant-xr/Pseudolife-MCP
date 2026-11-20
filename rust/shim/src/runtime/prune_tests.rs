@@ -136,6 +136,35 @@ fn tunnel_with_an_unopenable_windows_pid_still_pins_its_runtime() {
 }
 
 #[test]
+fn supervised_refresh_pins_an_image_until_its_child_is_proven_gone() {
+    let f = Fixture::new();
+    let selected = f.install("1.0.0");
+    f.install("1.0.1");
+    let root = f.path.join("tunnel");
+    crate::board::state::private_dir(&root).unwrap();
+    let path = root.join("fixture.process.json");
+    let mut record = json!({"native_launch":"generation", "spawn_started":true,
+        "supervisor":{"pid":88}, "target":null, "refresh":{"image":{"path":selected.executable()}}});
+    let save = |record: &Value| {
+        crate::board::state::atomic_write(&path, record.to_string().as_bytes(), None).unwrap()
+    };
+    save(&record);
+    assert!(
+        tunnel_runtimes(&f.layout, &root, &[])
+            .unwrap()
+            .contains(&selected.path)
+    );
+    record["target"] = json!({"pid":99});
+    save(&record);
+    assert!(
+        tunnel_runtimes(&f.layout, &root, &f.windows_evidence().processes)
+            .unwrap()
+            .contains(&selected.path)
+    );
+    assert!(tunnel_runtimes(&f.layout, &root, &[]).unwrap().is_empty());
+}
+
+#[test]
 fn readable_ambiguous_windows_image_blocks_pruning() {
     let f = Fixture::new();
     let old = f.install("1.0.0");
