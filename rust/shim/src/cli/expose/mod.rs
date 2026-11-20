@@ -260,6 +260,8 @@ async fn fetch_health(origin: &str, timeout: Duration) -> Health {
 
 // ── the report ───────────────────────────────────────────────────────────────
 
+pub(in crate::cli) const MOVE_EXPOSURE_REPORT_ENV: &str = "PSEUDOLIFE_MOVE_EXPOSURE_REPORT";
+
 /// `_Report`: the JSON report's fields, and the lines printed without
 /// `--json`.
 struct Report {
@@ -276,6 +278,8 @@ struct Report {
     warnings: Vec<Vec<u16>>,
     notes: Vec<String>,
     error: Option<J>,
+    include_move_failure: bool,
+    move_failure: Option<&'static str>,
     stdout: Vec<u16>,
     stderr: String,
 }
@@ -296,6 +300,9 @@ impl Report {
             warnings: Vec::new(),
             notes: Vec::new(),
             error: None,
+            include_move_failure: std::env::var_os(MOVE_EXPOSURE_REPORT_ENV).as_deref()
+                == Some(std::ffi::OsStr::new("1")),
+            move_failure: matches!(args.action, Action::Tailscale).then_some("not_attempted"),
             stdout: Vec::new(),
             stderr: String::new(),
         }
@@ -357,7 +364,7 @@ impl Report {
     fn finish(mut self, code: u8) -> Out {
         if self.as_json {
             let text = |value: Option<String>| value.map_or(J::Null, J::Str);
-            let data = J::Dict(vec![
+            let mut fields = vec![
                 (J::from("action"), J::from(self.action.name())),
                 (J::from("port"), J::Int(self.port.to_string())),
                 (J::from("tailscale"), text(self.tailscale.take())),
@@ -392,7 +399,13 @@ impl Report {
                 ),
                 (J::from("error"), self.error.take().unwrap_or(J::Null)),
                 (J::from("exit"), J::Int(code.to_string())),
-            ]);
+            ];
+            if self.include_move_failure
+                && let Some(failure) = self.move_failure
+            {
+                fields.push((J::from("move_failure"), J::from(failure)));
+            }
+            let data = J::Dict(fields);
             self.stdout
                 .extend(units(&(pyjson::dumps(&data, true) + "\n")));
         }
@@ -647,6 +660,7 @@ async fn serve(
     bank: &J,
     mut report: Report,
 ) -> Out {
+    report.move_failure = None;
     host.hold_interrupts();
     let proc = host.run(binary, &words(&serve_words(port))).await;
     let after = read_back(host, binary, port).await;
@@ -666,6 +680,18 @@ async fn serve(
             );
         }
     };
+    if proc.settled && state == State::None {
+        report.move_failure = Some(if permission_refused(&proc) {
+            "permission_denied"
+        } else if proc.timed_out
+            && printed(&proc)
+                .is_some_and(|hint| hint.starts_with("https://login.tailscale.com/f/serve"))
+        {
+            "serve_not_enabled"
+        } else {
+            "not_created"
+        });
+    }
     match (proc.succeeded(), state) {
         (true, State::Ours) => {}
         (_, State::Foreign) => {
@@ -745,7 +771,13 @@ async fn serve(
 
 /// The serve reported failure but its forward is in place: the port was
 /// free before, so the forward is this run's; take it back off and check.
-async fn undo(host: &impl Host, binary: &Binary, port: u16, proc: &Proc, report: Report) -> Out {
+async fn undo(
+    host: &impl Host,
+    binary: &Binary,
+    port: u16,
+    proc: &Proc,
+    mut report: Report,
+) -> Out {
     let removal = host.run(binary, &words(&off_words(port))).await;
     let left = match read_owned(host, binary, port).await {
         Ok((State::None, _)) => None,
@@ -766,13 +798,18 @@ async fn undo(host: &impl Host, binary: &Binary, port: u16, proc: &Proc, report:
         Err(why) => Some(why),
     };
     match left {
-        None => report.fail_text(
+        None => {
+            if proc.settled && removal.settled {
+                report.move_failure = Some("not_created");
+            }
+            report.fail_text(
             EXIT_UNDONE,
             &format!(
                 "`tailscale serve` failed ({}) although the forward appeared; it was removed again, so nothing changed",
                 ran(proc)
             ),
-        ),
+            )
+        }
         Some(why) => {
             let why = if removal.succeeded() {
                 why

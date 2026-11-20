@@ -91,6 +91,7 @@ struct Hostsides {
     target_timer: bool,
     carries_identities: bool,
     exposure_owned: bool,
+    exposure_pending: bool,
     gated: bool,
     bank: Bank,
     claim: Option<String>,
@@ -126,6 +127,7 @@ impl Hostsides {
             target_timer: true,
             carries_identities: false,
             exposure_owned: false,
+            exposure_pending: false,
             gated: false,
             bank: Bank::Empty,
             claim: None,
@@ -153,6 +155,10 @@ impl Hostsides {
 
 struct Model {
     hosts: Hostsides,
+    exposure_fixture: Option<(
+        super::exposure::tests::Folder,
+        super::exposure::tests::Fixture,
+    )>,
     /// The call to fault, counted from 1, and how.
     fault: Option<(usize, Fault)>,
     /// Calls that take this fault every time they run, by name, from call
@@ -206,6 +212,7 @@ impl Model {
     fn new() -> Self {
         Self {
             hosts: Hostsides::start(),
+            exposure_fixture: None,
             fault: None,
             always: Vec::new(),
             always_from: 0,
@@ -439,9 +446,22 @@ impl Model {
                 h.exposure_owned = true;
                 answer.exposure_url = Some(format!("http://100.64.0.7:{port}"));
             }
-            Op::UndoExposure { .. } => {
+            Op::UndoExposure { port } => {
                 assert!(request.rollback && h.aborted.as_deref() == Some(request.move_id.as_str()));
-                h.exposure_owned = false;
+                let result = match &mut self.exposure_fixture {
+                    _ if h.exposure_pending => {
+                        Err("the fixture exposure receipt is pending".into())
+                    }
+                    Some((folder, fixture)) => super::exposure::undo(fixture, &folder.0, *port),
+                    None => Ok(()),
+                };
+                match result {
+                    Ok(()) => h.exposure_owned = false,
+                    Err(why) => {
+                        answer.ok = false;
+                        answer.error = why;
+                    }
+                }
             }
             Op::TimerPause => h.target_timer = false,
             Op::TimerResume => h.target_timer = true,
@@ -715,6 +735,11 @@ impl Hosts for Model {
             });
         }
         let fault = self.enter(&what);
+        if matches!(request.op, Op::ExposeTarget { .. })
+            && matches!(fault, Some(Fault::Killed | Fault::Refused))
+        {
+            self.hosts.exposure_pending = true;
+        }
         let result = match fault {
             Some(Fault::Killed) => Err("the process is gone".to_owned()),
             Some(Fault::LostBefore) => Err("ssh lost the link".to_owned()),
@@ -931,7 +956,11 @@ fn a_lost_exposure_reply_rolls_back_the_transfer_without_leaving_the_owned_forwa
         model.fault = Some((call, fault));
         let _ = engine::execute(&mut model, &exposed, ID);
         let mut recovery = later(&model);
-        let _ = engine::roll_back(&mut recovery, model.record.unwrap());
+        let outcome = engine::roll_back(&mut recovery, model.record.unwrap());
+        if matches!(fault, Fault::Killed | Fault::Refused) {
+            assert_eq!(outcome.code, engine::EXIT_INCOMPLETE, "{fault:?}");
+            assert!(recovery.hosts.exposure_pending);
+        }
         assert!(!recovery.hosts.exposure_owned, "{fault:?}");
         assert!(
             recovery.hosts.source_running && !recovery.hosts.target_running,
@@ -1808,6 +1837,84 @@ fn parked_move() -> Model {
     assert_eq!(outcome.code, 6, "{outcome:?}");
     assert!(model.record.as_ref().unwrap().parked_writes.is_some());
     model
+}
+
+#[test]
+fn release_settles_the_exposure_receipt_before_returning_the_target_bank() {
+    use super::exposure::{
+        self,
+        tests::{Fixture, Folder},
+    };
+
+    for (pending, corrupt) in [(false, false), (true, false), (false, true)] {
+        let mut model = parked_move();
+        let mut record = model.record.take().unwrap();
+        record.expose_port = Some(8765);
+        record.flags.exposure_started = true;
+        let folder = Folder::new();
+        let mut fixture = Fixture::default();
+        fixture.lose_create_result = pending;
+        assert_eq!(
+            exposure::create(&mut fixture, &folder.0, 8765).is_err(),
+            pending
+        );
+        if corrupt {
+            std::fs::write(folder.0.join("exposure.json"), b"invalid receipt").unwrap();
+        }
+        model.exposure_fixture = Some((folder, fixture));
+        let result = engine::release_target(&mut model, record);
+        let (_, fixture) = model.exposure_fixture.as_ref().unwrap();
+        if pending || corrupt {
+            assert_eq!(result.code, engine::EXIT_INCOMPLETE, "{result:?}");
+            assert!(model.hosts.gated && !model.hosts.target_running);
+            assert!(fixture.url.is_some());
+            assert!(
+                !model
+                    .log
+                    .iter()
+                    .any(|line| line.contains("target give-back"))
+            );
+        } else {
+            assert_eq!(result.code, engine::EXIT_OK, "{result:?}");
+            assert!(fixture.url.is_none());
+            let settled = model
+                .log
+                .iter()
+                .position(|line| line.ends_with("target undo-exposure"))
+                .unwrap();
+            let give_back = model
+                .log
+                .iter()
+                .position(|line| line.ends_with("target give-back"))
+                .unwrap();
+            assert!(settled < give_back);
+        }
+    }
+}
+
+#[test]
+fn resume_keeps_exposure_cleanup_in_the_record_before_forward_steps() {
+    let mut first = Model::new();
+    first.fault = Some((call_of("target health"), Fault::Interrupt));
+    assert_eq!(run(&mut first).code, engine::EXIT_ROLLED_BACK);
+    let mut resumed = later(&first);
+    resumed.hosts.exposure_owned = true;
+    resumed.always.push(("target policy-no", Fault::Refused));
+    let plan = Plan {
+        resume: true,
+        target_running: false,
+        resume_baseline: first.record.unwrap().gated_baseline,
+        expose_port: Some(8765),
+        ..plan()
+    };
+    let result = engine::execute(&mut resumed, &plan, ID);
+    assert!(!resumed.hosts.exposure_owned, "{result:?}");
+    assert!(
+        resumed
+            .log
+            .iter()
+            .any(|line| line.ends_with("target undo-exposure"))
+    );
 }
 
 /// A later run (a new process) on the same two hosts.

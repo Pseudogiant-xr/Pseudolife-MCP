@@ -837,6 +837,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
     // gate: the record says so from the start, so a rollback keeps that
     // bank gated, keeps the claim, and never starts it as the target's own.
     record.flags.target_restored = plan.resume;
+    record.flags.exposure_started = plan.resume && plan.expose_port.is_some();
     let mut run = Run {
         hosts,
         plan,
@@ -1501,8 +1502,13 @@ impl<H: Hosts> Back<'_, H> {
             self.record.phase = Phase::RolledBack;
             self.save();
             let note = if restored {
+                let resume = if self.record.expose_port.is_some() {
+                    "--expose-target --resume"
+                } else {
+                    "--resume"
+                };
                 format!(
-                    "; the target keeps the restored bank stopped behind /data/move.json, and its claim ({} on {}). Rerun the move with --resume to finish it, or give {} back its own bank with pseudolife-mcp move --release-target {}",
+                    "; the target keeps the restored bank stopped behind /data/move.json, and its claim ({} on {}). Rerun the move with {resume} to finish it, or give {} back its own bank with pseudolife-mcp move --release-target {}",
                     claim_path(),
                     self.record.target,
                     self.record.target,
@@ -1544,7 +1550,7 @@ impl<H: Hosts> Back<'_, H> {
         }
         self.record.phase = Phase::RollbackIncomplete;
         self.save();
-        let why = match (&parked, &unresolved) {
+        let mut why = match (&parked, &unresolved) {
             (Some(tables), _) => format!(
                 "some undo steps failed, and the target took writes while it served, which are not in the source ({tables}); they are in the stopped, gated target bank on {}, and nothing was deleted",
                 self.record.target
@@ -1570,6 +1576,16 @@ impl<H: Hosts> Back<'_, H> {
                 format!("these undo steps failed: {}", failed.join("; "))
             }
         };
+        if (parked.is_some() || unresolved.is_some())
+            && let Some(failure) = self.record.rollback.iter().rev().find(|undo| {
+                undo.step == "remove the tailnet forward created for the move" && !undo.ok
+            })
+        {
+            why.push_str(&format!(
+                ". The target also reported that {}",
+                failure.detail
+            ));
+        }
         self.incomplete(reason, &why, false)
     }
 
@@ -1577,6 +1593,7 @@ impl<H: Hosts> Back<'_, H> {
     /// run did, a rerun finishes it, and never restores over a bank the
     /// release already gave back.
     fn release(&mut self) -> Outcome {
+        const SETTLE_EXPOSURE: &str = "settle the target exposure receipt";
         let id = self.record.move_id.clone();
         let to = self.record.target.clone();
         let bank = self.record.source_bank.clone();
@@ -1587,6 +1604,14 @@ impl<H: Hosts> Back<'_, H> {
                 detail: why.clone(),
             });
             back.save();
+            if step == SETTLE_EXPOSURE {
+                return Outcome {
+                    code: EXIT_INCOMPLETE,
+                    message: format!(
+                        "giving {to} back its own bank did not finish: {why}. Keep the target stopped and gated until its exposure is settled."
+                    ),
+                };
+            }
             let resort = if step == "read the target's state" {
                 String::new()
             } else {
@@ -1648,6 +1673,10 @@ impl<H: Hosts> Back<'_, H> {
         // Neither this move's claim nor its bank: nothing of this host's bank
         // is there, and nothing there is this move's to change.
         if !ours && !holds_bank {
+            if self.record.expose_port.is_some() && !self.record.flags.exposure_settled_for_release
+            {
+                return unfinished(self, SETTLE_EXPOSURE, "this move no longer holds the target claim and has an unsettled exposure receipt; verify the target's claim before retrying release".into());
+            }
             return self.nothing_there(&state);
         }
         self.record.phase = Phase::Releasing;
@@ -1685,6 +1714,18 @@ impl<H: Hosts> Back<'_, H> {
                 }
                 took.push("put /data/move.json in front of the moved copy");
             }
+        }
+        if let Some(port) = self.record.expose_port
+            && !self.record.flags.exposure_settled_for_release
+        {
+            if !self.abort() {
+                return unfinished(self, SETTLE_EXPOSURE, "the target did not confirm that earlier move steps stopped; retry release when the target can confirm the abort".into());
+            }
+            if let Err(why) = self.op(Op::UndoExposure { port }) {
+                return unfinished(self, SETTLE_EXPOSURE, why);
+            }
+            self.record.flags.exposure_settled_for_release = true;
+            self.save();
         }
         self.hosts
             .say("release: restore the target's own bank (its restore keeps the moved bank in a safety backup)");
@@ -2307,8 +2348,13 @@ fn manual_target_selection(record: &Record) -> Option<String> {
 /// The last way to close a record whose target keeps refusing: on this
 /// host, by hand, with what it leaves on the target.
 fn last_resort(record: &Record) -> String {
+    let exposure = if record.expose_port.is_some() && !record.flags.exposure_settled_for_release {
+        ". First settle the recorded exposure before starting any daemon on that target."
+    } else {
+        ""
+    };
     format!(
-        "if that cannot be put right there, the last resort is on this host: rename {} to record.json.closed, which closes this host's record of move {} so it no longer holds this host. {} then stays as it is, gated and perhaps claimed, until whoever runs it gives it back its own bank and then removes the gate ({}) and the claim (ssh {} rm -f {}); never the gate first, or the copy of this host's bank behind it would start there",
+        "if that cannot be put right there, the last resort is on this host: rename {} to record.json.closed, which closes this host's record of move {} so it no longer holds this host. {} then stays as it is, gated and perhaps claimed, until whoever runs it gives it back its own bank and then removes the gate ({}) and the claim (ssh {} rm -f {}); never the gate first, or the copy of this host's bank behind it would start there{exposure}",
         Path::new(&record.local_dir).join("record.json").display(),
         record.move_id,
         record.target,
@@ -2416,9 +2462,12 @@ pub(super) fn manual_rollback(record: &Record) -> Vec<String> {
     if f.exposure_started
         && let Some(port) = record.expose_port
     {
-        lines.push(format!(
-            "Check {}/exposure.json and run pseudolife-mcp expose status --port {port} --json on the target. Remove a forward only if the record says this move owns it and the reported URL still matches.",
+        let receipt = crate::cli::restore_cli::bank::sh_quote(&format!(
+            "{}/exposure.json",
             remote_folder(record)
+        ));
+        lines.push(format!(
+            "On the target, check {receipt} and run pseudolife-mcp expose status --port {port} --json. Use pseudolife-mcp expose off --port {port} only when the receipt says this move owns the forward and the reported URL still matches."
         ));
     }
     if (f.gate_lifting

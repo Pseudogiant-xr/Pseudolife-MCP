@@ -88,6 +88,7 @@ pub(super) struct Baseline {
 #[serde(default)]
 pub(super) struct Flags {
     pub exposure_started: bool,
+    pub exposure_settled_for_release: bool,
     /// The target's claim was asked for (it names this move once taken).
     pub claimed: bool,
     pub target_timer_paused: bool,

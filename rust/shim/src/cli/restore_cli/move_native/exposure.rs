@@ -6,7 +6,17 @@ use serde::{Deserialize, Serialize};
 use super::ops::Site;
 
 const RECEIPT: &str = "exposure.json";
-const UNKNOWN: &str = "the target forward's ownership could not be established; inspect its exposure receipt and run pseudolife-mcp expose status on the target before removing any forward";
+
+fn inspect(port: u16) -> String {
+    format!("run pseudolife-mcp expose status --port {port} --json on the target")
+}
+
+fn pending(folder: &Path, port: u16) -> String {
+    let folder = super::super::bank::sh_quote(&folder.to_string_lossy());
+    format!(
+        "the target exposure outcome is unknown. Confirm the earlier expose operation and its Tailscale Serve process have exited. On the target, check pseudolife-mcp expose status --port {port} --json and remove only this move's verified forward with pseudolife-mcp expose off --port {port}. Once the port's forward is absent, run pseudolife-mcp move-target settle-exposure {folder} {port} --confirmed-idle, then retry recovery"
+    )
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum Action {
@@ -42,14 +52,37 @@ pub(super) enum Report {
     Existing(String),
     Created(String),
     Removed,
+    NotCreated(String),
 }
 
-pub(super) fn parse(code: i32, output: &[u8], port: u16) -> Result<Report, String> {
-    let refused = "the target's native expose command could not verify its tailnet forward; configure Tailscale there or pass --target-url";
+pub(super) fn parse(action: Action, code: i32, output: &[u8], port: u16) -> Result<Report, String> {
+    let refused = || {
+        format!(
+            "the target's native expose command could not verify the tailnet forward; {} before retrying",
+            inspect(port)
+        )
+    };
+    let response: serde_json::Value = serde_json::from_slice(output).map_err(|_| refused())?;
     if code != 0 {
-        return Err(refused.into());
+        if matches!(action, Action::Create)
+            && response["action"] == "tailscale"
+            && response["port"].as_u64() == Some(u64::from(port))
+            && response["exit"].as_i64() == Some(i64::from(code))
+        {
+            let why = match response["move_failure"].as_str() {
+                Some("permission_denied") => format!(
+                    "Tailscale refused to create the forward for this user; {}",
+                    crate::cli::maintainer::setup::tailscale_permission_fix(std::env::consts::OS)
+                ),
+                Some("serve_not_enabled") => "Tailscale Serve is not enabled for the target's tailnet; have a tailnet administrator enable Serve before retrying".into(),
+                Some("not_attempted") => format!("the native expose checks refused to begin; {} to check the target setup", inspect(port)),
+                Some("not_created") => format!("Tailscale did not leave a forward; {} before retrying", inspect(port)),
+                _ => return Err(refused()),
+            };
+            return Ok(Report::NotCreated(why));
+        }
+        return Err(refused());
     }
-    let response: serde_json::Value = serde_json::from_slice(output).map_err(|_| refused)?;
     match response["state"].as_str() {
         Some("not_exposed") => Ok(Report::Absent),
         Some("removed") => Ok(Report::Removed),
@@ -57,14 +90,14 @@ pub(super) fn parse(code: i32, output: &[u8], port: u16) -> Result<Report, Strin
             let url = response["url"]
                 .as_str()
                 .filter(|url| valid_url(url, port))
-                .ok_or(refused)?;
+                .ok_or_else(refused)?;
             if state == "exposed" {
                 Ok(Report::Created(url.to_owned()))
             } else {
                 Ok(Report::Existing(url.to_owned()))
             }
         }
-        _ => Err(refused.into()),
+        _ => Err(refused()),
     }
 }
 
@@ -121,7 +154,12 @@ pub(super) fn status(report: Report, port: u16) -> Result<Status, String> {
     let url = match report {
         Report::Absent => None,
         Report::Existing(url) | Report::Created(url) => Some(url),
-        Report::Removed => return Err(UNKNOWN.into()),
+        Report::Removed | Report::NotCreated(_) => {
+            return Err(format!(
+                "the target returned an unexpected exposure status; {}",
+                inspect(port)
+            ));
+        }
     };
     Ok(Status { port, url })
 }
@@ -143,34 +181,41 @@ struct Receipt {
 }
 
 fn read(folder: &Path, port: u16) -> Result<Option<Receipt>, String> {
-    match fs::read(folder.join(RECEIPT)) {
+    let path = folder.join(RECEIPT);
+    match fs::read(&path) {
         Ok(bytes) => {
-            let receipt: Receipt = serde_json::from_slice(&bytes).map_err(|_| UNKNOWN)?;
+            let receipt: Receipt = serde_json::from_slice(&bytes).map_err(|_| format!("the exposure receipt at {path:?} is unreadable JSON; recover the original receipt before retrying"))?;
             if receipt.port != port {
-                return Err(UNKNOWN.into());
+                return Err(format!(
+                    "the exposure receipt at {path:?} names a different port; verify the original move and its exposure receipt before retrying"
+                ));
             }
             Ok(Some(receipt))
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err(UNKNOWN.into()),
+        Err(_) => Err(format!(
+            "the exposure receipt at {path:?} could not be read; restore read access before retrying"
+        )),
     }
 }
 
 fn save(folder: &Path, port: u16, ownership: Ownership) -> Result<(), String> {
-    let data = serde_json::to_vec(&Receipt { port, ownership }).map_err(|_| UNKNOWN)?;
+    let data = serde_json::to_vec(&Receipt { port, ownership }).map_err(
+        |_| "the exposure receipt could not be encoded; verify the target client before retrying",
+    )?;
     crate::board::state::atomic_write(&folder.join(RECEIPT), &data, None)
-        .map_err(|_| UNKNOWN.into())
+        .map_err(|_| "the exposure receipt could not be saved; verify the move folder is writable before retrying".into())
 }
 
 pub(super) fn create(site: &mut impl Site, folder: &Path, port: u16) -> Result<String, String> {
     let observed = status(site.expose(Action::Status, port)?, port)?.url;
     if let Some(receipt) = read(folder, port)? {
         match receipt.ownership {
-            Ownership::Pending => return Err(UNKNOWN.into()),
+            Ownership::Pending => return Err(pending(folder, port)),
             Ownership::Owned { url } | Ownership::Borrowed { url } => {
                 return (observed.as_ref() == Some(&url))
                     .then_some(url)
-                    .ok_or_else(|| UNKNOWN.into());
+                    .ok_or_else(|| format!("the observed forward differs from the exposure receipt; {} before retrying", inspect(port)));
             }
             Ownership::Removed => {}
         }
@@ -180,10 +225,17 @@ pub(super) fn create(site: &mut impl Site, folder: &Path, port: u16) -> Result<S
         return Ok(url);
     }
     save(folder, port, Ownership::Pending)?;
-    let (url, ownership) = match site.expose(Action::Create, port)? {
+    let (url, ownership) = match site
+        .expose(Action::Create, port)
+        .map_err(|_| pending(folder, port))?
+    {
         Report::Created(url) => (url.clone(), Ownership::Owned { url }),
         Report::Existing(url) => (url.clone(), Ownership::Borrowed { url }),
-        _ => return Err(UNKNOWN.into()),
+        Report::NotCreated(why) => {
+            save(folder, port, Ownership::Removed)?;
+            return Err(why);
+        }
+        _ => return Err(pending(folder, port)),
     };
     save(folder, port, ownership)?;
     Ok(url)
@@ -202,7 +254,7 @@ pub(super) fn undo(site: &mut impl Site, folder: &Path, port: u16) -> Result<(),
     // The expose child can outlive the target helper. An absent snapshot
     // cannot settle an attempt whose result never reached the journal.
     let Ownership::Owned { url } = receipt.ownership else {
-        return Err(UNKNOWN.into());
+        return Err(pending(folder, port));
     };
     let observed = status(site.expose(Action::Status, port)?, port)?.url;
     if let Some(observed) = observed
@@ -212,13 +264,43 @@ pub(super) fn undo(site: &mut impl Site, folder: &Path, port: u16) -> Result<(),
                 Report::Removed | Report::Absent
             ))
     {
-        return Err(UNKNOWN.into());
+        return Err(format!(
+            "the receipt's forward could not be verified and removed; {} before retrying",
+            inspect(port)
+        ));
+    }
+    save(folder, port, Ownership::Removed)
+}
+
+/// Called only after the operator confirms the earlier operations exited.
+pub(super) fn settle_pending(site: &mut impl Site, folder: &Path, port: u16) -> Result<(), String> {
+    let Some(receipt) = read(folder, port)? else {
+        return Err(
+            "the move folder has no exposure receipt; verify the move folder before retrying"
+                .into(),
+        );
+    };
+    match receipt.ownership {
+        Ownership::Removed => return Ok(()),
+        Ownership::Pending => {}
+        _ => {
+            return Err(
+                "the receipt already records a forward; use the usual move rollback or release"
+                    .into(),
+            );
+        }
+    }
+    if status(site.expose(Action::Status, port)?, port)?
+        .url
+        .is_some()
+    {
+        return Err(pending(folder, port));
     }
     save(folder, port, Ownership::Removed)
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::path::PathBuf;
 
@@ -255,9 +337,10 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Fixture {
-        url: Option<String>,
-        lose_create_result: bool,
+    pub(in crate::cli::restore_cli::move_native) struct Fixture {
+        pub(in crate::cli::restore_cli::move_native) url: Option<String>,
+        pub(in crate::cli::restore_cli::move_native) lose_create_result: bool,
+        clean_failure: Option<String>,
         creates: usize,
         removes: usize,
     }
@@ -285,6 +368,9 @@ mod tests {
                 Action::Status => Ok(self.url.clone().map_or(Report::Absent, Report::Existing)),
                 Action::Create => {
                     self.creates += 1;
+                    if let Some(why) = self.clean_failure.take() {
+                        return Ok(Report::NotCreated(why));
+                    }
                     self.url = Some(URL.into());
                     if self.lose_create_result {
                         Err("creation result lost".into())
@@ -301,10 +387,12 @@ mod tests {
         }
     }
 
-    struct Folder(PathBuf);
+    pub(in crate::cli::restore_cli::move_native) struct Folder(
+        pub(in crate::cli::restore_cli::move_native) PathBuf,
+    );
 
     impl Folder {
-        fn new() -> Self {
+        pub(in crate::cli::restore_cli::move_native) fn new() -> Self {
             let path = std::env::temp_dir()
                 .join(format!("move-exposure-{}", uuid::Uuid::new_v4().simple()));
             fs::create_dir(&path).unwrap();
@@ -357,21 +445,56 @@ mod tests {
         assert!(
             create(&mut lost, &folder.0, PORT)
                 .unwrap_err()
-                .contains("ownership")
+                .contains("settle-exposure")
         );
         assert!(
             undo(&mut lost, &folder.0, PORT)
                 .unwrap_err()
-                .contains("ownership")
+                .contains("settle-exposure")
         );
         assert_eq!((lost.creates, lost.removes), (1, 0));
         assert!(lost.url.is_some());
+        assert!(settle_pending(&mut lost, &folder.0, PORT).is_err());
         lost.url = None;
         assert!(
             undo(&mut lost, &folder.0, PORT)
                 .unwrap_err()
-                .contains("ownership")
+                .contains("settle-exposure")
         );
+        settle_pending(&mut lost, &folder.0, PORT).unwrap();
+        undo(&mut lost, &folder.0, PORT).unwrap();
         assert_eq!(lost.removes, 0);
+    }
+
+    #[test]
+    fn clean_exposure_refusals_preserve_the_recovery_state_and_report_the_cause() {
+        let report = |failure| {
+            serde_json::to_vec(&serde_json::json!({
+                "action":"tailscale", "port":PORT, "exit":4, "move_failure":failure,
+                "state":null, "error":"fixture diagnostic must stay local",
+            }))
+            .unwrap()
+        };
+        assert!(parse(Action::Create, 4, &report("unknown"), PORT).is_err());
+        assert!(parse(Action::Create, 4, &report("permission_denied"), PORT + 1).is_err());
+        for (kind, expected) in [
+            ("permission_denied", "refused to create"),
+            ("serve_not_enabled", "enable Serve"),
+        ] {
+            let Report::NotCreated(why) = parse(Action::Create, 4, &report(kind), PORT).unwrap()
+            else {
+                panic!("expected a clean refusal")
+            };
+            assert!(why.contains(expected));
+            assert!(!why.contains("fixture diagnostic"));
+            let folder = Folder::new();
+            let mut fixture = Fixture {
+                clean_failure: Some(why.clone()),
+                ..Default::default()
+            };
+            assert_eq!(create(&mut fixture, &folder.0, PORT), Err(why));
+            undo(&mut fixture, &folder.0, PORT).unwrap();
+            assert_eq!(create(&mut fixture, &folder.0, PORT).unwrap(), URL);
+        }
     }
 }

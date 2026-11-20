@@ -1232,6 +1232,43 @@ fn exposure_resume_advertises_the_mode_that_recreates_its_forward() {
 }
 
 #[test]
+fn resume_keeps_the_recorded_exposure_port_when_status_already_has_a_forward() {
+    let request = Request {
+        target_url: None,
+        expose_target: true,
+        resume_move: MOVE.into(),
+        resume_expose_port: Some(8765),
+        resume_baseline: Some(record::Baseline::default()),
+        ..request()
+    };
+    let home = exposure::tests::Folder::new();
+    let moves = home.0.join(".pseudolife-mcp/moves");
+    std::fs::create_dir_all(&moves).unwrap();
+    let claim = json!({"move_id": MOVE, "source_bank": fp(SOURCE_ID), "at": "t"});
+    std::fs::write(moves.join("claim.json"), claim.to_string()).unwrap();
+    let mut fake = world();
+    fake.wire.far.home = Some(home.0.clone());
+    fake.wire.far.nearest = Some((home.0.clone(), home.0.clone(), Some(100 << 30)));
+    fake.wire.far.docker = Host::new(SOURCE_ID);
+    fake.wire.far.docker.docs.insert(
+        "pseudolife-mcp-daemon".to_owned(),
+        daemon_doc(false, "pseudolife-stack", "/home/u/pseudolife-stack"),
+    );
+    fake.wire.state = Some(protocol::State {
+        gated: Some(true),
+        mutations: Some(Default::default()),
+        ..Default::default()
+    });
+    fake.wire.exposure = Some(exposure::Status {
+        port: 8765,
+        url: Some("http://100.64.0.7:8765".into()),
+    });
+    let plan = preflight(&mut fake, &request).unwrap();
+    assert_eq!(plan.expose_port, Some(8765));
+    assert_read_only(&fake);
+}
+
+#[test]
 fn explicit_target_files_require_helper_support_and_keep_overlay_order_on_the_wire() {
     let request = Request {
         no_keep_tokens: false,

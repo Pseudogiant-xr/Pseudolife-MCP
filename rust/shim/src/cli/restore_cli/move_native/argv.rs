@@ -29,6 +29,8 @@ pub(super) struct Request {
     pub resume_baseline: Option<super::record::Baseline>,
     /// For `--resume`: whether the target daemon ran before that move began.
     pub resume_target_was_running: bool,
+    /// For `--resume`: the port managed by the earlier attempt, if any.
+    pub resume_expose_port: Option<u16>,
 }
 
 /// The canonical argv, or `None` (the dispatcher defers it).

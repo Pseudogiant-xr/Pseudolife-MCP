@@ -363,6 +363,9 @@ pub(in crate::cli) fn run(arguments: &[std::ffi::OsString]) -> u8 {
     if asked == "recovery-commands" {
         return print_recovery_commands(arguments);
     }
+    if asked == "settle-exposure" {
+        return settle_exposure(arguments);
+    }
     let print = |reply: &Reply| {
         let line = format!(
             "{FRAME}{}\n",
@@ -448,6 +451,67 @@ fn print_recovery_commands(arguments: &[std::ffi::OsString]) -> u8 {
             4
         }
     }
+}
+
+fn settle_exposure(arguments: &[std::ffi::OsString]) -> u8 {
+    fn parse(arguments: &[std::ffi::OsString]) -> Option<(PathBuf, u16)> {
+        let [_, folder, port, confirmed] = arguments else {
+            return None;
+        };
+        if confirmed != "--confirmed-idle" {
+            return None;
+        }
+        let name = folder.to_str()?;
+        let folder = match name.strip_prefix("~/") {
+            Some(rest) => super::command::home()?.join(rest.trim_start_matches('/')),
+            None => PathBuf::from(name),
+        };
+        if !folder.is_absolute()
+            || name.chars().any(char::is_control)
+            || folder
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+        {
+            return None;
+        }
+        let port = port.to_str()?.parse().ok().filter(|port| *port != 0)?;
+        Some((folder, port))
+    }
+    let Some((folder, port)) = parse(arguments) else {
+        eprintln!(
+            "usage: pseudolife-mcp move-target settle-exposure <absolute-move-folder-or-~/> <port> --confirmed-idle"
+        );
+        return 2;
+    };
+    let Some(directory) = super::super::data_dir() else {
+        eprintln!(
+            "move-target: the target's update lock has no home directory; set the target user's home and retry"
+        );
+        return 4;
+    };
+    let mut site = Site2 {
+        docker: None,
+        missing: String::new(),
+    };
+    let result = super::super::with_update_lock(&directory, || {
+        super::exposure::settle_pending(&mut site, &folder, port)
+    });
+    match result {
+        Ok(Ok(())) => {
+            println!(
+                "The exposure receipt is settled. Retry the move's rollback or release from its source."
+            );
+            return 0;
+        }
+        Ok(Err(why)) => eprintln!("move-target: {why}"),
+        Err(super::super::LockRefusal::Busy(pid)) => eprintln!(
+            "move-target: the target's update lock is held (pid {pid}); wait for it to finish, then retry"
+        ),
+        Err(super::super::LockRefusal::Unavailable(_)) => eprintln!(
+            "move-target: the target's update lock could not be acquired; verify its data directory is writable and retry"
+        ),
+    }
+    4
 }
 
 /// The real target host, for protocol 2's operations.
@@ -564,10 +628,16 @@ fn run_expose(
     let mut command = std::process::Command::new(std::env::current_exe().map_err(|_| error)?);
     command
         .args(action.arguments(port))
+        .env(crate::cli::expose::MOVE_EXPOSURE_REPORT_ENV, "1")
         .stdin(std::process::Stdio::null());
     super::source::no_window(&mut command);
     let result = command.output().map_err(|_| error)?;
-    super::exposure::parse(result.status.code().unwrap_or(1), &result.stdout, port)
+    super::exposure::parse(
+        action,
+        result.status.code().unwrap_or(1),
+        &result.stdout,
+        port,
+    )
 }
 
 fn print_answer(answer: &super::protocol::Answer) {

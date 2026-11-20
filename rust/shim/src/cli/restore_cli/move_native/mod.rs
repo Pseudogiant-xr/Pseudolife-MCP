@@ -250,6 +250,12 @@ fn check_carry<W: World>(
 fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String> {
     let mut target_url = request.target_url.clone().unwrap_or_default();
     let wants_exposure = request.expose_target && request.target_url.is_none();
+    if request.resume_expose_port.is_some() && !wants_exposure {
+        return Err(
+            "this move manages a target forward; resume with --expose-target and omit --target-url"
+                .into(),
+        );
+    }
     let docker = world.docker()?;
     let mut source = probe::gather(docker).map_err(|why| format!("the source: {why}"))?;
     if source.running
@@ -383,6 +389,13 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         if status.port != exposure::port(&target.health_url)? || target_pins.is_none() {
             return Err("the selected target deployment could not be verified for exposure; check its Docker stack and local binding or pass --target-url".into());
         }
+        if let Some(port) = request.resume_expose_port
+            && status.port != port
+        {
+            return Err(format!(
+                "this move manages exposure on port {port}; restore the target's recorded loopback port before resuming"
+            ));
+        }
         if let Some(url) = &status.url {
             if !exposure::valid_url(url, status.port) {
                 return Err("the target helper reported an invalid tailnet URL; check its exposure or pass --target-url".into());
@@ -391,6 +404,9 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         } else {
             expose_port = Some(status.port);
         }
+        // An observed forward may belong to this move's earlier attempt.
+        // Let the target reconcile its receipt before reusing that URL.
+        expose_port = request.resume_expose_port.or(expose_port);
     }
     let can_carry = !request.no_keep_tokens
         && reply.supports_carry_execution == Some(true)
@@ -849,6 +865,7 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
                     request.target_work_dir =
                         (!earlier.work_dir.is_empty()).then(|| earlier.work_dir.clone());
                     request.resume_move = earlier.move_id.clone();
+                    request.resume_expose_port = earlier.expose_port;
                     if earlier.carried_identities && request.no_keep_tokens {
                         return Some(finish(&request, Err("the previous attempt carried bearer settings; resume it without --no-keep-tokens".into())));
                     }

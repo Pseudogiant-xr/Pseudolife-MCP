@@ -907,10 +907,13 @@ that the tailnet URL serves the moved bank before committing. The explicit
 flag authorizes creation of the persistent forward. With `--target-url`,
 the move uses that address.
 
-Rollback removes a forward only when its target-side `exposure.json`
-receipt identifies it as created by this move and the target still
-reports the same forward. The recovery output names the receipt and the
-read-only status command if ownership is uncertain.
+Rollback removes a forward when its target-side `exposure.json` receipt
+identifies it as created by this move and the target still reports the
+same forward. Target release settles the receipt before returning the
+target's own bank. Resume keeps the original exposure port and ownership.
+If a receipt is pending, confirm the earlier exposure processes have
+exited and check the port's status. Once the forward is absent, follow
+the printed `move-target settle-exposure` command, then retry recovery.
 
 If rollback cannot restore the target environment or verify its stopped
 daemon, keep the target stopped and gated. Follow the reported next step.

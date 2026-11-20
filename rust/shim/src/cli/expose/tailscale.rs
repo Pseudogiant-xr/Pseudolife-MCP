@@ -47,6 +47,8 @@ pub(super) struct Proc {
     pub(super) unreadable: bool,
     pub(super) timed_out: bool,
     pub(super) err_before: String,
+    /// The child was never started or its exit was observed.
+    pub(super) settled: bool,
 }
 
 impl Proc {
@@ -177,6 +179,7 @@ async fn run_within(binary: &Binary, args: &[&str], timeout: Duration) -> Proc {
             return Proc {
                 code: 127,
                 err: spawn_text(&error, &binary.shown),
+                settled: true,
                 ..Proc::default()
             };
         }
@@ -200,11 +203,13 @@ async fn run_within(binary: &Binary, args: &[&str], timeout: Duration) -> Proc {
                     code,
                     out,
                     err,
+                    settled: true,
                     ..Proc::default()
                 },
                 _ => Proc {
                     code,
                     unreadable: true,
+                    settled: true,
                     ..Proc::default()
                 },
             }
@@ -216,7 +221,7 @@ async fn run_within(binary: &Binary, args: &[&str], timeout: Duration) -> Proc {
         },
         Err(_) => {
             let _ = child.start_kill();
-            let _ = tokio::time::timeout(DRAIN, child.wait()).await;
+            let settled = matches!(tokio::time::timeout(DRAIN, child.wait()).await, Ok(Ok(_)));
             // A handle the first wait already saw finish must not be
             // polled again (Tokio panics on that).
             let _ = tokio::time::timeout(DRAIN, async {
@@ -237,6 +242,7 @@ async fn run_within(binary: &Binary, args: &[&str], timeout: Duration) -> Proc {
                 unreadable: false,
                 timed_out: true,
                 err_before: newlines(&String::from_utf8_lossy(&taken(&err))),
+                settled,
             }
         }
     }
@@ -642,6 +648,7 @@ mod tests {
                 err: "err
 "
                 .into(),
+                settled: true,
                 ..Proc::default()
             }
         );
