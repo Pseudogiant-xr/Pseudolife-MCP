@@ -349,7 +349,7 @@ fn check_unused_name(root: &Path, name: &str) -> Result<(), Fail> {
     Ok(())
 }
 
-fn check_directory(root: &Path) -> Result<(), Fail> {
+pub(super) fn check_directory(root: &Path) -> Result<(), Fail> {
     store::checked_path(root).map_err(|_| Fail::Tunnel(DIRECTORY))?;
     match fs::symlink_metadata(root) {
         Ok(info) if info.is_dir() => {
@@ -417,7 +417,7 @@ fn prepare_directory(root: &Path) -> Result<(), Fail> {
     check_directory(root)
 }
 
-fn publish_new(
+pub(super) fn publish_new(
     path: &Path,
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> Result<(), Fail> {

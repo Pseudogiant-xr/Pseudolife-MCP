@@ -54,6 +54,8 @@ pub(super) enum Why {
 pub(super) struct Record {
     pub path: PathBuf,
     pub liveness: Liveness,
+    /// Native supervisors accept a stop request bound to this launch.
+    pub native: bool,
     /// The record's own readiness flag, meaningful only while it runs.
     pub ready: bool,
     /// Why the verdict is `Unknown`; `None` otherwise.
@@ -104,6 +106,7 @@ pub(super) fn read(path: PathBuf, table: Option<&[Row]>) -> Option<Record> {
         return Some(Record {
             path,
             liveness: Liveness::Unknown,
+            native: false,
             ready: false,
             why: Some(Why::Unreadable),
         });
@@ -118,6 +121,11 @@ pub(super) fn read(path: PathBuf, table: Option<&[Row]>) -> Option<Record> {
     Some(Record {
         path,
         liveness,
+        native: record
+            .get("native_launch")
+            .and_then(Value::as_str)
+            .and_then(super::runtime::launch_id)
+            .is_some(),
         ready: record.get("ready") == Some(&Value::Bool(true)),
         why,
     })
