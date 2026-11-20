@@ -183,7 +183,7 @@ def _prompt_cases() -> list[Case]:
              env=TOKEN))
     add(Case("prompt-existing-cursor", ["prompt-hook"], stdin=prompt_input(), daemon=daemon(),
              env=TOKEN,
-             setup=lambda arm: p.write_private(_mark(arm.home), "1791515000.5\n")))
+             setup=lambda arm: p.write_private(_mark(arm.home), "1791515000.5\n", root=arm.home)))
     add(Case("prompt-cursor-only", ["prompt-hook"], stdin=prompt_input(), env=TOKEN,
              daemon=daemon(**{"/api/hook/memory-changes": text("1791516000.25\n")})))
     add(Case("prompt-cursor-no-newline", ["prompt-hook"], stdin=prompt_input(), env=TOKEN,
@@ -192,10 +192,10 @@ def _prompt_cases() -> list[Case]:
              daemon=daemon(**{"/api/hook/memory-changes": text("17.5\r\nnote ü\r\n")})))
     add(Case("prompt-bad-cursor", ["prompt-hook"], stdin=prompt_input(), env=TOKEN,
              daemon=daemon(**{"/api/hook/memory-changes": text("soon\nnote\n")}),
-             setup=lambda arm: p.write_private(_mark(arm.home), "12.0\n")))
+             setup=lambda arm: p.write_private(_mark(arm.home), "12.0\n", root=arm.home)))
     add(Case("prompt-payload-500", ["prompt-hook"], stdin=prompt_input(), env=TOKEN,
              daemon=daemon(**{"/api/hook/memory-changes": text("boom", 500)}),
-             setup=lambda arm: p.write_private(_mark(arm.home), "12.0\n")))
+             setup=lambda arm: p.write_private(_mark(arm.home), "12.0\n", root=arm.home)))
     add(Case("prompt-daemon-down", ["prompt-hook"], stdin=prompt_input(), env=TOKEN))
     add(Case("prompt-trickle", expect_output=True, argv=["prompt-hook"], stdin=prompt_input(), env=TOKEN,
              daemon=daemon(**{"/api/hook/memory-changes": Trickle(
@@ -210,7 +210,7 @@ def _prompt_cases() -> list[Case]:
     add(Case("prompt-no-token", ["prompt-hook"], stdin=prompt_input(), daemon=daemon()))
     add(Case("prompt-token-file", ["prompt-hook"], stdin=prompt_input(), daemon=daemon(),
              env={"PSEUDOLIFE_MCP_TOKEN_FILE": "{HOME}/tok"},
-             setup=lambda arm: p.write_private(arm.home / "tok", "w1b-file-token\n")))
+             setup=lambda arm: p.write_private(arm.home / "tok", "w1b-file-token\n", root=arm.home)))
     add(Case("prompt-invalid-session", ["prompt-hook"], stdin=prompt_input("has space"),
              daemon=daemon(), env=TOKEN))
     add(Case("prompt-session-max-length", ["prompt-hook"], stdin=prompt_input("a" * 128),
@@ -225,8 +225,8 @@ def _prompt_cases() -> list[Case]:
     def stale_marks(arm):
         d = p.digest_dir(arm.home)
         old, fresh = d / ("0" * 64 + ".mark"), d / ("1" * 64 + ".mark")
-        p.write_private(old, "1.0\n")
-        p.write_private(fresh, "2.0\n")
+        p.write_private(old, "1.0\n", root=arm.home)
+        p.write_private(fresh, "2.0\n", root=arm.home)
         past = time.time() - 31 * 86400
         os.utime(old, (past, past))
     add(Case("prompt-first-note-prunes-old-marks", ["prompt-hook"], stdin=prompt_input(),
@@ -245,7 +245,7 @@ def _bell(home: Path, suffix: str, thread: str = THREAD) -> Path:
 
 def seed_pending(kind="regular"):
     def setup(arm):
-        p.write_private(_bell(arm.home, "bell-pending"), p.doorbell_record(kind))
+        p.write_private(_bell(arm.home, "bell-pending"), p.doorbell_record(kind), root=arm.home)
     return setup
 
 
@@ -288,7 +288,7 @@ def _doorbell_cases() -> list[Case]:
              env={"PSEUDOLIFE_DIGEST_DIR": "{HOME}/custom-digests"},
              setup=lambda arm: p.write_private(
                  arm.home / "custom-digests" / f"{p.digest_key(THREAD)}.bell-pending",
-                 p.doorbell_record("regular"))))
+                 p.doorbell_record("regular"), root=arm.home)))
     return c
 
 
