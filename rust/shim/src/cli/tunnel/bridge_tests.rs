@@ -191,7 +191,6 @@ fn a_challenge_for_another_identity_names_the_refusal() {
     );
 }
 
-#[cfg(unix)]
 fn put_native_record(store: &Store, generation: &str, identity: &str, executable: &Path) {
     let record = json!({
         "native_launch": generation, "launch_identity": identity, "ready": true, "target": null,
@@ -205,25 +204,38 @@ fn put_native_record(store: &Store, generation: &str, identity: &str, executable
     .unwrap();
 }
 
-#[cfg(unix)]
-fn identity_fixture() -> (Store, std::fs::File) {
+fn identity_fixture() -> Option<(Store, std::fs::File)> {
     let store = Store::new();
     store.profile("dot");
     store.put("token", b"fixture-daemon-token");
+    #[cfg(unix)]
     store.put("dot.key", b"PLAIN\0fixture-runtime-key");
+    #[cfg(windows)]
+    {
+        let protected = match super::super::dpapi::protect(b"fixture-runtime-key") {
+            Ok(protected) => protected,
+            Err(_) if std::env::var_os("GITHUB_ACTIONS").is_none() => {
+                eprintln!("DPAPI unavailable for this Windows sign-in");
+                return None;
+            }
+            Err(_) => panic!("hosted Windows must exercise DPAPI"),
+        };
+        store.put("dot.key", &[b"DPAPI\0".as_slice(), &protected].concat());
+    }
     let lock = crate::board::state::create(&store.0.join("dot.native-run.lock"))
         .unwrap()
         .file;
     lock.try_lock().unwrap();
-    (store, lock)
+    Some((store, lock))
 }
 
 #[test]
-#[cfg(unix)]
 fn a_recovery_lock_cannot_activate_a_stale_ready_record() {
     // Recovery has both lifetime locks. The ready record belongs to a
     // generation whose supervisor is gone.
-    let (store, _native) = identity_fixture();
+    let Some((store, _native)) = identity_fixture() else {
+        return;
+    };
     let legacy_path = store.0.join("dot.lock");
     let legacy = crate::board::state::create(&legacy_path).unwrap().file;
     legacy.try_lock().unwrap();
@@ -254,9 +266,10 @@ fn a_recovery_lock_cannot_activate_a_stale_ready_record() {
 }
 
 #[test]
-#[cfg(unix)]
 fn a_matching_identity_can_settle_after_the_same_profile_relaunches() {
-    let (store, _lock) = identity_fixture();
+    let Some((store, _lock)) = identity_fixture() else {
+        return;
+    };
     let executable = std::env::current_exe().unwrap();
     let active = identity::fixture_identity(&store.0, &store.load("dot"), &executable);
     let old = uuid::Uuid::new_v4().simple().to_string();
@@ -307,9 +320,10 @@ fn a_matching_identity_can_settle_after_the_same_profile_relaunches() {
 }
 
 #[test]
-#[cfg(unix)]
 fn a_changed_runtime_digest_with_an_old_record_cannot_settle() {
-    let (store, _lock) = identity_fixture();
+    let Some((store, _lock)) = identity_fixture() else {
+        return;
+    };
     let executable = store.0.join("runtime-fixture");
     store.put("runtime-fixture", b"first runtime example");
     let active = identity::fixture_identity(&store.0, &store.load("dot"), &executable);

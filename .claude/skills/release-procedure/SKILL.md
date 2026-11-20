@@ -133,21 +133,28 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    distribution's `.dist-info/` directory. Check the `mcp-name` marker in METADATA,
    no identifiers (grep the METADATA for the guard list).
 3. **PyPI**: publishing the GitHub release triggers
-   `.github/workflows/release.yml` (Trusted Publishing — OIDC, no token):
-   the `build` job guards tag == pyproject version **and** both `server.json`
-   version fields == tag (issue #185 moved the server.json guard here, from
-   the `registry` job below, so a mismatch fails before anything builds or
-   uploads — it used to run after the irreversible PyPI publish and burn a
-   release number), then builds and twine-checks. The workflow verifies
-   and attaches the five native CLI archives, Compose bundle and
-   `SHA256SUMS` before the `publish` job waits for approval in the
-   `pypi` environment, so a failed native build or attachment stops the release
-   before PyPI. Existing PyPI-based updaters can obtain the archives once the
-   wheel becomes visible. Native GitHub discovery waits for
-   `RELEASE-READY.json`, which the workflow attaches only after the approved
-   `publish` job and both image jobs succeed, so the daemon, PostgreSQL and
-   Rust daemon images are all published. A manual wheel upload does not
-   create the readiness marker.
+   `.github/workflows/release.yml` (Trusted Publishing — OIDC, no token).
+   The `guards` job checks the tag against the pyproject version and both
+   `server.json` version fields, and checks that both native crate versions
+   match. These checks run before either build or any upload (issue #185).
+   Afterward, the `build` job builds and twine-checks the sdist and wheel
+   while the native jobs build, verify and attach the five native CLI
+   archives, Compose bundle and `SHA256SUMS`. The `publish` job asks for
+   approval in the `pypi` environment after both paths succeed, so a failed
+   native build or attachment still stops the release before PyPI. Existing
+   PyPI-based updaters can obtain the archives once the wheel becomes
+   visible. Native GitHub discovery waits for `RELEASE-READY.json`, which
+   the workflow attaches only after the approved `publish` job and both
+   image jobs succeed, so the daemon, PostgreSQL and Rust daemon images
+   are all published. A manual wheel upload does not create the readiness
+   marker.
+   If the wheel build fails, the native assets can still attach to the
+   public release before approval. Explicit tags and daemons with the
+   original GitHub discovery rule can see the assets. PyPI upload, image
+   and registry publication, and the readiness marker wait for a
+   successful wheel build and the approval it enables. If the wheel build
+   cannot be made to pass by re-running the failed job, abandon the version
+   as step 5 describes, because its native assets are already public.
    Manual `twine upload
    dist/*` remains the fallback. PyPI never accepts a same-version
    re-upload — metadata-only fixes are a `.postN`.
@@ -158,7 +165,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    for PyPI to actually serve the new version, checks the marker survived
    into the published description, publishes, then confirms the registry
    serves it as latest — the `server.json` version check itself already
-   happened in `build`, above. Publishing the GitHub release is now the
+   happened in `guards`, above. Publishing the GitHub release is now the
    single action that lands all four surfaces.
    *Manual fallback* (`mcp-publisher login github` then `publish`, from the
    repo root) if the job is ever broken — note the binary is often not on
@@ -197,9 +204,9 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    `docker pull` with nothing changed. The Rust image gets only the explicit version
    tag; the workflow pushes no `latest` for it.
    The five native CLI archives, `SHA256SUMS` and
-   `pseudolife-compose-<version>.tar.gz` publish with every release before
-   `publish` (no variable), once `build`'s guards passed; the installers download the archive
-   for their host.
+   `pseudolife-compose-<version>.tar.gz` attach to the release after
+   `guards` passes, independently of the wheel build and ahead of
+   `publish`. The installers download the archive for their host.
 
    After the run, use `gh release view v<version> --json assets` to check that
    the five native CLI archives, Compose bundle, `SHA256SUMS` and
@@ -218,15 +225,17 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    the job, as for the Python image.
 
    Run the build-only `release.yml` workflow dispatch on the candidate
-   first: all five target binaries must compile and execute their version
-   command after unpacking, and the complete compose/checksum artifact must
-   pass verification. Dispatch never invokes PyPI, GHCR, the registry or
-   GitHub asset publication. After an enabled release, inspect the Rust
-   image digest, download the six archives plus `SHA256SUMS`, and verify
-   every checksum and the archive-root layout in
-   [the asset contract](../../../docs/dev/release-assets.md). The Rust
-   GHCR package needs public visibility after its first approved push.
-   The build job checks native crate versions before PyPI publication.
+   first. The native build and bundle jobs must compile and execute the
+   version command for each unpacked target binary and verify the complete
+   Compose and checksum artifact. The native matrix checks the crate
+   versions. Dispatch skips `guards`, the wheel build, PyPI, GHCR, the
+   registry, GitHub asset attachment and the readiness marker. After an
+   enabled release, inspect the Rust image digest, download the six
+   archives plus `SHA256SUMS`, and verify every checksum and the archive-root
+   layout in [the asset contract](../../../docs/dev/release-assets.md).
+   The Rust GHCR package needs public visibility after its first approved
+   push. On a release, `guards` checks native crate versions before either
+   build starts.
    If native asset attachment stops after a partial upload, rerun the
    asset publication job with the same complete artifact. It requires the
    exact file set and checksums, downloads and verifies already published

@@ -1,7 +1,7 @@
 //! `pseudolife-mcp move-target <protocol>`: the target half of a move's
 //! preflight, run by the source over ssh.
 //!
-//! Hidden: users never run it. It reads one JSON request on stdin (what the
+//! The protocol form reads one JSON request on stdin (what the
 //! source is: its schema, PostgreSQL version and bank fingerprint, and the
 //! work directory the move would use), checks this host's bank without
 //! changing anything, and prints one line, [`FRAME`] then a JSON reply.
@@ -9,6 +9,7 @@
 //! prints. The reply carries verdicts and facts, never a secret. It exits 0
 //! whatever it found (the verdicts say), 3 for a protocol it does not
 //! speak, and never 255, which the source reads as ssh's own failure.
+//! The local `recovery-commands` form prints manual instructions from a carry journal.
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -62,6 +63,8 @@ pub(in crate::cli) struct Reply {
     /// Preflight-only helpers omit this even when they support CarryCheck.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supports_carry_execution: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_carry_files: Option<bool>,
 }
 
 /// What the target host offers the helper: its docker, a health GET, the
@@ -353,6 +356,9 @@ pub(in crate::cli) fn run(arguments: &[std::ffi::OsString]) -> u8 {
         .and_then(|a| a.to_str())
         .unwrap_or_default()
         .to_owned();
+    if asked == "recovery-commands" {
+        return print_recovery_commands(arguments);
+    }
     let print = |reply: &Reply| {
         let line = format!(
             "{FRAME}{}\n",
@@ -405,6 +411,41 @@ pub(in crate::cli) fn run(arguments: &[std::ffi::OsString]) -> u8 {
     0
 }
 
+fn print_recovery_commands(arguments: &[std::ffi::OsString]) -> u8 {
+    let [_, file] = arguments else {
+        eprintln!("usage: pseudolife-mcp move-target recovery-commands <carry.json>");
+        return 2;
+    };
+    let Some(file) = file
+        .to_str()
+        .filter(|name| super::carry::TargetFiles::valid(name))
+    else {
+        eprintln!("move-target: name the carry journal with an absolute path or ~/ on this host");
+        return 2;
+    };
+    let path = if let Some(rest) = file.strip_prefix("~/") {
+        let Some(home) = super::command::home() else {
+            eprintln!(
+                "move-target: use the journal's absolute path because this host has no home directory"
+            );
+            return 2;
+        };
+        home.join(rest.trim_start_matches('/'))
+    } else {
+        PathBuf::from(file)
+    };
+    match super::carry::recovery_commands(&path) {
+        Ok(commands) => {
+            println!("{commands}");
+            0
+        }
+        Err(error) => {
+            eprintln!("move-target: {error}");
+            4
+        }
+    }
+}
+
 /// The real target host, for protocol 2's operations.
 struct Site2 {
     docker: Option<docker::Real>,
@@ -420,12 +461,22 @@ impl super::ops::Site for Site2 {
         pins: Option<&super::carry::TargetPins>,
     ) -> Result<(), String> {
         use super::{carry, protocol::Op};
+        let home = self.home();
         let docker = self.docker()?;
         match op {
             Op::CarryApply {
                 identities,
                 expected_pins,
-            } => carry::apply(docker, folder, id, identities, expected_pins),
+                files,
+            } => carry::apply(
+                docker,
+                folder,
+                id,
+                identities,
+                expected_pins,
+                files,
+                home.as_deref(),
+            ),
             Op::CarryVerify { identities } => carry::verify(docker, folder, identities, pins),
             Op::CarryUndo => carry::undo(docker, folder, id, pins),
             _ => Err("unrecognized carried identity operation".into()),
@@ -566,13 +617,19 @@ fn answer_op(
         error,
         ..Answer::default()
     };
-    if let Op::CarryCheck { populated } = &request.op {
+    if let Op::CarryCheck { populated, files } = &request.op {
         use super::ops::Site;
         let mut answer = refuse(String::new());
-        match site
-            .docker()
-            .and_then(|docker| super::carry::target(docker, *populated, request.pins.as_ref()))
-        {
+        let home = site.home();
+        match site.docker().and_then(|docker| {
+            super::carry::target(
+                docker,
+                *populated,
+                request.pins.as_ref(),
+                files,
+                home.as_deref(),
+            )
+        }) {
             Ok(digest) => {
                 answer.ok = true;
                 answer.carry_deployment = digest;
@@ -634,6 +691,7 @@ fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
     let mut reply = answer(here, ask);
     reply.supports_carry = ask.carry.then_some(cfg!(target_os = "linux"));
     reply.supports_carry_execution = reply.supports_carry;
+    reply.supports_carry_files = reply.supports_carry;
     reply
 }
 
@@ -645,6 +703,7 @@ mod lock_tests {
     fn carry_check_dispatches_read_only_without_entering_the_move_transaction() {
         let op = Op::CarryCheck {
             populated: [true, false, false, false],
+            files: Default::default(),
         };
         assert!(!super::takes_lock(&op));
         let request = Request {

@@ -72,6 +72,88 @@ fn read_journal(path: &Path) -> Result<Option<Journal>, String> {
     }
 }
 
+/// Render the target's manual commands without reading its env file or running Docker.
+pub(in crate::cli::restore_cli::move_native) fn recovery_commands(
+    path: &Path,
+) -> Result<String, String> {
+    match read_journal(path) {
+        Ok(Some(journal)) => render_recovery_commands(&journal),
+        Ok(None) => Err(format!(
+            "no carry journal at {path:?}. If this is the move's intact folder, the move never changed the environment file and there is nothing to restore there. Otherwise locate the move's carry.json."
+        )),
+        Err(_) => Err(format!(
+            "cannot read or parse the target carry journal at {path:?}. Verify the file before continuing."
+        )),
+    }
+}
+
+fn render_recovery_commands(journal: &Journal) -> Result<String, String> {
+    use crate::cli::restore_cli::bank::sh_quote;
+
+    let deployment = &journal.deployment;
+    let invalid = concat!(
+        "the carry journal's deployment could not be verified. Keep the daemon stopped and gated. ",
+        "Restore the original environment by hand using deployment.env_file, original_bytes and ",
+        "original_digest from the journal. Verify the deployment, then recreate the daemon ",
+        "stopped using its recorded deployment.args."
+    );
+    deployment
+        .check_binding(&journal.original_pins)
+        .map_err(|_| invalid)?;
+    let args: Vec<_> = deployment.args.iter().map(String::as_str).collect();
+    let [
+        "compose",
+        "--project-name",
+        project,
+        "--project-directory",
+        dir,
+        "--env-file",
+        env,
+        files @ ..,
+    ] = args.as_slice()
+    else {
+        return Err(invalid.into());
+    };
+    let absolute = |path: &str| path.starts_with('/') && TargetFiles::valid(path);
+    if *project != deployment.project
+        || *env != deployment.env_file
+        || !absolute(dir)
+        || !absolute(env)
+        || files.is_empty()
+        || !files
+            .chunks(2)
+            .all(|pair| matches!(pair, ["-f", file] if absolute(file)))
+        || journal.original_bytes > MAX_ENV as usize
+        || !crate::cli::update::plain_release(&deployment.tag)
+    {
+        return Err(invalid.into());
+    }
+    let expected = journal
+        .original_digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let checksum = format!(
+        "Verify the original prefix (expected SHA-256 {expected}):\n  head -c {} {} | sha256sum",
+        journal.original_bytes,
+        sh_quote(env),
+    );
+    if journal.restored {
+        return Ok(format!(
+            "The carry journal records that the original environment was restored. Keep the daemon stopped and gated while you verify it.\n{checksum}"
+        ));
+    }
+    let compose = args
+        .iter()
+        .map(|arg| sh_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(format!(
+        "{checksum}\nAfter restoring the original environment, check for exported overrides in the shell where you will run Compose:\n  bash -c 'compgen -e' | grep -E '^(COMPOSE_|PSEUDOLIFE_)'\nThe check should print nothing. If it lists any names, unset each listed variable in this shell and run the check again. If the check reports an error, resolve it before continuing.\nThen recreate the selected daemon stopped:\n  PSEUDOLIFE_IMAGE_TAG={} docker {compose} up --no-start --no-deps --no-build --pull never --force-recreate {DAEMON_SERVICE}",
+        sh_quote(&deployment.tag)
+    ))
+}
+
 fn digest(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
@@ -269,32 +351,50 @@ pub(in crate::cli::restore_cli::move_native) fn apply(
     id: &str,
     identities: &Identities,
     pins: &TargetPins,
+    files: &TargetFiles,
+    home: Option<&Path>,
 ) -> Result<(), String> {
     let program = docker.program.clone();
     apply_with(
         docker,
         folder,
-        id,
-        identities,
-        pins,
+        Application {
+            id,
+            identities,
+            pins,
+            files: &files.resolve(home)?,
+        },
         &mut |deployment, args, env| deployment.compose(&program, args, env),
         |file, bytes| file.write_all(bytes),
     )
 }
 
+#[derive(Clone, Copy)]
+struct Application<'a> {
+    id: &'a str,
+    identities: &'a Identities,
+    pins: &'a TargetPins,
+    files: &'a TargetFiles,
+}
+
 fn apply_with(
     docker: &mut impl Docker,
     folder: &Path,
-    id: &str,
-    identities: &Identities,
-    pins: &TargetPins,
+    application: Application<'_>,
     compose: &mut Compose<'_>,
     append: impl FnOnce(&mut fs::File, &[u8]) -> std::io::Result<()>,
 ) -> Result<(), String> {
+    let Application {
+        id,
+        identities,
+        pins,
+        files,
+    } = application;
     let (deployment, original) = target_with(
         docker,
         shape(&identities.values)?,
         Some(pins),
+        files,
         &mut *compose,
     )?;
     deployment.check_binding(pins)?;
@@ -503,6 +603,98 @@ fn container_matches(container: &Value, identities: &Identities) -> bool {
 mod tests {
     use super::*;
 
+    fn manual_recovery_journal() -> Journal {
+        let deployment = Deployment {
+            args: [
+                "compose",
+                "--project-name",
+                "fixture",
+                "--project-directory",
+                "/srv/recovery",
+                "--env-file",
+                "/srv/recovery/private env",
+                "-f",
+                "/srv/recovery/base.yml",
+                "-f",
+                "/srv/recovery/overlay.yml",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            project: "fixture".into(),
+            env_file: "/srv/recovery/private env".into(),
+            tag: "0.25.0".into(),
+            image_id: "fixture-image".into(),
+            daemon_hash: "fixture-daemon-hash".into(),
+            pg_hash: "fixture-pg-hash".into(),
+        };
+        let mut pins = TargetPins {
+            project: deployment.project.clone(),
+            daemon: "1".repeat(64),
+            postgres: "2".repeat(64),
+            ..Default::default()
+        };
+        pins.deployment_digest = Some(deployment.digest(&pins).unwrap());
+        Journal {
+            deployment,
+            original_pins: pins.clone(),
+            pins,
+            running_shape: [0; 32],
+            original_bytes: 17,
+            original_digest: [0xa7; 32],
+            appended_bytes: 0,
+            appended_digest: [0; 32],
+            restored: false,
+        }
+    }
+
+    #[test]
+    fn manual_recovery_commands_render_the_hex_digest_and_ordered_deployment() {
+        let mut journal = manual_recovery_journal();
+        let lines = render_recovery_commands(&journal).unwrap();
+        assert!(lines.contains(&format!("expected SHA-256 {}", "a7".repeat(32))));
+        assert!(lines.contains("head -c 17 '/srv/recovery/private env' | sha256sum"));
+        assert!(lines.contains("PSEUDOLIFE_IMAGE_TAG=0.25.0 docker compose --project-name fixture --project-directory /srv/recovery --env-file '/srv/recovery/private env' -f /srv/recovery/base.yml -f /srv/recovery/overlay.yml up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon"));
+
+        journal.deployment.args.push("--profile".into());
+        journal.original_pins.deployment_digest =
+            Some(journal.deployment.digest(&journal.original_pins).unwrap());
+        assert!(render_recovery_commands(&journal).is_err());
+    }
+
+    #[test]
+    fn manual_recovery_for_an_unverified_deployment_names_the_manual_steps() {
+        let mut journal = manual_recovery_journal();
+        journal.deployment.args.push("--profile".into());
+        let error = render_recovery_commands(&journal).unwrap_err();
+        assert!(error.contains("stopped and gated"));
+        assert!(error.contains("deployment.env_file"));
+        assert!(error.contains("original_bytes"));
+        assert!(error.contains("original_digest"));
+        assert!(error.contains("deployment.args"));
+    }
+
+    #[test]
+    fn manual_recreation_prints_the_shell_override_check_before_the_command() {
+        let lines = render_recovery_commands(&manual_recovery_journal()).unwrap();
+        let check = lines
+            .find("  bash -c 'compgen -e' | grep -E '^(COMPOSE_|PSEUDOLIFE_)'\n")
+            .unwrap_or_else(|| panic!("{lines}"));
+        assert!(lines.contains("The check should print nothing. If it lists any names, unset each listed variable in this shell and run the check again."));
+        assert!(check < lines.find("  PSEUDOLIFE_IMAGE_TAG=").unwrap());
+    }
+
+    #[test]
+    fn a_restored_carry_journal_only_asks_to_verify_the_original_prefix() {
+        let mut journal = manual_recovery_journal();
+        journal.restored = true;
+        let lines = render_recovery_commands(&journal).unwrap();
+        assert!(
+            lines.contains("The carry journal records that the original environment was restored.")
+        );
+        assert!(lines.contains("head -c 17 '/srv/recovery/private env' | sha256sum"));
+        assert!(!lines.contains("--force-recreate"));
+    }
+
     #[cfg(target_os = "linux")]
     mod transaction {
         use super::*;
@@ -511,7 +703,12 @@ mod tests {
             script::{fail, ok},
         };
         use serde_json::json;
-        use std::{cell::Cell, os::unix::fs::OpenOptionsExt, path::PathBuf, time::Duration};
+        use std::{
+            cell::{Cell, RefCell},
+            os::unix::fs::OpenOptionsExt,
+            path::PathBuf,
+            time::Duration,
+        };
 
         const ID: &str = "20261120-000000-aabbccdd";
         const ORIGINAL: &[u8] = b"# preserve this configuration\nFIXTURE=one\n";
@@ -524,6 +721,8 @@ mod tests {
             rendering_changed: Cell<bool>,
             running_changed: Cell<bool>,
             running: Cell<bool>,
+            active_env: RefCell<Option<PathBuf>>,
+            exported_only: Cell<bool>,
         }
 
         impl Fixture {
@@ -546,10 +745,16 @@ mod tests {
                     rendering_changed: Cell::new(false),
                     running_changed: Cell::new(false),
                     running: Cell::new(false),
+                    active_env: RefCell::new(None),
+                    exported_only: Cell::new(false),
                 }
             }
 
             fn pins(&self) -> TargetPins {
+                self.pins_for(&TargetFiles::default())
+            }
+
+            fn pins_for(&self, files: &TargetFiles) -> TargetPins {
                 let mut pins = TargetPins {
                     daemon: "1".repeat(64),
                     postgres: "2".repeat(64),
@@ -560,15 +765,16 @@ mod tests {
                     &mut Engine(self),
                     [true, false, false, true],
                     Some(&pins),
-                    |_, args, env| self.compose(args, env),
+                    files,
+                    |deployment, args, env| self.compose(deployment, args, env),
                 )
                 .unwrap();
                 pins.deployment_digest = Some(deployment.digest(&pins).unwrap());
                 pins
             }
 
-            fn env(&self) -> BTreeMap<String, String> {
-                fs::read_to_string(self.root.join(".env"))
+            fn env(path: &Path) -> BTreeMap<String, String> {
+                fs::read_to_string(path)
                     .unwrap()
                     .lines()
                     .filter_map(|line| line.split_once('='))
@@ -578,13 +784,14 @@ mod tests {
 
             fn compose(
                 &self,
+                deployment: &Deployment,
                 args: &[&str],
                 overrides: &seams::Environment,
             ) -> Result<String, String> {
                 match args {
                     ["config", "--hash", "*"] => Ok(HASHES.into()),
                     ["config", "--format", "json"] => {
-                        let mut env = self.env();
+                        let mut env = Self::env(Path::new(&deployment.env_file));
                         if self.rendering_changed.get() && env.contains_key(KEYS[0]) {
                             env.insert("FIXTURE".into(), "unexpected".into());
                         }
@@ -599,6 +806,7 @@ mod tests {
                         Ok(if self.recreated.get() { "3" } else { "1" }.repeat(64))
                     }
                     ["up", ..] => {
+                        *self.active_env.borrow_mut() = Some(PathBuf::from(&deployment.env_file));
                         self.recreated.set(true);
                         Ok(String::new())
                     }
@@ -629,17 +837,22 @@ mod tests {
                         }},"Mounts":[{"Destination":"/var/lib/postgresql","Type":"volume","Name":"fixture-pg"}]}]).to_string())
                     }
                     ["inspect", "--type=container", id] => {
-                        let mut env = if f.recreated.get() { f.env() } else { BTreeMap::from([("FIXTURE".into(),"one".into())]) };
+                        let mut env = if f.recreated.get() {
+                            Fixture::env(f.active_env.borrow().as_deref().unwrap())
+                        } else {
+                            BTreeMap::from([("FIXTURE".into(),"one".into())])
+                        };
                         if f.running_changed.get() {
                             env.insert("FIXTURE".into(), "unexpected".into());
                         }
                         let env: Vec<_> = env.iter().map(|(key,value)| format!("{key}={value}")).collect();
+                        let labelled_dir = if f.exported_only.get() { f.root.join("not-visible") } else { f.root.clone() };
                         ok(&json!([{"Id":id,"Image":IMAGE,"State":{"Running":f.running.get()},
                             "Config":{"Env":env,"Image":"ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.25.0","Labels":{
                                 "com.docker.compose.project":"fixture","com.docker.compose.service":DAEMON_SERVICE,
                                 "com.docker.compose.config-hash":"daemon-hash",
-                                "com.docker.compose.project.working_dir":f.root,
-                                "com.docker.compose.project.config_files":f.root.join("compose.yaml")
+                                "com.docker.compose.project.working_dir":labelled_dir,
+                                "com.docker.compose.project.config_files":labelled_dir.join("compose.yaml")
                             }},"Mounts":[{"Destination":"/data","Type":"volume","Name":"fixture-state"}],
                             "HostConfig":{"PortBindings":{"8765/tcp":[{"HostIp":"127.0.0.1","HostPort":"8765"}]}}
                         }]).to_string())
@@ -650,18 +863,146 @@ mod tests {
         }
 
         #[test]
+        fn explicit_compose_file_errors_name_the_missing_or_nonfile_path() {
+            let f = Fixture::new();
+            let directory = f.root.join("directory instead of overlay");
+            fs::create_dir(&directory).unwrap();
+            let pins = f.pins();
+            for path in [f.root.join("missing overlay.yml"), directory] {
+                let files = TargetFiles {
+                    env: None,
+                    compose: vec![
+                        f.root.join("compose.yaml").to_string_lossy().into_owned(),
+                        path.to_string_lossy().into_owned(),
+                    ],
+                };
+                let message = target_with(
+                    &mut Engine(&f),
+                    [true, false, false, true],
+                    Some(&pins),
+                    &files,
+                    |_, _, _| {
+                        panic!("an unreadable explicit Compose file must refuse before rendering")
+                    },
+                )
+                .err()
+                .unwrap();
+                assert!(message.contains(path.to_str().unwrap()));
+                assert!(message.contains("missing or not a regular file"));
+            }
+        }
+
+        #[test]
+        fn explicit_target_files_drive_apply_and_undo_in_order() {
+            let f = Fixture::new();
+            let export = f.root.join("export");
+            fs::create_dir(&export).unwrap();
+            for file in ["base.yaml", "override.yaml"] {
+                fs::write(export.join(file), "fixture").unwrap();
+            }
+            for file in ["target env", "other env"] {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(export.join(file))
+                    .unwrap()
+                    .write_all(ORIGINAL)
+                    .unwrap();
+            }
+            f.exported_only.set(true);
+            let files = TargetFiles {
+                env: Some("~/export/target env".into()),
+                compose: vec!["~/export/base.yaml".into(), "~/export/override.yaml".into()],
+            }
+            .resolve(Some(&f.root))
+            .unwrap();
+            let pins = f.pins_for(&files);
+            let identities = fixture();
+            let result = target_with(
+                &mut Engine(&f),
+                [true, false, false, true],
+                Some(&pins),
+                &TargetFiles::default(),
+                |deployment, args, env| f.compose(deployment, args, env),
+            );
+            assert!(result.err().unwrap().contains("--target-compose-file"));
+            let application = Application {
+                id: ID,
+                identities: &identities,
+                pins: &pins,
+                files: &files,
+            };
+            let alternate = TargetFiles {
+                env: Some(export.join("other env").to_str().unwrap().into()),
+                ..files.clone()
+            };
+            let mut compose = |deployment: &Deployment, args: &[&str], env: &seams::Environment| {
+                f.compose(deployment, args, env)
+            };
+            assert!(
+                apply_with(
+                    &mut Engine(&f),
+                    &f.root,
+                    Application {
+                        files: &alternate,
+                        ..application
+                    },
+                    &mut compose,
+                    |_, _| panic!("an unverified path reached the append")
+                )
+                .is_err()
+            );
+            apply_with(
+                &mut Engine(&f),
+                &f.root,
+                application,
+                &mut compose,
+                |file, bytes| file.write_all(bytes),
+            )
+            .unwrap();
+            let journal = read_journal(&f.root.join(JOURNAL)).unwrap().unwrap();
+            assert_eq!(
+                journal.deployment.args,
+                [
+                    "compose",
+                    "--project-name",
+                    "fixture",
+                    "--project-directory",
+                    export.to_str().unwrap(),
+                    "--env-file",
+                    files.env.as_deref().unwrap(),
+                    "-f",
+                    &files.compose[0],
+                    "-f",
+                    &files.compose[1],
+                ]
+            );
+            assert!(fs::read(export.join("target env")).unwrap().len() > ORIGINAL.len());
+            assert!(fs::read(f.root.join(".env")).unwrap() == ORIGINAL);
+            undo_with(&mut Engine(&f), &f.root, ID, Some(&pins), &mut compose).unwrap();
+            for file in ["target env", "other env"] {
+                assert!(fs::read(export.join(file)).unwrap() == ORIGINAL);
+            }
+        }
+
+        #[test]
         fn torn_carry_write_restores_original_and_undo_recovers_a_marked_partial_suffix() {
             let f = Fixture::new();
             let pins = f.pins();
             let identities = fixture();
+            let files = TargetFiles::default();
             let mut partial = Vec::new();
             let result = apply_with(
                 &mut Engine(&f),
                 &f.root,
-                ID,
-                &identities,
-                &pins,
-                &mut |_, args, env| f.compose(args, env),
+                Application {
+                    id: ID,
+                    identities: &identities,
+                    pins: &pins,
+                    files: &files,
+                },
+                &mut |deployment, args, env| f.compose(deployment, args, env),
                 |file, bytes| {
                     assert!(read_journal(&f.root.join(JOURNAL)).unwrap().is_some());
                     partial.extend_from_slice(&bytes[..marker(ID).len() + KEYS[0].len() + 5]);
@@ -683,7 +1024,7 @@ mod tests {
                 &f.root,
                 ID,
                 Some(&pins),
-                &mut |_, args, env| f.compose(args, env),
+                &mut |deployment, args, env| f.compose(deployment, args, env),
             )
             .unwrap();
             assert!(fs::read(f.root.join(".env")).unwrap() == ORIGINAL);
@@ -700,16 +1041,22 @@ mod tests {
             let f = Fixture::new();
             let pins = f.pins();
             let identities = fixture();
-            let mut compose =
-                |_: &Deployment, args: &[&str], env: &seams::Environment| f.compose(args, env);
+            let files = TargetFiles::default();
+            let application = Application {
+                id: ID,
+                identities: &identities,
+                pins: &pins,
+                files: &files,
+            };
+            let mut compose = |deployment: &Deployment, args: &[&str], env: &seams::Environment| {
+                f.compose(deployment, args, env)
+            };
             f.rendering_changed.set(true);
             assert_eq!(
                 apply_with(
                     &mut Engine(&f),
                     &f.root,
-                    ID,
-                    &identities,
-                    &pins,
+                    application,
                     &mut compose,
                     |file, bytes| file.write_all(bytes)
                 )
@@ -723,9 +1070,7 @@ mod tests {
             apply_with(
                 &mut Engine(&f),
                 &f.root,
-                ID,
-                &identities,
-                &pins,
+                application,
                 &mut compose,
                 |file, bytes| file.write_all(bytes),
             )

@@ -37,7 +37,8 @@ import pgdisposable
 import psycopg
 from psycopg import sql
 from schema_cases import clock_diffs
-from pseudolife_memory.storage.schema import assert_disposable_database
+from session_fixture import EPISODES
+from rust.harness_support.database_guard import assert_disposable_database
 
 pg = pgdisposable.Slice.from_env("pgs")
 # Multi-band presets and retention policies other than balanced are retired
@@ -86,7 +87,6 @@ def part_cases(part):
     controls = {case for case, _ in MUTANTS.values()}
     second = tuple(case for index, case in enumerate(CASES) if case in controls or index >= FIRST_PART)
     return second if part == 2 else tuple(case for case in CASES if case not in second)
-EPISODES = tuple(f"{index + 1:032x}" for index in range(3))
 REQUIRED_FAILURES = {
     "required-loader-failure": ("lessons", "about", "lesson", "lesson-loader-about"),
     "required-entry-loader-failure": ("entries", "text", "entry", "entry-loader-text"),
@@ -522,7 +522,7 @@ def start_delta(before, state, rules):
     (``/rows/public.entries/rows: ...``).
     """
     from collections import Counter
-    from run import golden_scrub
+    from golden_values import golden_scrub
 
     def changed(old_rows, new_rows):
         old = Counter(json.dumps(row, sort_keys=True) for row in old_rows)

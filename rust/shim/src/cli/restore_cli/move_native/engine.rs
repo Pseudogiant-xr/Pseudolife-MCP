@@ -144,6 +144,7 @@ pub(super) struct Plan {
     pub source: super::probe::Facts,
     pub target_image: String,
     pub target_pins: Option<super::carry::TargetPins>,
+    pub target_files: super::carry::TargetFiles,
     pub target_url: String,
     pub work_dir: String,
     pub source_bank: String,
@@ -539,6 +540,7 @@ impl<H: Hosts> Run<'_, H> {
                 Op::CarryApply {
                     identities: identities.settings(),
                     expected_pins: pins.clone(),
+                    files: self.plan.target_files.clone(),
                 },
                 None,
             )?;
@@ -808,6 +810,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
         source: plan.source.clone(),
         target_image: plan.target_image.clone(),
         target_pins: plan.target_pins.clone(),
+        target_files: plan.target_files.clone(),
         // Kept as the earlier record had it, so a resume refused before it
         // changed anything leaves the record as resumable as it was.
         gated_baseline: plan.resume_baseline.clone(),
@@ -2229,11 +2232,13 @@ fn remote_folder(record: &Record) -> String {
 
 /// The command that removes the move's gate on the target, for a person.
 fn gate_removal(record: &Record) -> String {
+    gate_removal_for(record, manual_target_daemon(record))
+}
+
+fn gate_removal_for(record: &Record, daemon: &str) -> String {
     fill_in_container_id(format!(
         "ssh {} docker run --rm --entrypoint rm --volumes-from {} {} -f /data/move.json",
-        record.target,
-        manual_target_daemon(record),
-        record.target_image
+        record.target, daemon, record.target_image
     ))
 }
 
@@ -2267,7 +2272,7 @@ fn manual_target_selection(record: &Record) -> Option<String> {
         Some(format!(
             "On the target, substitute the daemon ID saved in {}/carry.json (pins.daemon) for <verified-target-daemon-id>. Verify that Docker returns that full ID for the expected Compose service. If the journal was never created, the selected daemon ID was {}. If a recreation began without recording its replacement, verify the original Compose project and its volumes before proceeding.",
             remote_folder(record),
-            selected
+            pins.daemon
         ))
     } else {
         Some(format!(
@@ -2297,15 +2302,24 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
     let to = &record.target;
     let at = &record.updated_at;
     let folder = remote_folder(record);
-    let start = fill_in_container_id(format!(
-        "ssh {to} docker start {}",
-        manual_target_daemon(record)
-    ));
+    let (environment, daemon) = if record.flags.identities_applied {
+        let recovery = crate::cli::restore_cli::bank::sh_quote(&format!("{folder}/carry.json"));
+        (
+            format!(
+                "Keep the target daemon stopped and gated while restoring its configuration. Before editing the environment file, run this on the target to get the exact head -c and sha256sum check (original_bytes and original_digest in the journal) and, if needed, the recorded docker compose command ending in up --no-start --no-deps --no-build --pull never --force-recreate pseudolife-daemon:\n  pseudolife-mcp move-target recovery-commands {recovery}\nIf the command is not on PATH, use the installed launcher at \"${{XDG_DATA_HOME:-$HOME/.local/share}}/pseudolife-mcp/bin/pseudolife-mcp\" or \"$HOME/.local/bin/pseudolife-mcp\" in its place. If it prints a recreation command, compare the checksum before using the original prefix, check for later edits, and remove only this move's appended # Pseudolife move {} block. If the file is already restored, verify its original settings. Run the printed Compose command only after restoring the environment, and fill in its new verified container ID before running later Docker commands. ",
+                record.move_id
+            ),
+            "<verified-target-daemon-id>",
+        )
+    } else {
+        (String::new(), manual_target_daemon(record))
+    };
+    let start = fill_in_container_id(format!("ssh {to} docker start {daemon}"));
+    let gate = gate_removal_for(record, daemon);
     let claim = format!("ssh {to} rm -f {}", claim_path());
     let hands = if record.given_back || !record.kept.is_empty() {
         format!(
-            "{to} already has its own bank back; what may remain there is the gate ({}) and the claim ({claim}), and the moved bank is kept in {}",
-            gate_removal(record),
+            "{to} already has its own bank back; what may remain there is the gate ({gate}) and the claim ({claim}), and the moved bank is kept in {}",
             if record.kept.is_empty() {
                 format!("{folder}/safety")
             } else {
@@ -2314,9 +2328,8 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
         )
     } else {
         format!(
-            "{to} then held the move's claim ({}), its gate /data/move.json and the stopped copy of this host's bank behind it. Its own bank first, from the safety backup that {folder}/own-bank.json names in {folder}/safety (on {to}, fill in both backup paths in pseudolife-mcp restore --backup-file <that dump> --state-archive <that state archive> --leave-stopped; if own-bank.json is missing, no command restores it, so look in {folder}/safety before anything else); then the gate, never before its own bank is back, or the copy of this host's bank behind it would start there ({}); then the claim ({claim}); then its daemon ({start})",
-            claim_path(),
-            gate_removal(record)
+            "{to} then held the move's claim ({}), its gate /data/move.json and the stopped copy of this host's bank behind it. Its own bank first, from the safety backup that {folder}/own-bank.json names in {folder}/safety (on {to}, fill in both backup paths in pseudolife-mcp restore --backup-file <that dump> --state-archive <that state archive> --leave-stopped; if own-bank.json is missing, no command restores it, so look in {folder}/safety before anything else); then the gate, never before its own bank is back, or the copy of this host's bank behind it would start there ({gate}); then the claim ({claim}); then its daemon ({start})",
+            claim_path()
         )
     };
     let newer = newer.map_or_else(String::new, |later| {
@@ -2333,7 +2346,7 @@ pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
     let selection =
         manual_target_selection(record).map_or_else(String::new, |line| format!(" {line}"));
     format!(
-        "This host gave {to} up at {at} (--target-gone), and that is final here: nothing is sent to {to} from this host for move {} again, and --release-target and --resume refuse it.{newer} The steps below describe {to} as it was at {at}, for whoever runs it. Check first: look at what {to} holds now, and if its daemon serves a bank, or a newer move has put one there, do none of this.{selection} Otherwise, in this order: {hands}",
+        "This host gave {to} up at {at} (--target-gone), and that is final here: nothing is sent to {to} from this host for move {} again, and --release-target and --resume refuse it.{newer} The steps below describe {to} as it was at {at}, for whoever runs it. Check first: look at what {to} holds now, and if its daemon serves a bank, or a newer move has put one there, do none of this.{selection} Otherwise, in this order: {environment}{hands}",
         record.move_id
     )
 }

@@ -255,6 +255,7 @@ struct Wire {
     state: Option<protocol::State>,
     supports_carry: Option<bool>,
     supports_carry_execution: Option<bool>,
+    supports_carry_files: Option<bool>,
 }
 
 impl Remote for Wire {
@@ -285,6 +286,7 @@ impl Remote for Wire {
                         let mut check = target::answer(&mut self.far, &ask);
                         check.supports_carry = self.supports_carry;
                         check.supports_carry_execution = self.supports_carry_execution;
+                        check.supports_carry_files = self.supports_carry_files;
                         protocol::Answer {
                             protocol: protocol::PROTOCOL,
                             ok: true,
@@ -292,7 +294,7 @@ impl Remote for Wire {
                             ..protocol::Answer::default()
                         }
                     }
-                    protocol::Op::CarryCheck { populated } => {
+                    protocol::Op::CarryCheck { populated, .. } => {
                         assert_eq!(populated, [true, false, false, false]);
                         assert!(request.move_id.is_empty());
                         protocol::Answer {
@@ -380,6 +382,7 @@ fn world() -> Both {
             state: None,
             supports_carry: None,
             supports_carry_execution: None,
+            supports_carry_files: None,
         },
         local_health: Some(health(SOURCE_ID, 60)),
         reached: Ok(health(TARGET_ID, 60)),
@@ -1162,6 +1165,64 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
 }
 
 #[test]
+fn explicit_target_files_require_helper_support_and_keep_overlay_order_on_the_wire() {
+    let request = Request {
+        no_keep_tokens: false,
+        target_files: carry::TargetFiles {
+            env: Some("~/export/stack.env".into()),
+            compose: vec!["/export/base.yaml".into(), "~/export/overlay.yaml".into()],
+        },
+        ..request()
+    };
+    assert!(argv::refusal(&request).is_none());
+    let mut world = world();
+    world.wire.supports_carry = Some(true);
+    world.wire.supports_carry_execution = Some(true);
+    assert!(
+        preflight(&mut world, &request)
+            .unwrap_err()
+            .contains("does not support explicit")
+    );
+    assert_eq!(world.wire.runs.len(), 1);
+
+    world.wire.runs.clear();
+    world.wire.supports_carry_files = Some(true);
+    assert!(preflight(&mut world, &request).unwrap().carry_executable);
+    let wire: Value = serde_json::from_slice(&world.wire.runs[1].2).unwrap();
+    assert_eq!(wire["files"]["env"], "~/export/stack.env");
+    assert_eq!(
+        wire["files"]["compose"],
+        json!(["/export/base.yaml", "~/export/overlay.yaml"])
+    );
+    assert_eq!(wire["populated"], json!([true, false, false, false]));
+    assert!(!String::from_utf8_lossy(&world.wire.runs[1].2).contains("tok-secret"));
+}
+
+#[test]
+fn explicit_target_files_refuse_unresolved_target_paths_before_any_effect() {
+    for value in [
+        "stack.env",
+        "/export/../stack.env",
+        "/export/line\n.env",
+        "",
+    ] {
+        let request = Request {
+            no_keep_tokens: false,
+            target_files: carry::TargetFiles {
+                env: Some(value.into()),
+                compose: Vec::new(),
+            },
+            ..request()
+        };
+        assert!(
+            argv::refusal(&request)
+                .unwrap()
+                .contains("must name absolute files")
+        );
+    }
+}
+
+#[test]
 fn carrying_requires_a_numeric_loopback_verification_endpoint() {
     let request = Request {
         dry_run: false,
@@ -1365,7 +1426,7 @@ fn argv_refusals_come_before_any_effect_in_order() {
     );
     starts(
         &[&base[..], &["--target-env-file", "/x/.env"]].concat(),
-        "--target-env-file and --target-compose-file are not available in the native client yet",
+        "--target-env-file and --target-compose-file apply only when carrying bearer settings",
     );
     starts(&without("--target-url"), "--target-url is required");
     assert_eq!(refused(&without("--no-keep-tokens")), None);

@@ -78,7 +78,7 @@ fn vendor_fixture() {
         return;
     };
     let mode = std::env::var("PSEUDOLIFE_TEST_TUNNEL_VENDOR_MODE").unwrap();
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     if mode == "supervisor" {
         let root = PathBuf::from(path);
         let exe = std::env::current_exe().unwrap();
@@ -108,8 +108,15 @@ fn vendor_fixture() {
     if mode == "early-exit" {
         return;
     }
-    if mode == "bad-key" {
-        eprintln!("control plane API key is malformed [synthetic-untrusted-suffix]");
+    let diagnostic = match mode.as_str() {
+        "bad-key" => Some("control plane API key is malformed"),
+        "unauthorized" => Some("controlplane client: unexpected status 401"),
+        "unknown-tunnel" => Some("controlplane client: unexpected metadata status 404"),
+        "network" => Some("controlplane client: poll transport failed (network_error)"),
+        _ => None,
+    };
+    if let Some(diagnostic) = diagnostic {
+        eprintln!("{diagnostic} [synthetic-untrusted-suffix]");
         return;
     }
     if mode == "ready" {
@@ -212,27 +219,50 @@ fn early_exit_and_readiness_timeout_release_the_launch_files() {
             .map(|entry| entry.unwrap().file_name())
             .collect();
         names.sort();
-        assert_eq!(names, ["daemon-token", "dot.lock", "dot.native-run.lock"]);
+        assert_eq!(
+            names,
+            [
+                ".tunnel-identity-key",
+                "daemon-token",
+                "dot.lock",
+                "dot.native-run.lock"
+            ]
+        );
         assert!(launch_locks(&home.0, "dot").is_ok());
     }
 }
 
 #[test]
 fn an_early_vendor_failure_names_only_a_bounded_safe_log() {
-    let home = Home::new();
     let exe = std::env::current_exe().unwrap();
-    let log = home.0.join("dot.native-runtime.log");
-    let result = launch(
-        launch_fixture(&home.0),
-        &exe,
-        Duration::from_secs(6),
-        |config| fixture_command(&exe, config, "bad-key"),
-    );
-    assert!(
-        matches!(result, Err(Fail::Detail(message)) if message.contains(&log.display().to_string()))
-    );
-    let bytes = store::private_read(&log, 1024).unwrap();
-    assert_eq!(bytes, b"The vendor rejected the runtime key format.\n");
+    for (mode, cause) in [
+        ("bad-key", "The vendor rejected the runtime key format."),
+        (
+            "unauthorized",
+            "The tunnel control plane refused authentication or access.",
+        ),
+        (
+            "unknown-tunnel",
+            "The tunnel control plane could not find the saved tunnel.",
+        ),
+        (
+            "network",
+            "The tunnel client could not reach the control plane.",
+        ),
+    ] {
+        let home = Home::new();
+        let log = home.0.join("dot.native-runtime.log");
+        let result = launch(launch_fixture(&home.0), &exe, STARTUP, |config| {
+            fixture_command(&exe, config, mode)
+        });
+        assert!(matches!(result, Err(Fail::Detail(message))
+            if message.contains(cause) && message.contains(&log.display().to_string())
+                && !message.contains("synthetic-untrusted-suffix")));
+        assert_eq!(
+            store::private_read(&log, 1024).unwrap(),
+            format!("{cause}\n").into_bytes()
+        );
+    }
 }
 
 #[test]
@@ -288,11 +318,12 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
 }
 
 #[test]
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
     let home = Home::new();
     let fixture = prepared(&home.0);
     state::atomic_create(&home.0.join("dot.profile.json"), &fixture.profile_bytes).unwrap();
+    #[cfg(target_os = "linux")]
     state::atomic_create(&home.0.join("dot.key"), b"PLAIN\0fixture-runtime-key").unwrap();
     drop(fixture);
     let mut supervisor = std::process::Command::new(std::env::current_exe().unwrap())
@@ -308,9 +339,18 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
     let evidence = live.map(|record| {
         let stage = stage_path(&home.0, launch_id(&record.native_launch).unwrap());
         let refused = prepare(&home.0, "dot").is_err();
-        let key_preserved = stage.join("key").is_file();
+        let key_preserved = stage.join("profile.yaml").is_file()
+            && stage.join("key").is_file() == cfg!(target_os = "linux");
+        #[cfg(target_os = "linux")]
         let bound = store::load(&stage, "dot").is_ok_and(|profile| {
             identity::Bound::capture(&stage, &record.native_launch, &profile).is_ok()
+        });
+        #[cfg(windows)]
+        let bound = state::open_with_write(&stage.join(OWNER_LOCK), true).is_ok_and(|owner| {
+            matches!(
+                owner.file.try_lock_shared(),
+                Err(fs::TryLockError::WouldBlock)
+            )
         });
         (stage, refused, key_preserved, bound)
     });
@@ -340,11 +380,13 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
     assert!(!stage.exists());
     assert!(!path.exists());
     state::atomic_write(&profile, &original, None).unwrap();
+    #[cfg(target_os = "linux")]
     assert!(prepare(&home.0, "dot").is_ok());
+    #[cfg(windows)]
+    assert!(prepare_locks(&home.0, "dot").is_ok());
 }
 
 #[test]
-#[cfg(target_os = "linux")]
 fn recovery_preserves_unknown_ownership_before_target_publication() {
     let home = Home::new();
     let _locks = launch_locks(&home.0, "dot").unwrap();
@@ -367,13 +409,33 @@ fn recovery_preserves_unknown_ownership_before_target_publication() {
     let path = record::path(&home.0, "dot");
     state::atomic_create(&path, &serde_json::to_vec(&launch).unwrap()).unwrap();
     assert!(
-        matches!(recover_launch(&home.0, "dot"), Err(Fail::Detail(message)) if message.contains(&directory.display().to_string()))
+        matches!(recover_launch(&home.0, "dot"), Err(Fail::Detail(message))
+            if message.contains(&directory.display().to_string())
+                && message.contains(&path.display().to_string()))
     );
     assert!(key.is_file() && path.is_file());
     launch.spawn_started = Some(false);
     state::atomic_write(&path, &serde_json::to_vec(&launch).unwrap(), None).unwrap();
-    recover_launch(&home.0, "dot").unwrap();
-    assert!(!directory.exists() && !path.exists());
+    #[cfg(not(target_os = "macos"))]
+    {
+        recover_launch(&home.0, "dot").unwrap();
+        assert!(!directory.exists() && !path.exists());
+    }
+}
+
+#[test]
+fn launch_retries_one_transient_lock_probe() {
+    let home = Home::new();
+    let path = lock_path(&home.0, "dot");
+    let probe = open_lock(&home.0, "dot", &path).unwrap();
+    let launch = open_lock(&home.0, "dot", &path).unwrap();
+    probe.try_lock_shared().unwrap();
+    assert!(try_launch_lock(&launch, || drop(probe)).is_ok());
+    let contender = open_lock(&home.0, "dot", &path).unwrap();
+    let mut retries = 0;
+    let busy = try_launch_lock(&contender, || retries += 1);
+    assert!(matches!(busy, Err(fs::TryLockError::WouldBlock)));
+    assert_eq!(retries, 1);
 }
 
 #[test]

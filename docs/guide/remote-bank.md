@@ -828,9 +828,46 @@ While such a target holds a copy of this host's bank, no other move starts from 
 
 A target that no longer holds anything of this host's bank is found so by `--release-target`: neither this move's claim nor its bank. The record is closed and stops holding this host, and nothing is changed there. If the move's gate (`/data/move.json`) is still in front of that other bank, the output names it and the command that removes it, which is for whoever runs that host once they are sure which bank it should serve. A target whose Docker does not answer is never taken for an empty one: the record is kept, and the release says so. So is a gate with no claim and no bank identity behind it, which cannot be told from another bank. If a give-back keeps failing there (for example, the target's move folder was lost, or its own bank cannot be restored), every such failure names the last resort on this host: renaming the move's `record.json`, which closes the record here and leaves the target gated until someone there clears it. With `--json`, `ending` says how a release ended (`given_back`, `nothing_there` or `given_up`), and `released` is true only for a target given back its own bank.
 
-If the target will never answer again, `pseudolife-mcp move --release-target <move id> --target-gone` gives it up on this host only, for good. It does so only while this host's daemon serves its own bank, and only when the target gives no answer as a move target in three attempts, five seconds apart. A target that answers is refused, naming `--release-target`. It asks first, or takes `--yes`; without a terminal and without `--yes` it refuses at once. Nothing is changed on either host. A given-up record is final here: nothing is sent to that target for the move again, and a later `--release-target` or `--resume` of it refuses. The output says what stayed on that host when it was given up, and how whoever runs it clears that by hand. Those steps describe the host as it was then, so they start with a check: if that machine now serves a bank, or a newer move has put one there (the output names a newer move from this host to it), do none of them. Otherwise, in order: its own bank first, from the safety backup that the move folder's `own-bank.json` names (`pseudolife-mcp restore --backup-file … --state-archive … --leave-stopped` there); then the gate, never before, or the copy of this host's bank behind it would start; then the move's claim (`~/.pseudolife-mcp/moves/claim.json`); then its daemon. Writes made there are not in this host's bank.
+If the target will never answer again, `pseudolife-mcp move --release-target <move id> --target-gone` gives it up on this host only, for good. It does so only while this host's daemon serves its own bank, and only when the target gives no answer as a move target in three attempts, five seconds apart. A target that answers is refused, naming `--release-target`. It asks first, or takes `--yes`; without a terminal and without `--yes` it refuses at once. Nothing is changed on either host. A given-up record is final here: nothing is sent to that target for the move again, and a later `--release-target` or `--resume` of it refuses. The output says what stayed on that host when it was given up, and how whoever runs it clears that by hand. Those steps describe the host as it was then, so they start with a check: if that machine now serves a bank, or a newer move has put one there (the output names a newer move from this host to it), do none of them.
 
-A rollback that could not reach the target to finish (exit 6, the record still unfinished) is not one `--target-gone` ends; its `--rollback` is rerun once the target answers.
+For a move that may have applied carried bearer settings, first keep the
+target daemon stopped and gated while restoring its original environment.
+Before editing the environment file, run
+`pseudolife-mcp move-target recovery-commands <carry.json>` on the target,
+filling in the journal path. If the client is unavailable on `PATH`, use the
+installed launcher at
+`${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp`
+or `$HOME/.local/bin/pseudolife-mcp`. If the journal is absent from this
+move's intact folder, there is nothing to restore in its environment file.
+
+The journal names the file in `deployment.env_file`. The helper prints the
+exact `head -c … | sha256sum` check and the expected hex checksum. If the
+journal records a completed restoration, verify the original prefix and
+check the daemon ID recorded in the journal. Otherwise verify the digest
+and check for later edits before using `original_bytes` to recover the
+original prefix. Remove only the block beginning `# Pseudolife move
+<move id>`.
+
+When recreation is needed, the helper prints a shell check for exported
+`COMPOSE_*` and `PSEUDOLIFE_*` variables. Unset any names it lists and rerun
+the check in the same shell until it prints nothing. Resolve any error from
+the check before continuing. Then use the printed
+`docker compose … up --no-start --no-deps --no-build --pull never
+--force-recreate pseudolife-daemon` command to recreate the daemon stopped.
+Use its newly verified container ID in the remaining commands, with the gate
+in place until the target has its own bank back.
+
+Restore the target's own bank from the safety backup named in the move
+folder's `own-bank.json` using `pseudolife-mcp restore --backup-file …
+--state-archive … --leave-stopped` on the target. Once its own bank is back,
+remove the gate and the move's claim (`~/.pseudolife-mcp/moves/claim.json`).
+Then start the target daemon. Writes made there are not in this host's bank.
+
+If rollback could not reach the target (exit 6), rerun `--rollback` when the
+target answers. For a carried move whose target is permanently gone, follow
+the record's manual source recovery steps after independently verifying that
+the target is stopped and gated or permanently retired. Once the source
+serves its own bank, `--target-gone` can close the incomplete carried move.
 
 Both hosts keep the move's files (a full copy of the bank) under
 `~/.pseudolife-mcp/moves/<move id>` until you remove them: the report names
@@ -843,11 +880,23 @@ fingerprint, or `ssh-keygen -R` after confirming a changed key. Move never
 accepts a key itself. `ssh` and `docker` are found only in absolute `PATH`
 directories.
 
+**Carried settings on an installed Linux target.** Use
+`--target-env-file <file>` to select the target's original private environment.
+An env file inside a Git checkout can be committed later with the carried
+settings in it. Choose a private file outside the checkout. Repeat
+`--target-compose-file <file>` for its original Compose files in
+overlay order. The paths are absolute or start with `~/` on the target. The
+native helper verifies that those files render the installed deployment
+before changing either bank. If the original project directory is
+unavailable, the first selected Compose file's directory is used, and the
+rendered service hashes and data mounts still have to match. Omitted flags
+use the installed labels. Resume reuses the original file selection and
+undo uses the recorded deployment. Both clients must support carrying
+settings with explicit target files. When using `--no-keep-tokens`, leave the
+file flags off.
+
 **Not available in the native client yet:**
 - `--expose-target`: expose the target yourself and pass `--target-url`;
-- carrying the source's tokens: pass `--no-keep-tokens`, and the target keeps
-  its own;
-- `--target-env-file` and `--target-compose-file`;
 - checkout targets (`--target-checkout`).
 
 The rest of this section describes the Python client's move.

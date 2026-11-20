@@ -215,7 +215,10 @@ fn check_carry<W: World>(
         work_dir: String::new(),
         rollback: false,
         pins,
-        op: protocol::Op::CarryCheck { populated },
+        op: protocol::Op::CarryCheck {
+            populated,
+            files: request.target_files.clone(),
+        },
     };
     let mut body =
         serde_json::to_vec(&check).map_err(|_| "cannot prepare the move's identity check")?;
@@ -355,6 +358,9 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
             Some(true) => {}
             Some(false) => return Err("checking carried identities requires a Linux Docker target; pass --no-keep-tokens to check a move using the target's bearer settings".into()),
             None => return Err(CARRY_CHECK_UNAVAILABLE.into()),
+        }
+        if !request.target_files.is_empty() && reply.supports_carry_files != Some(true) {
+            return Err("the target client does not support explicit Compose and environment files; update it to the same native client release and retry".into());
         }
     }
     if !reply.refusals.is_empty() {
@@ -812,6 +818,9 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
                     request.resume_move = earlier.move_id.clone();
                     if earlier.carried_identities && request.no_keep_tokens {
                         return Some(finish(&request, Err("the previous attempt carried bearer settings; resume it without --no-keep-tokens".into())));
+                    }
+                    if let Err(why) = request.target_files.resume_from(&earlier.target_files) {
+                        return Some(finish(&request, Err(why)));
                     }
                     request.no_keep_tokens |= !earlier.carried_identities;
                     request.resume_baseline = earlier.gated_baseline.clone();

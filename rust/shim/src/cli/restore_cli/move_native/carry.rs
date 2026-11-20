@@ -1,7 +1,11 @@
 //! Carry the source's bearer settings. A dry run sends four presence flags
 //! over SSH and the target renders Compose with fixture values. Execution
 //! sends the settings to a compatible target through SSH stdin.
-use std::{collections::BTreeMap, path::Path, time::Duration};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,7 +15,7 @@ use super::probe::Facts;
 use crate::cli::update::seams;
 
 mod runtime;
-pub(super) use runtime::{apply, loopback, recorded_pins, undo, verify};
+pub(super) use runtime::{apply, loopback, recorded_pins, recovery_commands, undo, verify};
 
 const KEYS: [&str; 4] = [
     "PSEUDOLIFE_MCP_TOKEN",
@@ -30,6 +34,76 @@ const ENV: &str = "the target's Compose environment is not a private writable fi
 const DAEMON_SERVICE: &str = "pseudolife-daemon";
 const PG_SERVICE: &str = "pseudolife-pg";
 const INTERPOLATION: &str = "the target's Compose files do not apply the carried identity settings without changing other settings; restore its original identity interpolation and retry move --dry-run";
+
+/// Optional paths on the target, never the contents of those files.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::cli) struct TargetFiles {
+    pub(super) env: Option<String>,
+    pub(super) compose: Vec<String>,
+}
+
+impl TargetFiles {
+    pub(super) fn is_empty(&self) -> bool {
+        self.env.is_none() && self.compose.is_empty()
+    }
+
+    pub(super) fn valid(path: &str) -> bool {
+        (path.starts_with('/') || path.starts_with("~/"))
+            && !path.chars().any(char::is_control)
+            && !path.split('/').any(|part| part == "..")
+    }
+
+    pub(super) fn resume_from(&mut self, recorded: &Self) -> Result<(), String> {
+        if self.is_empty() || self == recorded {
+            self.clone_from(recorded);
+            return Ok(());
+        }
+        if recorded.is_empty() {
+            return Err("resume uses the recorded target file selection: installed labels (no explicit file flags). Omit the file flags to reuse it".into());
+        }
+        let selection = recorded
+            .env
+            .iter()
+            .map(|path| format!("--target-env-file {path:?}"))
+            .chain(
+                recorded
+                    .compose
+                    .iter()
+                    .map(|path| format!("--target-compose-file {path:?}")),
+            )
+            .collect::<Vec<_>>()
+            .join(" ");
+        Err(format!(
+            "resume uses the recorded target file selection: {selection}. Omit the file flags to reuse it, or repeat the recorded paths with exactly the same spelling and order"
+        ))
+    }
+
+    fn resolve(&self, home: Option<&Path>) -> Result<Self, String> {
+        let resolve = |value: &String| -> Result<String, String> {
+            let path = if let Some(rest) = value.strip_prefix("~/") {
+                home.filter(|path| path.is_absolute())
+                    .map(|path| path.join(rest.trim_start_matches('/')))
+                    .ok_or("cannot resolve ~/ on the target; supply an absolute file path")?
+            } else {
+                PathBuf::from(value)
+            };
+            if !Self::valid(value) || !path.is_absolute() {
+                return Err("target file paths must be absolute or start with ~/ and have no .. or control characters".into());
+            }
+            path.into_os_string()
+                .into_string()
+                .map_err(|_| "target file paths must be UTF-8".into())
+        };
+        Ok(Self {
+            env: self.env.as_ref().map(resolve).transpose()?,
+            compose: self
+                .compose
+                .iter()
+                .map(resolve)
+                .collect::<Result<_, String>>()?,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::cli) struct TargetPins {
@@ -297,8 +371,17 @@ pub(super) fn target(
     docker: &mut docker::Real,
     shape: [bool; 4],
     pins: Option<&TargetPins>,
+    files: &TargetFiles,
+    home: Option<&Path>,
 ) -> Result<Option<[u8; 32]>, String> {
-    let (deployment, _) = checked_target(docker, shape, pins)?;
+    let program = docker.program.clone();
+    let (deployment, _) = target_with(
+        docker,
+        shape,
+        pins,
+        &files.resolve(home)?,
+        |deployment, args, env| deployment.compose(&program, args, env),
+    )?;
     pins.map(|pins| deployment.digest(pins)).transpose()
 }
 
@@ -350,21 +433,11 @@ impl Deployment {
     }
 }
 
-fn checked_target(
-    docker: &mut docker::Real,
-    shape: [bool; 4],
-    pins: Option<&TargetPins>,
-) -> Result<(Deployment, Value), String> {
-    let program = docker.program.clone();
-    target_with(docker, shape, pins, |deployment, args, env| {
-        deployment.compose(&program, args, env)
-    })
-}
-
 fn target_with(
     docker: &mut impl Docker,
     shape: [bool; 4],
     pins: Option<&TargetPins>,
+    overrides: &TargetFiles,
     mut run: impl FnMut(&Deployment, &[&str], &seams::Environment) -> Result<String, String>,
 ) -> Result<(Deployment, Value), String> {
     use super::super::bank::{DAEMON_CONTAINER, PG_CONTAINER};
@@ -380,10 +453,7 @@ fn target_with(
     let pg_labels = &pg["Config"]["Labels"];
     let label = |key: &str| labels[key].as_str().filter(|s| !s.is_empty()).ok_or(STACK);
     let project = label("com.docker.compose.project")?;
-    let dir = label("com.docker.compose.project.working_dir")?;
-    let files = label("com.docker.compose.project.config_files")?;
-    if !Path::new(dir).is_absolute()
-        || pg_labels["com.docker.compose.project"] != project
+    if pg_labels["com.docker.compose.project"] != project
         || labels["com.docker.compose.service"] != DAEMON_SERVICE
         || pg_labels["com.docker.compose.service"] != PG_SERVICE
     {
@@ -394,10 +464,41 @@ fn target_with(
         .or_else(|| reference.strip_prefix("ghcr.io/pseudogiant-xr/pseudolife-daemon:"))
         .filter(|tag| crate::cli::update::plain_release(tag))
         .ok_or("carrying identities needs the target's pinned release daemon image; pass --no-keep-tokens to retain the existing container")?;
-    let env_file = label("com.docker.compose.project.environment_file")
-        .map(str::to_owned)
-        .unwrap_or_else(|_| format!("{dir}/.env"));
-    if env_file.contains(',') || !Path::new(&env_file).is_absolute() {
+    let files = if overrides.compose.is_empty() {
+        label("com.docker.compose.project.config_files")
+            .map_err(|_| "the target has no installed Compose file paths; pass --target-compose-file for each original file in order")?
+            .split(',').map(str::to_owned).collect::<Vec<_>>()
+    } else {
+        overrides.compose.clone()
+    };
+    if let Some(file) = files
+        .iter()
+        .find(|file| !Path::new(file).is_absolute() || !Path::new(file).is_file())
+    {
+        if !overrides.compose.is_empty() {
+            return Err(format!(
+                "--target-compose-file {file:?} is missing or not a regular file on the target; supply that original Compose file and retry move --dry-run"
+            ));
+        }
+        return Err("the target's Compose files are not accessible; pass --target-compose-file for each original file in order".into());
+    }
+    let installed_dir = label("com.docker.compose.project.working_dir")
+        .ok()
+        .filter(|dir| Path::new(dir).is_absolute());
+    let dir = if overrides.is_empty() {
+        installed_dir.ok_or(STACK)?
+    } else {
+        installed_dir
+            .filter(|dir| Path::new(dir).is_dir())
+            .or_else(|| Path::new(&files[0]).parent()?.to_str())
+            .ok_or(STACK)?
+    };
+    let env_file = overrides.env.clone().unwrap_or_else(|| {
+        label("com.docker.compose.project.environment_file")
+            .map(str::to_owned)
+            .unwrap_or_else(|_| format!("{dir}/.env"))
+    });
+    if (overrides.env.is_none() && env_file.contains(',')) || !Path::new(&env_file).is_absolute() {
         return Err(ENV.into());
     }
     private_env(Path::new(&env_file))?;
@@ -422,11 +523,8 @@ fn target_with(
         &env_file,
     ];
     let mut args: Vec<String> = args.into_iter().map(str::to_owned).collect();
-    for file in files.split(',') {
-        if !Path::new(file).is_absolute() || !Path::new(file).is_file() {
-            return Err(STACK.into());
-        }
-        args.extend(["-f".into(), file.into()]);
+    for file in files {
+        args.extend(["-f".into(), file]);
     }
     let deployment = Deployment {
         args,
@@ -536,6 +634,52 @@ fn mounts_match(config: &Value, service: &str, container: &Value, data: fn(&str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_refuses_different_files_and_alternate_spellings_of_the_same_path() {
+        let recorded = TargetFiles {
+            env: Some("~/deployment/private.env".into()),
+            compose: vec![
+                "/srv/deployment/base.yml".into(),
+                "/srv/deployment/override.yml".into(),
+            ],
+        };
+        let mut omitted = TargetFiles::default();
+        omitted.resume_from(&recorded).unwrap();
+        assert_eq!(omitted, recorded);
+        omitted.resume_from(&recorded).unwrap();
+
+        for mut requested in [
+            TargetFiles {
+                env: Some("~/deployment/other.env".into()),
+                ..recorded.clone()
+            },
+            TargetFiles {
+                compose: vec![
+                    "/srv/deployment/./base.yml".into(),
+                    recorded.compose[1].clone(),
+                ],
+                ..recorded.clone()
+            },
+        ] {
+            let message = requested.resume_from(&recorded).unwrap_err();
+            assert!(message.contains(r#"--target-env-file "~/deployment/private.env""#));
+            assert!(message.contains(r#"--target-compose-file "/srv/deployment/base.yml""#));
+            assert!(message.contains("exactly the same spelling and order"));
+        }
+    }
+
+    #[test]
+    fn resume_with_an_empty_recorded_selection_only_asks_to_omit_file_flags() {
+        let mut requested = TargetFiles {
+            env: Some("~/deployment/private.env".into()),
+            ..TargetFiles::default()
+        };
+        assert_eq!(
+            requested.resume_from(&TargetFiles::default()).unwrap_err(),
+            "resume uses the recorded target file selection: installed labels (no explicit file flags). Omit the file flags to reuse it"
+        );
+    }
 
     #[test]
     fn carried_settings_reject_a_substitute_at_the_pinned_target_id() {
@@ -703,6 +847,7 @@ mod tests {
                 &mut docker,
                 [true, false, false, false],
                 None,
+                &TargetFiles::default(),
                 |_, args, env| {
                     if args == ["config", "--hash", "*"] {
                         let daemon = if case == "daemon hash" {

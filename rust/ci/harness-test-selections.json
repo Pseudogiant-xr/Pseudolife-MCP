@@ -2,8 +2,18 @@
   "schema": 1,
   "files": {
     "rust/cli_harness/test_audit_native.py": {
-      "kind": "native",
-      "reason": "Every test consumes the parity lane's built native candidate, including file-only and mocked container cases."
+      "kind": "mixed",
+      "reason": "The listed archive and verifier controls use synthetic events. Native audit cases run in the hosted parity lane.",
+      "unit_tests": [
+        "test_audit_hash_distinguishes_stored_text_from_parsed_payload",
+        "test_audit_verifier_identifies_the_first_break",
+        "test_audit_verifier_checks_body_commitments",
+        "test_audit_verifier_validates_the_redaction_record",
+        "test_audit_verifier_requires_matching_operator_redaction",
+        "test_audit_verifier_anchors_a_pruned_chain",
+        "test_audit_verifier_rejects_invalid_prune_record",
+        "test_audit_archive_edit_rehashes_without_the_frozen_package"
+      ]
     },
     "rust/cli_harness/test_audit_stats.py": {
       "kind": "unit",
