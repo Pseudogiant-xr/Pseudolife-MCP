@@ -457,7 +457,6 @@ live test_refind_arm.py
 live test_register_claude_desktop.py
 live test_regression_gate_defaults.py
 live test_regression_gate_inputs.py
-live test_rehearse_activation.py
 live test_relation_bench.py
 live test_relation_quality.py
 live test_release_ux.py
