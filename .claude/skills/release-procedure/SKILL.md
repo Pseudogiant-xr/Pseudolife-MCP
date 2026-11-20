@@ -126,10 +126,11 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    path, label or no label, naming the path.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
-   then open the wheel — Console build present: every file
-   `git ls-files pseudolife_memory/web/static` lists is in the wheel (11 at
-   0.17.0; a fixed count rots with every Console rebuild), no stray
-   top-level dirs, the `mcp-name` marker in METADATA,
+   then open the wheel. Every file returned by `git ls-files frontend/dist/`
+   must appear byte for byte under `pseudolife_memory/web/static/` at its
+   relative path within `frontend/dist/`. That wheel directory must contain
+   no other files. The only wheel roots are `pseudolife_memory/` and the
+   distribution's `.dist-info/` directory. Check the `mcp-name` marker in METADATA,
    no identifiers (grep the METADATA for the guard list).
 3. **PyPI**: publishing the GitHub release triggers
    `.github/workflows/release.yml` (Trusted Publishing — OIDC, no token).

@@ -81,8 +81,7 @@ each exists because it was violated at least once.
    because every job shares the account's 20 hosted slots; read
    `docs/dev/ci-budget.md` before adding a job or shard.
 10. **Python is frozen since 14 November 2026:** a change under
-    `pseudolife_memory/` (the Console build `pseudolife_memory/web/static/`
-    excepted) is made in Rust instead, because batch admission
+    `pseudolife_memory/` is made in Rust instead, because batch admission
     (`ops/integrate.py`) and the `Python freeze` check refuse it unless the
     PR carries the `freeze-exception` label, which marks a maintainer-ruled
     exception.

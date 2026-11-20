@@ -72,13 +72,19 @@ def test_a_deletion_inside_the_package_is_refused(repo):
         "pseudolife_memory/web/api.py"]
 
 
-def test_the_console_build_output_is_exempt(repo):
-    assert change(repo, write("pseudolife_memory/web/static/index.html")) == []
-    assert change(repo, write("pseudolife_memory/web/static/assets/app-123.js")) == []
+def test_the_retired_console_build_path_is_frozen(repo):
+    for path in ("pseudolife_memory/web/static/index.html",
+                 "pseudolife_memory/web/static/assets/app-123.js"):
+        assert change(repo, write(path)) == [path]
 
 
-def test_a_rename_out_of_the_console_build_output_is_exempt(repo):
-    assert change(repo, move("pseudolife_memory/web/static/index.html", "frontend/dist/index.html")) == []
+def test_the_frontend_build_is_outside_the_freeze(repo):
+    assert change(repo, write("frontend/dist/index.html")) == []
+
+
+def test_a_rename_out_of_the_retired_console_build_path_is_refused(repo):
+    old = "pseudolife_memory/web/static/index.html"
+    assert change(repo, move(old, "frontend/dist/index.html")) == [old]
 
 
 def test_a_rename_out_of_the_package_is_refused_by_its_old_path(repo):
@@ -150,13 +156,14 @@ def test_the_label_on_a_change_that_touches_nothing_frozen_changes_nothing(repo,
     write("rust/shim/src/cli.rs")(repo)
     git(repo, "commit", "-qam", "rust")
     assert python_freeze.main([*ARGS, "--labels", '["freeze-exception"]']) == 0
-    assert "none under pseudolife_memory/" in capsys.readouterr().out
+    assert capsys.readouterr().out.strip() == "Python freeze: 1 changed paths, none under pseudolife_memory/"
 
 
 def test_main_fails_on_a_frozen_change_and_passes_otherwise(repo, monkeypatch, capsys):
     monkeypatch.chdir(repo)
-    write("pseudolife_memory/web/static/index.html")(repo)
-    git(repo, "commit", "-qam", "static")
+    write("frontend/dist/index.html")(repo)
+    git(repo, "add", "frontend/dist/index.html")
+    git(repo, "commit", "-qm", "static")
     assert python_freeze.main(["--head-ref", "fix/x", "--head-repo", "o/r", "--base-repo", "o/r"]) == 0
     write("pseudolife_memory/cli.py")(repo)
     git(repo, "commit", "-qam", "python")
@@ -238,7 +245,6 @@ def test_the_guard_reads_the_labels_when_it_runs(tmp_path, answer, code, expecte
 def test_a_case_or_compatibility_variant_of_the_package_is_refused(path):
     # Reviewer of bf3de877 (N1): on a case-insensitive checkout (Windows, a
     # default macOS volume) a variant writes into the real package directory.
-    # The Console build stays exempt only under its exact spelling.
     assert python_freeze.frozen_paths([path]) == [path]
 
 
@@ -250,7 +256,7 @@ def test_a_windows_short_name_of_the_package_is_refused(path):
 
 
 @pytest.mark.parametrize("path", ["pseudolife_memory_tools/x.py", "docs/Pseudolife_memory.md",
-                                  "pseudolife_memory/web/static/assets/App.JS",
+                                  "frontend/dist/assets/App.JS",
                                   "docs/PSEUDO~1/x.py", "pseudo~x/y.py", "pseudo~1.txt", "PSEUDOX~1/a.py"])
 def test_case_variants_outside_the_package_still_pass(path):
     assert python_freeze.frozen_paths([path]) == []
