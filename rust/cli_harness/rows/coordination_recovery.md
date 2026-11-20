@@ -12,13 +12,17 @@ and all nine replayed successfully. No expectations come from the candidate.
 Both platform recordings come from the same bound oracle and replay successfully.
 
 Live cases use only owned `r1_` databases through the disposable test login.
-The oracle's writers seed fixed addresses, credentials, pending mail, an active
-attachment, a held lease and a waiter. Cases cover restore recovery, rebind,
+Both arms load the same five restored histories from
+`coordination_recovery.fixtures.json`. These rows and sequence positions
+were captured once from the frozen writers at `81c33560c`. The fixture
+uses the coordination and principal sections of the daemon's base DDL.
+The live cases start with fixed addresses, fixture credentials, pending mail,
+an active attachment, a held lease and a waiter. Cases cover restore recovery, rebind,
 ambiguous prefixes, reserved/wrong owners, invited owners with and without
 board access, an unrevoked credential, repeated
 recovery, pre-audit recovery, and replacement of a private-file reservation
 while a database trigger holds the rebind. Each arm must validate the whole
-audit chain with the oracle, retain pending mail byte-for-byte, and preserve
+audit chain with the shared audit verifier, retain pending mail byte-for-byte, and preserve
 the generation invariant. A failed rebind must leave all rows unchanged.
 
 `coordination-recovery-dynamic` replaces only newly appended timestamps and
