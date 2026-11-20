@@ -834,13 +834,13 @@ pub(in crate::cli::tunnel) fn status(root: &Path, name: &str) -> Option<(&'stati
                     .to_owned(),
             ));
         }
-    } else if let Some(record) = &record {
-        if !outcome.for_record(record) {
-            return Some((
-                "failed",
-                "the saved refresh result does not match the current launch".to_owned(),
-            ));
-        }
+    } else if let Some(record) = &record
+        && !outcome.for_record(record)
+    {
+        return Some((
+            "failed",
+            "the saved refresh result does not match the current launch".to_owned(),
+        ));
     }
     Some((
         outcome.state(),
