@@ -21,6 +21,7 @@ import schema_ci
 import session_fixture
 import startup_ci
 import startup_cases
+import startup_fixture
 import test_schema_executor
 import writer_session_cases
 
@@ -57,6 +58,16 @@ class SessionFixtureControls(unittest.TestCase):
                 patch.object(session_fixture.psycopg, "connect", return_value=conn), \
                 self.assertRaisesRegex(ValueError, "require a disposable harness database"):
             session_fixture.seed_bank("fixture-dsn", highwater="malformed")
+        conn.execute.assert_called_once_with("SELECT current_database()")
+
+    def test_startup_seed_refuses_a_non_disposable_server_name_before_writing(self):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = ("ordinary_bank",)
+        with patch.dict(os.environ, {"_PSEUDOLIFE_PRODUCTION_DB": "configured_bank"}), \
+                patch.object(startup_fixture.psycopg, "connect", return_value=conn), \
+                self.assertRaisesRegex(ValueError, "require a disposable harness database"):
+            startup_fixture.seed_bank("fixture-dsn", "stale-entry-dims")
         conn.execute.assert_called_once_with("SELECT current_database()")
 
     def test_second_writer_refuses_an_uninitialized_writer_epoch(self):

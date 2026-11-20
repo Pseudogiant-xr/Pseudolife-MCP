@@ -6,8 +6,8 @@ service.py:1638-1664, before observe() adds the process's wall clock. Complete
 storage.load_* rows preserve durable IDs, nullable fields and float32 vectors;
 entry snapshots expose resident timestamps and tags after construction. The
 zero-timestamp cell fixes both entry and seating clocks to 1000 seconds.
-Dimension fault cells remove owned-column typmods before producer writes;
-world/lesson vector lengths remain accepted by the source's startup guard.
+Dimension fault fixtures remove column typmods before inserting legacy vectors.
+Startup still accepts alternate world and lesson vector lengths.
 This is startup evidence, not a claim that PG-HYDRATE is closed.
 """
 from __future__ import annotations
