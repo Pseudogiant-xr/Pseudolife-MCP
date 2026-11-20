@@ -87,8 +87,18 @@ impl Child {
     }
 
     pub(super) async fn close(mut self) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        let group = self.id();
         self.kill()?;
-        tokio::time::timeout(Duration::from_secs(5), self.child.wait()).await??;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            self.child.wait().await?;
+            #[cfg(target_os = "linux")]
+            while group.is_some_and(|group| !group_is_empty(group)) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Ok::<(), io::Error>(())
+        })
+        .await??;
         Ok(())
     }
 }

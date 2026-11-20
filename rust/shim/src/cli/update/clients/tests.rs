@@ -936,6 +936,22 @@ fn tunnel_step_fails_an_invalid_store_with_its_cause() {
 }
 
 #[test]
+fn tunnel_step_reports_a_completed_supervised_restart() {
+    let fixture = Fixture::new();
+    let root = tunnel_store(&fixture);
+    let detail = "the tunnel reconnected on the installed runtime";
+    let answer = json!({"state":"refreshed","needs_attention":false,"detail":detail}).to_string();
+    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(0, &answer));
+    let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
+    assert_eq!(step["state"], "refreshed");
+    assert_eq!(
+        step["detail"],
+        format!("{detail}; run by the installed native launcher")
+    );
+    assert!(ladder_ok(&json!({"tunnel":step})));
+}
+
+#[test]
 fn tunnel_step_runs_only_for_a_record_and_an_installed_launcher() {
     let fixture = Fixture::new();
     let root = fixture.path.join(".pseudolife-mcp/tunnel");

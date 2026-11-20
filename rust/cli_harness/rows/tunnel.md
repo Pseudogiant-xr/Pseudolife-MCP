@@ -130,9 +130,10 @@ these cases are recorded from the candidate, not the oracle:
   A ready native launch is `current` when its live ownership and identity
   match the client running the check and saved settings and there is no
   interrupted key renewal or retained previous key. A Python refresh request
-  does not affect the native check. A live native launch whose identity
-  differs reports `stale` with stop and run commands for the same profile and store. The
-  restart reconnects the tunnel. Other running or uncertain launches are
+  does not affect the native check. A compatible supervisor can reconnect
+  on the verified installed shim and records `refreshed`, `rolled-back` or
+  `failed` after a `pending` refresh. A pre-protocol native launch still
+  gives explicit restart guidance. Other running or uncertain launches are
   `stale` and stay in place. A Python-supervised launch names the Python
   client as the client to use to stop it. A record with no profile beside it is
   listed by file name, `leftover` when its process is gone, `stale` when it

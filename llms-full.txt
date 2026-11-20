@@ -9022,7 +9022,7 @@ directory (`~/.pseudolife-mcp/tunnel`) exists or `http_proxy` /
 Linux desktop defaults (`--no-open` works;
 [Signing in to the Console](#signing-in-to-the-console)). `move` checks
 and plans a move with `--dry-run` but refuses to perform one
-([Moving a bank](remote-bank.md#moving-a-bank)). On a machine with a tunnel process record, a native `update` that runs the client steps leaves every tunnel as it is. The tunnel step reports a verified matching native launch as `current`. When a native launch differs from the installed runtime or saved settings, the step reports `stale` and gives the stop and run commands for that profile. This restart reconnects the tunnel. The step also reports running or uncertain launches it could not verify and names stopped process records that can be deleted. These reports exit 0. The step fails, and the update exits 5, when the tunnel store or a saved profile cannot be trusted (not owner-only, invalid, reached through a link, or holding entries the client does not read), or when the installed tunnel command does not run or answer in time. The step then names the cause and the file or directory it stopped on.
+([Moving a bank](remote-bank.md#moving-a-bank)). The native tunnel step reports a verified matching launch as `current`. A compatible supervisor can reconnect on the verified installed shim and reports `refreshed` after local readiness. It first checks the saved daemon connection while the old process serves the tunnel, then confirms that its owned process exits before starting the replacement. A failed check leaves the running child alone. A candidate that fails readiness triggers a rollback to the previous shim when the supervisor can prove the candidate stopped. Older foreground supervisors need the stop and run commands in the report. Restart an older service-managed launch through its manager. See [Tunnels](tunnels.md) for how to handle Python-supervised launches and cloud verification. The tunnel step exits 2 if it cannot safely read the store or a profile, or if a refresh cannot restart or verify shutdown of the child. The outer update reports that failure with exit 5.
 
 **Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
 checkout. Run inside one, a 0.16.x updater can record the wrong version in the
@@ -13873,15 +13873,26 @@ runs. `tunnel update` reports a tunnel that is not running, and names a
 process record left by a stopped tunnel as a file you can delete (a
 `leftover` when no saved profile is beside it). It reports `current` for
 a ready native launch whose identity matches the client running the check and
-the saved settings. If the launch differs from that client or the saved settings,
-`tunnel update` reports `stale` and leaves it running. Use
-`pseudolife-mcp tunnel stop` followed by `pseudolife-mcp tunnel run` for the
-same profile and directory. This reconnects the tunnel and interrupts its
-current session. An interrupted key renewal or a retained previous key also
-reports `stale` and gives guidance for that state. A pending refresh request
-written by the Python client does not affect the native launch check. Native
-update leaves a Python-supervised launch running and tells you to use the
-Python client that started it to stop it.
+the saved settings. After an installed client update, a compatible native
+supervisor verifies and pins the installed shim and checks the saved daemon
+connection while its current vendor process serves the tunnel. It then stops
+its owned vendor process, confirms exit, and starts the new launch. This
+reconnects the tunnel and interrupts its current session. If the candidate
+fails before local readiness, the supervisor tries its previous shim. Status
+shows the outcome and whether you need a new verification challenge. A
+rollback to the same identity preserves saved verification.
+
+An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
+followed by `pseudolife-mcp tunnel run` for the same profile and directory.
+If a service or scheduled task started that supervisor, restart the existing
+registration through its manager. A Python-supervised tunnel stays running
+until stopped with the Python client that started it. Then use native
+`tunnel run` for a foreground launch. The client switch continues to require
+removal of Python tunnel autostart before changing engines.
+
+An interrupted key renewal or a retained previous key reports `stale` with
+guidance for that state. A pending refresh request written by the Python
+client does not affect the native launch check.
 A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native

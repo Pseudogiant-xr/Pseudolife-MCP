@@ -1,4 +1,6 @@
 use super::*;
+#[path = "restart_tests.rs"]
+pub(super) mod restart_cases;
 use std::{io::BufRead, net::TcpListener, thread, time::Instant};
 
 struct Home(PathBuf);
@@ -311,6 +313,7 @@ fn update_reports_only_an_attested_current_launch_as_current() {
             exe: executable,
         }),
         ready: true,
+        refresh: None,
     };
     stage.announce(&record).unwrap();
     let record_path = super::record::path(&home.0, name);
@@ -567,6 +570,7 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
         },
         target: None,
         ready: true,
+        refresh: None,
     };
     state::atomic_write(&path, &serde_json::to_vec(&owner).unwrap(), None).unwrap();
     let _lock = open_lock(&home.0, "dot", &lock_path(&home.0, "dot")).unwrap();
@@ -664,6 +668,7 @@ fn recovery_preserves_unknown_ownership_before_target_publication() {
         },
         target: None,
         ready: false,
+        refresh: None,
     };
     let path = record::path(&home.0, "dot");
     state::atomic_create(&path, &serde_json::to_vec(&launch).unwrap()).unwrap();

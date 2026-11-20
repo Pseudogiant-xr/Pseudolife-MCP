@@ -52,15 +52,26 @@ runs. `tunnel update` reports a tunnel that is not running, and names a
 process record left by a stopped tunnel as a file you can delete (a
 `leftover` when no saved profile is beside it). It reports `current` for
 a ready native launch whose identity matches the client running the check and
-the saved settings. If the launch differs from that client or the saved settings,
-`tunnel update` reports `stale` and leaves it running. Use
-`pseudolife-mcp tunnel stop` followed by `pseudolife-mcp tunnel run` for the
-same profile and directory. This reconnects the tunnel and interrupts its
-current session. An interrupted key renewal or a retained previous key also
-reports `stale` and gives guidance for that state. A pending refresh request
-written by the Python client does not affect the native launch check. Native
-update leaves a Python-supervised launch running and tells you to use the
-Python client that started it to stop it.
+the saved settings. After an installed client update, a compatible native
+supervisor verifies and pins the installed shim and checks the saved daemon
+connection while its current vendor process serves the tunnel. It then stops
+its owned vendor process, confirms exit, and starts the new launch. This
+reconnects the tunnel and interrupts its current session. If the candidate
+fails before local readiness, the supervisor tries its previous shim. Status
+shows the outcome and whether you need a new verification challenge. A
+rollback to the same identity preserves saved verification.
+
+An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
+followed by `pseudolife-mcp tunnel run` for the same profile and directory.
+If a service or scheduled task started that supervisor, restart the existing
+registration through its manager. A Python-supervised tunnel stays running
+until stopped with the Python client that started it. Then use native
+`tunnel run` for a foreground launch. The client switch continues to require
+removal of Python tunnel autostart before changing engines.
+
+An interrupted key renewal or a retained previous key reports `stale` with
+guidance for that state. A pending refresh request written by the Python
+client does not affect the native launch check.
 A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native

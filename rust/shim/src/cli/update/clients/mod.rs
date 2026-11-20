@@ -204,11 +204,9 @@ fn update_tunnels(shim: Option<&Value>, runner: &impl Runner) -> Option<Value> {
 
 /// The tunnel step over the store at `root`: `None` when it holds no process
 /// record. `launcher` finds the installed native launcher, if any. The
-/// launcher's `tunnel update` reports each saved tunnel without stopping or
-/// starting one. A running launch that needs a restart reports `stale` with
-/// instructions, which this step accepts. The step fails only when that command refuses (an
-/// invalid store or profile, whose cause it carries), cannot run, or answers
-/// in a form this step does not know, or when the store cannot be read here.
+/// launcher's `tunnel update` asks a compatible supervisor to reconnect on
+/// the verified installed runtime. Older launches report `stale` with the
+/// steps to reconnect. A failure carries the command's diagnosis.
 fn tunnel_step(
     root: &Path,
     shim: Option<&Value>,
@@ -264,7 +262,7 @@ fn tunnel_step(
                 root.display()
             )
         })?;
-        let timeout = Duration::from_secs(60 + 90 * count);
+        let timeout = Duration::from_secs(60 + 120 * count);
         let output = runner.run(
             &launcher,
             &["tunnel", "update", "--profile-dir", directory],
@@ -272,12 +270,14 @@ fn tunnel_step(
             timeout,
             &[],
         );
-        // `stale` leaves the running tunnel in place and carries the
-        // tunnel command's restart or inspection instructions.
-        let answered = |state: &str| matches!(state, "current" | "stale");
+        // A refused request or successful rollback can leave the tunnel
+        // available on the previous runtime. The report carries its cause.
+        let answered = |state: &str| matches!(state, "current" | "stale" | "refreshed");
         if let Some(mut report) = output.json().filter(|r| {
-            matches!(r["state"].as_str(), Some("current" | "stale" | "failed"))
-                && r["detail"].is_string()
+            matches!(
+                r["state"].as_str(),
+                Some("current" | "stale" | "refreshed" | "failed")
+            ) && r["detail"].is_string()
         }) && (output.code == 0) == answered(report["state"].as_str().unwrap_or(""))
         {
             report["detail"] = json!(format!(

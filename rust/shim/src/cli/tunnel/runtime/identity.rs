@@ -1,8 +1,8 @@
 //! Verification is bound to stable launch inputs and to the bridge's own
 //! live generation. Relaunching the same inputs preserves the identity.
 use std::{
-    fs::{self, File},
-    io::{Read, Write},
+    fs,
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -11,14 +11,15 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::{
-    OWNER_LOCK, key::Key, launch_id, lock_path, read_record, record, setup, stage_path, store,
-    vendor,
+    LaunchRecord, OWNER_LOCK, key::Key, launch_id, lock_path, read_record, record, refresh::Image,
+    setup, stage_path, store, vendor,
 };
 
 pub(in crate::cli::tunnel) const CHANGED: &str = "the saved tunnel identity differs from the active launch. Stop and run the tunnel again before verification";
 const UNAVAILABLE: &str =
     "the native tunnel launch identity is unavailable. Check tunnel status before verification";
 
+#[cfg(test)]
 pub(super) fn compute(
     root: &Path,
     profile: &store::Profile,
@@ -31,7 +32,7 @@ pub(super) fn compute(
 
 const SIGNING_KEY: &str = ".tunnel-identity-key";
 
-fn ensure_signing_key(root: &Path) -> Result<(), &'static str> {
+pub(super) fn ensure_signing_key(root: &Path) -> Result<(), &'static str> {
     let path = root.join(SIGNING_KEY);
     if !store::occupied(&path).map_err(|_| UNAVAILABLE)? {
         let mut key = [0; 32];
@@ -46,7 +47,7 @@ fn ensure_signing_key(root: &Path) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn mac(root: &Path) -> Result<Hmac<Sha256>, &'static str> {
+pub(super) fn mac(root: &Path) -> Result<Hmac<Sha256>, &'static str> {
     let mut key = store::private_read(&root.join(SIGNING_KEY), 32).map_err(|_| UNAVAILABLE)?;
     let signer = if key.len() == 32 {
         Hmac::new_from_slice(&key).map_err(|_| UNAVAILABLE)
@@ -92,16 +93,41 @@ fn compute_identity(
     key: &Key,
     executable: &Path,
 ) -> Result<String, &'static str> {
-    let mut file = File::open(executable).map_err(|_| UNAVAILABLE)?;
-    let mut buffer = [0; 8192];
-    let mut hasher = Sha256::new();
-    loop {
-        let count = file.read(&mut buffer).map_err(|_| UNAVAILABLE)?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
+    let digest = crate::runtime::hash_file(executable).map_err(|_| UNAVAILABLE)?;
+    sign_inputs(
+        root,
+        profile,
+        key,
+        &digest,
+        env!("CARGO_PKG_VERSION"),
+        vendor::VERSION,
+    )
+}
+
+pub(super) fn sign_image(
+    root: &Path,
+    profile: &store::Profile,
+    key: &Key,
+    image: &Image,
+) -> Result<String, &'static str> {
+    sign_inputs(
+        root,
+        profile,
+        key,
+        &image.digest,
+        &image.version,
+        &image.vendor_version,
+    )
+}
+
+fn sign_inputs(
+    root: &Path,
+    profile: &store::Profile,
+    key: &Key,
+    digest: &str,
+    version: &str,
+    vendor_version: &str,
+) -> Result<String, &'static str> {
     let provider =
         crate::credentials::CredentialProvider::new(None, Some((&profile.token_file).into()))
             .map_err(|_| UNAVAILABLE)?;
@@ -109,9 +135,9 @@ fn compute_identity(
     let token = snapshot.token().ok_or(UNAVAILABLE)?;
     let inputs = json!({
         "schema": 2,
-        "runtime_digest": format!("{:x}", hasher.finalize()),
-        "runtime_version": env!("CARGO_PKG_VERSION"),
-        "vendor_version": vendor::VERSION,
+        "runtime_digest": digest,
+        "runtime_version": version,
+        "vendor_version": vendor_version,
         "profile": {
             "name": profile.name,
             "daemon_url": profile.daemon_url,
@@ -119,7 +145,7 @@ fn compute_identity(
             "tunnel_id": profile.tunnel_id,
             "organization_id": profile.organization_id,
             "minimum_catalog": profile.catalog,
-            "runtime_version": profile.runtime_version.as_deref().unwrap_or(vendor::VERSION),
+            "runtime_version": profile.runtime_version.as_deref().unwrap_or(vendor_version),
         },
         "daemon_credential": format!("{:x}", Sha256::digest(token.as_bytes())),
         "runtime_key": format!("{:x}", key.digest()),
@@ -139,7 +165,7 @@ fn held(path: &Path) -> bool {
     })
 }
 
-fn owns_generation(root: &Path, name: &str, stage: &Path) -> bool {
+pub(super) fn owns_generation(root: &Path, name: &str, stage: &Path) -> bool {
     // Startup and recovery both acquire the profile lock. Only the
     // supervisor holds the second lock for this particular generation.
     setup::check_directory(stage).is_ok()
@@ -159,6 +185,28 @@ fn expected(
     compute_identity(root, profile, &key, executable)
 }
 
+fn expected_record(
+    root: &Path,
+    profile: &store::Profile,
+    executable: &Path,
+    record: &LaunchRecord,
+) -> Result<String, &'static str> {
+    let Some(capability) = &record.refresh else {
+        return expected(root, profile, executable);
+    };
+    if profile.state != "ready" {
+        return Err(CHANGED);
+    }
+    let image = &capability.image;
+    super::check_executable_path(executable).map_err(|_| UNAVAILABLE)?;
+    let digest = crate::runtime::hash_file(executable).map_err(|_| UNAVAILABLE)?;
+    if digest != image.digest {
+        return Err(CHANGED);
+    }
+    let key = Key::load(root, &profile.name).map_err(|_| UNAVAILABLE)?;
+    sign_image(root, profile, &key, image)
+}
+
 pub(in crate::cli::tunnel) fn active(
     root: &Path,
     name: &str,
@@ -176,12 +224,13 @@ pub(in crate::cli::tunnel) fn active(
         return Err(UNAVAILABLE);
     }
     let profile = store::load(root, name).map_err(|_| UNAVAILABLE)?;
-    let identity = expected(root, &profile, executable)?;
+    let identity = expected_record(root, &profile, executable, &record)?;
     let current = read_record(&path).map_err(|_| UNAVAILABLE)?;
     if current.native_launch != record.native_launch
         || !current.ready
         || record.launch_identity.as_deref() != Some(&identity)
         || current.launch_identity != record.launch_identity
+        || current.refresh != record.refresh
         || !owns_generation(root, name, &stage)
     {
         return Err(CHANGED);
@@ -200,7 +249,7 @@ pub(in crate::cli::tunnel) fn fixture_identity(
 }
 
 #[cfg(test)]
-pub(in crate::cli::tunnel) fn fixture_owner(root: &Path, generation: &str) -> File {
+pub(in crate::cli::tunnel) fn fixture_owner(root: &Path, generation: &str) -> fs::File {
     let stage = stage_path(root, launch_id(generation).unwrap());
     crate::board::state::private_dir(&stage).unwrap();
     let owner = crate::board::state::create(&stage.join(OWNER_LOCK))
@@ -211,8 +260,12 @@ pub(in crate::cli::tunnel) fn fixture_owner(root: &Path, generation: &str) -> Fi
 }
 
 pub(in crate::cli::tunnel) fn current(root: &Path, name: &str) -> Result<String, &'static str> {
+    let record = read_record(&record::path(root, name)).map_err(|_| UNAVAILABLE)?;
+    if let Some(refresh) = &record.refresh {
+        return active(root, name, &refresh.image.path, Some(&record.native_launch));
+    }
     let executable = std::env::current_exe().map_err(|_| UNAVAILABLE)?;
-    active(root, name, &executable, None)
+    active(root, name, &executable, Some(&record.native_launch))
 }
 
 pub(in crate::cli::tunnel) struct Bound {
@@ -235,10 +288,17 @@ impl Bound {
             return Err(UNAVAILABLE);
         }
         let executable = std::env::current_exe().map_err(|_| UNAVAILABLE)?;
-        let identity = expected(root, profile, &executable)?;
         // The bridge is what gets the vendor ready. Check the record even
         // while starting, but require readiness before accepting a receipt.
         let record = read_record(&record::path(root, &profile.name)).map_err(|_| UNAVAILABLE)?;
+        if record
+            .refresh
+            .as_ref()
+            .is_some_and(|refresh| !crate::runtime::same_path(&executable, &refresh.image.path))
+        {
+            return Err(CHANGED);
+        }
+        let identity = expected_record(root, profile, &executable, &record)?;
         if record.native_launch != generation
             || record.launch_identity.as_deref() != Some(&identity)
         {
