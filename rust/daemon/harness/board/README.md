@@ -78,13 +78,13 @@ Per step it compares the status, the headers clients read (`content-type`,
 `cache-control`, `x-pl-board`) and the body by value. After every write it
 dumps the board's tables on both arms (agents, messages, events, leases,
 waiters, wakes, the two board meta keys and the three board sequences) and
-diffs them row for row. After every scenario it runs Python's own
-`verify_audit_chain` on each arm's chain, recomputes every row's hash with
-Python's `audit_hash`, requires every stored payload to equal Python's
-`_canonical` of itself byte for byte, and checks that every credential a
-register returned hashes to its stored `credential_hash`. The `mixed`
+diffs them row for row. After every scenario it uses the frozen rules in
+`rust.harness_support.audit_oracle` to verify both chains, recompute row
+hashes, and compare stored and canonical payload bytes. It also checks that
+each credential returned by registration hashes to its stored
+`credential_hash`. The `mixed`
 scenario appends to one chain from both daemons in turn (Python first, then
-Rust first) and requires Python's verifier to accept the whole chain.
+Rust first) and requires the harness verifier to accept the whole chain.
 
 ## Normalizers (`norm.py`, recorded with the goldens)
 

@@ -269,32 +269,50 @@ pub(in crate::cli::restore_cli::move_native) fn apply(
     id: &str,
     identities: &Identities,
     pins: &TargetPins,
+    files: &TargetFiles,
+    home: Option<&Path>,
 ) -> Result<(), String> {
     let program = docker.program.clone();
     apply_with(
         docker,
         folder,
-        id,
-        identities,
-        pins,
+        Application {
+            id,
+            identities,
+            pins,
+            files: &files.resolve(home)?,
+        },
         &mut |deployment, args, env| deployment.compose(&program, args, env),
         |file, bytes| file.write_all(bytes),
     )
 }
 
+#[derive(Clone, Copy)]
+struct Application<'a> {
+    id: &'a str,
+    identities: &'a Identities,
+    pins: &'a TargetPins,
+    files: &'a TargetFiles,
+}
+
 fn apply_with(
     docker: &mut impl Docker,
     folder: &Path,
-    id: &str,
-    identities: &Identities,
-    pins: &TargetPins,
+    application: Application<'_>,
     compose: &mut Compose<'_>,
     append: impl FnOnce(&mut fs::File, &[u8]) -> std::io::Result<()>,
 ) -> Result<(), String> {
+    let Application {
+        id,
+        identities,
+        pins,
+        files,
+    } = application;
     let (deployment, original) = target_with(
         docker,
         shape(&identities.values)?,
         Some(pins),
+        files,
         &mut *compose,
     )?;
     deployment.check_binding(pins)?;
@@ -511,7 +529,12 @@ mod tests {
             script::{fail, ok},
         };
         use serde_json::json;
-        use std::{cell::Cell, os::unix::fs::OpenOptionsExt, path::PathBuf, time::Duration};
+        use std::{
+            cell::{Cell, RefCell},
+            os::unix::fs::OpenOptionsExt,
+            path::PathBuf,
+            time::Duration,
+        };
 
         const ID: &str = "20261120-000000-aabbccdd";
         const ORIGINAL: &[u8] = b"# preserve this configuration\nFIXTURE=one\n";
@@ -524,6 +547,8 @@ mod tests {
             rendering_changed: Cell<bool>,
             running_changed: Cell<bool>,
             running: Cell<bool>,
+            active_env: RefCell<Option<PathBuf>>,
+            exported_only: Cell<bool>,
         }
 
         impl Fixture {
@@ -546,10 +571,16 @@ mod tests {
                     rendering_changed: Cell::new(false),
                     running_changed: Cell::new(false),
                     running: Cell::new(false),
+                    active_env: RefCell::new(None),
+                    exported_only: Cell::new(false),
                 }
             }
 
             fn pins(&self) -> TargetPins {
+                self.pins_for(&TargetFiles::default())
+            }
+
+            fn pins_for(&self, files: &TargetFiles) -> TargetPins {
                 let mut pins = TargetPins {
                     daemon: "1".repeat(64),
                     postgres: "2".repeat(64),
@@ -560,15 +591,16 @@ mod tests {
                     &mut Engine(self),
                     [true, false, false, true],
                     Some(&pins),
-                    |_, args, env| self.compose(args, env),
+                    files,
+                    |deployment, args, env| self.compose(deployment, args, env),
                 )
                 .unwrap();
                 pins.deployment_digest = Some(deployment.digest(&pins).unwrap());
                 pins
             }
 
-            fn env(&self) -> BTreeMap<String, String> {
-                fs::read_to_string(self.root.join(".env"))
+            fn env(path: &Path) -> BTreeMap<String, String> {
+                fs::read_to_string(path)
                     .unwrap()
                     .lines()
                     .filter_map(|line| line.split_once('='))
@@ -578,13 +610,14 @@ mod tests {
 
             fn compose(
                 &self,
+                deployment: &Deployment,
                 args: &[&str],
                 overrides: &seams::Environment,
             ) -> Result<String, String> {
                 match args {
                     ["config", "--hash", "*"] => Ok(HASHES.into()),
                     ["config", "--format", "json"] => {
-                        let mut env = self.env();
+                        let mut env = Self::env(Path::new(&deployment.env_file));
                         if self.rendering_changed.get() && env.contains_key(KEYS[0]) {
                             env.insert("FIXTURE".into(), "unexpected".into());
                         }
@@ -599,6 +632,7 @@ mod tests {
                         Ok(if self.recreated.get() { "3" } else { "1" }.repeat(64))
                     }
                     ["up", ..] => {
+                        *self.active_env.borrow_mut() = Some(PathBuf::from(&deployment.env_file));
                         self.recreated.set(true);
                         Ok(String::new())
                     }
@@ -629,17 +663,22 @@ mod tests {
                         }},"Mounts":[{"Destination":"/var/lib/postgresql","Type":"volume","Name":"fixture-pg"}]}]).to_string())
                     }
                     ["inspect", "--type=container", id] => {
-                        let mut env = if f.recreated.get() { f.env() } else { BTreeMap::from([("FIXTURE".into(),"one".into())]) };
+                        let mut env = if f.recreated.get() {
+                            Fixture::env(f.active_env.borrow().as_deref().unwrap())
+                        } else {
+                            BTreeMap::from([("FIXTURE".into(),"one".into())])
+                        };
                         if f.running_changed.get() {
                             env.insert("FIXTURE".into(), "unexpected".into());
                         }
                         let env: Vec<_> = env.iter().map(|(key,value)| format!("{key}={value}")).collect();
+                        let labelled_dir = if f.exported_only.get() { f.root.join("not-visible") } else { f.root.clone() };
                         ok(&json!([{"Id":id,"Image":IMAGE,"State":{"Running":f.running.get()},
                             "Config":{"Env":env,"Image":"ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.25.0","Labels":{
                                 "com.docker.compose.project":"fixture","com.docker.compose.service":DAEMON_SERVICE,
                                 "com.docker.compose.config-hash":"daemon-hash",
-                                "com.docker.compose.project.working_dir":f.root,
-                                "com.docker.compose.project.config_files":f.root.join("compose.yaml")
+                                "com.docker.compose.project.working_dir":labelled_dir,
+                                "com.docker.compose.project.config_files":labelled_dir.join("compose.yaml")
                             }},"Mounts":[{"Destination":"/data","Type":"volume","Name":"fixture-state"}],
                             "HostConfig":{"PortBindings":{"8765/tcp":[{"HostIp":"127.0.0.1","HostPort":"8765"}]}}
                         }]).to_string())
@@ -650,18 +689,116 @@ mod tests {
         }
 
         #[test]
+        fn explicit_target_files_drive_apply_and_undo_in_order() {
+            let f = Fixture::new();
+            let export = f.root.join("export");
+            fs::create_dir(&export).unwrap();
+            for file in ["base.yaml", "override.yaml"] {
+                fs::write(export.join(file), "fixture").unwrap();
+            }
+            for file in ["target env", "other env"] {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(export.join(file))
+                    .unwrap()
+                    .write_all(ORIGINAL)
+                    .unwrap();
+            }
+            f.exported_only.set(true);
+            let files = TargetFiles {
+                env: Some("~/export/target env".into()),
+                compose: vec!["~/export/base.yaml".into(), "~/export/override.yaml".into()],
+            }
+            .resolve(Some(&f.root))
+            .unwrap();
+            let pins = f.pins_for(&files);
+            let identities = fixture();
+            let result = target_with(
+                &mut Engine(&f),
+                [true, false, false, true],
+                Some(&pins),
+                &TargetFiles::default(),
+                |deployment, args, env| f.compose(deployment, args, env),
+            );
+            assert!(result.err().unwrap().contains("--target-compose-file"));
+            let application = Application {
+                id: ID,
+                identities: &identities,
+                pins: &pins,
+                files: &files,
+            };
+            let alternate = TargetFiles {
+                env: Some(export.join("other env").to_str().unwrap().into()),
+                ..files.clone()
+            };
+            let mut compose = |deployment: &Deployment, args: &[&str], env: &seams::Environment| {
+                f.compose(deployment, args, env)
+            };
+            assert!(
+                apply_with(
+                    &mut Engine(&f),
+                    &f.root,
+                    Application {
+                        files: &alternate,
+                        ..application
+                    },
+                    &mut compose,
+                    |_, _| panic!("an unverified path reached the append")
+                )
+                .is_err()
+            );
+            apply_with(
+                &mut Engine(&f),
+                &f.root,
+                application,
+                &mut compose,
+                |file, bytes| file.write_all(bytes),
+            )
+            .unwrap();
+            let journal = read_journal(&f.root.join(JOURNAL)).unwrap().unwrap();
+            assert_eq!(
+                journal.deployment.args,
+                [
+                    "compose",
+                    "--project-name",
+                    "fixture",
+                    "--project-directory",
+                    export.to_str().unwrap(),
+                    "--env-file",
+                    files.env.as_deref().unwrap(),
+                    "-f",
+                    &files.compose[0],
+                    "-f",
+                    &files.compose[1],
+                ]
+            );
+            assert!(fs::read(export.join("target env")).unwrap().len() > ORIGINAL.len());
+            assert!(fs::read(f.root.join(".env")).unwrap() == ORIGINAL);
+            undo_with(&mut Engine(&f), &f.root, ID, Some(&pins), &mut compose).unwrap();
+            for file in ["target env", "other env"] {
+                assert!(fs::read(export.join(file)).unwrap() == ORIGINAL);
+            }
+        }
+
+        #[test]
         fn torn_carry_write_restores_original_and_undo_recovers_a_marked_partial_suffix() {
             let f = Fixture::new();
             let pins = f.pins();
             let identities = fixture();
+            let files = TargetFiles::default();
             let mut partial = Vec::new();
             let result = apply_with(
                 &mut Engine(&f),
                 &f.root,
-                ID,
-                &identities,
-                &pins,
-                &mut |_, args, env| f.compose(args, env),
+                Application {
+                    id: ID,
+                    identities: &identities,
+                    pins: &pins,
+                    files: &files,
+                },
+                &mut |deployment, args, env| f.compose(deployment, args, env),
                 |file, bytes| {
                     assert!(read_journal(&f.root.join(JOURNAL)).unwrap().is_some());
                     partial.extend_from_slice(&bytes[..marker(ID).len() + KEYS[0].len() + 5]);
@@ -683,7 +820,7 @@ mod tests {
                 &f.root,
                 ID,
                 Some(&pins),
-                &mut |_, args, env| f.compose(args, env),
+                &mut |deployment, args, env| f.compose(deployment, args, env),
             )
             .unwrap();
             assert!(fs::read(f.root.join(".env")).unwrap() == ORIGINAL);
@@ -700,16 +837,22 @@ mod tests {
             let f = Fixture::new();
             let pins = f.pins();
             let identities = fixture();
-            let mut compose =
-                |_: &Deployment, args: &[&str], env: &seams::Environment| f.compose(args, env);
+            let files = TargetFiles::default();
+            let application = Application {
+                id: ID,
+                identities: &identities,
+                pins: &pins,
+                files: &files,
+            };
+            let mut compose = |deployment: &Deployment, args: &[&str], env: &seams::Environment| {
+                f.compose(deployment, args, env)
+            };
             f.rendering_changed.set(true);
             assert_eq!(
                 apply_with(
                     &mut Engine(&f),
                     &f.root,
-                    ID,
-                    &identities,
-                    &pins,
+                    application,
                     &mut compose,
                     |file, bytes| file.write_all(bytes)
                 )
@@ -723,9 +866,7 @@ mod tests {
             apply_with(
                 &mut Engine(&f),
                 &f.root,
-                ID,
-                &identities,
-                &pins,
+                application,
                 &mut compose,
                 |file, bytes| file.write_all(bytes),
             )

@@ -76,15 +76,7 @@ Each change waits for hosted CI once, on its batch:
   member's own run can be absent, queued or cancelled. A pull request that
   edits `python-freeze.yml` runs its own edited workflow, which review
   catches; admission does not depend on it.
-  Because nothing under `pseudolife_memory/` may change, two routine
-  changes are exceptions too while they still edit the package, and carry
-  the label, applied by the maintainer or by the conductor acting on a
-  maintainer ruling (the maintainer is confirming this): a version cut (the
-  0.23.1 cut, #1490, bumped `pseudolife_memory/compose/docker-compose.yml`;
-  the `release-procedure` skill says so) and a schema bump, until the
-  schema has a Rust-owned source (the Rust job's `gen_schema_sql.py
-  --check` builds `rust/daemon/src/storage/schema.sql` from
-  `pseudolife_memory/storage/schema.py`).
+  A version cut that still edits the frozen package requires the label, applied by the maintainer or by the conductor acting on a maintainer ruling. Follow the `release-procedure` skill. Schema changes use the Rust daemon's DDL and plan. The Rust job's `gen_schema_sql.py --check` checks those inputs and the derived metadata.
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
   pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend
@@ -177,15 +169,32 @@ under `docs/`. All of these hold first:
   identical tree ("Stacked local gates"), so a direct merge at that point
   costs the open batch a rebuild and a fresh gate. Wait for the batch to
   merge, or add the pull request to the next one.
-- Its review pass is recorded, the doc guards passed at its head, and every
-  check at its head was read and is green on the current merge ref.
-- It is merged with a merge commit (`gh pr merge <n> --merge`), never
-  squash.
+- Its review pass is recorded.
+
+Run `python ops/integrate.py merge-docs <pr>` from the clone holding the
+batch worktrees, during your turn to update master. Serialize it with
+batch builds, opens, merges and other updates to master.
+
+- The command checks that the pull request is open, non-draft, targets
+  master and is mergeable. It checks that no batch is open or built locally.
+- It requires both the pull request diff and the proposed master push to
+  be docs-only by master's CI classifier (`is_documentation_path` in
+  `rust/ci/parity_scope.py`).
+- The required checks must have reported and each latest check must be
+  finished with none failed. `SUCCESS`, `SKIPPED` and `NEUTRAL` qualify.
+- It runs the CI documentation guards and selected reader tests locally
+  in a disposable worktree at GitHub's test merge.
+- After the guards, it rechecks the batch state and checks, and requires the
+  base and head to match the tested pair. It pins the checked head in the
+  merge request and uses a regular GitHub merge commit. It then verifies
+  the landed commit's parents and tree.
 
 What it costs: a few hosted minutes for the doc guards. A push the workflows
 cannot classify as docs-only keeps the lanes it had before this shortcut,
 which can be the whole push matrix and about one hosted run on the account's
 20 slots, so do not merge one of those shortly before a batch opens.
+Do not start a direct merge shortly before a batch is built. Leave time
+for the local doc guards.
 
 Who merges: the maintainer, or a session the maintainer delegated merges to
 in their own words. A change to `CLAUDE.md` or another policy page is
@@ -1031,8 +1040,10 @@ raw `gh pr merge`, so this script is the only path there. That rule lives
 in the maintainer's own configuration, not in this repository: a Codex
 session, or any other harness, has no such block and relies on the written
 rule (CLAUDE.md, "Shipping checklist" item 4): a batch merges through
-`python ops/integrate.py merge`, and only a merge under the
-`merge-forward` skill's exceptions is made by hand, by the maintainer.
+`python ops/integrate.py merge`, a direct docs merge uses
+`python ops/integrate.py merge-docs <pr>` under
+[Docs-only pull requests](#docs-only-pull-requests), and only a merge under
+the `merge-forward` skill's exceptions is made by hand, by the maintainer.
 
 The maintainer runs it, or the session the maintainer delegated merging
 to.

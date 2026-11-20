@@ -22,6 +22,8 @@ from board import run  # noqa: E402
 from board.norm import Normalizer, Windows  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
+from rust.harness_support.database_guard import assert_disposable_database  # noqa: E402
+from rust.harness_support.import_blocker import cold_harness_imports  # noqa: E402
 
 pg = pgdisposable.Slice("mir")
 OLD = 1_000_000.5          # a base row's clock: outside any captured window
@@ -77,6 +79,7 @@ def base(monkeypatch):
     dbstate._BASE_HASHES.clear()
     try:
         with psycopg.connect(pg.create(name), autocommit=True) as conn:
+            assert_disposable_database(conn)
             conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
             conn.execute(SCHEMA_SQL)
             prev = GENESIS_HASH
@@ -249,6 +252,25 @@ def test_chain_check_verifies_every_row_but_reports_only_changed_payloads(copy):
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("DELETE FROM coordination_events WHERE seq = 1")
     assert [p for p in run.chain_check(dsn) if p.startswith("verify_audit_chain")]
+
+
+@pytest.mark.parametrize("legacy", [False, True], ids=["current", "legacy"])
+def test_chain_check_reads_the_bank_without_the_frozen_package(copy, monkeypatch, legacy):
+    dsn = copy("boardchaincold")
+    monkeypatch.delenv(pgdisposable.BASE_ENV, raising=False)
+    if legacy:
+        import psycopg
+
+        with psycopg.connect(dsn) as conn:
+            assert_disposable_database(conn)
+            conn.execute("ALTER TABLE coordination_events DROP COLUMN body, DROP COLUMN body_salt")
+
+    with cold_harness_imports():
+        from board import run as isolated_run
+
+        assert isolated_run.chain_check(dsn) == [
+            f"seq 2: payload is not Python's canonical text: {UNSORTED}",
+        ]
 
 
 def _reference_dump(dsn: str) -> dict:

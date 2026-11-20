@@ -9,7 +9,7 @@ import math
 import re
 import time
 
-from .. import core, normalize
+from .. import core, lease_fixture, normalize
 from ..core import Case
 from . import _bank
 from .lease import Board, TOKEN, T0, _Holder, _after, _local, _release_local, coordination_state
@@ -29,7 +29,6 @@ class OperatorBoard(Board):
 @normalize.rule("lease-fixture-pid")
 def fixture_pid(obs):
     """Associate the watched process PID, after validating raw audit chains."""
-    from pseudolife_memory.storage.coordination import audit_hash, verify_audit_chain
     pid = obs["fixture_pid"]
     assert isinstance(pid, int) and pid > 0
     pattern = re.compile(rf"\bpid {pid}\b")
@@ -50,6 +49,10 @@ def fixture_pid(obs):
     states = [item["state"] for item in obs.get("db", {}).get("writes", [])]
     if "final" in obs.get("db", {}):
         states.append(obs["db"]["final"])
+    if not states:
+        return
+    from pseudolife_memory.storage.coordination import audit_hash, verify_audit_chain
+
     for state in states:
         assert verify_audit_chain(_audit(state))["ok"]
         for table, records in state["tables"].items():
@@ -66,7 +69,6 @@ def fixture_pid(obs):
 
 
 def hold_case(identifier, *, board=False, queued=False, gone=False, renew=False):
-    from pseudolife_memory import os_lock
     env = {"PSEUDOLIFE_LEASE_LOCK_DIR": "{HOME}/locks", "PSEUDOLIFE_AGENT_PROJECT": "fixture",
            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     if board:
@@ -96,7 +98,7 @@ def hold_case(identifier, *, board=False, queued=False, gone=False, renew=False)
         deadline = time.monotonic() + 20
         path = arm.home / "locks" / "lease-fixture.lock"
         while proc.poll() is None and time.monotonic() < deadline:
-            if path.exists() and os_lock.probe(path) is True:
+            if path.exists() and lease_fixture.probe(path) is True:
                 arm.state["local_seen"] = True
                 break
             time.sleep(0.02)
@@ -118,7 +120,7 @@ def hold_case(identifier, *, board=False, queued=False, gone=False, renew=False)
         obs["fixture_pid"] = arm.state["watched"].pid
         obs["listener"] = {"local_seen": arm.state["local_seen"], "stable_hold": arm.state["stable_hold"],
                            "wait_observed": arm.state.get("waited", False),
-                           "local_free": os_lock.probe(arm.home / "locks" / "lease-fixture.lock") is not True,
+                           "local_free": lease_fixture.probe(arm.home / "locks" / "lease-fixture.lock") is not True,
                            "watched_gone": arm.state["watched"].proc.poll() is not None}
         if arm.name == "python" and not gone:
             assert obs["listener"]["local_seen"] and obs["listener"]["stable_hold"]
@@ -313,8 +315,8 @@ def native_pg_diagnostics(obs):
 
 def operator_case(identifier, argv, scenario="missing", events=(), local=False, stdout_closed=False,
                   fault=None, failure_class=None):
-    from pseudolife_memory.lease_cli import parse_duration
-    hold = parse_duration(argv[argv.index("--for") + 1]) if "--for" in argv else 86400
+    # The two explicit fixture inputs and the default hold window, in seconds.
+    hold = {"2m": 120, "7d": 604800}[argv[argv.index("--for") + 1]] if "--for" in argv else 86400
     env = {"PSEUDOLIFE_DAEMON_EXEC": "1", "PYTHONUTF8": "1",
            "PYTHONIOENCODING": "utf-8", "PSEUDOLIFE_LEASE_LOCK_DIR": "{HOME}/locks"}
 
@@ -379,8 +381,7 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
 
     def after(arm, obs):
         if local:
-            from pseudolife_memory.os_lock import probe
-            obs["listener"] = {"local_still_held": probe(arm.home / "locks" / "lease-fixture.lock") is True}
+            obs["listener"] = {"local_still_held": lease_fixture.probe(arm.home / "locks" / "lease-fixture.lock") is True}
             if arm.name == "python":
                 assert obs["listener"]["local_still_held"]
         _after(arm, obs)

@@ -15,6 +15,8 @@ applies.
 `import_blocker.py` lets the harness tests reload cached modules and reject
 imports of the frozen Python package. The principal parity tests also collect
 the readiness and cold-import controls in `test_readiness.py`.
+`audit_oracle.py` preserves the frozen audit byte layout and verification
+rules for the CLI and board comparisons.
 The schema executor contains no DDL and imports no product code. It runs in
 one transaction, or a savepoint inside a caller-owned transaction, and refuses
 unknown operations. On Linux the `cli-startup` schema step compares its complete

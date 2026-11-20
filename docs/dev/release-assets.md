@@ -182,11 +182,22 @@ does not imply a daemon image for every target. The runtime installs
 
 The image job is enabled only by the maintainer setting
 `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true`; unset or other values disable it.
-The native asset set has no variable: it publishes on every release
-event once the `build` job's version guards passed, before the `publish`
-(PyPI) job, which needs it. The `release-ready` job requires successful
-`publish`, `images` and `rust-image` jobs. A skipped, failed or cancelled
-image job leaves the marker absent.
+On a published release, `guards` checks the tag, Python package metadata,
+both `server.json` version fields and both native crate versions. Then
+`build` builds and checks the wheel and sdist while `rust-assets`,
+`rust-assets-bundle` and `rust-assets-publish` build, verify and attach the
+native assets independently. `publish` requires both the wheel build and the
+native attachment to succeed before the `pypi` environment asks for approval.
+The image jobs and registry wait for `publish`. The `release-ready` job
+requires successful `publish`, `images` and `rust-image` jobs. A skipped,
+failed or cancelled image job leaves the marker absent.
+
+A failed wheel build can leave the complete native asset set on the public
+GitHub release before approval. Explicit tags can reach those assets, and a
+daemon with the original GitHub discovery rule can announce the release.
+The approval job and both image jobs are skipped while the wheel build
+has failed, so PyPI-based clients and native consumers with the readiness
+rule do not discover the new version.
 Build-only CI proofs skip the marker job, asset attachment and image
 publication. Installers and pinned updates still treat an asset as
 unavailable until the release actually carries it (a 404 or a missing
@@ -211,9 +222,10 @@ provisions them there before its backup.
 
 To prove the matrix without publication, dispatch `release.yml` on the
 candidate branch. The native build and bundle jobs upload an Actions
-artifact named `native-release-complete`; all publishing jobs are skipped,
-even if the Rust image variable is enabled. A release event builds the same
-archives after the `build` job's guards, then verifies the downloaded
+artifact named `native-release-complete`. The version-guard job, wheel build
+and publishers are skipped, even if the Rust image variable is enabled. The
+matrix still checks native crate versions. A release event builds the same
+archives after `guards` succeeds, then verifies the downloaded
 `SHA256SUMS` immediately before attaching the complete set to the
 already published GitHub release; PyPI, the images and the registry wait
 for that attachment. The archive attachment job requires exactly the six listed

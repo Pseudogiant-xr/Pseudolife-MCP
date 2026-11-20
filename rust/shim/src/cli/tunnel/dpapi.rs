@@ -1,8 +1,7 @@
 //! The Windows protection of a saved tunnel key: user-scoped DPAPI, sealed
 //! as `tunnel_profiles._dpapi` seals it (no description, no entropy, no
-//! prompt, `CRYPTPROTECT_UI_FORBIDDEN`). Only whether the key unseals to a
-//! valid key leaves this module: the plaintext is wiped before it is freed
-//! and is never formatted, logged or returned.
+//! prompt, `CRYPTPROTECT_UI_FORBIDDEN`). Decrypted bytes are scoped to
+//! a callback and are never formatted or logged.
 use windows_sys::Win32::Foundation::{
     ERROR_INVALID_DATA, ERROR_INVALID_PARAMETER, GetLastError, LocalFree,
 };
@@ -22,8 +21,23 @@ use windows_sys::Win32::Security::Cryptography::{
 /// `NTE_BAD_KEY_STATE`, measured the same day).
 #[allow(unsafe_code)]
 pub(super) fn holds_key(sealed: &[u8]) -> Option<bool> {
+    match with_key(sealed, |_| ()) {
+        Ok(()) => Some(true),
+        Err(KeyError::Invalid) => Some(false),
+        Err(KeyError::Unavailable) => None,
+    }
+}
+
+pub(super) enum KeyError {
+    Invalid,
+    Unavailable,
+}
+
+/// Scope the decrypted bytes to the caller and release the OS allocation.
+#[allow(unsafe_code)]
+pub(super) fn with_key<T>(sealed: &[u8], use_key: impl FnOnce(&[u8]) -> T) -> Result<T, KeyError> {
     let Ok(size) = u32::try_from(sealed.len()) else {
-        return Some(false);
+        return Err(KeyError::Invalid);
     };
     let input = CRYPT_INTEGER_BLOB {
         cbData: size,
@@ -51,25 +65,28 @@ pub(super) fn holds_key(sealed: &[u8]) -> Option<bool> {
     if unsealed == 0 {
         // SAFETY: reads this thread's last-error value, set by the call above.
         let error = unsafe { GetLastError() };
-        return matches!(error, ERROR_INVALID_DATA | ERROR_INVALID_PARAMETER).then_some(false);
+        return Err(
+            if matches!(error, ERROR_INVALID_DATA | ERROR_INVALID_PARAMETER) {
+                KeyError::Invalid
+            } else {
+                KeyError::Unavailable
+            },
+        );
     }
     if output.pbData.is_null() {
-        return None;
+        return Err(KeyError::Unavailable);
     }
     // SAFETY: as above, `output` describes a buffer this call owns.
     let plain = unsafe { std::slice::from_raw_parts_mut(output.pbData, output.cbData as usize) };
-    let valid = match crate::credentials::decode_token(plain) {
-        Ok(token) => {
-            wipe(token.into_bytes());
-            true
-        }
-        Err(_) => false,
-    };
+    let decoded = crate::credentials::decode_token(plain);
     plain.fill(0);
     // SAFETY: the buffer was allocated by CryptUnprotectData with LocalAlloc
     // and is not used after this.
     unsafe { LocalFree(output.pbData.cast()) };
-    Some(valid)
+    let decoded = decoded.map_err(|_| KeyError::Invalid)?.into_bytes();
+    let result = use_key(&decoded);
+    wipe(decoded);
+    Ok(result)
 }
 
 fn wipe(mut bytes: Vec<u8>) {

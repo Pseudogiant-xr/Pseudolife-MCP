@@ -13388,9 +13388,30 @@ While such a target holds a copy of this host's bank, no other move starts from 
 
 A target that no longer holds anything of this host's bank is found so by `--release-target`: neither this move's claim nor its bank. The record is closed and stops holding this host, and nothing is changed there. If the move's gate (`/data/move.json`) is still in front of that other bank, the output names it and the command that removes it, which is for whoever runs that host once they are sure which bank it should serve. A target whose Docker does not answer is never taken for an empty one: the record is kept, and the release says so. So is a gate with no claim and no bank identity behind it, which cannot be told from another bank. If a give-back keeps failing there (for example, the target's move folder was lost, or its own bank cannot be restored), every such failure names the last resort on this host: renaming the move's `record.json`, which closes the record here and leaves the target gated until someone there clears it. With `--json`, `ending` says how a release ended (`given_back`, `nothing_there` or `given_up`), and `released` is true only for a target given back its own bank.
 
-If the target will never answer again, `pseudolife-mcp move --release-target <move id> --target-gone` gives it up on this host only, for good. It does so only while this host's daemon serves its own bank, and only when the target gives no answer as a move target in three attempts, five seconds apart. A target that answers is refused, naming `--release-target`. It asks first, or takes `--yes`; without a terminal and without `--yes` it refuses at once. Nothing is changed on either host. A given-up record is final here: nothing is sent to that target for the move again, and a later `--release-target` or `--resume` of it refuses. The output says what stayed on that host when it was given up, and how whoever runs it clears that by hand. Those steps describe the host as it was then, so they start with a check: if that machine now serves a bank, or a newer move has put one there (the output names a newer move from this host to it), do none of them. Otherwise, in order: its own bank first, from the safety backup that the move folder's `own-bank.json` names (`pseudolife-mcp restore --backup-file … --state-archive … --leave-stopped` there); then the gate, never before, or the copy of this host's bank behind it would start; then the move's claim (`~/.pseudolife-mcp/moves/claim.json`); then its daemon. Writes made there are not in this host's bank.
+If the target will never answer again, `pseudolife-mcp move --release-target <move id> --target-gone` gives it up on this host only, for good. It does so only while this host's daemon serves its own bank, and only when the target gives no answer as a move target in three attempts, five seconds apart. A target that answers is refused, naming `--release-target`. It asks first, or takes `--yes`; without a terminal and without `--yes` it refuses at once. Nothing is changed on either host. A given-up record is final here: nothing is sent to that target for the move again, and a later `--release-target` or `--resume` of it refuses. The output says what stayed on that host when it was given up, and how whoever runs it clears that by hand. Those steps describe the host as it was then, so they start with a check: if that machine now serves a bank, or a newer move has put one there (the output names a newer move from this host to it), do none of them.
 
-A rollback that could not reach the target to finish (exit 6, the record still unfinished) is not one `--target-gone` ends; its `--rollback` is rerun once the target answers.
+For a move that may have applied carried bearer settings, first keep the
+target daemon stopped and gated while restoring its original environment.
+The target move folder's `carry.json` names the file in `deployment.env_file`.
+Remove only the block beginning `# Pseudolife move <move id>`. Use the
+journal's `original_bytes` to recover the original prefix only after checking
+its `original_digest` and checking for later edits. If the env file is already
+restored, verify its original settings. Recreate the selected daemon stopped
+with the verified environment. Use its newly verified container ID in the
+remaining commands, with the gate in place until the target has its own bank
+back.
+
+Restore the target's own bank from the safety backup named in the move
+folder's `own-bank.json` using `pseudolife-mcp restore --backup-file …
+--state-archive … --leave-stopped` on the target. Once its own bank is back,
+remove the gate and the move's claim (`~/.pseudolife-mcp/moves/claim.json`).
+Then start the target daemon. Writes made there are not in this host's bank.
+
+If rollback could not reach the target (exit 6), rerun `--rollback` when the
+target answers. For a carried move whose target is permanently gone, follow
+the record's manual source recovery steps after independently verifying that
+the target is stopped and gated or permanently retired. Once the source
+serves its own bank, `--target-gone` can close the incomplete carried move.
 
 Both hosts keep the move's files (a full copy of the bank) under
 `~/.pseudolife-mcp/moves/<move id>` until you remove them: the report names
@@ -13403,11 +13424,21 @@ fingerprint, or `ssh-keygen -R` after confirming a changed key. Move never
 accepts a key itself. `ssh` and `docker` are found only in absolute `PATH`
 directories.
 
+**Carried settings on an installed Linux target.** Use
+`--target-env-file <file>` to select the target's original private environment
+and repeat `--target-compose-file <file>` for its original Compose files in
+overlay order. The paths are absolute or start with `~/` on the target. The
+native helper verifies that those files render the installed deployment
+before changing either bank. If the original project directory is
+unavailable, the first selected Compose file's directory is used, and the
+rendered service hashes and data mounts still have to match. Omitted flags
+use the installed labels. Resume reuses the original file selection and
+undo uses the recorded deployment. Both clients must support carrying
+settings with explicit target files. When using `--no-keep-tokens`, leave the
+file flags off.
+
 **Not available in the native client yet:**
 - `--expose-target`: expose the target yourself and pass `--target-url`;
-- carrying the source's tokens: pass `--no-keep-tokens`, and the target keeps
-  its own;
-- `--target-env-file` and `--target-compose-file`;
 - checkout targets (`--target-checkout`).
 
 The rest of this section describes the Python client's move.
@@ -13764,8 +13795,15 @@ flowchart TD
 explicit `--daemon-url` and owner-only `--token-file` after `--accept-access`
 and an authenticated daemon check. Resume the prepared profile with
 `--tunnel-id`, then import its first runtime key in a separate setup command
-using `--read-key` at a terminal or an owner-only `--key-file`. Key renewal,
-starting, stopping and refreshing a tunnel still require the Python client.
+using `--read-key` at a terminal or an owner-only `--key-file`. Use
+`pseudolife-mcp tunnel run` to keep a prepared tunnel in the foreground.
+In another terminal, `pseudolife-mcp tunnel stop` asks that native
+supervisor to stop its runtime. Pass the same `--profile` and
+`--profile-dir` in both commands if you selected a different profile or
+store. Use the same client to manage a running tunnel. The Python client's
+status can report a native launch as stopped, and Python stop leaves that
+launch running. Key renewal, background start and refresh still require
+the Python client.
 
 The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel
@@ -13781,17 +13819,17 @@ client also answers preflight refusals for `tunnel verify` and `tunnel setup`.
 Operations it defers stop with
 `pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and exit 1,
 having changed nothing. That covers guided setup and unsupported saved-profile
-edits, `start`, `run`, `stop`,
-`doctor`, `service`, the cloud verification, `status` of a profile in a
+edits, `start`,
+`doctor`, `service`, verification of a Python-owned launch, `status` of a profile in a
 form it does not read or beside a verification or refresh file in a form
-it does not read, and `verify` while a process record exists or with a
+it does not read, and `verify` with a
 Windows (DPAPI) key it cannot unseal in this session. On Windows it unseals
 the saved key to check it: a damaged key file is no usable key, and a key
 sealed by another account, or read over a logon without the account's
 credentials (such as a key-based SSH logon), is reported as `not_verified`.
 `pseudolife-mcp doctor` lists saved tunnels and names only steps this client
-runs. On a host that runs a tunnel, keep the Python
-client, which an update does unless you opt in with
+runs. If your tunnel relies on background start or refresh, keep the
+Python client. An update keeps it unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how
