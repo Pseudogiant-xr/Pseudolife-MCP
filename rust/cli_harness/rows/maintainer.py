@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
-from rust.harness_support.fixture_rows import insert_fixture_rows
+from rust.harness_support.fixture_rows import checked_fixture_insert
 
 from .. import core, normalize
 from . import _bank
@@ -91,12 +91,13 @@ def _seed(conn, name, kind):
     _require_bank(conn, name)
     rows = _fixture()["seeds"][kind]
     _validate_rows(rows, _SEED_SHAPES[kind])
-    if rows["meta"][0]["key"] != "maintainer_secret_v1":
-        raise ValueError("maintainer fixture is missing its secret row")
     with conn.transaction():
-        for table in _SEED_TABLES:
-            if table in rows:
-                insert_fixture_rows(conn, table, rows[table])
+        inserts = [checked_fixture_insert(conn, table, rows[table])
+                   for table in _SEED_TABLES if table in rows]
+        if rows["meta"][0]["key"] != "maintainer_secret_v1":
+            raise ValueError("maintainer fixture is missing its secret row")
+        for statement, params in inserts:
+            conn.execute(statement, params)
 
 
 _BASELINE: dict[str, dict] = {}
@@ -339,27 +340,30 @@ def _live_code(conn, proc) -> str | None:
     return None
 
 
-def redeem_during(arm, proc) -> None:
+def redeem_during(arm, proc) -> bytes:
     with _bank.connect(ARM_DB, autocommit=True) as conn:
         _require_bank(conn, ARM_DB)
         stored = _live_code(conn, proc)
         if stored is None:
-            return
+            return b""
         # Both waiting cases copy the fresh bank. Its only captured row is
         # the fixture secret, so the CLI's new code is the only bootstrap row.
         capture = _fixture()["hooks"]["redeem"]
         nonce, key, event = ("maintainer_nonces", "maintainer_passkeys", "coordination_events")
         rows, status = capture["rows"], capture["status"]
         _validate_rows(rows, {nonce: 1, key: 1, event: 1})
-        if status != {"credential_id": rows[key][0]["credential_id"],
-                      "failed_attempts": 0, "used_at": HOOK_T}:
-            raise ValueError("invalid maintainer redemption fixture")
         # The waiting CLI publishes the code before the hook runs. Keep its
         # actual hash and expiry while replaying the captured Console effects.
         with conn.transaction():
-            insert_fixture_rows(conn, nonce, rows[nonce])
+            nonce_insert = checked_fixture_insert(conn, nonce, rows[nonce])
             conn.execute("LOCK TABLE maintainer_passkeys IN SHARE ROW EXCLUSIVE MODE")
-            insert_fixture_rows(conn, key, rows[key])
+            key_insert = checked_fixture_insert(conn, key, rows[key])
+            event_insert = checked_fixture_insert(conn, event, rows[event])
+            if status != {"credential_id": rows[key][0]["credential_id"],
+                          "failed_attempts": 0, "used_at": HOOK_T}:
+                raise ValueError("invalid maintainer redemption fixture")
+            conn.execute(*nonce_insert)
+            conn.execute(*key_insert)
             changed = conn.execute(
                 "UPDATE maintainer_bootstrap SET used_at=%s,credential_id=%s "
                 "WHERE code_hash=%s AND used_at IS NULL AND expires_at>=%s AND failed_attempts=0",
@@ -367,7 +371,8 @@ def redeem_during(arm, proc) -> None:
             ).rowcount
             if changed != 1:
                 raise RuntimeError("maintainer fixture did not redeem the waiting code")
-            insert_fixture_rows(conn, event, rows[event])
+            conn.execute(*event_insert)
+        return b""
 
 
 def burn_during(arm, proc) -> None:
@@ -457,7 +462,7 @@ class _DatabaseUrl(str):
         return "'<database URL withheld>'"
 
 
-def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
+def case(case_id, kind, argv, *, rules=WRITES, during=None, before_capture=None, env=None, dsn=True,
          stdout_closed=False, skip_if=None, prepare=(), note="", programs=(), golden=True):
     """``maintainer <argv>`` on this arm's own copy of a seeded bank;
     ``prepare`` statements run on that copy first (test instruments)."""
@@ -486,7 +491,7 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
     if environment.get(key) is not None:
         environment[key] = _DatabaseUrl(environment[key])
     return core.Case(case_id, ["maintainer", *argv], env=environment, setup=setup,
-                     during=during, after=after, rules=rules, timeout=60,
+                     during=during, before_capture=before_capture, after=after, rules=rules, timeout=60,
                      stdout_closed=stdout_closed, skip_if=skip_if, note=note,
                      programs=programs, golden=golden)
 
@@ -531,7 +536,8 @@ def cases() -> list[core.Case]:
         case("enrol-code-replaces-unused", "stale", ["enrol-code", "--no-wait"]),
         case("enrol-code-refused-pending", "pending", ["enrol-code", "--no-wait"]),
         case("enrol-code-refused-active", "rich", ["enrol-code"]),
-        case("enrol-code-wait-redeemed", "fresh", ["enrol-code"], during=redeem_during),
+        # The capture handshake reports fixture errors and stops the child.
+        case("enrol-code-wait-redeemed", "fresh", ["enrol-code"], before_capture=redeem_during),
         case("enrol-code-wait-burned", "fresh", ["enrol-code"], during=burn_during),
         # confirm
         case("confirm-dash-prefix", "pending", ["confirm", pending[:9]]),

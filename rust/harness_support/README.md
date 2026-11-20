@@ -11,9 +11,9 @@ HTTP readiness, and `schema.py` executes the daemon's committed schema plan.
 epoch for the dream, graph and principal harnesses.
 `fixture_rows.py` checks captured row keys against the live public-table
 columns before inserting them inside a guarded fixture transaction.
-Fixture writes require a server-confirmed disposable name in the
-`pl_cf_<slice>_<name>` namespace. The shared production-bank guard still
-applies.
+Fixture writes require a server-confirmed name in the caller's disposable
+namespace, such as `pl_cf_<slice>_<name>` or the recovery row's owned
+`r1_` names. The shared production-bank guard still applies.
 `import_blocker.py` lets the harness tests reload cached modules and reject
 imports of the frozen Python package. The principal parity tests also collect
 the readiness and cold-import controls in `test_readiness.py`.

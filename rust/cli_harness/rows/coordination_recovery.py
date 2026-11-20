@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
-from rust.harness_support.fixture_rows import insert_fixture_rows
+from rust.harness_support.fixture_rows import checked_fixture_insert
 
 from .. import core, normalize
 from ..run_names import RunNames
@@ -137,10 +137,6 @@ def _validate_history(history, variant):
     if ({table: len(rows) for table, rows in history["rows"].items()} != expected_rows
             or history["sequences"] != _SEQUENCE_POSITIONS):
         raise ValueError(f"incomplete recovery history for {variant}")
-    if invited:
-        principal, = history["rows"]["principals"]
-        if principal["principal"] != "paired" or principal["board"] is not (variant == "invited"):
-            raise ValueError(f"wrong paired owner in recovery history for {variant}")
 
 
 def _seed_history(conn, name, kind):
@@ -164,13 +160,19 @@ def _seed_history(conn, name, kind):
     }.get(kind, kind)
     history = json.loads(_HISTORY.read_text(encoding="utf-8"))["variants"][variant]
     _validate_history(history, variant)
+    rows = history["rows"]
     with conn.transaction():
         conn.execute("CREATE TABLE IF NOT EXISTS coordination_agents (" + coordination)
         if kind in ("invited", "invited-denied"):
             conn.execute("CREATE TABLE IF NOT EXISTS principals (" + principals)
-        for table in _SEED_TABLES:
-            if rows := history["rows"].get(table):
-                insert_fixture_rows(conn, table, rows)
+        inserts = [checked_fixture_insert(conn, table, rows[table])
+                   for table in _SEED_TABLES if table in rows]
+        if kind in ("invited", "invited-denied"):
+            principal, = rows["principals"]
+            if principal["principal"] != "paired" or principal["board"] is not (variant == "invited"):
+                raise ValueError(f"wrong paired owner in recovery history for {variant}")
+        for statement, params in inserts:
+            conn.execute(statement, params)
         for sequence, (value, called) in history["sequences"].items():
             conn.execute("SELECT setval(%s::regclass, %s, %s)", ("public." + sequence, value, called))
 
