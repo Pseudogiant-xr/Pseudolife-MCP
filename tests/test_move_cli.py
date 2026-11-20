@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from pseudolife_memory import move_cli
+from rust.daemon.harness.gen_schema_sql import load_schema_plan
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401 — fixtures
 from tests.test_update_engine import engine_host  # noqa: F401 — isolated external engine fixture
 
@@ -2543,7 +2544,7 @@ def test_rust_image_ships_the_schema_constant_compiled_into_its_daemon():
     root = Path(__file__).resolve().parents[1]
     assert "COPY rust/daemon/src/storage/schema_meta.rs /app/pseudolife-schema.rs" in (root / "ops/Dockerfile.daemon-rust").read_text()
     version = (root / "rust/daemon/src/storage/schema_meta.rs").read_text()
-    assert move_cli._schema_version(version, rust=True) == move_cli._schema_version((root / "pseudolife_memory/storage/schema.py").read_text())
+    assert move_cli._schema_version(version, rust=True) == load_schema_plan()["schema_version"]
 
 
 @pytest.mark.parametrize("value, expected", [("59", 59), ("True", None), ("None", None), ("unknown()", None)])

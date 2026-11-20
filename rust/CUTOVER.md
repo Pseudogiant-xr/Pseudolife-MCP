@@ -78,7 +78,7 @@ The command exits at that point without starting the Python client.
 | `expose` | Status, consent, Tailscale serve changes and read-back run natively. Malformed arguments get an actionable usage error before host access. (#1636, #1725) | — |
 | `test-login` | Help, argument checks, admin-URL and container setup, and private credential staging run natively. Preflight refusals name the failed condition. (#1727) | — |
 | `maintainer` | Guided setup and administration (`enrol-code`, `confirm`, `revoke`, `reset`, `list`) run natively. Invalid arguments and database settings receive named refusals. (#1730) | — |
-| `move` | On Linux Docker targets, preflight checks both bearer modes and the native transaction can carry bearer settings or keep the target's. Rollback and target release run natively. | Remaining exposure and configuration shapes. Prove those and the final recovery paths on disposable hosts. |
+| `move` | On Linux Docker targets, preflight checks both bearer modes. Carried moves can use the original Compose and environment files named explicitly on the target. Rollback and target release run natively. | Remaining exposure and checkout shapes. Prove those and the final recovery paths on disposable hosts. |
 | `tunnel` | Status, read-only update reporting, the native bridge, explicit setup and continuation of a prepared profile, and private first-key intake. `tunnel run` supervises one foreground launch, `tunnel stop` requests its shutdown, and verification receipts are bound to the current native launch identity. | Native key renewal before Python retirement, background start, service registration and refresh recovery. |
 | `embedded` | A plain refusal: retired with file mode. | Nothing. |
 | `backup`, `restore`, `export`, `import`, `invite`, `maintainer`, `lease`, `board-audit` on a lite bank | One refusal that names the Docker install and the 0.23.x pip release that still opens the bank (`cli/retired.rs`). | Nothing. |
@@ -124,8 +124,15 @@ What remains after that is the Rust build and test, mostly on Windows.
    `rust/daemon/src/static_files.rs` read it).
 2. Whatever still reads `pseudolife_memory/storage/schema.py` (the schema
    generator, the native updater's engine switch) reads a Rust source.
-3. A last PyPI release carries a deprecation note; the Python daemon image
-   stops publishing; `server.json` points at what the native install offers.
+3. After proving native installation and upgrade, publish one final PyPI
+   bridge wheel with a deprecation note, then stop publishing wheels. Keep
+   the current PyPI-backed MCP Registry listing frozen and mark it deprecated
+   with a pointer to native installation once that route is proven. A native
+   registry bundle is separate work. Keep publishing the Python daemon image
+   until the legacy import (#1778) lands and retain the pinned 0.23.1 image
+   afterward. After the last wheel, the maintainer creates a dedicated
+   release environment with required reviewers and release-tag protection
+   before a workflow references it.
 4. `pseudolife_memory/`, the tests that only test it, the oracle harness code
    under `rust/` and `evals/rust_port/`, the partial lite-tier code under
    `rust/shared/`, and the Python lanes are deleted.

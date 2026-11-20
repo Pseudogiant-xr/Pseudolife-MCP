@@ -62,6 +62,8 @@ pub(in crate::cli) struct Reply {
     /// Preflight-only helpers omit this even when they support CarryCheck.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supports_carry_execution: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_carry_files: Option<bool>,
 }
 
 /// What the target host offers the helper: its docker, a health GET, the
@@ -420,12 +422,22 @@ impl super::ops::Site for Site2 {
         pins: Option<&super::carry::TargetPins>,
     ) -> Result<(), String> {
         use super::{carry, protocol::Op};
+        let home = self.home();
         let docker = self.docker()?;
         match op {
             Op::CarryApply {
                 identities,
                 expected_pins,
-            } => carry::apply(docker, folder, id, identities, expected_pins),
+                files,
+            } => carry::apply(
+                docker,
+                folder,
+                id,
+                identities,
+                expected_pins,
+                files,
+                home.as_deref(),
+            ),
             Op::CarryVerify { identities } => carry::verify(docker, folder, identities, pins),
             Op::CarryUndo => carry::undo(docker, folder, id, pins),
             _ => Err("unrecognized carried identity operation".into()),
@@ -566,13 +578,19 @@ fn answer_op(
         error,
         ..Answer::default()
     };
-    if let Op::CarryCheck { populated } = &request.op {
+    if let Op::CarryCheck { populated, files } = &request.op {
         use super::ops::Site;
         let mut answer = refuse(String::new());
-        match site
-            .docker()
-            .and_then(|docker| super::carry::target(docker, *populated, request.pins.as_ref()))
-        {
+        let home = site.home();
+        match site.docker().and_then(|docker| {
+            super::carry::target(
+                docker,
+                *populated,
+                request.pins.as_ref(),
+                files,
+                home.as_deref(),
+            )
+        }) {
             Ok(digest) => {
                 answer.ok = true;
                 answer.carry_deployment = digest;
@@ -634,6 +652,7 @@ fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
     let mut reply = answer(here, ask);
     reply.supports_carry = ask.carry.then_some(cfg!(target_os = "linux"));
     reply.supports_carry_execution = reply.supports_carry;
+    reply.supports_carry_files = reply.supports_carry;
     reply
 }
 
@@ -645,6 +664,7 @@ mod lock_tests {
     fn carry_check_dispatches_read_only_without_entering_the_move_transaction() {
         let op = Op::CarryCheck {
             populated: [true, false, false, false],
+            files: Default::default(),
         };
         assert!(!super::takes_lock(&op));
         let request = Request {

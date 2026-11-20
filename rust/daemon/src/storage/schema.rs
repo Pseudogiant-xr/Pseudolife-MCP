@@ -1,27 +1,21 @@
-//! `ensure_schema` (spec P3, P6): `pseudolife_memory/storage/schema.py`
-//! Generated SQL and migration steps; regenerate with harness/gen_schema_sql.py.
+//! The native schema lives in `schema.sql` and `schema_plan.json`.
 //!
-//! Every generated statement runs in the same order as the Python, inside the one
-//! explicit transaction the caller opens. Order matters beyond correctness:
-//! each `ADD COLUMN` appends a column, so a reordered statement changes the
-//! ordinal positions the database-state harness compares. Statements without
-//! parameters go over the simple query protocol (psycopg sends a
-//! parameterless `execute` with `PQsendQuery`); the two parameterized ones
-//! (the healing updates and the `schema_version` upsert) use the extended
-//! protocol, as psycopg does for any statement with bind parameters.
+//! The caller runs the steps in plan order inside one transaction.
+//! Each `ADD COLUMN` appends a column, so reordering can change the ordinal
+//! positions the database-state harness compares. Statements without
+//! parameters use the simple query protocol. Statements with bind parameters
+//! use the extended protocol.
 
 use tokio_postgres::Client;
 use tokio_postgres::types::Type;
 
-// Metadata shares the generator with the SQL and migration plan.
+// The harness derives this metadata from the native plan.
 include!("schema_meta.rs");
 
-/// The generated copy of `SCHEMA_SQL`, with the one header line
-/// `gen_schema_sql.py` prepends (`-- schema_version NN\n`).
+/// The base DDL with its version header (`-- schema_version NN\n`).
 const SCHEMA_SQL_FILE: &str = include_str!("schema.sql");
 
-/// `SCHEMA_SQL` byte for byte: the generated file minus its header line, so
-/// the batch the server receives is exactly the Python constant.
+/// The base DDL sent to the server without the version header.
 pub fn schema_sql() -> &'static str {
     match SCHEMA_SQL_FILE.strip_prefix("-- schema_version ") {
         Some(rest) => rest.split_once('\n').map_or("", |(_, body)| body),
@@ -29,7 +23,7 @@ pub fn schema_sql() -> &'static str {
     }
 }
 
-/// The schema version the generated copy was written for (its header line).
+/// The schema version from the DDL header.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn schema_sql_version() -> Option<i64> {
     SCHEMA_SQL_FILE
@@ -41,8 +35,7 @@ pub fn schema_sql_version() -> Option<i64> {
         .ok()
 }
 
-/// The `RuntimeError` text of `_refuse_on_embedding_dim_mismatch`
-/// (schema.py:1131-1145), exactly.
+/// Fill in the observed dimension in the plan's refusal text.
 pub fn dim_mismatch_message(live_dim: i32) -> String {
     generated_plan()["embedding_refusal"]
         .as_str()
@@ -76,7 +69,7 @@ pub(crate) async fn simple_value(
     Ok(None)
 }
 
-/// `_refuse_on_embedding_dim_mismatch` (schema.py:1105-1145).
+/// Refuse a bank whose existing entries use a different embedding dimension.
 async fn refuse_on_embedding_dim_mismatch(client: &Client) -> Result<(), SchemaError> {
     let plan = generated_plan();
     let row = simple_value(client, plan["embedding_probe"].as_str().unwrap()).await?;
@@ -127,9 +120,8 @@ pub async fn check_read_only(client: &Client) -> Result<(), SchemaError> {
     Ok(())
 }
 
-/// Execute the generated, ordered plan inside the caller's DDL transaction.
-/// Constant loops are expanded by the generator; database-dependent branches
-/// are evaluated here, preserving Python's one-time repairs and healing.
+/// Execute the ordered plan inside the caller's DDL transaction.
+/// Evaluate database-dependent branches here for one-time repairs and healing.
 pub async fn ensure_schema_in_transaction(client: &Client) -> Result<(), SchemaError> {
     let plan = generated_plan();
     assert_eq!(plan["format"], 1);
@@ -193,9 +185,8 @@ pub async fn ensure_schema_in_transaction(client: &Client) -> Result<(), SchemaE
 
 const RESTORE_HINT: &str = "(`pseudolife-mcp restore --backup-file <dump> --state-archive <state.tgz>`; from a checkout, `ops/restore.ps1 -Apply -BackupFile <dump> -StateArchive <state.tgz>` or `ops/restore.sh --apply --backup-file <dump> --state-archive <state.tgz>`)";
 
-/// schema.py's `_schema_version_refusal`, word for word: a newer build's
-/// stamp is refused rather than stamped down, and so is a stamp that is not
-/// a positive JSON integer. `value` is the stamp's JSON text.
+/// Refuse stamps from a newer build and stamps other than positive JSON
+/// integers. `value` is the stamp's JSON text.
 fn version_refusal(value: &str) -> Option<String> {
     let parsed = serde_json::from_str::<serde_json::Value>(value).ok();
     let version = parsed.and_then(|v| v.as_i64());
@@ -210,8 +201,8 @@ fn version_refusal(value: &str) -> Option<String> {
     }
 }
 
-/// schema.py's `bank_schema_refusal`: the refusal for the bank `client`
-/// reads, or `None` when this build may open it. Read-only, so a
+/// The schema-version refusal for the bank `client` reads, or `None` when
+/// this build may open it. The check is read-only, so a
 /// reconnect can run it before its session writes anything (issue #909).
 pub(crate) async fn bank_schema_refusal(
     client: &Client,
