@@ -327,6 +327,11 @@ fn refresh_status(root: &Path, name: &str) -> Result<Refresh, Fail> {
     })
 }
 
+fn refresh_idle(root: &Path, name: &str) -> bool {
+    refresh_status(root, name)
+        .is_ok_and(|refresh| !matches!(refresh, Refresh::Pending | Refresh::Unavailable))
+}
+
 /// Why `status` cannot read a profile's verification challenge.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ChallengeIssue {
@@ -841,7 +846,7 @@ fn update(root: &Path) -> Answer {
 fn current_launch(root: &Path, name: &str) -> bool {
     setup::check_pending(root, name).is_ok()
         && matches!(setup::validate_previous_key(root, name), Ok(false))
-        && refresh_status(root, name).is_ok_and(|refresh| !refresh.needs_attention())
+        && refresh_idle(root, name)
         && runtime::identity::current(root, name).is_ok()
 }
 

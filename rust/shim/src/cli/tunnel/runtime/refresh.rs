@@ -149,7 +149,7 @@ pub(super) fn activate(
     let check_recovery = || {
         if setup::check_pending(root, name).is_err()
             || !matches!(setup::validate_previous_key(root, name), Ok(false))
-            || !super::super::refresh_status(root, name).is_ok_and(|r| !r.needs_attention())
+            || !super::super::refresh_idle(root, name)
         {
             return Err(RECOVERY);
         }

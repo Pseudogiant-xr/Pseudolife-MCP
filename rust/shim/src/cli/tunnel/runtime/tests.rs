@@ -324,6 +324,13 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     state::atomic_create(&pending, br#"{"id":"00000000000000000000000000000000"}"#).unwrap();
     check("stale");
     fs::remove_file(pending).unwrap();
+    let history = home.0.join(format!("{name}.reload.result.json"));
+    state::atomic_create(
+        &history,
+        br#"{"id":"00000000000000000000000000000000","state":"failed"}"#,
+    )
+    .unwrap();
+    check("current");
     let pending = home.0.join(format!("{name}.key-renewal"));
     state::atomic_create(&pending, b"interrupted renewal fixture").unwrap();
     check("stale");
