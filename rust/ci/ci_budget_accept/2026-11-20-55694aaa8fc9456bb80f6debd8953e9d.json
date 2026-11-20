@@ -2,7 +2,7 @@
   "schema": 1,
   "workflow": "rust.yml",
   "job": "parity-checks",
-  "before": "00737b599343eefe",
-  "fingerprint": "0b1e5e49bb054e89",
+  "before": "3167aeba05a54b66",
+  "fingerprint": "fba99601308c7ff7",
   "reason": "The startup shard uses one shared ONNX install instead of two per-part installs, drops the Pydantic-only pin, and runs the same native replay commands."
 }
