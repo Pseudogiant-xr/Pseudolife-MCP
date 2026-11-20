@@ -57,8 +57,8 @@ def _remove_digest(arm) -> None:
 
 def _advance_digest(arm) -> None:
     f = _paths(arm.home)
-    _while_held(lambda: p.write_digest(f["digest"], 8, _body()))
-    _while_held(lambda: p.write_ring(f["ring"], 8, "rung", "urgent"))
+    _while_held(lambda: p.write_digest(f["digest"], 8, _body(), root=arm.home))
+    _while_held(lambda: p.write_ring(f["ring"], 8, "rung", "urgent", root=arm.home))
 
 
 def seed(digest_wm=7, ring=(7, "rung", "urgent"), seen=None, text=True, key=KEY,
@@ -66,13 +66,13 @@ def seed(digest_wm=7, ring=(7, "rung", "urgent"), seen=None, text=True, key=KEY,
     def setup(arm):
         f = _paths(arm.home, key)
         if digest_wm is not None:
-            p.write_digest(f["digest"], digest_wm, _body() if text else "")
+            p.write_digest(f["digest"], digest_wm, _body() if text else "", root=arm.home)
         if ring_raw is not None:
-            p.write_private(f["ring"], ring_raw)
+            p.write_private(f["ring"], ring_raw, root=arm.home)
         elif ring is not None:
-            p.write_ring(f["ring"], *ring)
+            p.write_ring(f["ring"], *ring, root=arm.home)
         if seen is not None:
-            p.write_seen(f["seen"], seen)
+            p.write_seen(f["seen"], seen, root=arm.home)
     return setup
 
 
@@ -159,7 +159,7 @@ def renewed_listener(arm, proc):
                     elif record != first:
                         samples.append(listener_shape(arm, path, 20.0, raw=raw))
                         arm.state["listener"] = "valid" if samples == ["valid", "valid"] else samples
-                        p.write_ring(_paths(arm.home)["ring"], 7, "rung", "urgent")
+                        p.write_ring(_paths(arm.home)["ring"], 7, "rung", "urgent", root=arm.home)
                         return
         time.sleep(0.01)
     arm.state["listener"] = samples + ["never-renewed"]
@@ -220,14 +220,14 @@ def cases() -> list[Case]:
     add(Case("ring-fires-digest-dir-env", ["wait-mail", *SID],
              env={"PSEUDOLIFE_DIGEST_DIR": "{HOME}/custom-digests"},
              setup=lambda arm: (
-                 p.write_digest(arm.home / "custom-digests" / f"{KEY}.txt", 4, _body()),
-                 p.write_ring(arm.home / "custom-digests" / f"{KEY}.ring", 4, "rung", "urgent")),
+                 p.write_digest(arm.home / "custom-digests" / f"{KEY}.txt", 4, _body(), root=arm.home),
+                 p.write_ring(arm.home / "custom-digests" / f"{KEY}.ring", 4, "rung", "urgent", root=arm.home)),
              rules=DELIVERY))
     add(Case("ring-past-seen", ["wait-mail", *SID], setup=seed(9, (9, "rung", "clears park"),
                                                                  seen=5), rules=DELIVERY))
     add(Case("seen-leading-zeros", ["wait-mail", *SID],
              setup=lambda arm: (seed(12, (12, "rung", "urgent"))(arm),
-                                p.write_private(_paths(arm.home)["seen"], " 0011 \n")),
+                                p.write_private(_paths(arm.home)["seen"], " 0011 \n", root=arm.home)),
              rules=DELIVERY))
     add(Case("ring-cr-spaces", ["wait-mail", *SID], setup=seed(ring_raw="1 2\r\nrung urgent\r\n",
                                                                digest_wm=12), rules=DELIVERY))
@@ -267,7 +267,7 @@ def cases() -> list[Case]:
         seed()(arm)
         new = "w1b-after-clear"
         line2 = hashlib.sha256((new if confirmed else "other").encode()).hexdigest()
-        p.write_private(_paths(arm.home)["dir"] / "claude-4242.host", f"{KEY}\n{line2}\n")
+        p.write_private(_paths(arm.home)["dir"] / "claude-4242.host", f"{KEY}\n{line2}\n", root=arm.home)
     clear_env = {"CLAUDE_CODE_SESSION_ID": "w1b-after-clear", "CLAUDE_PID": "4242"}
     add(Case("host-record-followed", ["wait-mail"], env=clear_env, setup=host_record,
              rules=DELIVERY))

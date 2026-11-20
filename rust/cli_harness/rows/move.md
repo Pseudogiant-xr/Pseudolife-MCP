@@ -67,11 +67,11 @@ Each of these was a case of this row while the native command deferred:
 
 - Every argv that passes the checks above: the native module answers it.
   On Linux targets, `--dry-run` checks both bearer modes. It checks carried
-  bearer settings against the installed Compose files without sending the
-  source values. Execution requires an execution-capable target helper and
-  a loopback daemon endpoint for carried-bearer verification. Checkout targets, automatic
-  exposure, explicit target environment or Compose files, a missing
-  `--target-url`, and a relative `--target-work-dir` are refused (exit 2).
+  bearer settings against the installed Compose files or the original files
+  supplied explicitly, without sending the source values. Execution requires
+  an execution-capable target helper and a loopback daemon endpoint for
+  carried-bearer verification. Checkout targets, automatic exposure, a
+  missing `--target-url`, and relative paths outside `~/` are refused (exit 2).
   The oracle would contact the live daemon, so these use the Rust tests.
 - `--target-url` values whose validity differs between Python releases
   (bracketed hosts, empty userinfo, empty or `+`/leading-zero ports, `_` or
