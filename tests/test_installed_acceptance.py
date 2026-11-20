@@ -13,6 +13,13 @@ from ops.acceptance import matrix, runner
 CELL = "clean-install", "linux-x64"
 ARCHIVE = "pseudolife-mcp-0.24.0-x86_64-unknown-linux-gnu.tar.gz"
 OTHER_ARCHIVE = "pseudolife-mcp-0.24.0-aarch64-unknown-linux-gnu.tar.gz"
+REDIRECTED = (
+    "HOME", "USERPROFILE", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+)
+CLEARED = (
+    "PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER", "PSEUDOLIFE_SHIM_USER_BIN",
+    "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PSEUDOLIFE_MCP_TOKEN",
+)
 
 
 def completed():
@@ -45,6 +52,7 @@ def test_writer_refuses_identifier(tmp_path, field):
     record = completed()
     private = "account@host.example"
     if field == "command":
+        record.update(status="fail", outcome=matrix.FAILURE_OUTCOMES[0])
         record["commands"][0]["command"] += f" {private}"
     else:
         record[field] = private
@@ -71,6 +79,22 @@ def test_init_writes_explicit_pending_rows(tmp_path, capsys):
     assert "windows-x64" in output and "macos-arm64" in output
 
 
+def test_describe_shows_host_effects_and_the_bounded_linux_candidate(capsys):
+    assert matrix.main(["describe", "clean-install", "linux-arm64"]) == 0
+    output = capsys.readouterr().out
+    for expected in (
+        "changes the real user service manager", "needs its own Docker engine",
+        "--client-only --daemon-url <fixture-url> --client claude,codex,gemini",
+        "--client-update-schedule no --claude-plugin skip --token-file <fixture-token-file>",
+        "ufw", "Tailscale", "passkey", "browser", "not yet run",
+    ):
+        assert expected in output
+    assert matrix.main(["describe", "upgrade-and-rollback", "windows-x64"]) == 0
+    output = capsys.readouterr().out
+    assert "changes the real task scheduler" in output
+    assert "--client-only" not in output
+
+
 def test_missing_cell_fails_checker(tmp_path, capsys):
     ledger(tmp_path, omit=CELL)
     assert matrix.main(["check", str(tmp_path)]) == 1
@@ -80,7 +104,8 @@ def test_missing_cell_fails_checker(tmp_path, capsys):
 def test_malformed_record_fails_checker_without_echoing_fields(tmp_path, capsys):
     ledger(tmp_path)
     path = next(tmp_path.glob("clean-install--linux-x64.json"))
-    path.write_text('{"status":"private","status":"not yet run"}', encoding="utf-8")
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original.replace('"status":', '"status":"private","status":'), encoding="utf-8")
     assert matrix.main(["check", str(tmp_path)]) == 1
     error = capsys.readouterr().err
     assert "duplicate JSON key" in error and "private" not in error
@@ -206,23 +231,26 @@ def test_disposable_environment_and_allowlisted_tools(tmp_path, monkeypatch):
     source = tmp_path / "host-tools"
     source.mkdir()
     monkeypatch.setenv("PATH", str(source))
-    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-only")
+    for name in REDIRECTED + CLEARED:
+        monkeypatch.setenv(name, str(tmp_path / name))
     suffix = ".exe" if os.name == "nt" else ""
-    for name in ("tar", "python", "python3", "pip", "py"):
+    for name in ("tar", "claude", "codex", "gemini", "python", "python3", "pip", "py"):
         (source / (name + suffix)).write_bytes(b"fixture")
         (source / (name + suffix)).chmod(0o700)
 
     with runner.DisposableHome(tmp_path) as home:
-        path = home.prepare_path({"tar": source / ("tar" + suffix)})
+        needed = ("tar", "claude", "codex", "gemini")
+        path = home.prepare_path({name: source / (name + suffix) for name in needed})
         env = home.environment()
         assert env["PATH"] == str(path)
-        assert "PSEUDOLIFE_MCP_TOKEN" not in env
-        for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CODEX_HOME", "TMPDIR"):
+        assert not set(CLEARED) & env.keys()
+        for key in (*REDIRECTED, "APPDATA", "LOCALAPPDATA", "TMPDIR"):
             assert Path(env[key]).is_relative_to(home.root)
         with monkeypatch.context() as search:
             search.chdir(home.root / "work")
             search.setenv("PATHEXT", env["PATHEXT"])
-            assert shutil.which("tar" + suffix, path=env["PATH"])
+            for name in needed:
+                assert shutil.which(name + suffix, path=env["PATH"])
             for name in ("python", "python3", "pip", "py"):
                 assert shutil.which(name + suffix, path=env["PATH"]) is None
 

@@ -113,6 +113,30 @@ FAILURE_PROBES = {
     "linux": ("<child-interruption>", "<interrupted-publication>", "<interrupted-refresh>"),
     "macos": ("<cancelled-launch>", "<failed-launch>", "<interrupted-refresh>"),
 }
+LOCAL_BANK = (
+    "A local bank needs its own Docker engine. The project, network, three container names and "
+    "loopback ports 8765 and 5433 are fixed. PSEUDOLIFE_BANK_VOLUME and "
+    "PSEUDOLIFE_STATE_VOLUME can override the default volume names."
+)
+USER_SERVICES = {
+    "linux": "A non-client-only install changes the real user service manager.",
+    "windows": "A non-client-only install changes the real task scheduler. The installer also writes the real user PATH.",
+    "macos": "Legacy tunnel migration reaches the real launchd login domain. Native unattended schedule setup is unavailable.",
+}
+LINUX_INSTALL_EFFECTS = (
+    "A local install can add a ufw rule through sudo, offer Tailscale exposure and passkey setup, "
+    "and open the browser for Console sign-in."
+)
+FIRST_LINUX_PROBE = (
+    "--client-only --daemon-url <fixture-url> --client claude,codex,gemini "
+    "--client-update-schedule no --claude-plugin skip --token-file <fixture-token-file>",
+    "Use a local PSEUDOLIFE_NATIVE_ARCHIVE_URL, a disposable profile and endpoint, and put "
+    "stand-in claude, codex and gemini programs on the Python-free search path.",
+    "Covers real archive verification and launcher installation, fixture endpoint preflight "
+    "and registration requests to the stand-ins.",
+    "Real client registration and first MCP session, plugin, scheduling, local Docker, "
+    "and the other cells remain not yet run.",
+)
 
 
 class RecordError(ValueError):
@@ -146,6 +170,22 @@ def _steps(scenario: str, platform: str) -> tuple[Step, ...]:
 def commands(scenario: str, platform: str) -> tuple[str, ...]:
     """Return the publishable command templates for a matrix cell."""
     return tuple(step.command for step in _steps(scenario, platform))
+
+
+def describe(scenario: str, platform: str) -> None:
+    family = platform.split("-", 1)[0]
+    print(f"{scenario} on {platform}")
+    print(USER_SERVICES[family])
+    print(LOCAL_BANK)
+    if family == "linux" and scenario in ("clean-install", "upgrade-and-rollback", "failure-and-retry"):
+        print(LINUX_INSTALL_EFFECTS)
+    if family == "linux" and scenario == "clean-install":
+        args, *details = FIRST_LINUX_PROBE
+        print("First bounded Linux probe (not yet run)")
+        print(f"bash ops/install-native.sh {args}")
+        print("\n".join(details))
+    print("Command templates")
+    print("\n".join(commands(scenario, platform)))
 
 
 def known_archive(name: str) -> bool:
@@ -267,9 +307,16 @@ def read_ledger(folder: Path) -> dict[tuple[str, str], str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("init", "check"))
-    parser.add_argument("folder", type=Path)
+    actions = parser.add_subparsers(dest="action", required=True)
+    for action in ("init", "check"):
+        actions.add_parser(action).add_argument("folder", type=Path)
+    scenario = actions.add_parser("describe")
+    scenario.add_argument("scenario", choices=SCENARIOS)
+    scenario.add_argument("platform", choices=TARGETS)
     args = parser.parse_args(argv)
+    if args.action == "describe":
+        describe(args.scenario, args.platform)
+        return 0
     try:
         if args.action == "init":
             args.folder.mkdir()

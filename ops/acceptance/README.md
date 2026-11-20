@@ -13,6 +13,7 @@ From the repository root, create a new ledger and check its coverage.
 ```sh
 python -m ops.acceptance.matrix init acceptance-records
 python -m ops.acceptance.matrix check acceptance-records
+python -m ops.acceptance.matrix describe clean-install linux-x64
 ```
 
 The folder has one UTF-8 JSON file per scenario and platform, named
@@ -38,6 +39,11 @@ matrix, counts each status, and exits 1 for malformed or missing rows.
 Exit 0 means the ledger is structurally complete. For release acceptance
 the printed matrix must show a pass in every required cell.
 
+`describe` prints the command templates and host requirements for a cell.
+For Linux clean install it also shows the proposed client-only probe with
+stand-in client programs. That probe leaves the clean-install cell pending
+until the first real MCP session and the remaining checks are observed.
+
 Use `matrix.commands(scenario, platform)` to get the published command
 templates. Write the observed command results with `matrix.write_record`.
 The writer creates a file exclusively, so keep the old ledger and write the
@@ -61,7 +67,9 @@ inventories out of the ledger.
 
 `runner.DisposableHome` creates a fresh directory under a dedicated scratch
 parent, redirects the profile and temporary folders, and builds a new child
-environment. Supply trusted executables by absolute path to `prepare_path`.
+environment. The child receives no runtime overrides or user-service bus
+settings from the parent. Supply trusted executables by absolute path to
+`prepare_path`.
 Only selected tools enter the child search path. The Bash stand-in checks
 that `python`, `python3`, `pip` and `py` do not resolve and that `tar` does.
 It verifies a staged checksum manifest is present and leaves a marker in the

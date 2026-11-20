@@ -16,7 +16,7 @@ from .matrix import known_archive
 
 
 TOOLS = frozenset(
-    "awk basename bash cat chmod cmd cp curl cut date dirname env find git grep gzip "
+    "awk basename bash cat chmod claude cmd codex cp curl cut date dirname env find gemini git grep gzip "
     "head id install mkdir mktemp mv openssl powershell pwsh readlink rm sed sh "
     "shasum sha256sum sort stat tar tail tr uname wc".split()
 )
@@ -137,6 +137,8 @@ class DisposableHome:
 
     def environment(self) -> dict[str, str]:
         """Build the fixture environment without inheriting host settings."""
+        # A different HOME does not redirect the runtime overrides or the
+        # current login's D-Bus session. Keep both out of the child environment.
         folders = {
             "HOME": self.profile,
             "USERPROFILE": self.profile,
