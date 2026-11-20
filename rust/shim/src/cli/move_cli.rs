@@ -7,10 +7,11 @@
 //! stdout or stderr (`tests/cli_move_contract.rs` scans it for that).
 use std::{
     ffi::OsString,
-    io::{self, ErrorKind, IsTerminal, Write},
+    io::{self, ErrorKind, Write},
 };
 
-/// `_parser().format_help()` at `COLUMNS=80` (argparse wraps at 78).
+/// Native help, the same at every terminal width; the usage block keeps
+/// argparse's layout at 78 columns.
 const HELP: &str = concat!(
     "usage: pseudolife-mcp move [-h] --to SSH-TARGET [--target-checkout PATH]\n",
     "                           [--target-url URL] [--no-keep-tokens] [--resume]\n",
@@ -25,16 +26,16 @@ const HELP: &str = concat!(
     "backs up and fences the stopped source, verifies the restored bank, starts\n",
     "the target and re-points this machine's clients. Exit codes: 0\n",
     "moved, 1 failed and rolled back, 2 usage or not confirmed, 4 refused before\n",
-    "any change, 5 moved but re-pointing failed, 6 failed and the rollback could\n",
-    "not finish. Run it under tmux, screen or nohup.\n",
+    "any change, 5 moved but a follow-up failed (the report names it), 6 failed\n",
+    "and the rollback could not finish. Run it under tmux, screen or nohup.\n",
     "\n",
     "options:\n",
     "  -h, --help            show this help message and exit\n",
     "  --to SSH-TARGET       the target host as ssh takes it (user@box, or a\n",
     "                        ~/.ssh/config alias)\n",
     "  --target-checkout PATH\n",
-    "                        checkout handover option; use an installed release\n",
-    "                        target with the native client\n",
+    "                        refused: native move needs an installed release\n",
+    "                        deployment on the target; omit this option\n",
     "  --target-url URL      the URL clients will use for the target; required\n",
     "                        unless you pass --expose-target\n",
     "  --no-keep-tokens      do not carry the environment identities; invite each\n",
@@ -44,14 +45,14 @@ const HELP: &str = concat!(
     "  --dry-run             show the plan; change nothing\n",
     "  --expose-target       consent to creating a persistent Tailscale serve on\n",
     "                        the target if needed\n",
-    "  --target-release      use the target's installed CLI even when an unrelated\n",
-    "                        checkout exists\n",
+    "  --target-release      accepted for compatibility; native move always uses\n",
+    "                        the target's installed release\n",
     "  --target-env-file TARGET_ENV_FILE\n",
-    "                        original stack environment on the target (clone-free\n",
-    "                        mode)\n",
+    "                        the target deployment's original environment file,\n",
+    "                        read when carrying bearer settings\n",
     "  --target-compose-file TARGET_COMPOSE_FILE\n",
-    "                        original exported target compose file; repeat for\n",
-    "                        overlays (clone-free mode)\n",
+    "                        an original Compose file of the target deployment;\n",
+    "                        repeat for overlays, in order\n",
     "  --target-work-dir TARGET_WORK_DIR\n",
     "                        target artifact directory outside bank mounts and\n",
     "                        checkouts\n",
@@ -63,14 +64,23 @@ const HELP: &str = concat!(
     "  pseudolife-mcp move --release-target MOVE-ID [--target-gone] [--yes] [--json]\n",
     "  Use --resume on the original move command to retry after a rollback.\n",
 );
-const INVALID_ARGUMENTS: &str =
-    "move: invalid arguments. Use --help for supported forms and pass option values separately.\n";
 const REQUIRED: &str = "pseudolife-mcp move: error: the following arguments are required: --to\n";
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 \
                        (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
 const BAD_DEPLOY_PATH: &str = "move: target environment, compose and work directory paths must contain no control characters\n";
+/// The options that take a value, each as the next argument.
+const VALUE_OPTIONS: [&str; 6] = [
+    "--to",
+    "--target-checkout",
+    "--target-url",
+    "--target-env-file",
+    "--target-compose-file",
+    "--target-work-dir",
+];
+/// The recovery forms (`move --rollback MOVE-ID`, `move --release-target MOVE-ID`).
+const RECOVERY: [&str; 2] = ["--rollback", "--release-target"];
 const FLAGS: [&str; 7] = [
     "--no-keep-tokens",
     "--resume",
@@ -81,14 +91,10 @@ const FLAGS: [&str; 7] = [
     "--target-release",
 ];
 
-/// What the oracle's output depends on besides argv.
-pub(super) struct Context<'a> {
-    /// `COLUMNS`, which sets argparse's wrap width; only 80 is reproduced.
-    pub(super) columns: Option<&'a str>,
+/// What the early refusals depend on besides argv.
+pub(super) struct Context {
     /// CPython decodes this argv as UTF-8 (see `utf8_argv`).
     pub(super) utf8_argv: bool,
-    /// argparse could colour what it writes to stdout / stderr.
-    pub(super) colour_stderr: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -269,22 +275,17 @@ pub(super) fn utf8_argv() -> bool {
     cfg!(windows) || posix_utf8_argv(|name| std::env::var(name).ok())
 }
 
-/// argparse colours its usage on a terminal, or as `FORCE_COLOR`,
-/// `PYTHON_COLORS` and `NO_COLOR` say (newer CPython); any of them set defers.
-pub(super) fn colour_env(var: impl Fn(&str) -> bool) -> bool {
-    ["FORCE_COLOR", "PYTHON_COLORS", "NO_COLOR"]
-        .into_iter()
-        .any(var)
-}
-
 /// The oracle's order: argparse (`_parser`, `main`), the `--target-url`
 /// check, `main`'s `--to` check, then `Mover.run`'s `--to` and
 /// `--target-checkout` checks.
-pub(super) fn decide(arguments: &[String], context: &Context<'_>) -> Decision {
-    if matches!(arguments, [only] if only == "--help" || only == "-h") {
+pub(super) fn decide(arguments: &[String], context: &Context) -> Decision {
+    // Help wins wherever it appears, as argparse's does.
+    if arguments
+        .iter()
+        .any(|argument| argument == "--help" || argument == "-h")
+    {
         return Decision::Help;
     }
-    let wrapped_at_80 = context.columns == Some("80");
     // Outside UTF-8 decoding CPython sees other characters than these.
     if !context.utf8_argv && !arguments.iter().all(|argument| argument.is_ascii()) {
         return Decision::Defer;
@@ -293,12 +294,7 @@ pub(super) fn decide(arguments: &[String], context: &Context<'_>) -> Decision {
         return Decision::Defer;
     };
     let Some(to) = args.to else {
-        return if wrapped_at_80 && !context.colour_stderr {
-            let usage = &HELP[..HELP.find("\n\n").map_or(HELP.len(), |end| end + 1)];
-            Decision::Refuse(format!("{usage}{REQUIRED}"))
-        } else {
-            Decision::Defer
-        };
+        return Decision::Refuse(missing_to());
     };
     match args.url.map(origin) {
         Some(Origin::Invalid) => return Decision::Refuse(BAD_URL.to_owned()),
@@ -363,14 +359,217 @@ fn settle(code: u8, written: Result<(), usize>) -> u8 {
     if written.is_ok() { code } else { 1 }
 }
 
-pub(super) fn invalid_arguments() -> u8 {
+/// The usage block of the help and the missing `--to` line.
+fn missing_to() -> String {
+    let usage = &HELP[..HELP.find("\n\n").map_or(HELP.len(), |end| end + 1)];
+    format!("{usage}{REQUIRED}")
+}
+
+/// The refusal (exit 2) for argv that neither native parser takes, naming
+/// the first problem in argv order. Nothing has been read or changed.
+pub(super) fn invalid_arguments(arguments: &[OsString]) -> u8 {
     settle(
         2,
         emit(
             &mut io::stderr().lock(),
-            &super::text_bytes(INVALID_ARGUMENTS),
+            &super::text_bytes(&usage_refusal(arguments)),
         ),
     )
+}
+
+/// What `invalid_arguments` prints.
+pub(super) fn usage_refusal(arguments: &[OsString]) -> String {
+    match usage_problem(arguments) {
+        Some(problem) => format!("move: {problem}. Nothing was changed\n"),
+        None => missing_to(),
+    }
+}
+
+/// The first problem in argv, or `None` when the only one is a missing
+/// `--to`.
+fn usage_problem(arguments: &[OsString]) -> Option<String> {
+    let mut words = Vec::with_capacity(arguments.len());
+    for (index, argument) in arguments.iter().enumerate() {
+        let Some(word) = argument.to_str() else {
+            return Some(format!(
+                "argument {} is not valid Unicode text; retype it",
+                index + 1
+            ));
+        };
+        words.push(word);
+    }
+    if let Some(recovery) = words
+        .iter()
+        .map(|word| option_name(word))
+        .find(|name| RECOVERY.contains(name))
+    {
+        return Some(recovery_problem(&words, recovery));
+    }
+    forward_problem(&words)
+}
+
+/// `--name` for `--name=value`, otherwise the word itself.
+fn option_name(word: &str) -> &str {
+    match word.split_once('=') {
+        Some((name, _)) if name.starts_with("--") => name,
+        _ => word,
+    }
+}
+
+/// A word shown back only when it is a plain option spelling; anything
+/// else (a value, a path, a pasted secret) is named by its position.
+fn shown(word: &str, index: usize) -> String {
+    let plain = word.len() <= 40
+        && word.starts_with('-')
+        && word.bytes().any(|b| b != b'-')
+        && word.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    if plain {
+        word.to_owned()
+    } else {
+        format!("argument {}", index + 1)
+    }
+}
+
+const NO_JOINED_VALUE: &str = "write the option and its value as two arguments";
+
+fn forward_problem(words: &[&str]) -> Option<String> {
+    let mut seen: Vec<&str> = Vec::new();
+    let mut to = false;
+    let mut index = 0;
+    while index < words.len() {
+        let word = words[index];
+        let name = option_name(word);
+        let takes_value = VALUE_OPTIONS.contains(&name);
+        if !takes_value && !FLAGS.contains(&name) {
+            return Some(unknown(word, index));
+        }
+        if name != word {
+            return Some(if takes_value {
+                format!("{NO_JOINED_VALUE} ({name} VALUE); move does not read {name}=VALUE")
+            } else {
+                format!("{name} takes no value")
+            });
+        }
+        // Compose files repeat, one per overlay, in order.
+        if seen.contains(&name) && name != "--target-compose-file" {
+            return Some(format!("{name} is given twice; give it once"));
+        }
+        seen.push(name);
+        if takes_value {
+            if words
+                .get(index + 1)
+                .is_none_or(|value| value.starts_with('-'))
+            {
+                return Some(if name == "--to" {
+                    "--to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -"
+                        .to_owned()
+                } else {
+                    format!("{name} needs a value after it, and the value cannot start with -")
+                });
+            }
+            to |= name == "--to";
+            index += 1;
+        }
+        index += 1;
+    }
+    // Both parsers take every argv that passes this walk with a `--to`.
+    to.then(|| {
+        "these arguments do not form a move command; see pseudolife-mcp move --help".to_owned()
+    })
+}
+
+fn unknown(word: &str, index: usize) -> String {
+    if word == "--target-gone" {
+        return "--target-gone applies only to the recovery form pseudolife-mcp move --release-target MOVE-ID --target-gone"
+            .to_owned();
+    }
+    if !word.starts_with('-') {
+        return format!(
+            "argument {} is neither an option nor an option's value; each value follows its option, such as --to user@box",
+            index + 1
+        );
+    }
+    let name = option_name(word);
+    let full: Vec<&str> = VALUE_OPTIONS
+        .iter()
+        .chain(&FLAGS)
+        .chain(&RECOVERY)
+        .copied()
+        .filter(|option| name.len() > 2 && option.starts_with(name))
+        .collect();
+    match full.as_slice() {
+        [one] => format!(
+            "{} is short for {one}; write the full option name",
+            shown(name, index)
+        ),
+        [] => format!(
+            "{} is not a move option; see pseudolife-mcp move --help",
+            shown(word, index)
+        ),
+        many => format!(
+            "{} could be {}; write the full option name",
+            shown(name, index),
+            many.join(" or ")
+        ),
+    }
+}
+
+/// Problems with `move --rollback MOVE-ID [--yes] [--json]` and
+/// `move --release-target MOVE-ID [--target-gone] [--yes] [--json]`.
+fn recovery_problem(words: &[&str], recovery: &str) -> String {
+    let release = recovery == "--release-target";
+    let takes = if release {
+        "a move id, --target-gone, --yes and --json"
+    } else {
+        "a move id, --yes and --json"
+    };
+    let mut chosen: Option<&str> = None;
+    let mut seen: Vec<&str> = Vec::new();
+    let mut index = 0;
+    while index < words.len() {
+        let word = words[index];
+        let name = option_name(word);
+        if RECOVERY.contains(&name) {
+            if name != word {
+                return format!("{NO_JOINED_VALUE} ({name} MOVE-ID)");
+            }
+            if let Some(first) = chosen {
+                return if first == name {
+                    format!("{name} is given twice; give it once")
+                } else {
+                    "give --rollback or --release-target, not both".to_owned()
+                };
+            }
+            chosen = Some(name);
+            if words.get(index + 1).is_none_or(|id| id.starts_with('-')) {
+                return format!(
+                    "{name} needs the id of the move to recover, as {name} MOVE-ID (the failed move printed it)"
+                );
+            }
+            index += 1;
+        } else if matches!(name, "--yes" | "--json" | "--target-gone") {
+            if name != word {
+                return format!("{name} takes no value");
+            }
+            if seen.contains(&name) {
+                return format!("{name} is given twice; give it once");
+            }
+            seen.push(name);
+        } else {
+            let what = if word.starts_with('-') {
+                shown(name, index)
+            } else {
+                format!("argument {}", index + 1)
+            };
+            return format!("{what} cannot be used with {recovery}, which takes only {takes}");
+        }
+        index += 1;
+    }
+    if seen.contains(&"--target-gone") && !release {
+        return "--target-gone applies only to --release-target MOVE-ID, not to --rollback"
+            .to_owned();
+    }
+    format!("{recovery} takes only {takes}; see pseudolife-mcp move --help")
 }
 
 /// A missing answer passes the arguments to the native transaction parser.
@@ -380,12 +579,8 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
         .map(OsString::into_string)
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    let columns = std::env::var("COLUMNS").ok();
-    let colour = colour_env(|name| std::env::var_os(name).is_some());
     let context = Context {
-        columns: columns.as_deref(),
         utf8_argv: utf8_argv(),
-        colour_stderr: colour || io::stderr().is_terminal(),
     };
     match decide(&arguments, &context) {
         Decision::Defer => None,
@@ -408,12 +603,8 @@ mod tests {
         items.iter().map(|item| (*item).to_owned()).collect()
     }
 
-    fn plain(columns: Option<&str>) -> Context<'_> {
-        Context {
-            columns,
-            utf8_argv: true,
-            colour_stderr: false,
-        }
+    fn plain() -> Context {
+        Context { utf8_argv: true }
     }
 
     #[test]
@@ -503,16 +694,12 @@ mod tests {
             &["--to", "box", "--target-checkout", "a\tb"],
             &["--to", "box", "--target-checkout", ""],
         ] {
-            assert_eq!(
-                decide(&argv(items), &plain(Some("80"))),
-                Decision::Defer,
-                "{items:?}"
-            );
+            assert_eq!(decide(&argv(items), &plain()), Decision::Defer, "{items:?}");
         }
     }
 
     #[test]
-    fn argparse_shapes_defer() {
+    fn argparse_shapes_pass_to_the_native_parsers() {
         for items in [
             &["--to=box"][..],
             &["--to", "-1"],
@@ -523,65 +710,180 @@ mod tests {
             &["--to", "a", "--to", "b"],
             &["box"],
             &["--to", "box", "extra"],
-            &["--help", "--to", "box"],
+            &["--rollback", "20261121T000000Z-ab12"],
         ] {
-            assert_eq!(
-                decide(&argv(items), &plain(Some("80"))),
-                Decision::Defer,
-                "{items:?}"
-            );
+            assert_eq!(decide(&argv(items), &plain()), Decision::Defer, "{items:?}");
         }
-        assert_eq!(
-            decide(&argv(&["--help"]), &plain(Some("100"))),
-            Decision::Help
-        );
-        assert_eq!(decide(&argv(&[]), &plain(None)), Decision::Defer);
+    }
+
+    #[test]
+    fn help_answers_wherever_it_appears() {
+        for items in [
+            &["--help"][..],
+            &["-h"],
+            &["--help", "--to", "box"],
+            &["--to", "box", "--dry-run", "-h"],
+            &["--to=box", "--help"],
+            &["--rollback", "--help"],
+        ] {
+            assert_eq!(decide(&argv(items), &plain()), Decision::Help, "{items:?}");
+        }
     }
 
     #[test]
     fn refusals_follow_the_oracle_order() {
         let refuse = |text: &str| Decision::Refuse(text.to_owned());
         let bad_url = &["--to", "a b", "--target-url", "http://h/x"][..];
-        assert_eq!(decide(&argv(bad_url), &plain(None)), refuse(BAD_URL));
+        assert_eq!(decide(&argv(bad_url), &plain()), refuse(BAD_URL));
         let unsure = &["--to", "a b", "--target-url", "http://[::1]"][..];
-        assert_eq!(decide(&argv(unsure), &plain(None)), Decision::Defer);
+        assert_eq!(decide(&argv(unsure), &plain()), Decision::Defer);
         let fine = &["--to", "a b", "--target-url", "http://h:1"][..];
-        assert_eq!(decide(&argv(fine), &plain(None)), refuse(BAD_TO));
-        assert_eq!(decide(&argv(&["--to", ""]), &plain(None)), refuse(BAD_TO));
+        assert_eq!(decide(&argv(fine), &plain()), refuse(BAD_TO));
+        assert_eq!(decide(&argv(&["--to", ""]), &plain()), refuse(BAD_TO));
         assert_eq!(
-            decide(&argv(&["--to", "a\u{1c}b", "--json"]), &plain(None)),
+            decide(&argv(&["--to", "a\u{1c}b", "--json"]), &plain()),
             refuse(BAD_TO)
         );
         assert_eq!(
-            decide(&argv(&["--to", "a\u{1}b"]), &plain(None)),
+            decide(&argv(&["--to", "a\u{1}b"]), &plain()),
             refuse(BAD_TO)
         );
         assert_eq!(
-            decide(&argv(&["--json", "--to", "a\u{1}b"]), &plain(None)),
+            decide(&argv(&["--json", "--to", "a\u{1}b"]), &plain()),
             Decision::Defer
         );
         let checkout = &["--to", "a\u{1}b", "--target-checkout", "x\ny"][..];
-        assert_eq!(decide(&argv(checkout), &plain(None)), refuse(BAD_TO));
+        assert_eq!(decide(&argv(checkout), &plain()), refuse(BAD_TO));
         for path in ["x\ny", "x\r", "\r/"] {
             let items = &["--to", "box", "--target-checkout", path][..];
-            assert_eq!(decide(&argv(items), &plain(None)), refuse(BAD_CHECKOUT));
+            assert_eq!(decide(&argv(items), &plain()), refuse(BAD_CHECKOUT));
         }
         let json = &["--to", "box", "--target-checkout", "x\n", "--json"][..];
-        assert_eq!(decide(&argv(json), &plain(None)), Decision::Defer);
+        assert_eq!(decide(&argv(json), &plain()), Decision::Defer);
     }
 
     #[test]
-    fn missing_to_is_argparse_usage_at_80_columns() {
-        let Decision::Refuse(text) = decide(&argv(&["--yes"]), &plain(Some("80"))) else {
-            panic!("expected the usage error");
-        };
-        assert!(text.starts_with("usage: pseudolife-mcp move [-h] --to SSH-TARGET"));
-        assert!(text.ends_with(&format!("[--json]\n{REQUIRED}")));
-        assert_eq!(text.matches('\n').count(), 8);
+    fn missing_to_is_the_usage_error_whatever_the_terminal() {
+        // The width, a terminal and colour variables no longer change it.
+        for items in [&[][..], &["--yes"], &["--dry-run", "--json"]] {
+            let Decision::Refuse(text) = decide(&argv(items), &plain()) else {
+                panic!("expected the usage error for {items:?}");
+            };
+            assert!(text.starts_with("usage: pseudolife-mcp move [-h] --to SSH-TARGET"));
+            assert!(text.ends_with(&format!("[--json]\n{REQUIRED}")));
+            assert_eq!(text.matches('\n').count(), 8);
+            assert_eq!(text, missing_to());
+        }
+    }
+
+    fn refusal_for(items: &[&str]) -> String {
+        let arguments: Vec<OsString> = items.iter().map(OsString::from).collect();
+        usage_refusal(&arguments)
+    }
+
+    #[test]
+    fn every_declined_shape_names_its_cause() {
+        let nothing = ". Nothing was changed\n";
+        for (items, problem) in [
+            (
+                &["--to=root@box"][..],
+                "write the option and its value as two arguments (--to VALUE); move does not read --to=VALUE",
+            ),
+            (&["--to", "box", "--yes=1"], "--yes takes no value"),
+            (
+                &["--dry", "--to", "box"],
+                "--dry is short for --dry-run; write the full option name",
+            ),
+            (
+                &["--target", "x", "--to", "box"],
+                "--target could be --target-checkout or --target-url or --target-env-file or --target-compose-file or --target-work-dir or --target-release; write the full option name",
+            ),
+            (
+                &["--to", "box", "--bogus"],
+                "--bogus is not a move option; see pseudolife-mcp move --help",
+            ),
+            (
+                &["--to", "box", "--token=s3cret"],
+                "argument 3 is not a move option; see pseudolife-mcp move --help",
+            ),
+            (
+                &["--yes", "--yes", "--to", "box"],
+                "--yes is given twice; give it once",
+            ),
+            (
+                &["--to", "a", "--to", "b"],
+                "--to is given twice; give it once",
+            ),
+            (
+                &["--to", "box", "extra"],
+                "argument 3 is neither an option nor an option's value; each value follows its option, such as --to user@box",
+            ),
+            (
+                &["--to"],
+                "--to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -",
+            ),
+            (
+                &["--to", "-oProxy=x"],
+                "--to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -",
+            ),
+            (
+                &["--to", "box", "--target-url", "-x"],
+                "--target-url needs a value after it, and the value cannot start with -",
+            ),
+            (
+                &["--to", "box", "--target-gone"],
+                "--target-gone applies only to the recovery form pseudolife-mcp move --release-target MOVE-ID --target-gone",
+            ),
+            (
+                &["--rollback"],
+                "--rollback needs the id of the move to recover, as --rollback MOVE-ID (the failed move printed it)",
+            ),
+            (
+                &["--rollback", "--yes"],
+                "--rollback needs the id of the move to recover, as --rollback MOVE-ID (the failed move printed it)",
+            ),
+            (
+                &["--rollback=abc"],
+                "write the option and its value as two arguments (--rollback MOVE-ID)",
+            ),
+            (
+                &["--rollback", "a", "--rollback", "b"],
+                "--rollback is given twice; give it once",
+            ),
+            (
+                &["--rollback", "a", "--release-target", "b"],
+                "give --rollback or --release-target, not both",
+            ),
+            (
+                &["--rollback", "a", "--target-gone"],
+                "--target-gone applies only to --release-target MOVE-ID, not to --rollback",
+            ),
+            (
+                &["--rollback", "a", "--to", "box"],
+                "--to cannot be used with --rollback, which takes only a move id, --yes and --json",
+            ),
+            (
+                &["--release-target", "a", "extra"],
+                "argument 3 cannot be used with --release-target, which takes only a move id, --target-gone, --yes and --json",
+            ),
+            (
+                &["--release-target", "a", "--yes", "--yes"],
+                "--yes is given twice; give it once",
+            ),
+        ] {
+            assert_eq!(
+                refusal_for(items),
+                format!("move: {problem}{nothing}"),
+                "{items:?}"
+            );
+        }
+        // Repeated compose files are overlays, not a repeat: with a --to
+        // missing, that is the one problem named.
         assert_eq!(
-            decide(&argv(&["--yes"]), &plain(Some("81"))),
-            Decision::Defer
+            refusal_for(&["--target-compose-file", "/a", "--target-compose-file", "/b"]),
+            missing_to()
         );
+        assert_eq!(refusal_for(&[]), missing_to());
     }
 
     /// Takes `room` bytes, then fails.
@@ -655,17 +957,14 @@ mod tests {
         ] {
             assert_eq!(posix_utf8_argv(env(pairs)), utf8, "{pairs:?}");
         }
-        let latin1 = Context {
-            utf8_argv: false,
-            ..plain(Some("80"))
-        };
+        let latin1 = Context { utf8_argv: false };
         for items in [
             &["--to", "root@\u{3000}box"][..],
             &["--to", "box", "--target-url", "http://box\u{a0}"],
             &["--to", "a b", "--target-checkout", "/srv/\u{e4}"],
         ] {
             assert_eq!(decide(&argv(items), &latin1), Decision::Defer, "{items:?}");
-            assert_ne!(decide(&argv(items), &plain(Some("80"))), Decision::Defer);
+            assert_ne!(decide(&argv(items), &plain()), Decision::Defer);
         }
         let ascii = &["--to", "a b"][..];
         assert_eq!(
@@ -675,33 +974,9 @@ mod tests {
     }
 
     #[test]
-    fn native_help_and_refusals_are_plain_on_a_terminal() {
-        let tty_err = Context {
-            colour_stderr: true,
-            ..plain(Some("80"))
-        };
-        assert_eq!(decide(&argv(&["-h"]), &tty_err), Decision::Help);
-        assert_eq!(decide(&argv(&["--yes"]), &tty_err), Decision::Defer);
-        assert_ne!(
-            decide(&argv(&["--yes"]), &plain(Some("80"))),
-            Decision::Defer
-        );
-        // main's own messages are plain print() calls: never coloured.
-        let refusal = &["--to", ""][..];
-        assert_eq!(
-            decide(&argv(refusal), &tty_err),
-            Decision::Refuse(BAD_TO.to_owned())
-        );
-        for name in ["FORCE_COLOR", "PYTHON_COLORS", "NO_COLOR"] {
-            assert!(colour_env(|var| var == name), "{name}");
-        }
-        assert!(!colour_env(|var| var == "TERM"));
-    }
-
-    #[test]
     fn exposure_consent_preserves_pure_refusals_and_effectful_deferral() {
         assert_eq!(
-            decide(&argv(&["--to", "box", "--expose-target"]), &plain(None)),
+            decide(&argv(&["--to", "box", "--expose-target"]), &plain()),
             Decision::Defer
         );
         assert_eq!(
@@ -713,7 +988,7 @@ mod tests {
                     "--target-url",
                     "ftp://box"
                 ]),
-                &plain(None)
+                &plain()
             ),
             Decision::Refuse(BAD_URL.to_owned())
         );
@@ -727,13 +1002,13 @@ mod tests {
             "--target-work-dir",
         ] {
             assert_eq!(
-                decide(&argv(&["--to", "box", option, "bad\npath"]), &plain(None)),
+                decide(&argv(&["--to", "box", option, "bad\npath"]), &plain()),
                 Decision::Refuse(BAD_DEPLOY_PATH.to_owned())
             );
             assert_eq!(
                 decide(
                     &argv(&["--to", "box", option, "bad\npath", "--json"]),
-                    &plain(None)
+                    &plain()
                 ),
                 Decision::Defer
             );
@@ -747,7 +1022,7 @@ mod tests {
                     "--target-work-dir",
                     "/srv/moves"
                 ]),
-                &plain(None)
+                &plain()
             ),
             Decision::Defer
         );

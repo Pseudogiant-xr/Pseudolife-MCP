@@ -59,9 +59,9 @@ fn unknown_mode_uses_python_quotes_and_exit_two() {
 
 #[test]
 fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
-    // Both commands still decline help before attempting a move or a tunnel
-    // operation. The empty home and closed address isolate either command
-    // if its dispatch behavior changes.
+    // `tunnel` still declines help before attempting a tunnel operation;
+    // `move` answers it natively. The empty home and closed address isolate
+    // either command if its dispatch behavior changes.
     let home = std::env::temp_dir().join(format!("pl-dispatch-home-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
     for mode in ["move", "tunnel"] {
@@ -83,6 +83,12 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
         .env_remove("PSEUDOLIFE_MCP_TOKEN_FILE")
         .output()
         .unwrap();
+        if mode == "move" {
+            assert_eq!(output.status.code(), Some(0));
+            assert!(output.stderr.is_empty());
+            assert!(output.stdout.starts_with(b"usage: pseudolife-mcp move"));
+            continue;
+        }
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
         let expected = bytes(&format!(

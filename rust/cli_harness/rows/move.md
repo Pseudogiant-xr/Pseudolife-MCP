@@ -20,7 +20,10 @@ model of both hosts with a fault at every call;
 `tests/cli_move_contract.rs` runs through the binary.
 
 `move --rollback <move id>` and `move --release-target <move id>` use
-the native recovery parser. The dispatcher checks their syntax first.
+the native recovery parser. The dispatcher checks their syntax first. Every
+`move` argv ends in native code: the recovery forms, help and the early
+refusals in `move_cli.rs`, the transaction, or the named usage refusal
+below. None reaches the dispatcher's deferral line.
 
 ## What runs before the first effect (checked)
 
@@ -40,7 +43,7 @@ the native recovery parser. The dispatcher checks their syntax first.
 
 | Item | Python source |
 |---|---|
-| No `--to` (every other token canonical): usage (3 lines) + `pseudolife-mcp move: error: the following arguments are required: --to`, stderr, exit 2; only at `COLUMNS=80` | `_parser` 1816 (`required=True`) |
+| No `--to` (every other token canonical, or the only problem): usage (7 lines, argparse's layout at 78 columns) + `pseudolife-mcp move: error: the following arguments are required: --to`, stderr, exit 2, at every `COLUMNS`, on a terminal and with colour variables set; the oracle matches it only at `COLUMNS=80` | `_parser` 1816 (`required=True`) |
 | `--target-url` given and not an origin: `move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 (no path, query or credentials)`, stderr, exit 2, before any `--to` check | `main` 1837-1844; `codex_connection.py:104-117` |
 | `--to` empty, or any `str.isspace` character: `move: --to takes an ssh target such as user@box or a ~/.ssh/config alias` (the frozen Python says `root@box`; the native text, since 16 November 2026, does not teach a root login), stderr, exit 2 (also under `--json`) | `main` 1848-1850 |
 | `--to` holding a C0 character that is not whitespace (U+0000-U+0008, U+000E-U+001B): the same text, stderr, exit 2 | `Mover.run` 619-620, `fail` 555-559 |
@@ -85,17 +88,29 @@ native module then prints the same `--to` refusal).
 
 ## Native help and usage
 
-`--help` or `-h` alone prints the same help at every terminal width. The
-help describes installed release targets and the native recovery commands.
-The help cases replay the native goldens after this change from the
-frozen oracle.
+`--help` or `-h` anywhere in argv prints the same help at every terminal
+width, as argparse's does; `--rollback --help` is help too, since a move id
+never starts with `-`. The help describes installed release targets, says
+`--target-checkout` is refused and `--target-release` changes nothing, and
+names the recovery commands.
 
-Unsupported arguments receive a native usage refusal on stderr (exit 2)
-before opening a move record or consulting either host. This includes
-`--opt=value`, abbreviations, unexpected repeated options or positionals,
-a missing value, non-Unicode argv and option values starting with `-`.
-Use full option names and pass values as separate arguments. The parser
-accepts repeated `--target-compose-file` entries in overlay order.
+Argv neither native parser takes gets one refusal on stderr, exit 2,
+`move: <cause>. Nothing was changed`, before any move record is read or
+either host consulted. The cause names the first problem in argv order:
+a joined `--opt=value`, a flag given a value, an abbreviation (with the
+full name it stands for), an unknown option, a repeated option, a
+positional argument, a missing value or one starting with `-` (for `--to`
+that would be an ssh option), non-Unicode argv, `--target-gone` outside
+`--release-target`, and for the recovery forms a missing move id, both
+forms at once or an option they do not take. An option spelling is echoed
+only when it is a plain `-`/`--` word; anything else, which could be a
+value or a pasted secret, is named by its position. Repeated
+`--target-compose-file` entries are overlays, in order, not a repeat.
+
+The cases whose native answer differs from argparse's (the help cases, the
+missing `--to` at `COLUMNS=120`, and every case that names a usage cause)
+replay goldens recorded from the candidate with `--record-candidate`; the
+case IDs keep their `defer-` names from when the command deferred.
 
 ## Free items
 

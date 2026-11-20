@@ -16,8 +16,7 @@ use std::{
     process::{Command, Output},
 };
 
-const INVALID_ARGUMENTS: &str =
-    "move: invalid arguments. Use --help for supported forms and pass option values separately.\n";
+const TO_VALUE: &str = "move: --to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -. Nothing was changed\n";
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
@@ -290,23 +289,128 @@ fn an_ssh_planted_in_the_working_directory_is_never_run() {
 fn unsupported_argument_shapes_receive_native_usage() {
     let home = Home::new("shapes");
     let (socket, url) = listener();
+    let nothing = ". Nothing was changed\n";
+    for (args, problem) in [
+        (
+            &["--to=root@box"][..],
+            "write the option and its value as two arguments (--to VALUE); move does not read --to=VALUE",
+        ),
+        (
+            &["--dry", "--to", "root@box"],
+            "--dry is short for --dry-run; write the full option name",
+        ),
+        (
+            &["--yes", "--yes", "--to", "root@box"],
+            "--yes is given twice; give it once",
+        ),
+        (
+            &["--to", "root@box", "extra"],
+            "argument 3 is neither an option nor an option's value; each value follows its option, such as --to user@box",
+        ),
+        (
+            &["--to", "root@box", "--bogus"],
+            "--bogus is not a move option; see pseudolife-mcp move --help",
+        ),
+    ] {
+        let want = format!("move: {problem}{nothing}");
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", &want);
+    }
+    // A --to value starting with `-` would be an ssh option: never taken.
     for args in [
-        &["--to=root@box"][..],
-        &["--to"],
+        &["--to"][..],
         &["--to", "-1"],
         &["--to", "-oProxyCommand=evil"],
-        &["--dry", "--to", "root@box"],
-        &["--yes", "--yes", "--to", "root@box"],
-        &["--to", "root@box", "extra"],
     ] {
-        assert_answer(&run(&home.0, &url, "80", args), 2, "", INVALID_ARGUMENTS);
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", TO_VALUE);
     }
     let narrow_help = run(&home.0, &url, "80", &["--help"]);
     let wide_help = run(&home.0, &url, "100", &["--help"]);
     assert_eq!(wide_help.status.code(), Some(0));
     assert!(wide_help.stderr.is_empty());
     assert_eq!(narrow_help.stdout, wide_help.stdout);
-    assert_answer(&run(&home.0, &url, "100", &[]), 2, "", INVALID_ARGUMENTS);
+    // Help wherever it appears, before any check.
+    for args in [
+        &["--to", "root@box", "--dry-run", "--help"][..],
+        &["--rollback", "--help"],
+        &["--release-target", "-h"],
+    ] {
+        let output = run(&home.0, &url, "100", args);
+        assert_eq!(output.status.code(), Some(0), "{args:?}");
+        assert_eq!(output.stdout, wide_help.stdout, "{args:?}");
+        assert!(output.stderr.is_empty(), "{args:?}");
+    }
+    // A missing --to is named at every width.
+    let required =
+        format!("{USAGE}pseudolife-mcp move: error: the following arguments are required: --to\n");
+    for columns in ["80", "100", ""] {
+        assert_answer(&run(&home.0, &url, columns, &[]), 2, "", &required);
+        assert_answer(&run(&home.0, &url, columns, &["--yes"]), 2, "", &required);
+    }
+    assert_quiet(&socket);
+    assert!(listing(&home.0).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_argv_is_named_by_position() {
+    use std::os::unix::ffi::OsStrExt;
+    let home = Home::new("non-unicode");
+    let output = cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+        .arg("move")
+        .arg("--to")
+        .arg(std::ffi::OsStr::from_bytes(b"b\xff"))
+        .current_dir(&home.0)
+        .env("HOME", &home.0)
+        .env("PATH", &home.0)
+        .output()
+        .unwrap();
+    assert_answer(
+        &output,
+        2,
+        "",
+        "move: argument 2 is not valid Unicode text; retype it. Nothing was changed\n",
+    );
+    assert!(listing(&home.0).is_empty());
+}
+
+#[test]
+fn malformed_recovery_forms_name_their_cause_before_reading_records() {
+    let home = Home::new("recovery-shapes");
+    let (socket, url) = listener();
+    let nothing = ". Nothing was changed\n";
+    for (args, problem) in [
+        (
+            &["--rollback"][..],
+            "--rollback needs the id of the move to recover, as --rollback MOVE-ID (the failed move printed it)",
+        ),
+        (
+            &["--release-target", "--yes"],
+            "--release-target needs the id of the move to recover, as --release-target MOVE-ID (the failed move printed it)",
+        ),
+        (
+            &["--rollback", MOVE_ID, "--target-gone"],
+            "--target-gone applies only to --release-target MOVE-ID, not to --rollback",
+        ),
+        (
+            &["--rollback", MOVE_ID, "--release-target", MOVE_ID],
+            "give --rollback or --release-target, not both",
+        ),
+        (
+            &["--rollback", MOVE_ID, "--to", "root@box"],
+            "--to cannot be used with --rollback, which takes only a move id, --yes and --json",
+        ),
+        (
+            &["--release-target", MOVE_ID, "--dry-run"],
+            "--dry-run cannot be used with --release-target, which takes only a move id, --target-gone, --yes and --json",
+        ),
+        (
+            &["--to", "root@box", "--target-gone"],
+            "--target-gone applies only to the recovery form pseudolife-mcp move --release-target MOVE-ID --target-gone",
+        ),
+    ] {
+        let want = format!("move: {problem}{nothing}");
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", &want);
+    }
     assert_quiet(&socket);
     assert!(listing(&home.0).is_empty());
 }

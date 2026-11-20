@@ -1,8 +1,10 @@
 """CLI-MOVE-REFUSALS: the refusals ``pseudolife-mcp move`` makes before any effect.
 
-This row replays native help and usage, invalid ``--target-url`` and
-``--to`` arguments, and a ``--target-checkout`` holding CR or LF. The
-transaction and recovery use separate Rust tests (see ``move.md``).
+This row replays native help, the missing ``--to`` usage error, invalid
+``--target-url`` and ``--to`` arguments, a ``--target-checkout`` holding CR
+or LF, and the named usage refusal for argv shapes neither native parser
+takes. The transaction and recovery use separate Rust tests (see
+``move.md``).
 
 Safety. The oracle's move reads the hardcoded ``http://127.0.0.1:8765``
 (the developer's live daemon) and, with ``--yes``, starts a real move, so
@@ -14,10 +16,11 @@ to 127.0.0.1 would reach instead of the live daemon (the positive control
 are compared, and must be empty. A direct socket (say to 127.0.0.1:8765)
 would bypass that listener, so every case also scans the candidate's own
 ``move_cli.rs`` for network, process and file APIs (``_leaf_io``): any hit
-is a difference. A case whose argv passes validation
+is a difference. A case whose argv the oracle would accept
 (``ORACLE_NOT_RUN``) never runs the oracle: its Python arm runs a stub
 ``pseudolife_memory.cli`` placed first on ``PYTHONPATH``, verified before
-use, and the expectation is the native usage refusal with no request.
+use. Its golden entry is recorded from the candidate (``--record-candidate``),
+because the oracle has no answer to compare.
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ from pathlib import Path
 from .. import normalize, producers
 from ..core import WINDOWS, Case
 
-INVALID_ARGUMENTS = "move: invalid arguments. Use --help for supported forms and pass option values separately.\n"
+STUB_ONLY = "move row: this case is compared only with its candidate-recorded golden\n"
 STUB_MARKER = "move row: the oracle was not run for this argv\n"
 # The native text (the frozen oracle still says root@box).
 BAD_TO = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n"
@@ -173,26 +176,18 @@ def _leaf_io() -> list[str]:
 
 @normalize.rule("move-oracle-not-run")
 def oracle_not_run(obs: dict) -> None:
-    """A valid argv: the oracle is not run (it would contact the live
-    daemon). The Python arm must show it ran the stub and nothing else (exit
-    0, the marker, no request, no file); it becomes the expectation that
-    the candidate prints native usage and exits 2."""
+    """An argv the oracle would accept: the oracle is not run (it would
+    contact the live daemon). The Python arm must show it ran the stub and
+    nothing else (exit 0, the marker, no request, no file). The oracle has
+    no answer for the native refusal, so a live comparison names the
+    candidate-recorded golden instead of passing."""
     if obs.get("arm") != "python":
         return
     if (obs["exit"], base64.b64decode(obs["stdout"]), base64.b64decode(obs["stderr"])) != (
             0, b"", _native(STUB_MARKER)):
         return  # left as observed: the comparison then fails
     obs["exit"] = 2
-    obs["stderr"] = base64.b64encode(_native(INVALID_ARGUMENTS)).decode()
-
-
-@normalize.rule("move-native-usage-refusal")
-def native_usage_refusal(obs: dict) -> None:
-    """For a frozen-oracle usage refusal, expect the native usage message."""
-    if obs.get("arm") != "python" or obs["exit"] != 2 or obs.get("requests"):
-        return
-    obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(INVALID_ARGUMENTS)).decode()
+    obs["stderr"] = base64.b64encode(_native(STUB_ONLY)).decode()
 
 
 # The native client's example target is user@box; the frozen oracle still
@@ -258,10 +253,6 @@ def _valid(case_id: str, argv: list[str]) -> Case:
     return _case(case_id, argv, rules=("move-oracle-not-run",), oracle=False)
 
 
-def _usage_refusal(case_id: str, argv: list[str], **kwargs) -> Case:
-    return _case(case_id, argv, rules=("move-native-usage-refusal",), **kwargs)
-
-
 GOOD_URL = "http://100.64.0.2:8765"
 
 # The origin() unit table, each URL paired with --to "a b": the oracle then
@@ -301,7 +292,7 @@ def cases() -> list[Case]:
     return [
         # tests/test_move_cli.py::test_usage_errors_exit_2, argv for argv
         _case("oracle-test-no-arguments", []),
-        _usage_refusal("oracle-test-proxycommand", ["--to", "-oProxyCommand=evil"]),
+        _case("oracle-test-proxycommand", ["--to", "-oProxyCommand=evil"]),
         _case("oracle-test-ftp-url", ["--to", "root@box", "--target-url", "ftp://x/y"]),
         # Native help and usage
         _case("help", ["--help"]),
@@ -336,22 +327,24 @@ def cases() -> list[Case]:
         _case("checkout-newline", ["--to", "root@box", "--target-checkout", "/srv/x\ny"]),
         _case("checkout-cr", ["--to", "root@box", "--target-checkout", "/srv/x\r"]),
         _case("checkout-cr-slashes", ["--to", "root@box", "--target-checkout", "\r//", "--yes"]),
-        # Keep the historical case IDs for the candidate goldens.
+        # Native answers recorded from the candidate (argparse's differ);
+        # the case IDs keep their names from when the command deferred.
         _case("defer-help-columns", ["--help"], columns="100"),
-        _usage_refusal("defer-missing-to-columns", ["--yes"], columns="120"),
-        _usage_refusal("defer-missing-value", ["--to"]),
-        _usage_refusal("defer-to-dash", ["--to", "-"]),
-        _usage_refusal("defer-to-negative-number", ["--to", "-1"]),
-        _usage_refusal("defer-to-joined-dash", ["--to=-x"]),
-        _usage_refusal("defer-unknown-flag", ["--to", "root@box", "--bogus"]),
-        _usage_refusal("defer-positional", ["--to", "root@box", "extra"]),
+        _case("defer-missing-to-columns", ["--yes"], columns="120"),
+        _case("defer-missing-value", ["--to"]),
+        _case("defer-to-dash", ["--to", "-"]),
+        _case("defer-to-negative-number", ["--to", "-1"]),
+        _case("defer-to-joined-dash", ["--to=-x"]),
+        _case("defer-unknown-flag", ["--to", "root@box", "--bogus"]),
+        _case("defer-positional", ["--to", "root@box", "extra"]),
         _case("url-invalid-bracket-unclosed", ["--to", "a b", "--target-url", "http://[::1"]),
         # a value starting with '-' is argparse's "expected one argument"
-        _usage_refusal("defer-url-dash-value", ["--to", "box", "--target-url", "-x"]),
-        _usage_refusal("defer-checkout-dash-newline", ["--to", "box", "--target-checkout", "-\n"]),
-        _usage_refusal("defer-to-dash-control", ["--to", "-\x01"]),
+        _case("defer-url-dash-value", ["--to", "box", "--target-url", "-x"]),
+        _case("defer-checkout-dash-newline", ["--to", "box", "--target-checkout", "-\n"]),
+        _case("defer-to-dash-control", ["--to", "-\x01"]),
         *_url_cases(),
-        # The native parser refuses these before effects; the oracle is stubbed.
+        # The oracle would accept these and contact the live daemon, so it is
+        # stubbed; the native refusals are recorded from the candidate.
         _valid("defer-joined-to", ["--to=root@box"]),
         _valid("defer-abbreviation", ["--dry", "--to", "root@box"]),
         _valid("defer-repeated-flag", ["--yes", "--yes", "--to", "root@box"]),

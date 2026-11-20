@@ -200,11 +200,13 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "move" {
         let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
-        // Recovery syntax has its own required arguments.
+        // Every move argv ends here: the recovery forms, then help and the
+        // early refusals, then the transaction, and otherwise a usage
+        // refusal that names the first problem.
         let code = restore_cli::move_native::run_rollback(&arguments)
             .or_else(|| move_cli::run(arguments.clone()))
             .or_else(|| restore_cli::move_native::run(&arguments))
-            .unwrap_or_else(move_cli::invalid_arguments);
+            .unwrap_or_else(|| move_cli::invalid_arguments(&arguments));
         return Some(ExitCode::from(code));
     }
     // Hidden: the target half of `move`'s preflight, run over ssh.

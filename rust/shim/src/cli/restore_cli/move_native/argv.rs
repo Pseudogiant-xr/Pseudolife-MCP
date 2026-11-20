@@ -169,7 +169,13 @@ pub(super) fn parse_rollback(arguments: &[OsString]) -> Option<Rollback> {
             flag @ ("--rollback" | "--release-target") if id.is_none() => {
                 rollback.release = flag == "--release-target";
                 index += 1;
-                id = Some((*words.get(index)?).to_owned());
+                // A move id never starts with `-`: `--rollback --help` is
+                // help, not the rollback of a move named `--help`.
+                let word = *words.get(index)?;
+                if word.starts_with('-') {
+                    return None;
+                }
+                id = Some(word.to_owned());
             }
             "--yes" if !rollback.yes => rollback.yes = true,
             "--target-gone" if !rollback.target_gone => rollback.target_gone = true,
