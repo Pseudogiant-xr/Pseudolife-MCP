@@ -207,9 +207,10 @@ pub(super) fn build_environment(tree: &seams::Tree) -> Environment {
     .into_iter()
     .collect()
 }
+const CHECKOUT_SCHEMA_PLAN: &str = "rust/daemon/src/storage/schema_plan.json";
+
 pub(super) fn checkout_version_schema(repo: &Path) -> Result<(String, i64)> {
     let project = fs::read_to_string(repo.join("pyproject.toml"))?;
-    let schema = fs::read_to_string(repo.join("pseudolife_memory/storage/schema.py"))?;
     let version = regex::Regex::new(r#"(?m)^version\s*=\s*"([^"]+)""#)
         .expect("version")
         .captures(&project)
@@ -217,11 +218,20 @@ pub(super) fn checkout_version_schema(repo: &Path) -> Result<(String, i64)> {
         .ok_or_else(|| {
             UpdateError::usage("cannot read the checkout version from pyproject.toml")
         })?;
-    let schema = regex::Regex::new(r"(?m)^SCHEMA_META_VERSION\s*=\s*([0-9]+)")
-        .expect("schema")
-        .captures(&schema)
-        .and_then(|c| c[1].parse::<i64>().ok())
-        .ok_or_else(|| UpdateError::usage("cannot read the checkout schema version"))?;
+    let plan = fs::read(repo.join(CHECKOUT_SCHEMA_PLAN)).map_err(|error| {
+        UpdateError::usage(format!(
+            "cannot read {CHECKOUT_SCHEMA_PLAN} in this checkout ({error}). Restore that file and retry."
+        ))
+    })?;
+    let schema = serde_json::from_slice::<Value>(&plan)
+        .ok()
+        .and_then(|plan| plan["schema_version"].as_i64())
+        .filter(|version| *version > 0)
+        .ok_or_else(|| {
+            UpdateError::usage(format!(
+                "{CHECKOUT_SCHEMA_PLAN} must contain a positive integer schema_version. Restore that file and retry."
+            ))
+        })?;
     Ok((version, schema))
 }
 pub(super) fn daemon_token(config: &Value) -> Result<String> {
