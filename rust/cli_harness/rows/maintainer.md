@@ -36,6 +36,14 @@ Every displayed time is floored to a whole second and printed in UTC as `YYYY-MM
 
 ## Fixtures and regression snapshots
 
+The seeded rows and both waiting-case transitions were captured once from
+the frozen writer at `00964cbeb` in `maintainer.fixtures.json`. The fixture
+loads into the daemon's committed schema. The waiting cases still let the
+CLI issue and poll its own code. The harness updates that code's observed
+row and replays the captured Console state, keeping the actual hash and
+expiry. The redeem case also restores the captured pending key, spent nonce
+and audit event. The burn case commits five increments separately.
+
 The existing seeded banks are created with the test login and the disposable-bank guards on the dev machine's test PostgreSQL only. Each arm receives its own copy of a seed. The row wraps connection URL values in a local str subclass with a fixed repr placeholder; the real string payload still reaches the child environment. A synthetic regression checks case repr, pytest parameter ID and actual child delivery. Bank-backed runs are redirected to private machine logs and checked for test-password disclosure before logs are copied or summarized.
 
 Historical `defer-*` IDs remain regression cases for native outcomes. Deferral and local-time normalizers are removed; UTC output is compared directly. New `list-read-error` and `list-column-type-error` cases alter only their guarded disposable copies to exercise failed reads and row decoding, and require the database state to remain unchanged by the command. These read-fault goldens are the collected replay coverage; the former standalone qualification function in the row was not collected by ordinary pytest and has been removed.

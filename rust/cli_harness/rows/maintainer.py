@@ -1,26 +1,8 @@
 """CLI-MAINTAINER: ``pseudolife-mcp maintainer`` (maintainer_cli.py).
 
-Banks are seeded through the oracle's own writers only: ``MaintainerStore``
-issues challenges, ``bootstrap_code`` admits the first key, the Console's
-enrolment (``enrol_bootstrap``, ``approve_enrol`` + ``enrol_approved``),
-``cancel`` and the sign-count flag run on the test suite's software
-authenticator (``tests.maintainer_authenticator``), and the host's
-``confirm`` activates the first key. Seeding is deterministic, so a kind's
-bank is byte-identical on every host and run and goldens replay against it:
-credential ids and authenticator keys are fixed (the tests draw both at
-random), the store's ``secrets`` draws (the secret, codes, nonces) come
-from a generator seeded by the kind, and the seed clock is a fixed minute.
-Each kind is seeded once per harness process; every arm of every case gets
-its own ``CREATE DATABASE ... TEMPLATE`` copy, so both arms start from
-identical rows.
-
-The waiting ``enrol-code`` cases act from the harness while the CLI waits
-(``Case.during``): once the CLI's code row exists, the oracle's
-``enrol_bootstrap`` redeems it, or five wrong guesses through it burn it.
-The plaintext code is only on the CLI's stdout, which the harness reads
-after exit, so the redemption runs with ``storage.maintainer.code_hash``
-answering the stored hash (the one seam replaced; every row is still the
-oracle's), a fixed clock and a fixed challenge nonce.
+Each arm copies an owned disposable bank. The seeded rows and the Console
+effects selected by the waiting cases were captured from the frozen writer.
+The CLI still creates the real code and polls its actual durable state.
 """
 
 from __future__ import annotations
@@ -31,12 +13,11 @@ import contextlib
 import hashlib
 import json
 import os
-import random
 import re
 import time
-import types
-from contextlib import contextmanager
-from unittest import mock
+from pathlib import Path
+
+from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
 
 from .. import core, normalize
 from . import _bank
@@ -56,17 +37,8 @@ IDS = {
     "pending": "-pendingKeyAAAAAAAAAAA",   # a pending bootstrap key; '-' leads
     "laptop": "-dashKeyAAAAAAAAAAAAAA",    # active (bootstrap, host confirm)
     "phone": "phoneKey_quarantineAAA",     # active, quarantined; '_' inside
-    "twin1": "twinAB1keyDAAAAAAAAAAA",     # twin1 and twin2 share 'twinAB'
-    "twin2": "twinAB2keyEAAAAAAAAAAA",
     "spare": "cancelXdRevokedAAAAAAA",     # revoked (cancelled by laptop)
-    "desk": "deskKeyHookAAAAAAAAAAA",      # redeemed by the waiting case
 }
-LABELS = {"pending": "laptop", "laptop": "laptop", "phone": "Tom's phone ☎",
-          "twin1": 'it\'s "twin"', "twin2": "twin two", "spare": "spare",
-          "desk": "desk key"}
-WRONG_CODE = "WRONGCODE2"
-
-
 def _session(sid: str, issuer: str, method: str) -> str:
     """A v59 Console session row (test instrument): ``issuer`` is a passkey
     credential id for a passkey sign-in, a token hash for a link one."""
@@ -84,148 +56,60 @@ SESSIONS = (_session("sess-laptop", IDS["laptop"], "passkey"),
             _session("sess-link", "0" * 64, "link"))
 
 
-class _Storage:
-    """The minimal storage the oracle store runs on (as the CLI's own)."""
-
-    def __init__(self, conn):
-        self.conn = conn
-
-    @contextmanager
-    def _txn(self):
-        with self.conn.transaction():
-            yield
-
-
-def _store(conn, clock):
-    from pseudolife_memory.storage.maintainer import MaintainerStore  # noqa: PLC0415
-    from tests.maintainer_authenticator import ORIGIN, RP_ID  # noqa: PLC0415
-    return MaintainerStore(_Storage(conn), rp_id=RP_ID, origin=ORIGIN, clock=clock)
+_FIXTURE = Path(__file__).with_name("maintainer.fixtures.json")
+_SEED_TABLES = ("meta", "maintainer_nonces", "maintainer_passkeys",
+                "maintainer_bootstrap", "coordination_events")
+_SEED_SHAPES = {
+    "fresh": {"meta": 1},
+    "stale": {"meta": 1, "maintainer_bootstrap": 1},
+    "pending": {table: 1 for table in _SEED_TABLES},
+    "rich": {"meta": 1, "maintainer_nonces": 10, "maintainer_passkeys": 5,
+             "maintainer_bootstrap": 1, "coordination_events": 7},
+}
 
 
-_AUTHS: dict = {}
-_P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+def _fixture():
+    return json.loads(_FIXTURE.read_text(encoding="utf-8"))
 
 
-def _fixed_key(name: str):
-    """A P-256 key fixed per chosen id (the stored public key is a seeded
-    value, so it must not change between runs)."""
-    from cryptography.hazmat.primitives.asymmetric import ec  # noqa: PLC0415
-    digest = hashlib.sha256(f"pl-cli-harness-maintainer-key-{name}".encode()).digest()
-    return ec.derive_private_key(int.from_bytes(digest, "big") % (_P256_ORDER - 1) + 1,
-                                 ec.SECP256R1())
+def _require_owned_bank(name):
+    _bank.NAMES.require_owned(name)
+    if not name.startswith(PREFIX):
+        raise ValueError("maintainer fixture requires an owned maintainer bank")
 
 
-def auth(name: str):
-    """One software authenticator per chosen id, shared by every arm."""
-    if name not in _AUTHS:
-        from tests.maintainer_authenticator import SoftAuthenticator  # noqa: PLC0415
-        # A nonzero count makes every assertion advance it, so a stale one
-        # is a regression the store flags.
-        made = SoftAuthenticator(sign_count=1)
-        made.private = _fixed_key(name)
-        made.credential_id = base64.urlsafe_b64decode(IDS[name] + "==")
-        if made.id != IDS[name]:
-            raise RuntimeError(f"{name}: id {IDS[name]} is not canonical base64url")
-        _AUTHS[name] = made
-    return _AUTHS[name]
+def _require_bank(conn, name):
+    _require_owned_bank(name)
+    if assert_disposable_database(conn) != name:
+        raise ValueError("server reported a different database from the owned maintainer fixture")
 
 
-def _challenge(payload):
-    from pseudolife_memory.storage.maintainer import challenge_bytes  # noqa: PLC0415
-    return challenge_bytes(payload)
+def _insert_rows(conn, table, rows):
+    from psycopg import sql
+    from psycopg.types.json import Json
+
+    ident = sql.Identifier("public", table)
+    conn.execute(sql.SQL("INSERT INTO {} SELECT * FROM json_populate_recordset(NULL::{}, %s)")
+                 .format(ident, ident), (Json(rows),))
 
 
-def _bootstrap(store, name):
-    """The first key, as the Console redeems a host code."""
-    code = store.bootstrap_code()
-    payload, mac = store.issue("enrol-bootstrap", {"label": LABELS[name]})
-    return store.enrol_bootstrap(payload, mac, auth(name).register(_challenge(payload)), code)
+def _validate_rows(rows, expected):
+    if {table: len(records) for table, records in rows.items()} != expected:
+        raise ValueError("incomplete or unexpected maintainer fixture rows")
 
 
-def _add(store, signer, name):
-    """Another key: ``signer`` approves the label, then the new key registers."""
-    payload, mac = store.issue("enrol-approve", {"label": LABELS[name]})
-    approved = store.approve_enrol(payload, mac, auth(signer).assertion(_challenge(payload)))
-    attestation = auth(name).register(_challenge(approved["payload"]))
-    return store.enrol_approved(approved["payload"], approved["mac"], attestation)
+def _seed(conn, name, kind):
+    _require_bank(conn, name)
+    rows = _fixture()["seeds"][kind]
+    _validate_rows(rows, _SEED_SHAPES[kind])
+    if rows["meta"][0]["key"] != "maintainer_secret_v1":
+        raise ValueError("maintainer fixture is missing its secret row")
+    with conn.transaction():
+        for table in _SEED_TABLES:
+            if table in rows:
+                _insert_rows(conn, table, rows[table])
 
 
-def _clock():
-    now = [T0]
-
-    def tick():
-        now[0] += 60.0
-        return now[0]
-    return now, tick
-
-
-def seed_fresh(conn):
-    """A daemon that has issued one challenge: the secret exists, no keys."""
-    now, _ = _clock()
-    _store(conn, lambda: now[0]).issue("enrol-bootstrap", {"label": "unused"})
-
-
-def seed_stale(conn):
-    """As fresh, plus an unused host code nobody redeemed."""
-    now, _ = _clock()
-    store = _store(conn, lambda: now[0])
-    store.issue("enrol-bootstrap", {"label": "unused"})
-    store.bootstrap_code()
-
-
-def seed_pending(conn):
-    now, _ = _clock()
-    _bootstrap(_store(conn, lambda: now[0]), "pending")
-
-
-def seed_rich(conn):
-    from pseudolife_memory.storage.maintainer import MaintainerError  # noqa: PLC0415
-    now, tick = _clock()
-    store = _store(conn, lambda: now[0])
-    _bootstrap(store, "laptop")
-    tick()
-    store.confirm(IDS["laptop"][:8])
-    for name in ("phone", "twin1", "twin2", "spare"):
-        tick()
-        _add(store, "laptop", name)
-    tick()
-    payload, mac = store.issue("cancel", {"credential_id": IDS["spare"]})
-    store.cancel(payload, mac, auth("laptop").assertion(_challenge(payload)))
-    tick()
-    # A stale sign count: refused, and the key is flagged for review.
-    payload, mac = store.issue("enrol-approve", {"label": "stale"})
-    stale = auth("laptop").assertion(_challenge(payload), sign_count=auth("laptop").sign_count)
-    try:
-        store.approve_enrol(payload, mac, stale)
-    except MaintainerError:
-        pass
-    else:
-        raise RuntimeError("the stale assertion was accepted")
-
-
-SEEDERS = {"fresh": seed_fresh, "stale": seed_stale, "pending": seed_pending,
-           "rich": seed_rich}
-
-
-class _SeededSecrets:
-    """The oracle store's ``secrets`` while a kind is seeded: the same
-    draws (secret, codes, nonces) on every host and run."""
-
-    def __init__(self, label: str):
-        self._draw = random.Random(label)
-
-    def token_hex(self, nbytes: int) -> str:
-        return self._draw.randbytes(nbytes).hex()
-
-    def choice(self, sequence):
-        return sequence[self._draw.randrange(len(sequence))]
-
-
-@contextmanager
-def _seeded(kind: str):
-    from pseudolife_memory.storage import maintainer  # noqa: PLC0415
-    with mock.patch.object(maintainer, "secrets", _SeededSecrets(f"pl-cli-harness-{kind}")):
-        yield
 _BASELINE: dict[str, dict] = {}
 _CREATED: set[str] = set()
 
@@ -258,12 +142,15 @@ atexit.register(_drop_all)
 
 
 def _copy(source: str, target: str) -> None:
-    from pseudolife_memory.storage.schema import assert_disposable_database  # noqa: PLC0415
-    _bank.url(target)  # validates the name: pl_cf_ only
+    _require_owned_bank(source)
+    _require_owned_bank(target)
+    refuse_production_database(source)
+    refuse_production_database(target)
     _drop(target)
     _CREATED.add(target)
     with _bank._admin() as conn:
-        assert_disposable_database(conn)
+        if assert_disposable_database(conn) != "postgres":
+            raise ValueError("maintainer fixture copy requires the test admin database")
         conn.execute(f'CREATE DATABASE "{target}" TEMPLATE "{source}"')
 
 
@@ -277,9 +164,9 @@ def ensure(kind: str) -> str:
         _bank.create(name, schema=False)
     else:
         _bank.create(name)
-        if kind in SEEDERS:
-            with _bank.connect(name, autocommit=True) as conn, _seeded(kind):
-                SEEDERS[kind](conn)
+        if kind in _SEED_SHAPES:
+            with _bank.connect(name, autocommit=True) as conn:
+                _seed(conn, name, kind)
     _BASELINE[name] = _bank.dump(name)
     return name
 
@@ -463,58 +350,69 @@ def _live_code(conn, proc) -> str | None:
     return None
 
 
-@contextmanager
-def _fixed_nonce():
-    from pseudolife_memory.storage import maintainer  # noqa: PLC0415
-    fixed = types.SimpleNamespace(token_hex=lambda n: "5e" * n, choice=None)
-    with mock.patch.object(maintainer, "secrets", fixed):
-        yield
-
-
 def redeem_during(arm, proc) -> None:
-    from pseudolife_memory.storage import maintainer  # noqa: PLC0415
     with _bank.connect(ARM_DB, autocommit=True) as conn:
+        _require_bank(conn, ARM_DB)
         stored = _live_code(conn, proc)
         if stored is None:
             return
-        store = _store(conn, lambda: HOOK_T)
-        with _fixed_nonce():
-            payload, mac = store.issue("enrol-bootstrap", {"label": LABELS["desk"]})
-        attestation = auth("desk").register(_challenge(payload))
-        with mock.patch.object(maintainer, "code_hash", lambda _code: stored):
-            store.enrol_bootstrap(payload, mac, attestation, "<from the CLI's stdout>")
+        capture = _fixture()["hooks"]["redeem"]
+        nonce, key, event = ("maintainer_nonces", "maintainer_passkeys", "coordination_events")
+        rows, status = capture["rows"], capture["status"]
+        _validate_rows(rows, {nonce: 1, key: 1, event: 1})
+        if status != {"credential_id": rows[key][0]["credential_id"],
+                      "failed_attempts": 0, "used_at": HOOK_T}:
+            raise ValueError("invalid maintainer redemption fixture")
+        # The waiting CLI publishes the code before the hook runs. Keep its
+        # actual hash and expiry while replaying the captured Console effects.
+        with conn.transaction():
+            _insert_rows(conn, nonce, rows[nonce])
+            conn.execute("LOCK TABLE maintainer_passkeys IN SHARE ROW EXCLUSIVE MODE")
+            _insert_rows(conn, key, rows[key])
+            changed = conn.execute(
+                "UPDATE maintainer_bootstrap SET used_at=%s,credential_id=%s "
+                "WHERE code_hash=%s AND used_at IS NULL AND expires_at>=%s AND failed_attempts=0",
+                (status["used_at"], status["credential_id"], stored, HOOK_T),
+            ).rowcount
+            if changed != 1:
+                raise RuntimeError("maintainer fixture did not redeem the waiting code")
+            _insert_rows(conn, event, rows[event])
 
 
 def burn_during(arm, proc) -> None:
-    from pseudolife_memory.storage.maintainer import (  # noqa: PLC0415
-        BOOTSTRAP_MAX_FAILURES, MaintainerError,
-    )
     with _bank.connect(ARM_DB, autocommit=True) as conn:
-        if _live_code(conn, proc) is None:
+        _require_bank(conn, ARM_DB)
+        stored = _live_code(conn, proc)
+        if stored is None:
             return
-        store = _store(conn, lambda: HOOK_T)
-        with _fixed_nonce():
-            payload, mac = store.issue("enrol-bootstrap", {"label": LABELS["desk"]})
-        attestation = auth("desk").register(_challenge(payload))
-        for _ in range(BOOTSTRAP_MAX_FAILURES):
-            try:
-                store.enrol_bootstrap(payload, mac, attestation, WRONG_CODE)
-            except MaintainerError as exc:
-                if exc.code != "bootstrap_code_invalid":
-                    raise
+        capture = _fixture()["hooks"]["burn"]
+        if capture != {"rows": {}, "status": {"credential_id": None,
+                                                "failed_attempts": 5, "used_at": None}}:
+            raise ValueError("invalid maintainer burn fixture")
+        # Wrong guesses commit separately and leave no spent nonce. Only the
+        # last committed increment makes the waiting command report a burn.
+        for attempt in range(capture["status"]["failed_attempts"]):
+            changed = conn.execute(
+                "UPDATE maintainer_bootstrap SET failed_attempts=failed_attempts+1 "
+                "WHERE code_hash=%s AND used_at IS NULL AND expires_at>=%s AND failed_attempts=%s",
+                (stored, HOOK_T, attempt),
+            ).rowcount
+            if changed != 1:
+                raise RuntimeError("maintainer fixture did not burn the waiting code")
 
 
 def terminate_during(arm, proc) -> None:
     """End the waiting CLI's backend from the server side (the oracle then
     reports psycopg's class for SQLSTATE 57P01). Only this login's other
     sessions on this arm's own disposable copy."""
-    from pseudolife_memory.storage.schema import assert_disposable_database  # noqa: PLC0415
+    _require_owned_bank(ARM_DB)
     with _bank.connect(ARM_DB, autocommit=True) as conn:
+        if assert_disposable_database(conn) != ARM_DB:
+            raise ValueError("server reported a different database from the owned maintainer fixture")
         if _live_code(conn, proc) is None:
             return
         # Past the first poll, so the CLI is between polls.
         time.sleep(0.5)
-        assert_disposable_database(conn)
         conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
                      "WHERE datname = current_database() AND pid <> pg_backend_pid() "
                      "AND usename = current_user")
@@ -524,11 +422,10 @@ def lock_during(arm, proc) -> None:
     """Hold the code table while the CLI waits: its next poll meets the
     session's 5 s lock timeout (SQLSTATE 55P03)."""
     import psycopg  # noqa: PLC0415
-    from pseudolife_memory.storage.schema import assert_disposable_database  # noqa: PLC0415
     with _bank.connect(ARM_DB, autocommit=True) as conn:
+        _require_bank(conn, ARM_DB)
         if _live_code(conn, proc) is None:
             return
-        assert_disposable_database(conn)
         with conn.transaction():
             conn.execute("LOCK TABLE maintainer_bootstrap IN ACCESS EXCLUSIVE MODE")
             deadline = time.monotonic() + 30
@@ -576,11 +473,8 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
     def setup(arm):
         _copy(ensure(kind), ARM_DB)
         if prepare:
-            from pseudolife_memory.storage.schema import (  # noqa: PLC0415
-                assert_disposable_database,
-            )
             with _bank.connect(ARM_DB, autocommit=True) as conn:
-                assert_disposable_database(conn)
+                _require_bank(conn, ARM_DB)
                 for statement in prepare:
                     conn.execute(statement)
         arm.state["prepared"] = _bank.dump(ARM_DB) if prepare else _BASELINE[_name(kind)]
