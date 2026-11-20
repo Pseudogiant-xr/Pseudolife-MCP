@@ -11,10 +11,17 @@ fn inspect(port: u16) -> String {
     format!("run pseudolife-mcp expose status --port {port} --json on the target")
 }
 
-fn pending(folder: &Path, port: u16) -> String {
+fn settle_steps(folder: &Path, port: u16) -> String {
     let folder = super::super::bank::sh_quote(&folder.to_string_lossy());
     format!(
-        "the target exposure outcome is unknown. Confirm the earlier expose operation and its Tailscale Serve process have exited. On the target, check pseudolife-mcp expose status --port {port} --json and remove only this move's verified forward with pseudolife-mcp expose off --port {port}. Once the port's forward is absent, run pseudolife-mcp move-target settle-exposure {folder} {port} --confirmed-idle, then retry recovery"
+        "On the target, verify in the process list that the earlier native expose and Tailscale client processes have exited (on Linux, ps -eo pid,args shows their command lines). Check pseudolife-mcp expose status --port {port} --json and remove only this move's verified forward with pseudolife-mcp expose off --port {port}. Once the port's forward is absent, run pseudolife-mcp move-target settle-exposure {folder} {port} --confirmed-idle on the target"
+    )
+}
+
+fn pending(folder: &Path, port: u16) -> String {
+    format!(
+        "the target exposure outcome is unknown. {}",
+        settle_steps(folder, port)
     )
 }
 
@@ -69,14 +76,17 @@ pub(super) fn parse(action: Action, code: i32, output: &[u8], port: u16) -> Resu
             && response["port"].as_u64() == Some(u64::from(port))
             && response["exit"].as_i64() == Some(i64::from(code))
         {
+            let detail = response["move_failure_detail"].as_str().filter(|detail| {
+                !detail.is_empty() && detail.len() <= 512 && !detail.chars().any(char::is_control)
+            });
             let why = match response["move_failure"].as_str() {
                 Some("permission_denied") => format!(
                     "Tailscale refused to create the forward for this user; {}",
                     crate::cli::maintainer::setup::tailscale_permission_fix(std::env::consts::OS)
                 ),
                 Some("serve_not_enabled") => "Tailscale Serve is not enabled for the target's tailnet; have a tailnet administrator enable Serve before retrying".into(),
-                Some("not_attempted") => format!("the native expose checks refused to begin; {} to check the target setup", inspect(port)),
-                Some("not_created") => format!("Tailscale did not leave a forward; {} before retrying", inspect(port)),
+                Some("not_attempted") => detail.map_or_else(|| format!("the native expose checks refused to begin; {} to check the target setup", inspect(port)), str::to_owned),
+                Some("not_created") => detail.map_or_else(|| format!("Tailscale did not leave a forward; {} before retrying", inspect(port)), str::to_owned),
                 _ => return Err(refused()),
             };
             return Ok(Report::NotCreated(why));
@@ -212,6 +222,9 @@ pub(super) fn create(site: &mut impl Site, folder: &Path, port: u16) -> Result<S
     if let Some(receipt) = read(folder, port)? {
         match receipt.ownership {
             Ownership::Pending => return Err(pending(folder, port)),
+            Ownership::Owned { .. } if observed.is_none() => {
+                return Err("the move's recorded forward is absent; let rollback settle the exposure receipt before resuming".into());
+            }
             Ownership::Owned { url } | Ownership::Borrowed { url } => {
                 return (observed.as_ref() == Some(&url))
                     .then_some(url)
@@ -272,8 +285,31 @@ pub(super) fn undo(site: &mut impl Site, folder: &Path, port: u16) -> Result<(),
     save(folder, port, Ownership::Removed)
 }
 
+/// A detached release may close its source record after settlement, without
+/// taking a claim or changing the target.
+pub(super) fn check_release_receipt(
+    folder: &Path,
+    port: u16,
+    unclaimed: bool,
+) -> Result<(), String> {
+    let cause = match read(folder, port)?.map(|receipt| receipt.ownership) {
+        None | Some(Ownership::Removed | Ownership::Borrowed { .. }) => return Ok(()),
+        Some(Ownership::Pending) => "the target exposure outcome is unknown",
+        Some(Ownership::Owned { .. }) => "the receipt still records a forward owned by this move",
+    };
+    let next = if unclaimed {
+        format!(
+            "Before making any exposure changes, confirm that no other move holds the target claim. {}",
+            settle_steps(folder, port)
+        )
+    } else {
+        "Leave the forward in place while the target is claimed or its claim cannot be read. Verify that the target is unclaimed before retrying release".into()
+    };
+    Err(format!("{cause}. {next}"))
+}
+
 /// Called only after the operator confirms the earlier operations exited.
-pub(super) fn settle_pending(site: &mut impl Site, folder: &Path, port: u16) -> Result<(), String> {
+pub(super) fn settle_idle(site: &mut impl Site, folder: &Path, port: u16) -> Result<(), String> {
     let Some(receipt) = read(folder, port)? else {
         return Err(
             "the move folder has no exposure receipt; verify the move folder before retrying"
@@ -282,10 +318,10 @@ pub(super) fn settle_pending(site: &mut impl Site, folder: &Path, port: u16) -> 
     };
     match receipt.ownership {
         Ownership::Removed => return Ok(()),
-        Ownership::Pending => {}
-        _ => {
+        Ownership::Pending | Ownership::Owned { .. } => {}
+        Ownership::Borrowed { .. } => {
             return Err(
-                "the receipt already records a forward; use the usual move rollback or release"
+                "the receipt records a borrowed forward; preserve it and use the usual move rollback or release"
                     .into(),
             );
         }
@@ -294,7 +330,14 @@ pub(super) fn settle_pending(site: &mut impl Site, folder: &Path, port: u16) -> 
         .url
         .is_some()
     {
-        return Err(pending(folder, port));
+        return Err(if matches!(receipt.ownership, Ownership::Owned { .. }) {
+            format!(
+                "the receipt records this move's forward and port {port} still has a forward; {} and verify its ownership before retrying settlement",
+                inspect(port)
+            )
+        } else {
+            pending(folder, port)
+        });
     }
     save(folder, port, Ownership::Removed)
 }
@@ -387,6 +430,15 @@ pub(super) mod tests {
         }
     }
 
+    impl Fixture {
+        pub(in crate::cli::restore_cli::move_native) fn with_clean_refusal() -> Self {
+            Self {
+                clean_failure: Some("fixture exposure refusal".into()),
+                ..Self::default()
+            }
+        }
+    }
+
     pub(in crate::cli::restore_cli::move_native) struct Folder(
         pub(in crate::cli::restore_cli::move_native) PathBuf,
     );
@@ -454,14 +506,14 @@ pub(super) mod tests {
         );
         assert_eq!((lost.creates, lost.removes), (1, 0));
         assert!(lost.url.is_some());
-        assert!(settle_pending(&mut lost, &folder.0, PORT).is_err());
+        assert!(settle_idle(&mut lost, &folder.0, PORT).is_err());
         lost.url = None;
         assert!(
             undo(&mut lost, &folder.0, PORT)
                 .unwrap_err()
                 .contains("settle-exposure")
         );
-        settle_pending(&mut lost, &folder.0, PORT).unwrap();
+        settle_idle(&mut lost, &folder.0, PORT).unwrap();
         undo(&mut lost, &folder.0, PORT).unwrap();
         assert_eq!(lost.removes, 0);
     }
@@ -496,5 +548,74 @@ pub(super) mod tests {
             undo(&mut fixture, &folder.0, PORT).unwrap();
             assert_eq!(create(&mut fixture, &folder.0, PORT).unwrap(), URL);
         }
+    }
+
+    #[test]
+    fn clean_report_keeps_the_native_diagnostic() {
+        for failure in ["not_attempted", "not_created"] {
+            let detail = "No daemon answers on the selected port. Start it before retrying.";
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "action":"tailscale", "port":PORT, "exit":4, "move_failure":failure,
+                "move_failure_detail":detail, "error":"raw fixture output",
+            }))
+            .unwrap();
+            assert_eq!(
+                parse(Action::Create, 4, &bytes, PORT),
+                Ok(Report::NotCreated(detail.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn clean_report_discards_invalid_native_diagnostics() {
+        for detail in [
+            String::new(),
+            "é".repeat(257),
+            "unexpected\nline".into(),
+            "unexpected\u{007f}".into(),
+        ] {
+            for (failure, expected) in [
+                (
+                    "not_attempted",
+                    "the native expose checks refused to begin; run pseudolife-mcp expose status --port 8765 --json on the target to check the target setup",
+                ),
+                (
+                    "not_created",
+                    "Tailscale did not leave a forward; run pseudolife-mcp expose status --port 8765 --json on the target before retrying",
+                ),
+            ] {
+                let bytes = serde_json::to_vec(&serde_json::json!({
+                    "action":"tailscale", "port":PORT, "exit":4, "move_failure":failure,
+                    "move_failure_detail":detail,
+                }))
+                .unwrap();
+                assert_eq!(
+                    parse(Action::Create, 4, &bytes, PORT),
+                    Ok(Report::NotCreated(expected.into())),
+                    "{failure}: {detail:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_absent_owned_forward_can_be_settled_after_operator_confirmation() {
+        let folder = Folder::new();
+        let mut fixture = Fixture::default();
+        create(&mut fixture, &folder.0, PORT).unwrap();
+        assert!(
+            settle_idle(&mut fixture, &folder.0, PORT)
+                .unwrap_err()
+                .contains("still has a forward")
+        );
+        fixture.url = None;
+        assert!(
+            create(&mut fixture, &folder.0, PORT)
+                .unwrap_err()
+                .contains("rollback")
+        );
+        assert!(check_release_receipt(&folder.0, PORT, true).is_err());
+        settle_idle(&mut fixture, &folder.0, PORT).unwrap();
+        assert!(check_release_receipt(&folder.0, PORT, true).is_ok());
     }
 }

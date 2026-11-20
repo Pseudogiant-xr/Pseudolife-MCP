@@ -443,8 +443,29 @@ impl Model {
             }
             Op::ExposeTarget { port } => {
                 assert!(h.target_serves_clone() && h.fenced);
-                h.exposure_owned = true;
-                answer.exposure_url = Some(format!("http://100.64.0.7:{port}"));
+                let result = match &mut self.exposure_fixture {
+                    Some((folder, fixture)) => super::exposure::create(fixture, &folder.0, *port),
+                    None => Ok(format!("http://100.64.0.7:{port}")),
+                };
+                match result {
+                    Ok(url) => {
+                        h.exposure_owned = true;
+                        answer.exposure_url = Some(url);
+                    }
+                    Err(why) => {
+                        answer.ok = false;
+                        answer.error = why;
+                    }
+                }
+            }
+            Op::CheckExposureReceipt { port } => {
+                if let Some((folder, _)) = &self.exposure_fixture
+                    && let Err(why) =
+                        super::exposure::check_release_receipt(&folder.0, *port, h.claim.is_none())
+                {
+                    answer.ok = false;
+                    answer.error = why;
+                }
             }
             Op::UndoExposure { port } => {
                 assert!(request.rollback && h.aborted.as_deref() == Some(request.move_id.as_str()));
@@ -968,6 +989,15 @@ fn a_lost_exposure_reply_rolls_back_the_transfer_without_leaving_the_owned_forwa
         );
         assert!(recovery.violations.is_empty(), "{:?}", recovery.violations);
     }
+
+    use super::exposure::tests::{Fixture, Folder};
+    let mut clean = Model::new();
+    clean.exposure_fixture = Some((Folder::new(), Fixture::with_clean_refusal()));
+    let outcome = engine::execute(&mut clean, &exposed, ID);
+    assert_eq!(outcome.code, engine::EXIT_ROLLED_BACK, "{outcome:?}");
+    assert!(clean.hosts.source_running && !clean.hosts.target_running);
+    assert!(!clean.hosts.exposure_pending && !clean.hosts.exposure_owned);
+    assert!(clean.violations.is_empty());
 }
 
 #[test]
@@ -1889,6 +1919,100 @@ fn release_settles_the_exposure_receipt_before_returning_the_target_bank() {
                 .unwrap();
             assert!(settled < give_back);
         }
+    }
+}
+
+#[test]
+fn release_closes_a_detached_move_with_a_settled_receipt() {
+    use super::exposure::{
+        self,
+        tests::{Fixture, Folder},
+    };
+
+    for (receipt, cause) in [
+        ("absent", None),
+        ("removed", None),
+        ("borrowed", None),
+        ("owned", Some("records a forward owned by this move")),
+        ("pending", Some("target exposure outcome is unknown")),
+        ("unreadable", Some("could not be read")),
+        ("malformed", Some("is unreadable JSON")),
+        ("wrong port", Some("names a different port")),
+        ("other claim", Some("records a forward owned by this move")),
+        ("lost link", Some("ssh lost the link")),
+    ] {
+        let mut model = parked_move();
+        let mut record = model.record.take().unwrap();
+        let open_phase = record.phase;
+        record.expose_port = Some(8765);
+        record.flags.exposure_started = true;
+        model.hosts.bank = Bank::Empty;
+        model.hosts.claim = (receipt == "other claim").then(|| "other-move".into());
+        model.hosts.gated = false;
+        model.hosts.target_running = true;
+        let folder = Folder::new();
+        let mut fixture = Fixture::default();
+        match receipt {
+            "absent" => {}
+            "unreadable" => std::fs::create_dir(folder.0.join("exposure.json")).unwrap(),
+            "malformed" => std::fs::write(folder.0.join("exposure.json"), b"{").unwrap(),
+            "wrong port" => std::fs::write(
+                folder.0.join("exposure.json"),
+                br#"{"port":8766,"ownership":"removed"}"#,
+            )
+            .unwrap(),
+            "lost link" => model.lost.push(("target check-exposure-receipt", 1)),
+            _ => {
+                if receipt == "borrowed" {
+                    fixture.url = Some("http://100.64.0.7:8765".into());
+                }
+                fixture.lose_create_result = receipt == "pending";
+                assert_eq!(
+                    exposure::create(&mut fixture, &folder.0, 8765).is_err(),
+                    receipt == "pending"
+                );
+                if receipt == "removed" {
+                    exposure::undo(&mut fixture, &folder.0, 8765).unwrap();
+                }
+            }
+        }
+        model.exposure_fixture = Some((folder, fixture));
+        let before = model.hosts.clone();
+        let result = engine::release_target(&mut model, record);
+        if let Some(cause) = cause {
+            assert_eq!(
+                result.code,
+                engine::EXIT_INCOMPLETE,
+                "{receipt}: {result:?}"
+            );
+            assert_eq!(model.record.as_ref().unwrap().phase, open_phase);
+            assert!(result.message.contains(cause), "{receipt}: {result:?}");
+            assert!(result.message.contains("record.json.closed"));
+            assert!(
+                result
+                    .message
+                    .contains("without a source record tracking it")
+            );
+            assert!(!result.message.contains("Keep the target stopped and gated"));
+            assert!(!result.message.contains("After the receipt is settled"));
+            if matches!(receipt, "owned" | "pending") {
+                assert!(result.message.contains("settle-exposure"));
+            }
+            if receipt == "other claim" {
+                assert!(result.message.contains("Leave the forward in place"));
+                assert!(!result.message.contains("expose off --port"));
+            }
+        } else {
+            assert_eq!(result.code, engine::EXIT_OK, "{receipt}: {result:?}");
+            assert_eq!(model.record.unwrap().phase, Phase::Released);
+        }
+        assert_eq!(model.hosts, before);
+        assert!(
+            model
+                .log
+                .iter()
+                .any(|line| line.contains(": target check-exposure-receipt"))
+        );
     }
 }
 
