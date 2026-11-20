@@ -293,7 +293,7 @@ fn tunnel_step(
         let said = last.filter(|line| line.len() <= 1024);
         let left = format!("tunnels in {} were left as they are", root.display());
         let inspect = format!(
-            "a supervisor may still finish a refresh it accepted. Check with `pseudolife-mcp tunnel status --profile NAME --profile-dir {}`",
+            "a supervisor may still finish a refresh it accepted. Run `pseudolife-mcp tunnel status --profile-dir {}` with `--profile` for each affected profile",
             super::seams::quote(directory)
         );
         let launcher = launcher.display();

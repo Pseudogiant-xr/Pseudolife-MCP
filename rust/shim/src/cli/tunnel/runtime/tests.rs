@@ -392,6 +392,11 @@ fn update_reports_only_an_attested_current_launch_as_current() {
             "Run `pseudolife-mcp tunnel stop --profile dot --profile-dir {directory}`, then `pseudolife-mcp tunnel run --profile dot --profile-dir {directory}` to reconnect the tunnel"
         ),
     );
+    check(
+        &installed,
+        "stale",
+        "its supervisor predates native refresh",
+    );
     let pending = home.0.join(format!("{name}.reload.json"));
     state::atomic_create(&pending, br#"{"id":"00000000000000000000000000000000"}"#).unwrap();
     check_current("current");

@@ -579,6 +579,9 @@ fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String
         (Phase::Failed, Some(Cause::OldChildExited)) => format!("the previous tunnel exited during refresh preparation. Run `{}` to start it again", run()),
         (Phase::Failed, _) => format!("the installed and previous runtimes failed to become ready. The tunnel is stopped. Run `{}` to start it again", run()),
         (Phase::Refused, _) => {
+            if cause == Some(Cause::Stopped) {
+                return "a stop was requested before refresh acceptance".to_owned();
+            }
             let reason = match cause {
                 Some(Cause::ProfileChanged) => "its saved profile or credential no longer matches the launch",
                 Some(Cause::DaemonHandshake) => "the authenticated daemon handshake failed",
@@ -852,24 +855,23 @@ pub(in crate::cli::tunnel) fn verify(root: &Path, name: &str) -> Output {
             .as_ref()
             .is_some_and(|record| outcome.for_record(record))
     });
-    match outcome.as_ref().map(|outcome| outcome.phase) {
-        Some(Phase::Pending) if status(root, name).is_some_and(|(state, _)| state == "pending") => {
-            Err(Fail::Detail(detail(root, name, Phase::Pending, None)))
-        }
-        Some(Phase::RolledBack) => super::super::bridge::continue_verification(root, name)
-            .map_or_else(|| super::super::bridge::begin(root, name), Ok),
-        Some(Phase::Refreshed) => {
-            if let Some(current) = super::super::bridge::continue_verification(root, name) {
-                return Ok(current);
-            }
-            let (challenge, code) = super::super::bridge::begin(root, name)?;
-            Ok((
-                format!(
-                    "The refreshed launch uses a new identity and needs a new challenge.\n{challenge}"
-                ),
-                code,
-            ))
-        }
-        _ => super::super::bridge::begin(root, name),
+    let phase = outcome.as_ref().map(|outcome| outcome.phase);
+    if phase == Some(Phase::Pending)
+        && status(root, name).is_some_and(|(state, _)| state == "pending")
+    {
+        return Err(Fail::Detail(detail(root, name, Phase::Pending, None)));
     }
+    if let Some(current) = super::super::bridge::continue_verification(root, name) {
+        return Ok(current);
+    }
+    let (challenge, code) = super::super::bridge::begin(root, name)?;
+    if phase == Some(Phase::Refreshed) {
+        return Ok((
+            format!(
+                "The refreshed launch uses a new identity and needs a new challenge.\n{challenge}"
+            ),
+            code,
+        ));
+    }
+    Ok((challenge, code))
 }

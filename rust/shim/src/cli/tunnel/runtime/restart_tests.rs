@@ -61,7 +61,7 @@ fn supervised_fixture() {
             std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
         }
         "vendor" => eager_vendor(&path),
-        "updater" | "invalid-updater" => {
+        "updater" | "invalid-updater" | "failing-updater" => {
             let candidate =
                 crate::runtime::current_runtime(&crate::runtime::default_layout().unwrap())
                     .unwrap();
@@ -75,6 +75,13 @@ fn supervised_fixture() {
                 return;
             }
             let (text, code) = result.unwrap();
+            if mode == "failing-updater" {
+                let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(code, 2, "{text}");
+                assert_eq!(report["state"], "failed", "{text}");
+                assert_eq!(report["profiles"][0]["running"], false, "{text}");
+                return;
+            }
             assert_eq!(code, 0, "{text}");
             assert_eq!(
                 serde_json::from_str::<serde_json::Value>(&text).unwrap()["state"],
@@ -537,10 +544,14 @@ impl Scenario {
     }
 
     fn start_with_bridge(production: Option<&Path>) -> Self {
+        Self::start_with_images(production, production)
+    }
+
+    fn start_with_images(production: Option<&Path>, candidate_source: Option<&Path>) -> Self {
         let home = Home::new();
         let root = &home.0;
         let executable = std::env::current_exe().unwrap();
-        let candidate = install_candidate(root, production, 1);
+        let candidate = install_candidate(root, candidate_source, 1);
         let mock_image = root.join("original-image");
         if production.is_none() {
             state::atomic_create(&mock_image, b"original image fixture").unwrap();
@@ -865,6 +876,17 @@ fn accepted_restart_finishes_after_sender_leaves_and_requires_new_verification()
     assert_ne!(new.launch_identity, old.launch_identity);
     assert_eq!(new.refresh.unwrap().image, scenario.candidate);
     assert!(!super::super::super::bridge::cloud_status(scenario.root(), "dot").current);
+    let status = |args: &[&str]| {
+        let args: Vec<_> = args.iter().copied().map(std::ffi::OsString::from).collect();
+        let options = super::super::super::parse(&args).unwrap();
+        super::super::super::status(&options, scenario.root())
+            .unwrap()
+            .0
+    };
+    let report: serde_json::Value = serde_json::from_str(&status(&["status", "--json"])).unwrap();
+    assert_eq!(report["native_refresh"]["state"], "refreshed");
+    assert_eq!(report["native_refresh"]["new_verification_required"], true);
+    assert!(status(&["status"]).contains("The refreshed launch needs a new challenge"));
     assert!(
         restart::verify(scenario.root(), "dot")
             .unwrap()
@@ -891,11 +913,17 @@ fn unsuccessful_rollback_leaves_durable_stopped_outcome_with_run_command() {
         return;
     }
     scenario.mode("both-fail");
-    let ticket = scenario.submit(&scenario.candidate);
-    let failure = scenario.outcome(&ticket, Phase::Failed);
+    let executable = std::env::current_exe().unwrap();
+    assert!(
+        Scenario::child(&executable, scenario.root(), "failing-updater")
+            .status()
+            .unwrap()
+            .success()
+    );
+    let failure = refresh::read_outcome(scenario.root(), "dot").unwrap();
+    assert_eq!(failure.phase, Phase::Failed);
     assert_eq!(failure.active_identity, None);
     assert_eq!(failure.cause, Some(Cause::RollbackStartup));
-    drop(ticket);
     wait_until(|| scenario.supervisor.try_wait().unwrap().is_some());
     let (state, detail) = restart::status(scenario.root(), "dot").unwrap();
     assert_eq!(state, "failed");
@@ -971,4 +999,22 @@ fn vendor_ready_without_production_bridge_ack_rolls_back() {
             .join(format!("bridge-rpc-{}", rolled_back.id))
             .is_file()
     );
+}
+
+#[test]
+fn an_incompatible_bridge_is_refused_before_interrupting_the_old_tunnel() {
+    let Some(binary) = production_executable() else {
+        return;
+    };
+    let scenario = Scenario::start_with_images(Some(&binary), None);
+    let old = scenario.record();
+    let before = scenario.daemon.observed.load(Ordering::SeqCst);
+    let ticket = scenario.submit(&scenario.candidate);
+    let outcome = scenario.outcome(&ticket, refresh::Phase::Refused);
+    assert_eq!(outcome.cause, Some(refresh::Cause::BridgeProtocol));
+    assert_eq!(
+        scenario.record().target.unwrap().pid,
+        old.target.unwrap().pid
+    );
+    assert_eq!(scenario.daemon.observed.load(Ordering::SeqCst), before);
 }
