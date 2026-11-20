@@ -47,6 +47,10 @@ build, and fails if the rebuilt output differs from what is committed.
 `.gitattributes` checks the sources out with LF line endings on every OS so
 that a Windows build and the Linux CI build produce the same bytes.
 
+If you run the frozen Python daemon from a source checkout or an ordinary
+editable install, its `/ui/` returns a bare 404. For development, open the
+Vite dev server at `http://localhost:5173/ui/` as shown above.
+
 ## Layout
 
 - `src/views/`: one component per route; `src/lib/nav.ts` lists the routes.
