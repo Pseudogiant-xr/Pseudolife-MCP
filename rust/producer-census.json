@@ -17,7 +17,7 @@
     "docs/dev/merge-batches.md": "35aad388e6d1c5c1a58594f00d0691902fc7010567bddbba78594f31501dddb9",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "02104e3aaac74c9b578e007f6b37b16e59a163d4ff9adafd920844e805bec3f7",
-    "docs/dev/python-retirement.md": "120441c1947259c6e576ee91a1808c84725c71eae798309b6b0f1180a72af60b",
+    "docs/dev/python-retirement.md": "288d4fd14ddb762139467fa656f3a64b0e76dd270daa8df1d8d07a50880d8454",
     "docs/dev/release-assets.md": "dca16d906c41015e08b4863b0aedfd9e31c2f37e854b6fa2ac1a5c73be15e767",
     "docs/dev/run-rust-beside-python.md": "d469218a5dde03c87c769867bfcdb198193f3e1a27761c9ae1cc200491d8739e",
     "docs/dev/worktree-retention.md": "21ba0e48574bb6be98d456c9725a6d3746a99891d667cef8d8ed76c984819f8e",
@@ -32,7 +32,7 @@
     "docs/guide/install-and-move.md": "e7ea0c9972e00af0080f95d3af259d0bc3b85b40554140ce9f57746077e7c373",
     "docs/guide/memory-model.md": "6e295c317f53ad8558e3a3b1d6cd8ea74e01401eb6d8cce82b9143c5b087ed5f",
     "docs/guide/providers.md": "75d14c8986be055f9a91d19aa95f628ab7fac7d0ae2f2847a6d1d1a0b0fc434e",
-    "docs/guide/remote-bank.md": "a0a7f5180177329adb23cfaaca6dc91149b854d2cc4743ecc59b05b5c79b847b",
+    "docs/guide/remote-bank.md": "42d50f3ba659e8b0367ae435328e9eaf3dc826881d71e8bd0507ba21f66796db",
     "docs/guide/retrieval.md": "9d5825f277e8f7facf4f2387e24f263d60692f2b9d56c40c04405128ddfcb8ba",
     "docs/guide/security-posture.md": "5996f4cef7908476b81cf9957a95bc762a1d02bcfafa24f66ba691a22d1f0505",
     "docs/guide/tunnels.md": "a956848202c835dd8b7129268cb140336cb7c7d5a974d599311e0d9ab6d62f3f",
@@ -231,6 +231,9 @@
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.mirror-runner": "b71046c9947e25a2c63cb95c6675621e2f3b6ba935853f73b283c89efa304342",
     "ops/Dockerfile.pg": "ff8b83d3a569807d851eed7219063514d7f5405c8280fe7b6d3e40e56ab2b401",
+    "ops/acceptance/README.md": "62cb8331b3ff706d635cea9c86cf52ed29a6b5936a73c1da315ba8c6d9861a27",
+    "ops/acceptance/matrix.py": "9fbfef67203a65b046c4841f60ddb5812f65e6fd2d31e05486c20b6de08f70a4",
+    "ops/acceptance/runner.py": "48e0647674b0551f57a82620d043c1b6d36ac4603b36a11ed65cf12847163dc8",
     "ops/add-user-path.ps1": "4ec89d4411fd4a2275313193d96682d76b20c7dd4bddf15a57f4acfcc58d7822",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
     "ops/backfill_edge_confidence.py": "4ebb4ebd55c853c3d146a98dd2a5bc140ba1ab630c5a3545eae4a639de4081ea",
@@ -441,9 +444,9 @@
     "rust/shim/src/cli/episode.rs": "cf39ca9de9effb7bed1e110fdb2fddda55407b8ae2d0ccc98455aef7ea235bec",
     "rust/shim/src/cli/episode_input.rs": "deb1f4bbc2dedd6395793f40064310c7e5d8277bdfb8232146f8cee060c7536b",
     "rust/shim/src/cli/expose/args.rs": "251f6045cfb8e5d85687443676f3c8100dea72c7ddc3e6ac50f1a053daf91c4d",
-    "rust/shim/src/cli/expose/mod.rs": "00bbed490c21c6203c8451ab54420f2fe0e28fbbd900005726bd2b7cf9e87911",
+    "rust/shim/src/cli/expose/mod.rs": "805c57d2d1042fad8b97411f1c9f4da7973ce1b5d8247554dff3cdae6d0df00d",
     "rust/shim/src/cli/expose/tailscale.rs": "6ccd6955e9b37c11c6f0ff90f3dab8f663e9b3e70f1e38745213b6dade357de4",
-    "rust/shim/src/cli/expose/tests.rs": "8da391081a70cc088a2d1f0332f25e40e9a4240f21b020be4f7dad8eeb55fae7",
+    "rust/shim/src/cli/expose/tests.rs": "c900763fe9ed7abfaeab57368c8555f8b18713a7f2bcfae27c9550beffd2aad5",
     "rust/shim/src/cli/hook_http.rs": "b6041ceaf0a7a7cb976d843412acc94c4957988e96d004b3e875fabe82ad990c",
     "rust/shim/src/cli/hook_json.rs": "ec016389716157c2eed558af5dab9774fbbc98d256e6a8e9e7784e8b73cc7602",
     "rust/shim/src/cli/host_connection.rs": "7b3423379687a70960ea50bf0e8f2d47560633f7d1950997bc5aebd9a933278c",
@@ -541,21 +544,21 @@
     "rust/shim/src/cli/restore_cli/gzip.rs": "ba58af7a2dab8694202e081e94210949d127f7552becfe95e5626a9becd3c15e",
     "rust/shim/src/cli/restore_cli/interrupt.rs": "4a020980f41455b479e196a0fb8ceade882821d8ccafb48e065bf7116191085d",
     "rust/shim/src/cli/restore_cli/mod.rs": "824dd941e42c4e08227623326db60947557a44350d2855443386ad7df7a37fc3",
-    "rust/shim/src/cli/restore_cli/move_native/argv.rs": "eaf62af68092dc73201127958166d13094038bd3600c109b61dcc4b9914b8f71",
+    "rust/shim/src/cli/restore_cli/move_native/argv.rs": "0e9238ad5b2cce50d5d6b82dc26487be4dd966eb88066c3d4bb4da2b6b41e5a9",
     "rust/shim/src/cli/restore_cli/move_native/carry.rs": "a2e2d96cc0bd0ef5691246fc56292d63e0fcfb54ac823abeb5442395e13a4566",
-    "rust/shim/src/cli/restore_cli/move_native/carry/runtime.rs": "f91772dc13511d5a457902750d32c42c7ef393709dfc202d2a3cb833bd03f962",
+    "rust/shim/src/cli/restore_cli/move_native/carry/runtime.rs": "3c66596ba9a59708d477793b350360b1bd4b1e110bb73ad8d9bc52f55683fd22",
     "rust/shim/src/cli/restore_cli/move_native/command.rs": "967a22864952378aff957ac69a361854b484554aa3b0c530bc590233594bfc58",
-    "rust/shim/src/cli/restore_cli/move_native/engine.rs": "49ba96af8f929d5fbab18ff9fb2a47b3e4b22504501bf660d45f7b229f0b528e",
-    "rust/shim/src/cli/restore_cli/move_native/exposure.rs": "f1cfc8d852d68d4183b244ba2860ee35143ec140f4b83ffd9b56be16aae566ab",
+    "rust/shim/src/cli/restore_cli/move_native/engine.rs": "1541ba18cd9ae104589dfe245eb95f86e88d6c9474df14de1c02809ed41db746",
+    "rust/shim/src/cli/restore_cli/move_native/exposure.rs": "a61392a26e82703bc355f7effb9f9a24efdd6855c825608050175daef5909793",
     "rust/shim/src/cli/restore_cli/move_native/mod.rs": "83e20a9b6fc22c47d130b873b17b5184b211e0d19f971e036e5dcd21e57c5ca4",
-    "rust/shim/src/cli/restore_cli/move_native/ops.rs": "a26fc7dc57c7f4ce04939dcd697912953b9481136d6eeff4356a6b9e487b91ef",
+    "rust/shim/src/cli/restore_cli/move_native/ops.rs": "508cbe530df90393f15424ccf5790998cd5c878b9e77783afc6cad4b7d5f7a18",
     "rust/shim/src/cli/restore_cli/move_native/probe.rs": "198869c23a4f189a3e8b21974fc29c60532e46c542fa2f2a067249ff92376fdc",
-    "rust/shim/src/cli/restore_cli/move_native/protocol.rs": "51d247ce6741d2fe37f315a7b56941ccfda805316eca734308c17a89444942c0",
+    "rust/shim/src/cli/restore_cli/move_native/protocol.rs": "4eef5d6ba78385e542390d2c0a6e2072ac76c1b916d90d19a88ea9111be383ab",
     "rust/shim/src/cli/restore_cli/move_native/record.rs": "f53f6ad4f16b87475b4c3d13d937861090afeee0e9f132d149f3eb1095673d9a",
     "rust/shim/src/cli/restore_cli/move_native/remote.rs": "7c03c98c76635d6aa72e50697a2601fef3c0cbf733976a42003302dd47e9fc13",
     "rust/shim/src/cli/restore_cli/move_native/source.rs": "dc8643b431679f56b4e32d4e6c09639b33755d1ac5f0b7b1d879f32670a978e2",
-    "rust/shim/src/cli/restore_cli/move_native/target.rs": "9821f1fb34faec77b54707470c0ae047078f46db03c635a1995c1af52d3d1468",
-    "rust/shim/src/cli/restore_cli/move_native/tests.rs": "05490d08d0be8c5c621d2a28d0136c6adb3de39c8474b2fd991ea0998de98328",
+    "rust/shim/src/cli/restore_cli/move_native/target.rs": "ccbfd5f6ff4a536707d708fdc02f7a5bf1d4e4ca17f5f2eb445b0a6ee76ef805",
+    "rust/shim/src/cli/restore_cli/move_native/tests.rs": "5d7c4f435be71bee85eaeadce40b41e318a164438fda8a86f3c2d51a8fc96a58",
     "rust/shim/src/cli/restore_cli/ownership_steps.rs": "78360b672eaf411ff6353668da0bc2bca50fe6e320fe51b17888bed0f177d577",
     "rust/shim/src/cli/restore_cli/pathlib.rs": "35845d5a7e02ba8d57bde972d7a24531e37a39bd85f0ad409d6ec05c9e4e921d",
     "rust/shim/src/cli/restore_cli/restore_help.txt": "a201c00bb53db6397a20e539af3c41e232bdcc5cb8bac0e3a1aa6faad16bb056",
@@ -954,7 +957,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1239",
+          "location": "docs/guide/remote-bank.md:1248",
           "shape": {
             "argv_source": "backup",
             "channel": "argv",
@@ -2246,7 +2249,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1209",
+          "location": "docs/guide/remote-bank.md:1218",
           "shape": {
             "argv_source": "connect <daemon-url> --read-code",
             "channel": "argv",
@@ -2303,7 +2306,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:986",
+          "location": "docs/guide/remote-bank.md:995",
           "shape": {
             "argv_source": "connect <target-url> --token-file <target-token-file> --yes",
             "channel": "argv",
@@ -2814,7 +2817,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2029",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2041",
           "shape": {
             "argv_source": "connect {} --token-file {argument} --yes   # {detail}\",",
             "channel": "argv",
@@ -2844,7 +2847,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1116",
+          "location": "docs/guide/remote-bank.md:1125",
           "shape": {
             "argv_source": "connect",
             "channel": "argv",
@@ -4467,7 +4470,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:1160",
+          "location": "rust/shim/src/cli/expose/mod.rs:1189",
           "shape": {
             "argv_source": "expose {}\", action.name()),",
             "channel": "argv",
@@ -4480,7 +4483,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:1164",
+          "location": "rust/shim/src/cli/expose/mod.rs:1193",
           "shape": {
             "argv_source": "expose \".to_owned(),",
             "channel": "argv",
@@ -4493,7 +4496,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:1207",
+          "location": "rust/shim/src/cli/expose/mod.rs:1236",
           "shape": {
             "argv_source": "expose : error: argument is not valid Unicode; retype it as Unicode text; nothing changed\\n\".into(),",
             "channel": "argv",
@@ -4506,7 +4509,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:676",
+          "location": "rust/shim/src/cli/expose/mod.rs:687",
           "shape": {
             "argv_source": "expose off --port {port}`\",",
             "channel": "argv",
@@ -4523,7 +4526,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:736",
+          "location": "rust/shim/src/cli/expose/mod.rs:757",
           "shape": {
             "argv_source": "expose tailscale --port {port}`\",",
             "channel": "argv",
@@ -4540,7 +4543,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:766",
+          "location": "rust/shim/src/cli/expose/mod.rs:787",
           "shape": {
             "argv_source": "expose off --port {port}\"",
             "channel": "argv",
@@ -4557,7 +4560,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:1150",
+          "location": "rust/shim/src/cli/expose/tests.rs:1187",
           "shape": {
             "argv_source": "expose off [-h] [--port PORT] [--yes] [--json]\\n\\",
             "channel": "argv",
@@ -4577,7 +4580,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:1151",
+          "location": "rust/shim/src/cli/expose/tests.rs:1188",
           "shape": {
             "argv_source": "expose off: error: argument --port: not a port: '0'\\n\"",
             "channel": "argv",
@@ -4590,7 +4593,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:1156",
+          "location": "rust/shim/src/cli/expose/tests.rs:1193",
           "shape": {
             "argv_source": "expose [-h] {tailscale,off,status} ...\\n\\",
             "channel": "argv",
@@ -4603,7 +4606,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:1157",
+          "location": "rust/shim/src/cli/expose/tests.rs:1194",
           "shape": {
             "argv_source": "expose : error: unrecognized arguments: --yes\\n\"",
             "channel": "argv",
@@ -4633,7 +4636,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:817",
+          "location": "rust/shim/src/cli/expose/tests.rs:854",
           "shape": {
             "argv_source": "expose tailscale --port 8443`\\n\"",
             "channel": "argv",
@@ -4650,7 +4653,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/tests.rs:864",
+          "location": "rust/shim/src/cli/expose/tests.rs:901",
           "shape": {
             "argv_source": "expose off --port 8443`\\n\"",
             "channel": "argv",
@@ -4667,7 +4670,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2470",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2490",
           "shape": {
             "argv_source": "expose status --port {port} --json. Use pseudolife-mcp expose off --port {port} only when the receipt says this move owns the forward and the reported URL still matches.\"",
             "channel": "argv",
@@ -4706,12 +4709,15 @@
           "evidence": "static",
           "location": "rust/shim/src/cli/restore_cli/move_native/exposure.rs:17",
           "shape": {
-            "argv_source": "expose status --port {port} --json and remove only this move's verified forward with pseudolife-mcp expose off --port {port}. Once the port's forward is absent, run pseudolife-mcp move-target settle-exposure {folder} {port} --confirmed-idle, then retry recovery\"",
+            "argv_source": "expose status --port {port} --json and remove only this move's verified forward with pseudolife-mcp expose off --port {port}. Once the port's forward is absent, run pseudolife-mcp move-target settle-exposure {folder} {port} --confirmed-idle on the target\"",
             "channel": "argv",
             "complete": false,
-            "expression": "status --port {port} --json and remove only this move's verified forward with pseudolife-mcp expose off --port {port}. Once the port's forward is absent, run pseudolife-mcp move-target settle-exposure {folder} {port} --confirmed-idle, then retry recovery\"",
+            "expression": "status --port {port} --json and remove only this move's verified forward with pseudolife-mcp expose off --port {port}. Once the port's forward is absent, run pseudolife-mcp move-target settle-exposure {folder} {port} --confirmed-idle on the target\"",
             "omitted_optional": null,
             "parameters": {
+              "--confirmed-idle": {
+                "expression": "on"
+              },
               "--json": {
                 "literal": true
               },
@@ -4897,7 +4903,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1208",
+          "location": "docs/guide/remote-bank.md:1217",
           "shape": {
             "argv_source": "invite <name>",
             "channel": "argv",
@@ -5554,7 +5560,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:763",
+          "location": "rust/shim/src/cli/expose/mod.rs:784",
           "shape": {
             "argv_source": "invite <machine>` here, then give the code it prints to that machine's installer (option 2), or run `pseudolife-mcp pair {url} <code>` there\"",
             "channel": "argv",
@@ -6592,7 +6598,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1144",
+          "location": "docs/guide/remote-bank.md:1153",
           "shape": {
             "argv_source": "move --to <target> --resume",
             "channel": "argv",
@@ -6894,7 +6900,41 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1623",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1613",
+          "shape": {
+            "argv_source": "move --release-target {id}.\\n  If recovery cannot continue, {resort}. Renaming the record may leave this move's tailnet forward on the target without a source record tracking it. Check and settle the exposure before starting any daemon there. Preserve any forward another move is using.\"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--release-target {id}.\\n  If recovery cannot continue, {resort}. Renaming the record may leave this move's tailnet forward on the target without a source record tracking it. Check and settle the exposure before starting any daemon there. Preserve any forward another move is using.\"",
+            "omitted_optional": null,
+            "parameters": {
+              "--release-target": {
+                "expression": "{id}.\\n"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1621",
+          "shape": {
+            "argv_source": "move --release-target {id}.\"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--release-target {id}.\"",
+            "omitted_optional": null,
+            "parameters": {
+              "--release-target": {
+                "expression": "{id}.\""
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1633",
           "shape": {
             "argv_source": "move --release-target {id} (each step is safe to repeat){resort}\"",
             "channel": "argv",
@@ -6911,7 +6951,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1632",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1642",
           "shape": {
             "argv_source": "move --release-target {id} --target-gone (it gives {to} up on this host only, for good, while {to} gives no answer)\"",
             "channel": "argv",
@@ -6931,7 +6971,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1668",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1678",
           "shape": {
             "argv_source": "move --release-target {id}\\n  {}\",",
             "channel": "argv",
@@ -6948,7 +6988,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1885",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1897",
           "shape": {
             "argv_source": "move --release-target {id}; {}\",",
             "channel": "argv",
@@ -6965,7 +7005,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1973",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1985",
           "shape": {
             "argv_source": "move --release-target {} gives {} back its own bank and keeps the gated bank, whatever it holds, in a backup there that it names\",",
             "channel": "argv",
@@ -6982,7 +7022,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1978",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1990",
           "shape": {
             "argv_source": "move --release-target {} gives {} back its own bank and keeps the gated bank, writes and all, in a backup there that it names\",",
             "channel": "argv",
@@ -6999,7 +7039,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1982",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1994",
           "shape": {
             "argv_source": "move --rollback {}\", self.record.move_id)",
             "channel": "argv",
@@ -7016,7 +7056,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2113",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2125",
           "shape": {
             "argv_source": "move --rollback {id}. Nothing was changed\",",
             "channel": "argv",
@@ -7033,7 +7073,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2178",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2190",
           "shape": {
             "argv_source": "move --rollback {id}. Nothing was changed\",",
             "channel": "argv",
@@ -7050,7 +7090,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2238",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2250",
           "shape": {
             "argv_source": "move --release-target {id}. Nothing was changed\"",
             "channel": "argv",
@@ -7067,7 +7107,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2506",
+          "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2526",
           "shape": {
             "argv_source": "move --rollback {} from the source. For manual source recovery, first verify that the target is stopped and gated, or that the target and its moved copy are permanently retired. Keep the source stopped and fenced until then.\",",
             "channel": "argv",
@@ -7172,7 +7212,27 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:2112",
+          "location": "rust/shim/src/cli/restore_cli/move_native/target.rs:507",
+          "shape": {
+            "argv_source": "move --rollback {id}, or pseudolife-mcp move --release-target {id} if rollback is already complete.\"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--rollback {id}, or pseudolife-mcp move --release-target {id} if rollback is already complete.\"",
+            "omitted_optional": null,
+            "parameters": {
+              "--release-target": {
+                "expression": "{id}"
+              },
+              "--rollback": {
+                "expression": "{id},"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:2140",
           "shape": {
             "argv_source": "move --release-target {MOVE}\")),",
             "channel": "argv",
@@ -7189,7 +7249,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:2165",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:2193",
           "shape": {
             "argv_source": "move --release-target {MOVE}\")),",
             "channel": "argv",
@@ -7264,7 +7324,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:932",
+          "location": "docs/guide/remote-bank.md:941",
           "shape": {
             "argv_source": "move --to user@box --dry-run   # the plan; changes nothing",
             "channel": "argv",
@@ -7282,7 +7342,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:933",
+          "location": "docs/guide/remote-bank.md:942",
           "shape": {
             "argv_source": "move --to user@box             # confirms the move and any new exposure",
             "channel": "argv",
@@ -7297,7 +7357,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:968",
+          "location": "docs/guide/remote-bank.md:977",
           "shape": {
             "argv_source": "move --to user@box --target-release \\",
             "channel": "argv",
@@ -30189,6 +30249,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/acceptance/matrix.py:119",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.stack.yml:99",
           "shape": {
             "channel": "environment",
@@ -33755,7 +33828,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1235",
+          "location": "docs/guide/remote-bank.md:1244",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45018,7 +45091,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1636",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1664",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -45033,7 +45106,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1642",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1670",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -45048,7 +45121,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1648",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1676",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -45063,7 +45136,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1655",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1683",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46877,7 +46950,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1635",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1663",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46892,7 +46965,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1643",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1671",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46907,7 +46980,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1653",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1681",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46922,7 +46995,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1654",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1682",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46937,7 +47010,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1672",
+          "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1700",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -47130,7 +47203,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1089",
+          "location": "docs/guide/remote-bank.md:1098",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -47911,7 +47984,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1008",
+          "location": "docs/guide/remote-bank.md:1017",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -47924,7 +47997,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1088",
+          "location": "docs/guide/remote-bank.md:1097",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -48356,6 +48429,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/.env.example:91",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/acceptance/runner.py:25",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50032,7 +50118,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:972",
+          "location": "rust/shim/src/cli/expose/mod.rs:997",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50871,7 +50957,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1009",
+          "location": "docs/guide/remote-bank.md:1018",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50884,7 +50970,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1088",
+          "location": "docs/guide/remote-bank.md:1097",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51981,7 +52067,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/expose/mod.rs:972",
+          "location": "rust/shim/src/cli/expose/mod.rs:997",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -52511,7 +52597,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1003",
+          "location": "docs/guide/remote-bank.md:1012",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -55372,7 +55458,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/remote-bank.md:1089",
+          "location": "docs/guide/remote-bank.md:1098",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56993,6 +57079,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/acceptance/runner.py:25",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/install-hook-native.sh:89",
           "shape": {
             "channel": "environment",
@@ -57607,6 +57706,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/acceptance/runner.py:25",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/briefing_hook.rs:553",
           "shape": {
             "channel": "environment",
@@ -57767,6 +57879,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/acceptance/runner.py:25",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
         }
       ]
     },
@@ -57806,6 +57931,19 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "location": "docs/runbooks/docker-disk-retention.md:276",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/acceptance/matrix.py:120",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -78134,7 +78272,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/guide/remote-bank.md:1152",
+      "location": "docs/guide/remote-bank.md:1161",
       "name": "restore",
       "shape": {
         "argv_source": "restore --yes --leave-stopped --backup-file <that dump> --state-archive",
@@ -82111,20 +82249,6 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/restore_cli/move_native/argv.rs:108",
-      "name": "client",
-      "shape": {
-        "argv_source": "client there; drop --target-checkout\"",
-        "channel": "argv",
-        "complete": false,
-        "expression": "there; drop --target-checkout\"",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "cli",
       "location": "rust/shim/src/cli/restore_cli/move_native/carry.rs:22",
       "name": "move-target",
       "shape": {
@@ -82167,7 +82291,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2399",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2419",
       "name": "restore",
       "shape": {
         "argv_source": "restore --backup-file <that dump> --state-archive <that state archive> --leave-stopped; if own-bank.json is missing, no command restores it, so look in {folder}/safety before anything else); then the gate, never before its own bank is back, or the copy of this host's bank behind it would start there ({gate}); then the claim ({claim}); then its daemon ({start})\",",
@@ -83041,6 +83165,34 @@
       "kind": "environment",
       "location": "ops/Dockerfile.daemon-rust:45",
       "name": "PSEUDOLIFE_DAEMON_RERANK_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/matrix.py:137",
+      "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/runner.py:36",
+      "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -88276,7 +88428,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/remote-bank.md:1059",
+      "location": "docs/guide/remote-bank.md:1068",
       "method": null,
       "name": "/health",
       "shape": {
@@ -88304,7 +88456,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/remote-bank.md:1104",
+      "location": "docs/guide/remote-bank.md:1113",
       "method": null,
       "name": "/health",
       "shape": {
@@ -88318,7 +88470,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/remote-bank.md:1223",
+      "location": "docs/guide/remote-bank.md:1232",
       "method": null,
       "name": "/health",
       "shape": {
@@ -88542,7 +88694,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/remote-bank.md:990",
+      "location": "docs/guide/remote-bank.md:999",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91384,7 +91536,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:838",
+      "location": "rust/shim/src/cli/expose/mod.rs:863",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91398,7 +91550,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:852",
+      "location": "rust/shim/src/cli/expose/mod.rs:877",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91412,7 +91564,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:861",
+      "location": "rust/shim/src/cli/expose/mod.rs:886",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91426,7 +91578,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:870",
+      "location": "rust/shim/src/cli/expose/mod.rs:895",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91440,7 +91592,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:943",
+      "location": "rust/shim/src/cli/expose/mod.rs:968",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91454,7 +91606,21 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/expose/mod.rs:950",
+      "location": "rust/shim/src/cli/expose/mod.rs:973",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "rust/shim/src/cli/expose/mod.rs:975",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91622,7 +91788,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/restore_cli/move_native/carry/runtime.rs:574",
+      "location": "rust/shim/src/cli/restore_cli/move_native/carry/runtime.rs:597",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91636,7 +91802,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2136",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2148",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91650,7 +91816,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2216",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2228",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91762,7 +91928,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/restore_cli/move_native/target.rs:525",
+      "location": "rust/shim/src/cli/restore_cli/move_native/target.rs:535",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91776,7 +91942,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1678",
+      "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1706",
       "method": null,
       "name": "/health",
       "shape": {
@@ -92525,7 +92691,7 @@
     {
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/guide/remote-bank.md:1081",
+      "location": "docs/guide/remote-bank.md:1090",
       "name": "restore",
       "shape": {
         "argv_source": "restore --yes --leave-stopped",
@@ -92544,7 +92710,7 @@
     {
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/guide/remote-bank.md:1240",
+      "location": "docs/guide/remote-bank.md:1249",
       "name": "restore",
       "shape": {
         "argv_source": "restore --backup-file",
@@ -95153,6 +95319,22 @@
         "parameters": {
           "value": {
             "literal": "3"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/runner.py:143",
+      "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "self.archives"
           }
         }
       },
@@ -102207,19 +102389,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1003",
+      "location": "docs/guide/remote-bank.md:1012",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1008",
+      "location": "docs/guide/remote-bank.md:1017",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1009",
+      "location": "docs/guide/remote-bank.md:1018",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
@@ -102231,7 +102413,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1059",
+      "location": "docs/guide/remote-bank.md:1068",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -102243,67 +102425,67 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1088",
+      "location": "docs/guide/remote-bank.md:1097",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1088",
+      "location": "docs/guide/remote-bank.md:1097",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1089",
+      "location": "docs/guide/remote-bank.md:1098",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1089",
+      "location": "docs/guide/remote-bank.md:1098",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOOLSET"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1104",
+      "location": "docs/guide/remote-bank.md:1113",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1144",
+      "location": "docs/guide/remote-bank.md:1153",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1152",
+      "location": "docs/guide/remote-bank.md:1161",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1208",
+      "location": "docs/guide/remote-bank.md:1217",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1209",
+      "location": "docs/guide/remote-bank.md:1218",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1223",
+      "location": "docs/guide/remote-bank.md:1232",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:1235",
+      "location": "docs/guide/remote-bank.md:1244",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DAEMON_MEM_LIMIT"
     },
@@ -102678,13 +102860,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:986",
+      "location": "docs/guide/remote-bank.md:995",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/remote-bank.md:990",
+      "location": "docs/guide/remote-bank.md:999",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -113271,6 +113453,59 @@
       "location": "ops/Dockerfile.mirror-runner:13",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:RerankerConfig.model_name"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/matrix.py:119",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/matrix.py:120",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/matrix.py:137",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/runner.py:18",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/runner.py:25",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/runner.py:25",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/runner.py:25",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/runner.py:25",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SHIM_USER_BIN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/runner.py:36",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
     },
     {
       "dynamic": "unresolved",
@@ -123898,19 +124133,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:1160",
+      "location": "rust/shim/src/cli/expose/mod.rs:1189",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:1164",
+      "location": "rust/shim/src/cli/expose/mod.rs:1193",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:1207",
+      "location": "rust/shim/src/cli/expose/mod.rs:1236",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
@@ -123922,102 +124157,108 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:676",
+      "location": "rust/shim/src/cli/expose/mod.rs:687",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:736",
+      "location": "rust/shim/src/cli/expose/mod.rs:757",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:763",
+      "location": "rust/shim/src/cli/expose/mod.rs:784",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:766",
+      "location": "rust/shim/src/cli/expose/mod.rs:787",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:838",
+      "location": "rust/shim/src/cli/expose/mod.rs:863",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:838",
+      "location": "rust/shim/src/cli/expose/mod.rs:863",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:852",
+      "location": "rust/shim/src/cli/expose/mod.rs:877",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:861",
+      "location": "rust/shim/src/cli/expose/mod.rs:886",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:870",
+      "location": "rust/shim/src/cli/expose/mod.rs:895",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:943",
+      "location": "rust/shim/src/cli/expose/mod.rs:968",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:950",
+      "location": "rust/shim/src/cli/expose/mod.rs:973",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:972",
+      "location": "rust/shim/src/cli/expose/mod.rs:975",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/expose/mod.rs:997",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/mod.rs:972",
+      "location": "rust/shim/src/cli/expose/mod.rs:997",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:1150",
+      "location": "rust/shim/src/cli/expose/tests.rs:1187",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:1151",
+      "location": "rust/shim/src/cli/expose/tests.rs:1188",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:1156",
+      "location": "rust/shim/src/cli/expose/tests.rs:1193",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:1157",
+      "location": "rust/shim/src/cli/expose/tests.rs:1194",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
@@ -124058,13 +124299,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:817",
+      "location": "rust/shim/src/cli/expose/tests.rs:854",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/expose/tests.rs:864",
+      "location": "rust/shim/src/cli/expose/tests.rs:901",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
@@ -125859,12 +126100,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/argv.rs:108",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:client"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "rust/shim/src/cli/restore_cli/move_native/carry.rs:22",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:move-target"
@@ -125895,7 +126130,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/carry/runtime.rs:574",
+      "location": "rust/shim/src/cli/restore_cli/move_native/carry/runtime.rs:597",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -125961,97 +126196,109 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1623",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1613",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1632",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1621",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1668",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1633",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1885",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1642",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1973",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1678",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1978",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1897",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1982",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1985",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2029",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1990",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:move"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:1994",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:move"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2041",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2113",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2125",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2136",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2148",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2178",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2190",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2216",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2228",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2238",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2250",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2399",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2419",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:restore"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2470",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2490",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:expose"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2506",
+      "location": "rust/shim/src/cli/restore_cli/move_native/engine.rs:2526",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
@@ -126237,7 +126484,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/target.rs:525",
+      "location": "rust/shim/src/cli/restore_cli/move_native/target.rs:507",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:move"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/restore_cli/move_native/target.rs:535",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -126255,19 +126508,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1678",
+      "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:1706",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:2112",
+      "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:2140",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:2165",
+      "location": "rust/shim/src/cli/restore_cli/move_native/tests.rs:2193",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },

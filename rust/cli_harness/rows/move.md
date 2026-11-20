@@ -70,10 +70,10 @@ recovery forms are `--rollback MOVE-ID [--yes] [--json]` and
   supplied explicitly, without sending the source values. Execution requires
   an execution-capable target helper and a loopback daemon endpoint for
   carried-bearer verification. `--expose-target` checks or creates a
-  target tailnet forward when `--target-url` is omitted. Checkout handover
-  receives an early refusal that points to the installed release route. A
-  missing `--target-url` without `--expose-target` and relative paths
-  outside `~/` are refused (exit 2).
+  target tailnet forward when `--target-url` is omitted. `--target-checkout`
+  receives a refusal that explains the checkout rebuild and points to the
+  installed release route. A missing `--target-url` without
+  `--expose-target` and relative paths outside `~/` are refused (exit 2).
   The oracle would contact the live daemon, so these use the Rust tests.
 - `--target-url` values whose validity differs between Python releases
   (bracketed hosts, empty userinfo, empty or `+`/leading-zero ports, `_` or

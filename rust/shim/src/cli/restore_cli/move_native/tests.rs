@@ -1522,7 +1522,7 @@ fn argv_refusals_come_before_any_effect_in_order() {
     assert_eq!(refused(&[&base[..], &["--resume"]].concat()), None);
     starts(
         &[&base[..], &["--target-checkout", "/srv/x"]].concat(),
-        "--target-checkout is not supported",
+        "--target-checkout selects a checkout rebuild and stopped handover",
     );
     assert_eq!(refused(&[&base[..], &["--expose-target"]].concat()), None);
     starts(
@@ -1570,13 +1570,41 @@ fn argv_refusals_come_before_any_effect_in_order() {
     // Without --dry-run the checks are the same, in the same order.
     starts(
         &["--to", "u@box", "--target-checkout", "/x"],
-        "--target-checkout is not supported",
+        "--target-checkout selects a checkout rebuild and stopped handover",
     );
     // --target-release is the only mode now: accepted.
     assert_eq!(
         refused(&[&base[..], &["--target-release", "--yes", "--json"]].concat()),
         None
     );
+}
+
+#[test]
+fn checkout_handover_refusal_points_to_the_native_release_route() {
+    let refused = |args: &[&str]| argv::refusal(&argv::parse(&words(args)).unwrap());
+    let base = [
+        "--to",
+        "u@box",
+        "--target-url",
+        "http://h:8765",
+        "--dry-run",
+    ];
+    for checkout in ["/srv/project checkout", "~/project checkout"] {
+        for suffix in [
+            &[][..],
+            &["--target-release", "--json"][..],
+            &["--resume"][..],
+        ] {
+            let args = [&base[..], &["--target-checkout", checkout], suffix].concat();
+            assert_eq!(
+                refused(&args).as_deref(),
+                Some(
+                    "--target-checkout selects a checkout rebuild and stopped handover. Native move requires an installed release Docker deployment and the native client on the target. Retry against that deployment with --target-release and omit --target-checkout. Nothing was changed"
+                )
+            );
+        }
+    }
+    assert_eq!(refused(&[&base[..], &["--target-release"]].concat()), None);
 }
 
 #[test]

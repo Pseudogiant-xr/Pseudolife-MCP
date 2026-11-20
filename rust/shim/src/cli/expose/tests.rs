@@ -649,6 +649,43 @@ fn move_reports_no_creation_only_after_the_child_has_exited_and_status_is_known(
 }
 
 #[test]
+fn move_report_names_the_local_health_refusal() {
+    let auth_off = match json_dict(r#"{"status":"ok", "auth":false}"#) {
+        J::Dict(dict) => Health::Ok(dict),
+        other => panic!("{other:?}"),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    for (health, expected) in [
+        (Health::None, "No daemon answers"),
+        (auth_off, "did not report authentication enabled"),
+    ] {
+        let mut host = Fake::free();
+        host.local = health;
+        let args = Args {
+            action: Action::Tailscale,
+            port: 8443,
+            yes: true,
+            json: true,
+        };
+        let mut report = Report::new(&args);
+        report.include_move_failure = true;
+        let output = runtime.block_on(expose(&host, &args, report));
+        let json: Value =
+            serde_json::from_str(&String::from_utf16(&output.stdout).unwrap()).unwrap();
+        assert_eq!(json["move_failure"], "not_attempted");
+        assert!(
+            json["move_failure_detail"]
+                .as_str()
+                .unwrap()
+                .contains(expected)
+        );
+    }
+}
+
+#[test]
 fn a_permission_refusal_whose_forward_appeared_is_undone_not_called_unchanged() {
     let mut fake = Fake::free();
     fake.bg = Step {
