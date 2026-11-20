@@ -214,6 +214,8 @@ def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture,
     conn.execute.return_value.fetchone.side_effect = [(row.ARM_DB,), (observed,)]
     conn.execute.return_value.rowcount = 1
     monkeypatch.setattr(_bank, "connect", lambda *a, **kw: nullcontext(conn))
+    insert = MagicMock(wraps=row._insert_rows)
+    monkeypatch.setattr(row, "_insert_rows", insert)
     process = MagicMock()
     process.poll.return_value = None
     getattr(row, operation + "_during")(None, process)
@@ -221,9 +223,13 @@ def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture,
                and call.args[0].startswith("UPDATE maintainer_bootstrap")]
     if operation == "redeem":
         assert updates == [(row.HOOK_T, "deskKeyHookAAAAAAAAAAA", observed, row.HOOK_T)]
+        assert [call.args[1] for call in insert.call_args_list] == [
+            "maintainer_nonces", "maintainer_passkeys", "coordination_events",
+        ]
         conn.transaction.assert_called_once_with()
     else:
         assert updates == [(observed, row.HOOK_T, attempt) for attempt in range(5)]
+        insert.assert_not_called()
         conn.transaction.assert_not_called()
 
 
