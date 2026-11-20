@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 import urllib.error
@@ -16,16 +17,20 @@ QUERY = "disposable container readiness query"
 
 def verify_console(base: str) -> dict:
     static = Path(__file__).resolve().parents[2] / "frontend/dist"
-    index = static / "index.html"
-    files = sorted(file for file in static.rglob("*") if file.is_file())
-    for file in files:
-        relative = "" if file == index else file.relative_to(static).as_posix()
-        path = "/ui/" + urllib.parse.quote(relative)
-        with urllib.request.urlopen(base + path, timeout=30) as response:
-            if response.status != 200 or response.read() != file.read_bytes():
+    index_path = static / "index.html"
+    index = index_path.read_bytes()
+    assets = set(re.findall(r'(?:src|href)="(/ui/[^"?#]+)"', index.decode("utf-8")))
+    if not assets:
+        raise RuntimeError("Console index contains no static assets")
+    assets.update("/ui/" + file.relative_to(static).as_posix()
+                  for file in static.rglob("*") if file.is_file() and file != index_path)
+    for path in ["/ui/", *sorted(assets)]:
+        expected = index if path == "/ui/" else (static / path.removeprefix("/ui/")).read_bytes()
+        with urllib.request.urlopen(base + urllib.parse.quote(path), timeout=30) as response:
+            if response.status != 200 or response.read() != expected:
                 raise RuntimeError(f"container Console content differs at {path}")
-    return {"console": True, "assets": len(files) - 1,
-            "index_sha256": hashlib.sha256(index.read_bytes()).hexdigest()}
+    return {"console": True, "assets": len(assets),
+            "index_sha256": hashlib.sha256(index).hexdigest()}
 
 
 def verify_policy(log: str) -> dict:
