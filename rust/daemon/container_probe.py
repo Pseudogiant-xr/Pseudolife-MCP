@@ -5,7 +5,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import time
 from pathlib import Path
 import urllib.error
@@ -16,18 +15,17 @@ QUERY = "disposable container readiness query"
 
 
 def verify_console(base: str) -> dict:
-    static = Path(__file__).resolve().parents[2] / "pseudolife_memory/web/static"
-    index = (static / "index.html").read_bytes()
-    assets = re.findall(r'(?:src|href)="(/ui/[^"?#]+)"', index.decode("utf-8"))
-    if not assets:
-        raise RuntimeError("Console index contains no static assets")
-    for path in ["/ui", *assets]:
-        expected = index if path == "/ui" else (static / path.removeprefix("/ui/")).read_bytes()
+    static = Path(__file__).resolve().parents[2] / "frontend/dist"
+    index = static / "index.html"
+    files = sorted(file for file in static.rglob("*") if file.is_file())
+    for file in files:
+        relative = "" if file == index else file.relative_to(static).as_posix()
+        path = "/ui/" + urllib.parse.quote(relative)
         with urllib.request.urlopen(base + path, timeout=30) as response:
-            if response.status != 200 or response.read() != expected:
+            if response.status != 200 or response.read() != file.read_bytes():
                 raise RuntimeError(f"container Console content differs at {path}")
-    return {"console": True, "assets": len(assets),
-            "index_sha256": hashlib.sha256(index).hexdigest()}
+    return {"console": True, "assets": len(files) - 1,
+            "index_sha256": hashlib.sha256(index.read_bytes()).hexdigest()}
 
 
 def verify_policy(log: str) -> dict:
@@ -84,7 +82,7 @@ def main() -> None:
     parser.add_argument("--url", default="http://127.0.0.1:8766")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--console-only", action="store_true",
-                        help="compare the image's Console index and referenced assets with this checkout")
+                        help="compare the image's Console index and assets with this checkout")
     parser.add_argument("--startup-log", type=Path,
                         help="verify the loaded model policy from a daemon startup log only")
     args = parser.parse_args()
@@ -98,6 +96,7 @@ def main() -> None:
     if not token:
         parser.error("set W3J_RUST_TOKEN to the disposable daemon token")
     print(json.dumps(verify(args.url, token, args.timeout), sort_keys=True))
+    print(json.dumps(verify_console(args.url), sort_keys=True))
 
 
 if __name__ == "__main__":

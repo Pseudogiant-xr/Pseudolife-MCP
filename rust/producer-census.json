@@ -8,7 +8,7 @@
     "docs/README.md": "344f55f1081ec2899af8136ae9428c6e53ea6b9dd9e3ba43e263ab636b705807",
     "docs/atlas/README.md": "77897a89250cf80f9f3fe707f8f681bc6d8e6233908270cfd1a107471cb82e88",
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
-    "docs/atlas/atlas.json": "58525c896dae613c9a9c4bfc98bc33c291b2ac8f0c87377877f4803340fbf19e",
+    "docs/atlas/atlas.json": "13f427705a6c8ef518b142351ecbc0e7da68748681d8dcb0d14938242f8f2e4b",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
     "docs/dev/dev-machines.md": "0083269f909fda4a7fad6e4663d84129e228788d8d28233cbbf4cfd52a321754",
@@ -17,7 +17,7 @@
     "docs/dev/merge-batches.md": "37440c179e852fd5d25fa0929b90ab5be3b965322c1cc56e20875a9f2f4c32cc",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "02104e3aaac74c9b578e007f6b37b16e59a163d4ff9adafd920844e805bec3f7",
-    "docs/dev/python-retirement.md": "c2034d261f0db10d2577de4ddaac5522a7041199516f28ec047f8f50e56e0dea",
+    "docs/dev/python-retirement.md": "e88bcac4ed8597a5b9b0ccf24a405d41932939a5798d5e25c7990a35025d8c80",
     "docs/dev/release-assets.md": "9ab29f58686b66058d42e3e6ddb2fb3290564112c3790916fbf5edcea4f7d767",
     "docs/dev/run-rust-beside-python.md": "12d52aa9774f05ae699cd67277173b04ff1b837b1772c2c96700b2fb0b110b15",
     "docs/dev/worktree-retention.md": "21ba0e48574bb6be98d456c9725a6d3746a99891d667cef8d8ed76c984819f8e",
@@ -221,9 +221,13 @@
     "examples/CLAUDE.memory.md": "608f6691e4ce902427f8b4ea071d761d618a7d0803a131161a33889a3f4173b5",
     "examples/commands/dream.md": "a3482ef8ab9589d36e4b2368e3416e0497f51eaef83e0a29e2eff777af3c2129",
     "examples/hook-instructions.md": "96356a8fbfc27a3123f5dd9aacde2421ed2c14c40b31ac12c2a6b23f05c5b87e",
+    "frontend/dist/assets/Geist-LICENSE.txt": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137",
+    "frontend/dist/assets/index-CWP6PB_i.js": "81fe776d09744f879e49be51971799d8d290ab831186e98e20a7da378c360cf5",
+    "frontend/dist/index.html": "11d0a84baee68201fd461ff99c696434fc76c276a5ef6155bd8292ddb25761c9",
+    "frontend/dist/theme.js": "f2399e3aaa94b61d639937aab791511ef83efb27276330b82324a21be9eea17e",
     "ops/.env.example": "13c3d741b4553f01cfa9be8990f1109fa5fe48c92a6e826c0eeae2fb39aeaa2a",
-    "ops/Dockerfile.daemon": "91924b87f19bf50e14e6764687ee13b0dc3aa2ba3edd89dba521203260e91166",
-    "ops/Dockerfile.daemon-rust": "d01cd1898b7a2daec3b85cf2eb7796623c773d926536ef65044a2dc89ffe683b",
+    "ops/Dockerfile.daemon": "f6df7ae912c5fe79045bf65386d7a9085e7b31f675be62ccd2dab73994ab2932",
+    "ops/Dockerfile.daemon-rust": "5dd59a2e612dfe2413b01f2c1780d95e886910657d46040f11d74f4a2aa403f7",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.mirror-runner": "b71046c9947e25a2c63cb95c6675621e2f3b6ba935853f73b283c89efa304342",
     "ops/Dockerfile.pg": "ff8b83d3a569807d851eed7219063514d7f5405c8280fe7b6d3e40e56ab2b401",
@@ -347,10 +351,6 @@
     "pseudolife_memory/utils/config.py": "72f527f3926bb3ec87300cf3414adfed7b583285cc7a0bc6307734d30f55f197",
     "pseudolife_memory/web/api.py": "56c42c40090f1460696576c995007e211b22d12fda256acb3e85da5a35b6f52d",
     "pseudolife_memory/web/routes.py": "5c40b6df4a1b6db200bf84a93c6a83ab2f3ab1d98e0bed02f0de4f9102793d20",
-    "pseudolife_memory/web/static/assets/Geist-LICENSE.txt": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137",
-    "pseudolife_memory/web/static/assets/index-CWP6PB_i.js": "81fe776d09744f879e49be51971799d8d290ab831186e98e20a7da378c360cf5",
-    "pseudolife_memory/web/static/index.html": "11d0a84baee68201fd461ff99c696434fc76c276a5ef6155bd8292ddb25761c9",
-    "pseudolife_memory/web/static/theme.js": "f2399e3aaa94b61d639937aab791511ef83efb27276330b82324a21be9eea17e",
     "rust/contract-inventory.json": "27555edf13a3f8c27cae2c68fa0cf6e5d11f5695fe3ecb28563a6cb97f1d09cc",
     "rust/shim/src/argv.rs": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb",
     "rust/shim/src/board.rs": "335ab008a3d3cfb6e21e3903311de2b15f6d94d836dc4547c139cb1b927fb5e5",
@@ -671,7 +671,7 @@
   },
   "scopes": [
     "plugin",
-    "pseudolife_memory/web/static",
+    "frontend/dist",
     "evals/claude_shim.py",
     "evals/codex_shim.py",
     "rust/shim/src",
@@ -7916,7 +7916,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:160",
+          "location": "ops/Dockerfile.daemon:164",
           "shape": {
             "argv": [
               {
@@ -30384,7 +30384,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:147",
+          "location": "ops/Dockerfile.daemon:151",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30474,7 +30474,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:146",
+          "location": "ops/Dockerfile.daemon:150",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30512,7 +30512,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:149",
+          "location": "ops/Dockerfile.daemon:153",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30602,7 +30602,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:148",
+          "location": "ops/Dockerfile.daemon:152",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -48161,6 +48161,32 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:3",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/.env.example:91",
           "shape": {
             "channel": "environment",
@@ -49522,32 +49548,6 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:3",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
         },
         {
           "dynamic": "unresolved",
@@ -50981,6 +50981,32 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:3",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/.env.example:75",
           "shape": {
             "channel": "environment",
@@ -51814,32 +51840,6 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/register_claude_desktop.py:99",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:3",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56267,7 +56267,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/Dockerfile.daemon:117",
+          "location": "ops/Dockerfile.daemon:121",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61616,7 +61616,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -61929,7 +61929,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62007,7 +62007,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:27",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:27",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62017,7 +62017,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62083,7 +62083,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62126,7 +62126,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62236,7 +62236,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:27",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:27",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62334,7 +62334,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62474,7 +62474,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:26",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:26",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62519,7 +62519,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:26",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:26",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62594,7 +62594,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62681,7 +62681,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -62698,7 +62698,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63103,7 +63103,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63304,7 +63304,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:22",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:22",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63357,7 +63357,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63493,7 +63493,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:13",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:13",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63709,7 +63709,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -63719,7 +63719,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64077,7 +64077,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64091,7 +64091,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64808,7 +64808,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64870,7 +64870,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -64963,7 +64963,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:13",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:13",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65022,7 +65022,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65042,7 +65042,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65121,7 +65121,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65201,7 +65201,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65304,7 +65304,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65550,7 +65550,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65608,7 +65608,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "query",
             "complete": true,
@@ -65820,7 +65820,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:27",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:27",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -65909,7 +65909,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -66210,7 +66210,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -66882,7 +66882,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -66928,7 +66928,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67023,7 +67023,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -67085,7 +67085,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67200,7 +67200,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67252,7 +67252,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67391,7 +67391,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67423,7 +67423,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67554,7 +67554,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67582,7 +67582,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67599,7 +67599,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67717,7 +67717,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67797,7 +67797,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67849,7 +67849,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67892,7 +67892,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -67923,7 +67923,7 @@
       "producers": [
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -68056,7 +68056,7 @@
         },
         {
           "evidence": "static",
-          "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+          "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
           "shape": {
             "channel": "body",
             "complete": true,
@@ -86688,6 +86688,118 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/cancel",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/challenge",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "e",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/enrol",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "e",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/enrol",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/repudiate",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/revoke",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/role",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "method": "POST",
+      "name": "/api/maintainer/send",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "{...e}",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
       "location": "ops/setup-codex-coordination.py:52",
       "name": "/api/coordination/agents",
       "shape": {
@@ -86708,118 +86820,6 @@
         "channel": "query",
         "complete": false,
         "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/cancel",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/challenge",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "e",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/enrol",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "e",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/enrol",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/repudiate",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/revoke",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/role",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "method": "POST",
-      "name": "/api/maintainer/send",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "{...e}",
         "parameters": {}
       }
     },
@@ -90077,7 +90077,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/Dockerfile.daemon:155",
+      "location": "ops/Dockerfile.daemon:159",
       "method": null,
       "name": "/health",
       "shape": {
@@ -96672,7 +96672,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
       "method": "GET",
       "name": "/api/maintainer",
       "shape": {
@@ -96684,7 +96684,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
       "method": "GET",
       "name": "/api/maintainer/inbox",
       "shape": {
@@ -96700,7 +96700,7 @@
     {
       "evidence": "static",
       "kind": "route",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
       "method": "GET",
       "name": "/api/maintainer/sent",
       "shape": {
@@ -112679,6 +112679,163 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:1",
+      "reason": "forwarded parameters, request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:10",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:11",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:13",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:16",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:17",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:19",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/cancel"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/challenge"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/enrol"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/repudiate"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/revoke"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/role"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer/send"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:2",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:21",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:22",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:26",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:27",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:3",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:3",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:31",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:39",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:46",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:5",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:POST /api/facts/set"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "frontend/dist/assets/index-CWP6PB_i.js:6",
+      "reason": "forwarded parameters, built URL"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/.env.example:112",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
@@ -112864,13 +113021,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon:155",
+      "location": "ops/Dockerfile.daemon:159",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/Dockerfile.daemon:160",
+      "location": "ops/Dockerfile.daemon:164",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:serve"
     },
@@ -121734,163 +121891,6 @@
       "location": "pseudolife_memory/mcp_server.py:818",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_fact_set"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:1",
-      "reason": "forwarded parameters, request target supplied dynamically or external"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:10",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:11",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:13",
-      "reason": "built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:16",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:17",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:19",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/cancel"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/challenge"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/enrol"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/repudiate"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/revoke"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/role"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/maintainer/send"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:2",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:21",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:22",
-      "reason": "built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:26",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:27",
-      "reason": "built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:3",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:3",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:31",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:39",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:46",
-      "reason": "forwarded parameters"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:5",
-      "reason": "forwarded parameters, built URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:POST /api/facts/set"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "pseudolife_memory/web/static/assets/index-CWP6PB_i.js:6",
-      "reason": "forwarded parameters, built URL"
     },
     {
       "dynamic": "unresolved",

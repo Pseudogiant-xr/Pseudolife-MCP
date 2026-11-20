@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
+CONSOLE_DIST = REPO / "frontend" / "dist"
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 from rust.harness_support import readiness  # noqa: E402
@@ -171,6 +172,7 @@ def make_home(root: Path, name: str, config_yaml: str | None) -> Path:
 def python_daemon(home: Path, port: int, env: dict[str, str]) -> Daemon:
     env = dict(env)
     env.setdefault("PSEUDOLIFE_MCP_PORT", str(port))  # a refusal case may set its own
+    env.setdefault("PL_HARNESS_STATIC_DIR", str(CONSOLE_DIST))
     argv = [sys.executable, "-m", "pseudolife_memory.cli", "serve"]
     if env.get("PL_HARNESS_STATIC_DIR") or env.get("PL_HARNESS_LOOPBACK_BIND"):
         setup = "import os,sys; from pathlib import Path; "

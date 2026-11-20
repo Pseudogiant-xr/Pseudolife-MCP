@@ -14,7 +14,7 @@ def test_console_build_extensions_have_native_mime_entries():
     config = (frontend / "vite.config.ts").read_text(encoding="utf-8")
     output = re.search(r'outDir:\s*"([^"]+)"', config)
     assert output, "Console build output must be identified"
-    roots = {ROOT / "pseudolife_memory/web/static", frontend / output[1], frontend / "public"}
+    roots = {frontend / output[1], frontend / "public"}
     extensions = set()
     for root in roots:
         assert root.is_dir(), f"Console asset tree is missing: {root.relative_to(ROOT)}"

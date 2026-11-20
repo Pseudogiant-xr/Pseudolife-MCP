@@ -1420,7 +1420,7 @@ wire bytes: 4 MiB for the text-bearing writes (`/api/facts/set`,
 16 KiB for the session-end hook, 1 KiB for `/api/pair`, and 256 KiB for
 everything else; a larger body gets HTTP 413 `{"error":
 "request_too_large"}`. No CDN, fully offline: a Svelte
-build committed under `pseudolife_memory/web/static/` with vendored OFL fonts
+build committed under `frontend/dist/` with vendored OFL fonts
 and a vendored 3D engine, served straight from the daemon, so neither the
 daemon image nor a pip install needs Node. The source is in
 [`frontend/`](frontend/README.md); CI rebuilds it and fails if the committed

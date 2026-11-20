@@ -29,19 +29,20 @@ board.
 ```bash
 npm run check        # svelte-check, warnings fail
 npm test             # vitest: src/**/*.test.ts and scripts/**/*.test.mjs
-npm run build        # writes ../pseudolife_memory/web/static/
+npm run build        # writes dist/
 ```
 
-`npm run build` empties `pseudolife_memory/web/static/` and writes the build
+`npm run build` empties `frontend/dist/` and writes the build
 there, then runs `scripts/check-dist.mjs`, which fails if the output contains
 an absolute local path or this machine's user or host name. A generic account
 name such as `dev` or `runner` identifies no one and is skipped, with one line
 saying so (`scripts/local-ids.mjs`).
 
-**The build output is committed.** The Python wheel ships
-`pseudolife_memory/web/static/**` and is built without Node, so a source
-change here is not live until `npm run build` has run and its output is
-committed with it. CI's `frontend` job runs the check, the tests and the
+**The build output is committed.** Both daemon images and the Python wheel
+ship these files without building them. The wheel installs the files under
+`pseudolife_memory/web/static/`, where the Python daemon reads them.
+Commit the output of `npm run build` with any source change.
+CI's `frontend` job runs the check, the tests and the
 build, and fails if the rebuilt output differs from what is committed.
 `.gitattributes` checks the sources out with LF line endings on every OS so
 that a Windows build and the Linux CI build produce the same bytes.

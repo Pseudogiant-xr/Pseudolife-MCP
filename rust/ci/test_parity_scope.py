@@ -247,6 +247,13 @@ def test_docs_with_readers_can_use_the_documentation_lane(path):
     assert parity_scope.is_documentation_path(path)
 
 
+@pytest.mark.parametrize("path", ["frontend/dist/vendor/README.md",
+                                  "frontend/dist/assets/Geist-LICENSE.txt"])
+def test_shipped_console_notices_cannot_use_the_documentation_lane(path):
+    assert not parity_scope.is_documentation_path(path)
+    assert not documentation_only([path])
+
+
 @pytest.mark.parametrize("path", ["docs/notes.txt", "docs/notes.rst", "docs/diagram.pdf"])
 def test_supported_docs_do_not_widen_mixed_pr_parity(path):
     from pr_precheck import rows_for

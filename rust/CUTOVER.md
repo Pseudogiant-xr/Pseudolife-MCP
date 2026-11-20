@@ -118,10 +118,9 @@ What remains after that is the Rust build and test, mostly on Windows.
 
 ### 3. Delete Python
 
-1. The Console build output moves out of `pseudolife_memory/web/static`
-   (`frontend/vite.config.ts` writes it; `ops/Dockerfile.daemon-rust`,
-   `ops/Dockerfile.daemon` and the static-file tests in
-   `rust/daemon/src/static_files.rs` read it).
+1. The committed Console build lives in `frontend/dist/`. Both daemon
+   images and the static-file tests read it there. The Python wheel maps it
+   to the package's static directory at build time.
 2. Whatever still reads `pseudolife_memory/storage/schema.py` (the schema
    generator, the native updater's engine switch) reads a Rust source.
 3. A last PyPI release carries a deprecation note; the Python daemon image

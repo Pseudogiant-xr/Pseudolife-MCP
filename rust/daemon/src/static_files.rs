@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn shipped_assets_match_python_312_without_a_platform_table() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../pseudolife_memory/web/static");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../frontend/dist");
         let mut files = Vec::new();
         shipped_files(&root, &mut files);
         assert!(files.len() > 5, "the committed Console build is missing");

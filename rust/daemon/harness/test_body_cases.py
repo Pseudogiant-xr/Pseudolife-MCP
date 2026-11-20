@@ -120,7 +120,7 @@ def test_recorded_health_memory_uses_replay_host_oracle_shape(reading, monkeypat
 
 def test_gate_css_case_targets_a_current_asset_and_rejects_spa_fallback():
     case = next(c for c in run.gate_cases(None) if c["name"] == "ui asset css")
-    asset = run.REPO / "pseudolife_memory/web/static" / case["path"].removeprefix("/ui/")
+    asset = run.REPO / "frontend/dist" / case["path"].removeprefix("/ui/")
     assert asset.is_file()
     fallback = {"status": 200, "headers": {"content-type": "text/html; charset=utf-8"},
                 "bytes": "<!doctype html>"}
