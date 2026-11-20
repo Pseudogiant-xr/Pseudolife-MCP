@@ -2143,6 +2143,7 @@ def test_rollback_then_update_retires_the_pending_import_pointer(tmp_path, mode)
             # A validated checkout can select the same image under a new activation.
             original["Config"]["Image"] = "pseudolife-daemon-rust:checkout"
             state["target_version"] = "0.21.1"
+            (repo / "pseudolife_memory/storage/schema.py").write_text("SCHEMA_META_VERSION = 59\n")
             labels = original["Config"]["Labels"]
             labels.update({"org.pseudolife.engine": "rust", "org.pseudolife.checkout": str(repo),
                            "org.pseudolife.activation": "c" * 32})
