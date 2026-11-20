@@ -1991,6 +1991,21 @@ def test_unattended_rust_only_release_holds_and_posts_once_per_release(tmp_path)
         log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
         assert log.count("Original pre-import recovery instructions (saved at ") == 1
         assert "attended-fixture-pre-import" in log
+        original = json.loads(interrupted.stdout)["rollback"]
+        state["running"]["Id"] = "restored-original"
+        state["running"]["Config"]["Image"] = original["tag"]
+        state_path.write_text(json.dumps(state))
+        interrupted_again = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0",
+                                                          "--json", "--health-retries", "1",
+                                                          "--rollback-tag", "second-attempt"])
+        assert interrupted_again.returncode == 1 and "health gate" in interrupted_again.stdout, interrupted_again.stdout
+        for _ in range(2):
+            held = run_arm(repo, env, binary, ["--unattended", "--tag", "0.25.0", "--json"])
+            assert held.returncode == 4, held.stdout
+        assert len(state_path.with_name("notices.jsonl").read_text().splitlines()) == 2
+        log = Path(env["PSEUDOLIFE_MCP_DATA_DIR"], "unattended-update.log").read_text(encoding="utf-8")
+        assert log.count("Original pre-import recovery instructions (saved at ") == 2
+        assert "second-attempt-pre-import" in log
 
 
 @pytest.mark.parametrize("manifest_denied", [False, True])

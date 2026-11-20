@@ -2,6 +2,7 @@
 use super::{Result, Update, UpdateError, seams};
 use crate::credentials::CredentialProvider;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     cell::RefCell,
     fs::{self, File, OpenOptions},
@@ -219,29 +220,46 @@ fn notice(update: &mut Update, text: &str) {
     }
 }
 
-fn reserve_attended_notice(update: &mut Update, path: &Path) -> bool {
+fn reserve_attended_record(path: &Path) -> std::result::Result<bool, &'static str> {
     if fs::symlink_metadata(path).is_ok() {
-        return false;
+        return Ok(false);
     }
     // Reserve before posting. A crash or a lost response must not make
     // the next scheduled run post the same notice again.
-    if fs::create_dir_all(path.parent().expect("notice directory")).is_ok()
-        && crate::board::state::atomic_create(path, b"1\n").is_ok()
-    {
-        return true;
+    let directory = path.parent().expect("notice directory");
+    crate::board::state::private_dir(directory)?;
+    let record = match crate::board::state::create(path) {
+        Ok(record) => record,
+        Err(_) if fs::symlink_metadata(path).is_ok() => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    record
+        .file
+        .sync_all()
+        .map_err(|_| "notice_state_unavailable")?;
+    #[cfg(unix)]
+    File::open(directory)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|_| "notice_state_unavailable")?;
+    Ok(true)
+}
+
+fn reserve_attended_notice(update: &mut Update, path: &Path) -> bool {
+    match reserve_attended_record(path) {
+        Ok(reserved) => reserved,
+        Err(_) => {
+            update.warn(format!(
+                "cannot save the attended notice record at {}; check directory access",
+                path.display()
+            ));
+            false
+        }
     }
-    if fs::symlink_metadata(path).is_err() {
-        update.warn(format!(
-            "cannot save the attended notice record at {}; check directory access",
-            path.display()
-        ));
-    }
-    false
 }
 
 fn attended_hold(update: &mut Update, target: Option<&str>, reason: &str) -> u8 {
     let target = target.filter(|tag| super::plain_release(tag));
-    let id = target.unwrap_or("unknown-target");
+    let id = format!("{:x}", Sha256::digest(target.unwrap_or("unknown-target")));
     let release = target.map_or_else(|| "this update".to_owned(), |tag| format!("release {tag}"));
     let command = target.map_or_else(
         || "pseudolife-mcp update --engine rust".to_owned(),
@@ -263,10 +281,13 @@ fn attended_hold(update: &mut Update, target: Option<&str>, reason: &str) -> u8 
     if post {
         update.step(&text);
     }
-    if let Some(detail) = recovery
-        && reserve_attended_notice(update, &directory.join(format!("{id}.recovery")))
-    {
-        update.step(detail);
+    if let Some(detail) = recovery {
+        // The same release can have multiple attended attempts. Keep each
+        // new original recovery record in the log without posting again.
+        let record = format!("{:x}", Sha256::digest(detail));
+        if reserve_attended_notice(update, &directory.join(format!("{id}.{record}.recovery"))) {
+            update.step(detail);
+        }
     }
     if post {
         notice(update, &text);
