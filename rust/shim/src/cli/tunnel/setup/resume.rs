@@ -15,7 +15,10 @@ use super::{
 };
 use crate::{
     board::state,
-    cli::tunnel::{Fail, Options, Output, absolute_token, bridge::status_command, record, store},
+    cli::tunnel::{
+        Fail, KEY_RENEWAL, Options, Output, Setup, absolute_token, bridge::status_command, record,
+        store,
+    },
     credentials::{MAX_TOKEN_BYTES, decode_token},
 };
 
@@ -37,6 +40,9 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     );
 
     if setup.has_key_input() {
+        if store::occupied(&store::key_path(root, &profile.name))? {
+            return Err(Fail::Tunnel(KEY_RENEWAL));
+        }
         if profile.state != "ready" {
             return Err(if profile.tunnel_id.is_none() {
                 Fail::Tunnel(
@@ -58,9 +64,10 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
                 "the runtime key matches the daemon credential; supply the separate tunnel runtime key",
             ));
         }
-        let encoded = encode_key(&key.0)?;
+        let encoded = encode_key(&key.0);
         let (_lock, _) = commit_lock(root, path, &original)?;
         recheck_inactive(root, &profile.name, &status)?;
+        let encoded = encoded?;
         publish_new(&store::key_path(root, &profile.name), |file| {
             file.write_all(&encoded.0)
         })?;
@@ -113,6 +120,21 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             ),
             0,
         ));
+    }
+    if matches!(
+        setup,
+        Setup {
+            key_expires_at: Some(_),
+            daemon_url: None,
+            token_file: None,
+            tunnel_id: None,
+            organization_id: None,
+            catalog: None,
+            ..
+        }
+    ) && store::occupied(&store::key_path(root, &profile.name))?
+    {
+        return Err(Fail::Tunnel(KEY_RENEWAL));
     }
     require_no_autostart(&saved)?;
     require_inactive(root, &profile.name)?;

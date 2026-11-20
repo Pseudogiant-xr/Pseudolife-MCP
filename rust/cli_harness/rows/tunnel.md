@@ -61,8 +61,9 @@ writing it or contacting the daemon. An equivalent Python-written profile
 also counts as an unchanged rerun. The response points to `tunnel status`
 for checking the saved configuration. A stopped tunnel can resume profile
 setup before its first key is imported. Changing the daemon connection or
-expanding access requires explicit consent. Key renewal is refused with
-instructions for the Python client, which also appear in expired-key status.
+expanding access requires explicit consent. Key input alone and an expiry
+change alone on a keyed profile show the same Python renewal instructions
+as expired-key status. An unchanged expiry remains a no-op.
 Setup requires a saved tunnel ID before first-key intake and both connection
 flags when repointing the daemon. A key or process record that appears during
 setup gets a refusal naming its path. Edits to a profile with autostart,
@@ -72,7 +73,14 @@ These effects are covered in
 `shim/tests/cli_tunnel_contract.rs` against a disposable daemon fixture.
 The setup cases in this row exercise preflight refusals and deferrals.
 
-Save the profile and import the first runtime key in separate invocations.
+Native `run` supervises a foreground launch of the pinned runtime. It checks
+the loopback readiness endpoint and links the existing stdio bridge to a
+private snapshot of the selected profile. `stop` requests termination from
+that native supervisor without signalling a PID read from a record. Rust
+tests use a local stand-in runtime and exercise readiness and cleanup.
+
+Save the profile settings, including any key expiry, and import the first
+runtime key in separate invocations.
 The key is read from an owner-only file or from a terminal without echo.
 Unix saves it in an owner-only file. Windows protects it with user-scoped
 DPAPI. The setup lock serializes native writes to the store. An interrupted
