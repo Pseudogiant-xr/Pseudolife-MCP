@@ -10,22 +10,17 @@ Harness row: `move` (`rust/cli_harness/rows/move.py`). Oracle test:
 
 ## Scope
 
-Since the maintainer's ruling of 14 November 2026 (works, not matches),
-`move` is rebuilt as a native feature rather than ported. This row compares
-the two where they still answer alike: what the command decides from its
-argv before any effect. The native move is not compared (below): its
-transaction and rollback, its dry run (`--dry-run`: both hosts checked
-read-only, the target's half in the hidden `move-target` helper over ssh)
-and their own refusals. They are tested in Rust:
+The native move dispatcher handles help, argument refusals, dry runs,
+execution, resume, rollback and target release. This row replays its
+before-effect command-line answers. The transaction, including the dry run
+and its read-only checks on both hosts, has its own Rust tests:
 `restore_cli/move_native/engine_tests.rs` runs the transaction against a
 model of both hosts with a fault at every call;
 `restore_cli/move_native/tests.rs` and `ops.rs` use recording fakes; and
 `tests/cli_move_contract.rs` runs through the binary.
 
-`move --rollback <move id>` and `move --release-target <move id>` are native
-only: Python's move has neither option. The dispatcher reads those shapes
-before `move_cli`'s argparse checks, so the oracle's usage error for them is
-not compared either.
+`move --rollback <move id>` and `move --release-target <move id>` use
+the native recovery parser. The dispatcher checks their syntax first.
 
 ## What runs before the first effect (checked)
 
@@ -45,7 +40,6 @@ not compared either.
 
 | Item | Python source |
 |---|---|
-| `--help` / `-h` alone: argparse help on stdout, exit 0; only `COLUMNS=80` (wrap 78) is reproduced | `_parser` 1807-1829, `main` 1833-1836 |
 | No `--to` (every other token canonical): usage (3 lines) + `pseudolife-mcp move: error: the following arguments are required: --to`, stderr, exit 2; only at `COLUMNS=80` | `_parser` 1816 (`required=True`) |
 | `--target-url` given and not an origin: `move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 (no path, query or credentials)`, stderr, exit 2, before any `--to` check | `main` 1837-1844; `codex_connection.py:104-117` |
 | `--to` empty, or any `str.isspace` character: `move: --to takes an ssh target such as user@box or a ~/.ssh/config alias` (the frozen Python says `root@box`; the native text, since 16 November 2026, does not teach a root login), stderr, exit 2 (also under `--json`) | `main` 1848-1850 |
@@ -63,16 +57,15 @@ Unicode, not starting with `-`.
 
 ## Not compared (the native behaviour is by design)
 
-Each of these was a case of this row while the native command deferred:
-
 - Every argv that passes the checks above: the native module answers it.
   On Linux targets, `--dry-run` checks both bearer modes. It checks carried
   bearer settings against the installed Compose files or the original files
   supplied explicitly, without sending the source values. Execution requires
   an execution-capable target helper and a loopback daemon endpoint for
   carried-bearer verification. `--expose-target` checks or creates a
-  target tailnet forward when `--target-url` is omitted. Checkout targets,
-  a missing `--target-url` without `--expose-target`, and relative paths
+  target tailnet forward when `--target-url` is omitted. Checkout handover
+  receives an early refusal that points to the installed release route. A
+  missing `--target-url` without `--expose-target` and relative paths
   outside `~/` are refused (exit 2).
   The oracle would contact the live daemon, so these use the Rust tests.
 - `--target-url` values whose validity differs between Python releases
@@ -90,26 +83,19 @@ valid argv, which `tests/cli_move_contract.rs` pins; the other two are now
 equivalent mutants (each turns a `--to` refusal into a deferral, and the
 native module then prints the same `--to` refusal).
 
-## Deferred (the dispatcher's `mode 'move' is deferred` line, exit 1)
+## Native help and usage
 
-- Argparse shapes: `--opt=value`, abbreviations, repeated options,
-  positionals, a missing value, any value starting with `-` (so the oracle's
-  `--to` starts-with-`-` refusal, reachable only through `--to=-x`,
-  `--to -1`, `--to -` or a spaced value, always defers here), `--help` with
-  other arguments, help or usage at any `COLUMNS` other than `80`.
-- Non-Unicode argv.
-- Any non-ASCII argument when CPython would not decode a POSIX argv as
-  UTF-8: UTF-8 mode (`PYTHONUTF8=1`, or `PYTHONUTF8` unset or empty under
-  the C or POSIX locale, PEP 540) or a UTF-8 codeset in the first non-empty
-  of `LC_ALL`, `LC_CTYPE`, `LANG`. Otherwise the oracle decodes argv with the
-  locale codec and sees other characters. Windows argv is always exact.
-- argparse help when stdout is a terminal, and argparse usage when stderr
-  is a terminal, or either when `FORCE_COLOR`, `PYTHON_COLORS` or `NO_COLOR`
-  is set: newer CPython argparse colours its output there. The plain
-  `print` refusals are never coloured and stay answered.
-- An answer whose write fails before any byte is accepted (stderr on
-  `/dev/full`, a closed stdout): nothing was answered, so the dispatcher's
-  deferral follows (its own write fails too, exit 1).
+`--help` or `-h` alone prints the same help at every terminal width. The
+help describes installed release targets and the native recovery commands.
+The help cases replay the native goldens after this change from the
+frozen oracle.
+
+Unsupported arguments receive a native usage refusal on stderr (exit 2)
+before opening a move record or consulting either host. This includes
+`--opt=value`, abbreviations, unexpected repeated options or positionals,
+a missing value, non-Unicode argv and option values starting with `-`.
+Use full option names and pass values as separate arguments. The parser
+accepts repeated `--target-compose-file` entries in overlay order.
 
 ## Free items
 
@@ -117,11 +103,9 @@ None: every answered byte is compared.
 
 ## Declared divergence
 
-An answer whose write fails part-way exits 1 with the bytes already
-written. CPython's `print` raises there; its traceback write fails too and
-the exit is 1, or 120 when the final flush fails. Unit-tested only
-(`a_failed_answer_write_defers_only_when_nothing_left`): the harness has no
-stderr-on-`/dev/full` arm.
+An answer whose write fails exits 1, including when the stream accepts
+zero bytes. The partial and zero-byte cases use the writer fake in
+`a_failed_answer_write_ends_the_command`.
 
 The `--to` help and refusal give `user@box` as the example target, where
 the frozen oracle says `root@box`. Every case applies `move-native-wording`,
@@ -134,11 +118,11 @@ The oracle runs only argv that refuse before any effect, with `PATH` set to
 an empty directory and every proxy variable naming a recording listener;
 a once-per-process positive control proves the oracle's own HTTP reader
 (`move_cli.Runner.get_json`) reaches that listener for a loopback URL, so
-no request could reach the live daemon on 8765. The argv shapes that still
-defer run a verified stub `pseudolife_memory.cli` in the Python arm, never
-the oracle; the candidate must print the deferral and make no request. The
-Rust contract test `rust/shim/tests/cli_move_contract.rs` checks the native
-answers and the deferrals against a bound listener that every proxy and
+no request could reach the live daemon on 8765. The Python arm runs a
+verified stub for argv shapes the Python parser accepts but the native
+parser refuses. The candidate must print native usage and make no request.
+The Rust contract test `rust/shim/tests/cli_move_contract.rs` checks these
+answers against a bound listener that every proxy and
 daemon variable names, which must see no connection, with `PATH` holding
 nothing (no docker, no ssh), so a native dry run refuses at its first need,
 ssh, before any connection.
@@ -156,6 +140,6 @@ only the scan could catch it. Source mutants were retired on 17 November
 
 ## Hosted CI and goldens
 
-Both Parity lanes run the row live and against `goldens/move.<os>.json`.
+Both Parity lanes replay `goldens/move.<os>.json`.
 The guards above are unchanged on a runner: `PATH` points at an empty
 directory and every proxy variable at the recording listener.

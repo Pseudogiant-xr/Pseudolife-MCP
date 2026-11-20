@@ -1,10 +1,8 @@
 """CLI-MOVE-REFUSALS: the refusals ``pseudolife-mcp move`` makes before any effect.
 
-Answered: ``--help`` / ``-h`` alone and a missing ``--to`` (argparse, at
-COLUMNS=80); an invalid ``--target-url``; an empty ``--to`` or one holding
-whitespace or a control character; a ``--target-checkout`` holding CR or LF.
-Everything else defers, and every argv that passes the checks defers before
-any effect (the spec is ``move.md`` beside this file).
+This row replays native help and usage, invalid ``--target-url`` and
+``--to`` arguments, and a ``--target-checkout`` holding CR or LF. The
+transaction and recovery use separate Rust tests (see ``move.md``).
 
 Safety. The oracle's move reads the hardcoded ``http://127.0.0.1:8765``
 (the developer's live daemon) and, with ``--yes``, starts a real move, so
@@ -19,7 +17,7 @@ would bypass that listener, so every case also scans the candidate's own
 is a difference. A case whose argv passes validation
 (``ORACLE_NOT_RUN``) never runs the oracle: its Python arm runs a stub
 ``pseudolife_memory.cli`` placed first on ``PYTHONPATH``, verified before
-use, and the expectation is the Rust deferral with no request.
+use, and the expectation is the native usage refusal with no request.
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ from pathlib import Path
 from .. import normalize, producers
 from ..core import WINDOWS, Case
 
-DEFERRAL = "pseudolife-stdio: mode 'move' is deferred in this candidate\n"
+INVALID_ARGUMENTS = "move: invalid arguments. Use --help for supported forms and pass option values separately.\n"
 STUB_MARKER = "move row: the oracle was not run for this argv\n"
 # The native text (the frozen oracle still says root@box).
 BAD_TO = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n"
@@ -178,27 +176,23 @@ def oracle_not_run(obs: dict) -> None:
     """A valid argv: the oracle is not run (it would contact the live
     daemon). The Python arm must show it ran the stub and nothing else (exit
     0, the marker, no request, no file); it becomes the expectation that
-    the candidate prints the dispatcher's deferral and exits 1."""
+    the candidate prints native usage and exits 2."""
     if obs.get("arm") != "python":
         return
     if (obs["exit"], base64.b64decode(obs["stdout"]), base64.b64decode(obs["stderr"])) != (
             0, b"", _native(STUB_MARKER)):
         return  # left as observed: the comparison then fails
-    obs["exit"] = 1
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
+    obs["exit"] = 2
+    obs["stderr"] = base64.b64encode(_native(INVALID_ARGUMENTS)).decode()
 
 
-@normalize.rule("move-declared-deferral")
-def declared_deferral(obs: dict) -> None:
-    """The oracle answers (a refusal or argparse's help or usage, all before
-    any effect) but the candidate defers by design: the oracle's exit must
-    be 0 or 2 and it must have made no request; the expectation becomes the
-    deferral line, exit 1, the home unchanged."""
-    if obs.get("arm") != "python" or obs["exit"] not in (0, 2) or obs.get("requests"):
+@normalize.rule("move-native-usage-refusal")
+def native_usage_refusal(obs: dict) -> None:
+    """For a frozen-oracle usage refusal, expect the native usage message."""
+    if obs.get("arm") != "python" or obs["exit"] != 2 or obs.get("requests"):
         return
-    obs["exit"] = 1
     obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
+    obs["stderr"] = base64.b64encode(_native(INVALID_ARGUMENTS)).decode()
 
 
 # The native client's example target is user@box; the frozen oracle still
@@ -235,8 +229,8 @@ def _case(case_id: str, argv: list[str], *, rules: tuple[str, ...] = (), columns
     env.update({key: "http://127.0.0.1:{DAEMON_PORT}" for key in _PROXY_KEYS})
     if not oracle:
         env["PYTHONPATH"] = str(_STUB_ROOT)
-    # Only valid argv reaches docker or ssh, and the stub answers those; core's
-    # preflight proves PATH finds neither outside the home anyway.
+    # The stub covers argv the Python parser would accept. Core's preflight
+    # also proves PATH finds neither Docker nor SSH outside the fixture home.
     case = Case(case_id, ["move", *argv], env=env, daemon=_Recorder,
                 rules=("move-native-wording", *rules),
                 platforms=platforms, programs=("docker", "ssh"))
@@ -264,8 +258,8 @@ def _valid(case_id: str, argv: list[str]) -> Case:
     return _case(case_id, argv, rules=("move-oracle-not-run",), oracle=False)
 
 
-def _deferred(case_id: str, argv: list[str], **kwargs) -> Case:
-    return _case(case_id, argv, rules=("move-declared-deferral",), **kwargs)
+def _usage_refusal(case_id: str, argv: list[str], **kwargs) -> Case:
+    return _case(case_id, argv, rules=("move-native-usage-refusal",), **kwargs)
 
 
 GOOD_URL = "http://100.64.0.2:8765"
@@ -307,9 +301,9 @@ def cases() -> list[Case]:
     return [
         # tests/test_move_cli.py::test_usage_errors_exit_2, argv for argv
         _case("oracle-test-no-arguments", []),
-        _deferred("oracle-test-proxycommand", ["--to", "-oProxyCommand=evil"]),
+        _usage_refusal("oracle-test-proxycommand", ["--to", "-oProxyCommand=evil"]),
         _case("oracle-test-ftp-url", ["--to", "root@box", "--target-url", "ftp://x/y"]),
-        # argparse, reproduced at COLUMNS=80
+        # Native help and usage
         _case("help", ["--help"]),
         _case("help-short", ["-h"]),
         _case("missing-to-with-flags", ["--dry-run", "--yes", "--target-url", GOOD_URL]),
@@ -342,23 +336,22 @@ def cases() -> list[Case]:
         _case("checkout-newline", ["--to", "root@box", "--target-checkout", "/srv/x\ny"]),
         _case("checkout-cr", ["--to", "root@box", "--target-checkout", "/srv/x\r"]),
         _case("checkout-cr-slashes", ["--to", "root@box", "--target-checkout", "\r//", "--yes"]),
-        # the oracle refuses before any effect; the candidate defers by design
-        _deferred("defer-help-columns", ["--help"], columns="100"),
-        _deferred("defer-missing-to-columns", ["--yes"], columns="120"),
-        _deferred("defer-missing-value", ["--to"]),
-        _deferred("defer-to-dash", ["--to", "-"]),
-        _deferred("defer-to-negative-number", ["--to", "-1"]),
-        _deferred("defer-to-joined-dash", ["--to=-x"]),
-        _deferred("defer-unknown-flag", ["--to", "root@box", "--bogus"]),
-        _deferred("defer-positional", ["--to", "root@box", "extra"]),
+        # Keep the historical case IDs for the candidate goldens.
+        _case("defer-help-columns", ["--help"], columns="100"),
+        _usage_refusal("defer-missing-to-columns", ["--yes"], columns="120"),
+        _usage_refusal("defer-missing-value", ["--to"]),
+        _usage_refusal("defer-to-dash", ["--to", "-"]),
+        _usage_refusal("defer-to-negative-number", ["--to", "-1"]),
+        _usage_refusal("defer-to-joined-dash", ["--to=-x"]),
+        _usage_refusal("defer-unknown-flag", ["--to", "root@box", "--bogus"]),
+        _usage_refusal("defer-positional", ["--to", "root@box", "extra"]),
         _case("url-invalid-bracket-unclosed", ["--to", "a b", "--target-url", "http://[::1"]),
         # a value starting with '-' is argparse's "expected one argument"
-        _deferred("defer-url-dash-value", ["--to", "box", "--target-url", "-x"]),
-        _deferred("defer-checkout-dash-newline", ["--to", "box", "--target-checkout", "-\n"]),
-        _deferred("defer-to-dash-control", ["--to", "-\x01"]),
+        _usage_refusal("defer-url-dash-value", ["--to", "box", "--target-url", "-x"]),
+        _usage_refusal("defer-checkout-dash-newline", ["--to", "box", "--target-checkout", "-\n"]),
+        _usage_refusal("defer-to-dash-control", ["--to", "-\x01"]),
         *_url_cases(),
-        # argv shapes the native parser does not take: the candidate defers;
-        # the oracle is never run
+        # The native parser refuses these before effects; the oracle is stubbed.
         _valid("defer-joined-to", ["--to=root@box"]),
         _valid("defer-abbreviation", ["--dry", "--to", "root@box"]),
         _valid("defer-repeated-flag", ["--yes", "--yes", "--to", "root@box"]),

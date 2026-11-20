@@ -3,8 +3,8 @@
 //! `move_cli.rs` decides the oracle's refusals first; every argv it passes
 //! on comes here. This parser takes only the canonical spellings (each
 //! option by its full name, a value as the next argument not starting with
-//! `-`, a flag at most once); any other shape returns `None` and keeps the
-//! dispatcher's deferral (the edge-shape sweep is separate work).
+//! `-`, a flag at most once); any other shape returns `None` for the
+//! dispatcher's native usage refusal.
 use super::carry::TargetFiles;
 use std::ffi::OsString;
 
@@ -33,7 +33,7 @@ pub(super) struct Request {
     pub resume_expose_port: Option<u16>,
 }
 
-/// The canonical argv, or `None` (the dispatcher defers it).
+/// The canonical argv, or `None` for the native usage refusal.
 pub(super) fn parse(arguments: &[OsString]) -> Option<Request> {
     let words: Vec<&str> = arguments
         .iter()

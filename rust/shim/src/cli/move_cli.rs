@@ -1,10 +1,9 @@
 //! `move`: the refusals `pseudolife-mcp move` makes before any effect.
 //!
 //! Oracle: `pseudolife_memory/move_cli.py` (`_parser`, `main` and the first
-//! two checks of `Mover.run`). Every argv that passes those checks goes on to
-//! read the source daemon's `/health`, run docker and ssh, and start a move,
-//! so it defers here. The decision is made from argv and the environment
-//! alone, and this module does no I/O beyond writing its one answer to
+//! two checks of `Mover.run`). This leaf prints native help and preserves
+//! the established early refusals. The native transaction handles accepted
+//! move arguments. This module does no I/O beyond writing its answer to
 //! stdout or stderr (`tests/cli_move_contract.rs` scans it for that).
 use std::{
     ffi::OsString,
@@ -21,10 +20,10 @@ const HELP: &str = concat!(
     "                           [--target-work-dir TARGET_WORK_DIR] [--yes]\n",
     "                           [--json]\n",
     "\n",
-    "Move this host's Docker-tier bank to another Docker host with an owning\n",
-    "checkout or installed CLI over key-based ssh: preflight, final backup from the\n",
-    "stopped source, database fence, restore and verify on the target, start it\n",
-    "once, re-point this machine's clients. A failure rolls back. Exit codes: 0\n",
+    "Move this host's Docker-tier bank to an installed release deployment over\n",
+    "key-based ssh. The target needs the native pseudolife-mcp client. The move\n",
+    "backs up and fences the stopped source, verifies the restored bank, starts\n",
+    "the target and re-points this machine's clients. Exit codes: 0\n",
     "moved, 1 failed and rolled back, 2 usage or not confirmed, 4 refused before\n",
     "any change, 5 moved but re-pointing failed, 6 failed and the rollback could\n",
     "not finish. Run it under tmux, screen or nohup.\n",
@@ -34,10 +33,10 @@ const HELP: &str = concat!(
     "  --to SSH-TARGET       the target host as ssh takes it (user@box, or a\n",
     "                        ~/.ssh/config alias)\n",
     "  --target-checkout PATH\n",
-    "                        the checkout on the target (default ~/src/Pseudolife-\n",
-    "                        MCP)\n",
-    "  --target-url URL      the URL clients will use for the target (default: its\n",
-    "                        `expose status`)\n",
+    "                        checkout handover option; use an installed release\n",
+    "                        target with the native client\n",
+    "  --target-url URL      the URL clients will use for the target; required\n",
+    "                        unless you pass --expose-target\n",
     "  --no-keep-tokens      do not carry the environment identities; invite each\n",
     "                        machine on the target again\n",
     "  --resume              overwrite the half-restored bank an earlier attempt of\n",
@@ -58,7 +57,14 @@ const HELP: &str = concat!(
     "                        checkouts\n",
     "  --yes                 confirm the bank move (exposure needs --expose-target)\n",
     "  --json                one JSON report on stdout\n",
+    "\n",
+    "Recovery:\n",
+    "  pseudolife-mcp move --rollback MOVE-ID [--yes] [--json]\n",
+    "  pseudolife-mcp move --release-target MOVE-ID [--target-gone] [--yes] [--json]\n",
+    "  Use --resume on the original move command to retry after a rollback.\n",
 );
+const INVALID_ARGUMENTS: &str =
+    "move: invalid arguments. Use --help for supported forms and pass option values separately.\n";
 const REQUIRED: &str = "pseudolife-mcp move: error: the following arguments are required: --to\n";
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 \
@@ -82,18 +88,17 @@ pub(super) struct Context<'a> {
     /// CPython decodes this argv as UTF-8 (see `utf8_argv`).
     pub(super) utf8_argv: bool,
     /// argparse could colour what it writes to stdout / stderr.
-    pub(super) colour_stdout: bool,
     pub(super) colour_stderr: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Decision {
-    /// argparse's help on stdout, exit 0.
+    /// Native help on stdout, exit 0.
     Help,
     /// One refusal on stderr, exit 2 (`EXIT_USAGE`): argparse's usage error
     /// or one of `main` / `Mover.run`'s messages.
     Refuse(String),
-    /// Everything else: the dispatcher's deferral line, exit 1.
+    /// Pass the arguments to the native transaction parser.
     Defer,
 }
 
@@ -264,7 +269,7 @@ pub(super) fn utf8_argv() -> bool {
     cfg!(windows) || posix_utf8_argv(|name| std::env::var(name).ok())
 }
 
-/// argparse colours its help and usage on a terminal, or as `FORCE_COLOR`,
+/// argparse colours its usage on a terminal, or as `FORCE_COLOR`,
 /// `PYTHON_COLORS` and `NO_COLOR` say (newer CPython); any of them set defers.
 pub(super) fn colour_env(var: impl Fn(&str) -> bool) -> bool {
     ["FORCE_COLOR", "PYTHON_COLORS", "NO_COLOR"]
@@ -276,17 +281,13 @@ pub(super) fn colour_env(var: impl Fn(&str) -> bool) -> bool {
 /// check, `main`'s `--to` check, then `Mover.run`'s `--to` and
 /// `--target-checkout` checks.
 pub(super) fn decide(arguments: &[String], context: &Context<'_>) -> Decision {
+    if matches!(arguments, [only] if only == "--help" || only == "-h") {
+        return Decision::Help;
+    }
     let wrapped_at_80 = context.columns == Some("80");
     // Outside UTF-8 decoding CPython sees other characters than these.
     if !context.utf8_argv && !arguments.iter().all(|argument| argument.is_ascii()) {
         return Decision::Defer;
-    }
-    if matches!(arguments, [only] if only == "--help" || only == "-h") {
-        return if wrapped_at_80 && !context.colour_stdout {
-            Decision::Help
-        } else {
-            Decision::Defer
-        };
     }
     let Some(args) = parse(arguments) else {
         return Decision::Defer;
@@ -357,18 +358,22 @@ pub(super) fn emit(out: &mut impl Write, bytes: &[u8]) -> Result<(), usize> {
     out.flush().map_err(|_| written)
 }
 
-/// A write that failed before any byte left defers: nothing was answered
-/// yet. One that failed part-way exits 1, where CPython raises from
-/// `print` (its traceback write fails too; the exit is 1 or 120).
-pub(super) fn settle(code: u8, written: Result<(), usize>) -> Option<u8> {
-    match written {
-        Ok(()) => Some(code),
-        Err(0) => None,
-        Err(_) => Some(1),
-    }
+/// A failed answer write ends the command, including an empty write.
+fn settle(code: u8, written: Result<(), usize>) -> u8 {
+    if written.is_ok() { code } else { 1 }
 }
 
-/// `None` defers to the dispatcher before any effect.
+pub(super) fn invalid_arguments() -> u8 {
+    settle(
+        2,
+        emit(
+            &mut io::stderr().lock(),
+            &super::text_bytes(INVALID_ARGUMENTS),
+        ),
+    )
+}
+
+/// A missing answer passes the arguments to the native transaction parser.
 pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     let arguments = arguments
         .into_iter()
@@ -380,15 +385,18 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     let context = Context {
         columns: columns.as_deref(),
         utf8_argv: utf8_argv(),
-        colour_stdout: colour || io::stdout().is_terminal(),
         colour_stderr: colour || io::stderr().is_terminal(),
     };
     match decide(&arguments, &context) {
         Decision::Defer => None,
-        Decision::Help => settle(0, emit(&mut io::stdout().lock(), &super::text_bytes(HELP))),
-        Decision::Refuse(text) => {
-            settle(2, emit(&mut io::stderr().lock(), &super::text_bytes(&text)))
-        }
+        Decision::Help => Some(settle(
+            0,
+            emit(&mut io::stdout().lock(), &super::text_bytes(HELP)),
+        )),
+        Decision::Refuse(text) => Some(settle(
+            2,
+            emit(&mut io::stderr().lock(), &super::text_bytes(&text)),
+        )),
     }
 }
 
@@ -404,7 +412,6 @@ mod tests {
         Context {
             columns,
             utf8_argv: true,
-            colour_stdout: false,
             colour_stderr: false,
         }
     }
@@ -526,7 +533,7 @@ mod tests {
         }
         assert_eq!(
             decide(&argv(&["--help"]), &plain(Some("100"))),
-            Decision::Defer
+            Decision::Help
         );
         assert_eq!(decide(&argv(&[]), &plain(None)), Decision::Defer);
     }
@@ -597,19 +604,14 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_answer_write_defers_only_when_nothing_left() {
+    fn a_failed_answer_write_ends_the_command() {
         let text = BAD_TO.as_bytes();
-        // stderr on /dev/full: nothing was written, so nothing was answered.
-        assert_eq!(settle(2, emit(&mut Full { room: 0 }, text)), None);
-        // part of the answer left: CPython's print raised, exit 1 (or 120).
-        assert_eq!(settle(2, emit(&mut Full { room: 5 }, text)), Some(1));
+        assert_eq!(settle(2, emit(&mut Full { room: 0 }, text)), 1);
+        assert_eq!(settle(2, emit(&mut Full { room: 5 }, text)), 1);
         let mut sink = Vec::new();
-        assert_eq!(settle(2, emit(&mut sink, text)), Some(2));
+        assert_eq!(settle(2, emit(&mut sink, text)), 2);
         assert_eq!(sink, text);
-        assert_eq!(
-            settle(0, emit(&mut Full { room: 0 }, HELP.as_bytes())),
-            None
-        );
+        assert_eq!(settle(0, emit(&mut Full { room: 0 }, HELP.as_bytes())), 1);
     }
 
     #[test]
@@ -673,19 +675,17 @@ mod tests {
     }
 
     #[test]
-    fn argparse_output_defers_when_it_could_be_coloured() {
-        let tty_out = Context {
-            colour_stdout: true,
-            ..plain(Some("80"))
-        };
+    fn native_help_and_refusals_are_plain_on_a_terminal() {
         let tty_err = Context {
             colour_stderr: true,
             ..plain(Some("80"))
         };
-        assert_eq!(decide(&argv(&["--help"]), &tty_out), Decision::Defer);
         assert_eq!(decide(&argv(&["-h"]), &tty_err), Decision::Help);
         assert_eq!(decide(&argv(&["--yes"]), &tty_err), Decision::Defer);
-        assert_ne!(decide(&argv(&["--yes"]), &tty_out), Decision::Defer);
+        assert_ne!(
+            decide(&argv(&["--yes"]), &plain(Some("80"))),
+            Decision::Defer
+        );
         // main's own messages are plain print() calls: never coloured.
         let refusal = &["--to", ""][..];
         assert_eq!(

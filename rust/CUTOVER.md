@@ -42,8 +42,8 @@ gate below.
 | Published packages | The PyPI wheel, the Python daemon image, the PostgreSQL image, the Rust daemon image, the native archives on the GitHub release, and an MCP registry entry (`server.json`) that points at PyPI. | PyPI, the Python image and the registry entry |
 
 The generic dispatcher deferral prints `pseudolife-stdio: mode '<mode>' is
-deferred in this candidate` on stderr and exits 1. The only entries in
-`DEFERRED_MODES` in `rust/shim/src/cli.rs` are `tunnel` and `move`.
+deferred in this candidate` on stderr and exits 1. The only entry in
+`DEFERRED_MODES` in `rust/shim/src/cli.rs` is `tunnel`.
 The command exits at that point without starting the Python client.
 
 ## What is left
@@ -78,7 +78,7 @@ The command exits at that point without starting the Python client.
 | `expose` | Status, consent, Tailscale serve changes and read-back run natively. Malformed arguments get an actionable usage error before host access. (#1636, #1725) | — |
 | `test-login` | Help, argument checks, admin-URL and container setup, and private credential staging run natively. Preflight refusals name the failed condition. (#1727) | — |
 | `maintainer` | Guided setup and administration (`enrol-code`, `confirm`, `revoke`, `reset`, `list`) run natively. Invalid arguments and database settings receive named refusals. (#1730) | — |
-| `move` | On Linux Docker targets, preflight checks both bearer modes. Carried moves can use explicit original files. `--expose-target` can reuse a target tailnet forward or create one with a recovery receipt. Rollback and target release run natively. | Remaining checkout shapes and final recovery proofs. |
+| `move` | The native dispatcher owns help, argument refusals, dry runs, moves, resume, rollback and target release. On Linux Docker targets, preflight checks both bearer modes. Carried moves can use explicit original files. `--expose-target` can reuse a target tailnet forward or create one with a recovery receipt. Checkout handover receives an early refusal with the installed release route. | Installed acceptance matrix. |
 | `tunnel` | Native setup creates and resumes prepared profiles and imports or renews private keys. A renewal retains the previous pair until the replacement completes a control-plane poll. Setup can recover interrupted writes and explicitly restore or discard a retained pair. `tunnel run` supervises a foreground launch, `tunnel stop` requests shutdown, and verification binds receipts to the current native launch identity. | Background start, service registration, refresh and restart. |
 | `embedded` | A plain refusal: retired with file mode. | Nothing. |
 | `backup`, `restore`, `export`, `import`, `invite`, `maintainer`, `lease`, `board-audit` on a lite bank | One refusal that names the Docker install and the 0.23.x pip release that still opens the bank (`cli/retired.rs`). | Nothing. |

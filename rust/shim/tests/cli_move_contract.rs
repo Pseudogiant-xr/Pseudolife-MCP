@@ -2,8 +2,8 @@
 //! `move` without a daemon: argparse help and usage, the refusals made
 //! before any effect, the native answers to the argv that passes them (a
 //! dry run's own refusals, and its preflight refusing when no ssh is on an
-//! absolute PATH entry), and the deferral of shapes the native parser does
-//! not take. The differential proof against the Python oracle is the CLI
+//! absolute PATH entry), and native usage for unsupported argument shapes.
+//! The differential proof against the Python oracle is the CLI
 //! harness (`rust/cli_harness --row move`); the dry run against both hosts
 //! is unit-tested in `restore_cli/move_native/tests.rs`.
 #[path = "common/cli.rs"]
@@ -321,6 +321,8 @@ fn help_and_usage_at_80_columns() {
         let text = String::from_utf8(output.stdout).unwrap();
         assert!(text.starts_with(&String::from_utf8(cli::native_text(USAGE)).unwrap()));
         assert!(text.contains("--json                one JSON report on stdout"));
+        assert!(text.contains("move --rollback MOVE-ID"));
+        assert!(text.contains("move --release-target MOVE-ID"));
         // The example target is an ordinary account, never a root login.
         assert!(
             text.contains("(user@box, or a") && !text.contains("root@"),
