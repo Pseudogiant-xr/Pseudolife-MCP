@@ -895,8 +895,11 @@ undo uses the recorded deployment. Both clients must support carrying
 settings with explicit target files. When using `--no-keep-tokens`, leave the
 file flags off.
 
-**Not available in the native client yet:**
-- checkout targets (`--target-checkout`).
+**Checkout handover.** `--target-checkout` selects the contributor
+workflow that rebuilds from a source checkout and hands over the stopped
+daemon. Prepare an empty installed release Docker deployment with the
+native client on the target for a native move. Select it with
+`--target-release` and leave off `--target-checkout`.
 
 **Tailnet exposure during a native move.** Use `--expose-target` to use
 Tailscale Serve on the target's existing `127.0.0.1` HTTP port. A dry run
