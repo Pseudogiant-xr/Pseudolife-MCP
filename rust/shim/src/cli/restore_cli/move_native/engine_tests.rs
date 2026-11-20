@@ -460,7 +460,8 @@ impl Model {
             }
             Op::CheckExposureReceipt { port } => {
                 if let Some((folder, _)) = &self.exposure_fixture
-                    && let Err(why) = super::exposure::check_release_receipt(&folder.0, *port)
+                    && let Err(why) =
+                        super::exposure::check_release_receipt(&folder.0, *port, h.claim.is_none())
                 {
                     answer.ok = false;
                     answer.error = why;
@@ -755,7 +756,9 @@ impl Hosts for Model {
             });
         }
         let fault = self.enter(&what);
-        if matches!(request.op, Op::ExposeTarget { .. }) && fault == Some(Fault::Killed) {
+        if matches!(request.op, Op::ExposeTarget { .. })
+            && matches!(fault, Some(Fault::Killed | Fault::Refused))
+        {
             self.hosts.exposure_pending = true;
         }
         let result = match fault {
@@ -971,19 +974,11 @@ fn a_lost_exposure_reply_rolls_back_the_transfer_without_leaving_the_owned_forwa
         Fault::Refused,
     ] {
         let mut model = Model::new();
-        if fault == Fault::Refused {
-            use super::exposure::tests::{Fixture, Folder};
-            model.exposure_fixture = Some((Folder::new(), Fixture::with_clean_refusal()));
-        } else {
-            model.fault = Some((call, fault));
-        }
-        let result = engine::execute(&mut model, &exposed, ID);
-        if fault == Fault::Refused {
-            assert_eq!(result.code, engine::EXIT_ROLLED_BACK, "{result:?}");
-        }
+        model.fault = Some((call, fault));
+        let _ = engine::execute(&mut model, &exposed, ID);
         let mut recovery = later(&model);
         let outcome = engine::roll_back(&mut recovery, model.record.unwrap());
-        if fault == Fault::Killed {
+        if matches!(fault, Fault::Killed | Fault::Refused) {
             assert_eq!(outcome.code, engine::EXIT_INCOMPLETE, "{fault:?}");
             assert!(recovery.hosts.exposure_pending);
         }
@@ -994,6 +989,15 @@ fn a_lost_exposure_reply_rolls_back_the_transfer_without_leaving_the_owned_forwa
         );
         assert!(recovery.violations.is_empty(), "{:?}", recovery.violations);
     }
+
+    use super::exposure::tests::{Fixture, Folder};
+    let mut clean = Model::new();
+    clean.exposure_fixture = Some((Folder::new(), Fixture::with_clean_refusal()));
+    let outcome = engine::execute(&mut clean, &exposed, ID);
+    assert_eq!(outcome.code, engine::EXIT_ROLLED_BACK, "{outcome:?}");
+    assert!(clean.hosts.source_running && !clean.hosts.target_running);
+    assert!(!clean.hosts.exposure_pending && !clean.hosts.exposure_owned);
+    assert!(clean.violations.is_empty());
 }
 
 #[test]
@@ -1925,36 +1929,81 @@ fn release_closes_a_detached_move_with_a_settled_receipt() {
         tests::{Fixture, Folder},
     };
 
-    for ownership in ["absent", "removed", "borrowed", "owned"] {
+    for (receipt, cause) in [
+        ("absent", None),
+        ("removed", None),
+        ("borrowed", None),
+        ("owned", Some("records a forward owned by this move")),
+        ("pending", Some("target exposure outcome is unknown")),
+        ("unreadable", Some("could not be read")),
+        ("malformed", Some("is unreadable JSON")),
+        ("wrong port", Some("names a different port")),
+        ("other claim", Some("records a forward owned by this move")),
+        ("lost link", Some("ssh lost the link")),
+    ] {
         let mut model = parked_move();
         let mut record = model.record.take().unwrap();
+        let open_phase = record.phase;
         record.expose_port = Some(8765);
         record.flags.exposure_started = true;
         model.hosts.bank = Bank::Empty;
-        model.hosts.claim = None;
+        model.hosts.claim = (receipt == "other claim").then(|| "other-move".into());
         model.hosts.gated = false;
         model.hosts.target_running = true;
         let folder = Folder::new();
         let mut fixture = Fixture::default();
-        if ownership == "borrowed" {
-            fixture.url = Some("http://100.64.0.7:8765".into());
-        }
-        if ownership != "absent" {
-            exposure::create(&mut fixture, &folder.0, 8765).unwrap();
-        }
-        if ownership == "removed" {
-            exposure::undo(&mut fixture, &folder.0, 8765).unwrap();
+        match receipt {
+            "absent" => {}
+            "unreadable" => std::fs::create_dir(folder.0.join("exposure.json")).unwrap(),
+            "malformed" => std::fs::write(folder.0.join("exposure.json"), b"{").unwrap(),
+            "wrong port" => std::fs::write(
+                folder.0.join("exposure.json"),
+                br#"{"port":8766,"ownership":"removed"}"#,
+            )
+            .unwrap(),
+            "lost link" => model.lost.push(("target check-exposure-receipt", 1)),
+            _ => {
+                if receipt == "borrowed" {
+                    fixture.url = Some("http://100.64.0.7:8765".into());
+                }
+                fixture.lose_create_result = receipt == "pending";
+                assert_eq!(
+                    exposure::create(&mut fixture, &folder.0, 8765).is_err(),
+                    receipt == "pending"
+                );
+                if receipt == "removed" {
+                    exposure::undo(&mut fixture, &folder.0, 8765).unwrap();
+                }
+            }
         }
         model.exposure_fixture = Some((folder, fixture));
         let before = model.hosts.clone();
         let result = engine::release_target(&mut model, record);
-        if ownership == "owned" {
-            assert_eq!(result.code, engine::EXIT_INCOMPLETE, "{result:?}");
+        if let Some(cause) = cause {
+            assert_eq!(
+                result.code,
+                engine::EXIT_INCOMPLETE,
+                "{receipt}: {result:?}"
+            );
+            assert_eq!(model.record.as_ref().unwrap().phase, open_phase);
+            assert!(result.message.contains(cause), "{receipt}: {result:?}");
             assert!(result.message.contains("record.json.closed"));
-            assert!(result.message.contains("settle-exposure"));
+            assert!(
+                result
+                    .message
+                    .contains("without a source record tracking it")
+            );
             assert!(!result.message.contains("Keep the target stopped and gated"));
+            assert!(!result.message.contains("After the receipt is settled"));
+            if matches!(receipt, "owned" | "pending") {
+                assert!(result.message.contains("settle-exposure"));
+            }
+            if receipt == "other claim" {
+                assert!(result.message.contains("Leave the forward in place"));
+                assert!(!result.message.contains("expose off --port"));
+            }
         } else {
-            assert_eq!(result.code, engine::EXIT_OK, "{ownership}: {result:?}");
+            assert_eq!(result.code, engine::EXIT_OK, "{receipt}: {result:?}");
             assert_eq!(model.record.unwrap().phase, Phase::Released);
         }
         assert_eq!(model.hosts, before);
@@ -1962,7 +2011,7 @@ fn release_closes_a_detached_move_with_a_settled_receipt() {
             model
                 .log
                 .iter()
-                .any(|line| line.ends_with("target check-exposure-receipt"))
+                .any(|line| line.contains(": target check-exposure-receipt"))
         );
     }
 }

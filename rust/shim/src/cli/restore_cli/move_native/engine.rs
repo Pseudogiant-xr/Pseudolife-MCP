@@ -1610,7 +1610,7 @@ impl<H: Hosts> Back<'_, H> {
                 return Outcome {
                     code: EXIT_INCOMPLETE,
                     message: format!(
-                        "release did not finish: {why}. After the receipt is settled, rerun pseudolife-mcp move --release-target {id}.\n  If recovery cannot continue, {resort}"
+                        "release did not finish: {why}.\n  After addressing the reported issue, rerun pseudolife-mcp move --release-target {id}.\n  If recovery cannot continue, {resort}. Renaming the record may leave this move's tailnet forward on the target without a source record tracking it. Check and settle the exposure before starting any daemon there. Preserve any forward another move is using."
                     ),
                 };
             }
@@ -2357,8 +2357,7 @@ fn manual_target_selection(record: &Record) -> Option<String> {
     }
 }
 
-/// The last way to close a record whose target keeps refusing: on this
-/// host, by hand, with what it leaves on the target.
+/// Close only the source record by hand.
 fn close_source_record(record: &Record) -> String {
     format!(
         "the last resort is on this host: rename {} to record.json.closed, which closes this host's record of move {} so it no longer holds this host",
@@ -2367,6 +2366,8 @@ fn close_source_record(record: &Record) -> String {
     )
 }
 
+/// The last way to close a record whose target keeps refusing, including
+/// what it leaves on the target.
 fn last_resort(record: &Record) -> String {
     let exposure = if record.expose_port.is_some() && !record.flags.exposure_settled_for_release {
         ". First settle the recorded exposure before starting any daemon on that target."

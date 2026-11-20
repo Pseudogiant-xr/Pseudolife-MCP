@@ -1094,7 +1094,9 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
     let folder = base.join(&request.move_id);
     let op = &request.op;
     if let Op::CheckExposureReceipt { port } = op {
-        return exposure::check_release_receipt(&folder, *port).map_or_else(failed, |()| done());
+        let unclaimed = matches!(read_claim(&claims), Ok(None));
+        return exposure::check_release_receipt(&folder, *port, unclaimed)
+            .map_or_else(failed, |()| done());
     }
     if op.changes() {
         // A --target-work-dir the user named keeps its own permissions: only
@@ -1644,6 +1646,43 @@ mod tests {
         Op::Claim {
             source_bank: bank.into(),
             resume: false,
+        }
+    }
+
+    #[test]
+    fn receipt_check_preserves_the_forward_with_a_claim_or_unreadable_claim() {
+        let mut fake = Fake::new(|_| panic!("receipt check called Docker"));
+        let base = fake.base();
+        let folder = base.join(ID);
+        std::fs::create_dir_all(&folder).unwrap();
+        let receipt = br#"{"port":8765,"ownership":"owned","url":"http://100.64.0.7:8765"}"#;
+        let path = folder.join("exposure.json");
+        std::fs::write(&path, receipt).unwrap();
+
+        for claim in [
+            None,
+            Some(
+                serde_json::to_vec(&Claim {
+                    move_id: OTHER.into(),
+                    ..Claim::default()
+                })
+                .unwrap(),
+            ),
+            Some(b"{".to_vec()),
+        ] {
+            if let Some(bytes) = &claim {
+                std::fs::write(base.join(CLAIM), bytes).unwrap();
+            }
+            let answer = act(&mut fake, ID, Op::CheckExposureReceipt { port: 8765 });
+            assert!(!answer.ok, "{answer:?}");
+            assert_eq!(answer.error.contains("expose off --port"), claim.is_none());
+            assert_eq!(
+                answer.error.contains("Leave the forward in place"),
+                claim.is_some()
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), receipt);
+            assert_eq!(std::fs::read(base.join(CLAIM)).ok(), claim);
+            assert!(!folder.join("ops.jsonl").exists());
         }
     }
 
