@@ -1,6 +1,7 @@
 """Exercise the oracle side of native transport rows with real child processes."""
 import sys
 import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -137,7 +138,16 @@ def test_recovery_bank_setup_runs_without_frozen_imports(monkeypatch, recovery_r
     monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
     admin, target = MagicMock(), MagicMock()
     admin.execute.return_value.fetchone.return_value = None
-    target.execute.return_value.fetchone.return_value = (name,)
+    reply = MagicMock()
+    reply.fetchone.return_value = (name,)
+    rows = json.loads(row._HISTORY.read_text(encoding="utf-8"))["variants"][kind]["rows"]
+
+    def execute(statement, params=None):
+        if isinstance(statement, str) and statement.startswith("SELECT a.attname "):
+            return [(column,) for column in rows[params[0]][0]]
+        return reply
+
+    target.execute.side_effect = execute
     monkeypatch.setattr(row, "_admin", lambda: nullcontext(admin))
     monkeypatch.setattr(row, "_url", lambda _: "fixture-only")
     monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: nullcontext(target))
@@ -149,6 +159,24 @@ def test_recovery_bank_setup_runs_without_frozen_imports(monkeypatch, recovery_r
     assert target.execute.call_args_list[-1] == call(
         "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
     )
+
+
+def test_recovery_seed_checks_live_columns(recovery_row, monkeypatch):
+    from unittest.mock import MagicMock
+
+    row = recovery_row
+    name = row.NAMES.name("r1_fixture", max_length=63)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    conn = MagicMock()
+    reply = MagicMock()
+    reply.fetchone.return_value = (name,)
+    captured = json.loads(row._HISTORY.read_text(encoding="utf-8"))["variants"]["recover"]["rows"]
+    columns = captured["coordination_agents"][0].keys() - {"credential_hash"}
+    conn.execute.side_effect = [reply, None, None, [(column,) for column in columns], None]
+    with pytest.raises(ValueError, match="public.coordination_agents .*unexpected credential_hash"):
+        row._seed_history(conn, name, "recover")
+    assert len(conn.execute.call_args_list) == 4
 
 
 @pytest.mark.parametrize("damage,reason", [

@@ -18,16 +18,14 @@ import time
 from pathlib import Path
 
 from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
+from rust.harness_support.fixture_rows import insert_fixture_rows
 
 from .. import core, normalize
 from . import _bank
 
 PREFIX = "pl_cf_w1c_maint_"
 ARM_DB = _bank.name(PREFIX + "arm")
-# Seed clock: a fixed whole minute, 2026-07-01T00:00:00Z, so seeded banks and
-# the goldens recorded from them are identical on every host and run. Mid
-# year: no common zone changes its UTC offset within two days of it. Windows
-# uses UTC timestamps, so the seed is independent of local years and zones.
+# The fixed clock used to capture the seed rows and date the session fixtures.
 T0 = 1782864000.0
 # The waiting cases' redemption clock: after every seed, before any run.
 HOOK_T = T0 + 3600.0
@@ -84,15 +82,6 @@ def _require_bank(conn, name):
         raise ValueError("server reported a different database from the owned maintainer fixture")
 
 
-def _insert_rows(conn, table, rows):
-    from psycopg import sql
-    from psycopg.types.json import Json
-
-    ident = sql.Identifier("public", table)
-    conn.execute(sql.SQL("INSERT INTO {} SELECT * FROM json_populate_recordset(NULL::{}, %s)")
-                 .format(ident, ident), (Json(rows),))
-
-
 def _validate_rows(rows, expected):
     if {table: len(records) for table, records in rows.items()} != expected:
         raise ValueError("incomplete or unexpected maintainer fixture rows")
@@ -107,7 +96,7 @@ def _seed(conn, name, kind):
     with conn.transaction():
         for table in _SEED_TABLES:
             if table in rows:
-                _insert_rows(conn, table, rows[table])
+                insert_fixture_rows(conn, table, rows[table])
 
 
 _BASELINE: dict[str, dict] = {}
@@ -356,6 +345,8 @@ def redeem_during(arm, proc) -> None:
         stored = _live_code(conn, proc)
         if stored is None:
             return
+        # Both waiting cases copy the fresh bank. Its only captured row is
+        # the fixture secret, so the CLI's new code is the only bootstrap row.
         capture = _fixture()["hooks"]["redeem"]
         nonce, key, event = ("maintainer_nonces", "maintainer_passkeys", "coordination_events")
         rows, status = capture["rows"], capture["status"]
@@ -366,9 +357,9 @@ def redeem_during(arm, proc) -> None:
         # The waiting CLI publishes the code before the hook runs. Keep its
         # actual hash and expiry while replaying the captured Console effects.
         with conn.transaction():
-            _insert_rows(conn, nonce, rows[nonce])
+            insert_fixture_rows(conn, nonce, rows[nonce])
             conn.execute("LOCK TABLE maintainer_passkeys IN SHARE ROW EXCLUSIVE MODE")
-            _insert_rows(conn, key, rows[key])
+            insert_fixture_rows(conn, key, rows[key])
             changed = conn.execute(
                 "UPDATE maintainer_bootstrap SET used_at=%s,credential_id=%s "
                 "WHERE code_hash=%s AND used_at IS NULL AND expires_at>=%s AND failed_attempts=0",
@@ -376,7 +367,7 @@ def redeem_during(arm, proc) -> None:
             ).rowcount
             if changed != 1:
                 raise RuntimeError("maintainer fixture did not redeem the waiting code")
-            _insert_rows(conn, event, rows[event])
+            insert_fixture_rows(conn, event, rows[event])
 
 
 def burn_during(arm, proc) -> None:
@@ -385,6 +376,7 @@ def burn_during(arm, proc) -> None:
         stored = _live_code(conn, proc)
         if stored is None:
             return
+        # As in redeem_during, the waiting command started on a fresh copy.
         capture = _fixture()["hooks"]["burn"]
         if capture != {"rows": {}, "status": {"credential_id": None,
                                                 "failed_attempts": 5, "used_at": None}}:

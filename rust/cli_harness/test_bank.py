@@ -99,6 +99,26 @@ def test_two_interpreters_allocate_distinct_row_names():
     assert all(_bank._NAME.fullmatch(name) for name in names)
 
 
+@pytest.mark.parametrize("fixture_row,expected_message", [
+    ({"known": None, "old": 2}, "missing added, unexpected old"),
+    ({"known": None}, "missing added, unexpected none"),
+    ({"known": None, "added": 1, "old": 2}, "missing none, unexpected old"),
+])
+def test_fixture_column_check_rejects_any_mismatched_row(fixture_row, expected_message):
+    from unittest.mock import MagicMock
+
+    from rust.harness_support.fixture_rows import insert_fixture_rows
+
+    conn = MagicMock()
+    conn.execute.side_effect = [None, [("added",), ("known",)], None]
+    with pytest.raises(ValueError, match="public.fixture_table fixture row 2 column mismatch") as error:
+        insert_fixture_rows(conn, "fixture_table", [{"known": None, "added": 1}, fixture_row])
+    assert expected_message in str(error.value)
+    lock, catalog = conn.execute.call_args_list
+    assert lock.args[0].as_string() == 'LOCK TABLE "public"."fixture_table" IN ROW EXCLUSIVE MODE'
+    assert catalog.args[1] == ("fixture_table",)
+
+
 @pytest.fixture
 def maintainer_fixture(monkeypatch):
     import atexit
@@ -124,19 +144,43 @@ def maintainer_fixture(monkeypatch):
 @pytest.mark.parametrize("kind", ["fresh", "stale", "pending", "rich"])
 def test_maintainer_seed_runs_with_frozen_imports_blocked(maintainer_fixture, monkeypatch, kind):
     from contextlib import nullcontext
-    from unittest.mock import MagicMock, call
+    from unittest.mock import MagicMock, call, patch
 
     row = maintainer_fixture
     name = row._name(kind)
+    expected = row._fixture()["seeds"][kind]
     conn = MagicMock()
-    conn.execute.return_value.fetchone.return_value = (name,)
+    reply = MagicMock()
+    reply.fetchone.return_value = (name,)
+
+    def execute(statement, params=None):
+        if isinstance(statement, str) and statement.startswith("SELECT a.attname "):
+            return [(column,) for column in expected[params[0]][0]]
+        return reply
+
+    conn.execute.side_effect = execute
     monkeypatch.setattr(_bank, "create", MagicMock())
     monkeypatch.setattr(_bank, "connect", lambda *a, **kw: nullcontext(conn))
     monkeypatch.setattr(_bank, "dump", lambda _: {"seeded": True})
-    assert row.ensure(kind) == name
+    with patch.object(row, "insert_fixture_rows", wraps=row.insert_fixture_rows) as insert:
+        assert row.ensure(kind) == name
+    assert insert.call_args_list == [call(conn, table, expected[table])
+                                    for table in row._SEED_TABLES if table in expected]
     assert conn.execute.call_args_list[0] == call("SELECT current_database()")
     conn.transaction.assert_called_once_with()
-    assert conn.execute.call_count > 1
+
+
+def test_maintainer_seed_checks_live_columns(maintainer_fixture):
+    from unittest.mock import MagicMock
+
+    row = maintainer_fixture
+    conn = MagicMock()
+    reply = MagicMock()
+    reply.fetchone.return_value = (row.ARM_DB,)
+    conn.execute.side_effect = [reply, None, [("key",), ("value",), ("new_default",)], None]
+    with pytest.raises(ValueError, match="public.meta .*missing new_default"):
+        row._seed(conn, row.ARM_DB, "fresh")
+    assert len(conn.execute.call_args_list) == 3
 
 
 @pytest.mark.parametrize("server_name", ["pseudolife_memory", "pseudolife_bench", "pl_cf_other_run"])
@@ -241,31 +285,53 @@ def test_maintainer_successful_fixture_paths_are_import_free(maintainer_fixture,
     assert conn.execute.call_args.args[0].startswith(last)
 
 
-def test_maintainer_seed_refuses_missing_pending_key(maintainer_fixture, monkeypatch):
+@pytest.mark.parametrize("fixture_change,reason", [
+    ("missing-passkey", "incomplete or unexpected maintainer fixture rows"),
+    ("wrong-secret-key", "maintainer fixture is missing its secret row"),
+])
+def test_maintainer_seed_refuses_incomplete_data(maintainer_fixture, monkeypatch, fixture_change, reason):
     from unittest.mock import MagicMock
 
     row = maintainer_fixture
     conn = MagicMock()
-    conn.execute.return_value.fetchone.return_value = (row.ARM_DB,)
+    reply = MagicMock()
+    reply.fetchone.return_value = (row.ARM_DB,)
     fixture = row._fixture()
-    del fixture["seeds"]["pending"]["maintainer_passkeys"]
+    pending = fixture["seeds"]["pending"]
+    if fixture_change == "missing-passkey":
+        del pending["maintainer_passkeys"]
+    else:
+        pending["meta"][0]["key"] = "wrong_key"
     monkeypatch.setattr(row, "_fixture", lambda: fixture)
-    with pytest.raises(ValueError, match="incomplete or unexpected maintainer fixture rows"):
+
+    def execute(statement, params=None):
+        if isinstance(statement, str) and statement.startswith("SELECT a.attname "):
+            return [(column,) for column in pending[params[0]][0]]
+        return reply
+
+    conn.execute.side_effect = execute
+    with pytest.raises(ValueError, match=reason):
         row._seed(conn, row.ARM_DB, "pending")
     conn.execute.assert_called_once_with("SELECT current_database()")
     conn.transaction.assert_not_called()
 
 
 @pytest.mark.parametrize("operation", ["redeem", "burn"])
-def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture, monkeypatch, operation):
+@pytest.mark.parametrize("scenario", ["success", "missing-code", "invalid-capture"])
+def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture, monkeypatch, operation, scenario):
     from contextlib import contextmanager, nullcontext
     from unittest.mock import MagicMock
 
     row = maintainer_fixture
     conn = MagicMock()
     observed = "fixture-code-hash"
-    response = MagicMock(rowcount=1)
+    response = MagicMock(rowcount=0 if scenario == "missing-code" else 1)
     response.fetchone.side_effect = [(row.ARM_DB,), (observed,)]
+    fixture = row._fixture()
+    capture = fixture["hooks"][operation]
+    if scenario == "invalid-capture":
+        capture["status"]["failed_attempts"] = -1
+        monkeypatch.setattr(row, "_fixture", lambda: fixture)
     in_transaction = False
     transactions = []
 
@@ -280,6 +346,8 @@ def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture,
             in_transaction = False
 
     def execute(statement, *args):
+        if isinstance(statement, str) and statement.startswith("SELECT a.attname "):
+            return [(column,) for column in capture["rows"][args[0][0]][0]]
         if not isinstance(statement, str) or statement.startswith(("UPDATE ", "LOCK ")):
             transactions.append(in_transaction)
         return response
@@ -288,11 +356,23 @@ def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture,
     conn.execute.side_effect = execute
     connect = MagicMock(return_value=nullcontext(conn))
     monkeypatch.setattr(_bank, "connect", connect)
-    insert = MagicMock(wraps=row._insert_rows)
-    monkeypatch.setattr(row, "_insert_rows", insert)
+    insert = MagicMock(wraps=row.insert_fixture_rows)
+    monkeypatch.setattr(row, "insert_fixture_rows", insert)
     process = MagicMock()
     process.poll.return_value = None
-    getattr(row, operation + "_during")(None, process)
+    during = getattr(row, operation + "_during")
+    if scenario == "invalid-capture":
+        description = "redemption" if operation == "redeem" else "burn"
+        with pytest.raises(ValueError, match=f"invalid maintainer {description} fixture"):
+            during(None, process)
+        assert not transactions
+        return
+    if scenario == "missing-code":
+        with pytest.raises(RuntimeError, match=f"did not {operation} the waiting code"):
+            during(None, process)
+        assert transactions == ([True] * 6 if operation == "redeem" else [False])
+        return
+    during(None, process)
     connect.assert_called_once_with(row.ARM_DB, autocommit=True)
     updates = [call.args[1] for call in conn.execute.call_args_list if isinstance(call.args[0], str)
                and call.args[0].startswith("UPDATE maintainer_bootstrap")]
@@ -302,7 +382,7 @@ def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture,
             "maintainer_nonces", "maintainer_passkeys", "coordination_events",
         ]
         conn.transaction.assert_called_once_with()
-        assert transactions == [True] * 5
+        assert transactions == [True] * 8
     else:
         assert updates == [(observed, row.HOOK_T, attempt) for attempt in range(5)]
         insert.assert_not_called()

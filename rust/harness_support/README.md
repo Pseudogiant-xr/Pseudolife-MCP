@@ -9,6 +9,8 @@ and process lifecycle belong with their respective owners.
 HTTP readiness, and `schema.py` executes the daemon's committed schema plan.
 `bank_fixture.py` uses that plan and seeds the built-in relations and writer
 epoch for the dream, graph and principal harnesses.
+`fixture_rows.py` checks captured row keys against the live public-table
+columns before inserting them inside a guarded fixture transaction.
 Fixture writes require a server-confirmed disposable name in the
 `pl_cf_<slice>_<name>` namespace. The shared production-bank guard still
 applies.
