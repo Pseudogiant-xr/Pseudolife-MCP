@@ -172,7 +172,6 @@ def make_home(root: Path, name: str, config_yaml: str | None) -> Path:
 def python_daemon(home: Path, port: int, env: dict[str, str]) -> Daemon:
     env = dict(env)
     env.setdefault("PSEUDOLIFE_MCP_PORT", str(port))  # a refusal case may set its own
-    env.setdefault("PL_HARNESS_STATIC_DIR", str(CONSOLE_DIST))
     argv = [sys.executable, "-m", "pseudolife_memory.cli", "serve"]
     if env.get("PL_HARNESS_STATIC_DIR") or env.get("PL_HARNESS_LOOPBACK_BIND"):
         setup = "import os,sys; from pathlib import Path; "
