@@ -325,7 +325,7 @@ fn run_inner(
         ));
     }
     if !version_is_newer(&latest, &current) {
-        update.refuse_import_noop()?;
+        update.refuse_import_noop(false)?;
         update.step(format!(
             "current: {current} is the newest release; nothing to do"
         ));
@@ -380,7 +380,7 @@ fn run_inner(
     let current = health_version(&health)?;
     update.report.current = Some(current.clone());
     if !version_is_newer(&latest, &current) {
-        update.refuse_import_noop()?;
+        update.refuse_import_noop(true)?;
         update.step(format!(
             "current: the daemon already runs {current} (another update moved it); nothing to do"
         ));

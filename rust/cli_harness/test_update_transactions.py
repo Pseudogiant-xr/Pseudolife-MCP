@@ -2074,6 +2074,13 @@ def test_interrupted_compose_replacement_keeps_pre_import_recovery(tmp_path, cut
         result = run_arm(repo, env, binary, [*args, "--rollback-tag", "retry-fixture"])
         assert result.returncode != 0, result.stdout
         assert Path(point["backup"]["dump"]).name in result.stdout, result.stdout
+        if cut == "original still running":
+            report = json.loads(result.stdout)
+            steps = "\n".join(report["steps"])
+            assert "The original daemon is still running" in steps
+            assert "pending-import" in steps and "then rerun the update" in steps
+            assert "--pull never" in steps and "pseudolife-mcp restore" not in steps
+            assert report["rollback"]["restore_required"] is False
         assert "backup" not in stages(json.loads(state_path.read_text()))
 
 
@@ -2100,6 +2107,88 @@ def test_unattended_does_not_accept_a_matching_version_after_unverified_rust_rec
         assert Path(original).name in result.stdout, result.stdout
         assert "to roll back to the imported bank" in result.stdout, result.stdout
         assert "backup" not in stages(json.loads(state_path.read_text()))
+
+
+@pytest.mark.parametrize("mode", ["attended", "unattended", "checkout"])
+def test_rollback_then_update_retires_the_pending_import_pointer(tmp_path, mode):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        state = json.loads(state_path.read_text())
+        original = state["running"]
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--engine", "rust", "--tag", "0.25.0", "--json",
+                                             "--health-retries", "1", "--rollback-tag", "original"])
+        assert result.returncode == 1 and "health gate" in result.stdout, result.stdout
+        rollback = json.loads(result.stdout)["rollback"]
+        pointer = _accepted(env).parent / "pending-import"
+        original_record = pointer.parent / f"import-{pointer.read_text()}.json"
+        assert original_record.is_file()
+        state = json.loads(state_path.read_text())
+        original["Id"] = "restored-daemon"
+        original["Config"]["Image"] = rollback["tag"]
+        state.update(running=original, archived_python=False, deployed=False,
+                     wait_for_bridge=False, imported=True, running_schema=59, calls=[])
+        if mode == "attended":
+            args = ["--engine", "python", "--tag", "0.21.0", "--json"]
+        elif mode == "unattended":
+            # Compose recreated the daemon from the base image after rollback.
+            original.update(Id="replaced-daemon", Image="sha256:later-release")
+            original["Config"]["Image"] = "pseudolife-daemon:0.21.0"
+            args = ["--unattended", "--tag", "0.21.0", "--json"]
+        else:
+            # A validated checkout can select the same image under a new activation.
+            original["Config"]["Image"] = "pseudolife-daemon-rust:checkout"
+            labels = original["Config"]["Labels"]
+            labels.update({"org.pseudolife.engine": "rust", "org.pseudolife.checkout": str(repo),
+                           "org.pseudolife.activation": "c" * 32})
+            selection = repo / "data/update-engine/docker-compose.engine.json"
+            selection.parent.mkdir(parents=True)
+            selection.write_text(json.dumps({"services": {SERVICE: {"labels": labels}}}))
+            args = ["--json", "--daemon-only", "--health-retries", "1"]
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        assert "cannot verify the legacy import recovery record" not in result.stdout, result.stdout
+        assert not pointer.exists()
+        assert original_record.is_file()
+        assert Path(rollback["backup"]["dump"]).is_file()
+        if mode != "checkout":
+            assert result.returncode == (3 if mode == "unattended" else 0), result.stdout
+            assert "backup" not in stages(json.loads(state_path.read_text()))
+        else:
+            assert result.returncode == 0, result.stdout
+            assert json.loads(result.stdout)["mode"] == "checkout", result.stdout
+        state = json.loads(state_path.read_text())
+        state["canonical_missing"] = True
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--engine", "python", "--tag", "0.21.0", "--json"])
+        assert result.returncode == 2 and "--engine requires a Docker host" in result.stdout, result.stdout
+
+
+def test_bridge_resume_matches_the_bank_after_a_password_change(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path, "pending_import") as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state.update(target_version="0.25.0", target_schema=59, wait_for_bridge=True)
+        state_path.write_text(json.dumps(state))
+        args = ["--engine", "rust", "--tag", "0.25.0", "--json", "--health-retries", "1"]
+        first = run_arm(repo, env, binary, [*args, "--rollback-tag", "original"])
+        assert first.returncode == 1 and "health gate" in first.stdout, first.stdout
+        state = json.loads(state_path.read_text())
+        new_url = "postgresql://fixture:rotated-fixture@pseudolife-pg:5432/fixture"
+        state["running"]["Config"]["Env"][0] = "PSEUDOLIFE_MCP_DATABASE_URL=" + new_url
+        state["config"]["services"][SERVICE]["environment"]["PSEUDOLIFE_MCP_DATABASE_URL"] = new_url
+        state.update(calls=[], wait_for_bridge=False)
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, args)
+        report = json.loads(result.stdout)
+        assert result.returncode == 0, result.stdout
+        assert report["rollback"]["before_import"] == json.loads(first.stdout)["rollback"]
 
 
 def test_schema_56_without_weights_needs_no_counter_row_after_import(tmp_path):
