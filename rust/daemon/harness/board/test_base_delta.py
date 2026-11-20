@@ -13,6 +13,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,7 +23,10 @@ from board import run  # noqa: E402
 from board.norm import Normalizer, Windows  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
-from rust.harness_support.database_guard import assert_disposable_database  # noqa: E402
+from rust.harness_support.audit_oracle import GENESIS_HASH, audit_hash  # noqa: E402
+from rust.harness_support.database_guard import (  # noqa: E402
+    ProductionDatabaseError, assert_disposable_database, fixture_database_pattern,
+)
 from rust.harness_support.import_blocker import cold_harness_imports  # noqa: E402
 
 pg = pgdisposable.Slice("mir")
@@ -44,7 +48,6 @@ def test_base_missing_passes_through_normalization_into_the_state_diff():
 
 
 def _event(seq: int, prev: str, payload: str, created_at: float) -> dict:
-    from pseudolife_memory.storage.coordination import audit_hash
     row = {"seq": seq, "event": "note", "actor": "daemon", "principal": "", "agent_id": "",
            "recipient_agent_id": None, "project": "", "task": "", "message_id": None,
            "payload": payload, "created_at": created_at, "hlc": "", "prev_hash": prev}
@@ -62,6 +65,38 @@ def _head(conn) -> tuple[int, str]:
     return conn.execute("SELECT seq, hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
 
 
+def _seed_base(conn) -> None:
+    if not fixture_database_pattern("mir").fullmatch(assert_disposable_database(conn)):
+        raise ValueError("board base seed needs a disposable mir database")
+    from rust.harness_support.schema import load_plan
+
+    # The fixture starts from the base DDL and three audit rows.
+    _, sql = load_plan()
+    with conn.transaction():
+        conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        conn.execute(sql)
+        prev = GENESIS_HASH
+        for seq, payload in ((1, CANONICAL), (2, UNSORTED), (3, CANONICAL)):
+            row = _event(seq, prev, payload, OLD + seq)
+            _insert(conn, row)
+            prev = row["hash"]
+
+
+@pytest.mark.parametrize("database,error,reason", [
+    ("pseudolife_memory", ProductionDatabaseError, "production bank"),
+    ("pseudolife_bench", ValueError, "disposable mir database"),
+])
+def test_board_base_seed_refuses_non_fixture_database_before_writes(monkeypatch, database, error, reason):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = (database,)
+    with pytest.raises(error, match=reason):
+        _seed_base(conn)
+    conn.execute.assert_called_once_with("SELECT current_database()")
+    conn.transaction.assert_not_called()
+
+
 @pytest.fixture
 def base(monkeypatch):
     """A three-event chain, the second payload not canonical, in a base
@@ -72,21 +107,12 @@ def base(monkeypatch):
                                   "create it once on the daemon host with `pseudolife-mcp test-login "
                                   "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     import psycopg
-    from pseudolife_memory.storage.coordination import GENESIS_HASH
-    from pseudolife_memory.storage.schema import SCHEMA_SQL
     monkeypatch.delenv(pgdisposable.BASE_ENV, raising=False)
     name = pg.name("pl_cf_mir_boardbase")
     dbstate._BASE_HASHES.clear()
     try:
-        with psycopg.connect(pg.create(name), autocommit=True) as conn:
-            assert_disposable_database(conn)
-            conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            conn.execute(SCHEMA_SQL)
-            prev = GENESIS_HASH
-            for seq, payload in ((1, CANONICAL), (2, UNSORTED), (3, CANONICAL)):
-                row = _event(seq, prev, payload, OLD + seq)
-                _insert(conn, row)
-                prev = row["hash"]
+        with cold_harness_imports(), psycopg.connect(pg.create(name), autocommit=True) as conn:
+            _seed_base(conn)
         yield name
     finally:
         dbstate._BASE_HASHES.clear()
