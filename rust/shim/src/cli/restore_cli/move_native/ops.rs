@@ -1650,6 +1650,7 @@ mod tests {
                 Op::CarryApply {
                     identities: carry::fixture(),
                     expected_pins: expected,
+                    files: Default::default(),
                 },
             );
             call.pins = Some(pins.clone());

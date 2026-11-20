@@ -5,6 +5,7 @@
 //! option by its full name, a value as the next argument not starting with
 //! `-`, a flag at most once); any other shape returns `None` and keeps the
 //! dispatcher's deferral (the edge-shape sweep is separate work).
+use super::carry::TargetFiles;
 use std::ffi::OsString;
 
 /// What `move` was asked.
@@ -14,8 +15,7 @@ pub(super) struct Request {
     pub target_url: Option<String>,
     pub target_checkout: Option<String>,
     pub target_work_dir: Option<String>,
-    pub target_env_file: Option<String>,
-    pub target_compose_files: Vec<String>,
+    pub target_files: TargetFiles,
     pub no_keep_tokens: bool,
     pub resume: bool,
     pub dry_run: bool,
@@ -63,10 +63,10 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Request> {
             "--target-work-dir" if request.target_work_dir.is_none() => {
                 request.target_work_dir = Some(value()?)
             }
-            "--target-env-file" if request.target_env_file.is_none() => {
-                request.target_env_file = Some(value()?)
+            "--target-env-file" if request.target_files.env.is_none() => {
+                request.target_files.env = Some(value()?)
             }
-            "--target-compose-file" => request.target_compose_files.push(value()?),
+            "--target-compose-file" => request.target_files.compose.push(value()?),
             "--no-keep-tokens" => flag(&mut request.no_keep_tokens)?,
             "--resume" => flag(&mut request.resume)?,
             "--dry-run" => flag(&mut request.dry_run)?,
@@ -108,9 +108,16 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
     } else if request.expose_target {
         "--expose-target is not available in the native client yet: expose the target's daemon yourself (for example with Tailscale serve) and name the URL clients will use with --target-url <url>"
             .to_owned()
-    } else if request.target_env_file.is_some() || !request.target_compose_files.is_empty() {
-        "--target-env-file and --target-compose-file are not available in the native client yet (they serve carried tokens): move reads the target's containers as they are, so drop them"
-            .to_owned()
+    } else if request.no_keep_tokens && !request.target_files.is_empty() {
+        "--target-env-file and --target-compose-file apply only when carrying bearer settings; drop the file flags to keep the target's existing settings".to_owned()
+    } else if request
+        .target_files
+        .env
+        .iter()
+        .chain(&request.target_files.compose)
+        .any(|path| !TargetFiles::valid(path))
+    {
+        "--target-env-file and --target-compose-file must name absolute files or use ~/ on the target, without .. or control characters".to_owned()
     } else if request.target_url.is_none() {
         "--target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765"
             .to_owned()
