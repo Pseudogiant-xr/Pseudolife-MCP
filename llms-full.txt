@@ -13851,9 +13851,10 @@ can load, reading the tunnel's process record to say whether the tunnel
 runs. It also answers `tunnel update`, which starts, stops and signals
 nothing. `tunnel update` reports a tunnel that is not running, and names a
 process record left by a stopped tunnel as a file you can delete (a
-`leftover` when no saved profile is beside it). It reports a tunnel that
-runs, or may run, as `stale`: it is left as it is, because this client
-cannot refresh it yet. A record it cannot judge (unreadable, or naming no
+`leftover` when no saved profile is beside it). It reports `current` for
+a ready native launch whose identity matches the installed runtime and saved
+connection. Other running or uncertain launches are `stale` and stay in
+place. A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native
 client also answers preflight refusals for `tunnel verify` and `tunnel setup`.

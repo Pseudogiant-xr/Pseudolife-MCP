@@ -258,6 +258,81 @@ fn replacement_releases_previous_key_only_after_a_successful_poll() {
 }
 
 #[test]
+fn update_reports_only_an_attested_current_launch_as_current() {
+    let home = Home::new();
+    let prepared = launch_fixture(&home.0);
+    let executable = std::env::current_exe().unwrap();
+    let name = &prepared.profile.name;
+    state::atomic_create(
+        &store::profile_path(&home.0, name).unwrap(),
+        &prepared.profile_bytes,
+    )
+    .unwrap();
+    #[cfg(windows)]
+    let stored = {
+        let Some(sealed) = super::super::dpapi::seal(b"fixture-runtime-key") else {
+            return;
+        };
+        [b"DPAPI\0".as_slice(), &sealed].concat()
+    };
+    #[cfg(unix)]
+    let stored = b"PLAIN\0fixture-runtime-key";
+    state::atomic_create(&store::key_path(&home.0, name), stored.as_ref()).unwrap();
+
+    let launch = Uuid::new_v4();
+    let mut stage = Stage::new(&home.0, name, launch).unwrap();
+    let record = LaunchRecord {
+        native_launch: launch.simple().to_string(),
+        launch_identity: Some(
+            identity::compute(&home.0, &prepared.profile, &prepared.key, &executable).unwrap(),
+        ),
+        spawn_started: Some(true),
+        supervisor: Identity {
+            pid: std::process::id(),
+            exe: executable.clone(),
+        },
+        target: Some(Identity {
+            pid: std::process::id(),
+            exe: executable,
+        }),
+        ready: true,
+    };
+    stage.announce(&record).unwrap();
+    let record_path = super::record::path(&home.0, name);
+    let original = fs::read(&record_path).unwrap();
+    let check = |expected| {
+        let (text, code) = super::super::update(&home.0).unwrap();
+        assert_eq!(code, 0);
+        let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(report["state"], expected);
+        assert_eq!(report["profiles"][0]["state"], expected);
+        assert_eq!(report["profiles"][0]["running"], true);
+        assert!(fs::read(&record_path).unwrap() == original);
+    };
+    check("current");
+    check("current");
+    let pending = home.0.join(format!("{name}.reload.json"));
+    state::atomic_create(&pending, br#"{"id":"00000000000000000000000000000000"}"#).unwrap();
+    check("stale");
+    fs::remove_file(pending).unwrap();
+    let pending = home.0.join(format!("{name}.key-renewal"));
+    state::atomic_create(&pending, b"interrupted renewal fixture").unwrap();
+    check("stale");
+    fs::remove_file(pending).unwrap();
+    let previous = home.0.join(format!("{name}.key-previous"));
+    state::atomic_create(&previous, b"unresolved retained pair fixture").unwrap();
+    check("stale");
+    fs::remove_file(previous).unwrap();
+    let token = Path::new(&prepared.profile.token_file);
+    state::atomic_write(token, b"changed-fixture-daemon-token", None).unwrap();
+    check("stale");
+    state::atomic_write(token, b"fixture-daemon-token", None).unwrap();
+    check("current");
+    drop(stage.owner.take());
+    check("stale");
+}
+
+#[test]
 fn foreground_launch_owns_one_child_and_stop_waits_for_cleanup() {
     let home = Home::new();
     let exe = std::env::current_exe().unwrap();

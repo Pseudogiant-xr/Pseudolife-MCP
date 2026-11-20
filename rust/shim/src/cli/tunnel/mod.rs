@@ -621,12 +621,11 @@ fn report(
     text
 }
 
-/// `tunnel update`: report each saved profile's tunnel as it is. This client
-/// cannot refresh a running tunnel yet, so it starts, stops and signals
-/// nothing: a running tunnel is reported `stale` and left running, a record
-/// whose process is gone is named as a file to delete, and neither a record
-/// nor a key ever stops the command. Refused only for a store or profile it
-/// cannot trust (exit 2), and exit 3 when nothing is saved at all.
+/// `tunnel update`: report each saved profile's tunnel as it is. A running
+/// native launch is current when its identity matches the installed runtime
+/// and saved connection. Other live or uncertain launches are left in place.
+/// Refused only for a store or profile it cannot trust (exit 2), and exit 3
+/// when nothing is saved at all.
 fn update(root: &Path) -> Answer {
     // A store this client cannot list is a refusal with its cause, never a
     // deferral: the update step shows the cause to the user.
@@ -712,6 +711,14 @@ fn update(root: &Path) -> Answer {
                 "unread",
                 "false",
                 format!("{unread}; it has no tunnel process record, so no tunnel of it runs"),
+            ),
+            (Some(record), Err(true)) if current_launch(root, name, record) => (
+                "current",
+                "true",
+                format!(
+                    "tunnel {name} is already running on the current runtime (process record {})",
+                    record.path.display()
+                ),
             ),
             (Some(record), unread) => {
                 // A stopped tunnel needs nothing and leaves the update
@@ -799,6 +806,16 @@ fn update(root: &Path) -> Answer {
         ),
         0,
     ))
+}
+
+fn current_launch(root: &Path, name: &str, record: &record::Record) -> bool {
+    record.native
+        && record.ready
+        && record.liveness == Liveness::Running
+        && setup::check_pending(root, name).is_ok()
+        && matches!(setup::validate_previous_key(root, name), Ok(false))
+        && refresh_status(root, name).is_ok_and(|refresh| !refresh.needs_attention())
+        && runtime::identity::current(root, name).is_ok()
 }
 
 fn verify(options: &Options, root: &Path) -> Output {
