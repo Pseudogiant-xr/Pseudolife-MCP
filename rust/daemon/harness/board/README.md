@@ -131,6 +131,16 @@ the elapsed input schedule needed to reproduce its activity decisions. A
 local `--record` run writes fresh recordings to `board/goldens/`; recording
 is separate from proving replay parity.
 
+`goldens/mail-activity.json` records the exact unparked activity boundary.
+The archived rows were reproduced byte-for-byte from the frozen Python
+baseline at `32fc652c6`. The archive has no regeneration path. Edit it only
+with a stated reason. The board runner tests read each input and decision;
+the Rust wake test checks the same archive against the implementation.
+
+`test_base_delta.py` seeds its disposable base with the daemon's committed
+base DDL and three fixture audit rows. Copied banks start from that schema
+and chain when the tests compare base deltas.
+
 `board.boundary` creates and removes one owned disposable bank on loopback
 port 5434, then explicitly runs the otherwise ignored Cargo regression: a
 registered, attached agent must heartbeat while full initialization holds the

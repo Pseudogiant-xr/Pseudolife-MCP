@@ -9,12 +9,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from board import run  # noqa: E402
 
 
-def test_mail_exact_activity_oracle_remains_current():
+def test_mail_exact_activity_archive_covers_both_sides_and_equality():
     import json
-    from board.gen_mail_activity import cases
+    from rust.harness_support.import_blocker import cold_harness_imports
 
-    recorded = json.loads((Path(__file__).with_name("goldens") / "mail-activity.json").read_text())
-    assert recorded == cases()
+    with cold_harness_imports():
+        fixture = Path(__file__).with_name("goldens") / "mail-activity.json"
+        recorded = json.loads(fixture.read_text(encoding="utf-8"))
+    assert recorded == [
+        {"now": 1000.0, "active_seconds": active_seconds,
+         "last_activity": 1000.0 - active_seconds + delta,
+         "wake": ({"decision": "hinted", "reason": "active"} if delta > 0
+                  else {"decision": "not_needed", "reason": "no_park"})}
+        for active_seconds in (0, 1, 600)
+        for delta in (-0.25, 0, 0.25)
+    ]
 
 
 def test_mail_records_both_sides_of_activity_and_checks_the_decisions():
