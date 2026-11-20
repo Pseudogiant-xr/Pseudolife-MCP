@@ -178,6 +178,7 @@ fn eager_vendor(config: &Path) {
             );
             if candidate && mode() == "rollback" && status == "200 OK" {
                 // Prove that a 200 racing the vendor's exit cannot settle.
+                eprintln!("controlplane client: unexpected status 401");
                 drop(stream);
                 drop(bridge.stdin.take());
                 assert!(bridge.wait().unwrap().success());
@@ -429,7 +430,12 @@ async fn daemon_reply(
 
 #[track_caller]
 fn wait_until(mut done: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(40);
+    wait_until_for(Duration::from_secs(40), &mut done);
+}
+
+#[track_caller]
+fn wait_until_for(duration: Duration, mut done: impl FnMut() -> bool) {
+    let deadline = Instant::now() + duration;
     while !done() {
         assert!(
             Instant::now() < deadline,
@@ -666,6 +672,7 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
     let mut wrong = scenario.candidate.clone();
     wrong.digest = "f".repeat(64);
     let ticket = scenario.submit(&wrong);
+    let first_request = ticket.request();
     assert_eq!(
         scenario.outcome(&ticket, Phase::Refused).cause,
         Some(Cause::CandidateChanged)
@@ -689,6 +696,13 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
     );
     drop(ticket);
     assert_eq!(scenario.record().target.unwrap().pid, old_pid);
+    let replay =
+        refresh::submit_request(scenario.root(), "dot", &scenario.record(), first_request).unwrap();
+    assert_eq!(
+        scenario.outcome(&replay, Phase::Refused).cause,
+        Some(Cause::Reply(refresh::Refusal::Replay))
+    );
+    drop(replay);
     scenario.daemon.mode.store(0, Ordering::SeqCst);
     let fence = identity::verification_fence(scenario.root(), "dot").unwrap();
     let ticket = scenario.submit(&scenario.candidate);
@@ -726,6 +740,30 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
     let rolled_back = scenario.outcome(&ticket, Phase::RolledBack);
     assert_eq!(rolled_back.active_identity, old.launch_identity);
     assert_ne!(scenario.record().target.unwrap().pid, old_pid);
+    assert_eq!(
+        rolled_back.cause,
+        Some(Cause::CandidateStartup(
+            refresh::CandidateFailure::VendorDiagnostics
+        ))
+    );
+    assert!(
+        restart::status(scenario.root(), "dot")
+            .unwrap()
+            .1
+            .contains("dot.native-runtime.log")
+    );
+    assert!(scenario.root().join("dot.native-runtime.log").is_file());
+    drop(ticket);
+    let restored_pid = scenario.record().target.unwrap().pid;
+    let again = scenario.submit(&scenario.candidate);
+    assert_eq!(
+        scenario.outcome(&again, Phase::Refused).cause,
+        Some(Cause::CandidateAlreadyRolledBack(
+            refresh::CandidateFailure::VendorDiagnostics
+        ))
+    );
+    assert_eq!(scenario.record().target.unwrap().pid, restored_pid);
+    drop(again);
     assert!(
         restart::verify(scenario.root(), "dot")
             .unwrap()
@@ -750,6 +788,26 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
         fs::read(scenario.root().join("dot-verification/challenge.json")).unwrap(),
         challenge
     );
+    assert!(!scenario.root().join("overlap").exists());
+}
+
+#[test]
+fn stopping_during_preflight_reports_a_terminal_stopped_result() {
+    use refresh::{Cause, Phase};
+    let scenario = Scenario::start();
+    if !scenario.sealed_key {
+        return;
+    }
+    scenario.daemon.mode.store(2, Ordering::SeqCst);
+    let ticket = scenario.submit(&scenario.candidate);
+    wait_until(|| scenario.daemon.observed.load(Ordering::SeqCst) != 0);
+    thread::scope(|scope| {
+        let stop = scope.spawn(|| stop(scenario.root(), "dot"));
+        let outcome = scenario.outcome(&ticket, Phase::Failed);
+        assert_eq!(outcome.cause, Some(Cause::Stopped));
+        drop(ticket);
+        assert!(stop.join().unwrap().is_ok());
+    });
     assert!(!scenario.root().join("overlap").exists());
 }
 
@@ -885,7 +943,16 @@ fn vendor_ready_without_production_bridge_ack_rolls_back() {
     let old = scenario.record();
     scenario.mode("bridge-refused");
     let ticket = scenario.submit(&scenario.candidate);
-    let result = scenario.outcome(&ticket, refresh::Phase::RolledBack);
+    // After acceptance this case includes the complete vendor startup
+    // deadline. Hashing before acceptance does not count against it.
+    scenario.outcome(&ticket, refresh::Phase::Pending);
+    let terminal = || {
+        refresh::read_outcome(scenario.root(), "dot").filter(|outcome| outcome.for_ticket(&ticket))
+    };
+    wait_until_for(Duration::from_secs(60), || {
+        terminal().is_some_and(|outcome| outcome.phase == refresh::Phase::RolledBack)
+    });
+    let result = terminal().unwrap();
     assert_eq!(result.active_identity, old.launch_identity);
     assert!(
         fs::read_dir(scenario.root())

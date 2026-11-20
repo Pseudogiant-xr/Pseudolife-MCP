@@ -344,7 +344,7 @@ fn update_reports_only_an_attested_current_launch_as_current() {
 
     let launch = Uuid::new_v4();
     let mut stage = Stage::new(&home.0, name, launch).unwrap();
-    let record = LaunchRecord {
+    let mut record = LaunchRecord {
         native_launch: launch.simple().to_string(),
         launch_identity: Some(
             identity::compute(&home.0, &prepared.profile, &prepared.key, &image).unwrap(),
@@ -429,6 +429,31 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     check_stale("differs from the current runtime or saved settings");
     state::atomic_write(token, b"fixture-daemon-token", None).unwrap();
     check_current("current");
+    let changed_vendor = refresh::Image {
+        path: image.clone(),
+        digest: crate::runtime::hash_file(&image).unwrap(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        vendor_version: "99.0.0".to_owned(),
+    };
+    record.launch_identity = Some(
+        identity::sign_image(&home.0, &prepared.profile, &prepared.key, &changed_vendor).unwrap(),
+    );
+    record.refresh = Some(refresh::Capability {
+        epoch: Uuid::new_v4().simple().to_string(),
+        image: changed_vendor,
+    });
+    stage.announce(&record).unwrap();
+    let (text, _) = super::super::update_with_runtime(&home.0, Some(&image)).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["state"], "stale");
+    let advice = report["detail"].as_str().unwrap();
+    assert!(
+        advice.contains("pins a different vendor version")
+            && advice.contains("tunnel stop")
+            && advice.contains("tunnel run"),
+        "{advice}"
+    );
+    state::atomic_write(&record_path, &original, None).unwrap();
     drop(stage.owner.take());
     check_stale("could not be verified against the current runtime");
 }

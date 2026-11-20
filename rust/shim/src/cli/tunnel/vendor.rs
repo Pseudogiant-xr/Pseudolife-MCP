@@ -312,6 +312,18 @@ pub(super) fn ensure(root: &Path) -> Result<Installed, String> {
     ensure_with(root, pin, &SystemProbe, download)
 }
 
+/// Verify the existing vendor installation before another spawn. Reconnect
+/// never installs a different vendor or fetches one while replacing a child.
+pub(super) fn reverify(root: &Path, executable: &Path) -> Result<(), String> {
+    let pin = pin_for(std::env::consts::OS, std::env::consts::ARCH)?;
+    let target = root.join(folder_name(&pin));
+    let installed = installed(&target, &pin)?.ok_or_else(|| corrupt(&target, "it is missing"))?;
+    if installed.binary != executable {
+        return Err(corrupt(&target, "the selected vendor executable changed"));
+    }
+    Ok(())
+}
+
 /// `ensure` with its effects injected: the pin, the `--help` probe and the
 /// download (`fetch(url, exact size)`).
 fn ensure_with(

@@ -73,15 +73,21 @@ pub(super) fn run(root: &Path, name: &str) -> Output {
     } else {
         STARTUP
     };
-    launch(prepared, &executable, deadline, |config| {
-        let mut command = Command::new(&installed.binary);
-        command
-            .args(["run", "--profile-file"])
-            .arg(config)
-            .env_clear()
-            .envs(vendor::probe_environment(std::env::vars_os()));
-        command
-    })
+    launch_with_vendor(
+        prepared,
+        &executable,
+        deadline,
+        Some(&installed.binary),
+        |config| {
+            let mut command = Command::new(&installed.binary);
+            command
+                .args(["run", "--profile-file"])
+                .arg(config)
+                .env_clear()
+                .envs(vendor::probe_environment(std::env::vars_os()));
+            command
+        },
+    )
 }
 
 fn check_executable_path(path: &Path) -> Result<(), Fail> {
@@ -368,6 +374,7 @@ fn remove_launch_files(directory: &Path, profile: &str) -> Result<(), Fail> {
         refresh::REQUEST,
         refresh::CLAIM,
         refresh::PUBLISHER,
+        refresh::ISSUE,
     ];
     let mut senders = Vec::new();
     let mut stages = Vec::new();
@@ -561,17 +568,34 @@ fn bridge_command(
     ))
 }
 
+#[cfg(test)]
 fn launch(
     prepared: Prepared<'_>,
     executable: &Path,
     deadline: Duration,
     command: impl Fn(&Path) -> Command,
 ) -> Output {
+    launch_with_vendor(prepared, executable, deadline, None, command)
+}
+
+fn launch_with_vendor(
+    prepared: Prepared<'_>,
+    executable: &Path,
+    deadline: Duration,
+    vendor_path: Option<&Path>,
+    command: impl Fn(&Path) -> Command,
+) -> Output {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|_| CHILD_ERROR)?;
-    let result = runtime.block_on(supervise(prepared, executable, deadline, command));
+    let result = runtime.block_on(supervise(
+        prepared,
+        executable,
+        deadline,
+        vendor_path,
+        command,
+    ));
     runtime.shutdown_background();
     result
 }
@@ -580,6 +604,7 @@ async fn supervise(
     prepared: Prepared<'_>,
     executable: &Path,
     deadline: Duration,
+    vendor_path: Option<&Path>,
     command: impl Fn(&Path) -> Command,
 ) -> Output {
     let Prepared {
@@ -637,6 +662,7 @@ async fn supervise(
         profile: &profile,
         profile_bytes: &profile_bytes,
         id,
+        vendor_path,
         command: &command,
         client,
     };
@@ -652,7 +678,7 @@ async fn supervise(
         .await?;
     drop(key);
     // Hold the selected image through its bridge lifetime and a possible rollback.
-    let mut image_pin = None;
+    let mut refresh_driver = restart::Driver::default();
     loop {
         restart::flush_outcome(&session, &mut record);
         let Some(mut running) = active.take() else {
@@ -682,7 +708,7 @@ async fn supervise(
             &mut stage,
             &mut record,
             &mut signals,
-            &mut image_pin,
+            &mut refresh_driver,
             running,
         )
         .await?;
@@ -708,6 +734,7 @@ struct Session<'a> {
     profile: &'a Profile,
     profile_bytes: &'a [u8],
     id: Uuid,
+    vendor_path: Option<&'a Path>,
     command: &'a dyn Fn(&Path) -> Command,
     client: reqwest::Client,
 }
@@ -757,6 +784,13 @@ impl Session<'_> {
         let name = &self.profile.name;
         if stop_marker(&stage.directory, self.id)? {
             return Ok(None);
+        }
+        if let Some(vendor_path) = self.vendor_path {
+            #[cfg(unix)]
+            if rustix::process::geteuid().is_root() {
+                trusted_root_paths([self.root, vendor_path, Path::new(&self.profile.token_file)])?;
+            }
+            vendor::reverify(self.root, vendor_path).map_err(Fail::Detail)?;
         }
         let health = stage.directory.join("health.url");
         store::checked_path(&health)?;

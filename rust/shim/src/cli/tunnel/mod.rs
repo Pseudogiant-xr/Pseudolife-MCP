@@ -896,6 +896,13 @@ fn check_running_launch(
     let executable = executable.ok_or_else(|| {
         "the installed client executable could not be identified. Run update through the installed launcher".to_owned()
     })?;
+    if runtime::restart::vendor_changed(root, name) {
+        let stop = tunnel_command("stop", name, directory);
+        let run = tunnel_command("run", name, directory);
+        return Err(format!(
+            "the installed client pins a different vendor version. Run `{stop}`, then `{run}` to reconnect the tunnel"
+        ));
+    }
     match runtime::identity::active(root, name, executable, None) {
         Ok(_) => Ok(None),
         Err(runtime::identity::CHANGED) => {

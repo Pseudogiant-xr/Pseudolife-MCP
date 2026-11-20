@@ -1,8 +1,33 @@
 use super::*;
-use refresh::{Capability, Cause, Image, Outcome, Phase, Request};
+use refresh::{
+    CandidateFailure, Capability, Cause, ChannelIssue, Image, Outcome, Phase, Refusal, Request,
+};
+use std::collections::{HashMap, HashSet};
 
 const PREFLIGHT: Duration = Duration::from_secs(20);
 const RESPONSE: Duration = Duration::from_secs(110);
+
+#[derive(Default)]
+pub(super) struct Driver {
+    pin: Option<File>,
+    consumed: HashSet<String>,
+    rolled_back: HashMap<String, CandidateFailure>,
+    channel_issue: Option<ChannelIssue>,
+}
+
+impl Driver {
+    fn issue(&mut self, stage: &Stage, issue: ChannelIssue) {
+        if self.channel_issue.replace(issue) != Some(issue) {
+            crate::stderrln!("Tunnel refresh refused: {}.", issue.message());
+            let _ = refresh::note_issue(&stage.directory, issue);
+        }
+    }
+
+    fn clear_issue(&mut self, stage: &Stage) {
+        self.channel_issue = None;
+        refresh::clear_issue(&stage.directory);
+    }
+}
 
 struct Candidate {
     image: Image,
@@ -170,6 +195,7 @@ fn report(
         crate::stderrln!(
             "Tunnel refresh outcome could not be saved. Check tunnel status for the current launch."
         );
+        let _ = refresh::note_issue(&stage.directory, ChannelIssue::ResultUnavailable);
     } else {
         record.refresh_outcome = None;
     }
@@ -188,27 +214,66 @@ pub(super) async fn handle(
     stage: &mut Stage,
     record: &mut LaunchRecord,
     signals: &mut process::Signals,
-    pin: &mut Option<File>,
+    driver: &mut Driver,
     mut running: RunningChild,
 ) -> Result<Option<RunningChild>, Fail> {
     let current = record.refresh.as_ref().ok_or(CHILD_ERROR)?;
-    let claim = refresh::Claim::take(&stage.directory);
+    let claim = refresh::Claim::clear_abandoned(&stage.directory)
+        .and_then(|()| refresh::Claim::take(&stage.directory));
     let mut claim = match claim {
         Ok(Some(claim)) => claim,
         Ok(None) => return Ok(Some(running)),
-        Err(reason) => {
-            crate::stderrln!("Tunnel refresh refused: {reason}.");
+        Err(issue) => {
+            driver.issue(stage, issue);
             return Ok(Some(running));
         }
     };
     let name = &session.profile.name;
-    let request = match claim.read(session.root, name, record) {
+    let request = match claim.authenticate(session.root) {
         Ok(request) => request,
-        Err(reason) => {
-            crate::stderrln!("Tunnel refresh refused: {reason}.");
+        Err(issue) => {
+            driver.issue(stage, issue);
             return Ok(Some(running));
         }
     };
+    if request.generation != record.native_launch {
+        driver.issue(stage, ChannelIssue::ForeignGeneration);
+        return Ok(Some(running));
+    }
+    driver.clear_issue(stage);
+    let refusal = if !driver.consumed.insert(request.id.clone()) {
+        Some(Refusal::Replay)
+    } else {
+        refresh::check_binding(
+            &request,
+            record,
+            refresh::read_outcome(session.root, name).as_ref(),
+        )
+        .err()
+        .or_else(|| (!claim.sender_live()).then_some(Refusal::SenderGone))
+    };
+    if let Some(refusal) = refusal {
+        report(
+            session,
+            stage,
+            record,
+            &request,
+            Phase::Refused,
+            Some(Cause::Reply(refusal)),
+        );
+        return Ok(Some(running));
+    }
+    if let Some(failure) = driver.rolled_back.get(&request.candidate).copied() {
+        report(
+            session,
+            stage,
+            record,
+            &request,
+            Phase::Refused,
+            Some(Cause::CandidateAlreadyRolledBack(failure)),
+        );
+        return Ok(Some(running));
+    }
     let prepared = tokio::select! {
         biased;
         _ = async {
@@ -221,8 +286,7 @@ pub(super) async fn handle(
                 } => {},
             }
         } => {
-            running.finish(session.root, name, stage, stopped(name), false).await?;
-            return Ok(None);
+            return finish_before_switch(session, stage, record, &request, running, Cause::Stopped).await;
         }
         prepared = preflight(session, &current.image, &request) => prepared,
     };
@@ -252,7 +316,15 @@ pub(super) async fn handle(
         return Ok(Some(running));
     }
     if !matches!(running.child.exit_code(), Ok(None)) {
-        return Ok(Some(running));
+        return finish_before_switch(
+            session,
+            stage,
+            record,
+            &request,
+            running,
+            Cause::OldChildExited,
+        )
+        .await;
     }
     let verification = match identity::verification_fence(session.root, name) {
         Ok(fence) => fence,
@@ -269,25 +341,37 @@ pub(super) async fn handle(
         }
     };
     if !claim.sender_live() {
-        crate::stderrln!(
-            "Tunnel refresh refused: the refresh request is stale because its sender exited before acceptance."
+        report(
+            session,
+            stage,
+            record,
+            &request,
+            Phase::Refused,
+            Some(Cause::Reply(Refusal::SenderGone)),
         );
         return Ok(Some(running));
     }
     // Acceptance is irreversible for the sender. Journal it before the
     // first action that can interrupt the live tunnel.
     if publish(session, &Outcome::new(&request, Phase::Pending, None, None)).is_err() {
-        crate::stderrln!(
-            "Tunnel refresh refused: its pending outcome could not be saved. The old tunnel was left running."
+        report(
+            session,
+            stage,
+            record,
+            &request,
+            Phase::Refused,
+            Some(Cause::StateUnavailable),
         );
         return Ok(Some(running));
     }
     let old = current.image.clone();
+    let previous_epoch = current.epoch.clone();
     let epoch = Uuid::new_v4().simple().to_string();
     record.ready = false;
     record.refresh.as_mut().unwrap().epoch.clone_from(&epoch);
     if let Err(error) = stage.announce(record) {
         record.ready = true;
+        record.refresh.as_mut().unwrap().epoch = previous_epoch;
         let _ = stage.announce(record);
         report(
             session,
@@ -326,9 +410,9 @@ pub(super) async fn handle(
         }
         Err(_) => Err(CHILD_ERROR),
     };
-    match attempted {
+    let failure = match attempted {
         Ok(Some(candidate)) => {
-            *pin = Some(prepared.candidate.pin);
+            driver.pin = Some(prepared.candidate.pin);
             report(session, stage, record, &request, Phase::Refreshed, None);
             return Ok(Some(candidate));
         }
@@ -352,8 +436,8 @@ pub(super) async fn handle(
                 Cause::CandidateChildUnproven,
             );
         }
-        Err(_) => {}
-    }
+        Err(error) => candidate_failure(&error),
+    };
     change_image(record, old.clone(), request.identity.clone(), &epoch);
     let restored = match verify_image(&old) {
         Ok(()) => {
@@ -365,13 +449,16 @@ pub(super) async fn handle(
     };
     match restored {
         Ok(Some(restored)) => {
+            driver
+                .rolled_back
+                .insert(request.candidate.clone(), failure);
             report(
                 session,
                 stage,
                 record,
                 &request,
                 Phase::RolledBack,
-                Some(Cause::CandidateStartup),
+                Some(Cause::CandidateStartup(failure)),
             );
             Ok(Some(restored))
         }
@@ -412,6 +499,36 @@ pub(super) async fn handle(
     }
 }
 
+async fn finish_before_switch(
+    session: &Session<'_>,
+    stage: &mut Stage,
+    record: &mut LaunchRecord,
+    request: &Request,
+    running: RunningChild,
+    cause: Cause,
+) -> Result<Option<RunningChild>, Fail> {
+    let name = &session.profile.name;
+    if running
+        .finish(session.root, name, stage, stopped(name), false)
+        .await
+        .is_err()
+    {
+        return unproven(session, stage, record, request, Cause::OldChildUnproven);
+    }
+    report(session, stage, record, request, Phase::Failed, Some(cause));
+    Ok(None)
+}
+
+fn candidate_failure(error: &Fail) -> CandidateFailure {
+    match error {
+        &READINESS_TIMEOUT => CandidateFailure::ReadinessDeadline,
+        Fail::Detail(message) if message.contains("Check the runtime diagnostics at ") => {
+            CandidateFailure::VendorDiagnostics
+        }
+        _ => CandidateFailure::Startup,
+    }
+}
+
 fn change_image(record: &mut LaunchRecord, image: Image, identity: String, epoch: &str) {
     record.refresh = Some(Capability {
         image,
@@ -441,20 +558,25 @@ fn unproven(
 
 fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String {
     let run = || super::super::tunnel_command("run", name, root.to_str());
-    let status = || super::super::bridge::status_command(name, root.to_str());
+    let stop = || super::super::tunnel_command("stop", name, root.to_str());
     match (phase, cause) {
-        (Phase::Pending, _) => format!("tunnel refresh is pending; `{}` shows the outcome", status()),
+        (Phase::Pending, _) => "tunnel refresh is pending. The supervisor has not reported its final outcome".to_owned(),
         (Phase::Refreshed, _) => "the tunnel reconnected on the installed runtime".to_owned(),
-        (Phase::RolledBack, _) => "the installed runtime did not become ready. The tunnel reconnected on its previous runtime and saved verification for that identity still applies".to_owned(),
+        (Phase::RolledBack, Some(Cause::CandidateStartup(failure))) => format!(
+            "{} The tunnel reconnected on its previous runtime and saved verification for that identity still applies. Install a corrected runtime before retrying update",
+            failure_detail(root, name, failure)
+        ),
+        (Phase::RolledBack, _) => "the tunnel reconnected on its previous runtime. Install a corrected runtime before retrying update".to_owned(),
         (Phase::Failed, Some(Cause::OldChildUnproven | Cause::CandidateChildUnproven | Cause::RollbackChildUnproven)) => {
             let child = match cause {
                 Some(Cause::OldChildUnproven) => "previous",
                 Some(Cause::CandidateChildUnproven) => "replacement",
                 _ => "rollback",
             };
-            format!("could not confirm the {child} tunnel process exited. Recovery is blocked. Check with `{}`", status())
+            format!("could not confirm the {child} tunnel process exited. Recovery is blocked until its exit can be confirmed")
         }
         (Phase::Failed, Some(Cause::Stopped)) => "a stop was requested during refresh and the tunnel stopped".to_owned(),
+        (Phase::Failed, Some(Cause::OldChildExited)) => format!("the previous tunnel exited during refresh preparation. Run `{}` to start it again", run()),
         (Phase::Failed, _) => format!("the installed and previous runtimes failed to become ready. The tunnel is stopped. Run `{}` to start it again", run()),
         (Phase::Refused, _) => {
             let reason = match cause {
@@ -464,14 +586,34 @@ fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String
                 Some(Cause::BridgeProtocol) => "the installed runtime did not confirm readiness protocol v1",
                 Some(Cause::Stopped) => "a stop was requested",
                 Some(Cause::VerificationBusy) => "verification holds the profile",
+                Some(Cause::Reply(reason)) => reason.message(),
+                Some(Cause::CandidateAlreadyRolledBack(failure)) => return format!(
+                    "this exact installed runtime already failed and rolled back. {} The previous tunnel is still running. Install a corrected runtime before retrying update",
+                    failure_detail(root, name, failure)
+                ),
                 _ => "the launch state could not be saved",
             };
-            if cause == Some(Cause::BridgeProtocol) {
+            if matches!(cause, Some(Cause::ProfileChanged | Cause::DaemonHandshake | Cause::CandidateChanged)) {
+                format!("refresh was refused because {reason}. The old tunnel is still running. After addressing that cause, run `{}`, then `{}` to reconnect", stop(), run())
+            } else if cause == Some(Cause::BridgeProtocol) {
                 format!("refresh was refused because {reason}. The old tunnel is still running. Install a runtime that supports readiness protocol v1 and retry update")
             } else {
-                format!("refresh was refused because {reason}. This refresh left the running child alone. Check with `{}`", status())
+                format!("refresh was refused because {reason}. The previous tunnel was left running")
             }
         }
+    }
+}
+
+fn failure_detail(root: &Path, name: &str, failure: CandidateFailure) -> String {
+    match failure {
+        CandidateFailure::Startup => "The installed runtime did not become ready.".to_owned(),
+        CandidateFailure::ReadinessDeadline => {
+            "The installed runtime did not acknowledge readiness before the deadline.".to_owned()
+        }
+        CandidateFailure::VendorDiagnostics => format!(
+            "The installed runtime failed startup. See the local diagnostics at {}.",
+            root.join(format!("{name}.native-runtime.log")).display()
+        ),
     }
 }
 
@@ -483,6 +625,15 @@ pub(in crate::cli::tunnel) struct Report {
 
 pub(in crate::cli::tunnel) fn predates_refresh(root: &Path, name: &str) -> bool {
     read_record(&record::path(root, name)).is_ok_and(|record| record.refresh.is_none())
+}
+
+pub(in crate::cli::tunnel) fn vendor_changed(root: &Path, name: &str) -> bool {
+    read_record(&record::path(root, name)).is_ok_and(|record| {
+        record
+            .refresh
+            .as_ref()
+            .is_some_and(|refresh| refresh.image.vendor_version != vendor::VERSION)
+    })
 }
 
 pub(in crate::cli::tunnel) fn attempt(
@@ -515,7 +666,10 @@ pub(in crate::cli::tunnel) fn attempt(
         Ok(ticket) => ticket,
         Err(reason) => return Some(refuse(reason)),
     };
+    let directory = stage_path(root, launch_id(&record.native_launch)?);
     let limit = std::time::Instant::now() + RESPONSE;
+    let mut lost_generation = false;
+    let mut lost_request = false;
     loop {
         if let Some(outcome) =
             refresh::read_outcome(root, name).filter(|outcome| outcome.for_ticket(&ticket))
@@ -569,6 +723,59 @@ pub(in crate::cli::tunnel) fn attempt(
                 detail: detail(root, name, outcome.phase, outcome.cause),
             });
         }
+        let current = read_record(&record::path(root, name)).ok();
+        let still_owned = current
+            .as_ref()
+            .is_some_and(|active| active.native_launch == record.native_launch)
+            && identity::owns_generation(root, name, &directory);
+        if lost_generation && !still_owned {
+            let stopped = matches!(store::occupied(&record::path(root, name)), Ok(false));
+            return Some(Report {
+                state: "failed",
+                running: if stopped { "false" } else { "\"unknown\"" },
+                detail: if stopped {
+                    format!(
+                        "the supervisor stopped before reporting the refresh outcome. Run `{}` to start the tunnel again",
+                        super::super::tunnel_command("run", name, root.to_str())
+                    )
+                } else {
+                    format!(
+                        "the requesting launch is no longer owned. Check with `{}` before retrying",
+                        super::super::bridge::status_command(name, root.to_str())
+                    )
+                },
+            });
+        }
+        lost_generation = !still_owned;
+        let queued = ticket.queued();
+        if still_owned
+            && (lost_request && !queued || ticket.issue() == Some(ChannelIssue::ClaimBlocked))
+        {
+            let reason = ticket.issue().map_or(
+                "the supervisor cleared the request without a readable outcome",
+                ChannelIssue::message,
+            );
+            let still_previous = current.as_ref().is_some_and(|active| {
+                active.ready
+                    && active
+                        .refresh
+                        .as_ref()
+                        .is_some_and(|active| active.epoch == capability.epoch)
+            });
+            return Some(Report {
+                state: "stale",
+                running: if still_previous {
+                    "true"
+                } else {
+                    "\"unknown\""
+                },
+                detail: format!(
+                    "{reason}. Check with `{}` before retrying",
+                    super::super::bridge::status_command(name, root.to_str())
+                ),
+            });
+        }
+        lost_request = !queued;
         if std::time::Instant::now() >= limit {
             return Some(Report {
                 state: "stale",
@@ -585,7 +792,25 @@ pub(in crate::cli::tunnel) fn attempt(
 
 pub(in crate::cli::tunnel) fn status(root: &Path, name: &str) -> Option<(&'static str, String)> {
     let outcome = refresh::read_outcome(root, name)?;
-    let record = read_record(&record::path(root, name)).ok();
+    let path = record::path(root, name);
+    let record = read_record(&path).ok();
+    if record.is_none() && store::occupied(&path).unwrap_or(true) {
+        return None;
+    }
+    if record
+        .as_ref()
+        .is_some_and(|record| !outcome.for_generation(record))
+    {
+        return None;
+    }
+    if record.is_none()
+        && matches!(
+            outcome.phase,
+            Phase::Refreshed | Phase::RolledBack | Phase::Refused
+        )
+    {
+        return None;
+    }
     if outcome.phase == Phase::Pending {
         let live = record.as_ref().is_some_and(|record| {
             outcome.for_record(record)
@@ -607,9 +832,6 @@ pub(in crate::cli::tunnel) fn status(root: &Path, name: &str) -> Option<(&'stati
             ));
         }
     } else if let Some(record) = &record {
-        if !outcome.for_generation(record) {
-            return None;
-        }
         if !outcome.for_record(record) {
             return Some((
                 "failed",
