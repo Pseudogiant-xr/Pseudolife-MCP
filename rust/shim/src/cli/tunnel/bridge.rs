@@ -22,11 +22,11 @@
 //! bridge prints no token, key or nonce, and its child gets only the
 //! environment named in [`INHERITED`] plus what the profile sets.
 //!
-//! A receipt's `identity` is the challenge's, copied: this bridge checks the
-//! profile it serves is unchanged since it started, but there is no native
-//! launch identity yet to compare with the challenge's, so a reader must not
-//! take the field as proof of which launch answered until one exists. No
-//! launcher may start this bridge for real until it checks one.
+//! The native supervisor passes its launch generation along with the frozen
+//! profile. The bridge captures the recorded identity before serving and
+//! writes receipts in the saved profile's store only when the challenge,
+//! captured identity and current launch agree. A bridge without a launch
+//! binding can relay requests, but cannot settle a verification call.
 use std::{
     collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
@@ -45,7 +45,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWrite
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::{Fail, store, syntax};
+use super::{Fail, runtime::identity, store, syntax};
 
 const USAGE: &str = "tunnel shim is started by the tunnel runtime, not by hand: it needs --profile <name>, and --profile-dir <directory> for a store other than the default";
 const NO_SHIM: &str =
@@ -66,9 +66,8 @@ const DISCOVERY_FAILED: &str =
     "Full tool discovery unavailable; run pseudolife-mcp doctor on the tunnel host.";
 
 /// The only names the child shim inherits from the bridge's environment
-/// (compared without case on Windows, as Windows compares them). With no
-/// native launcher in front of it yet, the bridge is the one layer between
-/// whoever started the vendor and a shim the remote side drives, so a
+/// (compared without case on Windows, as Windows compares them). The bridge
+/// is the layer between the vendor and a shim the remote side drives, so a
 /// token, a daemon address, a board identity or a session handle never
 /// crosses: only what the shim needs to find its folders and reach its
 /// daemon.
@@ -176,9 +175,9 @@ const TOOLS: [&str; 2] = ["memory_search", "memory_agents"];
 
 /// `--profile <name>` (required) and `--profile-dir <directory>`, each once,
 /// in any order.
-fn parse(values: &[OsString]) -> Option<(String, Option<String>)> {
+fn parse(values: &[OsString]) -> Option<(String, Option<String>, Option<String>)> {
     let values: Vec<&str> = values.iter().map(|v| v.to_str()).collect::<Option<_>>()?;
-    let (mut profile, mut directory) = (None, None);
+    let (mut profile, mut directory, mut launch) = (None, None, None);
     let mut rest = values.iter();
     while let Some(option) = rest.next() {
         let value = rest
@@ -187,19 +186,21 @@ fn parse(values: &[OsString]) -> Option<(String, Option<String>)> {
         let slot = match *option {
             "--profile" => &mut profile,
             "--profile-dir" => &mut directory,
+            "--launch-id" => &mut launch,
             _ => return None,
         };
         if slot.replace((*value).to_owned()).is_some() {
             return None;
         }
     }
-    Some((profile?, directory))
+    Some((profile?, directory, launch))
 }
 
 /// What the bridge was started with: the store and its validated profile.
 struct Start {
     root: PathBuf,
     profile: store::Profile,
+    verification: Option<ReceiptIdentity>,
 }
 
 /// The `tunnel status` command for this profile, in the store the bridge
@@ -217,7 +218,7 @@ pub(super) fn status_command(name: &str, directory: Option<&str>) -> String {
 }
 
 fn prepare(values: &[OsString]) -> Result<Start, String> {
-    let (name, directory) = parse(values).ok_or(USAGE)?;
+    let (name, directory, launch) = parse(values).ok_or(USAGE)?;
     let root = store::store_root(directory.as_deref()).map_err(|_| store::UNSAFE_ROOT)?;
     let command = status_command(&name, directory.as_deref());
     let status = format!("`{command}` names the cause");
@@ -241,7 +242,23 @@ fn prepare(values: &[OsString]) -> Result<Start, String> {
             "the profile's daemon address is not an http(s) origin (no path, query or credentials), which the stdio shim needs, and this client cannot change a saved profile yet; `{command}` names its file"
         ));
     }
-    Ok(Start { root, profile })
+    let (root, verification) = match launch {
+        Some(launch) => {
+            let scope = identity::Bound::capture(&root, &launch, &profile)?;
+            let root = scope.root.clone();
+            let verification = ReceiptIdentity {
+                captured: scope.identity.clone(),
+                current: Arc::new(move || scope.expected()),
+            };
+            (root, Some(verification))
+        }
+        None => (root, None),
+    };
+    Ok(Start {
+        root,
+        profile,
+        verification,
+    })
 }
 
 /// The child shim, as the bridge starts it: `<executable> shim`, the
@@ -331,12 +348,13 @@ async fn serve(start: Start) -> ExitCode {
         crate::stderrln!("{NO_SHIM}");
         return ExitCode::FAILURE;
     };
-    let observer = Observer::new(
+    let mut observer = Observer::new(
         start.root,
         &start.profile,
         Reporter::stderr(),
         private_sink(),
     );
+    observer.verification = start.verification;
     let gate = Gate::new(start.profile.catalog == "full");
     let relayed = relay(
         tokio::io::stdin(),
@@ -960,6 +978,65 @@ fn read_challenge(root: &Path, name: &str) -> Option<Challenge> {
     })
 }
 
+#[derive(Default)]
+pub(super) struct Cloud {
+    pub(super) successful: u8,
+    pub(super) current: bool,
+}
+
+pub(super) fn cloud_status(root: &Path, name: &str) -> Cloud {
+    let Some(challenge) = read_challenge(root, name) else {
+        return Cloud::default();
+    };
+    if !identity::current(root, name).is_ok_and(|current| current == challenge.identity) {
+        return Cloud::default();
+    }
+    let directory = root.join(format!("{name}-verification"));
+    let successful = TOOLS
+        .iter()
+        .filter(|tool| {
+            let path = directory.join(format!("{}-{tool}.json", challenge.nonce));
+            let Ok(data) = store::private_read(&path, 65536) else {
+                return false;
+            };
+            let syntax::Admit::Yes(Value::Object(receipt)) = syntax::json_loads(&data) else {
+                return false;
+            };
+            receipt.get("identity").and_then(Value::as_str) == Some(challenge.identity.as_str())
+                && receipt.get("nonce").and_then(Value::as_str) == Some(challenge.nonce.as_str())
+                && receipt.get("tool").and_then(Value::as_str) == Some(**tool)
+                && receipt.get("success") == Some(&Value::Bool(true))
+                && receipt
+                    .get("observed")
+                    .and_then(Value::as_f64)
+                    .is_some_and(|observed| observed.is_finite() && observed >= challenge.created)
+        })
+        .count() as u8;
+    Cloud {
+        successful,
+        current: true,
+    }
+}
+
+pub(super) fn begin(root: &Path, name: &str) -> super::Output {
+    let identity = identity::current(root, name).map_err(Fail::Tunnel)?;
+    let directory = store::checked_path(&root.join(format!("{name}-verification")))?;
+    crate::board::state::private_dir(&directory).map_err(|_| Fail::Tunnel(RECEIPT_FAILED))?;
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let challenge = json!({"identity": identity, "nonce": nonce, "created": now()});
+    crate::board::state::atomic_write(
+        &directory.join("challenge.json"),
+        challenge.to_string().as_bytes(),
+        None,
+    ).map_err(|_| Fail::Tunnel("the verification challenge could not be saved. Check the verification directory and retry"))?;
+    Ok((
+        format!(
+            "In the connected app, call memory_search with query=\"{nonce}\" and memory_agents with action=\"list\" and project=\"{nonce}\". Report success or failure only. Check the receipts with tunnel status.\n"
+        ),
+        0,
+    ))
+}
+
 /// The profile fields that decide where the bridge's calls go; a receipt is
 /// written only while the saved profile still names them.
 #[derive(Clone, Debug, PartialEq)]
@@ -1032,10 +1109,19 @@ struct Call {
     asked: f64,
 }
 
+type CurrentIdentity = Arc<dyn Fn() -> Result<String, &'static str> + Send + Sync>;
+
+#[derive(Clone)]
+struct ReceiptIdentity {
+    captured: String,
+    current: CurrentIdentity,
+}
+
 /// Watches the relayed stream for verification calls; never changes it.
 pub(super) struct Observer {
     root: PathBuf,
     binding: Binding,
+    verification: Option<ReceiptIdentity>,
     pending: HashMap<Id, Call>,
     /// How many client requests under each id are not yet answered: a
     /// verification call sent while another under its id is outstanding is
@@ -1056,6 +1142,7 @@ impl Observer {
         Self {
             root,
             binding: Binding::of(profile),
+            verification: None,
             pending: HashMap::new(),
             in_flight: HashMap::new(),
             outstanding: 0,
@@ -1156,6 +1243,7 @@ impl Observer {
         succeeded(message).then(|| Proof {
             root: self.root.clone(),
             binding: self.binding.clone(),
+            verification: self.verification.clone(),
             call,
             reporter: self.reporter.clone(),
             sink: self.sink.clone(),
@@ -1168,6 +1256,7 @@ impl Observer {
 struct Proof {
     root: PathBuf,
     binding: Binding,
+    verification: Option<ReceiptIdentity>,
     call: Call,
     reporter: Reporter,
     sink: Sink,
@@ -1184,10 +1273,32 @@ impl Proof {
         if !self.call.supplied.contains(&challenge.nonce) || challenge.created > self.call.asked {
             return None;
         }
+        let Some(verification) = self.verification else {
+            self.reporter.once("tunnel bridge has no verified native launch identity. Start it with tunnel run before verification");
+            return None;
+        };
+        if challenge.identity != verification.captured {
+            self.reporter.once("the verification challenge belongs to a different tunnel identity. Repeat tunnel verify for this launch");
+            return None;
+        }
+        match (verification.current)() {
+            Ok(expected) if expected == verification.captured => {}
+            Ok(_) => {
+                self.reporter.once(identity::CHANGED);
+                return None;
+            }
+            Err(cause) => {
+                self.reporter.once(cause);
+                return None;
+            }
+        }
         // The profile still names the daemon and tunnel this bridge serves.
         match store::load(&self.root, name) {
             Ok(profile) if profile.state == "ready" && Binding::of(&profile) == self.binding => {}
-            _ => return None,
+            _ => {
+                self.reporter.once(identity::CHANGED);
+                return None;
+            }
         }
         let written = (|| {
             let directory = store::checked_path(&self.root.join(format!("{name}-verification")))
