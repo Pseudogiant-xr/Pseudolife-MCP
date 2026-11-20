@@ -333,6 +333,40 @@ fn update_reports_only_an_attested_current_launch_as_current() {
 }
 
 #[test]
+fn stopped_foreground_tunnel_restarts_with_fresh_launch_ownership() {
+    let home = Home::new();
+    let token = home.0.join("daemon-token");
+    state::atomic_create(&token, b"fixture-daemon-token").unwrap();
+    let executable = std::env::current_exe().unwrap();
+    let record_path = record::path(&home.0, "dot");
+    let run_and_stop = || {
+        thread::scope(|scope| {
+            let run = scope.spawn(|| {
+                launch(prepared(&home.0), &executable, STARTUP, |config| {
+                    fixture_command(&executable, config, "ready")
+                })
+            });
+            let Some(ready) = wait_for_ready(&record_path, || run.is_finished()) else {
+                panic!("fixture did not become ready: {:?}", run.join().unwrap());
+            };
+            let stopped = stop(&home.0, "dot");
+            let outcome = run.join().unwrap();
+            assert_eq!(stopped.unwrap().1, 0);
+            assert_eq!(outcome, Ok(("Tunnel dot stopped.\n".into(), 0)));
+            assert!(!record_path.exists());
+            let launch = launch_id(&ready.native_launch).unwrap();
+            assert!(!stage_path(&home.0, launch).exists());
+            ready
+        })
+    };
+    let first = run_and_stop();
+    let second = run_and_stop();
+    assert_ne!(first.native_launch, second.native_launch);
+    assert!(first.launch_identity.is_some());
+    assert_eq!(first.launch_identity, second.launch_identity);
+}
+
+#[test]
 fn foreground_launch_owns_one_child_and_stop_waits_for_cleanup() {
     let home = Home::new();
     let exe = std::env::current_exe().unwrap();
