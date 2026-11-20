@@ -54,6 +54,12 @@ pub(super) fn save_fixture_key(root: &Path, name: &str) -> bool {
     true
 }
 
+pub(super) fn fixture_image(root: &Path, name: &str) -> PathBuf {
+    let path = root.join(name);
+    state::atomic_create(&path, name.as_bytes()).unwrap();
+    path
+}
+
 const FIXTURE: &str = "cli::tunnel::runtime::tests::vendor_fixture";
 const CONFIG_ENV: &str = "PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG";
 const FIXTURE_WATCHDOG: Duration = Duration::from_secs(90);
@@ -276,6 +282,7 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     let home = Home::new();
     let prepared = launch_fixture(&home.0);
     let executable = std::env::current_exe().unwrap();
+    let image = fixture_image(&home.0, "current-shim");
     let name = &prepared.profile.name;
     state::atomic_create(
         &store::profile_path(&home.0, name).unwrap(),
@@ -293,7 +300,7 @@ fn update_reports_only_an_attested_current_launch_as_current() {
         executable: None,
         bridge: None,
         launch_identity: Some(
-            identity::compute(&home.0, &prepared.profile, &prepared.key, &executable).unwrap(),
+            identity::compute(&home.0, &prepared.profile, &prepared.key, &image).unwrap(),
         ),
         spawn_started: Some(true),
         supervisor: Identity {
@@ -310,7 +317,7 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     let record_path = super::record::path(&home.0, name);
     let original = fs::read(&record_path).unwrap();
     let check = |expected| {
-        let (text, code) = super::super::update(&home.0).unwrap();
+        let (text, code) = super::super::update_with_runtime(&home.0, Some(&image)).unwrap();
         assert_eq!(code, 0);
         let report: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(report["state"], expected);

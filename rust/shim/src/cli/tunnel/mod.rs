@@ -630,6 +630,10 @@ fn report(
 /// session of an owned launch. Idle profiles stay idle and an existing
 /// stdio session keeps its shim. The release updater consumes this report.
 fn update(root: &Path) -> Answer {
+    update_with_runtime(root, std::env::current_exe().ok().as_deref())
+}
+
+fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
     // A store this client cannot list is a refusal with its cause, never a
     // deferral: the update step shows the cause to the user.
     let unreadable = |fail: Fail| match fail {
@@ -703,7 +707,7 @@ fn update(root: &Path) -> Answer {
             && record.as_ref().is_some_and(|record| {
                 record.native && record.ready && record.liveness == Liveness::Running
             });
-        let current = live_native && current_launch(root, name);
+        let current = live_native && executable.is_some_and(|exe| current_launch(root, name, exe));
         let selected = if live_native && !current {
             runtime::refresh::attempt(root, name)
         } else {
@@ -843,11 +847,11 @@ fn update(root: &Path) -> Answer {
     ))
 }
 
-fn current_launch(root: &Path, name: &str) -> bool {
+fn current_launch(root: &Path, name: &str, executable: &Path) -> bool {
     setup::check_pending(root, name).is_ok()
         && matches!(setup::validate_previous_key(root, name), Ok(false))
         && refresh_idle(root, name)
-        && runtime::identity::current(root, name).is_ok()
+        && runtime::identity::active(root, name, executable, None).is_ok()
 }
 
 fn verify(options: &Options, root: &Path) -> Output {

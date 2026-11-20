@@ -221,7 +221,7 @@ pub(super) fn activate(
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{Home, launch_fixture, save_fixture_key};
+    use super::super::tests::{Home, fixture_image, launch_fixture, save_fixture_key};
     use super::super::{Identity, Prepared, Stage};
     use super::*;
     use uuid::Uuid;
@@ -238,6 +238,7 @@ mod tests {
         .unwrap();
         let id = Uuid::new_v4();
         let mut stage = Stage::new(&home.0, "dot", id).unwrap();
+        let process_image = std::env::current_exe().unwrap();
         let launch = LaunchRecord {
             native_launch: id.simple().to_string(),
             launch_identity: Some(
@@ -248,11 +249,11 @@ mod tests {
             spawn_started: Some(true),
             supervisor: Identity {
                 pid: std::process::id(),
-                exe: executable.to_owned(),
+                exe: process_image.clone(),
             },
             target: Some(Identity {
                 pid: std::process::id(),
-                exe: executable.to_owned(),
+                exe: process_image,
             }),
             ready: true,
         };
@@ -276,7 +277,7 @@ mod tests {
         if !save_fixture_key(&home.0, "dot") {
             return;
         }
-        let current = std::env::current_exe().unwrap();
+        let current = fixture_image(&home.0, "current-shim");
         let (_prepared, stage, initial) = launch_for_refresh(&home, &current);
         let candidate = || Some(current.clone());
         let run = |probe: fn(&store::Profile) -> Result<(), &'static str>| {
@@ -318,7 +319,7 @@ mod tests {
             Some(current.as_path())
         );
         drop(racing_session);
-        assert!(identity::current(&home.0, "dot").is_ok());
+        assert!(identity::active(&home.0, "dot", &current, None).is_ok());
     }
 
     #[test]
@@ -327,26 +328,35 @@ mod tests {
         if !save_fixture_key(&home.0, "dot") {
             return;
         }
-        let prior = std::env::current_exe().unwrap();
-        let (prepared, mut stage, mut initial) = launch_for_refresh(&home, &prior);
-        // Use an older recorded shim version to model an installed upgrade
-        // without starting a second vendor process.
-        initial.bridge.as_mut().unwrap().version = "0.0.1".into();
-        initial.launch_identity =
-            Some(identity::expected(&home.0, &prepared.profile, &prior, "0.0.1").unwrap());
-        stage.announce(&initial).unwrap();
+        let prior = fixture_image(&home.0, "prior-shim");
+        let candidate = fixture_image(&home.0, "selected-shim");
+        // An elevated bridge requires an executable outside the temp tree.
+        #[cfg(unix)]
+        let candidate = if rustix::process::geteuid().is_root() {
+            std::env::current_exe().unwrap()
+        } else {
+            candidate
+        };
+        let (prepared, stage, initial) = launch_for_refresh(&home, &prior);
         let prior_id = initial.launch_identity.clone();
         let generation = initial.native_launch.clone();
-        let outcome = activate(&home.0, "dot", initial, || Some(prior.clone()), |_| Ok(()));
+        let outcome = activate(
+            &home.0,
+            "dot",
+            initial,
+            || Some(candidate.clone()),
+            |_| Ok(()),
+        );
         assert_eq!(outcome, Ok(Selection::Refreshed));
         let selected = read_record(&stage.record).unwrap();
         assert_ne!(selected.launch_identity, prior_id);
         assert_eq!(selected.native_launch, generation);
         assert_eq!(selected.target.as_ref().unwrap().pid, std::process::id());
+        assert_eq!(selected.executable.as_deref(), Some(candidate.as_path()));
         let bound =
             identity::Bound::capture(&stage.directory, &generation, &prepared.profile).unwrap();
         assert_eq!(Some(bound.expected().unwrap()), selected.launch_identity);
-        assert!(identity::current(&home.0, "dot").is_ok());
+        assert!(identity::active(&home.0, "dot", &candidate, None).is_ok());
         assert!(try_gate(&stage.directory).unwrap().is_none());
     }
 }
