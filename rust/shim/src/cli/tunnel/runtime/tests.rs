@@ -30,6 +30,7 @@ fn prepared(root: &Path) -> Prepared<'_> {
         profile,
         profile_bytes,
         key: key::Key::fixture(),
+        previous_key: false,
         _locks: locks,
     }
 }
@@ -119,7 +120,19 @@ fn vendor_fixture() {
         eprintln!("{diagnostic} [synthetic-untrusted-suffix]");
         return;
     }
-    if mode == "ready" {
+    let poll = match mode.as_str() {
+        "trial-refused" => Some(
+            r#"{"schema_version":1,"component":"control-plane","status":"degraded","details":{"http_status":403}}"#,
+        ),
+        "trial-qualified" | "trial-early" => Some(
+            r#"{"schema_version":1,"component":"control-plane","status":"ok","details":{"last_success":"2026-11-20T00:00:00Z"}}"#,
+        ),
+        "trial-local" => Some(
+            r#"{"schema_version":1,"component":"control-plane","status":"unknown","details":{}}"#,
+        ),
+        _ => None,
+    };
+    if mode == "ready" || poll.is_some() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let health = config["health"]["url_file"].as_str().unwrap();
@@ -136,13 +149,34 @@ fn vendor_fixture() {
                     if std::io::BufReader::new(&mut stream)
                         .read_line(&mut request)
                         .is_ok()
-                        && request.starts_with("GET /readyz HTTP/1.1")
                     {
+                        let readiness = request.starts_with("GET /readyz HTTP/1.1");
+                        let body = if readiness {
+                            Some("")
+                        } else if request.starts_with("GET /health/control-plane HTTP/1.1") {
+                            poll
+                        } else {
+                            None
+                        };
                         // A probe may have timed out while the fixture was
                         // descheduled. The next probe can still get a reply.
-                        let _ = stream.write_all(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        );
+                        if let Some(body) = body {
+                            let status = if readiness && mode == "trial-early" {
+                                "503 Starting"
+                            } else {
+                                "200 OK"
+                            };
+                            let _ = write!(
+                                stream,
+                                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                body.len()
+                            );
+                            if matches!(mode.as_str(), "trial-local" | "trial-early")
+                                && !body.is_empty()
+                            {
+                                return;
+                            }
+                        }
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -155,6 +189,72 @@ fn vendor_fixture() {
     }
     // Bounds a fixture even if a mutation causes the supervisor to lose it.
     thread::sleep(Duration::from_secs(20));
+}
+
+#[test]
+fn replacement_releases_previous_key_only_after_a_successful_poll() {
+    for (mode, confirmed, becomes_ready) in [
+        ("trial-refused", false, false),
+        ("trial-local", false, false),
+        ("trial-qualified", true, true),
+        ("trial-early", true, false),
+    ] {
+        let home = Home::new();
+        let mut prepared = launch_fixture(&home.0);
+        let mut older: serde_json::Value = serde_json::from_slice(&prepared.profile_bytes).unwrap();
+        older["runtime_key_expires_at"] = json!("2020-01-01T00:00:00Z");
+        let older = older.to_string();
+        let prefix = if cfg!(windows) {
+            b"DPAPI\0"
+        } else {
+            b"PLAIN\0"
+        };
+        let old_key = [prefix.as_slice(), b"prior opaque fixture"].concat();
+        let new_key = [prefix.as_slice(), b"replacement opaque fixture"].concat();
+        let profile = home.0.join("dot.profile.json");
+        let key = home.0.join("dot.key");
+        state::atomic_create(&profile, older.as_bytes()).unwrap();
+        state::atomic_create(&key, &old_key).unwrap();
+        setup::seed_trial(
+            &home.0,
+            "dot",
+            (older.as_bytes(), &old_key),
+            (&prepared.profile_bytes, &new_key),
+        )
+        .unwrap();
+        prepared.previous_key = setup::validate_previous_key(&home.0, "dot").unwrap();
+        let marker = home.0.join("dot.key-previous");
+        let expected = store::private_read(&marker, 131072).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let record_path = record::path(&home.0, "dot");
+        let (ready, outcome) = thread::scope(|scope| {
+            let run = scope.spawn(|| {
+                launch(prepared, &exe, STARTUP, |config| {
+                    fixture_command(&exe, config, mode)
+                })
+            });
+            let ready = wait_for_ready(&record_path, || run.is_finished());
+            if ready.is_some() {
+                stop(&home.0, "dot").unwrap();
+            }
+            (ready, run.join().unwrap())
+        });
+        assert_eq!(ready.is_some(), becomes_ready);
+        assert!(fs::read(&key).unwrap() == new_key);
+        if confirmed {
+            assert!(!marker.exists());
+            assert_eq!(outcome.is_ok(), becomes_ready);
+        } else {
+            assert!(store::private_read(&marker, 131072).unwrap() == expected);
+            assert!(matches!(&outcome, Err(Fail::Tunnel(message))
+                    if message.contains("previous key is retained")
+                    && message.contains("pseudolife-mcp tunnel setup --restore-key")
+                    && !message.contains("--discard-previous-key")));
+            if mode == "trial-refused" {
+                assert_eq!(outcome, Err(TRIAL_AUTH));
+            }
+        }
+    }
 }
 
 #[test]
