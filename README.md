@@ -1420,14 +1420,14 @@ wire bytes: 4 MiB for the text-bearing writes (`/api/facts/set`,
 16 KiB for the session-end hook, 1 KiB for `/api/pair`, and 256 KiB for
 everything else; a larger body gets HTTP 413 `{"error":
 "request_too_large"}`. No CDN, fully offline: a Svelte
-build committed under `pseudolife_memory/web/static/` with vendored OFL fonts
+build committed under `frontend/dist/` with vendored OFL fonts
 and a vendored 3D engine, served straight from the daemon, so neither the
 daemon image nor a pip install needs Node. The source is in
 [`frontend/`](frontend/README.md); CI rebuilds it and fails if the committed
-build differs. Developing the UI? A fixture-backed dev server (no Postgres,
-no torch) serves the console against canned data:
-`python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
-Its payloads self-announce (`"fixtures": true` on `/health`), and the
+build differs. For UI development, the [Vite fixture-server workflow](frontend/README.md#develop)
+serves the Console at `http://localhost:5173/ui/` against canned data
+without Postgres or torch. Its payloads self-announce
+(`"fixtures": true` on `/health`), and the
 topbar shows a "Demo data, not a real bank" chip, so a fixture run is never
 mistaken for a real bank.
 

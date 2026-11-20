@@ -27,7 +27,8 @@ from pathlib import Path
 
 from .. import core, normalize
 from . import _bank
-from rust.harness_support.audit_oracle import audit_hash, verify_audit_chain
+from rust.harness_support.audit_oracle import GENESIS_HASH, audit_hash, canonical_payload, verify_audit_chain
+from rust.harness_support.database_guard import assert_disposable_database, fixture_database_pattern
 
 DAY = 86400
 # Fixed seed clock: far enough in the past that a redaction's
@@ -831,8 +832,9 @@ def stats_events():
 
 
 def seed_stats(conn):
-    """Oracle-chained events, plus a controlled historical wakes-table fixture."""
-    store = _store(conn)
+    """Seed the fresh stats bank with a deterministic chain and historical wakes."""
+    if not fixture_database_pattern("w1c").fullmatch(assert_disposable_database(conn)):
+        raise ValueError("stats seed needs a disposable w1c database")
     events = stats_events()
     b = "b" * 32
     events.extend([
@@ -840,18 +842,35 @@ def seed_stats(conn):
         dict(events[0], seq=101, event="read", created_at=1411.0, agent_id=b, payload={"path":"delivery"}),
         dict(events[0], seq=102, event="update", created_at=1420.0, agent_id=b, actor="daemon", payload={}),
     ])
-    for row in sorted(events,key=lambda r:(r["created_at"],r["seq"])):
-        event = store._event(row["event"],row["payload"],actor=row["actor"],principal=row["principal"],
-                             agent_id=row["agent_id"],recipient=row["recipient_agent_id"],project="fixture",
-                             task="stats",message_id=row["message_id"])
-        with store.storage._txn():
-            store._append([event],row["created_at"])
-    for n,(decision,created,served) in enumerate([
-        ("rung",1400.0,1405.0),("nudged",1410.0,None),("rung",1450.0,5000.0),
-        ("rung",900.0,1000.0),("hinted",1460.0,1470.0),
-    ]):
-        conn.execute("INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,decision,ring_at,created_at,served_at) "
-                     "VALUES (%s,%s,%s,%s,%s,%s,%s)", (b,"a"*32,f"m{n}",decision,created,created,served))
+    ordered = sorted(events, key=lambda row: (row["created_at"], row["seq"]))
+    previous = GENESIS_HASH
+    for seq, row in enumerate(ordered, start=1):
+        row.update(seq=seq, payload=canonical_payload(row["payload"]), prev_hash=previous)
+        row["hash"] = previous = audit_hash(previous, row)
+    wakes = [
+        ("rung", 1400.0, 1405.0),
+        ("nudged", 1410.0, None),
+        ("rung", 1450.0, 5000.0),
+        ("rung", 900.0, 1000.0),
+        ("hinted", 1460.0, 1470.0),
+    ]
+    with conn.transaction(), conn.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO coordination_events "
+            "(seq,event,actor,principal,agent_id,recipient_agent_id,project,task,"
+            "message_id,payload,created_at,hlc,prev_hash,hash) "
+            "VALUES (%(seq)s,%(event)s,%(actor)s,%(principal)s,%(agent_id)s,"
+            "%(recipient_agent_id)s,%(project)s,%(task)s,%(message_id)s,%(payload)s,"
+            "%(created_at)s,%(hlc)s,%(prev_hash)s,%(hash)s)",
+            ordered,
+        )
+        cursor.executemany(
+            "INSERT INTO coordination_wakes "
+            "(recipient_agent_id,sender_agent_id,message_id,decision,ring_at,created_at,served_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            [(b, "a" * 32, f"m{n}", decision, created, created, served)
+             for n, (decision, created, served) in enumerate(wakes)],
+        )
     return {}
 
 
@@ -864,30 +883,6 @@ def stats_durations():
         {"ended":"1970-01-01T01:23:20Z", "seconds":999},
         {"ended":"bad", "seconds":5},
     ])
-
-
-def stats_fixture():
-    """Generate deterministic unit-test goldens by executing the Python oracle."""
-    from pseudolife_memory.board_audit_stats import compute_stats
-    events = stats_events()
-    integer_events = [dict(e,created_at=int(e["created_at"])) for e in events]
-    durations = []
-    for line in stats_durations().splitlines():
-        try:
-            durations.append(json.loads(line))
-        except ValueError:
-            pass
-    b = "b"*32
-    wakes = [{"recipient_agent_id":b,"decision":d,"created_at":c,"served_at":s}
-             for d,c,s in [("rung",1400.0,1401.0),("nudged",1410.0,None),("rung",1450.0,5000.0)]]
-    result = []
-    for name, rows, rings, records in [("empty",[],[],[]),("telemetry",events,wakes,durations),
-                                       ("integer-times",integer_events,wakes,durations)]:
-        report = compute_stats(rows,rings,records,since=1000.0,until=5000.0,now=5000.5,
-                               version="fixture",sources={"events":"export","wakes":"fixture","durations":"file"})
-        result.append(dict(name=name,events=rows,wakes=rings,durations=records,report=report,
-                           line=json.dumps(report,ensure_ascii=True,separators=(",",":"))))
-    return result
 
 
 def stats_cases():

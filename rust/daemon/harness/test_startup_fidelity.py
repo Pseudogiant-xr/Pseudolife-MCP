@@ -6,20 +6,18 @@ import tempfile
 import unittest
 from itertools import permutations
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import torch
 import torch.nn.functional as F
 
-import startup_cases as startup
+from startup_fixture import entry_rows
 
 
 class SurpriseFixtureTests(unittest.TestCase):
     def test_surprise_fixture_has_strictly_descending_dense_scores(self):
-        rows = []
-        startup.seed(SimpleNamespace(insert_entry=rows.append), "surprise-real-text-rounding")
-        matrix = torch.stack([torch.as_tensor(row["embedding"]) for row in rows])
+        rows = entry_rows("surprise-real-text-rounding")
+        matrix = torch.tensor([row["embedding"] for row in rows], dtype=torch.float32)
         query = torch.zeros(matrix.shape[1])
         query[0] = 1.0
         scores = (F.normalize(matrix, dim=1) @ query).tolist()

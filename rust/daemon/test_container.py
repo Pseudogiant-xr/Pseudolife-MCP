@@ -138,11 +138,11 @@ class ContainerTests(unittest.TestCase):
                      "ops/Dockerfile.daemon-rust", "ops/docker-compose.rust.yml",
                      "ops/provision-daemon-models.sh",
                      ".github/workflows/rust.yml", "plugin/hooks/session-start.sh",
-                     "pseudolife_memory/web/static/index.html"):
+                     "frontend/dist/index.html", "frontend/dist/vendor/README.md"):
             with self.subTest(path=path):
                 self.assertTrue(gate.needs_image([path]))
         self.assertFalse(gate.needs_image(["README.md", "docs/guide/configuration.md",
-                                          "pseudolife_memory/service.py"]))
+                                          "pseudolife_memory/service.py", "frontend/src/main.ts"]))
 
     def test_image_ships_the_native_operator_cli(self):
         dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
@@ -159,9 +159,38 @@ class ContainerTests(unittest.TestCase):
 
     def test_image_ships_the_console_and_selects_its_asset_directory(self):
         dockerfile = (ROOT / "ops/Dockerfile.daemon-rust").read_text(encoding="utf-8")
-        self.assertIn("COPY pseudolife_memory/web/static /app/static", dockerfile)
+        self.assertIn("COPY frontend/dist /app/static", dockerfile.splitlines())
         self.assertIn("PSEUDOLIFE_DAEMON_STATIC_DIR=/app/static", dockerfile)
-        self.assertTrue((ROOT / "pseudolife_memory/web/static/index.html").is_file())
+        self.assertTrue((ROOT / "frontend/dist/index.html").is_file())
+
+    def test_python_image_installs_and_serves_the_console(self):
+        dockerfile = (ROOT / "ops/Dockerfile.daemon").read_text(encoding="utf-8")
+        self.assertIn("--mount=type=bind,source=setup.py,target=/app/setup.py", dockerfile)
+        self.assertIn("--mount=type=bind,source=frontend/dist,target=/app/frontend/dist", dockerfile)
+        self.assertIn("COPY frontend/dist /app/pseudolife_memory/web/static", dockerfile.splitlines())
+
+    def test_image_probe_rejects_changed_console_bytes(self):
+        import io
+        from unittest.mock import patch
+
+        probe = load("container_probe")
+        base = "http://127.0.0.1:8766"
+        dist = ROOT / "frontend/dist"
+        for changed in ("/ui/", "/ui/vendor/README.md"):
+            def urlopen(url, *, timeout):
+                served = url.removeprefix(base + "/ui/")
+                body = b"wrong Console bytes" if url == base + changed else (dist / (served or "index.html")).read_bytes()
+                reply = io.BytesIO(body)
+                reply.status = 200
+                return reply
+
+            with (self.subTest(path=changed),
+                  patch.dict(os.environ, {"W3J_RUST_TOKEN": "disposable-test-token"}),
+                  patch.object(sys, "argv", ["container_probe.py"]),
+                  patch.object(probe, "verify", return_value={"query_inference": True}),
+                  patch.object(probe.urllib.request, "urlopen", side_effect=urlopen),
+                  self.assertRaisesRegex(RuntimeError, "Console content differs at " + re.escape(changed))):
+                probe.main()
 
     def test_release_overlay_requires_a_pull_and_an_explicit_version(self):
         overlay = (ROOT / "ops/docker-compose.rust-ghcr.yml").read_text(encoding="utf-8")

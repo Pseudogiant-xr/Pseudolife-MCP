@@ -1,9 +1,8 @@
 """Guards over the committed build of the Cortex Console.
 
-The Vite/Svelte source lives in ``frontend/``; its build output is committed
-under ``pseudolife_memory/web/static/`` because the Python wheel ships
-``static/**`` and neither the daemon image nor a pip install has Node. The
-daemon serves that directory at ``/ui/``. These tests pin the parts of the
+The Vite/Svelte source lives in ``frontend/`` and the build is committed
+under ``frontend/dist/`` for the daemon images and Python wheel. The daemon
+serves those files at ``/ui/``. These tests pin the parts of the
 output the daemon relies on, so a missing or mis-based build fails here
 rather than as a blank page. They do not compare the build with
 ``frontend/src``: CI's ``frontend`` job rebuilds and diffs it.
@@ -12,12 +11,34 @@ rather than as a blank page. They do not compare the build with
 from __future__ import annotations
 
 import re
+import runpy
+import sys
+import tomllib
+from glob import glob
 from html.parser import HTMLParser
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
-STATIC = ROOT / "pseudolife_memory" / "web" / "static"
 FRONTEND = ROOT / "frontend"
+STATIC = FRONTEND / "dist"
+
+
+def test_python_wheel_maps_every_console_file(monkeypatch):
+    package = "pseudolife_memory.web.static"
+    setup_options = {}
+    setuptools = SimpleNamespace(find_namespace_packages=lambda **kwargs: [], setup=setup_options.update)
+    monkeypatch.setitem(sys.modules, "setuptools", setuptools)
+    runpy.run_path(str(ROOT / "setup.py"))
+
+    assert package in setup_options["packages"]
+    assert setup_options["package_dir"][package] == "frontend/dist"
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    patterns = config["tool"]["setuptools"]["package-data"][package]
+    packaged = {name for pattern in patterns for name in glob(pattern, root_dir=STATIC, recursive=True)
+                if (STATIC / name).is_file()}
+    expected = {str(path.relative_to(STATIC)) for path in STATIC.rglob("*") if path.is_file()}
+    assert expected and packaged == expected
 
 
 def test_console_build_is_committed():
@@ -53,8 +74,7 @@ def test_console_source_declares_base_and_outdir():
     assert config is not None, "frontend/vite.config.* missing"
     src = config.read_text(encoding="utf-8")
     assert re.search(r'^\s*base:\s*"/ui/",', src, re.M), "vite base must be /ui/"
-    assert re.search(r'^\s*outDir:\s*"\.\./pseudolife_memory/web/static",', src, re.M), \
-        "vite outDir must be pseudolife_memory/web/static"
+    assert re.search(r'^\s*outDir:\s*"dist",', src, re.M), "vite outDir must be frontend/dist"
     assert re.search(r"^\s*sourcemap:\s*false,", src, re.M), \
         "source maps would ship local paths in the wheel"
 
@@ -82,8 +102,8 @@ def test_vendored_galaxy_bundle_ships_with_its_licences():
     tail = out.read_text(encoding="utf-8", errors="ignore")[-20_000:]
     assert "Bundled license information" in tail and "Three.js Authors" in tail, \
         "the bundle's end-of-file licence comments are missing"
-    assert (FRONTEND / "public" / "vendor" / "README.md").is_file(), \
-        "the bundle's provenance and licence audit live in vendor/README.md"
+    assert out.with_name("README.md").read_bytes() == src.with_name("README.md").read_bytes(), \
+        "the build altered the bundle's provenance and licence audit"
     assert (STATIC / "assets" / "Geist-LICENSE.txt").is_file(), "the Geist font licence must ship"
 
 

@@ -148,10 +148,14 @@ pub(super) fn held_refusal(records: &[Record], to: &str, resume: bool) -> Option
             target = held.target
         )
     } else {
+        let endpoint = if held.expose_port.is_some() {
+            "--expose-target".to_owned()
+        } else {
+            format!("--target-url {}", held.target_url)
+        };
         format!(
-            "first finish it with pseudolife-mcp move --to {target} --target-url {url}{tokens} --resume, or give {target} back its own bank with {release}",
+            "first finish it with pseudolife-mcp move --to {target} {endpoint}{tokens} --resume, or give {target} back its own bank with {release}",
             target = held.target,
-            url = held.target_url,
             tokens = if held.carried_identities {
                 ""
             } else {
@@ -293,6 +297,7 @@ pub(super) fn transaction(
         target_pins: plan.target_pins.clone(),
         target_files: request.target_files.clone(),
         target_url: super::argv::base(&plan.target_url).to_owned(),
+        expose_port: plan.expose_port,
         work_dir: request.target_work_dir.clone().unwrap_or_default(),
         source_bank: plan.source.bank.clone().unwrap_or_default(),
         source_policy: plan.source.restart_policy.clone(),

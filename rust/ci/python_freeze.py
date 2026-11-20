@@ -7,9 +7,7 @@ decides on the paths of the pull request's own net change only: its merge
 commit against the base parent, ``git diff --no-renames``, so a rename out
 of the package counts as a deletion of its old path.
 
-One prefix is exempt: ``pseudolife_memory/web/static/``, the tracked Console
-build output the Rust daemon serves (ci.yml's ``frontend`` job rebuilds it),
-under its exact spelling only. The package prefix itself is compared after
+The package prefix is compared after
 NFKC normalisation and case folding, because on a case-insensitive checkout
 (Windows, a default macOS volume) ``Pseudolife_memory/x.py`` writes into the
 real package. A diff that cannot be read fails closed.
@@ -42,7 +40,7 @@ import re
 from pathlib import Path
 
 FROZEN = "pseudolife_memory/"
-EXEMPT = ("pseudolife_memory/web/static/",)
+EXEMPT = ()
 BATCH_PREFIX = "integrate/"
 EXCEPTION_LABEL = "freeze-exception"
 
@@ -57,9 +55,7 @@ SHORT_NAME = re.compile(r"pseudo~[0-9]+/")
 
 
 def frozen_paths(paths: list[str]) -> list[str]:
-    """The changed paths the freeze refuses, in order: anything whose folded
-    form is under the package or its short name, unless it is under the
-    exempt prefix exactly."""
+    """Return the changed paths under the folded package prefix or its short name."""
     return [path for path in paths
             if (_folded(path).startswith(FROZEN) or SHORT_NAME.match(_folded(path)))
             and not path.startswith(EXEMPT)]
@@ -94,8 +90,8 @@ def labels_of(raw: str) -> list[str]:
 def refusal(paths: list[str]) -> str:
     return ("Python is frozen since 14 November 2026: this pull request changes "
             + ", ".join(paths)
-            + "; make the change in Rust instead (only pseudolife_memory/web/static/, the Console build, may change;"
-            + f" a change the maintainer ruled an exception carries the label {EXCEPTION_LABEL}).")
+            + "; make the change in Rust instead"
+            + f" (a change the maintainer ruled an exception carries the label {EXCEPTION_LABEL}).")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -123,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error title=Python is frozen::{refusal(refused)}")
         print(refusal(refused))
         return 1
-    print(f"Python freeze: {len(paths)} changed paths, none under {FROZEN} outside {', '.join(EXEMPT)}")
+    print(f"Python freeze: {len(paths)} changed paths, none under {FROZEN}")
     return 0
 
 

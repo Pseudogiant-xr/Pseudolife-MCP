@@ -158,6 +158,27 @@ fn recovery_commands_validate_the_path_and_distinguish_a_missing_journal() {
 }
 
 #[test]
+fn settling_exposure_requires_explicit_idle_confirmation() {
+    let home = Home::new("settle-exposure");
+    for suffix in [&[][..], &["--unknown"][..]] {
+        let output = cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+            .args(["move-target", "settle-exposure", "~/move folder", "8443"])
+            .args(suffix)
+            .env("HOME", &home.0)
+            .env("USERPROFILE", &home.0)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("--confirmed-idle")
+        );
+    }
+    assert!(listing(&home.0).is_empty());
+}
+
+#[test]
 fn valid_argv_gets_the_native_answer_without_a_connection() {
     let home = Home::new("valid");
     let (socket, url) = listener();

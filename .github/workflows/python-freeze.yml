@@ -1,6 +1,5 @@
 # Python is frozen since 14 November 2026 (maintainer ruling): an ordinary
-# pull request whose own net change touches pseudolife_memory/ (outside the
-# Console build output under pseudolife_memory/web/static/) fails this check,
+# pull request whose own net change touches pseudolife_memory/ fails this check,
 # and the fix is to make the change in Rust. rust/ci/python_freeze.py decides
 # on the diff's paths and the exact label `freeze-exception`, which only
 # someone with triage access can apply, for a change the maintainer ruled an

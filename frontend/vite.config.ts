@@ -3,9 +3,8 @@ import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 
-// The daemon serves pseudolife_memory/web/static/** under /ui/, so the build
-// is written there and served at /ui/ with no backend change. The output is
-// committed: the Python wheel ships static/** and nothing installs Node.
+// The daemon serves the committed dist/ build under /ui/.
+// The images and Python wheel can ship it without installing Node.
 // public/ (the vendored 3D galaxy bundle) is copied into the output as is.
 const DAEMON = "http://127.0.0.1:8770"; // python -m pseudolife_memory.web.devserver
 
@@ -54,8 +53,7 @@ export default defineConfig({
   base: "/ui/",
   plugins: [svelte(), fontLicense(), vendorPassthrough()],
   build: {
-    // Emptied on every build: static/ holds nothing but this console's output.
-    outDir: "../pseudolife_memory/web/static",
+    outDir: "dist",
     emptyOutDir: true,
     sourcemap: false,
     // Fonts stay separate files (cacheable); nothing is inlined as data: URIs.

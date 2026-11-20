@@ -1495,7 +1495,7 @@ def test_cli_budgets_preserve_separate_startup_part_limits():
             if step.get("if") == f"matrix.suite == '{suite}'" and step.get("run"):
                 by_suite.setdefault(suite, []).append(step["name"])
     # Both logical parts keep their selectors and budgets in one physical job.
-    assert by_suite["cli-startup"] == ["Keep the oracle's pydantic pin for the startup steps", "Daemon schema startup parity"]
+    assert by_suite["cli-startup"] == ["Install the startup model fixture dependencies", "Daemon schema startup parity"]
     parts = {shard["suite"]: shard.get("startup_part") for shard in job["strategy"]["matrix"]["include"]}
     assert parts["cli-startup"] == 1
     assert "--part ${{ matrix.startup_part }}" in next(
@@ -1505,9 +1505,9 @@ def test_cli_budgets_preserve_separate_startup_part_limits():
     first = next(s for s in steps if s.get("name") == "Daemon resident startup parity")
     assert first["timeout-minutes"] == second["timeout-minutes"] == 26
     assert first["if"] == second["if"] == "${{ !cancelled() && matrix.suite == 'cli-startup' && steps.startup_setup.outcome == 'success' }}"
-    pin = next(s for s in steps if s.get("name") == "Keep the oracle's pydantic pin for the startup steps")
-    for package in ("pydantic==2.14.0", "pydantic-core==2.50.0"):
-        assert package in pin["run"]
+    setup = next(s for s in steps if s.get("id") == "startup_setup")
+    assert setup["run"] == 'python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"'
+    assert all("pip install" not in step["run"] for step in (first, second))
     names = [step.get("name") for step in steps]
     assert names.index("Daemon schema startup parity") < names.index("Daemon resident startup parity")
     assert names.index("Daemon resident startup parity") < names.index(second["name"])

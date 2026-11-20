@@ -256,6 +256,7 @@ struct Wire {
     supports_carry: Option<bool>,
     supports_carry_execution: Option<bool>,
     supports_carry_files: Option<bool>,
+    exposure: Option<exposure::Status>,
 }
 
 impl Remote for Wire {
@@ -287,6 +288,9 @@ impl Remote for Wire {
                         check.supports_carry = self.supports_carry;
                         check.supports_carry_execution = self.supports_carry_execution;
                         check.supports_carry_files = self.supports_carry_files;
+                        if ask.expose {
+                            check.exposure.clone_from(&self.exposure);
+                        }
                         protocol::Answer {
                             protocol: protocol::PROTOCOL,
                             ok: true,
@@ -383,6 +387,7 @@ fn world() -> Both {
             supports_carry: None,
             supports_carry_execution: None,
             supports_carry_files: None,
+            exposure: None,
         },
         local_health: Some(health(SOURCE_ID, 60)),
         reached: Ok(health(TARGET_ID, 60)),
@@ -1165,6 +1170,105 @@ fn default_dry_run_sends_only_identity_shape_to_a_compatible_target() {
 }
 
 #[test]
+fn exposing_a_target_plans_read_only_and_reuses_an_existing_url() {
+    let request = Request {
+        target_url: None,
+        expose_target: true,
+        ..request()
+    };
+    assert!(argv::refusal(&request).is_none());
+    let mut fake = world();
+    assert!(
+        preflight(&mut fake, &request)
+            .unwrap_err()
+            .contains("did not report its exposure")
+    );
+    assert_read_only(&fake);
+    fake.wire.exposure = Some(exposure::Status {
+        port: 8765,
+        url: None,
+    });
+    let plan = preflight(&mut fake, &request).unwrap();
+    assert_eq!(plan.expose_port, Some(8765));
+    assert!(plan.target_url.is_empty());
+    assert!(document(&plan)["will_expose_target"] == true);
+    assert!(
+        steps(&plan)
+            .iter()
+            .any(|step| step.contains("create its tailnet forward"))
+    );
+
+    let url = "http://100.64.0.7:8765";
+    fake.wire.exposure.as_mut().unwrap().url = Some(url.into());
+    let plan = preflight(&mut fake, &request).unwrap();
+    assert_eq!(plan.target_url, url);
+    assert_eq!(plan.expose_port, None);
+    assert_read_only(&fake);
+
+    fake.wire.exposure = None;
+    let provided = Request {
+        target_url: Some(url.into()),
+        ..request
+    };
+    let plan = preflight(&mut fake, &provided).unwrap();
+    assert_eq!(plan.target_url, url);
+    assert_eq!(plan.expose_port, None);
+}
+
+#[test]
+fn exposure_resume_advertises_the_mode_that_recreates_its_forward() {
+    let mut record = record::Record {
+        target: "box".into(),
+        expose_port: Some(8765),
+        phase: record::Phase::RolledBack,
+        ..Default::default()
+    };
+    record.flags.target_restored = true;
+    for url in ["", "http://100.64.0.7:8765"] {
+        record.target_url = url.into();
+        let refused = command::held_refusal(std::slice::from_ref(&record), "other", false).unwrap();
+        assert!(refused.contains("move --to box --expose-target --no-keep-tokens --resume"));
+    }
+}
+
+#[test]
+fn resume_keeps_the_recorded_exposure_port_when_status_already_has_a_forward() {
+    let request = Request {
+        target_url: None,
+        expose_target: true,
+        resume_move: MOVE.into(),
+        resume_expose_port: Some(8765),
+        resume_baseline: Some(record::Baseline::default()),
+        ..request()
+    };
+    let home = exposure::tests::Folder::new();
+    let moves = home.0.join(".pseudolife-mcp/moves");
+    std::fs::create_dir_all(&moves).unwrap();
+    let claim = json!({"move_id": MOVE, "source_bank": fp(SOURCE_ID), "at": "t"});
+    std::fs::write(moves.join("claim.json"), claim.to_string()).unwrap();
+    let mut fake = world();
+    fake.wire.far.home = Some(home.0.clone());
+    fake.wire.far.nearest = Some((home.0.clone(), home.0.clone(), Some(100 << 30)));
+    fake.wire.far.docker = Host::new(SOURCE_ID);
+    fake.wire.far.docker.docs.insert(
+        "pseudolife-mcp-daemon".to_owned(),
+        daemon_doc(false, "pseudolife-stack", "/home/u/pseudolife-stack"),
+    );
+    fake.wire.state = Some(protocol::State {
+        gated: Some(true),
+        mutations: Some(Default::default()),
+        ..Default::default()
+    });
+    fake.wire.exposure = Some(exposure::Status {
+        port: 8765,
+        url: Some("http://100.64.0.7:8765".into()),
+    });
+    let plan = preflight(&mut fake, &request).unwrap();
+    assert_eq!(plan.expose_port, Some(8765));
+    assert_read_only(&fake);
+}
+
+#[test]
 fn explicit_target_files_require_helper_support_and_keep_overlay_order_on_the_wire() {
     let request = Request {
         no_keep_tokens: false,
@@ -1420,10 +1524,7 @@ fn argv_refusals_come_before_any_effect_in_order() {
         &[&base[..], &["--target-checkout", "/srv/x"]].concat(),
         "--target-checkout is not supported",
     );
-    starts(
-        &[&base[..], &["--expose-target"]].concat(),
-        "--expose-target is not available in the native client yet: expose the target's daemon yourself",
-    );
+    assert_eq!(refused(&[&base[..], &["--expose-target"]].concat()), None);
     starts(
         &[&base[..], &["--target-env-file", "/x/.env"]].concat(),
         "--target-env-file and --target-compose-file apply only when carrying bearer settings",

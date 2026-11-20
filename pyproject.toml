@@ -129,15 +129,9 @@ Issues = "https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues"
 [project.scripts]
 pseudolife-mcp = "pseudolife_memory.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["pseudolife_memory*"]
-
 [tool.setuptools.package-data]
-# The Cortex Console is served from inside the package — the wheel must
-# carry its committed build (index.html, assets/, vendor/) or a pip install
-# gets a 404 console. The source is frontend/; nothing at install time needs Node.
-"pseudolife_memory.web" = ["static/**"]
+# setup.py maps the committed build to the Python daemon's static directory.
+"pseudolife_memory.web.static" = ["**/*"]
 # `pseudolife-mcp update` recreates the daemon container from the compose
 # files the running container was created with; when those are gone (the
 # checkout was deleted) it falls back to these copies, pinned byte-equal to

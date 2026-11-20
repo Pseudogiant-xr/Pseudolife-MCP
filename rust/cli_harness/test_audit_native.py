@@ -1,4 +1,4 @@
-"""Native audit refusals and complete file publication on disposable banks."""
+"""Audit comparison rules, native refusals, and archive publication on disposable banks."""
 from __future__ import annotations
 
 import atexit
@@ -157,28 +157,30 @@ def test_audit_verifier_identifies_the_first_break(audit_rules, defect, seq, rea
     }
 
 
+def _sent_event():
+    body, salt = "fixture body 雪", "ab" * 16
+    digest = hashlib.sha256(bytes.fromhex(salt) + body.encode("utf-8")).hexdigest()
+    return event(event="send", message_id="message", body=body, body_salt=salt,
+                 payload=json.dumps({"text_commitment": digest}))
+
+
 @pytest.mark.parametrize("change,reason", [
     ({"body": "changed"}, "body_mismatch"),
     ({"body_salt": "AB" * 16}, "body_mismatch"),
     ({"body": None}, "body_mismatch"),
     ({"body": None, "body_salt": None}, "body_missing"),
+    ({"event": "note"}, "body_mismatch"),
 ])
 def test_audit_verifier_checks_body_commitments(audit_rules, change, reason):
-    body, salt = "fixture body 雪", "ab" * 16
-    digest = hashlib.sha256(bytes.fromhex(salt) + body.encode("utf-8")).hexdigest()
-    sent = event(event="send", message_id="message", body=body, body_salt=salt,
-                 payload=json.dumps({"text_commitment": digest}))
+    sent = _sent_event()
     assert audit_rules.verify_audit_chain([sent])["ok"]
-    assert audit_rules.verify_audit_chain([dict(sent, **change)]) == {
+    assert audit_rules.verify_audit_chain([event(**dict(sent, **change))]) == {
         "ok": False, "seq": 1, "reason": reason,
     }
 
 
 def test_audit_verifier_validates_the_redaction_record(audit_rules):
-    body, salt = "fixture body", "01" * 16
-    digest = hashlib.sha256(bytes.fromhex(salt) + body.encode("utf-8")).hexdigest()
-    sent = event(event="send", message_id="message", body=body, body_salt=salt,
-                 payload=json.dumps({"text_commitment": digest}))
+    sent = _sent_event()
     blank = dict(sent, body=None, body_salt=None)
     old_export = {key: value for key, value in blank.items() if key != "body"}
     assert audit_rules.verify_audit_chain([old_export]) == {
@@ -189,6 +191,22 @@ def test_audit_verifier_validates_the_redaction_record(audit_rules):
     assert audit_rules.verify_audit_chain([blank, redact])["ok"]
     assert audit_rules.verify_audit_chain([sent, redact]) == {
         "ok": False, "seq": 1, "reason": "body_mismatch",
+    }
+
+
+@pytest.mark.parametrize("actor,copy_status,message_id", [
+    pytest.param("daemon", "removed", "message", id="actor"),
+    pytest.param("operator", "kept", "message", id="kept-copy"),
+    pytest.param("operator", "removed", "other-message", id="wrong-message"),
+])
+def test_audit_verifier_requires_matching_operator_redaction(audit_rules, actor, copy_status, message_id):
+    sent = _sent_event()
+    blank = dict(sent, body=None, body_salt=None)
+    payload = {"seq": 1, "message_id": message_id, "audit_copy": copy_status}
+    redact = event(seq=2, event="redact", actor=actor, prev_hash=sent["hash"],
+                   payload=json.dumps(payload))
+    assert audit_rules.verify_audit_chain([blank, redact]) == {
+        "ok": False, "seq": 1, "reason": "body_missing",
     }
 
 
@@ -209,6 +227,30 @@ def test_audit_verifier_anchors_a_pruned_chain(audit_rules):
     }
     invalid = event(**cut_args, payload=json.dumps(dict(payload, cutoff=86_399)))
     assert audit_rules.verify_audit_chain([first, invalid]) == {
+        "ok": False, "seq": 2, "reason": "unanchored_start",
+    }
+
+
+@pytest.mark.parametrize("actor,days,through_seq", [
+    pytest.param("operator", 1, 1, id="actor"),
+    pytest.param("daemon", 0, 1, id="zero-days"),
+    pytest.param("daemon", 36_501, 1, id="above-max-days"),
+    pytest.param("daemon", 1.0, 1, id="float-days"),
+    pytest.param("daemon", True, 1, id="bool-days"),
+    pytest.param("daemon", 1, 1.0, id="float-seq"),
+    pytest.param("daemon", 1, True, id="bool-seq"),
+])
+def test_audit_verifier_rejects_invalid_prune_record(audit_rules, actor, days, through_seq):
+    gone = event(created_at=0.0)
+    first = event(seq=2, prev_hash=gone["hash"], created_at=86_400.125)
+    payload = {"through_seq": through_seq, "through_hash": gone["hash"],
+               "retention_days": days, "cutoff": 86_400}
+    # Keep the cutoff and first retained row consistent even when days is zero
+    # or above the ceiling, so those witnesses exercise the retention guards.
+    cut = event(seq=3, event="audit_prune", actor=actor,
+                created_at=(days + 1) * 86_400 + 0.125,
+                prev_hash=first["hash"], payload=json.dumps(payload))
+    assert audit_rules.verify_audit_chain([first, cut]) == {
         "ok": False, "seq": 2, "reason": "unanchored_start",
     }
 

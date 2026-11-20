@@ -478,7 +478,7 @@
    "y": 380,
    "t": "Cortex Console SPA",
    "s": "Svelte 5 build · /ui/",
-   "p": "pseudolife_memory/web/static/",
+   "p": "frontend/dist/",
    "d": [
     "Views: Observatory · Cortex · World · Lessons · Stream · Recall · Graph (3D galaxy) · Review · Insight · Board · Episodes · Settings",
     "Source in frontend/ (Vite + Svelte 5 + TypeScript); the committed build is what the wheel ships, and CI rebuilds and diffs it",

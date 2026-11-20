@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from pseudolife_memory.storage.coordination import audit_hash, verify_audit_chain
+from rust.harness_support.audit_oracle import audit_hash, verify_audit_chain
+from rust.harness_support.import_blocker import cold_harness_imports
 
 from . import compare, normalize
 from .rows import lease_operator
@@ -225,6 +226,18 @@ def test_only_the_captured_watched_pid_is_associated(platform, identifier):
     assert not compare.diff(original, rebound, PID_RULES)
     rebound["fixture_pid"] = original["fixture_pid"]
     assert compare.diff(original, rebound, PID_RULES)
+
+
+@pytest.mark.parametrize("identifier,project,rewrite,rules", [
+    pytest.param("break-fifo", lease_operator._operator_clock, shift_clocks, CLOCK_RULES, id="clock"),
+    pytest.param("hold-board", lease_operator.fixture_pid, rebind_pid, PID_RULES, id="pid"),
+])
+def test_banked_lease_comparison_blocks_frozen_imports(identifier, project, rewrite, rules):
+    original = captured("linux", identifier)
+    assert audit(original["db"]["final"])
+    with cold_harness_imports():
+        project(copy.deepcopy(original))
+        assert not compare.diff(original, rewrite(original), rules)
 
 
 @pytest.mark.parametrize("platform", PLATFORMS)

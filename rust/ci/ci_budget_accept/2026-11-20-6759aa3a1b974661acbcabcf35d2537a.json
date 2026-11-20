@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "scope",
+  "before": "c7803649087495de",
+  "fingerprint": "cd3a6fa994792606",
+  "reason": "The scope job applies one prefix check to identify frozen package changes after the Console move."
+}

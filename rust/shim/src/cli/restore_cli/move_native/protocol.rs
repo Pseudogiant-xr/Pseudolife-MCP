@@ -17,6 +17,9 @@ use super::{
     target::Ask,
 };
 
+/// Opts the target's native `expose` subprocess into reporting its move outcome.
+pub(in crate::cli) const MOVE_EXPOSURE_REPORT_ENV: &str = "PSEUDOLIFE_MOVE_EXPOSURE_REPORT";
+
 /// The protocol this client's source speaks for a move's transaction.
 pub(in crate::cli) const PROTOCOL: u32 = 2;
 
@@ -46,6 +49,12 @@ pub(in crate::cli) enum Op {
         identities: Identities,
     },
     CarryUndo,
+    ExposeTarget {
+        port: u16,
+    },
+    UndoExposure {
+        port: u16,
+    },
     /// Claim the target for this move: refused while another move holds it.
     Claim {
         source_bank: String,
@@ -123,6 +132,8 @@ impl Op {
             Self::CarryApply { .. } => "carry-apply",
             Self::CarryVerify { .. } => "carry-verify",
             Self::CarryUndo => "carry-undo",
+            Self::ExposeTarget { .. } => "expose-target",
+            Self::UndoExposure { .. } => "undo-exposure",
             Self::Claim { .. } => "claim",
             Self::State { .. } => "state",
             Self::TimerPause => "timer-pause",
@@ -205,6 +216,8 @@ pub(in crate::cli) struct State {
 pub(in crate::cli) struct Answer {
     /// Read-only receipt for the deployment, saved before carrying begins.
     pub carry_deployment: Option<[u8; 32]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exposure_url: Option<String>,
     pub protocol: u32,
     pub version: String,
     /// Whether the operation did what it says.
