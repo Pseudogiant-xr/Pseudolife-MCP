@@ -10,7 +10,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 |----------|---------|--------|
 | `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v59). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself (its superuser password is a random per-bank secret in the owner-only `<data_dir>/embedded_pg.secret`, with SCRAM authentication; a bank from before 2026-10-25 moves off the old fixed `postgres` password at its next start); otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
-| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
+| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to. Docker installs wait for the container. Native host-process autostart requires `PSEUDOLIFE_MCP_SERVE_COMMAND`. Use an HTTP(S) origin with a scheme, host and optional port. Leave out the path, user information, query and fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host (a `PSEUDOLIFE_MCP_TOKENS` map also satisfies this). Maps to the reserved principal `default`, which keeps the `X-PL-Writer`/`PSEUDOLIFE_WRITER_ID` writer path. |
@@ -1833,8 +1833,10 @@ pseudolife-mcp board-audit verify
 ```
 
 `export` writes one JSON object per line, oldest first, to stdout or to a new
-`--out` file, which it never overwrites. Each line carries the row's columns,
-the payload parsed, and `body` and `body_salt` (`null` except on a v46
+`--out` file, which it never overwrites. The native client writes an
+owner-only archive and creates the output file only after the export
+succeeds. Each line carries the row's columns, the parsed payload, and
+`body` and `body_salt` (`null` except on a v46
 `send` that has not been redacted). A `send` whose mail rang (a `rung`
 decision, a Codex `attention` grant, or `no_path` with the ring queued for a
 listener) carries
@@ -3683,11 +3685,10 @@ program with no Python. Its runtime is a numbered directory holding that
 binary (`runtime.json` says `"kind": "native"`) behind the same launcher,
 so the registrations and the `PATH` entry above stay as they are.
 
-**The move is opt-in in 0.24.0.** The native client does not yet run
-everything the Python client does (the lists below), and no ordinary
-`update` moves a machine back (an installer run does, below), so an update
-keeps the Python client unless you ask. Read "What the native client refuses" and "Not in the
-native client yet" before you opt in.
+**The native client is opt-in.** A Python client update keeps that client
+unless you select `PSEUDOLIFE_SHIM_ENGINE=native`. A native client update
+keeps the native client. The installer can switch a machine back to Python
+as described below.
 
 **Moving a machine.** Set `PSEUDOLIFE_SHIM_ENGINE=native` for the update:
 
@@ -3779,17 +3780,15 @@ picks the release as an update would.
   one. With neither, the shim waits for a daemon and its note names the
   Docker command.
 
-**Not in the native client yet:** a shape it does not handle stops with
-`pseudolife-stdio: mode '<mode>' is deferred in this candidate` and exit 1,
-having changed nothing. Among them:
-most of `tunnel` ([tunnels](tunnels.md)), `doctor` when a tunnel
-directory (`~/.pseudolife-mcp/tunnel`) exists or `http_proxy` /
-`https_proxy` is set, and `console` opening a browser on macOS and for some
-Linux desktop defaults (`--no-open` works;
-[Signing in to the Console](#signing-in-to-the-console)). `move` is no
-longer among them: it moves a bank to an installed release target natively,
-and refuses with the cause any command line it cannot take
-([Moving a bank](remote-bank.md#moving-a-bank)).
+The native `doctor` continues checking the installation when an individual
+probe fails and reports what it could determine. `console` can open the
+browser on Windows, macOS and Linux desktops. If the browser cannot open,
+the client prints the validated sign-in link and the cause. See
+[Signing in to the Console](#signing-in-to-the-console) and
+[Moving a bank](remote-bank.md#moving-a-bank) for native `move` requirements.
+Unsupported `tunnel` operations still exit 1 with the deferral message.
+See [Tunnels](tunnels.md) for the supported foreground lifecycle and the
+commands that still need the Python client.
 
 The native tunnel step reports a verified matching launch as `current`. A compatible supervisor can reconnect on the verified installed shim. It reports `refreshed` after the live vendor answers its local readiness probe and the bridge acknowledges the signed launch. It verifies the pinned tunnel client, the candidate's readiness protocol and the saved daemon connection before interrupting the old process. A failed check leaves the running child alone. A candidate that fails readiness triggers a rollback to the previous shim when the supervisor confirms the candidate exited. Reports of a refusal, successful rollback or a reply deadline with the launch still owned are `stale` and exit 0. Older foreground supervisors and vendor version changes need the stop and run commands in the report. Restart an older service-managed launch through its manager. See [Tunnels](tunnels.md) for Python-supervised launches and cloud verification. The tunnel step exits 2 if it cannot safely read the store or a profile, if the tunnel stops during refresh, if rollback fails, or if the supervisor cannot confirm the child exited. A supervisor that disappears before reporting also yields exit 2. The outer update reports that failure with exit 5.
 
@@ -4709,9 +4708,9 @@ print.
 
 | command | what it does |
 |---|---|
-| `pseudolife-mcp update` | Docker tier: pull the daemon image of the newest release on PyPI (`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>` for the Rust engine, `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>` for the Python one; a host that never chose an engine moves to Rust, see [Daemon engine](install-and-move.md)), pull the release's PostgreSQL image when that container differs from the release's definition, back the bank up, recreate that one service and wait until it is healthy (the previous one is restored on failure), tag the running image `…-pre-update-<stamp>`, recreate the daemon container, wait for `/health` at that version, then the client side. The client side keeps the Python client unless `PSEUDOLIFE_SHIM_ENGINE=native` is set; with it, a 0.23.x Python client moves to the native client when the release's archive for this platform downloads, verifies and runs, and otherwise keeps the Python client and says why ([The native client](#the-native-client)). Pip / lite: upgrade the package where it is installed; restart nothing; the client is not moved. |
-| `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
-| `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
+| `pseudolife-mcp update` | On a Docker host, the native updater discovers the latest ready GitHub release and the Python updater discovers the latest release on PyPI. Update backs up the bank, tags the previous image `…-pre-update-<stamp>` for rollback, recreates the daemon, checks `/health`, and then updates clients. The Python updater also checks the managed PostgreSQL image against the release's definition. See [Daemon engine](install-and-move.md#daemon-engine) for engine selection and [The native client](#the-native-client) for client opt-in. Pip and lite installs upgrade the package in place and leave restarts to the operator. |
+| `pseudolife-mcp update --tag <version>` | Use the specified published release and bypass latest-release discovery. |
+| `pseudolife-mcp update --check` | Report only. Exit 0 when a newer release exists, 3 when there is no newer eligible release, or 2 when the check fails. |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
 | `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings, and record the choice so later updates keep it. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support; `--engine python` switches back. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
@@ -4730,8 +4729,9 @@ is missing (see
 [The test suite's Postgres login](#the-test-suites-postgres-login-pseudolife-mcp-test-login));
 a release update never does.
 
-What it refuses: a target it cannot read (PyPI unreachable and no
-`--tag`: nothing is guessed), a downgrade without `--allow-downgrade`,
+The updater refuses when it cannot read its release source (GitHub for
+native, PyPI for Python) and you supplied no `--tag`. It also refuses a
+downgrade without `--allow-downgrade`,
 Docker installed but not answering (Docker Desktop stopped is not "no
 daemon container": the shim runtime this runs from is never pip-upgraded
 in its place), on a pip install an editable checkout, and with
@@ -4875,16 +4875,18 @@ updates:
   unattended_clients: false     # the shim may take the client half of an update by itself
 ```
 
-With `check_releases` on (the default) the daemon reads GitHub's latest
+With `check_releases` on (the default) the Rust daemon reads GitHub's latest
 stable release from `api.github.com` once per interval in the background,
-never on a request. Once its native assets are complete, it keeps that answer
-and serves it on `/health` as
+never on a request. Once its native assets and readiness marker are present,
+it keeps that answer and serves it on `/health` as
 `updates.latest_release` (with `checked_at`). When that release is newer
 than the daemon, the session-start briefing opens with one line naming
 the command: `release X is available (daemon Y[, plugin Z]) — run
 pseudolife-mcp update`, and no second line about the plugin, since that
 command moves both. The GitHub release must carry all five native archives,
-the compose bundle and `SHA256SUMS` before it is offered. The check sends no
+the compose bundle, `SHA256SUMS` and `RELEASE-READY.json` before the Rust
+daemon or native updater offers it. GitHub attaches that marker after the
+approved package and image jobs succeed. The check sends no
 credentials or memory content. A daemon with no route to GitHub and no cached
 answer offers nothing; failures retain an earlier successful answer.
 The first check runs at startup, without delaying startup; subsequent checks
