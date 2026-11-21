@@ -2434,7 +2434,7 @@ connect_existing_registrations() {
     if [ "$connect_rc" -ne 0 ]; then
         case "$connect_rc" in
             1) connect_meaning="a write failed, and every file it wrote was rolled back" ;;
-            4) connect_meaning="the daemon refused the token file or the MCP handshake, and nothing was written" ;;
+            4) connect_meaning="verification failed, and nothing was written (see its reason above)" ;;
             5) connect_meaning="the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" ;;
             *) connect_meaning="see its message above" ;;
         esac

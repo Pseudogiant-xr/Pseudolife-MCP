@@ -2394,7 +2394,7 @@ function Invoke-ClientOnlyConnect {
     if ($applyExit -ne 0) {
         $meaning = switch ($applyExit) {
             1 { "a write failed, and every file it wrote was rolled back" }
-            4 { "the daemon refused the token file or the MCP handshake, and nothing was written" }
+            4 { "verification failed, and nothing was written (see its reason above)" }
             5 { "the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" }
             default { "see its message above" }
         }

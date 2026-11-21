@@ -1016,7 +1016,8 @@ def test_codex_registers_with_the_remote_url_and_its_credential_file(bash, tmp_p
 
 
 @pytest.mark.parametrize("outcome,recovery", [
-    ("refused", "The installer credential was not accepted by the configured daemon."),
+    ("refused", "The installer credential was not accepted by the configured daemon. "
+     "Supply a token accepted by that daemon, then rerun the installer."),
     ("not-ready", "The daemon did not answer the authenticated check. Rerun the installer."),
 ])
 @BASH

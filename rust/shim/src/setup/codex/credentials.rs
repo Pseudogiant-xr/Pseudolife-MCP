@@ -108,7 +108,9 @@ async fn installer_check_result(
     let (mut error, failure) = match wait_for_credential(probe).await {
         CredentialCheck::Accepted => return Ok(()),
         CredentialCheck::Refused => (
-            SetupError("The installer credential was not accepted by the configured daemon."),
+            SetupError(
+                "The installer credential was not accepted by the configured daemon. Supply a token accepted by that daemon, then rerun the installer.",
+            ),
             CredentialCheckFailure::Refused,
         ),
         CredentialCheck::NotReady => (
@@ -434,7 +436,7 @@ mod tests {
             home.assert_untouched();
             assert_eq!(
                 error.to_string(),
-                "The installer credential was not accepted by the configured daemon."
+                "The installer credential was not accepted by the configured daemon. Supply a token accepted by that daemon, then rerun the installer."
             );
             assert!(!format!("{error:?}").contains(TOKEN));
             assert_eq!(

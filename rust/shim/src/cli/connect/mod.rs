@@ -500,17 +500,16 @@ async fn verify(ctx: &Ctx, rows: &[Row], auth: bool) -> Result<(Vec<J>, Vec<Stri
         };
         if let Some(token) = &token {
             use crate::setup::codex::CredentialCheck;
-            let header = net::bearer(token).ok_or_else(|| {
-                format!("{shown} cannot be sent as a bearer credential. Replace it and retry")
-            })?;
+            let refused = || {
+                format!(
+                    "the daemon at {} refused {shown} (an authenticated request that follows no redirects did not succeed)",
+                    ctx.url
+                )
+            };
+            let header = net::bearer(token).ok_or_else(refused)?;
             match net::check_credential(&ctx.url, &header).await {
                 CredentialCheck::Accepted => {}
-                CredentialCheck::Refused => {
-                    return Err(format!(
-                        "the daemon at {} refused {shown} (an authenticated request that follows no redirects did not succeed)",
-                        ctx.url
-                    ));
-                }
+                CredentialCheck::Refused => return Err(refused()),
                 CredentialCheck::NotReady => {
                     return Err(format!(
                         "{} When it is ready, rerun pseudolife-mcp connect",
