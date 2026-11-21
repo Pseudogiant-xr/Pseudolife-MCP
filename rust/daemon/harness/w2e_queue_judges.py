@@ -175,7 +175,7 @@ def candidate_bindings(conn):
 
 def archived_evidence(conn, fingerprint):
     return conn.execute(
-        "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
+        "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%%' "
         "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened' "
         f"AND {own_pairs(DISMISSED_PAIR)} AND value->>'evidence_fingerprint' = %s)",
         (fingerprint,),
