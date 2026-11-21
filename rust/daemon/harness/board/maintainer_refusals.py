@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 
 from board import scenarios as S
+from board.maintainer_proofs import challenge_bytes
 from board.maintainer import (
     MaintainerScenario, SignedNormalizer, add_key, auth, bootstrap, challenge,
     complete, host, post, status,
@@ -23,7 +24,6 @@ class RefusalScenario(MaintainerScenario):
 
 
 def registration(ctx, source, name="primary", *, code=False):
-    from pseudolife_memory.storage.maintainer import challenge_bytes
     issued = ctx.vals[source]
     out = {"payload": issued["payload"], "mac": issued["mac"],
            "attestation": auth(ctx, name).register(challenge_bytes(issued["payload"]))}
@@ -223,7 +223,6 @@ class AssertionRefusals(RefusalScenario):
     def steps(self):
         def assertion(**kwargs):
             def edit(ctx, body):
-                from pseudolife_memory.storage.maintainer import challenge_bytes
                 values = {key: value(ctx) if callable(value) else value for key, value in kwargs.items()}
                 signed_over = values.pop("challenge", challenge_bytes(body["payload"]))
                 body["assertion"] = auth(ctx).assertion(signed_over, **values)
