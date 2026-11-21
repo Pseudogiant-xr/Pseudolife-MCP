@@ -350,7 +350,7 @@ pub fn runtime_hook_line(trust: &str, file_state: &str) -> String {
     let recovery = match trust {
         "current" => return "current".into(),
         "needs-approval" => {
-            "Run python ops/setup-codex-hooks.py --source plugin --trust ask, then start a new session."
+            "Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
         }
         "disabled" => {
             "If you want these hooks enabled, enable the Pseudolife handlers in Codex /hooks, then start a new session."
@@ -877,6 +877,11 @@ mod runtime_trust_tests {
             runtime_hook_line("not-loaded", "current"),
             "not-loaded: Check that the Pseudolife plugin is installed and enabled in Codex's plugin manager, then start a new session."
         );
-        assert!(runtime_hook_line("needs-approval", "current").contains("--trust ask"));
+        let approval = runtime_hook_line("needs-approval", "current");
+        assert_eq!(
+            approval,
+            "needs-approval: Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
+        );
+        assert!(!approval.contains("setup-codex-hooks.py"));
     }
 }
