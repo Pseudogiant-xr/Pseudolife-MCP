@@ -1,5 +1,6 @@
 use super::*;
 use reqwest::StatusCode;
+use std::io;
 use std::time::Duration;
 use tokio::time::{Instant, sleep_until, timeout_at};
 
@@ -30,9 +31,12 @@ pub fn daemon_url(server: &Map<String, Value>) -> Result<String, SetupError> {
     validated_daemon_url(&url)
 }
 
-// The 21 November 2026 fresh-install probe took 3.431 seconds to get HTTP 200
-// after /health was already answering. Use the native installers' Rust
-// readiness wait (120 retries spaced 1.5 seconds apart) as a hard ceiling.
+// The 21 November 2026 disposable-guest probe returned HTTP 200 after
+// 3.431 seconds while /health already answered. Cap this earlier check at
+// 180 seconds (the sleeps in the installer's later Rust readiness loop).
+// That loop also has 3 seconds per request (up to about 540 seconds total).
+// Keep credential verification shorter because it also runs in connect and
+// against remote daemons, where a bad address can outlast any startup wait.
 const STARTUP_BUDGET: Duration = Duration::from_secs(180);
 // A single attempt must have time to finish that 3.431-second read.
 const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -41,42 +45,76 @@ const RETRY_DELAY: Duration = Duration::from_millis(1500);
 pub(crate) enum CredentialCheck {
     Accepted,
     Refused,
-    NotReady,
+    NotReady(ProbeFailure),
     UnexpectedStatus(StatusCode),
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum ProbeFailure {
+    TimedOut,
+    RefusedOrReset,
+    ConnectionFailed,
+    ServerError(StatusCode),
+}
+
+impl ProbeFailure {
+    pub(crate) fn from_io(kind: Option<io::ErrorKind>) -> Self {
+        match kind {
+            Some(io::ErrorKind::TimedOut) => Self::TimedOut,
+            Some(io::ErrorKind::ConnectionRefused | io::ErrorKind::ConnectionReset) => {
+                Self::RefusedOrReset
+            }
+            _ => Self::ConnectionFailed,
+        }
+    }
+
+    fn last_attempt(self) -> String {
+        match self {
+            Self::TimedOut => "The last attempt timed out.".into(),
+            Self::RefusedOrReset => "The last connection was refused or reset.".into(),
+            Self::ConnectionFailed => "The last attempt could not establish a connection.".into(),
+            Self::ServerError(status) => {
+                format!("The last attempt returned HTTP {}.", status.as_u16())
+            }
+        }
+    }
+}
+
 impl CredentialCheck {
-    pub(crate) fn not_ready_reason(url: &str) -> String {
+    pub(crate) fn not_ready_reason(url: &str, failure: ProbeFailure) -> String {
         format!(
-            "The daemon at {url} did not answer the authenticated check in {} seconds and may still be starting.",
-            STARTUP_BUDGET.as_secs()
+            "The authenticated check at {url} did not succeed within {} seconds. {}",
+            STARTUP_BUDGET.as_secs(),
+            failure.last_attempt()
         )
     }
 }
 
 pub(crate) async fn wait_for_credential(
-    mut probe: impl AsyncFnMut(Duration) -> Option<StatusCode>,
+    mut probe: impl AsyncFnMut(Duration) -> Result<StatusCode, ProbeFailure>,
 ) -> CredentialCheck {
     let deadline = Instant::now() + STARTUP_BUDGET;
+    let mut last_failure = ProbeFailure::TimedOut;
     loop {
         let now = Instant::now();
         let remaining = deadline.saturating_duration_since(now);
         if remaining.is_zero() {
-            return CredentialCheck::NotReady;
+            return CredentialCheck::NotReady(last_failure);
         }
         let attempt = remaining.min(ATTEMPT_TIMEOUT);
-        match timeout_at(now + attempt, probe(attempt)).await {
-            Ok(Some(StatusCode::OK)) => return CredentialCheck::Accepted,
-            Ok(Some(StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)) => {
+        last_failure = match timeout_at(now + attempt, probe(attempt)).await {
+            Ok(Ok(StatusCode::OK)) => return CredentialCheck::Accepted,
+            Ok(Ok(StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)) => {
                 return CredentialCheck::Refused;
             }
-            Ok(Some(status)) if !status.is_server_error() => {
+            Ok(Ok(status)) if !status.is_server_error() => {
                 return CredentialCheck::UnexpectedStatus(status);
             }
-            // A 5xx, a transport failure or an expired attempt can occur
-            // while the daemon starts. Bound both each attempt and the sleep.
-            _ => sleep_until(deadline.min(Instant::now() + RETRY_DELAY)).await,
-        }
+            Ok(Ok(status)) => ProbeFailure::ServerError(status),
+            Ok(Err(failure)) => failure,
+            Err(_) => ProbeFailure::TimedOut,
+        };
+        sleep_until(deadline.min(Instant::now() + RETRY_DELAY)).await;
     }
 }
 
@@ -91,19 +129,25 @@ async fn verify_installer_credential(url: &str, token: &str) -> Result<(), Setup
         .build()
         .map_err(|_| SetupError("The installer could not prepare the authenticated request. Check the daemon URL and credential settings, then rerun the installer."))?;
     installer_check_result(url, async |_| {
-        let request = request.try_clone()?;
+        let request = request.try_clone().ok_or(ProbeFailure::ConnectionFailed)?;
         client
             .execute(request)
             .await
-            .ok()
             .map(|response| response.status())
+            .map_err(|error| {
+                if error.is_timeout() {
+                    ProbeFailure::TimedOut
+                } else {
+                    ProbeFailure::from_io(crate::errors::io_error_kind(&error))
+                }
+            })
     })
     .await
 }
 
 async fn installer_check_result(
     url: &str,
-    probe: impl AsyncFnMut(Duration) -> Option<StatusCode>,
+    probe: impl AsyncFnMut(Duration) -> Result<StatusCode, ProbeFailure>,
 ) -> Result<(), SetupError> {
     let (mut error, failure) = match wait_for_credential(probe).await {
         CredentialCheck::Accepted => return Ok(()),
@@ -113,10 +157,10 @@ async fn installer_check_result(
             ),
             CredentialCheckFailure::Refused,
         ),
-        CredentialCheck::NotReady => (
+        CredentialCheck::NotReady(failure) => (
             SetupError::detail(format!(
-                "{} When it is ready, rerun the installer.",
-                CredentialCheck::not_ready_reason(url)
+                "{} Check that the daemon is reachable, then rerun the installer.",
+                CredentialCheck::not_ready_reason(url, failure)
             )),
             CredentialCheckFailure::NotReady,
         ),
@@ -338,7 +382,7 @@ mod tests {
 
         async fn configure(
             &self,
-            mut probe: impl AsyncFnMut(&str, &str) -> Option<StatusCode>,
+            mut probe: impl AsyncFnMut(&str, &str) -> Result<StatusCode, ProbeFailure>,
         ) -> Result<Value, SetupError> {
             let mut rpc = ReadOnlyCodex(json!({
                 "config": {},
@@ -391,11 +435,11 @@ mod tests {
                 if attempts.get() == 1 {
                     // A request that cannot complete until its attempt times out.
                     sleep(BUDGET * 2).await;
-                    return None;
+                    return Err(ProbeFailure::TimedOut);
                 }
                 sleep(Duration::from_millis(3431)).await;
                 home.assert_untouched();
-                Some(StatusCode::OK)
+                Ok(StatusCode::OK)
             })
             .await
             .unwrap();
@@ -427,7 +471,7 @@ mod tests {
             let error = home
                 .configure(async |_, _| {
                     attempts.set(attempts.get() + 1);
-                    Some(status)
+                    Ok(status)
                 })
                 .await
                 .unwrap_err();
@@ -446,6 +490,93 @@ mod tests {
         }
     }
 
+    async fn check_last_failure(reply: Result<StatusCode, ProbeFailure>, reason: &str) {
+        let home = Home::new();
+        let mut attempts = 0;
+        let error = home
+            .configure(async |_, _| {
+                attempts += 1;
+                // The first result differs from the last.
+                if attempts == 1 {
+                    return Ok(StatusCode::BAD_GATEWAY);
+                }
+                reply
+            })
+            .await
+            .unwrap_err();
+        home.assert_untouched();
+        assert!(attempts > 1);
+        assert_eq!(
+            error.credential_check,
+            Some(CredentialCheckFailure::NotReady)
+        );
+        assert!(error.to_string().contains(reason), "{error}");
+        assert!(!error.to_string().contains("HTTP 502"));
+        assert!(!format!("{error:?}").contains(TOKEN));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn installer_reports_the_last_timeout() {
+        check_last_failure(Err(ProbeFailure::TimedOut), "The last attempt timed out.").await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn installer_reports_the_last_refused_or_reset_connection() {
+        check_last_failure(
+            Err(ProbeFailure::from_io(Some(
+                io::ErrorKind::ConnectionRefused,
+            ))),
+            "The last connection was refused or reset.",
+        )
+        .await;
+        check_last_failure(
+            Err(ProbeFailure::from_io(Some(io::ErrorKind::ConnectionReset))),
+            "The last connection was refused or reset.",
+        )
+        .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn installer_reports_the_last_connection_failure() {
+        check_last_failure(
+            Err(ProbeFailure::ConnectionFailed),
+            "The last attempt could not establish a connection.",
+        )
+        .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn installer_reports_the_last_server_error() {
+        check_last_failure(
+            Ok(StatusCode::SERVICE_UNAVAILABLE),
+            "The last attempt returned HTTP 503.",
+        )
+        .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn installer_returns_http_404_immediately_without_writes() {
+        let home = Home::new();
+        let mut attempts = 0;
+        let started = Instant::now();
+        let error = home
+            .configure(async |_, _| {
+                attempts += 1;
+                Ok(StatusCode::NOT_FOUND)
+            })
+            .await
+            .unwrap_err();
+        home.assert_untouched();
+        assert_eq!(attempts, 1);
+        assert_eq!(started.elapsed(), Duration::ZERO);
+        assert_eq!(
+            error.credential_check,
+            Some(CredentialCheckFailure::UnexpectedStatus)
+        );
+        assert!(error.to_string().contains("returned HTTP 404"));
+        assert!(!format!("{error:?}").contains(TOKEN));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn installer_stops_at_the_budget_when_the_daemon_never_becomes_ready() {
         let home = Home::new();
@@ -456,11 +587,11 @@ mod tests {
                 home.assert_untouched();
                 attempts.set(attempts.get() + 1);
                 match attempts.get() {
-                    1 => Some(StatusCode::SERVICE_UNAVAILABLE),
-                    2 => None,
+                    1 => Ok(StatusCode::SERVICE_UNAVAILABLE),
+                    2 => Err(ProbeFailure::RefusedOrReset),
                     _ => {
                         sleep(BUDGET * 2).await;
-                        None
+                        Err(ProbeFailure::TimedOut)
                     }
                 }
             })
@@ -472,8 +603,9 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("did not answer the authenticated check in 180 seconds")
+                .contains("did not succeed within 180 seconds")
         );
+        assert!(error.to_string().contains("The last attempt timed out."));
         assert!(error.to_string().contains("rerun the installer"));
         assert!(!format!("{error:?}").contains(TOKEN));
         assert_eq!(

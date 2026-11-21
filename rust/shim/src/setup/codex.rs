@@ -3,7 +3,7 @@
 mod credentials;
 mod outcome;
 mod rpc;
-pub(crate) use credentials::{CredentialCheck, wait_for_credential};
+pub(crate) use credentials::{CredentialCheck, ProbeFailure, wait_for_credential};
 pub use credentials::{configure_credential_file, daemon_url, effective_value};
 pub use outcome::{SetupFailure, apply_replace_detailed};
 use outcome::{WriteDisposition, WriteFailure};

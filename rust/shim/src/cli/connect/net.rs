@@ -8,7 +8,7 @@
 use super::pyjson::{self, J};
 use super::{Cred, Refusal};
 use crate::cli::hook_http;
-use crate::setup::codex::{CredentialCheck, wait_for_credential};
+use crate::setup::codex::{CredentialCheck, ProbeFailure, wait_for_credential};
 use reqwest::StatusCode;
 use std::time::Duration;
 
@@ -64,25 +64,93 @@ pub(super) fn bearer(token: &str) -> Option<Vec<u8>> {
     Some(value)
 }
 
+fn credential_refused(url: &str, shown: &str) -> String {
+    format!(
+        "the daemon at {url} refused {shown} (an authenticated request that follows no redirects did not succeed)"
+    )
+}
+
 /// The authenticated read uses the installer's startup budget. Preserve
 /// connect's request headers and the one-byte read on a successful response.
-pub(super) async fn check_credential(url: &str, header: &[u8]) -> CredentialCheck {
-    wait_for_credential(async |timeout| {
-        let reply = hook_http::get_bounded(
+pub(super) async fn verify_credential(url: &str, shown: &str, token: &str) -> Result<(), String> {
+    let header = bearer(token).ok_or_else(|| credential_refused(url, shown))?;
+    verify_credential_with(url, shown, async |timeout| {
+        let reply = hook_http::get_bounded_no_redirect(
             url,
             "/api/episodes?limit=1",
-            Some(header),
+            &header,
             timeout,
-            false,
             (Some(1), Some(0)),
         )
-        .await?;
+        .await
+        .map_err(|error| ProbeFailure::from_io(error.io_kind()))?;
         if reply.body_failed {
-            return None;
+            return Err(ProbeFailure::from_io(reply.body_io_error));
         }
-        StatusCode::from_u16(reply.status).ok()
+        StatusCode::from_u16(reply.status).map_err(|_| ProbeFailure::ConnectionFailed)
     })
     .await
+}
+
+async fn verify_credential_with(
+    url: &str,
+    shown: &str,
+    probe: impl AsyncFnMut(Duration) -> Result<StatusCode, ProbeFailure>,
+) -> Result<(), String> {
+    let reason = match wait_for_credential(probe).await {
+        CredentialCheck::Accepted => return Ok(()),
+        CredentialCheck::Refused => credential_refused(url, shown),
+        CredentialCheck::NotReady(failure) => format!(
+            "{} Check that the daemon is reachable, then retry",
+            CredentialCheck::not_ready_reason(url, failure)
+        ),
+        CredentialCheck::UnexpectedStatus(status) => format!(
+            "the daemon at {url} returned HTTP {} to the authenticated check with {shown}. Check that the address serves the Pseudolife daemon and retry",
+            status.as_u16()
+        ),
+    };
+    Err(reason)
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::*;
+    use tokio::time::Instant;
+
+    const URL: &str = "https://daemon.example.com";
+
+    #[tokio::test(start_paused = true)]
+    async fn credential_verification_reports_exhausted_http_retry_and_says_to_retry() {
+        let started = Instant::now();
+        let error = verify_credential_with(URL, "test credential file", async |_| {
+            Ok(StatusCode::SERVICE_UNAVAILABLE)
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(started.elapsed(), Duration::from_secs(180));
+        assert_eq!(
+            error,
+            "The authenticated check at https://daemon.example.com did not succeed within 180 seconds. The last attempt returned HTTP 503. Check that the daemon is reachable, then retry"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn credential_verification_returns_redirect_and_404_without_retry() {
+        for status in [StatusCode::FOUND, StatusCode::NOT_FOUND] {
+            let mut attempts = 0;
+            let started = Instant::now();
+            let error = verify_credential_with(URL, "test credential file", async |_| {
+                attempts += 1;
+                Ok(status)
+            })
+            .await
+            .unwrap_err();
+            assert_eq!(attempts, 1);
+            assert_eq!(started.elapsed(), Duration::ZERO);
+            assert!(error.contains(&format!("returned HTTP {}", status.as_u16())));
+            assert!(error.contains("Check that the address serves the Pseudolife daemon"));
+        }
+    }
 }
 
 const REASONS: [(&str, &str); 6] = [

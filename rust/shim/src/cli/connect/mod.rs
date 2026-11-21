@@ -499,31 +499,7 @@ async fn verify(ctx: &Ctx, rows: &[Row], auth: bool) -> Result<(Vec<J>, Vec<Stri
             Cred::None => None,
         };
         if let Some(token) = &token {
-            use crate::setup::codex::CredentialCheck;
-            let refused = || {
-                format!(
-                    "the daemon at {} refused {shown} (an authenticated request that follows no redirects did not succeed)",
-                    ctx.url
-                )
-            };
-            let header = net::bearer(token).ok_or_else(refused)?;
-            match net::check_credential(&ctx.url, &header).await {
-                CredentialCheck::Accepted => {}
-                CredentialCheck::Refused => return Err(refused()),
-                CredentialCheck::NotReady => {
-                    return Err(format!(
-                        "{} When it is ready, rerun pseudolife-mcp connect",
-                        CredentialCheck::not_ready_reason(&ctx.url)
-                    ));
-                }
-                CredentialCheck::UnexpectedStatus(status) => {
-                    return Err(format!(
-                        "the daemon at {} returned HTTP {} to the authenticated check with {shown}. Check that the address serves the Pseudolife daemon and retry",
-                        ctx.url,
-                        status.as_u16()
-                    ));
-                }
-            }
+            net::verify_credential(&ctx.url, &shown, token).await?;
         }
         let tools = net::handshake(&ctx.url, &credential).await.map_err(|error| {
             format!(

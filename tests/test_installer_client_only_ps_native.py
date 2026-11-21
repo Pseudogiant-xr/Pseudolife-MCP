@@ -972,7 +972,9 @@ def test_codex_registers_with_the_remote_url_and_its_credential_file(tmp_path):
 @pytest.mark.parametrize("outcome,recovery", [
     ("refused", "The installer credential was not accepted by the configured daemon. "
      "Supply a token accepted by that daemon, then rerun the installer."),
-    ("not-ready", "The daemon did not answer the authenticated check. Rerun the installer."),
+    ("not-ready", "The authenticated check at https://daemon.example.com did not succeed "
+     "within 180 seconds. The last attempt returned HTTP 503. Check that the daemon is "
+     "reachable, then rerun the installer."),
 ])
 def test_codex_credential_bootstrap_reports_failure(tmp_path, outcome, recovery):
     cred = json.dumps({
