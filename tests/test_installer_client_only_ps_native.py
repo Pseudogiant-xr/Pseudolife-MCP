@@ -1027,8 +1027,8 @@ def test_current_credential_probe_in_native_powershell(tmp_path, accepted):
                 "Supply a token accepted by that daemon, then rerun the installer.")
     report = json.dumps({"status": "ready"} if accepted else {"status": "failed", "recovery": recovery})
     plan = json.dumps({"exit": 0, "rows": [
-        {"client": "claude-code", "place": "registration", "state": "current"}]})
-    body = f"""$clients = @('claude', 'gemini')
+        {"client": "codex", "place": "registration", "state": "current"}]})
+    body = f"""$clients = @('codex', 'gemini')
 $requestedClients = $clients
 $DaemonUrl = '{REMOTE}'
 $TokenFile = 'fixture.token'
@@ -1036,7 +1036,7 @@ $tunnelExit = 0
 $hookState = @{{}}
 $instrState = @{{}}
 $mcpState = @{{}}
-function claude {{ }}
+function codex {{ }}
 function gemini {{ }}
 function Step($message) {{ Write-Output $message | Out-Host }}
 function Install-ShimOnce {{ $script:shimInstallPath = 'fake-shim'; return $true }}
@@ -1065,6 +1065,10 @@ if (-not $script:clientSetupFailures['gemini']) {{ Write-Output 'GEMINI_REGISTRA
 """
     proc = ps.run(body)
     assert proc.returncode == (0 if accepted else 5), _output(proc)
+    assert proc.stdout.count(
+        "Verifying the current credential for codex,gemini. "
+        "If the daemon is unreachable, this can take up to 180 seconds."
+    ) == 1
     assert "GEMINI_REGISTRAR_ELIGIBLE" in proc.stdout
     assert not any("--yes" in call for call in ps.logged())
     assert [call for call in ps.logged() if call.startswith("installer|")] == [
@@ -1072,7 +1076,7 @@ if (-not $script:clientSetupFailures['gemini']) {{ Write-Output 'GEMINI_REGISTRA
     if accepted:
         assert "Nothing to write." in proc.stdout
     else:
-        assert proc.stderr.splitlines()[-1] == f"Requested client setup incomplete (Claude Code). {recovery}"
+        assert proc.stderr.splitlines()[-1] == f"Requested client setup incomplete (Codex). {recovery}"
 
 
 @pytest.mark.parametrize("outcome,recovery", [

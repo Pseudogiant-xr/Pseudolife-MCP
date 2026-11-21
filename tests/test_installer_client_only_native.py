@@ -1401,6 +1401,7 @@ def test_client_only_current_registration_with_refused_token_is_incomplete(bash,
     _, proc, _, _, shell, _ = _whole_client_only_run(
         bash, tmp_path, board_server, connect_report=plan, connect_exit=0, current_recovery=DENIED_CREDENTIAL)
     assert proc.returncode == 5, proc.stdout + proc.stderr
+    assert proc.stdout.count("If the daemon is unreachable, this can take up to 180 seconds.") == 1
     assert proc.stderr.splitlines()[-1] == "Requested client setup incomplete (Claude Code). " + DENIED_CREDENTIAL
     calls = shell.logged()
     assert len([call for call in calls if call.startswith("shim|installer credentials verify-token-file")]) == 1

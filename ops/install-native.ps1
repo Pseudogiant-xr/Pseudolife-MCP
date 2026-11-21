@@ -2365,9 +2365,10 @@ function Write-ConnectPlan($report, [switch]$ManualOnly) {
         if ($row.detail) { Write-Host "             $($row.detail)" }
     }
 }
-function Test-CurrentClientToken {
+function Test-CurrentClientToken([string]$Name) {
     if (-not $script:currentClientTokenChecked) {
         $script:currentClientTokenChecked = $true
+        Step "Verifying the current credential for $Name. If the daemon is unreachable, this can take up to 180 seconds."
         try {
             $raw = Invoke-NativeHelper credentials verify-token-file --daemon-url $DaemonUrl --token-file $TokenFile
             $status = $LASTEXITCODE
@@ -2424,7 +2425,7 @@ function Connect-ExistingRegistration([string[]]$Provider, [string]$Name, [switc
         return $false
     }
     if (($planJson | Invoke-NativeHelper connect-report current 2>$null) -ceq "current") {
-        if (-not (Test-CurrentClientToken)) {
+        if (-not (Test-CurrentClientToken $Name)) {
             if (-not $Grouped) { Write-ClientSetupFailure $Provider[0] $script:currentClientTokenFailure }
             return $false
         }

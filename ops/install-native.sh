@@ -2399,6 +2399,9 @@ MCP_GEMINI=""
 # no token and writes nothing; when it finds no registration (exit 3),
 # connect is not run again. Keep the grouped move on success, including
 # its all-client schedule step. Isolate the providers if that move fails.
+# The native connect-report current mode identifies plans that only need the
+# read-only credentials verify-token-file check. The credentials gemini-guard
+# step reads Gemini settings separately because its CLI listing omits env.
 CONNECTED_CLIENTS=""
 CONNECT_CHECKED_CLIENTS=""
 CONNECT_CURRENT_CHECKED=""
@@ -2439,14 +2442,15 @@ client_connect_checked() {
 }
 # <<< client registration state <<<
 connect_report_lines() {  # mode and the connect --json report on stdin
-    # valid: status 0 for connect's report (a JSON object with rows and
-    # exit); the others print its error, its changes or the handled clients.
+    # valid checks the report shape. error, plan, manual and handled print
+    # parts of the report. current selects read-only credential verification.
     native_helper connect-report "$1"
 }
 verify_current_client_token() {
     if [ -z "$CONNECT_CURRENT_CHECKED" ]; then
         CONNECT_CURRENT_CHECKED=1
         local report status=0
+        step "Verifying the current credential for $1. If the daemon is unreachable, this can take up to 180 seconds."
         report=$(native_helper credentials verify-token-file --daemon-url "$DAEMON_URL" --token-file "$TOKEN_FILE") || status=$?
         if [ "$status" -ne 0 ] || [ "$(native_helper json-field status <<< "$report" 2>/dev/null)" != ready ]; then
             CONNECT_CURRENT_FAILURE=$(native_helper json-field recovery <<< "$report" 2>/dev/null) || CONNECT_CURRENT_FAILURE=""
@@ -2493,7 +2497,7 @@ connect_existing_registration() {
             return 0 ;;
     esac
     if [ "$(printf '%s' "$connect_report" | connect_report_lines current 2>/dev/null)" = current ]; then
-        if ! verify_current_client_token; then
+        if ! verify_current_client_token "$connect_name"; then
             [ -z "$grouped" ] || return 1
             warn_client_failure "$provider" "$CONNECT_CURRENT_FAILURE"
             return 0

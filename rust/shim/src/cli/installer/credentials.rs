@@ -34,7 +34,7 @@ const DAEMON_URL_KEY: &str = "PSEUDOLIFE_MCP_DAEMON_URL";
 const SOURCE_ENV: &str = "PSEUDOLIFE_INSTALLER_TOKEN";
 const MAP_SOURCE_ENV: &str = "PSEUDOLIFE_INSTALLER_TOKENS";
 const MINTED_COMMENT: &str = "# Bearer token minted by the installer: the agent board needs one. See 'Turning the board on' in docs/guide/configuration.md.";
-pub(super) const USAGE: &str = "usage: pseudolife-mcp installer credentials mint --env-file F | token-file --principal P --path F | registration-env --config C [--set K=V]... | claude-settings-env --settings S --token-file T --daemon-url U [--replace] | check-token-file --path F | write-token-file --path F | board --daemon-url U [--token-file T]";
+pub(super) const USAGE: &str = "usage: pseudolife-mcp installer credentials mint --env-file F | token-file --principal P --path F | registration-env --config C [--set K=V]... | claude-settings-env --settings S --token-file T --daemon-url U [--replace] | check-token-file --path F | write-token-file --path F | gemini-guard --config C | verify-token-file --daemon-url U --token-file T | board --daemon-url U [--token-file T]";
 
 fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
@@ -162,13 +162,15 @@ pub(super) fn run(args: &[String]) -> u8 {
             "gemini-guard" => gemini_guard(Path::new(options.need("config")?)),
             "verify-token-file" => {
                 let url = options.need("daemon-url")?;
-                let token = read_token(Path::new(options.need("token-file")?));
+                let path = Path::new(options.need("token-file")?);
+                let token = read_token(path);
                 match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                 {
                     Ok(runtime) => runtime.block_on(verify_token(
                         url,
+                        path,
                         token,
                         codex::verify_installer_credential,
                     )),
@@ -588,6 +590,7 @@ fn gemini_guard(path: &Path) -> Value {
 
 async fn verify_token(
     url: &str,
+    token_file: &Path,
     token: Result<Option<String>, &'static str>,
     probe: impl AsyncFnOnce(&str, &str) -> Result<(), SetupError>,
 ) -> Value {
@@ -596,21 +599,22 @@ async fn verify_token(
             "The installer daemon URL is invalid. Supply an HTTP or HTTPS origin and rerun the installer.",
         );
     };
+    let path = token_file.display();
     let token = match token {
         Ok(Some(token)) if !token.starts_with('\u{feff}') => token,
         Ok(Some(_)) => {
-            return failed(
-                "The client token file starts with a UTF-8 byte-order mark. Write it without one and rerun the installer.",
-            );
+            return failed(format!(
+                "The client token file {path} starts with a UTF-8 byte-order mark. Write it without one and rerun the installer."
+            ));
         }
         Ok(None) => {
-            return failed(
-                "The client token file holds no token. Supply a valid token file and rerun the installer.",
-            );
+            return failed(format!(
+                "The client token file {path} holds no token. Supply a valid token file and rerun the installer."
+            ));
         }
         Err(reason) => {
             return failed(format!(
-                "The client token file could not be used ({reason}). Repair it and rerun the installer."
+                "The client token file {path} could not be used ({reason}). Repair it and rerun the installer."
             ));
         }
     };
@@ -702,10 +706,26 @@ mod tests {
         assert_eq!(disabled["status"], "absent");
     }
 
+    #[test]
+    fn gemini_guard_leaves_a_commented_registration_unverified_and_untouched() {
+        let path =
+            std::env::temp_dir().join(format!("installer-guard-{}.json", uuid::Uuid::new_v4()));
+        let settings = r#"{
+  // Local registration
+  "mcpServers": {"pseudolife-memory": {"env": {"PSEUDOLIFE_MCP_NO_SPAWN": "1"}}}
+}"#;
+        std::fs::write(&path, settings).unwrap();
+        let result = gemini_guard(&path);
+        let saved = std::fs::read(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(result["status"], "not-verified");
+        assert_eq!(saved, settings.as_bytes());
+    }
+
     #[tokio::test]
     async fn installer_verification_reports_the_rejected_current_credential_without_exposing_it() {
         let token = "fixture-bearer";
-        let report = verify_token("https://daemon.example.com/", Ok(Some(token.to_owned())), async |url, sent| {
+        let report = verify_token("https://daemon.example.com/", Path::new("current.token"), Ok(Some(token.to_owned())), async |url, sent| {
             assert_eq!(url, "https://daemon.example.com");
             assert!(sent == token);
             Err(crate::setup::codex::SetupError("The installer credential was not accepted by the configured daemon. Supply a token accepted by that daemon, then rerun the installer.")
@@ -724,8 +744,10 @@ mod tests {
 
     #[tokio::test]
     async fn installer_verification_checks_inputs_before_probing() {
+        let path = Path::new("fixture token.txt");
         let valid = verify_token(
             "https://daemon.example.com",
+            path,
             Ok(Some("fixture".into())),
             async |_, _| Ok(()),
         )
@@ -733,18 +755,30 @@ mod tests {
         assert_eq!(valid, json!({"status":"ready"}));
         let bad_origin = verify_token(
             "https://daemon.example.com/path",
+            path,
             Ok(Some("fixture".into())),
             async |_, _| panic!("an invalid daemon origin reached the probe"),
         )
         .await;
         assert_eq!(bad_origin["status"], "failed");
-        let bad_token = verify_token(
-            "https://daemon.example.com",
-            Ok(Some("\u{feff}fixture".into())),
-            async |_, _| panic!("an invalid file token reached the probe"),
-        )
-        .await;
-        assert_eq!(bad_token["status"], "failed");
+        for (token, reason) in [
+            (
+                Ok(Some("\u{feff}synthetic-bearer".into())),
+                "byte-order mark",
+            ),
+            (Ok(None), "holds no token"),
+            (Err("fixture read failure"), "fixture read failure"),
+        ] {
+            let report = verify_token("https://daemon.example.com", path, token, async |_, _| {
+                panic!("an invalid file token reached the probe")
+            })
+            .await;
+            assert_eq!(report["status"], "failed");
+            let recovery = report["recovery"].as_str().unwrap();
+            assert!(recovery.contains("fixture token.txt"));
+            assert!(recovery.contains(reason));
+            assert!(!recovery.contains("synthetic-bearer"));
+        }
     }
 
     #[test]

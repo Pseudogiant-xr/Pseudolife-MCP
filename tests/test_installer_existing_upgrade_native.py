@@ -582,6 +582,10 @@ def test_requested_gemini_rerun_checks_settings_when_listing_hides_guard(
     output = (proc.stdout + proc.stderr).decode(errors="replace")
     assert proc.returncode == exit_code, output
     assert ("was not verified" in output) == (guard_status == "not-verified")
+    if guard_status == "not-verified":
+        # The helper returns this status for unreadable settings, including comments.
+        assert "Warnings\n" in output.replace("\r\n", "\n")
+        assert "Check the pseudolife-memory entry in ~/.gemini/settings.json." in output
     assert ("Requested client setup incomplete (Gemini CLI)" in output) == (exit_code == 5)
     if exit_code == 5:
         assert output.splitlines()[-1].endswith("Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun.")
