@@ -768,7 +768,7 @@ class _FakeService:
 
 
 def _fake_lmb(monkeypatch, contexts):
-    mod = type(sys)("longmemeval_bench")
+    mod = type(sys)("_python_longmemeval_bench")
     mod.RAG_TOP_K = 6
     mod.HYBRID_TOP_K = 2
     mod.CORTEX_TOP_K = 24
@@ -777,7 +777,7 @@ def _fake_lmb(monkeypatch, contexts):
     mod.HYBRID_TIMELINE = None
     mod.build_contexts = lambda svc, question: dict(contexts)
     mod.serve_comparator_arms = lambda ctx, question, nomem=False: None
-    monkeypatch.setitem(sys.modules, "longmemeval_bench", mod)
+    monkeypatch.setitem(sys.modules, "_python_longmemeval_bench", mod)
     return mod
 
 

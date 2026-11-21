@@ -29,8 +29,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-import ladder_sweep as ladder            # noqa: E402
-import longmemeval_bench as lme          # noqa: E402
+import _python_ladder_sweep as ladder            # noqa: E402
+import _python_longmemeval_bench as lme          # noqa: E402
 import taubench_adapter as taubench      # noqa: E402
 
 PRODUCTION_PORTS = {

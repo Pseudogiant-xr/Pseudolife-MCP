@@ -93,7 +93,7 @@ def write_artifact(out: Path, payload: dict) -> None:
 def _run_pass(rung: str, tag: str) -> dict:
     """One ladder rung invocation in a subprocess; returns its result dict
     (read back from the tagged artifact ladder_sweep writes)."""
-    cmd = [sys.executable, str(Path(__file__).parent / "ladder_sweep.py"),
+    cmd = [sys.executable, str(Path(__file__).parent / "_python_ladder_sweep.py"),
            "--rung", rung, "--out-tag", tag]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     artifact = RESULTS_DIR / f"{rung}-{tag}.json"

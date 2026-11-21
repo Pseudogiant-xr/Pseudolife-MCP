@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "evals"))
 
-import ladder_sweep as ls                                  # noqa: E402
+import _python_ladder_sweep as ls                                  # noqa: E402
 import embedder_stamp                                      # noqa: E402
 
 # dream.py imports json function-locally, so the only common seam in this

@@ -44,7 +44,8 @@ def test_documentation_fallback_cannot_classify_code(path):
     ("evals/rust_port/phase1_ci.py", ledger.TESTING),
     ("evals/prompts/live.md", ledger.ACTIVE),
     ("evals/results/old.md", ledger.HISTORY),
-    ("evals/unresolved_driver.py", ledger.EVALS),
+    ("evals/gen_shim_prompt.py", ledger.ACTIVE),
+    ("evals/queue_judge_ladder.py", ledger.ACTIVE),
 ])
 def test_eval_classes(path, category):
     source = ("python -m pseudolife_memory.cli" if path.endswith(".md")
@@ -52,6 +53,12 @@ def test_eval_classes(path, category):
     hit, = ledger.scan(path, source)
     rule = next(rule for rule in ledger.load_rules(ledger.ROOT) if rule.matches(hit))
     assert rule.category == category
+
+
+@pytest.mark.parametrize("path", ["evals/longmemeval_bench.py", "evals/unresolved_driver.py"])
+def test_eval_engine_imports_have_no_directory_wide_allowlist(path):
+    hit, = ledger.scan(path, "from pseudolife_memory import cli")
+    assert ledger.classify([hit], ledger.load_rules(ledger.ROOT))[0] == [hit]
 
 
 @pytest.mark.parametrize(("path", "source", "kind"), [

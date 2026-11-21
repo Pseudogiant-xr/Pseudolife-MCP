@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-import longmemeval_bench as lmb  # noqa: E402
+import _python_longmemeval_bench as lmb  # noqa: E402
 
 VARIANT_KEYS = ("rag", "cortex", "hybrid", "hybrid_ctg", "hybrid_tl",
                 "hybrid_enum", "hybrid_all")

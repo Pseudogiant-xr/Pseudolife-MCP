@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-from longmemeval_bench import (  # noqa: E402
+from _python_longmemeval_bench import (  # noqa: E402
     ALL_TYPES, DEFAULT_TYPES, _JUDGE_SYSTEM, _JUDGE_SYSTEM_GENERIC,
     bank_dir, out_file, parse_types, types_slug,
 )
@@ -71,5 +71,5 @@ def test_missing_question_type_falls_back_to_ku_judge():
     # refactor cannot silently re-judge old artifacts with the generic
     # prompt.
     src = (Path(__file__).resolve().parents[1] / "evals"
-           / "longmemeval_bench.py").read_text(encoding="utf-8")
+           / "_python_longmemeval_bench.py").read_text(encoding="utf-8")
     assert 'row.get("question_type", "knowledge-update")' in src

@@ -79,7 +79,7 @@ def test_both_reset_sites_consume_the_shared_list():
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import ladder_sweep
+    import _python_ladder_sweep as ladder_sweep
 
     from tests import pg_fixtures
 

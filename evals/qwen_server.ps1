@@ -276,6 +276,38 @@ function Test-GpuBusy {
     return $null
 }
 
+function Get-QwenReproducibleArguments {
+    param([int]$Ctx = 100000)
+    # Stock q8_0 without MTP, server-side prompt caching or context shifting.
+    @(
+        '-m', (Get-QwenModelPath),
+        '--host', '127.0.0.1', '--port', '1234',
+        '-ngl', '999', '-c', "$Ctx", '-fa', 'on',
+        '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0',
+        '--jinja',
+        # Escaped quotes survive Start-Process's space join and the child's Windows argv parsing.
+        '--chat-template-kwargs', '{\"reasoning_effort\":\"medium\"}',
+        '--reasoning-preserve', '--parallel', '1', '--metrics',
+        '--temp', '1.0', '--top-k', '20', '--top-p', '0.95', '--min-p', '0.0',
+        '--presence-penalty', '0.0', '-b', '512', '-ub', '256', '-t', '8', '-tb', '8',
+        '--no-context-shift', '--cache-ram', '0', '--ctx-checkpoints', '0'
+    )
+}
+
+function Test-QwenReproducibleListener {
+    # Start-Qwen's reuse check recognises the model and MTP mode. A judged
+    # gate also needs the exact engine and launch profile on the serving PID.
+    try {
+        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 1234 -ErrorAction Stop)
+        if ($listeners.Count -ne 1 -or $listeners[0].LocalAddress -ne '127.0.0.1') { return $false }
+        $owner = [int]$listeners[0].OwningProcess
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $owner" -ErrorAction Stop
+    } catch { return $false }
+    if ($process.ExecutablePath -ine "$script:QwenEngine\llama-server.exe") { return $false }
+    if ($process.CommandLine -notmatch '^\s*(?:"[^"]+"|\S+)\s+(?<args>.*)$') { return $false }
+    return $Matches.args -ceq ((Get-QwenReproducibleArguments) -join ' ')
+}
+
 function Start-Qwen {
     <# Ensure the requested config is serving :1234. Returns $true on success.
        If the OTHER config is already running it is stopped and replaced —
@@ -463,29 +495,7 @@ function Start-Qwen {
     # rejected by the template) and enable_thinking:false still works
     # per-request (verified 2026-08-17).
     # -Ctx: KV-cache CAPACITY only, as before.
-    $qwenArgs = @(
-        "-m", (Get-QwenModelPath),
-        "--host", "127.0.0.1", "--port", "1234",
-        "-ngl", "999",
-        "-c", "$Ctx",
-        "-fa", "on",
-        "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
-        "--jinja",
-        # Backslash-escaped quotes survive Start-Process's naive space-join:
-        # the child's CommandLineToArgvW turns \" back into literal quotes,
-        # so llama-server receives valid JSON. Raw quotes here get stripped.
-        "--chat-template-kwargs", '{\"reasoning_effort\":\"medium\"}',
-        "--reasoning-preserve",
-        "--parallel", "1",
-        "--metrics",
-        "--temp", "1.0", "--top-k", "20", "--top-p", "0.95", "--min-p", "0.0",
-        "--presence-penalty", "0.0",
-        "-b", "512", "-ub", "256",
-        "-t", "8", "-tb", "8",
-        "--no-context-shift",
-        "--cache-ram", "0",
-        "--ctx-checkpoints", "0"
-    )
+    $qwenArgs = Get-QwenReproducibleArguments -Ctx $Ctx
     try {
         $process = Start-Process -FilePath "$script:QwenEngine\llama-server.exe" `
             -WorkingDirectory $script:QwenEngine -WindowStyle Hidden `

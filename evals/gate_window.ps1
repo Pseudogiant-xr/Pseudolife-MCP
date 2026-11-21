@@ -17,8 +17,8 @@
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot
 $py = Join-Path $repo ".venv\Scripts\python.exe"
-$bench = Join-Path $repo "evals\longmemeval_bench.py"
-$ladder = Join-Path $repo "evals\ladder_sweep.py"
+$bench = Join-Path $repo "evals\_python_longmemeval_bench.py"
+$ladder = Join-Path $repo "evals\_python_ladder_sweep.py"
 $echo = Join-Path $repo "evals\window_echo_check.py"
 $ftGguf = Join-Path $repo "evals\models\e4b-extractor-Q4_K_M.gguf"
 $ladderJson = Join-Path $repo "evals\results\e4b-ft.json"
