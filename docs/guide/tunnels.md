@@ -124,7 +124,8 @@ Python client (see [Autostart and private storage](#autostart-and-private-storag
 ## Start or resume
 
 Use an always-on host if you need access while a laptop sleeps. Both its daemon
-and tunnel must remain running. Install Pseudolife normally, then run:
+and tunnel must remain running. With the Python client, install Pseudolife
+normally, then start guided setup:
 
 ```sh
 pseudolife-mcp tunnel setup
@@ -157,10 +158,12 @@ separate connections. `--profile-dir <directory>` selects private profile storag
    Creating or editing a tunnel separately needs **Read + Manage**. Enter the
    runtime key privately with `pseudolife-mcp tunnel setup --read-key`, or use
    `--key-file <owner-only-file>`. Keep it out of chat, command arguments and
-   environment variables. If its expiry is known, add
-   `--key-expires-at 2026-12-01T00:00:00Z`; a date such as `2026-12-01` means
-   midnight UTC. Timestamps need a timezone; otherwise status reports unknown
-   when no expiry is supplied.
+   environment variables. If its expiry is known, save it with
+   `pseudolife-mcp tunnel setup --key-expires-at 2026-12-01T00:00:00Z`.
+   The native client requires a separate call to save the expiry before
+   importing the first key. The Python client accepts expiry and key input
+   in one command. A date such as `2026-12-01` means midnight UTC. Give full
+   timestamps a timezone. Without an expiry, status reports it as unknown.
 3. With the native client, use `pseudolife-mcp tunnel run` in a foreground
    terminal. With the Python client, use `tunnel start` for a managed launch
    or `tunnel run` in the foreground. The Python client's `tunnel setup --start`

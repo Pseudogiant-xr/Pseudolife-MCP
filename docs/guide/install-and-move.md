@@ -84,13 +84,14 @@ It checks the platform archive against `SHA256SUMS` and confirms that the
 client supports the installer's setup commands before making changes. The
 client choice is independent of `--engine`, which selects the Docker daemon.
 
-On an existing installer-managed Python client, opt in with
+On an installer-managed Python client from 0.23.0 or later, opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (set
-`$env:PSEUDOLIFE_SHIM_ENGINE = 'native'` first in PowerShell). The updater
-checks the release archive and keeps the Python client if it cannot move
-this installation. Running sessions keep their runtime. New sessions use
-the selected client through the existing launcher. Pip, pipx and lite
-installs update in place. See [The native client](configuration.md#the-native-client)
+`$env:PSEUDOLIFE_SHIM_ENGINE = 'native'` first in PowerShell). If your client
+predates 0.23.0, update it on Python first, then run the opt-in command.
+The updater checks the release archive and keeps the Python client if it
+cannot move this installation. Running sessions keep their runtime. New
+sessions use the selected client through the existing launcher. Pip, pipx
+and lite installs update in place. See [The native client](configuration.md#the-native-client)
 for the supported platforms, tunnel limits and the route back to Python.
 
 If the Python client registered a tunnel to start automatically, opting in
@@ -103,8 +104,10 @@ When the native installer sets up Codex with a supplied token, it waits up
 to three minutes for an authenticated daemon read. It retries a connection
 failure or server error while the daemon starts. A rejected token (HTTP 401
 or 403) stops the check immediately. The installer shows the cause and the
-recovery step if it cannot finish Codex setup. Release update refreshes an
-existing registration and its hooks after checking daemon health.
+recovery step if it cannot finish Codex setup. Release update can refresh
+existing Codex hook scripts when their approved definitions stay the same.
+If a definition changes, follow the update's instructions to review and
+approve it in Codex.
 
 ## Installer refusals
 

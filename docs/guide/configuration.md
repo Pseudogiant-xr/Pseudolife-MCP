@@ -4708,9 +4708,9 @@ print.
 
 | command | what it does |
 |---|---|
-| `pseudolife-mcp update` | Docker tier: pull the daemon image of the newest release on PyPI (`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>` for the Rust engine, `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>` for the Python one; a host that never chose an engine moves to Rust, see [Daemon engine](install-and-move.md)), pull the release's PostgreSQL image when that container differs from the release's definition, back the bank up, recreate that one service and wait until it is healthy (the previous one is restored on failure), tag the running image `…-pre-update-<stamp>`, recreate the daemon container, wait for `/health` at that version, then the client side. The client side keeps the Python client unless `PSEUDOLIFE_SHIM_ENGINE=native` is set; with it, a 0.23.x Python client moves to the native client when the release's archive for this platform downloads, verifies and runs, and otherwise keeps the Python client and says why ([The native client](#the-native-client)). Pip / lite: upgrade the package where it is installed; restart nothing; the client is not moved. |
-| `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
-| `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
+| `pseudolife-mcp update` | On a Docker host, the native updater discovers the latest ready GitHub release and the Python updater discovers the latest release on PyPI. Update backs up the bank, tags the previous image `…-pre-update-<stamp>` for rollback, recreates the daemon, checks `/health`, and then updates clients. The Python updater also checks the managed PostgreSQL image against the release's definition. See [Daemon engine](install-and-move.md#daemon-engine) for engine selection and [The native client](#the-native-client) for client opt-in. Pip and lite installs upgrade the package in place and leave restarts to the operator. |
+| `pseudolife-mcp update --tag <version>` | Use the specified published release and bypass latest-release discovery. |
+| `pseudolife-mcp update --check` | Report only. Exit 0 when a newer release exists, 3 when there is no newer eligible release, or 2 when the check fails. |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
 | `--engine rust` / `--engine python` | Docker tier: select the daemon engine on the same bank, `/data` volume, port and bearer settings, and record the choice so later updates keep it. `--engine rust` needs a release that publishes the Rust image and refuses, before the backup, a configuration the Rust daemon does not support; `--engine python` switches back. An explicit engine change moves only the daemon, never the clients: run `pseudolife-mcp update --clients-only` afterwards if the clients are behind. Details: [Daemon engine](install-and-move.md) |
 | `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
@@ -4729,8 +4729,9 @@ is missing (see
 [The test suite's Postgres login](#the-test-suites-postgres-login-pseudolife-mcp-test-login));
 a release update never does.
 
-What it refuses: a target it cannot read (PyPI unreachable and no
-`--tag`: nothing is guessed), a downgrade without `--allow-downgrade`,
+The updater refuses when it cannot read its release source (GitHub for
+native, PyPI for Python) and you supplied no `--tag`. It also refuses a
+downgrade without `--allow-downgrade`,
 Docker installed but not answering (Docker Desktop stopped is not "no
 daemon container": the shim runtime this runs from is never pip-upgraded
 in its place), on a pip install an editable checkout, and with
