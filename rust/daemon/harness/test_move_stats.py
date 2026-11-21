@@ -6,7 +6,7 @@ Parent-only heavy command (prebuilt daemon and offline models required):
 
 No shared registry edit is needed. This driver loads a private w2d_search module,
 reuses its config, seed, requests, complete stats comparator, coverage and bank
-diff, and confines every created/cloned/dropped fixture database to r2_* names.
+diff, and confines every created/cloned/dropped database to pl_cf_w2d_r2_* fixtures.
 --self-check is pure: no database, daemon, network, model or subprocess access.
 """
 from __future__ import annotations
@@ -19,7 +19,6 @@ import ipaddress
 import json
 import os
 from pathlib import Path
-import re
 import sys
 import tempfile
 
@@ -171,16 +170,14 @@ def bank_space(harness, host_port: str, login_file: Path):
     class Banks(harness.pgdisposable.Slice):
         def __init__(self):
             super().__init__("w2d")
-            self.PREFIX = "r2_"
-            self.DISPOSABLE_NAME = re.compile(r"r2_[a-z0-9_]{1,40}")
             self.NAMES = RunNames()
             self.HOST_PORT = host_port
 
         def name(self, label):
             if not label.startswith("pl_cf_w2d_"):
                 raise ValueError("unexpected service fixture label")
-            label = "r2_" + label.removeprefix("pl_cf_w2d_")
-            return self.NAMES.name(self._check(label), max_length=43)
+            label = f"{self.PREFIX}r2_" + label.removeprefix(self.PREFIX)
+            return self.NAMES.name(self._check(label), max_length=len(self.PREFIX) + 40)
 
         def _login(self):
             return user, password
@@ -365,7 +362,7 @@ def main():
         args.out.write_text(json.dumps({"complete": False, "results": []}), encoding="utf-8")
         try:
             template = banks.name("pl_cf_w2d_template")
-            harness.seed_template(template, args.paragraphs)
+            harness.seed_template(template, args.paragraphs, args.rust_bin)
             for name in args.only:
                 scenario = scenarios[name]()
                 groups = sum("mcp" in case and case.get("tool") == "memory_stats"
