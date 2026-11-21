@@ -838,7 +838,7 @@ fn a_native_launcher_whose_runtime_is_gone_is_still_native() {
     let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
         panic!("an ELF launcher is the native client: nothing to refuse");
     };
-    assert!(lines[0].contains("now the native client"), "{lines:?}");
+    assert!(lines[0].contains("uses this machine's native launcher"), "{lines:?}");
 }
 
 #[test]
