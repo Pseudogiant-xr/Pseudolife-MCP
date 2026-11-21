@@ -18,7 +18,7 @@ param([switch]$SkipOracle)
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot
 $py = Join-Path $repo ".venv\Scripts\python.exe"
-$bench = Join-Path $repo "evals\longmemeval_bench.py"
+$bench = Join-Path $repo "evals\_python_longmemeval_bench.py"
 $e2bGguf = Join-Path $repo "evals\models\gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
 $env:PYTHONPATH = $repo
 $env:TORCHDYNAMO_DISABLE = "1"

@@ -561,6 +561,9 @@ stronger tier's scalar into a set (it parks, `member_add_blocked_tier`),
 and a weaker-tier retraction of a stronger tier's member is dropped
 (`member_remove_refused`). Joining a set is not tier-guarded, and the MCP
 set tools, which pass no tier, are unguarded by design.
+
+The following LongMemEval and ladder results measured the Python engine.
+
 Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
 for assistant-stated facts lifts the fact-only arm on
 `single-session-assistant` from 0.054 to 0.536 while the knowledge-update

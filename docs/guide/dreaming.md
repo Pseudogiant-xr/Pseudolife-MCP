@@ -271,6 +271,8 @@ idle is a little slower; nothing else changes.
 
 ## Upgrading the extractor — bigger local models
 
+The ladder and LongMemEval figures below are historical measurements from the Python engine.
+
 If you have a GPU (or a beefier box on your LAN), any OpenAI-compatible
 server can replace the sidecar — the ladder measured a Qwen3.6-27B on a
 single RTX 4090 at the ladder ceiling (gold 1.0 / stale-leak 0.0) while
@@ -585,7 +587,7 @@ layout is off PATH and rotates on auto-update — the shim re-resolves the
 newest at every start).
 
 Extraction quality: the `terra` and `luna` ladder rungs
-(`evals/ladder_sweep.py --rung terra` / `--rung luna`, first measured
+(`evals/_python_ladder_sweep.py --rung terra` / `--rung luna`, first measured
 2026-09-01) score GPT-5.6 Terra and Luna at parity with the Claude
 ceiling rungs on the extraction bench — see the ceiling-probe table in
 `evals/README.md` for the numbers and the single-run caveats. (The shim

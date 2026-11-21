@@ -14,7 +14,7 @@ param([int]$N = 4)
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot
 $py = Join-Path $repo ".venv\Scripts\python.exe"
-$replicatePy = Join-Path $repo "evals\replicate.py"
+$replicatePy = Join-Path $repo "evals\_python_replicate.py"
 $env:PYTHONPATH = $repo
 $maxRetries = 8
 

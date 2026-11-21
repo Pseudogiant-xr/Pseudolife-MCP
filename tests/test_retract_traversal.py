@@ -910,7 +910,7 @@ def test_bank_dumps_drop_the_read_time_annotation(tmp_path, which):
 
     svc = _Svc()
     if which == "lme":
-        from evals.longmemeval_bench import dump_bank
+        from evals._python_longmemeval_bench import dump_bank
         facts = dump_bank(svc, {"question_id": "q1", "question": "?",
                                 "answer": "a", "question_date": "2026-01-01"},
                           tmp_path / "bank.json.gz")

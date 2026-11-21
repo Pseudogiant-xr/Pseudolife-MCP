@@ -320,7 +320,7 @@ jobs:
         # Catch Rust workflow/harness drift on the PR that introduces it.
         run: >-
           python -m pytest -q -m "not real_model"
-          tests/test_release_ux.py tests/test_eval_evidence.py
+          tests/test_release_ux.py tests/test_eval_evidence.py tests/test_retained_evals.py
           tests/test_atlas_currency.py tests/test_client_install_ux.py
           tests/test_codex_hook_launcher.py tests/test_label_pair.py
           tests/test_merge_queue.py tests/test_plugin_packaging.py
@@ -1172,6 +1172,8 @@ jobs:
           tests/test_subagent_board_guard.py
           tests/test_codex_hook_setup.py
           tests/test_codex_hook_setup_edges.py
+          tests/test_regression_gate_inputs.py
+          tests/test_regression_gate_defaults.py
           tests/test_update_cli.py
           tests/test_ops_update_wrappers.py
           tests/test_register_claude_desktop.py

@@ -254,12 +254,43 @@ class MutantQualification(unittest.TestCase):
         with (patch.object(search.pg, "create", return_value="fixture"),
               patch.object(search.daemons, "make_home"),
               patch.object(search.daemons, "base_env", return_value={}),
-              patch.object(search.subprocess, "run") as run,
+              patch.object(search, "run_seed_child") as run,
               patch.object(search.time, "sleep") as sleep):
             run.return_value.returncode = 0
             run.return_value.stdout = "stored fixture"
-            search.seed_template("fixture", 0)
+            search.seed_template("fixture", 0, Path("candidate"))
         sleep.assert_called_once_with(70)
+
+    def test_seed_child_never_receives_daemon_dsn_or_mutant(self):
+        with (patch.object(search.pg, "create", return_value="dbname=pl_cf_w2d_synthetic"),
+              patch.object(search.daemons, "scratch_root", return_value=Path("unused")),
+              patch.object(search.daemons, "make_home", return_value=Path("unused-seed-home")),
+              patch.object(search, "run_seed_child") as run,
+              patch.object(search.time, "sleep"),
+              patch.dict(search.os.environ, {"PSEUDOLIFE_MCP_DATABASE_URL": "dbname=synthetic_production",
+                                             "PSEUDOLIFE_DAEMON_MUTANT": "inherited"})):
+            run.return_value.returncode = 0
+            run.return_value.stdout = "stored fixture"
+            search.seed_template("fixture", 0, Path("candidate"))
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["PL_HARNESS_SEED_DSN"], "dbname=pl_cf_w2d_synthetic")
+        self.assertEqual(Path(env["PL_HARNESS_SEED_RUST"]), Path("candidate").resolve())
+        self.assertNotIn("PSEUDOLIFE_MCP_DATABASE_URL", env)
+        self.assertNotIn("PSEUDOLIFE_DAEMON_MUTANT", env)
+
+    def test_seed_timeout_signals_the_owned_posix_process_group(self):
+        proc = unittest.mock.MagicMock(pid=42)
+        proc.communicate.side_effect = [search.subprocess.TimeoutExpired(["seed"], 1), ("", "")]
+        with (patch.object(search.subprocess, "Popen") as popen,
+              patch.object(search.os, "name", "posix"),
+              patch.object(search.signal, "SIGKILL", 9, create=True),
+              patch.object(search.os, "killpg", create=True) as killpg):
+            popen.return_value.__enter__.return_value = proc
+            with self.assertRaises(search.subprocess.TimeoutExpired):
+                search.run_seed_child(["seed"], env={}, timeout=1)
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
+            killpg.assert_called_once_with(proc.pid, search.signal.SIGKILL)
+        proc.kill.assert_not_called()
 
     def run_control(self, results):
         with (patch.object(sys, "argv", ["w2d_search.py", "mutants", "--rust-bin", "unused"]),

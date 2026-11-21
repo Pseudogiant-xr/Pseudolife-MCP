@@ -25,7 +25,7 @@ def test_the_length_policy_matches_the_harness_the_arm_runs_in():
     review).
     """
     import beam_adapter
-    import longmemeval_bench as lmb
+    import _python_longmemeval_bench as lmb
     assert LENGTH_ONE_SENTENCE in lmb._ANSWER_SYSTEM
     assert LENGTH_COMPLETE in beam_adapter._BEAM_ANSWER_SYSTEM
     assert LENGTH_ONE_SENTENCE in nomem_system(LENGTH_ONE_SENTENCE)
