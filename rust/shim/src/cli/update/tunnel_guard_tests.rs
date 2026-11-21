@@ -303,7 +303,11 @@ fn a_registered_user_unit_refuses_the_move_and_changes_nothing() {
     );
     assert!(line.contains("Nothing was changed"), "{line}");
     assert!(
-        line.contains("the native client cannot run a tunnel yet"),
+        line.contains(
+            "The native client can run it in the foreground with pseudolife-mcp tunnel run"
+        ) && line.contains("has no automatic or background start")
+            && line.contains("Removing autostart means the tunnel will no longer start on its own")
+            && !line.contains("cannot run a tunnel yet"),
         "{line}"
     );
     assert!(

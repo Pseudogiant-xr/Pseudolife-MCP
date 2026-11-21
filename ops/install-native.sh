@@ -674,7 +674,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     native_check_says="$(native_bounded both "$NATIVE_STAGED" runtime install --check)" || native_check_status=$?
     if [ "$native_check_status" = 3 ]; then
         printf '%s\n' "$native_check_says" >&2
-        native_refuse "a tunnel is registered to start by itself through this machine's Python client, and the native client cannot run a tunnel yet (the line above names it)" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native to keep the Python client, or first remove the autostart with the command the line above prints, then rerun."
+        native_refuse "a tunnel is registered to start by itself through this machine's Python client. The native client can run it in the foreground with pseudolife-mcp tunnel run and has no automatic or background start" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native to keep the Python client. To move to the native client, run the autostart removal command above, then rerun. Removing autostart means the tunnel will no longer start on its own."
     elif [ "$native_check_status" = 124 ]; then
         echo "  the tunnel-service check did not answer in $NATIVE_PROBE_SECONDS s; runtime install checks again later" >&2
     elif [ "$native_check_status" = 0 ] && [ -n "$native_check_says" ]; then

@@ -1067,13 +1067,16 @@ fn health_url(path: &Path) -> Option<String> {
 }
 
 fn read_record(path: &Path) -> Result<LaunchRecord, Fail> {
-    store::private_read(path, RECORD_LIMIT).ok()
+    store::private_read(path, RECORD_LIMIT)
+        .ok()
         .and_then(|bytes| serde_json::from_slice::<LaunchRecord>(&bytes).ok())
         .filter(|record| launch_id(&record.native_launch).is_some())
-        .ok_or_else(|| Fail::Detail(format!(
-            "cannot prove native ownership of {}. Check tunnel status and stop it with the client that started it",
-            path.display()
-        )))
+        .ok_or_else(|| {
+            Fail::Detail(format!(
+                "cannot prove native ownership of {}. Check tunnel status",
+                path.display()
+            ))
+        })
 }
 
 pub(super) fn launch_id(text: &str) -> Option<Uuid> {
@@ -1105,7 +1108,20 @@ pub(super) fn stop(root: &Path, name: &str) -> Output {
         return stopped();
     }
     setup::check_directory(root).map_err(|_| UNSAFE_STORE)?;
-    let record = read_record(&record_path)?;
+    let record = read_record(&record_path).map_err(|failure| {
+        let observed = record::read(record_path.clone(), record::table().as_deref());
+        if let Some(observed) =
+            observed.filter(|seen| !seen.native && seen.liveness == record::Liveness::Running)
+        {
+            Fail::Detail(format!(
+                "cannot prove native ownership of {}. {}",
+                record_path.display(),
+                super::legacy_handoff(name, &observed)
+            ))
+        } else {
+            failure
+        }
+    })?;
     let lock =
         state::open_with_write(&lock_path(root, name), true).map_err(|_| conflict(root, name))?;
     match lock.file.try_lock() {

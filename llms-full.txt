@@ -13917,10 +13917,16 @@ An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
 followed by `pseudolife-mcp tunnel run` for the same profile and directory.
 Use the same commands when the updated client pins a different vendor version.
 If a service or scheduled task started that supervisor, restart the existing
-registration through its manager. A Python-supervised tunnel stays running
-until stopped with the Python client that started it. Then use native
-`tunnel run` for a foreground launch. The client switch continues to require
-removal of Python tunnel autostart before changing engines.
+registration through its manager.
+
+A Python-supervised tunnel keeps serving after the client switch.
+If `tunnel update` or `tunnel stop` prints a stop
+command with the retained Python client's full path, run that command. If no
+path is available, wait until the process ends, for example after a restart.
+Once `tunnel status` reports the tunnel has stopped, move aside any leftover
+process record it names. Then run `pseudolife-mcp tunnel run --profile <name>`
+in a terminal you keep open. Include the same `--profile-dir` if you use a
+custom directory.
 
 An interrupted key renewal or a retained previous key reports `stale` with
 guidance for that state. A pending refresh request written by the Python
@@ -13941,7 +13947,7 @@ the saved key to check it: a damaged key file is no usable key, and a key
 sealed by another account, or read over a logon without the account's
 credentials (such as a key-based SSH logon), is reported as `not_verified`.
 `pseudolife-mcp doctor` lists saved tunnels and names only steps this client
-runs. If your tunnel relies on background start or refresh, keep the
+runs. If your tunnel relies on automatic or background start, keep the
 Python client. An update keeps it unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
@@ -14107,17 +14113,19 @@ No root service or login policy is changed implicitly. An autostart service cann
 a sleeping or powered-off host available.
 
 **A machine with an autostart service stays on the Python client.** The
-service starts the tunnel through the installed `pseudolife-mcp` launcher,
-and the native client cannot run a tunnel yet. So a run that would move this
-machine to the native client refuses while a tunnel service it installed is
-registered and runs that launcher, even a disabled one. An update with
+native client can run a tunnel in the foreground with
+`pseudolife-mcp tunnel run`. It has no automatic or background start.
+An install or update that would move this machine to the native client
+refuses while a tunnel service the Python client installed is registered and
+runs the shared launcher, even if the service is disabled. An update with
 `PSEUDOLIFE_SHIM_ENGINE=native` exits 2, and the installer with it stops in
 its preflight; `runtime install --check` is the check both use. The refusal
 names the service and changes nothing. Rerun without
 `PSEUDOLIFE_SHIM_ENGINE=native` to stay on the Python client. To move anyway,
 first run the `pseudolife-mcp tunnel service remove` command the refusal
 prints (it carries the service's `--profile`, `--profile-dir` and, for a root
-service, `--system-service`), then rerun. An unattended update on the
+service, `--system-service`), then rerun. Removing autostart means the tunnel
+will no longer start on its own. An unattended update on the
 daemon's host instead updates the daemon alone and says why, on each run that
 installs a release, until the autostart is gone; after that, the next
 unattended run that installs a release moves the client.

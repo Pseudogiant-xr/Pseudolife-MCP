@@ -1085,7 +1085,7 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
         ),
     };
     format!(
-        "this machine stays on the Python client: a tunnel is registered to start by itself and the native client cannot run a tunnel yet. {stay}. To move to the native client, first remove the autostart with the Python client ({removes}), then {again}. Registered: {places}"
+        "this machine stays on the Python client: a tunnel is registered to start by itself. {stay}. To move to the native client, first remove the autostart with the Python client ({removes}), then {again}. Registered: {places}. Removing autostart means the tunnel will no longer start on its own. The native client can run it in the foreground with pseudolife-mcp tunnel run and has no automatic or background start"
     )
 }
 

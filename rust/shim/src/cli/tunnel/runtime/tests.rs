@@ -634,7 +634,8 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
     let bytes = br#"{"pid":1,"ready":true}"#;
     state::atomic_create(&path, bytes).unwrap();
     assert!(
-        matches!(stop(&home.0, "dot"), Err(Fail::Detail(message)) if message.contains("cannot prove native ownership"))
+        matches!(stop(&home.0, "dot"), Err(Fail::Detail(message)) if message.contains("cannot prove native ownership")
+            && !message.contains("stop it with the client that started it"))
     );
     assert_eq!(fs::read(&path).unwrap(), bytes);
     let id = Uuid::new_v4();
