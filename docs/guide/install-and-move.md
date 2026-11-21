@@ -100,14 +100,16 @@ the Python client to retain autostart. On the native client, tunnels run in
 the foreground. See [the tunnel guide](tunnels.md#autostart-and-private-storage)
 before moving a host that serves a tunnel.
 
-When the native installer sets up Codex with a supplied token, it waits up
-to three minutes for an authenticated daemon read. It retries a connection
-failure or server error while the daemon starts. A rejected token (HTTP 401
-or 403) stops the check immediately. The installer shows the cause and the
-recovery step if it cannot finish Codex setup. Release update can refresh
-existing Codex hook scripts when their approved definitions stay the same.
-If a definition changes, follow the update's instructions to review and
-approve it in Codex.
+When the native installer sets up Codex with a daemon token (the local
+install's own or a supplied file), it waits up to three minutes for an
+authenticated daemon read. It retries a connection failure or server error
+while the daemon starts. A rejected token (HTTP 401 or 403) stops the check
+immediately. If the check fails, the installer completes the rest of the
+setup and skips Codex registration. It prints a warning with the reason
+and tells you how to retry the installer. Release update can refresh existing
+Codex hook scripts when their approved definitions stay the same. If a
+definition changes, open `/hooks` in Codex to review and approve the changed
+Pseudolife handlers.
 
 ## Installer refusals
 
