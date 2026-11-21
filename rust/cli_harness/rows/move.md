@@ -10,22 +10,20 @@ Harness row: `move` (`rust/cli_harness/rows/move.py`). Oracle test:
 
 ## Scope
 
-Since the maintainer's ruling of 14 November 2026 (works, not matches),
-`move` is rebuilt as a native feature rather than ported. This row compares
-the two where they still answer alike: what the command decides from its
-argv before any effect. The native move is not compared (below): its
-transaction and rollback, its dry run (`--dry-run`: both hosts checked
-read-only, the target's half in the hidden `move-target` helper over ssh)
-and their own refusals. They are tested in Rust:
+The native move dispatcher handles help, argument refusals, dry runs,
+execution, resume, rollback and target release. This row replays its
+before-effect command-line answers. The transaction, including the dry run
+and its read-only checks on both hosts, has its own Rust tests:
 `restore_cli/move_native/engine_tests.rs` runs the transaction against a
 model of both hosts with a fault at every call;
 `restore_cli/move_native/tests.rs` and `ops.rs` use recording fakes; and
 `tests/cli_move_contract.rs` runs through the binary.
 
-`move --rollback <move id>` and `move --release-target <move id>` are native
-only: Python's move has neither option. The dispatcher reads those shapes
-before `move_cli`'s argparse checks, so the oracle's usage error for them is
-not compared either.
+`move --rollback <move id>` and `move --release-target <move id>` use
+the native recovery parser. The dispatcher checks their syntax first. Every
+`move` argv ends in native code: the recovery forms, help and the early
+refusals in `move_cli.rs`, the transaction, or the named usage refusal
+below. None reaches the dispatcher's deferral line.
 
 ## What runs before the first effect (checked)
 
@@ -45,25 +43,26 @@ not compared either.
 
 | Item | Python source |
 |---|---|
-| `--help` / `-h` alone: argparse help on stdout, exit 0; only `COLUMNS=80` (wrap 78) is reproduced | `_parser` 1807-1829, `main` 1833-1836 |
-| No `--to` (every other token canonical): usage (3 lines) + `pseudolife-mcp move: error: the following arguments are required: --to`, stderr, exit 2; only at `COLUMNS=80` | `_parser` 1816 (`required=True`) |
+| No `--to` (every other token canonical, or the only problem): usage (7 lines, argparse's layout at 78 columns) + `pseudolife-mcp move: error: the following arguments are required: --to`, stderr, exit 2, at every `COLUMNS`, on a terminal and with colour variables set; the oracle matches it only at `COLUMNS=80` | `_parser` 1816 (`required=True`) |
 | `--target-url` given and not an origin: `move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 (no path, query or credentials)`, stderr, exit 2, before any `--to` check | `main` 1837-1844; `codex_connection.py:104-117` |
 | `--to` empty, or any `str.isspace` character: `move: --to takes an ssh target such as user@box or a ~/.ssh/config alias` (the frozen Python says `root@box`; the native text, since 16 November 2026, does not teach a root login), stderr, exit 2 (also under `--json`) | `main` 1848-1850 |
 | `--to` holding a C0 character that is not whitespace (U+0000-U+0008, U+000E-U+001B): the same text, stderr, exit 2 | `Mover.run` 619-620, `fail` 555-559 |
-| `--target-checkout` holding CR or LF (after `rstrip("/") or DEFAULT`): `move: --target-checkout holds a control character`, stderr, exit 2 | `Mover.__init__` 498, `Mover.run` 621-622 |
+| `--target-checkout` with any value or spelling: the one native refusal (`move_cli::TARGET_CHECKOUT_REFUSAL`, #1815's text: `--target-checkout selects a checkout rebuild and stopped handover ... omit --target-checkout. Nothing was changed`), whether the transaction parser or the usage path meets it; the oracle's `holds a control character` for CR or LF is not kept, since the option is refused whatever its value. stderr, exit 2 | `Mover.__init__` 498, `Mover.run` 621-622 |
 | Order: argparse, `--target-url`, `--to` (main), `--to` (Mover.run), `--target-checkout` | as above |
 | Streams: Python text streams, CRLF on Windows | `print(..., file=sys.stderr)` |
 
 ## Canonical argv admitted by the parser
 
 `move` followed by any order of `--to V`, `--target-checkout V`,
-`--target-url V`, `--no-keep-tokens`, `--resume`, `--dry-run`, `--yes`,
-`--json`, each at most once, with each value the next argument, valid
-Unicode, not starting with `-`.
+`--target-url V`, `--target-env-file V`, `--target-compose-file V`
+(repeatable, one per overlay, in order), `--target-work-dir V`,
+`--no-keep-tokens`, `--resume`, `--dry-run`, `--expose-target`,
+`--target-release`, `--yes`, `--json`, each other option at most once, with
+each value the next argument, valid Unicode, not starting with `-`. The
+recovery forms are `--rollback MOVE-ID [--yes] [--json]` and
+`--release-target MOVE-ID [--target-gone] [--yes] [--json]`.
 
 ## Not compared (the native behaviour is by design)
-
-Each of these was a case of this row while the native command deferred:
 
 - Every argv that passes the checks above: the native module answers it.
   On Linux targets, `--dry-run` checks both bearer modes. It checks carried
@@ -91,26 +90,35 @@ valid argv, which `tests/cli_move_contract.rs` pins; the other two are now
 equivalent mutants (each turns a `--to` refusal into a deferral, and the
 native module then prints the same `--to` refusal).
 
-## Deferred (the dispatcher's `mode 'move' is deferred` line, exit 1)
+## Native help and usage
 
-- Argparse shapes: `--opt=value`, abbreviations, repeated options,
-  positionals, a missing value, any value starting with `-` (so the oracle's
-  `--to` starts-with-`-` refusal, reachable only through `--to=-x`,
-  `--to -1`, `--to -` or a spaced value, always defers here), `--help` with
-  other arguments, help or usage at any `COLUMNS` other than `80`.
-- Non-Unicode argv.
-- Any non-ASCII argument when CPython would not decode a POSIX argv as
-  UTF-8: UTF-8 mode (`PYTHONUTF8=1`, or `PYTHONUTF8` unset or empty under
-  the C or POSIX locale, PEP 540) or a UTF-8 codeset in the first non-empty
-  of `LC_ALL`, `LC_CTYPE`, `LANG`. Otherwise the oracle decodes argv with the
-  locale codec and sees other characters. Windows argv is always exact.
-- argparse help when stdout is a terminal, and argparse usage when stderr
-  is a terminal, or either when `FORCE_COLOR`, `PYTHON_COLORS` or `NO_COLOR`
-  is set: newer CPython argparse colours its output there. The plain
-  `print` refusals are never coloured and stay answered.
-- An answer whose write fails before any byte is accepted (stderr on
-  `/dev/full`, a closed stdout): nothing was answered, so the dispatcher's
-  deferral follows (its own write fails too, exit 1).
+`--help` or `-h` anywhere in argv prints the same help at every terminal
+width, as argparse's does; `--rollback --help` is help too, since a move id
+never starts with `-`. The help describes installed release targets, says
+`--target-checkout` is refused and `--target-release` changes nothing, and
+names the recovery commands.
+
+Argv neither native parser takes gets one refusal on stderr, exit 2,
+`move: <cause>. Nothing was changed`, before any move record is read or
+either host consulted. The cause names the first problem in argv order:
+`--target-checkout` in any spelling (the same refusal as above), a joined `--opt=value`, a flag given a value, an abbreviation (with the
+full name it stands for), an unknown option, a repeated option, a
+positional argument, a missing value or one starting with `-` (for `--to`
+that would be an ssh option), non-Unicode argv, `--target-gone` outside
+`--release-target`, and for the recovery forms a missing move id, both
+forms at once or an option they do not take. `--release-target` beside
+`--to` is answered as the likely `--target-release` mix-up. An option
+spelling is echoed only when it is one or two dashes and lowercase letters
+and dashes; anything else, which could be a value or a pasted secret, is
+named by its position. Repeated `--target-compose-file` entries are
+overlays, in order, not a repeat. `--help` is help even beside argv that is
+not valid Unicode.
+
+The cases whose native answer differs from argparse's (the help cases, the
+missing `--to` at `COLUMNS=120`, the three `checkout-*` cases, and every
+case that names a usage cause) replay goldens recorded from the candidate
+with `--record-candidate`; the case IDs keep their `defer-` names from when
+the command deferred.
 
 ## Free items
 
@@ -118,11 +126,9 @@ None: every answered byte is compared.
 
 ## Declared divergence
 
-An answer whose write fails part-way exits 1 with the bytes already
-written. CPython's `print` raises there; its traceback write fails too and
-the exit is 1, or 120 when the final flush fails. Unit-tested only
-(`a_failed_answer_write_defers_only_when_nothing_left`): the harness has no
-stderr-on-`/dev/full` arm.
+An answer whose write fails exits 1, including when the stream accepts
+zero bytes. The partial and zero-byte cases use the writer fake in
+`a_failed_answer_write_ends_the_command`.
 
 The `--to` help and refusal give `user@box` as the example target, where
 the frozen oracle says `root@box`. Every case applies `move-native-wording`,
@@ -135,11 +141,11 @@ The oracle runs only argv that refuse before any effect, with `PATH` set to
 an empty directory and every proxy variable naming a recording listener;
 a once-per-process positive control proves the oracle's own HTTP reader
 (`move_cli.Runner.get_json`) reaches that listener for a loopback URL, so
-no request could reach the live daemon on 8765. The argv shapes that still
-defer run a verified stub `pseudolife_memory.cli` in the Python arm, never
-the oracle; the candidate must print the deferral and make no request. The
-Rust contract test `rust/shim/tests/cli_move_contract.rs` checks the native
-answers and the deferrals against a bound listener that every proxy and
+no request could reach the live daemon on 8765. The Python arm runs a
+verified stub for argv shapes the Python parser accepts but the native
+parser refuses. The candidate must print native usage and make no request.
+The Rust contract test `rust/shim/tests/cli_move_contract.rs` checks these
+answers against a bound listener that every proxy and
 daemon variable names, which must see no connection, with `PATH` holding
 nothing (no docker, no ssh), so a native dry run refuses at its first need,
 ssh, before any connection.
@@ -157,6 +163,6 @@ only the scan could catch it. Source mutants were retired on 17 November
 
 ## Hosted CI and goldens
 
-Both Parity lanes run the row live and against `goldens/move.<os>.json`.
+Both Parity lanes replay `goldens/move.<os>.json`.
 The guards above are unchanged on a runner: `PATH` points at an empty
 directory and every proxy variable at the recording listener.
