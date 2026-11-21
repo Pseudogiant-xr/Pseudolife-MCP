@@ -846,37 +846,12 @@ def test_graph_insight_scenarios_register_their_clocks_and_mutants(harness):
 
 
 def test_graph_insight_scenarios_partition_independently_of_order(harness):
-    """Each dream-insight scenario's graph, at every refresh, gets the same
-    communities and digest from ``memory/graph_insight.py`` with NetworkX's
-    seed-42 shuffle as without it (the Rust daemon's order), so the banks
-    compare exactly; graphs where the order matters are compared
-    structurally in ``src/graph_insight_tests.rs``. The oracle needs
-    NetworkX, and the memory package it lives in needs torch; the Rust CI
-    lane installs neither, so there it is skipped (run it where the
-    harness's oracle runs)."""
-    pytest.importorskip("networkx", reason="the graph-insight oracle needs networkx")
-    pytest.importorskip("torch", reason="the Python memory package needs torch")
-    import gen_graph_insight_goldens as gen
+    """Bind each refresh to its captured shuffled and ordered observations."""
+    from graph_insight_reference import refresh_references
     import w2e_graph_insight as gi
-    for name, refreshes in gi.graphs().items():
-        # Entity ids in mint order: the seed's fact subjects, then each
-        # relate's endpoints as they first appear.
-        ids: dict[str, int] = {}
-        for subject in ("Ledger API", "Orphan Host"):
-            ids.setdefault(subject, len(ids) + 1)
-        for edges in refreshes:
-            for a, _, b, _ in edges:
-                ids.setdefault(a, len(ids) + 1)
-                ids.setdefault(b, len(ids) + 1)
-        for edges in refreshes:
-            case = {
-                "entities": [{"id": i, "display": d} for d, i in ids.items()],
-                "edges": [gen.edge(ids[a], ids[b], r, kw.get("confidence", 0.8),
-                                   kw.get("origin")) for a, r, b, kw in edges],
-            }
-            exact = gen.run(case, gen._partition_exact, gen._betweenness_exact)
-            real = gen.run(case, gen._partition_seeded(42), gen._betweenness_seeded(42))
-            assert exact == real, name
+
+    for name, exact, real in refresh_references(gi.graphs()):
+        assert exact == real, name
 
 
 def test_dream_stage_scenarios_key_their_replies_and_register_their_mutants(harness):
