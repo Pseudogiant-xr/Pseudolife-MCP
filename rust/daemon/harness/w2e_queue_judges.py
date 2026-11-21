@@ -151,15 +151,6 @@ def candidate_records_sql(pairs: tuple = CANDIDATE_PAIRS) -> str:
             f"AND {own_pairs(*pairs)}")
 
 
-CANDIDATE_REOPENED = (
-    "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
-    "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened' "
-    f"AND {own_pairs(DISMISSED_PAIR)}) "
-    "AND EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
-    f"AND value->>'queue' = 'candidate' AND value->>'state' = 'active' "
-    f"AND {own_pairs(DISMISSED_PAIR)})")
-
-
 def candidate_bindings(conn):
     """Read the scan generation and the fixture pairs' active evidence."""
     out = []
@@ -177,13 +168,25 @@ def candidate_bindings(conn):
     return generation, evidence, out
 
 
-def archived_evidence(conn, fingerprint):
-    return conn.execute(
-        "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%%' "
+def archived_evidence_query(fingerprint):
+    return sql.SQL(
+        "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
         "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened' "
-        f"AND {own_pairs(DISMISSED_PAIR)} AND value->>'evidence_fingerprint' = %s)",
-        (fingerprint,),
-    ).fetchone()[0]
+        f"AND {own_pairs(DISMISSED_PAIR)} AND value->>'evidence_fingerprint' = {{}})"
+    ).format(sql.Literal(fingerprint))
+
+
+def candidate_reopen_wait(generation, evidence):
+    """Require this step's old evidence to be archived and its new scan complete."""
+    return sql.SQL(
+        f"{CANDIDATES_DONE} "
+        "AND EXISTS (SELECT 1 FROM meta WHERE key = 'deep_candidates_judged' "
+        "AND value->>'generation' <> {generation}) "
+        f"AND EXISTS (SELECT 1 FROM ({candidate_records_sql((DISMISSED_PAIR,))}) active "
+        "WHERE active.value->>'evidence_fingerprint' <> {evidence}) "
+        "AND ({archived})"
+    ).format(generation=sql.Literal(generation), evidence=sql.Literal(evidence),
+             archived=archived_evidence_query(evidence))
 
 
 def seed_shape(name):
@@ -296,11 +299,20 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
         diffs = harness.wait_warmups(sides, before) if harness.warmup_expected(scenario) else []
         steps = []
         asked = set()
-        generation, evidence = None, {}
         for index, (op, expected) in enumerate(zip(ops, reference, strict=True)):
             result = None
             begun = time.monotonic()
             settle = op.get("settle")
+            reopen = op.get("candidate_binding_check") == "reopen"
+            if reopen:
+                with psycopg.connect(dsn) as conn:
+                    conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+                    conn.read_only = True
+                    generation, evidence, binding_diffs = candidate_bindings(conn)
+                prior_evidence = evidence.get(DISMISSED_PAIR)
+                if binding_diffs or prior_evidence is None:
+                    raise RuntimeError(f"cannot wait for candidate reopen without prior bindings: {binding_diffs}")
+                settle = {**settle, "until": candidate_reopen_wait(generation, prior_evidence)}
             if op["op"] == "init":
                 settle = scenario.get("init_settle")
             elif op["op"] == "restart":
@@ -327,16 +339,14 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
             if op.get("candidate_binding_check"):
                 with psycopg.connect(dsn, autocommit=True) as conn:
                     current_generation, current_evidence, binding_diffs = candidate_bindings(conn)
-                    if op["candidate_binding_check"] == "reopen" and not archived_evidence(
-                            conn, evidence.get(DISMISSED_PAIR)):
+                    if reopen and not conn.execute(archived_evidence_query(prior_evidence)).fetchone()[0]:
                         binding_diffs.append("reopened dismissal did not preserve the old pair evidence")
                 diffs.extend(binding_diffs)
-                if op["candidate_binding_check"] == "reopen":
+                if reopen:
                     if current_generation == generation:
                         diffs.append("changed candidate inputs kept the old scan generation")
-                    if current_evidence.get(DISMISSED_PAIR) == evidence.get(DISMISSED_PAIR):
+                    if current_evidence.get(DISMISSED_PAIR) == prior_evidence:
                         diffs.append("reopened dismissal kept the old pair evidence")
-                generation, evidence = current_generation, current_evidence
             sent = stub.drain()
             diffs.extend(harness.extractor_unanswered("rust", sent))
             observed_requests = request_shape(sent, scenario)
@@ -636,14 +646,14 @@ def scenarios(w) -> dict:
                 "INSERT INTO edges (src_id, relation, dst_id, confidence, origin, "
                 f"asserted_at) VALUES ({w.eid('postgres')}, 'uses', {w.eid('ocean')}, "
                 "0.8, NULL, 1.0)"),
-                "settle": {**w.JUDGE_SETTLE, "until": CANDIDATE_REOPENED},
+                "settle": w.JUDGE_SETTLE,
                 "candidate_binding_check": "reopen"},
                 candidate_pair("postgres", "kafka-broker"), candidate_decision),
             # Only change the edge clock. A loader that ignores asserted_at
             # still notices the insertion above but misses this new binding.
             w.expect({**w.external(
                 f"UPDATE edges SET asserted_at = asserted_at + 1 WHERE {candidate_edge}"),
-                "settle": {**w.JUDGE_SETTLE, "until": CANDIDATES_DONE},
+                "settle": w.JUDGE_SETTLE,
                 "candidate_binding_check": "reopen"},
                 f"SELECT EXISTS (SELECT 1 FROM edges WHERE {candidate_edge} AND asserted_at = 2.0)",
                 candidate_pair("postgres", "kafka-broker"), candidate_decision),

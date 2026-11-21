@@ -77,15 +77,56 @@ def holds(conn, query) -> bool:
     return bool(row and row[0])
 
 
-def test_queue_seed_capture_is_pinned():
+@pytest.mark.parametrize("name,expected", [
+    ("w2e_queue_seed_rows.json", "ab08f5b5e968a2ecfc23171a1c7900e30afd1634c5c4fbc42510936655d3f719"),
+    ("w2e_queue_contract.json", "51f13877fac006b1856fd9dbaf2658898e2a679a0043b6d4de15ae65002002f8"),
+])
+def test_queue_seed_capture_is_pinned(name, expected):
     import hashlib
 
-    capture = (HERE / "w2e_queue_seed_rows.json").read_text(encoding="utf-8")
-    # The recipe independently captured all four seed shapes, including their
-    # sequence reservations. Pin the complete normalized file across platforms.
-    assert hashlib.sha256(capture.encode()).hexdigest() == (
-        "ab08f5b5e968a2ecfc23171a1c7900e30afd1634c5c4fbc42510936655d3f719"
-    )
+    capture = (HERE / name).read_text(encoding="utf-8")
+    assert hashlib.sha256(capture.encode()).hexdigest() == expected
+
+
+def test_queue_candidate_reopen_wait_requires_both_moved_bindings(bank):
+    from psycopg.types.json import Jsonb
+    from w2e_queue_judges import CANDIDATES_DONE, DISMISSED_PAIR, candidate_reopen_wait
+
+    conn, _ = bank
+    generation, previous, next_evidence = "1" * 64, "a" * 64, "b" * 64
+
+    def meta(key, value):
+        conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s) "
+                     "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, Jsonb(value)))
+
+    def judged(value, complete):
+        meta("deep_candidates_judged", {"ts": 12, "generation": value, "complete": complete})
+
+    def decision(number, state, fingerprint):
+        meta(f"automatic_review_decision_v1:{number}",
+             {"queue": "candidate", "pair": list(DISMISSED_PAIR), "state": state,
+              "evidence_fingerprint": fingerprint})
+
+    meta("deep_last_apply", {"ts": 12})
+    judged(generation, True)
+    decision(1, "reopened", "0" * 64)
+    decision(2, "active", previous)
+    wait = candidate_reopen_wait(generation, previous)
+    assert holds(conn, CANDIDATES_DONE)
+    assert not holds(conn, wait)
+    decision(2, "reopened", previous)
+    decision(3, "active", next_evidence)
+    assert not holds(conn, wait)
+    judged("2" * 64, False)
+    assert not holds(conn, wait)
+    judged("2" * 64, True)
+    decision(3, "active", previous)
+    assert not holds(conn, wait)
+    decision(3, "active", next_evidence)
+    decision(2, "reopened", "9" * 64)
+    assert not holds(conn, wait)
+    decision(2, "reopened", previous)
+    assert holds(conn, wait)
 
 
 @pytest.mark.parametrize("conflict", [False, True])
