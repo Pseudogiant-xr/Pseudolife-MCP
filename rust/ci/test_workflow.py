@@ -18,6 +18,18 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/rust.yml"
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
+
+
+def test_config_knob_golden_write_opt_in_is_manual():
+    result = subprocess.run(
+        ["git", "grep", "-I", "-l", "-F", "PL_CONFIG_KNOBS_WRITE", "--", ".",
+         ":(exclude)rust/daemon/src/config_io_tests.rs",
+         ":(exclude)rust/ci/test_workflow.py", ":(exclude,glob)**/*.md"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
 RUST_CHECKS = (
     "Check generated daemon schema",
     "Bind the selected Python interpreter for Rust fixtures",

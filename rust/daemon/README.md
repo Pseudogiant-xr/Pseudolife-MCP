@@ -197,20 +197,29 @@ database locale, the last nine read cells compare full state with an independent
 SQL fixture and select the inverse relation using PostgreSQL's local ordering;
 all other response fields and the structural comparator remain unchanged.
 
-`run.py embedding --rust-bin <binary> --model <existing model> --out <file>`
-runs Python torch, Python ONNX and Rust sequentially on a canonical text corpus.
-`--ranking-banks <dir>` adds all 78 replicated-eval bank dumps (read-only).
-Default vector comparison is exact; `--accepted-fp32` applies the declared,
-artifact-specific bounds in `spec-embedding.md`, preserving exact tokens, cache
-behavior and full/top-eight order. A missing or failing arm stays a failure.
-The Qwen Python ONNX `position_ids` failure is recorded, never treated as a
-successful ONNX comparison. `--fixture --golden harness/goldens/embedding-fixture.json`
-uses locally generated mixed-sign graphs for CI and catches eight compiled
-mutants. Mean/right-padding and last-token/left-padding/Normalize profiles include
-padded raw batches; the latter consumes attention-mask, token-type and position
-inputs. Its Python fixture adapter supplies position IDs explicitly, with that
-adjustment recorded; the real Qwen wrapper remains unmodified.
-It certifies the process/cache/tokenization seam, not real-model equivalence.
+`run.py embedding --reference <raw historical report> --rust-bin <binary>
+--model <existing model> --out <file>` compares fresh Rust CPU observations
+with the report's recorded torch and ONNX observations. Use the model and
+corpus settings that produced the report, including `--ranking-banks <dir>`
+if the capture included the 78 replicated-eval bank dumps. Vectors compare
+exactly by default. `--accepted-fp32` uses the artifact-specific bounds in
+`spec-embedding.md` and keeps exact token, cache and rank comparisons.
+An unavailable arm still fails unless the declared Qwen ONNX
+`position_ids` exception applies. `--fixture --golden
+harness/goldens/embedding-fixture.json` compares the native pipeline against
+the committed vectors using locally generated mixed-sign graphs and catches
+eight compiled mutants. The mean and last-token profiles exercise padding,
+pooling, tokenization and cache behavior. The last-token graph also consumes
+attention-mask, token-type and position inputs.
+
+Run `cargo test -p pseudolife-daemon --bin pseudolife-daemon
+config_io::tests::record_config_knobs -- --exact` from `rust/` to compare
+native defaults, coercion and YAML reads and writes with the Console knob
+golden. Review the diff first. For a deliberate update, run the same test
+with `PL_CONFIG_KNOBS_WRITE=1` in its environment, then review the golden
+diff and update the fixture hash in `harness/test_config_knobs_golden.py`.
+`harness/gen_config_knobs.py --rust-test-bin <test executable>` runs the
+comparison with a prebuilt test binary.
 
 The resident startup seam reuses the same storage test executable:
 

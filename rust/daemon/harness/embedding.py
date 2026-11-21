@@ -1,8 +1,8 @@
-"""Sequential CPU-only embedding arms; exact comparisons remain the default.
+"""Compare native CPU embeddings with recorded vectors.
 
-Invoked through run.py embedding. Model loading is isolated in child processes:
-the Python process exits before the Rust process loads its graph. Measurements
-write an artifact even when bit parity fails or the shipped ONNX wrapper fails.
+Invoked through run.py embedding. The offline fixture runs the native embedder
+against committed vectors. Real-model checks take the raw report from a
+historical three-arm run and compare its reference arms to a fresh native run.
 """
 from __future__ import annotations
 
@@ -79,79 +79,6 @@ def digest(path):
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             h.update(block)
     return h.hexdigest()
-
-
-def oracle(request, backend):
-    import numpy as np
-    import torch
-    sys.path.insert(0, str(REPO))
-    sys.path.insert(0, str(REPO / "evals"))
-    import embedder_stamp
-    from pseudolife_memory.memory.embedding import EmbeddingPipeline, _configured_onnx_source
-    from pseudolife_memory.utils.config import EmbeddingConfig
-    torch.set_num_threads(3)
-    torch.set_num_interop_threads(1)
-    cfg = EmbeddingConfig(**request["config"], backend=backend, device="cpu")
-    file_name, root = _configured_onnx_source(cfg)
-    if root is None:
-        raise RuntimeError("configured graph unavailable; no torch-only result substitutes for ONNX identity")
-    pipe = EmbeddingPipeline(cfg)
-    if request.get("fixture_position_ids"):
-        # Fixture-only adapter for the documented stock wrapper omission.
-        # Pooling/cache/normalization still run through EmbeddingPipeline;
-        # this does not repair or relabel the real Qwen ONNX arm.
-        forward = pipe.model[0].auto_model.forward
-        def positioned(*args, **kwargs):
-            ids = kwargs["input_ids"]
-            kwargs["position_ids"] = torch.arange(ids.shape[1], dtype=torch.int64).expand(ids.shape[0], -1)
-            return forward(*args, **kwargs)
-        pipe.model[0].auto_model.forward = positioned
-    stamp = embedder_stamp.describe(pipe)
-    forwards = 0
-    original = pipe.model.encode
-
-    def counted(texts, **kwargs):
-        nonlocal forwards
-        forwards += (len(texts) + cfg.batch_size - 1) // cfg.batch_size
-        return original(texts, **kwargs)
-
-    pipe.model.encode = counted
-    results = []
-    for op in request["operations"]:
-        texts, norm = op["texts"], op.get("normalize", True)
-        query = op.get("query", False)
-        if query:
-            rows = torch.stack([pipe.encode_query(t, normalize=norm) for t in texts])
-        else:
-            rows = pipe.encode(texts, normalize=norm)
-        token_texts = [cfg.query_prefix + t if query else t for t in texts]
-        tokenized = pipe.model.tokenize(token_texts) if texts else None
-        tokens = [{"ids": ids, "mask": mask} for ids, mask in zip(
-            tokenized["input_ids"].tolist(), tokenized["attention_mask"].tolist())] if texts else []
-        bits = rows.detach().cpu().numpy().astype("<f4").view("<u4").tolist()
-        results.append({"bits": bits, "tokens": tokens, "forwards": forwards})
-    first = pipe.encode_single("cache copy control")
-    expected = first.clone()
-    first.fill_(99)
-    copy_safe = torch.equal(pipe.encode_single("cache copy control"), expected)
-    root = Path(root)
-    modules = json.loads((root / "modules.json").read_text()) if (root / "modules.json").exists() else []
-    transformer_path = next((m["path"] for m in modules if m["type"].endswith(".Transformer")), "")
-    graph = root / transformer_path / file_name
-    identities = {p.relative_to(root).as_posix(): digest(p) for p in [graph, root / transformer_path / "tokenizer.json"]}
-    external = graph.with_name(graph.name + "_data")
-    if external.exists():
-        identities[external.relative_to(root).as_posix()] = digest(external)
-    for p in [root / "modules.json", root / transformer_path / "config.json",
-              root / transformer_path / "tokenizer_config.json", root / transformer_path / "model.safetensors",
-              root / transformer_path / "sentence_bert_config.json"] + [
-              root / m["path"] / "config.json" for m in modules if m["type"].endswith(".Pooling")]:
-        if p.exists():
-            identities[p.relative_to(root).as_posix()] = digest(p)
-    return {"dim": pipe.embedding_dim, "operations": results, "copy_safe": bool(copy_safe),
-            "embedder": stamp, "identities": identities,
-            "versions": {n: importlib.metadata.version(n) for n in
-                         ["torch", "sentence-transformers", "transformers", "tokenizers", "onnxruntime"]}}
 
 
 def compare(oracle_data, candidate, max_abs=0., cosine_floor=1.):
@@ -253,29 +180,17 @@ def run(args):
          REPO / "rust/daemon/src/onnx_artifacts.rs", REPO / "rust/daemon/src/model_provision.rs",
          REPO / "rust/daemon/src/onnx_runtime.rs", Path(__file__)]}
     report["ranking_pairs"] = ranking_pairs
+    reference_bytes = args.reference.read_bytes()
+    reference = json.loads(reference_bytes)
+    if (reference["corpus_sha256"] != report["corpus_sha256"]
+            or reference["ranking_pairs"] != ranking_pairs):
+        raise ValueError("recorded embedding reference does not match the requested corpus and config")
+    report["reference_sha256"] = hashlib.sha256(reference_bytes).hexdigest()
+    report["arms"] = {backend: reference["arms"][backend] for backend in ("torch", "onnx")}
     with tempfile.TemporaryDirectory(prefix="pl_cf_emb_") as tmp:
         tmp = Path(tmp)
-        req_path = tmp / "request.json"
-        req_path.write_text(json.dumps(request), encoding="utf-8")
         cfg_path = tmp / "config.yaml"
         cfg_path.write_text(json.dumps({"embedding": dict(config, backend="onnx", device="cpu")}), encoding="utf-8")
-        for backend in ["torch", "onnx"]:
-            print(f"embedding Python {backend}: starting CPU arm", flush=True)
-            out = tmp / f"{backend}.json"
-            try:
-                proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--oracle", backend,
-                                       "--request", str(req_path), "--out", str(out)],
-                                      env=env, capture_output=True, timeout=600)
-            except subprocess.TimeoutExpired:
-                report["arms"][backend] = {"error": f"TimeoutExpired: Python {backend} arm exceeded 600 seconds"}
-                print(f"embedding Python {backend}: timeout", flush=True)
-                continue
-            data = json.loads(out.read_text()) if out.exists() else {"error": "oracle produced no artifact"}
-            report["arms"][backend] = data
-            data["exit"] = proc.returncode
-            if proc.returncode and "error" not in data:
-                report["arms"][backend] = {"error": f"oracle exited {proc.returncode}", "partial": data}
-            print(f"embedding Python {backend}: exit {proc.returncode}", flush=True)
         rs_env = dict(env, PSEUDOLIFE_DAEMON_EMBED_PROBE="1")
         if args.mutant:
             rs_env["PSEUDOLIFE_DAEMON_MUTANT"] = args.mutant
@@ -341,9 +256,10 @@ def finish_report(report, args):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--oracle", choices=["torch", "onnx"])
-    ap.add_argument("--request", type=Path)
-    ap.add_argument("--recompare", type=Path)
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--fixture", action="store_true")
+    mode.add_argument("--reference", type=Path, help="raw historical three-arm report for a fresh native comparison")
+    mode.add_argument("--recompare", type=Path, help="recheck the observations in an existing report")
     ap.add_argument("--rust-bin", type=Path)
     ap.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2")
     ap.add_argument("--onnx-file", default="onnx/model.onnx")
@@ -351,34 +267,37 @@ def main(argv=None):
     ap.add_argument("--cap", type=int, default=512)
     ap.add_argument("--mutant")
     ap.add_argument("--ranking-banks", type=Path)
-    ap.add_argument("--fixture", action="store_true")
     ap.add_argument("--golden", type=Path)
-    ap.add_argument("--record", action="store_true")
     ap.add_argument("--accepted-fp32", action="store_true",
                     help="apply the declared fp32 bounds; exact token/cache/rank checks remain")
     ap.add_argument("--qwen-position-ids-deferred", action="store_true",
                     help="record only the identified Qwen wrapper failure as a declared divergence")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
+    if not args.recompare and args.rust_bin is None:
+        ap.error("--rust-bin is required to run the native embedder")
+    if args.fixture != (args.golden is not None):
+        ap.error("--fixture and --golden must be used together")
+    source = args.golden or args.recompare or args.reference
+    if (args.out.resolve() == source.resolve()
+            or (args.out.exists() and source.exists() and args.out.samefile(source))):
+        ap.error("--out must preserve the input artifact")
     if args.fixture:
         return fixture(args)
     if args.recompare:
-        if args.out.resolve() == args.recompare.resolve():
-            raise ValueError("recomparison must preserve the original artifact")
-        report = json.loads(args.recompare.read_text(encoding="utf-8"))
-        report["recomparison_of_sha256"] = digest(args.recompare)
+        source_bytes = args.recompare.read_bytes()
+        report = json.loads(source_bytes)
+        report["recomparison_of_sha256"] = hashlib.sha256(source_bytes).hexdigest()
         return finish_report(report, args)
-    if args.oracle:
-        try:
-            result = oracle(json.loads(args.request.read_text()), args.oracle)
-        except Exception as exc:
-            result = {"error": f"{type(exc).__name__}: {exc}"}
-        args.out.write_text(json.dumps(result), encoding="utf-8")
-        return int("error" in result)
     return run(args)
 
 
 def fixture(args):
+    profiles = [(2, "query ", "mean"), (0, "", "mean"), (-2, "", "mean"), (2, "query ", "last-left-normalize")]
+    golden = json.loads(args.golden.read_text(encoding="utf-8"))
+    if len(golden["profiles"]) != len(profiles):
+        raise ValueError("embedding golden must contain one observation for each fixture profile")
+
     import onnxruntime
     from embedding_fixture import create
     env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
@@ -392,7 +311,7 @@ def fixture(args):
                "embedding-no-truncation", "embedding-cache-disabled", "embedding-cache-key",
                "embedding-mean-mask-blind", "embedding-batch-row-offset"]
     report = {"platform": sys.platform, "mutants": {}, "profiles": [], "refusals": [],
-              "oracle_adjustment": "last-left-normalize fixture explicitly supplies arange position_ids to the stock ORT wrapper; real Qwen wrapper remains unmodified"}
+              "oracle_adjustment": golden["oracle_adjustment"]}
     with tempfile.TemporaryDirectory(prefix="pl_cf_emb_fixture_") as tmp:
         root = Path(tmp)
         create(root / "model")
@@ -407,30 +326,12 @@ def fixture(args):
                {"texts": ["memory cursor", "cache", "memory cursor"]},
                {"texts": ["document cache cursor", "cursor"], "normalize": False},
                {"texts": []}]
-        goldens = []
-        profiles = [(2, "query ", "mean"), (0, "", "mean"), (-2, "", "mean"), (2, "query ", "last-left-normalize")]
-        for cache_size, prefix, pooling_profile in profiles:
+        for (cache_size, prefix, pooling_profile), expected in zip(profiles, golden["profiles"], strict=True):
             is_last = pooling_profile == "last-left-normalize"
             config.update(cache_size=cache_size, query_prefix=prefix,
                           model_name=str(root / ("last-model" if is_last else "model")))
-            req = {"config": dict(config), "operations": ops, "fixture_position_ids": is_last}
-            req_file = root / "request.json"
-            req_file.write_text(json.dumps(req), encoding="utf-8")
             cfg_file = root / "config.yaml"
             cfg_file.write_text(json.dumps({"embedding": dict(config, backend="onnx", device="cpu")}), encoding="utf-8")
-            if args.record:
-                py_file = root / "python.json"
-                proc = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--oracle", "onnx",
-                                       "--request", str(req_file), "--out", str(py_file)],
-                                      env=env, capture_output=True, timeout=120)
-                if proc.returncode:
-                    raise RuntimeError(py_file.read_text())
-                expected = json.loads(py_file.read_text())
-                for key in ["identities", "versions", "embedder"]:
-                    expected.pop(key, None)
-                goldens.append(expected)
-            else:
-                expected = json.loads(args.golden.read_text())["profiles"][len(report["profiles"])]
             request_bytes = json.dumps({"config_path": str(cfg_file), "operations": ops}).encode()
 
             def candidate(mutant=None):
@@ -485,9 +386,6 @@ def fixture(args):
                     env=dict(env, PSEUDOLIFE_DAEMON_EMBED_PROBE="1"), capture_output=True, timeout=120)
                 report["refusals"].append({"case": "saved default prompt", "refused": proc.returncode != 0 and not proc.stdout})
                 saved_prompt_file.unlink()
-        if args.record and not any(p["diffs"] for p in report["profiles"]):
-            args.golden.write_text(json.dumps({"fixture": "embedding_fixture.py",
-                "oracle_adjustment": report["oracle_adjustment"], "profiles": goldens}, indent=1) + "\n", encoding="utf-8")
     failures = [p for p in report["profiles"] if p["diffs"]]
     survivors = [m for m, diffs in report["mutants"].items() if not diffs]
     report["survivors"] = survivors
