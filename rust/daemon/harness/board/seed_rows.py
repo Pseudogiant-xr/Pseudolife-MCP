@@ -21,8 +21,11 @@ from rust.harness_support.fixture_rows import checked_fixture_insert
 
 @lru_cache(maxsize=1)
 def _captured():
-    path = Path(__file__).with_name("fixtures") / "seed_rows.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+    folder = Path(__file__).with_name("fixtures")
+    captured = {}
+    for file in ("seed_rows.json", "host_seed_rows.json"):
+        captured.update(json.loads((folder / file).read_text(encoding="utf-8")))
+    return captured
 
 
 def _bind(value, bindings):
