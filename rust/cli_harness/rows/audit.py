@@ -12,6 +12,7 @@ import base64
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -955,6 +956,9 @@ def transport_cases():
                             assert destination.read_bytes() == b'{"container":"fixture"}\n'
                             if action == "stats":
                                 assert (arm.home/"log.jsonl").read_bytes() == destination.read_bytes()
+                            elif not core.WINDOWS:
+                                assert stat.S_IMODE(destination.stat().st_mode) == 0o600, (
+                                    "transport export must be owner-only (mode 0600)")
                     # Wrapper paths include the interpreter, so remove only the
                     # fixture files after asserting their original bytes.
                     for name,data in arm.state["inputs"].items():

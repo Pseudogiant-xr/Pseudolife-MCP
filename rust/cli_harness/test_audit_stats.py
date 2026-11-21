@@ -1,6 +1,7 @@
 """The stats comparison must retain every computed field and reject bad clocks."""
 import base64
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,40 @@ STATS_FIXTURE = Path(__file__).resolve().parents[1] / "shim/src/cli/board_audit/
 
 def stats_corpus():
     return json.loads(STATS_FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_stats_references_match_the_frozen_capture():
+    # Frozen 0c5de1488 reports captured on Linux and Windows, represented
+    # as deltas against the committed Rust stats corpus. Normalize checkout
+    # line endings before checking the captured reference file.
+    references = audit._STATS_REFERENCES.read_text(encoding="utf-8")
+    assert hashlib.sha256(references.encode("utf-8")).hexdigest() == (
+        "07b3751c0f966cbc4d9633d3478f394c4e094ec524752fccf4e303164cab1d26"
+    ), "audit stats references differ from the frozen capture"
+
+
+@pytest.mark.skipif(core.WINDOWS, reason="POSIX permission bits")
+def test_transport_export_requires_owner_only_permissions(tmp_path):
+    case = next(case for case in audit.transport_cases() if case.id == "transport-rust-export-0")
+    arm = core.Arm("rust", tmp_path, tmp_path / "cwd")
+    arm.cwd.mkdir()
+    case.setup(arm)
+    calls = [
+        ["inspect", "-f", "{{.State.Running}}", "pseudolife-mcp-daemon"],
+        ["inspect", "-f", '{{index .Config.Labels "org.pseudolife.engine"}}', "pseudolife-mcp-daemon"],
+        ["exec", "-i", "-e", "PSEUDOLIFE_DAEMON_EXEC=1", "pseudolife-mcp-daemon",
+         "pseudolife-mcp", "board-audit", "export", "--task", "fixture task"],
+    ]
+    (tmp_path / "docker.jsonl").write_text("".join(json.dumps(call) + "\n" for call in calls))
+    (tmp_path / "docker.stdin").write_bytes(b"")
+    destination = tmp_path / "out.jsonl"
+    destination.write_bytes(b'{"container":"fixture"}\n')
+    destination.chmod(0o644)
+    with pytest.raises(AssertionError, match="transport export must be owner-only"):
+        case.after(arm, {"exit": 0})
+
+    destination.chmod(0o600)
+    case.after(arm, {"exit": 0})
 
 
 def test_live_reference_runs_only_the_candidate(monkeypatch, tmp_path):
