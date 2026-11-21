@@ -13,6 +13,7 @@ import hmac
 import json
 
 from board import scenarios as S
+from board.maintainer_proofs import canonical, challenge_bytes, payload_fields, verify_challenge, verify_proof
 from board.norm import HEX64, Normalizer
 
 RP_ID = "console.example.com"
@@ -39,10 +40,6 @@ def auth(ctx, name="primary"):
 
 class SignedNormalizer(Normalizer):
     def value(self, value, key=None):
-        from pseudolife_memory.maintainer_webauthn import (
-            b64url_decode, b64url_encode, verify_assertion)
-        from pseudolife_memory.storage.maintainer import canonical, challenge_bytes
-
         if isinstance(value, (bytes, memoryview)):
             return bytes(value).hex()
         if key in ("active_from", "last_used_at", "revoked_at", "flagged_at", "used_at",
@@ -52,42 +49,35 @@ class SignedNormalizer(Normalizer):
         if key == "code_hash" and isinstance(value, str):
             return "<code hash>" if HEX64.fullmatch(value) else "<bad code hash>"
         if key == "payload" and isinstance(value, str):
-            fields = json.loads(value)
-            if canonical(fields) != value:
-                self.problems.append("maintainer payload is not canonical")
-            return self.value(fields)
-        if isinstance(value, dict) and "payload" in value and "mac" in value:
+            try:
+                return self.value(payload_fields(value))
+            except ValueError as exc:
+                self.problems.append(str(exc))
+                return value
+        if isinstance(value, dict) and ("mac" in value or {"payload", "publicKey"} <= value.keys()):
+            try:
+                verify_challenge(value, bytes.fromhex(SECRET))
+            except ValueError as exc:
+                self.problems.append(str(exc))
+                return value
             value = dict(value)
-            payload = value["payload"]
-            expected = hmac.new(bytes.fromhex(SECRET), payload.encode(), hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(expected, value["mac"]):
-                self.problems.append("maintainer response MAC does not authenticate its payload")
             value["mac"] = "<verified MAC>"
             if "publicKey" in value:
-                options = dict(value["publicKey"])
-                if options.get("challenge") != b64url_encode(challenge_bytes(payload)):
-                    self.problems.append("WebAuthn options do not challenge the signed payload")
-                options["challenge"] = "<verified challenge>"
-                value["publicKey"] = options
-        if isinstance(value, dict) and {"signature", "client_data_json", "payload"} <= value.keys():
-            value = dict(value)
+                value["publicKey"] = dict(value["publicKey"], challenge="<verified challenge>")
+        if isinstance(value, dict) and (key == "maintainer_proof"
+                                        or {"client_data_json", "payload"} <= value.keys()):
             fixtures = S.Ctx()
             signer = next((auth(fixtures, name) for name in ("primary", "spare", "third")
                            if auth(fixtures, name).id == value.get("credential_id")), None)
             try:
                 if signer is None:
                     raise ValueError("unknown proof credential")
-                verify_assertion(public_key=signer.cose_key(), alg=signer.alg,
-                                 client_data_json=b64url_decode(value["client_data_json"]),
-                                 authenticator_data=b64url_decode(value["authenticator_data"]),
-                                 signature=b64url_decode(value["signature"]),
-                                 challenge=challenge_bytes(value["payload"]), origin=ORIGIN, rp_id=RP_ID)
-                client = json.loads(b64url_decode(value["client_data_json"]))
-                client["challenge"] = "<verified challenge>"
-                value["client_data_json"] = client
-                value["signature"] = "<verified signature>"
+                client = verify_proof(value, signer.private.public_key(), origin=ORIGIN, rp_id=RP_ID)
             except ValueError as exc:
                 self.problems.append(f"invalid stored maintainer proof: {exc}")
+                return value
+            client["challenge"] = "<verified challenge>"
+            value = dict(value, client_data_json=client, signature="<verified signature>")
         return super().value(value, key)
 
 
@@ -146,8 +136,6 @@ def challenge(name, purpose, fields=None, **kwargs):
 def complete(name, route, *, source=None, signer="primary", edit=None, reuse=False,
              save=None, **kwargs):
     def body(ctx):
-        from pseudolife_memory.storage.maintainer import challenge_bytes
-
         if reuse:
             out = copy.deepcopy(ctx.vals["body:" + name])
         else:
@@ -178,7 +166,6 @@ def bootstrap(*, confirm=True, wrong_code=False):
         ctx.vals["code"] = store.bootstrap_code()
 
     def registration(ctx):
-        from pseudolife_memory.storage.maintainer import challenge_bytes
         issued = ctx.vals["bootstrap"]
         return {"payload": issued["payload"], "mac": issued["mac"], "code": ctx.vals["code"],
                 "attestation": auth(ctx).register(challenge_bytes(issued["payload"]))}
@@ -197,7 +184,6 @@ def bootstrap(*, confirm=True, wrong_code=False):
 
 def add_key(name):
     def registration(ctx, *, origin=None):
-        from pseudolife_memory.storage.maintainer import challenge_bytes
         issued = ctx.vals["approved:" + name]
         return {"payload": issued["payload"], "mac": issued["mac"],
                 "attestation": auth(ctx, name).register(challenge_bytes(issued["payload"]), origin=origin)}
@@ -300,13 +286,11 @@ class Refusals(MaintainerScenario):
     def steps(self):
         fields = lambda ctx: {"project": "p", "agent_id": ctx.id("A"), "hold": 3600}
         def bad_signature(ctx, body):
-            from pseudolife_memory.maintainer_webauthn import b64url_encode
+            from tests.maintainer_authenticator import b64url_encode
             body["assertion"]["response"]["signature"] = b64url_encode(b"\0" * 64)
         def stale_count(ctx, body):
-            from pseudolife_memory.storage.maintainer import challenge_bytes
             body["assertion"] = auth(ctx).assertion(challenge_bytes(body["payload"]), sign_count=1)
         def expired(ctx, body):
-            from pseudolife_memory.storage.maintainer import canonical, challenge_bytes
             fields = json.loads(body["payload"])
             fields["expires_at"] = ctx.now - 1
             body["payload"] = canonical(fields)
