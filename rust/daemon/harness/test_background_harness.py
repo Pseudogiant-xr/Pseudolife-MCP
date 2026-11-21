@@ -339,6 +339,7 @@ def test_reaper_title_validation_still_rejects_missing_durable_effect(scenario, 
     ("episode", "public.episodes"),
     ("entry", "public.entries"),
     ("cursor", "wrong durable cursor"),
+    ("copied-cursor", "wrong durable cursor"),
     ("deferred", "deferred_empty_roots"),
     ("tombstone", "episode_tombstones"),
     ("unrelated", "public.facts"),
@@ -350,13 +351,16 @@ def test_reaper_title_validation_still_rejects_missing_durable_effect(scenario, 
     ("title", "public.episodes"),
     ("swap", "empty root must close before the work root"),
     ("later-tick", "different reaper ticks"),
+    ("catalog", "changed the seeded catalog"),
 ])
 def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, message):
     import time
     from background_seed_rows import ROWS
-    from background_sessions import validate_session_writes
+    from background_sessions import pg, validate_session_writes
 
     monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
+    if effect == "copied-cursor":
+        monkeypatch.setattr(pg, "base_database", lambda: "pl_cf_mir_fixture")
     initial = copy.deepcopy(ROWS["sessions"])
     initial["meta"].append({"key": "writer_lease_epoch", "value": 1})
     after = copy.deepcopy(initial)
@@ -389,12 +393,14 @@ def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, m
         title = f"fixture - {stamp}: The background lifecycle fixture retains a nested session…"
         episodes["work fixture"]["title"] = entry["episode_title"] = title
     order = [[empty], [work]]
+    catalog = {}
 
-    def dump(tables):
+    def dump(tables, state_catalog=None):
         tables = {**tables, "meta": sorted(tables["meta"], key=lambda row: row["key"])}
         return {"rows": {"public." + table: {"columns": list(rows[0]),
                                             "rows": [list(row.values()) for row in rows]}
-                         for table, rows in tables.items()}, "root_close_order": order}
+                         for table, rows in tables.items()}, "root_close_order": order,
+                "catalog": state_catalog or {}}
 
     raw = dump(after)
     table = raw["rows"]["public.client_sessions"]
@@ -409,7 +415,7 @@ def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, m
         episodes["child"]["parent_id"] = None
     elif effect == "entry":
         entry["dream_state"] = "pending"
-    elif effect == "cursor":
+    elif effect in {"cursor", "copied-cursor"}:
         cursor["value"] = 0.0
     elif effect == "unrelated":
         after["facts"] = [{"id": 12}]
@@ -430,12 +436,14 @@ def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, m
         order.reverse()
     elif effect == "later-tick":
         next(row for row in table["rows"] if row[key] == "work")[ended] = 100.3
+    elif effect == "catalog":
+        catalog["indexes"] = ["unexpected"]
     elif sweep:
         metadata[empty]["title"] = "another title"
     else:
         del metadata[empty]
     with pytest.raises(RuntimeError, match=message):
-        validate_session_writes(dump(after), dump(initial), sweep, auto_title, 1, raw=raw)
+        validate_session_writes(dump(after, catalog), dump(initial), sweep, auto_title, 1, raw=raw)
 
 
 # A copy of a real bank (the forced mirror run's PL_HARNESS_BASE_DATABASE)

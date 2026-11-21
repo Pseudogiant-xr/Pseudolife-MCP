@@ -127,8 +127,6 @@ def register(harness):
             return normalize_refresh_clocks(state, before, self.clock_window(side))
 
         def validate_snapshot(self, state, before):
-            if differences := dbstate.diff(before["catalog"], state["catalog"]):
-                raise RuntimeError(f"session lifecycle changed the seeded catalog: {differences[:8]}")
             normalized = normalize_closes(state, before, self.starts["rust"], time.time())
             self.validate_expected(state)
             validate_session_writes(normalized, before, self.sweep, self.auto_title,
@@ -198,6 +196,8 @@ def session_rows(snapshot, table):
 def validate_session_writes(state, before, sweep, auto_title, expected_triggers, *,
                             boots=1, raw=None, graph_refresh=False):
     """Compare the entire expected bank after closing the captured fixture."""
+    if differences := dbstate.diff(before.get("catalog", {}), state.get("catalog", {})):
+        raise RuntimeError(f"session lifecycle changed the seeded catalog: {differences[:8]}")
     expected = copy.deepcopy(before["rows"])
     observed = state["rows"]
     clients = session_rows(before, "client_sessions")
