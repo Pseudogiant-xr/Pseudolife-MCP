@@ -1,7 +1,14 @@
 """Model-free contracts of the retained Rust quality drivers."""
+import ast
+from collections import deque
 from contextlib import contextmanager
+from fnmatch import fnmatchcase
 import gzip
 import json
+from pathlib import Path
+import re
+import subprocess
+import tomllib
 
 import pytest
 
@@ -239,3 +246,86 @@ def test_ladder_keeps_the_naive_control_fixed_across_rungs():
     assert ladder.check_control(control, {"engine": "rust"}) == naive
     with pytest.raises(BenchError, match="control"):
         ladder.check_control(control, {"engine": "python"})
+
+
+def local_dependencies(root, path, tracked):
+    source = (root / path).read_text(encoding="utf-8-sig")
+    if path.suffix == ".ps1":
+        code = re.sub(r"<#.*?#>", "", source, flags=re.DOTALL)
+        names = re.findall(r"['\"][^'\"\r\n]*?\b([\w.-]+\.(?:py|ps1))['\"]",
+                           "\n".join(line for line in code.splitlines() if not line.lstrip().startswith("#")))
+        return {path.parent / name for name in names} & tracked
+
+    def resolve(name, level=0):
+        dirs = [path.parents[level - 1]] if level else [path.parent, Path(), Path("evals")]
+        for directory in dirs:
+            prefix = directory.joinpath(*name.split("."))
+            if prefix.name and prefix.with_suffix(".py") in tracked:
+                return prefix.with_suffix(".py")
+            if prefix / "__init__.py" in tracked:
+                return prefix / "__init__.py"
+        return None
+
+    dependencies = set()
+    for node in ast.walk(ast.parse(source, filename=path.as_posix())):
+        if isinstance(node, ast.Import):
+            dependencies.update(resolve(alias.name) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            dependencies.add(resolve(module, node.level))
+            prefix = module + "." if module else ""
+            dependencies.update(resolve(prefix + alias.name, node.level) for alias in node.names)
+        elif isinstance(node, ast.Call) and node.args:
+            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            arg = node.args[0]
+            if (name in {"__import__", "import_module", "run_module"}
+                    and isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+                dependencies.add(resolve(arg.value))
+    return dependencies - {None}
+
+
+def frozen_imports_from(root, kept, tracked):
+    edges = {}
+    violations = []
+    for start in kept:
+        pending = deque([(start,)])
+        visited = set()
+        while pending:
+            chain = pending.popleft()
+            path = chain[-1]
+            if path.parts[0] == "evals" and path.name.startswith("_python_"):
+                violations.append(" -> ".join(item.as_posix() for item in chain))
+                break
+            if path in visited:
+                continue
+            visited.add(path)
+            if path not in edges:
+                edges[path] = local_dependencies(root, path, tracked)
+            pending.extend((*chain, dependency) for dependency in sorted(edges[path]))
+    return violations
+
+
+def test_kept_evals_do_not_import_frozen_implementations():
+    root = Path(__file__).resolve().parents[1]
+    tracking = subprocess.check_output(["git", "ls-files", "-z"], cwd=root, text=True)
+    tracked = {Path(path) for path in tracking.split("\0") if path}
+    with (root / "rust/ci/package_consumers.toml").open("rb") as stream:
+        rules = tomllib.load(stream)["rules"]
+    retiring = [glob for rule in rules if rule.get("retire_with_package") for glob in rule["globs"]]
+    kept = [path for path in sorted(tracked) if path.parts[0] == "evals" and path.suffix in {".py", ".ps1"}
+            and not any(fnmatchcase(path.as_posix(), pattern) for pattern in retiring)]
+    assert retiring and Path("evals/longmemeval_bench.py") in kept
+    assert not frozen_imports_from(root, kept, tracked)
+
+
+def test_frozen_import_check_follows_indirect_and_literal_dynamic_imports(tmp_path):
+    sources = {"evals/active.py": "from evals import helper\n",
+               "evals/helper.py": "import importlib\nimportlib.import_module('evals._python_old')\n",
+               "evals/_python_old.py": ""}
+    tracked = {Path(path) for path in sources}
+    (tmp_path / "evals").mkdir()
+    for name, source in sources.items():
+        (tmp_path / name).write_text(source, encoding="utf-8")
+    assert frozen_imports_from(tmp_path, [Path("evals/active.py")], tracked) == [
+        "evals/active.py -> evals/helper.py -> evals/_python_old.py",
+    ]

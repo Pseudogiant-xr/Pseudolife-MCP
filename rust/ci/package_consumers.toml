@@ -2,28 +2,137 @@
 # "*" also spans directories. Keep exceptions ahead of their enclosing area.
 
 [[rules]]
-globs = ["evals/results/*", "evals/subagent_tier_bench/results/*"]
+globs = ["evals/results/*", "evals/subagent_tier_bench/results/*", "evals/subagent_tier_bench/results-pilot-20261014.json"]
 kinds = ["command", "documentation", "metadata", "path", "python-import"]
 class = "historical evidence"
 reason = "Recorded commands preserve the provenance of earlier runs."
 
 [[rules]]
-globs = ["evals/rust_port/*"]
+globs = ["evals/rust_port/*", "evals/rust_baseline/*"]
 kinds = ["command", "documentation", "metadata", "path", "python-import"]
 class = "retained test tooling"
-reason = "The PR precheck and hosted parity tooling use this harness."
+reason = "The current Rust parity and precheck tools still consume these harnesses. Repoint those consumers before removal."
+retire_with_package = true
 
 [[rules]]
 globs = ["evals/prompts/*"]
 kinds = ["documentation"]
 class = "active dependency"
-reason = "The Rust daemon embeds these production prompt assets."
+reason = "The Rust daemon build and native shims use these prompt assets."
 
 [[rules]]
-globs = ["evals/*"]
+globs = ["evals/gen_assistant_facts_prompts.py", "evals/gen_shim_prompt.py"]
+kinds = ["path", "python-import"]
+class = "active dependency"
+reason = "Before package deletion, move prompt ownership off the frozen Python constants and switch or retire these generators."
+
+[[rules]]
+globs = ["evals/README.md"]
+kinds = ["documentation"]
+class = "historical evidence"
+reason = "The historical benchmark sections preserve their original Python commands and evidence."
+
+[[rules]]
+globs = ["evals/qwen_server.ps1"]
+kinds = ["command", "path"]
+class = "intentional legacy compatibility"
+reason = "The unchanged launcher uses the frozen checkout CLI for its GPU lease when present and supports the installed native CLI."
+
+[[rules]]
+globs = [
+  "evals/_python_ladder_sweep.py",
+  "evals/_python_lme_rejudge.py",
+  "evals/_python_longmemeval_bench.py",
+  "evals/_python_rebuild_contexts.py",
+  "evals/_python_regression_gate.ps1",
+  "evals/_python_replicate.py",
+  "evals/agent_token_ledger.py",
+  "evals/allocator_trim_probe.py",
+  "evals/apply_entity_kinds.py",
+  "evals/audit_supersessions.py",
+  "evals/band_ablation.py",
+  "evals/bank_dumps.py",
+  "evals/beam_adapter.py",
+  "evals/beam_attrib_ablation.py",
+  "evals/beam_reader_sweep.py",
+  "evals/beam_rejudge.py",
+  "evals/bench_diffusiongemma.ps1",
+  "evals/bench_store_latency.py",
+  "evals/classify_entity_kinds.py",
+  "evals/codex_doorbell_probe.py",
+  "evals/console_snapshot_bench.py",
+  "evals/contiguity_cue_split.py",
+  "evals/coordination_audit_volume.py",
+  "evals/coordination_bench.py",
+  "evals/coordination_checkin_bench.py",
+  "evals/coordination_checkin_heldout.py",
+  "evals/coordination_checkin_heldout2.py",
+  "evals/coordination_report.py",
+  "evals/digest_sidecar_probe.py",
+  "evals/distill_datagen.py",
+  "evals/distill_datagen_arm1.py",
+  "evals/distill_datagen_events.py",
+  "evals/distill_datagen_sonnet.py",
+  "evals/distractor_scale_probe.py",
+  "evals/epistemic_bench.py",
+  "evals/events_quantity_smoke.py",
+  "evals/evlora_capacity_spot.py",
+  "evals/flat_migration_smoke.py",
+  "evals/forgetting_sweep_probe.py",
+  "evals/gate_e4b_ft.ps1",
+  "evals/gate_firing_probe.py",
+  "evals/gate_window.ps1",
+  "evals/graph_ablation.py",
+  "evals/judge_ladder.py",
+  "evals/label_heuristic_audit.py",
+  "evals/lesson_synthesis_bench.py",
+  "evals/live_replay_flat_ab.py",
+  "evals/live_replay_judge.py",
+  "evals/lme_v2_check0.py",
+  "evals/lme_v2_check_fixd.py",
+  "evals/lme_v2_smoke.py",
+  "evals/memcot_bench.py",
+  "evals/memory_policy_bench.py",
+  "evals/memory_policy_daemon.py",
+  "evals/memory_policy_scenarios.py",
+  "evals/merge_detector_replay.py",
+  "evals/op_probe.py",
+  "evals/overnight_band_wabl.ps1",
+  "evals/overnight_lme_v2.ps1",
+  "evals/overnight_longmemeval.ps1",
+  "evals/overnight_qat_ornith.ps1",
+  "evals/overnight_replicates.ps1",
+  "evals/overnight_run.ps1",
+  "evals/preflight_overnight.ps1",
+  "evals/quarantine_gate.py",
+  "evals/quarantine_replay.py",
+  "evals/queue_judge_ladder.py",
+  "evals/rag_lite_rebuild.py",
+  "evals/recall_cap_probe.py",
+  "evals/recall_fanout_bench.py",
+  "evals/refind_arm.py",
+  "evals/relation_extraction_bench.py",
+  "evals/relations_bench.py",
+  "evals/rescore_strict_mc.py",
+  "evals/retention_bench.py",
+  "evals/retention_interval_eval.py",
+  "evals/retrieval_pool_probe.py",
+  "evals/retrieval_replay.py",
+  "evals/retrieval_sweep.py",
+  "evals/retrieval_telemetry_review.py",
+  "evals/seed_bench.py",
+  "evals/service_init_bench.py",
+  "evals/serving_policy_replay.py",
+  "evals/snippet_differential_replay.py",
+  "evals/stance_probe.py",
+  "evals/tonight_bakeoff.ps1",
+  "evals/warm_cache_probe.py",
+  "evals/window_echo_check.py",
+]
 kinds = ["command", "documentation", "metadata", "path", "python-import"]
-class = "awaits the retained-evals decision"
-reason = "Eval drivers and their instructions depend on the maintainer's retention decision."
+class = "active dependency"
+reason = "Remove these frozen consumers and their supporting tools with the Python package."
+retire_with_package = true
 
 [[rules]]
 globs = ["CHANGELOG.md", "changelog.d/*.md", "docs/specs/*.md", "docs/superpowers/*.md", "docs/runbooks/raglite-runs-*.md", "rust/PORT*.md", "rust/daemon/FORWARD-*.md", "rust/dossiers/*.md", "rust/parity/*.md"]

@@ -64,21 +64,24 @@ def test_gate_replays_current_sets_and_scalar_history_over_mcp(setup):
                 "haystack_dates": ["2024/11/01"],
                 "haystack_sessions": [[{"role": "user", "content": "The build tool is cedar."}]]}
     slots = [{"entity": "build", "attribute": "tool", "kind": "scalar", "values": ["maple", "cedar"]},
-             {"entity": "build", "attribute": "checks", "kind": "set", "values": ["lint", "format"]}]
+             # These fixture tokens have different vectors, so member cosine dedup keeps both.
+             {"entity": "build", "attribute": "checks", "kind": "set",
+              "values": ["memory cache", "cursor query"]}]
     row = gate.contexts_for(question, "frozen raw bytes", slots, lambda: setup.bank(fixture_config()))
     assert row["contexts"]["rag_control"] == "frozen raw bytes"
-    assert all(value in row["contexts"]["cortex"] for value in ("maple", "cedar", "lint", "format"))
+    assert all(value in row["contexts"]["cortex"] for value in ("maple", "cedar", "memory cache", "cursor query"))
 
 
 def test_ladder_uses_rust_dream_results_and_separate_raw_control(setup, monkeypatch):
-    old_line, new_line = "The build tool was maple.", "The build tool is now cedar."
+    old_line = "[2024/11/01] user: The build tool is maple by default."
+    new_line = "[2024/11/02] user: The build tool has been cedar since the migration."
     monkeypatch.setattr(ladder, "CORPUS", [old_line, new_line])
     monkeypatch.setattr(ladder, "PAIRS", [{"question": "What is the build tool?", "gold": "cedar", "stale": "maple"}])
     config = fixture_config()
     with setup.bank(config) as bank:
         ladder.ingest(bank, ladder.CORPUS)
         contexts, _ = ladder.read_contexts(bank, cortex=False)
-    assert ladder.measure(contexts)["stale_leak"] == 1
+    assert ladder.measure(contexts)["gold_recoverable"] == 1, contexts
     reply = {"kind": "claims", "user": f"[1] {old_line}\n\n[2] {new_line}", "times": 1,
              "content": json.dumps({"claims": [{"entity": "build", "attribute": "tool", "value": "cedar",
                                                  "source": 2, "confidence": 0.9}]})}

@@ -271,6 +271,8 @@ idle is a little slower; nothing else changes.
 
 ## Upgrading the extractor — bigger local models
 
+The ladder and LongMemEval figures below are historical measurements from the Python engine.
+
 If you have a GPU (or a beefier box on your LAN), any OpenAI-compatible
 server can replace the sidecar — the ladder measured a Qwen3.6-27B on a
 single RTX 4090 at the ladder ceiling (gold 1.0 / stale-leak 0.0) while

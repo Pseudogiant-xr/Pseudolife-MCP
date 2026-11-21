@@ -49,7 +49,7 @@ def check_control(control, instrument):
     return measure(contexts)
 
 
-def ingest(bank, turns=CORPUS):
+def ingest(bank, turns):
     for text in turns:
         bank.store(text)
 
@@ -68,7 +68,7 @@ def read_contexts(bank, *, cortex):
 
 def run_rung(open_bank, config, extractor):
     with open_bank(config, extractor) as bank:
-        ingest(bank)
+        ingest(bank, CORPUS)
         started = perf_counter()
         tally = drain_dream(bank.tool, stored=len(CORPUS))
         elapsed = round(perf_counter() - started, 3)
@@ -84,7 +84,7 @@ def abstention(open_bank, extractor, options):
             config = bench_config(**{**options, "floor": guard})
             config["memory"]["search_confidence_floor"] = floor
             with open_bank(config, extractor) as bank:
-                ingest(bank)
+                ingest(bank, CORPUS)
                 drain_dream(bank.tool, stored=len(CORPUS))
 
                 def refuses(question):
@@ -184,7 +184,7 @@ def main(argv=None):
                       "corpus_sha256": fingerprint(PAIRS + DISTRACTORS), "control_config": control_config}
         if args.rung == CONTROL_NAME:
             with setup.bank(control_config) as bank:
-                ingest(bank)
+                ingest(bank, CORPUS)
                 contexts, query_ms = read_contexts(bank, cortex=False)
             record(args.out, {**control_measurement(contexts, instrument), "query_ms": query_ms})
             return 0

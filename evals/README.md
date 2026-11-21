@@ -72,7 +72,31 @@ add a row there in the same change that adds the claim to the docs.
   not its agreement with any other instrument. A conclusion that moves when
   the judge moves is a finding about the bench, not about the memory.
 
+## Rust quality drivers
+
+`longmemeval_bench.py` prepares Rust search contexts with `--phase extract`,
+scores the saved contexts with `--phase answer`, and reads completed results
+with `--phase report`. Its default selection is all six oracle question types.
+`lme_rejudge.py` scores the same recorded answers with a second judge.
+
+`ladder_sweep.py --rung naive-rag` prepares the raw control. Model rungs take
+that artifact with `--control` and run dream against a fresh bank.
+`ladder_sweep.py --report` takes the raw control followed by the rung artifacts.
+
+`regression_gate.ps1` expects a local neutral fixture from `rebuild_contexts.py`
+and a measured Rust baseline. `-Establish` writes a candidate into the specified
+run directory. The historical `results/regression_gate.baseline.json` was
+measured on the Python engine and remains frozen.
+
+The drivers take a checkout-built daemon, a CPU ONNX embedder and ORT library,
+test PostgreSQL, and explicit model endpoints. Their `--help` lists the inputs
+for each phase. Keep context and answer artifacts outside the repository until
+reviewed for publication.
+
 # Extractor-ladder benchmark (`ladder_sweep.py`)
+
+The benchmark write-ups below are historical. Python-engine scores and their
+commands refer to the instrumentation used when those artifacts were created.
 
 Dev-only sweep that answers one question: **what is the minimum viable
 extraction model** for dream consolidation? It runs the same
