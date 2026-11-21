@@ -304,10 +304,19 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
             if op["op"] == "init":
                 settle = scenario.get("init_settle")
             elif op["op"] == "restart":
+                probes = harness.warmup_expected({"config": op["config"]})
+                if probes:
+                    with psycopg.connect(dsn, autocommit=True) as conn:
+                        boots = conn.execute(harness.BOOT_PROBES).fetchone()[0] + 1
                 daemon.stop()
                 (home / "data/config.yaml").write_text(
                     op["config"].replace("@STUB@", stub.origin), encoding="utf-8")
                 client = start()
+                if probes:
+                    # Preserve the old two-arm restart's single warmup row.
+                    # The closed sequence contract still checks allocation
+                    # of exactly one probe per boot.
+                    diffs.extend(harness.settle_boot_probes(dsn, boots))
                 result = {"isError": False, "value": None}
             else:
                 result = (harness.home_op(op, home) if op["op"] in harness.HOME_OPS
