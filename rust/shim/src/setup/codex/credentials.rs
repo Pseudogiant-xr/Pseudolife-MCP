@@ -54,6 +54,7 @@ pub(crate) enum ProbeFailure {
     TimedOut,
     RefusedOrReset,
     ConnectionFailed,
+    UnreadableReply,
     ServerError(StatusCode),
 }
 
@@ -73,6 +74,9 @@ impl ProbeFailure {
             Self::TimedOut => "The last attempt timed out.".into(),
             Self::RefusedOrReset => "The last connection was refused or reset.".into(),
             Self::ConnectionFailed => "The last attempt could not establish a connection.".into(),
+            Self::UnreadableReply => {
+                "The last attempt received an unreadable HTTP response.".into()
+            }
             Self::ServerError(status) => {
                 format!("The last attempt returned HTTP {}.", status.as_u16())
             }
@@ -529,8 +533,9 @@ mod tests {
             "The last connection was refused or reset.",
         )
         .await;
+        let reset = io::Error::other(io::Error::from(io::ErrorKind::ConnectionReset));
         check_last_failure(
-            Err(ProbeFailure::from_io(Some(io::ErrorKind::ConnectionReset))),
+            Err(ProbeFailure::from_io(crate::errors::io_error_kind(&reset))),
             "The last connection was refused or reset.",
         )
         .await;

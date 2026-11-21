@@ -84,12 +84,21 @@ pub(super) async fn verify_credential(url: &str, shown: &str, token: &str) -> Re
         )
         .await
         .map_err(|error| ProbeFailure::from_io(error.io_kind()))?;
-        if reply.body_failed {
-            return Err(ProbeFailure::from_io(reply.body_io_error));
-        }
-        StatusCode::from_u16(reply.status).map_err(|_| ProbeFailure::ConnectionFailed)
+        credential_status(reply)
     })
     .await
+}
+
+fn credential_status(reply: hook_http::Reply) -> Result<StatusCode, ProbeFailure> {
+    if reply.body_failed {
+        // Once response headers arrived, only a known transport error
+        // should describe this as a connection problem.
+        return Err(match ProbeFailure::from_io(reply.body_io_error) {
+            ProbeFailure::ConnectionFailed => ProbeFailure::UnreadableReply,
+            failure => failure,
+        });
+    }
+    StatusCode::from_u16(reply.status).map_err(|_| ProbeFailure::UnreadableReply)
 }
 
 async fn verify_credential_with(
@@ -149,6 +158,38 @@ mod credential_tests {
             assert_eq!(started.elapsed(), Duration::ZERO);
             assert!(error.contains(&format!("returned HTTP {}", status.as_u16())));
             assert!(error.contains("Check that the address serves the Pseudolife daemon"));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn credential_verification_names_an_unreadable_response() {
+        use std::io::ErrorKind;
+
+        for (body_io_error, message) in [
+            (
+                None,
+                "The last attempt received an unreadable HTTP response.",
+            ),
+            (Some(ErrorKind::TimedOut), "The last attempt timed out."),
+            (
+                Some(ErrorKind::ConnectionReset),
+                "The last connection was refused or reset.",
+            ),
+        ] {
+            let error = verify_credential_with(URL, "test credential file", async |_| {
+                credential_status(hook_http::Reply {
+                    status: 200,
+                    body: vec![],
+                    headers: http::HeaderMap::new(),
+                    body_failed: true,
+                    body_io_error,
+                    unsupported: false,
+                })
+            })
+            .await
+            .unwrap_err();
+            assert!(error.contains(message), "{error}");
+            assert!(!error.contains("could not establish a connection"));
         }
     }
 }

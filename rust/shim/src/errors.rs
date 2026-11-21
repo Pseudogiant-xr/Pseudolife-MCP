@@ -5,11 +5,24 @@ use rmcp::{ErrorData, model::ErrorCode, service::ServiceError};
 pub(crate) fn io_error_kind(
     mut error: &(dyn std::error::Error + 'static),
 ) -> Option<std::io::ErrorKind> {
+    let mut fallback = None;
     loop {
         if let Some(io) = error.downcast_ref::<std::io::Error>() {
-            return Some(io.kind());
+            let kind = io.kind();
+            if kind != std::io::ErrorKind::Other {
+                return Some(kind);
+            }
+            fallback = Some(kind);
+            // TLS adapters may wrap a specific I/O error in Error::other.
+            if let Some(inner) = io.get_ref() {
+                error = inner;
+                continue;
+            }
         }
-        error = error.source()?;
+        let Some(source) = error.source() else {
+            return fallback;
+        };
+        error = source;
     }
 }
 
