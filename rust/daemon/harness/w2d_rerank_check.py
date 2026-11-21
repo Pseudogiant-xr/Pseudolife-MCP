@@ -12,15 +12,15 @@ must match the compiled pins; arbitrary local exports are refused.
 
 Per case it compares the raw logits, the squashed scores and the ranked
 candidate order by text, so identical candidates cannot flip it. Exit 1
-when any order differs, any
-rerank result differs in length, or the max sigmoid diff exceeds 1e-4.
+when an order differs outside the declared tie, a rerank result differs in
+length, or the max sigmoid diff exceeds 1e-4.
 
-One order difference is declared (``DECLARED_TIES``): in case 20, different
-passages that truncate to identical tokens tie exactly in Rust while Python's
-scores differ by numeric noise. A swap there is reported as a declared tie,
-not a failure, only when the two orders agree once passages with identical
-truncated tokens are treated as one, and every squashed score is within
-tolerance. Any other order difference fails.
+The captured reference and the pinned Rust export tie the two passages in
+case 20 that truncate to identical tokens, so their orders agree. An earlier
+run separated their Python scores by roundoff. ``DECLARED_TIES`` allows a
+swap in case 20 only when the two orders agree after grouping identical
+truncated token sequences and every squashed score stays within tolerance.
+Any other order difference fails.
 """
 from __future__ import annotations
 
