@@ -60,8 +60,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
 import beam_within_run_pairs  # noqa: E402
 import leak_check  # noqa: E402
 from beam_rejudge import DEFAULT_CLI, CliJudge, out_path_for  # noqa: E402
-import longmemeval_bench as _lmb  # noqa: E402
-from longmemeval_bench import ARMS, load_rows  # noqa: E402
+import _python_longmemeval_bench as _lmb  # noqa: E402
+from _python_longmemeval_bench import ARMS, load_rows  # noqa: E402
 
 # Canonical arm order for reporting. The harness's three, then the two
 # opt-in comparator arms; knob-minted arms (rag1/rag2/ragb400) are

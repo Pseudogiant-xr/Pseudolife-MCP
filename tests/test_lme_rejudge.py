@@ -20,8 +20,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "evals"))
 
-import longmemeval_bench  # noqa: E402
-import lme_rejudge  # noqa: E402
+import _python_longmemeval_bench as longmemeval_bench  # noqa: E402
+import _python_lme_rejudge as lme_rejudge  # noqa: E402
 
 TAG = "opus5"
 

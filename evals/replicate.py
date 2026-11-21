@@ -361,7 +361,7 @@ def cmd_run(args) -> int:
     if args.results_dir != RESULTS_DIR:
         sys.exit("run only operates on the real results dir "
                  "(the bench owns file placement)")
-    from longmemeval_bench import report, run_answer  # noqa: PLC0415 — heavy
+    from _python_longmemeval_bench import report, run_answer  # noqa: PLC0415 — heavy
     for t in pending:
         run_answer(args.dataset, args.extractor, t)
         report(args.dataset, args.extractor, t)

@@ -79,7 +79,7 @@ def test_the_knob_state_rides_in_the_bench_summary_stamp(monkeypatch):
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import longmemeval_bench as B
+    import _python_longmemeval_bench as B
 
     monkeypatch.setenv("PSEUDOLIFE_BENCH_POOL_MULT", "4")
     monkeypatch.setenv("PSEUDOLIFE_BENCH_FUSION", "rrf")
@@ -122,7 +122,7 @@ def test_the_rerank_knob_state_rides_in_the_bench_summary_stamp(monkeypatch):
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import longmemeval_bench as B
+    import _python_longmemeval_bench as B
 
     monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", "1")
     monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK_TOP_N", "32")

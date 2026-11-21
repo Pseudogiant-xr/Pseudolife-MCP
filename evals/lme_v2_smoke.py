@@ -582,7 +582,7 @@ def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:
     verbatim (LME-V1 comparability); pass ``_V2_ANSWER_SYSTEM`` for the
     composition-aware variant. The primary metric is LME-V2's deterministic
     eval_function; the LLM judge is a secondary signal."""
-    from longmemeval_bench import (_chat, _ANSWER_SYSTEM, _JUDGE_SYSTEM)
+    from _python_longmemeval_bench import (_chat, _ANSWER_SYSTEM, _JUDGE_SYSTEM)
     from ladder_sweep import approx_tokens
     system = answer_system if answer_system is not None else _ANSWER_SYSTEM
     # The compose prompt permits brief reasoning before the boxed answer, so
@@ -632,7 +632,7 @@ def build_contexts_v2(svc, question: str,
     knobs, plus a full-pool cortex dump (top 40 at floor 0) so "claim never
     extracted" vs "extracted but ranked out" is distinguishable post-hoc.
     Returns (contexts, cortex_dump)."""
-    from longmemeval_bench import (CORTEX_MIN_SCORE, CORTEX_TOP_K,
+    from _python_longmemeval_bench import (CORTEX_MIN_SCORE, CORTEX_TOP_K,
                                    HYBRID_TOP_K, RAG_TOP_K, _compose_fact_line)
 
     raw = svc.search(question, top_k=RAG_TOP_K,
@@ -688,7 +688,7 @@ def run_smoke(limit: int, max_traj: int, retrv: dict | None = None,
               answer_system: str | None = None) -> None:
     from ladder_sweep import build_service, probe
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
-    from longmemeval_bench import build_contexts
+    from _python_longmemeval_bench import build_contexts
 
     if not probe(EXTRACTOR_URL):
         sys.exit(f"no qwen-27b endpoint at {EXTRACTOR_URL} — start it first "

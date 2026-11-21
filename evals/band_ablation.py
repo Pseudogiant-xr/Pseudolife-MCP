@@ -316,7 +316,7 @@ def cmd_replay(args) -> int:
     skipped, then serialise the complete band state."""
     import tempfile
 
-    from longmemeval_bench import (  # noqa: PLC0415 — heavy (torch)
+    from _python_longmemeval_bench import (  # noqa: PLC0415 — heavy (torch)
         _parse_date, load_questions,
     )
     from ladder_sweep import build_service  # noqa: PLC0415
@@ -973,7 +973,7 @@ def cmd_evidence(args) -> int:
     arms (edge case 1: eviction POLICY at identical total capacity), plus
     the drop-set evidence fraction (edge case 3: is the band/promotion
     signal informative about what to keep?)."""
-    from longmemeval_bench import load_questions  # noqa: PLC0415
+    from _python_longmemeval_bench import load_questions  # noqa: PLC0415
 
     by_id = {q["question_id"]: q for q in load_questions(args.dataset)}
     a_dir = band_state_dir(args.dataset, args.extractor, args.src_tag,

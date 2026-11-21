@@ -43,7 +43,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")                # CPU only
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-from longmemeval_bench import (  # noqa: E402
+from _python_longmemeval_bench import (  # noqa: E402
     CORTEX_MIN_SCORE, CORTEX_TOP_K, bank_dir, load_rows, out_file,
     rewrite_rows,
 )

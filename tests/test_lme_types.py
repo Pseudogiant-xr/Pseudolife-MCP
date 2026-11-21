@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-from longmemeval_bench import (  # noqa: E402
+from _python_longmemeval_bench import (  # noqa: E402
     ALL_TYPES, DEFAULT_TYPES, _JUDGE_SYSTEM, _JUDGE_SYSTEM_GENERIC,
     bank_dir, out_file, parse_types, types_slug,
 )
