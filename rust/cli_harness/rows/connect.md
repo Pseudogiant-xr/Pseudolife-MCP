@@ -130,7 +130,7 @@ and any other, is a manual row).
 - Connect's own requests on the wire, every header field and the body
   compared (the harness's wire projection): the health probe
   (`shim.probe_health`, `urlopen`, 2 s), the credential check
-  (`installer_credential_valid`, no-redirect opener, 3 s, `read(1)`) and
+  (no redirects, 10 s per attempt within the 180 s startup budget, `read(1)`) and
   the board probe (`board_status.board_probe`, no-redirect opener, 2 s,
   `read(65536)`) are GETs as urllib sends them, through `cli::hook_http`:
   `Host` as written, `User-Agent: Python-urllib/3.11`,
@@ -209,6 +209,8 @@ the existing rollback and verification handling.
 | `files.rs`: DEL read from stdin | Name connect's `--read-token` or the installer's `write-token-file stdin`; supply a valid token before any directory/file creation | `read_token_del_is_refused_before_creating_a_directory` (unit), with `~` control |
 | `net.rs`: unsupported /health JSON | Name `/health` and the exact JSON limit; repair the daemon or proxy response | `native_health_json_limit_has_a_remedy`; valid health responses are exercised throughout the contracts |
 | `net.rs`: unsupported redirect | `/health response redirects to an unsupported URL; use its direct http(s) daemon origin` | `native_unsupported_health_redirect_has_a_remedy`; existing `health-redirect` golden pins ordinary HTTP redirects |
+| `net.rs`: authenticated check never succeeds after healthy `/health` | Exit 4 after the startup budget, with the last classified transport, unreadable-response, or HTTP status failure and one retry step | `credential_verification_reports_exhausted_http_retry_and_says_to_retry`, `credential_verification_names_an_unreadable_response` (paused-clock units) |
+| `net.rs`: authenticated check returns 3xx or 404 | Exit 4 with the HTTP status and address to check after one probe | `credential_verification_returns_redirect_and_404_without_retry` (unit) |
 | `mod.rs`: preflight backup read fails after discovery | Name the target and OS error; restore read access before running connect | Existing rollback/read-only-file contracts; this read-after-discovery race is not separately fault-injected |
 | `discover.rs`: missing string command after `is_shim` admitted it | Defensive named registration refusal | Unreachable for an unchanged parsed registration: `is_shim` already requires a string; non-shim rows remain manual |
 | `files.rs`: missing/non-Unicode basename; `pyjson.rs`: float parser fails on a scanner-admitted number | Defensive named file/number refusal | `non_unicode_config_filename_names_the_location` (unit); fixed configuration basenames and the scanner make these unreachable through ordinary input; parser-domain unit tests retained |
@@ -222,6 +224,14 @@ No new harness file or hosted job is added.
 
 ## Declared divergences
 
+- Frozen Python gives the authenticated read one attempt with a three-second
+  socket timeout and reports any unsuccessful check as a refusal. Native
+  connect keeps the no-redirect request and one-byte read. It stops on HTTP
+  401 or 403, reports other non-200 and non-5xx responses by status, and
+  retries transport failures and 5xx within 180 seconds. If retries expire,
+  the message names the last classified failure and asks the caller to retry
+  once the daemon is reachable. That guidance also applies when the command
+  runs from a client-only install.
 - The handshake child is the candidate's own shim (`current_exe()`), as
   the oracle's is its own interpreter's shim (`sys.executable -m
   pseudolife_memory.cli`); every failure inside it reads `the handshake
