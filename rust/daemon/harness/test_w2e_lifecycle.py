@@ -693,6 +693,75 @@ def test_queue_request_contract_pins_every_verdict_key_and_tick(harness):
     assert [row[4] for row in requests] == ["primary", "second"]
 
 
+class _GateConn:
+    """A psycopg connection double for ``write_between_ticks``."""
+
+    def __init__(self, log, parked):
+        self.log, self.parked = log, parked
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, statement, params=None):
+        self.log.append(("probe", params) if params else ("execute", statement))
+        return SimpleNamespace(fetchone=lambda: (self.parked.pop(0) if self.parked else False,))
+
+    def commit(self):
+        self.log.append(("commit", None))
+
+    def rollback(self):
+        self.log.append(("rollback", None))
+
+
+def _gate_harness(log):
+    def call(port, method, path, headers, body, timeout):
+        log.append(("console", f"{method} {path}"))
+        return {"status": 200}
+    return SimpleNamespace(w1a=SimpleNamespace(call=call), AUTH=("Authorization", "Bearer t"))
+
+
+def test_queue_external_write_commits_only_while_the_console_read_is_parked(harness, monkeypatch):
+    import w2e_queue_judges as q
+
+    log, parked = [], [False, True]
+    monkeypatch.setattr(q.psycopg, "connect",
+                        lambda dsn, autocommit=False: _GateConn(log, parked))
+    result = q.write_between_ticks(_gate_harness(log), 1, "dsn", "INSERT INTO edges VALUES (1)")
+    assert result == {"isError": False, "value": None}
+    steps = [entry for entry in log if entry[0] != "probe"]
+    assert steps[0] == ("execute", "LOCK TABLE entity_aliases IN ACCESS EXCLUSIVE MODE")
+    assert ("console", "GET /api/facts?limit=1") in steps
+    assert steps[-2:] == [("execute", "INSERT INTO edges VALUES (1)"), ("commit", None)]
+    probes = [entry[1] for entry in log if entry[0] == "probe"]
+    assert probes == [("entity_aliases", q.CONSOLE_ALIAS_READ)] * 2
+
+
+def test_queue_external_write_is_never_made_while_a_tick_holds_the_mutex(harness, monkeypatch):
+    import w2e_queue_judges as q
+
+    log = []
+    monkeypatch.setattr(q.psycopg, "connect", lambda dsn, autocommit=False: _GateConn(log, []))
+    with pytest.raises(RuntimeError, match="was not made"):
+        q.write_between_ticks(_gate_harness(log), 1, "dsn", "INSERT INTO edges VALUES (1)",
+                              timeout_s=0.3, park_s=0.1)
+    assert ("execute", "INSERT INTO edges VALUES (1)") not in log
+    assert ("commit", None) not in log
+    assert sum(entry == ("rollback", None) for entry in log) >= 2
+
+
+def test_queue_external_writes_are_all_sql_ops_the_gate_runs(harness):
+    externals = [(name, op["sql"]) for name, scenario in harness._QUEUE_JUDGES.items()
+                 for op in scenario["ops"] if op.get("external")]
+    assert externals, "the queue scenarios move evidence out of band"
+    assert all(op["op"] == "sql" for scenario in harness._QUEUE_JUDGES.values()
+               for op in scenario["ops"] if op.get("external"))
+    assert {name for name, _ in externals} >= {"candidate-auto-reopen", "link-auto-reopen",
+                                               "junk-auto-reopen"}
+
+
 def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
     """Each sweep scenario's ``until`` must hold under its mutant too (a
     settle that times out crashes the mutants run instead of counting a

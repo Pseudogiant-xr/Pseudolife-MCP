@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -187,6 +188,72 @@ def candidate_reopen_wait(generation, evidence):
         "AND ({archived})"
     ).format(generation=sql.Literal(generation), evidence=sql.Literal(evidence),
              archived=archived_evidence_query(evidence))
+
+
+# The console facts dump (GET /api/facts) takes the daemon's write mutex,
+# then reads aliases with exactly this statement (``entity_id_map_body`` in
+# rust/daemon/src/storage/graph.rs). The judge ticks' own alias read
+# (``load_inputs`` in rust/daemon/src/dream/candidates.rs) adds ORDER BY, so
+# a backend waiting on this text is the console holding the mutex.
+CONSOLE_ALIAS_READ = "SELECT alias,entity_id FROM entity_aliases"
+WAITING_ON = (
+    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity a JOIN pg_locks l ON l.pid = a.pid "
+    "WHERE a.datname = current_database() AND a.pid <> pg_backend_pid() "
+    "AND a.wait_event_type = 'Lock' AND NOT l.granted "
+    "AND l.relation = %s::regclass AND a.query = %s)")
+
+
+def write_between_ticks(harness, port, dsn, statement, *, timeout_s=60.0, park_s=2.0):
+    """Commit an out-of-band write while no daemon task is inside a write section.
+
+    The candidate tick reads the inputs of its dismissal refresh and of its
+    scan in two queries inside one write-mutex section (``candidate_tick``,
+    ``refresh_candidate_dismissals``). A write committed between them reopens
+    nothing yet changes the scan, so one batch of re-judgments is split over
+    two ticks (two in 30 runs on the Windows dev VM in 8.3 temp mode, ordering
+    the requests differently from the contract). In-process writes hold the
+    same mutex; this write cannot, so it parks a console read that holds the
+    mutex on a table lock it waits for, commits inside that lock, then lets
+    the read finish. A tick that read before the commit sees the generation
+    move and is retried whole by the daemon's stale-evidence check."""
+    deadline = time.monotonic() + timeout_s
+    attempts = 0
+    while time.monotonic() < deadline:
+        attempts += 1
+        answer = {}
+
+        def console():
+            try:
+                answer["r"] = harness.w1a.call(port, "GET", "/api/facts?limit=1",
+                                               [harness.AUTH], None, timeout=timeout_s)
+            except Exception as failed:  # reported below, after the lock is released
+                answer["error"] = failed
+
+        with psycopg.connect(dsn) as gate, psycopg.connect(dsn, autocommit=True) as probe:
+            gate.execute("LOCK TABLE entity_aliases IN ACCESS EXCLUSIVE MODE")
+            reader = threading.Thread(target=console, daemon=True)
+            reader.start()
+            parked = False
+            until = min(deadline, time.monotonic() + park_s)
+            while not parked and time.monotonic() < until:
+                parked = probe.execute(WAITING_ON, ("entity_aliases", CONSOLE_ALIAS_READ)
+                                       ).fetchone()[0]
+                if not parked:
+                    time.sleep(0.02)
+            if parked:
+                gate.execute(statement)
+                gate.commit()
+            else:
+                # A tick holding the mutex reached the locked table first.
+                gate.rollback()
+        reader.join(timeout_s)
+        if reader.is_alive() or "error" in answer or answer["r"]["status"] != 200:
+            raise RuntimeError(f"console read for the write gate failed: "
+                               f"{answer.get('error') or answer.get('r', {}).get('status')}")
+        if parked:
+            return {"isError": False, "value": None}
+    raise RuntimeError(f"no console read parked on the write gate in {attempts} attempts "
+                       f"within {timeout_s:g}s; the out-of-band write was not made")
 
 
 def seed_shape(name):
@@ -330,6 +397,8 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
                     # of exactly one probe per boot.
                     diffs.extend(harness.settle_boot_probes(dsn, boots))
                 result = {"isError": False, "value": None}
+            elif op["op"] == "sql" and op.get("external"):
+                result = write_between_ticks(harness, daemon.port, dsn, op["sql"])
             else:
                 result = (harness.home_op(op, home) if op["op"] in harness.HOME_OPS
                           else harness.run_op(op, daemon.port, client, dsn))
