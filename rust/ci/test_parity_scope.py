@@ -84,6 +84,12 @@ def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
     assert suites == [suite for suite in SUITES if suite in suites]
 
 
+def test_frozen_audit_seed_helper_only_reaches_floor():
+    path = "tests/test_coordination_audit.py"
+    assert reached(path) == ()
+    assert select("pull_request", [path])[0] == list(FLOOR)
+
+
 @pytest.mark.parametrize("path", [
     ".github/workflows/rust.yml", "rust/ci/coverage_plan.py", "rust/ci/parity_scope.py",
     "rust/Cargo.lock", "rust/rust-toolchain.toml", "rust/shared/float_repr.rs",
@@ -96,7 +102,6 @@ def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
     "rust/cli_harness/rows/_bank.py", "rust/cli_harness/rows/lease_transport.py",
     # Test modules the harness imports (rows seed banks from them).
     "tests/test_transfer_cli.py", "tests/pg_defaults.py", "tests/maintainer_authenticator.py",
-    "tests/test_coordination_audit.py",
     # evals/rust_port modules the harness imports.
     "evals/rust_port/sent_http.py", "evals/rust_port/processes.py", "evals/rust_port/harness.py",
     # The packages' __init__.
