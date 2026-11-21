@@ -282,7 +282,11 @@ def test_the_plan_pages_counted_as_docs_are_read_by_no_code():
     # suite, which a batch runs locally) may read them: code may name one
     # only on a comment line, and data files not at all. Documents and the
     # classifier's own files, which list the pages, are exempt.
-    classifier = {"rust/ci/parity_scope.py", "rust/ci/test_parity_scope.py", "rust/ci/test_workflow.py"}
+    classifier = {
+        "rust/ci/parity_scope.py", "rust/ci/test_parity_scope.py", "rust/ci/test_workflow.py",
+        # Ledger globs label discovered documentation hits and never select scan inputs.
+        "rust/ci/package_consumers.toml",
+    }
     import subprocess
     root = Path(__file__).resolve().parents[2]
     assert parity_scope.RUST_PLAN_DOCS == {"rust/CUTOVER.md", "rust/DEV.md", "rust/SEMANTICS-CHECKLIST.md"}

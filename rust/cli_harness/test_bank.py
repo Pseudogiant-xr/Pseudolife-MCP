@@ -99,6 +99,41 @@ def test_two_interpreters_allocate_distinct_row_names():
     assert all(_bank._NAME.fullmatch(name) for name in names)
 
 
+def _sql_text(statement):
+    return statement if isinstance(statement, str) else statement.as_string()
+
+
+def _fixture_descriptors(rows):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    return {f'SELECT * FROM "public"."{table}" LIMIT 0': nullcontext(SimpleNamespace(
+        description=[SimpleNamespace(name=key) for key in records[0]],
+    )) for table, records in rows.items()}
+
+
+@pytest.mark.parametrize("fixture_row,expected_message", [
+    ({"known": None, "old": 2}, "missing added, unexpected old"),
+    ({"known": None}, "missing added, unexpected none"),
+    ({"known": None, "added": 1, "old": 2}, "missing none, unexpected old"),
+])
+def test_fixture_column_check_rejects_any_mismatched_row(fixture_row, expected_message):
+    from unittest.mock import MagicMock
+
+    from rust.harness_support.fixture_rows import checked_fixture_insert
+
+    conn = MagicMock()
+    valid = {"known": None, "added": 1}
+    descriptor, = _fixture_descriptors({"fixture_table": [valid]}).values()
+    conn.execute.side_effect = [None, descriptor]
+    with pytest.raises(ValueError, match="public.fixture_table fixture row 2 column mismatch") as error:
+        checked_fixture_insert(conn, "fixture_table", [valid, fixture_row])
+    assert expected_message in str(error.value)
+    lock, catalog = conn.execute.call_args_list
+    assert lock.args[0].as_string() == 'LOCK TABLE "public"."fixture_table" IN ROW EXCLUSIVE MODE'
+    assert catalog.args[0].as_string() == 'SELECT * FROM "public"."fixture_table" LIMIT 0'
+
+
 @pytest.fixture
 def maintainer_fixture(monkeypatch):
     import atexit
@@ -124,19 +159,40 @@ def maintainer_fixture(monkeypatch):
 @pytest.mark.parametrize("kind", ["fresh", "stale", "pending", "rich"])
 def test_maintainer_seed_runs_with_frozen_imports_blocked(maintainer_fixture, monkeypatch, kind):
     from contextlib import nullcontext
-    from unittest.mock import MagicMock, call
+    from unittest.mock import MagicMock, call, patch
 
     row = maintainer_fixture
     name = row._name(kind)
+    expected = row._fixture()["seeds"][kind]
     conn = MagicMock()
-    conn.execute.return_value.fetchone.return_value = (name,)
+    reply = MagicMock()
+    reply.fetchone.return_value = (name,)
+    descriptors = _fixture_descriptors(expected)
+    conn.execute.side_effect = lambda statement, *_: descriptors.get(_sql_text(statement), reply)
     monkeypatch.setattr(_bank, "create", MagicMock())
     monkeypatch.setattr(_bank, "connect", lambda *a, **kw: nullcontext(conn))
     monkeypatch.setattr(_bank, "dump", lambda _: {"seeded": True})
-    assert row.ensure(kind) == name
+    with patch.object(row, "checked_fixture_insert", wraps=row.checked_fixture_insert) as insert:
+        assert row.ensure(kind) == name
+    assert insert.call_args_list == [call(conn, table, expected[table])
+                                    for table in row._SEED_TABLES if table in expected]
     assert conn.execute.call_args_list[0] == call("SELECT current_database()")
+    assert sum(_sql_text(call.args[0]).startswith("INSERT ") for call in conn.execute.call_args_list) == len(expected)
     conn.transaction.assert_called_once_with()
-    assert conn.execute.call_count > 1
+
+
+def test_maintainer_seed_checks_live_columns(maintainer_fixture):
+    from unittest.mock import MagicMock
+
+    row = maintainer_fixture
+    conn = MagicMock()
+    reply = MagicMock()
+    reply.fetchone.return_value = (row.ARM_DB,)
+    descriptor, = _fixture_descriptors({"meta": [{"key": "", "value": None, "new_default": 0}]}).values()
+    conn.execute.side_effect = [reply, None, descriptor, None]
+    with pytest.raises(ValueError, match="public.meta .*missing new_default"):
+        row._seed(conn, row.ARM_DB, "fresh")
+    assert len(conn.execute.call_args_list) == 3
 
 
 @pytest.mark.parametrize("server_name", ["pseudolife_memory", "pseudolife_bench", "pl_cf_other_run"])
@@ -241,33 +297,55 @@ def test_maintainer_successful_fixture_paths_are_import_free(maintainer_fixture,
     assert conn.execute.call_args.args[0].startswith(last)
 
 
-def test_maintainer_seed_refuses_missing_pending_key(maintainer_fixture, monkeypatch):
+@pytest.mark.parametrize("fixture_change,reason", [
+    ("missing-passkey", "incomplete or unexpected maintainer fixture rows"),
+    ("wrong-secret-key", "maintainer fixture is missing its secret row"),
+    ("renamed-secret-key", "public.meta .*missing key, unexpected old_key"),
+])
+def test_maintainer_seed_refuses_incomplete_data(maintainer_fixture, monkeypatch, fixture_change, reason):
     from unittest.mock import MagicMock
 
     row = maintainer_fixture
     conn = MagicMock()
-    conn.execute.return_value.fetchone.return_value = (row.ARM_DB,)
+    reply = MagicMock()
+    reply.fetchone.return_value = (row.ARM_DB,)
     fixture = row._fixture()
-    del fixture["seeds"]["pending"]["maintainer_passkeys"]
+    pending = fixture["seeds"]["pending"]
+    descriptors = _fixture_descriptors(pending)
+    if fixture_change == "missing-passkey":
+        del pending["maintainer_passkeys"]
+    elif fixture_change == "wrong-secret-key":
+        pending["meta"][0]["key"] = "wrong_key"
+    else:
+        pending["meta"][0]["old_key"] = pending["meta"][0].pop("key")
     monkeypatch.setattr(row, "_fixture", lambda: fixture)
-    with pytest.raises(ValueError, match="incomplete or unexpected maintainer fixture rows"):
+
+    conn.execute.side_effect = lambda statement, *_: descriptors.get(_sql_text(statement), reply)
+    with pytest.raises(ValueError, match=reason):
         row._seed(conn, row.ARM_DB, "pending")
-    conn.execute.assert_called_once_with("SELECT current_database()")
-    conn.transaction.assert_not_called()
+    assert conn.execute.call_args_list[0].args == ("SELECT current_database()",)
+    assert not any(_sql_text(call.args[0]).startswith("INSERT ") for call in conn.execute.call_args_list)
 
 
 @pytest.mark.parametrize("operation", ["redeem", "burn"])
-def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture, monkeypatch, operation):
+@pytest.mark.parametrize("scenario", ["success", "missing-code", "invalid-capture"])
+def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture, monkeypatch, operation, scenario):
     from contextlib import contextmanager, nullcontext
     from unittest.mock import MagicMock
 
     row = maintainer_fixture
     conn = MagicMock()
     observed = "fixture-code-hash"
-    response = MagicMock(rowcount=1)
+    response = MagicMock(rowcount=0 if scenario == "missing-code" else 1)
     response.fetchone.side_effect = [(row.ARM_DB,), (observed,)]
+    fixture = row._fixture()
+    capture = fixture["hooks"][operation]
+    descriptors = _fixture_descriptors(capture["rows"])
+    if scenario == "invalid-capture":
+        capture["status"]["failed_attempts"] = -1
+        monkeypatch.setattr(row, "_fixture", lambda: fixture)
     in_transaction = False
-    transactions = []
+    operations = []
 
     @contextmanager
     def transaction():
@@ -280,34 +358,80 @@ def test_maintainer_wait_fixture_applies_to_the_waiting_code(maintainer_fixture,
             in_transaction = False
 
     def execute(statement, *args):
-        if not isinstance(statement, str) or statement.startswith(("UPDATE ", "LOCK ")):
-            transactions.append(in_transaction)
-        return response
+        command = _sql_text(statement)
+        if command.startswith(("UPDATE ", "LOCK ", "INSERT ")):
+            operations.append((command, in_transaction))
+        return descriptors.get(command, response)
 
     conn.transaction.side_effect = transaction
     conn.execute.side_effect = execute
     connect = MagicMock(return_value=nullcontext(conn))
     monkeypatch.setattr(_bank, "connect", connect)
-    insert = MagicMock(wraps=row._insert_rows)
-    monkeypatch.setattr(row, "_insert_rows", insert)
+    checked = MagicMock(wraps=row.checked_fixture_insert)
+    monkeypatch.setattr(row, "checked_fixture_insert", checked)
     process = MagicMock()
     process.poll.return_value = None
-    getattr(row, operation + "_during")(None, process)
+    during = getattr(row, operation + "_during")
+    if scenario == "invalid-capture":
+        description = "redemption" if operation == "redeem" else "burn"
+        with pytest.raises(ValueError, match=f"invalid maintainer {description} fixture"):
+            during(None, process)
+        assert all(cmd.startswith("LOCK ") and active for cmd, active in operations)
+        return
+    if scenario == "missing-code":
+        with pytest.raises(RuntimeError, match=f"did not {operation} the waiting code"):
+            during(None, process)
+        assert [active for _, active in operations] == ([True] * 7 if operation == "redeem" else [False])
+        return
+    during(None, process)
     connect.assert_called_once_with(row.ARM_DB, autocommit=True)
     updates = [call.args[1] for call in conn.execute.call_args_list if isinstance(call.args[0], str)
                and call.args[0].startswith("UPDATE maintainer_bootstrap")]
     if operation == "redeem":
         assert updates == [(row.HOOK_T, "deskKeyHookAAAAAAAAAAA", observed, row.HOOK_T)]
-        assert [call.args[1] for call in insert.call_args_list] == [
+        assert [call.args[1] for call in checked.call_args_list] == [
             "maintainer_nonces", "maintainer_passkeys", "coordination_events",
         ]
         conn.transaction.assert_called_once_with()
-        assert transactions == [True] * 5
+        assert [active for _, active in operations] == [True] * 8
     else:
         assert updates == [(observed, row.HOOK_T, attempt) for attempt in range(5)]
-        insert.assert_not_called()
+        checked.assert_not_called()
         conn.transaction.assert_not_called()
-        assert transactions == [False] * 5
+        assert [active for _, active in operations] == [False] * 5
+
+
+def test_maintainer_redemption_reports_renamed_column_and_reaps_waiting_child(
+        maintainer_fixture, monkeypatch, tmp_path):
+    from contextlib import nullcontext
+    from unittest.mock import MagicMock
+
+    row = maintainer_fixture
+    fixture = row._fixture()
+    rows = fixture["hooks"]["redeem"]["rows"]
+    descriptors = _fixture_descriptors(rows)
+    key = rows["maintainer_passkeys"][0]
+    key["old_id"] = key.pop("credential_id")
+    monkeypatch.setattr(row, "_fixture", lambda: fixture)
+    conn = MagicMock()
+    response = MagicMock()
+    response.fetchone.side_effect = [(row.ARM_DB,), ("fixture-code-hash",)]
+    conn.execute.side_effect = lambda statement, *_: descriptors.get(_sql_text(statement), response)
+    monkeypatch.setattr(_bank, "connect", lambda *a, **kw: nullcontext(conn))
+    monkeypatch.setattr(_bank, "url", lambda _: "fixture-only")
+    case = next(case for case in row.cases() if case.id == "enrol-code-wait-redeemed")
+    case.setup = None
+    case.after = None
+    process = MagicMock()
+    process.poll.return_value = None
+    process.communicate.return_value = b"", b""
+    monkeypatch.setattr(row.core.subprocess, "Popen", lambda *a, **kw: process)
+
+    with pytest.raises(ValueError, match="public.maintainer_passkeys .*missing credential_id, unexpected old_id"):
+        row.core.run_arm(case, row.core.Target("rust", ["fixture-client"]), tmp_path / "arm")
+    process.kill.assert_called_once_with()
+    process.communicate.assert_called_once_with()
+    assert not any(_sql_text(call.args[0]).startswith("INSERT ") for call in conn.execute.call_args_list)
 
 
 def test_foreign_cleanup_refuses_before_connecting(monkeypatch):
