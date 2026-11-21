@@ -1,17 +1,13 @@
-"""Prepare offline Python models and bind provisioned native model roots.
+"""Bind the model roots and ONNX Runtime library for native body checks.
 
 The native `provision models` command owns artifact integrity. This step
-only discovers its immutable layout and warms the Python oracle's cache.
+only discovers its immutable, already-provisioned layout.
 """
 from __future__ import annotations
 
 import argparse
 import os
 from pathlib import Path
-import sys
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
 
 
 def native_paths(models: Path, runtime: Path) -> dict[str, str]:
@@ -37,20 +33,14 @@ def main() -> None:
     parser.add_argument("--github-env", type=Path, required=True)
     args = parser.parse_args()
     import onnxruntime
-    from ops.provision_embedding_models import provision_embedding_models
-    from pseudolife_memory.utils.config import RerankerConfig
-    from sentence_transformers import CrossEncoder
-
     paths = native_paths(Path(os.environ["PSEUDOLIFE_DAEMON_MODELS_DIR"]),
                          Path(onnxruntime.__file__).parent / "capi")
-    provision_embedding_models()
-    CrossEncoder(RerankerConfig().model_name, device="cpu")
     with args.github_env.open("a", encoding="utf-8") as stream:
         for key, value in paths.items():
             if "\n" in value or "\r" in value:
                 raise ValueError("a native artifact path cannot be written to GITHUB_ENV")
             stream.write(f"{key}={value}\n")
-    print("Python embedding and reranker caches ready; native artifact roots bound.", flush=True)
+    print("Native embedding and reranker artifact roots bound.", flush=True)
 
 
 if __name__ == "__main__":

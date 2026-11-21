@@ -1,7 +1,12 @@
 """The reranker parity check's order verdict: only the declared tie passes."""
 
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -69,3 +74,55 @@ def test_the_declared_case_is_the_truncated_lorem_pool_and_its_entry_exists():
     assert case["candidates"] == [check.LOREM * k for k in (1, 3, 10, 25, 50)]
     for path in check.DECLARED_TIES.values():
         assert (check.REPO / path).is_file(), path
+
+
+@pytest.mark.parametrize(("change", "exit_code"), [(None, 0), ("order", 1), ("score", 1)])
+def test_reranker_check_runs_without_frozen_package(tmp_path, monkeypatch, capsys, change, exit_code):
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("the reranker comparison test must stay in process")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(os, "system", forbidden)
+    for name in dir(os):
+        if name.startswith(("exec", "spawn", "posix_spawn")):
+            monkeypatch.setattr(os, name, forbidden)
+    monkeypatch.setattr(sys, "argv", ["w2d_rerank_check.py", "--model-dir", "unused",
+                                     "--keep", str(tmp_path)])
+    with cold_harness_imports():
+        import w2d_rerank_check as cold_check
+
+        def candidate(*args):
+            rows = cold_check.load_reference(cold_check.build_cases())
+            if change == "order":
+                scores = rows[0]["logits"]
+                scores[scores.index(min(scores))] = max(scores) + 1.0
+            elif change == "score":
+                rows[0]["rerank"][0] += 2 * cold_check.SIGMOID_TOL
+            return rows
+
+        monkeypatch.setattr(cold_check, "rust_side", candidate)
+        assert cold_check.main() == exit_code
+        output = capsys.readouterr().out
+        if change == "order":
+            assert "case 1: candidate order differs" in output
+        elif change == "score":
+            assert "max sigmoid diff" in output and "RESULT: FAIL" in output
+
+
+def test_the_reference_binds_the_exact_case_inputs():
+    cases = check.build_cases()
+    cases[0]["query"] += "?"
+    with pytest.raises(ValueError, match="cases differ from the captured reference"):
+        check.load_reference(cases)
+
+
+def test_the_capture_is_pinned(tmp_path, monkeypatch):
+    captured = json.loads(check.REFERENCE.read_text(encoding="utf-8"))
+    captured["results"][0]["logits"][0] += 1.0
+    changed = tmp_path / "changed-reference.json"
+    changed.write_text(json.dumps(captured), encoding="utf-8")
+    monkeypatch.setattr(check, "REFERENCE", changed)
+    with pytest.raises(ValueError, match="reference differs from the pinned capture"):
+        check.load_reference(check.build_cases())
