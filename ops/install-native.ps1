@@ -11,6 +11,7 @@
 # extractor choice -> compose up -> client hooks -> standing instructions ->
 # MCP registration -> health. Re-running is safe; re-running with a different
 # -Extractor is the supported way to switch modes.
+# Exit statuses: 0 completed, 1 operational failure, 2 usage or prerequisite refusal, 5 requested client setup incomplete.
 #
 #   ops\install.ps1                                    # interactive
 #   ops\install.ps1 -Extractor sidecar -Client codex   # non-interactive
@@ -2932,6 +2933,8 @@ function Write-ClientHttpAuthResult([string]$Provider, [switch]$Existing) {
         $warning = "The $Provider HTTP registration was preserved. The daemon requires a bearer token. Verify the registration's bearer credential in the client."
         $script:httpCredentialWarnings += $warning
         Write-Warning $warning
+    } elseif ($Transport -eq "shim") {
+        Write-ClientSetupFailure $Provider "The native client could not be installed (see above), and the daemon requires a bearer token for this connection. Fix the native client install, then rerun the installer."
     } else {
         Write-ClientSetupFailure $Provider "The installer cannot add the daemon's required bearer token to an HTTP registration. Rerun the installer with -Transport shim."
     }
@@ -3205,12 +3208,12 @@ function Install-SelectedClient([string]$selectedClient) {
                 Write-ClientSetupFailure "codex" "This Codex CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
             }
         } else {
-            if ($Transport -eq "shim") {
-                Write-Warning "Shim unavailable for Codex (see warnings above) - falling back to HTTP."
-                Write-Host "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity."
-            }
             if ($codexCredentialFile -or $ClientOnly) {
-                Write-ClientSetupFailure "codex" "Codex authentication requires the stdio shim; HTTP fallback was not registered."
+                if ($Transport -eq "shim") {
+                    Write-ClientSetupFailure "codex" "Codex authentication requires the stdio shim. Fix the native client install (see above), then rerun the installer."
+                } else {
+                    Write-ClientSetupFailure "codex" "Codex authentication requires the stdio shim. Rerun the installer with -Transport shim."
+                }
             } else {
                 $codexHttpUrl = if ($codexCredentialUrl) {
                     "$codexCredentialUrl/mcp"
@@ -3218,6 +3221,10 @@ function Install-SelectedClient([string]$selectedClient) {
                     "http://127.0.0.1:8765/mcp"
                 }
                 if (-not (Test-ClientTransport "codex" "http")) { return }
+                if ($Transport -eq "shim") {
+                    Write-Warning "Shim unavailable for Codex (see warnings above) - falling back to HTTP."
+                    Write-Host "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity."
+                }
                 codex mcp add pseudolife-memory --url $codexHttpUrl
                 Register-Result "codex" "http" "Wired into Codex (codex mcp add, HTTP)."
                 if ($mcpState["codex"] -eq "http") { Set-CodexRuntimeDefaults }
@@ -3227,6 +3234,10 @@ function Install-SelectedClient([string]$selectedClient) {
         $geminiList = gemini mcp list 2>$null
         if ("$geminiList" -match "pseudolife-memory") {
             $geminiRegistration = ("$geminiList" -split "`r?`n" | Where-Object { $_ -match 'pseudolife-memory:' } | Select-Object -First 1)
+            if (-not $geminiRegistration) {
+                Write-ClientSetupFailure "gemini" "Gemini CLI did not return a usable Pseudolife registration. Check gemini mcp list, then rerun the installer."
+                return
+            }
             $geminiGuardUnverified = $false
             $geminiCredential = $null
             if (($Transport -eq "shim") -and -not (Test-McpHttpRegistration "$geminiRegistration")) {
@@ -3356,10 +3367,10 @@ function Install-SelectedClient([string]$selectedClient) {
         } elseif ($ClientOnly) {
             Write-ClientSetupFailure "gemini" "Shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
         } else {
+            if (-not (Test-ClientTransport "gemini" "http")) { return }
             if ($Transport -eq "shim") {
                 Write-Warning "Shim unavailable for Gemini CLI (see warnings above) - falling back to HTTP."
             }
-            if (-not (Test-ClientTransport "gemini" "http")) { return }
             gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
             Register-Result "gemini" "http" "Wired into Gemini CLI (gemini mcp add, HTTP)."
         }
@@ -3508,10 +3519,10 @@ function Install-SelectedClient([string]$selectedClient) {
             } elseif ($ClientOnly) {
                 Write-ClientSetupFailure "claude" "Could not install the pseudolife-mcp shim (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
             } else {
+                if (-not (Test-ClientTransport "claude" "http")) { return }
                 Write-Warning "Could not install the pseudolife-mcp shim: the native client install failed (see warnings above)."
                 Write-Host "  Without the shim, concurrent Claude Code sessions share one episode identity."
                 Write-Host "  Re-run once that is fixed (the verified download is reused), or pass -Transport http to silence this."
-                if (-not (Test-ClientTransport "claude" "http")) { return }
                 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
                 Register-Result "claude" "http" "Wired into Claude Code via HTTP (fallback - shim tooling not found or shim install failed)."
             }
@@ -3529,7 +3540,7 @@ foreach ($selectedClient in $clients) {
         continue
     }
     if ($selectedClient -in "claude", "codex", "gemini" -and -not (Get-Command $selectedClient -ErrorAction SilentlyContinue)) {
-        Write-ClientSetupFailure $selectedClient "The $selectedClient CLI is not on PATH. Install it and rerun the installer."
+        Write-ClientSetupFailure $selectedClient "The $selectedClient CLI is not on PATH. Install it and rerun, or drop it from -Client."
         continue
     }
     try {
@@ -3844,7 +3855,8 @@ foreach ($selectedClient in $clients) {
         }
         "codex" {
             Write-Host "  OpenAI Codex"
-            Write-Host "    $(Get-McpMarker $mcpState['codex']) MCP transport        $(Describe-Mcp $mcpState['codex'])"
+            $codexMarker = if ($codexRuntimeDefaults -eq "failed") { "[!]" } else { Get-McpMarker $mcpState['codex'] }
+            Write-Host "    $codexMarker MCP transport        $(Describe-Mcp $mcpState['codex'])"
             Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
             if ($hookState["codex"] -eq "ready") {
                 Write-Host "    [x] Memory hooks         trusted and verified ($($codexSetup.source))"
@@ -4161,7 +4173,7 @@ if ($Tunnel -and -not $interactive) {
 } elseif ($Tunnel) {
     if (-not $script:shimInstallPath) {
         [Console]::Error.WriteLine("Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup.")
-        $tunnelExit = 1
+        $tunnelExit = 2
     } else {
         $tunnelOldUrl = $env:PSEUDOLIFE_MCP_DAEMON_URL
         $tunnelOldFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE

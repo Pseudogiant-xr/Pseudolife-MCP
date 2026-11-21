@@ -161,6 +161,8 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
             '} elseif (($Transport -eq "shim")', 1)[0]
     assert 'CODEX_RUNTIME_DEFAULTS=failed' in sh
     assert '$script:codexRuntimeDefaults = "failed"' in ps
+    assert 'if [ "$CODEX_RUNTIME_DEFAULTS" = failed ]; then codex_marker=\'[!]\'; fi' in sh
+    assert '$codexMarker = if ($codexRuntimeDefaults -eq "failed") { "[!]" }' in ps
 
 
 def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:

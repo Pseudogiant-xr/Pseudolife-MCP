@@ -968,7 +968,7 @@ CRED_READY = ('{"status":"ready","credential_file_configured":true,"connection_c
 def _codex_wiring(shell: _Shell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
-                  runtime_failed: bool = False, tunnel_exit: int = 0):
+                  runtime_failed: bool = False, tunnel_exit: int = 0, gemini_list: str = ""):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex calls."""
@@ -990,8 +990,11 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
         steps = steps.replace("codex-runtime-defaults)\n", "codex-runtime-defaults) return 1\n", 1)
     finish_fixture = ""
     if requested is not None:
+        if native_exit and not gemini_list:
+            gemini_list = "pseudolife-memory: http://fixture.example/mcp (http)"
         _stub(shell.bin / "gemini",
               "printf 'gemini|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+              "if [ \"$*\" = 'mcp list' ]; then printf '%s\\n' \"$FAKE_GEMINI_LIST\"; fi\n"
               "if [ \"$*\" = 'mcp add --help' ]; then echo '  -e, --env'; fi\n"
               "exit 0\n")
         finish_fixture = ("\nprintf 'MCP_GEMINI=%s\\n' \"$MCP_GEMINI\"\n"
@@ -1014,6 +1017,7 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
         extra_env={"FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
                    "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(native_exit),
                    "FAKE_EXISTING": existing, "FAKE_MCP_ADD_EXIT": str(add_exit),
+                   "FAKE_GEMINI_LIST": gemini_list,
                    "FAKE_LAUNCHER": _bash_fixture_path(shell.bash, installed / "pseudolife-mcp", shell.env),
                    "FAKE_KEEP_LAUNCHER": "1"})
     adds = [call for call in shell.logged()
@@ -1041,6 +1045,7 @@ COMPLETION_CASES = [
                  "did not produce a token file", id="credential-missing"),
     pytest.param({"missing": True}, "CLI is not on PATH", id="cli-missing"),
     pytest.param({"add_exit": 17}, "MCP registration failed (exit 17)", id="registration"),
+    pytest.param({"native_exit": 7}, "Fix the native client install", id="native-install"),
     pytest.param({"existing": "pseudolife-memory\ncommand: pseudolife-mcp\n{PSEUDOLIFE_MCP_NO_SPAWN=1}"},
                  "still resolves to a different executable", id="migration"),
     pytest.param({"existing": "pseudolife-memory\ncommand: custom-shim"},
@@ -1054,12 +1059,37 @@ COMPLETION_CASES = [
 def test_incomplete_client_leaves_other_steps_running(bash, tmp_path, kwargs, reason, requested, status):
     proc, _ = _codex_wiring(_Shell(bash, tmp_path), requested=requested, **kwargs)
     assert proc.returncode == status, proc.stdout + proc.stderr
-    assert "MCP_GEMINI=shim-env" in proc.stdout
+    other_state = "present" if kwargs.get("native_exit") else "shim-env"
+    assert f"MCP_GEMINI={other_state}" in proc.stdout
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
     label = "Requested" if requested else "Detected"
     assert f"{label} client setup incomplete (Codex)." in proc.stderr.splitlines()[-1]
     assert reason in proc.stderr.splitlines()[-1]
     assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
+
+
+@BASH
+def test_malformed_gemini_listing_reports_only_that_client(bash, tmp_path):
+    proc, _ = _codex_wiring(
+        _Shell(bash, tmp_path), requested="codex gemini", gemini_list="pseudolife-memory")
+    assert proc.returncode == 5, proc.stdout + proc.stderr
+    assert "MCP_CODEX=shim-env" in proc.stdout
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert "Requested client setup incomplete (Gemini CLI). Gemini CLI did not return" in proc.stderr.splitlines()[-1]
+
+
+@pytest.mark.parametrize("transport,repair", [
+    ("shim", "Fix the native client install"),
+    ("http", "Rerun the installer with --transport shim"),
+])
+@BASH
+def test_bearer_transport_failure_names_the_right_repair(bash, tmp_path, transport, repair):
+    proc = _Shell(bash, tmp_path).run(
+        f"TRANSPORT={transport} CLIENTS=claude REQUESTED_CLIENTS=claude\n"
+        + _block("client registration state") + _block("client registration helpers")
+        + "check_client_http_auth claude\n" + _block("client setup result"))
+    assert proc.returncode == 5, proc.stdout + proc.stderr
+    assert repair in proc.stderr.splitlines()[-1]
 
 
 @pytest.mark.parametrize("kwargs", [{}, {"runtime_failed": True},
@@ -1188,7 +1218,8 @@ FRESH_CONNECT = '{"url": null, "rows": [], "exit": 3, "error": "none"}'
 
 
 def _whole_client_only_run(bash, tmp_path, board_server, *, connect_report: str = FRESH_CONNECT,
-                           connect_exit: int = 3, current_recovery: str = ""):
+                           connect_exit: int = 3, current_recovery: str = "",
+                           native_exit: int = 0, requested: bool = True):
     """The whole client-only run, with a configurable Claude Code connect result."""
     shell = _Shell(bash, tmp_path)
     token = _token(shell)
@@ -1243,14 +1274,28 @@ def _whole_client_only_run(bash, tmp_path, board_server, *, connect_report: str 
         proc = shell.run(
             f"exec '{shell.path(repo / 'ops' / 'install-native.sh')}' --client-only "
             f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
-            "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
+            + ("--client claude,gemini " if requested else "--yes ")
+            + "--claude-plugin skip --instructions skip --no-art\n",
             extra_env={"FAKE_HEALTH": HEALTH_ON,
+                       "FAKE_NATIVE_EXIT": str(native_exit),
                        **release_env,
                        "PSEUDOLIFE_SHIM_RUNTIMES": shell.path(installed / "runtimes"),
                        "PSEUDOLIFE_SHIM_LAUNCHER": shell.path(installed / "pseudolife-mcp"),
                        # The installer's own environment carries an older credential.
                        "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
     return installed, proc, python_calls, repo, shell, token
+
+
+@BASH
+def test_unattended_detected_clients_keep_success_when_native_install_fails(bash, tmp_path, board_server):
+    _, proc, _, _, _, _ = _whole_client_only_run(
+        bash, tmp_path, board_server, native_exit=7, requested=False)
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 0, output
+    assert "the native client could not be installed" in output
+    assert "Detected client setup incomplete (Claude Code)" in output
+    assert "Requested client setup incomplete" not in output
+    assert "Done. First session" in output
 
 
 @BASH

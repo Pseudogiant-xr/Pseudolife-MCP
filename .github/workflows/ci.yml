@@ -1184,6 +1184,14 @@ jobs:
           tests/test_installer_no_python.py
           tests/test_installer_existing_upgrade.py
           tests/test_installer_existing_upgrade_native.py
+          tests/test_installer_bank_question_native.py
+          tests/test_installer_board_token_native.py
+          tests/test_installer_board_token_ps_native.py
+          tests/test_installer_client_only_native.py
+          --deselect tests/test_installer_client_only_native.py::test_shell_fragment_transport_is_utf8_with_a_cp1252_parent
+          tests/test_installer_client_only_ps_native.py
+          --deselect tests/test_installer_client_only_ps_native.py::test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent
+          --deselect tests/test_installer_client_only_ps_native.py::test_powershell_fixture_roundtrips_unicode_stdio
           tests/test_codex_hooks.py
           tests/test_codex_hooks_native.py
           --deselect tests/test_codex_hooks.py::test_native_hook_rejects_broadened_managed_connection_acl

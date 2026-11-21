@@ -926,7 +926,7 @@ CODEX_STUB = """$global:LASTEXITCODE = 0
 def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
-                  runtime_failed: bool = False, tunnel_exit: int = 0):
+                  runtime_failed: bool = False, tunnel_exit: int = 0, gemini_list: str = ""):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex adds."""
@@ -947,8 +947,12 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
             """$global:LASTEXITCODE = 1; return '{"status":"needs-configuration"}'""",
         )
     codex = "" if missing else ps.stub_function("codex", CODEX_STUB + "\n$global:LASTEXITCODE = [int]$env:FAKE_MCP_ADD_EXIT")
+    if native_exit and not gemini_list:
+        gemini_list = "pseudolife-memory: http://fixture.example/mcp (http)"
     gemini = "" if requested is None else ps.stub_function(
-        "gemini", "$global:LASTEXITCODE = 0; if ($args -contains '--help') { '  -e, --env' }")
+        "gemini", "$global:LASTEXITCODE = 0\n"
+        "if ($args -contains 'list') { $env:FAKE_GEMINI_LIST }\n"
+        "if ($args -contains '--help') { '  -e, --env' }")
     providers = "'codex'" if requested is None else "'codex','gemini'"
     finish_fixture = "" if requested is None else (
         "Write-Output ('MCP_GEMINI=' + $mcpState['gemini'])\n"
@@ -974,6 +978,7 @@ Write-Output ("MCP_CODEX=" + $mcpState['codex'])
         "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
         "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(native_exit),
         "FAKE_EXISTING": existing, "FAKE_MCP_ADD_EXIT": str(add_exit),
+        "FAKE_GEMINI_LIST": gemini_list,
         "FAKE_LAUNCHER": str(launcher), "FAKE_KEEP_LAUNCHER": "1"})
     adds = [call for call in ps.logged()
             if call.startswith("codex|mcp add") and "--help" not in call]
@@ -995,12 +1000,37 @@ def test_codex_registers_with_the_remote_url_and_its_credential_file(tmp_path):
 def test_incomplete_client_leaves_other_steps_running(tmp_path, kwargs, reason, requested, status):
     proc, _ = _codex_wiring(_PowerShell(tmp_path), requested=requested, **kwargs)
     assert proc.returncode == status, _output(proc)
-    assert "MCP_GEMINI=shim-env" in proc.stdout
+    other_state = "present" if kwargs.get("native_exit") else "shim-env"
+    assert f"MCP_GEMINI={other_state}" in proc.stdout
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
     label = "Requested" if requested else "Detected"
     assert f"{label} client setup incomplete (Codex)." in proc.stderr.splitlines()[-1]
     assert reason in proc.stderr.splitlines()[-1]
     assert FIXTURE_TOKEN not in _output(proc)
+
+
+def test_malformed_gemini_listing_reports_only_that_client(tmp_path):
+    proc, _ = _codex_wiring(
+        _PowerShell(tmp_path), requested="codex gemini", gemini_list="pseudolife-memory")
+    assert proc.returncode == 5, _output(proc)
+    assert "MCP_CODEX=shim-env" in proc.stdout
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert "Requested client setup incomplete (Gemini CLI). Gemini CLI did not return" in proc.stderr.splitlines()[-1]
+
+
+@pytest.mark.parametrize("transport,repair", [
+    ("shim", "Fix the native client install"),
+    ("http", "Rerun the installer with -Transport shim"),
+])
+def test_bearer_transport_failure_names_the_right_repair(tmp_path, transport, repair):
+    proc = _PowerShell(tmp_path).run(
+        f"$Transport = '{transport}'\n"
+        "$clients = @('claude'); $requestedClients = $clients; $tunnelExit = 0\n"
+        "$hookState = @{}; $instrState = @{}; $mcpState = @{}\n"
+        + _block("client registration state") + _block("client registration helpers")
+        + 'Write-ClientHttpAuthResult "claude"\n' + _block("client setup result"))
+    assert proc.returncode == 5, _output(proc)
+    assert repair in proc.stderr.splitlines()[-1]
 
 
 @pytest.mark.parametrize("kwargs", [{}, {"runtime_failed": True},

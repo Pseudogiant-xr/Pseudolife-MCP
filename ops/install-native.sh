@@ -10,6 +10,7 @@
 # extractor choice -> compose up -> client hooks -> standing instructions ->
 # MCP registration -> health. Re-running is safe; re-running with a different
 # --extractor is the supported way to switch modes.
+# Exit statuses: 0 completed, 1 operational failure, 2 usage or prerequisite refusal, 5 requested client setup incomplete.
 #
 #   ops/install.sh                                  # interactive
 #   ops/install.sh --extractor sidecar --client codex
@@ -2977,6 +2978,8 @@ check_client_http_auth() {
         local warning="The $1 HTTP registration was preserved. The daemon requires a bearer token. Verify the registration's bearer credential in the client."
         HTTP_CREDENTIAL_WARNINGS="${HTTP_CREDENTIAL_WARNINGS:+$HTTP_CREDENTIAL_WARNINGS"$'\n'"}$warning"
         printf 'WARNING: %s\n' "$warning" >&2
+    elif [ "$TRANSPORT" = shim ]; then
+        warn_client_failure "$1" "The native client could not be installed (see above), and the daemon requires a bearer token for this connection. Fix the native client install, then rerun the installer."
     else
         warn_client_failure "$1" "The installer cannot add the daemon's required bearer token to an HTTP registration. Rerun the installer with --transport shim."
     fi
@@ -3071,7 +3074,7 @@ for selected_client in $CLIENTS; do
     [ -z "$(client_setup_failure "$selected_client")" ] || continue
     case "$selected_client" in claude|codex|gemini)
         if ! command -v "$selected_client" >/dev/null 2>&1; then
-            warn_client_failure "$selected_client" "The $selected_client CLI is not on PATH. Install it and rerun the installer."
+            warn_client_failure "$selected_client" "The $selected_client CLI is not on PATH. Install it and rerun, or drop it from --client."
             continue
         fi ;;
     esac
@@ -3273,11 +3276,13 @@ for selected_client in $CLIENTS; do
                     step "Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
                 fi
             else
-                echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
-                echo "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity." >&2
                 if [ -n "$CODEX_CREDENTIAL_FILE" ] || [ -n "${CLIENT_ONLY:-}" ]; then
-                    warn_client_failure codex "Codex authentication requires the stdio shim; HTTP fallback was not registered."
+                    warn_client_failure codex "Codex authentication requires the stdio shim. Fix the native client install (see above), then rerun the installer."
                 else
+                    if ! client_requires_bearer; then
+                        echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
+                        echo "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity." >&2
+                    fi
                     codex_http_url="${CODEX_CREDENTIAL_URL:-http://127.0.0.1:8765}/mcp"
                     register_client codex http pseudolife-memory --url "$codex_http_url"
                     if [ "$MCP_CODEX" = http ]; then
@@ -3288,7 +3293,7 @@ for selected_client in $CLIENTS; do
             fi
         else
             if [ -n "$CODEX_CREDENTIAL_FILE" ] || [ -n "${CLIENT_ONLY:-}" ]; then
-                warn_client_failure codex "Codex authentication requires the stdio shim; HTTP transport was not registered."
+                warn_client_failure codex "Codex authentication requires the stdio shim. Rerun the installer with --transport shim."
             else
                 register_client codex http pseudolife-memory --url http://127.0.0.1:8765/mcp
                 if [ "$MCP_CODEX" = http ]; then step "Wired into Codex (codex mcp add, HTTP)."; fi
@@ -3296,7 +3301,11 @@ for selected_client in $CLIENTS; do
         fi
     elif [ "$selected_client" = gemini ]; then
         if existing_gemini=$(gemini mcp list 2>/dev/null) && printf '%s' "$existing_gemini" | grep -q pseudolife-memory; then
-            gemini_registration=$(printf '%s\n' "$existing_gemini" | grep -E 'pseudolife-memory:' | sed -n '1p')
+            gemini_registration=$(printf '%s\n' "$existing_gemini" | awk '/pseudolife-memory:/ && !found { print; found = 1 }')
+            if [ -z "$gemini_registration" ]; then
+                warn_client_failure gemini "Gemini CLI did not return a usable Pseudolife registration. Check gemini mcp list, then rerun the installer."
+                continue
+            fi
             gemini_guard_unverified=""
             gemini_credential=""
             if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$gemini_registration"; then
@@ -3432,7 +3441,9 @@ for selected_client in $CLIENTS; do
             elif [ -n "${CLIENT_ONLY:-}" ]; then
                 warn_client_failure gemini "shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
             else
-                echo "WARNING: shim unavailable for Gemini CLI (see warnings above) — falling back to HTTP." >&2
+                if ! client_requires_bearer; then
+                    echo "WARNING: shim unavailable for Gemini CLI (see warnings above) — falling back to HTTP." >&2
+                fi
                 register_client gemini http -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
                 if [ "$MCP_GEMINI" = http ]; then step "Wired into Gemini CLI (gemini mcp add, HTTP fallback)."; fi
             fi
@@ -3600,9 +3611,11 @@ for selected_client in $CLIENTS; do
         elif [ -n "${CLIENT_ONLY:-}" ]; then
             warn_client_failure claude "the pseudolife-mcp shim is unavailable (see the message above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
         else
-            echo "WARNING: the pseudolife-mcp shim is unavailable: the native client install failed (see the message above)." >&2
-            echo "  Without the shim, concurrent Claude Code sessions share one episode identity." >&2
-            echo "  Re-run once that is fixed (the verified download is reused), or pass --transport http to silence this." >&2
+            if ! client_requires_bearer; then
+                echo "WARNING: the pseudolife-mcp shim is unavailable: the native client install failed (see the message above)." >&2
+                echo "  Without the shim, concurrent Claude Code sessions share one episode identity." >&2
+                echo "  Re-run once that is fixed (the verified download is reused), or pass --transport http to silence this." >&2
+            fi
             register_client claude http --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
             if [ "$MCP_CLAUDE" = http ]; then step "Wired into Claude Code via HTTP (fallback — shim tooling not found)."; fi
         fi
@@ -4005,7 +4018,9 @@ for selected_client in $CLIENTS; do
             echo "    Restart: fully quit Claude Desktop (tray / menu-bar icon) and relaunch to load the entry." ;;
         codex)
             echo "  OpenAI Codex"
-            echo "    $(mcp_marker "$MCP_CODEX") MCP transport        $(describe_mcp "$MCP_CODEX")"
+            codex_marker="$(mcp_marker "$MCP_CODEX")"
+            if [ "$CODEX_RUNTIME_DEFAULTS" = failed ]; then codex_marker='[!]'; fi
+            echo "    $codex_marker MCP transport        $(describe_mcp "$MCP_CODEX")"
             echo "    [x] Server instructions  automatic (MCP instructions field)"
             if [ "$HOOK_CODEX" = ready ]; then
                 echo "    [x] Memory hooks         trusted and verified ($CODEX_HOOK_SOURCE)"
