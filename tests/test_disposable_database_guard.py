@@ -32,7 +32,7 @@ from pseudolife_memory.storage import schema
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "evals"))
 
-import ladder_sweep  # noqa: E402
+import _python_ladder_sweep as ladder_sweep  # noqa: E402
 
 from tests import pg_fixtures  # noqa: E402
 from tests import test_transfer_cli as transfer_tests  # noqa: E402
@@ -168,7 +168,7 @@ def _run_transfer_bank():
 
 _RESET_SITES = {
     "tests/pg_fixtures.py::_pg_conn_session": _run_pg_conn_fixture,
-    "evals/ladder_sweep.py::reset_bench": _run_ladder_reset_bench,
+    "evals/_python_ladder_sweep.py::reset_bench": _run_ladder_reset_bench,
     "tests/test_transfer_cli.py::_bank": _run_transfer_bank,
 }
 
@@ -654,7 +654,7 @@ def test_every_reap_and_full_bank_truncate_is_guarded_first():
     # The scan must be finding the known sites, or it is guarding nothing.
     assert {(f, fn) for f, fn, _, _ in found} >= {
         ("tests/pg_fixtures.py", "_pg_conn_session"),
-        ("evals/ladder_sweep.py", "reset_bench"),
+        ("evals/_python_ladder_sweep.py", "reset_bench"),
         ("evals/coordination_audit_volume.py", "measure"),
         ("tests/test_transfer_cli.py", "_bank"),
         ("tests/test_transfer_cli.py", "_truncate_all"),

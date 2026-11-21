@@ -1,101 +1,97 @@
 #Requires -Version 7
-# Regression gate: pinned oracle/e4b-ft "arm1" slice, replicated, vs the
-# committed baseline (evals/results/regression_gate.baseline.json).
-#
-# SCOPE: offline cortex fact-ranking reconstruction + answer/judge path.
-# Raw-entry contexts are copied, so this does NOT exercise CMS candidate
-# selection/reranking, MemoryService search, or MCP rendering. Extraction and
-# dream-path changes are NOT covered here — re-run the ladder for those
-# (existing rule). Run this before committing eval- or retrieval-affecting
-# changes (CLAUDE.md review discipline).
-#
-# Stages: 0 cleanup of the arm1-gate namespace (stale judged gate files
-# would resume as no-ops and silently pass); 1 rebuild contexts from local
-# bank dumps with the supported fact-ranking knobs (required inputs;
-# absent banks invalidate the run); 2 judge
-# N replicates; 3 verdict vs baseline.
-#
-#   evals\regression_gate.ps1                # 2 replicates, gate verdict
-#   evals\regression_gate.ps1 -Replicates 1  # single pass, no drift canary
-#   evals\regression_gate.ps1 -Establish     # (re)write the baseline
-#
-# Replicates: 2, and NOT because the judge is noisy — because it must not be.
-# Replicates re-judge byte-identical persisted contexts, so on the
-# reproducible server (qwen_server.ps1 default: stock llama-server + q8_0 KV)
-# every replicate scores exactly the same. Measured 2026-07-27 at n=7,
-# spanning a server restart: std 0.0000 on all three arms
-# (evals/results/regression_gate-2026-07-27-establish-q8-n7-crossrestart.agg.json). The second replicate is therefore a CANARY,
-# not an estimator — if the two ever disagree, replicate.py prints a
-# nondeterminism WARNING and the run was served by the TurboQuant fork,
-# whose TBQ4_0 KV flips ~7% of verdicts on identical input.
-#
-# History: the default was 10 (~32 min) from 2026-07-26, sized to average
-# away a cortex std of ~0.033. That spread was the server, not the judge;
-# with it gone the gate costs ~8 min AND is more sensitive, because the
-# baseline margin (max(0.03, 2*std)) collapses to the 0.03 floor instead of
-# the 0.0637 the noise used to buy. Establish the baseline the same way you
-# check it — the comparison is only like-for-like if both sides are.
-#
-# Exit codes: 0 pass, 1 regression, 2 infrastructure (endpoint/rebuild).
-param([int]$Replicates = 2, [switch]$Establish)
-$ErrorActionPreference = "Continue"
-$repo = Split-Path -Parent $PSScriptRoot
-$py = Join-Path $repo ".venv\Scripts\python.exe"
-$replicatePy = Join-Path $repo "evals\replicate.py"
-$rebuild = Join-Path $repo "evals\rebuild_contexts.py"
-$results = Join-Path $repo "evals\results"
-$banks = Join-Path $results "banks\oracle-e4b-ft-arm1"
-$env:PYTHONPATH = $repo
+# The Rust public-search gate. Missing inputs or an invalid baseline are exit 2.
+param(
+    [int]$Replicates = 2,
+    [switch]$Establish,
+    [string]$Fixture = (Join-Path $PSScriptRoot 'results/banks/rust-oracle-ku78.json'),
+    [string]$Data = (Join-Path $PSScriptRoot 'data/longmemeval_oracle.json'),
+    [string]$Baseline = (Join-Path $PSScriptRoot 'results/rust-quality/regression_gate.baseline.json'),
+    [string]$Out,
+    [string]$Daemon,
+    [string]$DaemonRevision,
+    [string]$OnnxDir,
+    [string]$OrtLibrary,
+    [string]$Scratch,
+    [string]$Model = 'bench',
+    [string]$ServedModel = 'Qwen3.8-27B-UD-Q4_K_XL.gguf',
+    [string]$Python
+)
 
-function Log($msg) { Write-Host "$(Get-Date -Format 'HH:mm:ss') $msg" }
-
-# Missing fixtures are an invalid run, never a narrower passing gate. Check
-# before clearing prior results or loading/starting the model helper.
-if (-not (Test-Path -LiteralPath $banks -PathType Container)) {
-    Log "required bank dumps missing at $banks; restore the pinned banks before running the gate"
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+if (-not (Test-Path -LiteralPath $Fixture -PathType Leaf)) {
+    Write-Host 'Local Rust gate fixture missing. From the checkout run:'
+    Write-Host "  python evals/rebuild_contexts.py --dump-dir <local-bank-dumps> --out `"$Fixture`""
+    Write-Host 'The default fixture path is git-ignored by design.'
+    exit 2
+}
+if (-not $Establish -and -not (Test-Path -LiteralPath $Baseline -PathType Leaf)) {
+    Write-Host 'Rust baseline missing. Once authorised by the maintainer, run evals/regression_gate.ps1 -Establish -Out <dir> with the same instrument inputs.'
+    Write-Host 'The maintainer reviews <dir>/baseline-candidate.json and commits it as evals/results/rust-quality/regression_gate.baseline.json.'
+    exit 2
+}
+if (-not ($Out -and $Daemon -and $DaemonRevision -and $OnnxDir -and $OrtLibrary -and $Scratch)) {
+    Write-Host 'Provide -Out, -Daemon, -DaemonRevision, -OnnxDir, -OrtLibrary and -Scratch.'
     exit 2
 }
 
-# Start-Qwen / Stop-Qwen, including the eval env protocol. Default (no -Fast)
-# is the reproducible q8_0 config, which is mandatory here: this gate judges.
-. (Join-Path $PSScriptRoot "qwen_server.ps1")
-
-# -- Stage 0: cleanup ------------------------------------------------------
-Log "stage 0: clearing arm1-gate namespace"
-Remove-Item (Join-Path $results "longmemeval-ku-oracle-e4b-ft-arm1-gate*") `
-    -Force -ErrorAction SilentlyContinue
-
-# -- Stage 1: contexts -----------------------------------------------------
-Log "stage 1: rebuilding cortex contexts from required bank dumps; raw-entry contexts remain pinned"
-& $py $rebuild --dataset oracle --extractor e4b-ft `
-    --src-tag arm1 --out-tag arm1-gate
-if ($LASTEXITCODE -ne 0) { Log "rebuild failed"; exit 2 }
-
-# -- Stage 2: judge replicates --------------------------------------------
 try {
-    # Reuses a reproducible server that is already up (and leaves it
-    # running); refuses any other running server rather than displacing it.
-    if (-not (Start-Qwen -Owned)) { Log "no usable Qwen endpoint"; exit 2 }
-    & $py $replicatePy run --extractor e4b-ft --tag arm1-gate
-    if ($LASTEXITCODE -ne 0) { Log "run (r1) failed"; exit 2 }
-    if ($Replicates -gt 1) {
-        & $py $replicatePy spawn --extractor e4b-ft --tag arm1-gate `
-            -n ($Replicates - 1)
-        if ($LASTEXITCODE -ne 0) { Log "spawn failed"; exit 2 }
-        & $py $replicatePy run --extractor e4b-ft --tag arm1-gate
-        if ($LASTEXITCODE -ne 0) { Log "run (rN) failed"; exit 2 }
+    if (-not $Python) {
+        $repo = Split-Path -Parent $PSScriptRoot
+        $Python = Join-Path $repo '.venv/Scripts/python.exe'
+        if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+            $Python = (Get-Command python -ErrorAction Stop).Source
+        }
     }
-    & $py $replicatePy agg --extractor e4b-ft --tag arm1-gate
-    if ($LASTEXITCODE -ne 0) { Log "agg failed"; exit 2 }
+    $driver = Join-Path $PSScriptRoot 'regression_gate.py'
+    $endpoint = 'http://127.0.0.1:1234/v1'
+    $profile = 'qwen3.8-27b-ud-q4-k-xl-stock-q8_0'
+    $arguments = @(
+        $driver, '--fixture', $Fixture, '--data', $Data, '--baseline', $Baseline,
+        '--out', $Out, '--daemon', $Daemon, '--daemon-revision', $DaemonRevision,
+        '--onnx-dir', $OnnxDir, '--ort-library', $OrtLibrary, '--scratch', $Scratch,
+        '--replicates', $Replicates, '--answerer-url', $endpoint, '--answerer-model', $Model,
+        '--answerer-profile', $profile, '--answerer-served-model', $ServedModel,
+        '--judge-url', $endpoint, '--judge-model', $Model, '--judge-profile', $profile,
+        '--judge-served-model', $ServedModel
+    )
+    if ($Establish) { $arguments += '--establish' }
+    & $Python @arguments --preflight
+    if ($LASTEXITCODE -ne 0) { exit 2 }
 
-    # -- Stage 3: verdict --------------------------------------------------
-    if ($Establish) {
-        & $py $replicatePy baseline --extractor e4b-ft --tag arm1-gate
-        exit $LASTEXITCODE
+    . (Join-Path $PSScriptRoot 'qwen_server.ps1')
+    try {
+        if (-not (Start-Qwen -Owned)) { exit 2 }
+        if (-not (Test-QwenReproducibleListener)) {
+            Write-Host 'Port 1234 is serving a different Qwen launch profile. Free the port deliberately and retry with the stock profile.'
+            exit 2
+        }
+        $measuredRegression = $false
+        & $Python @arguments | ForEach-Object {
+            if ($_ -ceq 'Rust retrieval gate regressed') { $measuredRegression = $true }
+            Write-Host $_
+        }
+        $driverExit = $LASTEXITCODE
+        if ($driverExit -eq 0) { exit 0 }
+        if ($driverExit -eq 1 -and $measuredRegression) {
+            $verdictPath = Join-Path $Out 'verdict.json'
+            if (Test-Path -LiteralPath $verdictPath -PathType Leaf) {
+                $verdict = Get-Content -Raw -LiteralPath $verdictPath | ConvertFrom-Json -AsHashtable
+                $regressions = $verdict['regressions']
+                if ($regressions -is [array] -and $regressions.Count -gt 0 -and
+                    @($regressions | Where-Object { $_ -isnot [string] -or -not $_.Trim() }).Count -eq 0) {
+                    exit 1
+                }
+            }
+            Write-Host 'Driver reported a regression without a valid verdict.json. Inspect the run output and retry.'
+        } elseif ($driverExit -eq 1) {
+            Write-Host 'Driver exited without confirming a measured regression. Inspect the run output and retry.'
+        }
+        exit 2
+    } finally {
+        Stop-Qwen -Owned
     }
-    & $py $replicatePy gate-check --extractor e4b-ft --tag arm1-gate
-    exit $LASTEXITCODE
-} finally {
-    Stop-Qwen -Owned
-    Log "regression gate finished"
+} catch {
+    Write-Host "Rust regression gate incomplete ($($_.Exception.Message))"
+    exit 2
 }

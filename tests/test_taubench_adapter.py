@@ -825,8 +825,8 @@ def _top_nodes(text: str) -> dict[str, ast.AST]:
 # nothing else today; the assertion is written over the whole union so that
 # copying a second one later without keeping it identical fails here.
 _SHARED = {
-    "ladder_sweep.py": ("probe",),
-    "longmemeval_bench.py": ("_chat", "_THINKING_LEVELS", "_SAMPLER_PROTECTED"),
+    "_python_ladder_sweep.py": ("probe",),
+    "_python_longmemeval_bench.py": ("_chat", "_THINKING_LEVELS", "_SAMPLER_PROTECTED"),
     "beam_adapter.py": ("format_turn", "judge_response", "parse_judge_score"),
 }
 

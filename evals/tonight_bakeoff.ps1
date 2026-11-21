@@ -11,7 +11,7 @@
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot
 $py = Join-Path $repo ".venv\Scripts\python.exe"
-$bench = Join-Path $repo "evals\longmemeval_bench.py"
+$bench = Join-Path $repo "evals\_python_longmemeval_bench.py"
 $datagen = Join-Path $repo "evals\distill_datagen.py"
 $candidateGguf = Join-Path $repo "evals\models\Qwen3.5-4B-UD-Q4_K_XL.gguf"
 $env:PYTHONPATH = $repo

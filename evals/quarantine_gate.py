@@ -60,7 +60,7 @@ def consolidate_with_counters(svc, extractor) -> tuple[dict, dict]:
 
 def run_arm_with_counters(rung: str, quarantine: bool) -> dict:
     import embedder_stamp
-    import ladder_sweep as ls
+    import _python_ladder_sweep as ls
 
     with tempfile.TemporaryDirectory(prefix="plqgate_",
                                      ignore_cleanup_errors=True) as td:
@@ -92,7 +92,7 @@ def main() -> int:
     args = ap.parse_args()
 
     import ladder_replicate as lr
-    import ladder_sweep as ls
+    import _python_ladder_sweep as ls
 
     # The port is DERIVED from the rung's base_url, never a flag: a
     # mismatched publish would silently bench whatever else answers on

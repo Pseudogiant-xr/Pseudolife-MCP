@@ -131,7 +131,7 @@ def unqualified_stale(answer: str, value: str) -> bool:
     only punctuation followed by whitespace/end is folded.
     """
     import re
-    from ladder_sweep import value_present
+    from _python_ladder_sweep import value_present
     a = re.sub(r"[.!?,;](?=\s|$)", " ", (answer or "").casefold())
     if not value_present(a, value.casefold()):
         return False
@@ -144,7 +144,7 @@ def value_recovered(answer: str, value: str) -> bool:
     so hedging is correct behavior there, not a miss. Same terminal-
     punctuation folding as ``unqualified_stale``."""
     import re
-    from ladder_sweep import value_present
+    from _python_ladder_sweep import value_present
     a = re.sub(r"[.!?,;](?=\s|$)", " ", (answer or "").casefold())
     return value_present(a, value.casefold())
 
@@ -158,7 +158,7 @@ def answered_other_fact(answer: str, seeded_value: str,
     entry's underlying value is present. Reported beside the stale rate;
     not a gate."""
     import re
-    from ladder_sweep import value_present
+    from _python_ladder_sweep import value_present
     a = re.sub(r"[.!?,;](?=\s|$)", " ", (answer or "").casefold())
     if value_present(a, seeded_value.casefold()):
         return False
@@ -202,7 +202,7 @@ def run_study_a(rung: str, offsets_days=OFFSETS_DAYS) -> dict:
     and the rung's extractor endpoint (like any ladder run)."""
     import tempfile
 
-    import ladder_sweep as ls
+    import _python_ladder_sweep as ls
 
     # ignore_cleanup_errors: same ChromaDB file-lock caveat as ladder_sweep —
     # the PersistentClient keeps chroma.sqlite3 open past service teardown on
@@ -358,7 +358,7 @@ def run_study_b(answer_url: str | None) -> dict:
     is given, else persist contexts for a later judged run."""
     import tempfile
 
-    import ladder_sweep as ls
+    import _python_ladder_sweep as ls
 
     out: dict = {"query_offset_days": QUERY_OFFSET_DAYS,
                  "n_facts": len(STUDY_B_FACTS)}
@@ -456,7 +456,7 @@ def run_study_h3(answer_url: str | None) -> dict:
     given."""
     import tempfile
 
-    import ladder_sweep as ls
+    import _python_ladder_sweep as ls
 
     out: dict = {"preregistration": H3_PREREG,
                  "query_offset_days": QUERY_OFFSET_DAYS,
