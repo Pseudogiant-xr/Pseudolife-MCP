@@ -194,30 +194,41 @@ def test_native_host_state_reads_safe_yaml_without_rewriting(tmp_path, monkeypat
     assert list(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("text", [
-    "defaults: &base {rp_id: localhost, origin: http://localhost:8765}\n"
-    "coordination: {maintainer: {<<: *base}}\n",
-    "first: &first {rp_id: localhost, origin: http://localhost:8765}\n"
-    "second: &second {rp_id: ignored.invalid, origin: https://ignored.invalid}\n"
-    "coordination: {maintainer: {<<: [*first, *second]}}\n",
-    "defaults: &base {rp_id: ignored.invalid, origin: https://ignored.invalid}\n"
-    "coordination: {maintainer: {rp_id: localhost, <<: *base, origin: http://localhost:8765}}\n",
-    "coordination: {maintainer: {'<<': {rp_id: ignored.invalid}, "
-    "rp_id: localhost, origin: http://localhost:8765}}\n",
+@pytest.mark.parametrize("text,expected", [
+    pytest.param(
+        "defaults: &base {rp_id: localhost, origin: http://localhost:8765}\n"
+        "coordination: {maintainer: {<<: *base}}\n",
+        ("localhost", "http://localhost:8765", None),
+        id="single-merge",
+    ),
+    pytest.param(
+        "first: &first {rp_id: localhost, origin: http://localhost:8765}\n"
+        "second: &second {rp_id: ignored.invalid, origin: https://ignored.invalid}\n"
+        "coordination: {maintainer: {<<: [*first, *second]}}\n",
+        ("localhost", "http://localhost:8765", None),
+        id="earlier-mapping-wins",
+    ),
+    pytest.param(
+        "defaults: &base {rp_id: ignored.invalid, origin: https://ignored.invalid}\n"
+        "coordination: {maintainer: {rp_id: localhost, <<: *base, origin: http://localhost:8765}}\n",
+        ("localhost", "http://localhost:8765", None),
+        id="explicit-keys-win",
+    ),
+    pytest.param(
+        "coordination: {maintainer: {'<<': {rp_id: ignored.invalid}, "
+        "rp_id: localhost, origin: http://localhost:8765}}\n",
+        ("localhost", "http://localhost:8765", None),
+        id="quoted-merge-key-is-literal",
+    ),
 ])
-def test_native_host_state_resolves_yaml_merge_precedence(tmp_path, monkeypatch, text):
-    from pseudolife_memory import maintainer_setup as setup
+def test_native_host_state_resolves_yaml_merge_precedence(tmp_path, text, expected):
     path = tmp_path / "config.yaml"
     path.write_text(text, encoding="utf-8")
-    monkeypatch.setenv("PSEUDOLIFE_MCP_CONFIG", str(path))
-    monkeypatch.setattr(setup, "_bank_keys", lambda: (None, "NoBank"))
-    oracle = setup._state()
     result = subprocess.run([_native(), "maintainer", "setup", "--host-state"],
                             env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     state = json.loads(result.stdout)
-    assert (state["rp_id"], state["origin"], state["problem"]) == (
-        oracle["rp_id"], oracle["origin"], oracle["problem"])
+    assert (state["rp_id"], state["origin"], state["problem"]) == expected
     assert path.read_text(encoding="utf-8") == text
 
 

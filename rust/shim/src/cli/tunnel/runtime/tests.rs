@@ -40,6 +40,24 @@ fn launch_fixture(root: &Path) -> Prepared<'_> {
     prepared(root)
 }
 
+fn fixture_key_bytes(key: &[u8]) -> Option<Vec<u8>> {
+    #[cfg(windows)]
+    {
+        let sealed = super::super::dpapi::seal(key)?;
+        Some([b"DPAPI\0".as_slice(), &sealed].concat())
+    }
+    #[cfg(unix)]
+    {
+        Some([b"PLAIN\0".as_slice(), key].concat())
+    }
+}
+
+fn fixture_image(root: &Path, name: &str) -> PathBuf {
+    let path = root.join(name);
+    state::atomic_create(&path, name.as_bytes()).unwrap();
+    path
+}
+
 const FIXTURE: &str = "cli::tunnel::runtime::tests::vendor_fixture";
 const CONFIG_ENV: &str = "PSEUDOLIFE_TEST_TUNNEL_VENDOR_CONFIG";
 const FIXTURE_WATCHDOG: Duration = Duration::from_secs(90);
@@ -255,6 +273,147 @@ fn replacement_releases_previous_key_only_after_a_successful_poll() {
             }
         }
     }
+}
+
+#[test]
+fn update_reports_only_an_attested_current_launch_as_current() {
+    let home = Home::new();
+    let prepared = launch_fixture(&home.0);
+    let executable = std::env::current_exe().unwrap();
+    let image = fixture_image(&home.0, "current-shim");
+    let name = &prepared.profile.name;
+    state::atomic_create(
+        &store::profile_path(&home.0, name).unwrap(),
+        &prepared.profile_bytes,
+    )
+    .unwrap();
+    let Some(replacement_key) = fixture_key_bytes(b"fixture-runtime-key") else {
+        return;
+    };
+    let previous_key = fixture_key_bytes(b"previous-fixture-runtime-key").unwrap();
+    let key_path = store::key_path(&home.0, name);
+    state::atomic_create(&key_path, &replacement_key).unwrap();
+
+    let launch = Uuid::new_v4();
+    let mut stage = Stage::new(&home.0, name, launch).unwrap();
+    let record = LaunchRecord {
+        native_launch: launch.simple().to_string(),
+        launch_identity: Some(
+            identity::compute(&home.0, &prepared.profile, &prepared.key, &image).unwrap(),
+        ),
+        spawn_started: Some(true),
+        supervisor: Identity {
+            pid: std::process::id(),
+            exe: executable.clone(),
+        },
+        target: Some(Identity {
+            pid: std::process::id(),
+            exe: executable,
+        }),
+        ready: true,
+    };
+    stage.announce(&record).unwrap();
+    let record_path = super::record::path(&home.0, name);
+    let original = fs::read(&record_path).unwrap();
+    let check = |runtime_image: &Path, expected, guidance: &str| {
+        let (text, code) = super::super::update_with_runtime(&home.0, Some(runtime_image)).unwrap();
+        assert_eq!(code, 0);
+        let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(report["state"], expected);
+        assert_eq!(report["profiles"][0]["state"], expected);
+        assert_eq!(report["profiles"][0]["running"], true);
+        let detail = report["profiles"][0]["detail"].as_str().unwrap();
+        assert!(detail.contains(guidance), "{detail}");
+        assert!(report["detail"].as_str().unwrap().contains(detail));
+        assert!(fs::read(&record_path).unwrap() == original);
+    };
+    let check_current =
+        |expected| check(&image, expected, "already running on the current runtime");
+    let check_stale = |guidance| check(&image, "stale", guidance);
+    check_current("current");
+    check_current("current");
+    let installed = fixture_image(&home.0, "new-installed-shim");
+    let directory = crate::cli::update::seams::quote(home.0.to_str().unwrap());
+    check(
+        &installed,
+        "stale",
+        &format!(
+            "Run `pseudolife-mcp tunnel stop --profile dot --profile-dir {directory}`, then `pseudolife-mcp tunnel run --profile dot --profile-dir {directory}` to reconnect the tunnel"
+        ),
+    );
+    let pending = home.0.join(format!("{name}.reload.json"));
+    state::atomic_create(&pending, br#"{"id":"00000000000000000000000000000000"}"#).unwrap();
+    check_current("current");
+    assert!(pending.is_file());
+    fs::remove_file(pending).unwrap();
+    let history = home.0.join(format!("{name}.reload.result.json"));
+    state::atomic_create(
+        &history,
+        br#"{"id":"00000000000000000000000000000000","state":"failed"}"#,
+    )
+    .unwrap();
+    check_current("current");
+    let pending = home.0.join(format!("{name}.key-renewal"));
+    state::atomic_create(&pending, b"interrupted renewal fixture").unwrap();
+    check_stale("runtime key renewal is incomplete");
+    fs::remove_file(pending).unwrap();
+    let previous = home.0.join(format!("{name}.key-previous"));
+    state::atomic_create(&previous, b"unresolved retained pair fixture").unwrap();
+    check_stale("cannot read the retained previous key");
+    fs::remove_file(&previous).unwrap();
+    state::atomic_write(&key_path, &previous_key, None).unwrap();
+    setup::seed_trial(
+        &home.0,
+        name,
+        (&prepared.profile_bytes, &previous_key),
+        (&prepared.profile_bytes, &replacement_key),
+    )
+    .unwrap();
+    check_stale("the previous key is still retained");
+    assert!(previous.is_file());
+    fs::remove_file(previous).unwrap();
+    check_current("current");
+    let token = Path::new(&prepared.profile.token_file);
+    state::atomic_write(token, b"changed-fixture-daemon-token", None).unwrap();
+    check_stale("differs from the current runtime or saved settings");
+    state::atomic_write(token, b"fixture-daemon-token", None).unwrap();
+    check_current("current");
+    drop(stage.owner.take());
+    check_stale("could not be verified against the current runtime");
+}
+
+#[test]
+fn stopped_foreground_tunnel_restarts_with_fresh_launch_ownership() {
+    let home = Home::new();
+    let token = home.0.join("daemon-token");
+    state::atomic_create(&token, b"fixture-daemon-token").unwrap();
+    let executable = std::env::current_exe().unwrap();
+    let record_path = record::path(&home.0, "dot");
+    let run_and_stop = || {
+        thread::scope(|scope| {
+            let run = scope.spawn(|| {
+                launch(prepared(&home.0), &executable, STARTUP, |config| {
+                    fixture_command(&executable, config, "ready")
+                })
+            });
+            let Some(ready) = wait_for_ready(&record_path, || run.is_finished()) else {
+                panic!("fixture did not become ready: {:?}", run.join().unwrap());
+            };
+            let stopped = stop(&home.0, "dot");
+            let outcome = run.join().unwrap();
+            assert_eq!(stopped.unwrap().1, 0);
+            assert_eq!(outcome, Ok(("Tunnel dot stopped.\n".into(), 0)));
+            assert!(!record_path.exists());
+            let launch = launch_id(&ready.native_launch).unwrap();
+            assert!(!stage_path(&home.0, launch).exists());
+            ready
+        })
+    };
+    let first = run_and_stop();
+    let second = run_and_stop();
+    assert_ne!(first.native_launch, second.native_launch);
+    assert!(first.launch_identity.is_some());
+    assert_eq!(first.launch_identity, second.launch_identity);
 }
 
 #[test]

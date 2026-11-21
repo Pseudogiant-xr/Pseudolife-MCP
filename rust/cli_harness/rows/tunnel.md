@@ -126,9 +126,15 @@ these cases are recorded from the candidate, not the oracle:
   which a key-based SSH logon cannot seal; record them in a logon signed in
   at the machine.
 - `update` never stops on a record or a key and starts, stops or signals
-  nothing: a ready profile without a running record is `not-running`, a
-  running one is `stale` (left running; this client cannot refresh it
-  yet; also an unknown one), and a record with no profile beside it is
+  nothing. A ready profile without a running record is `not-running`.
+  A ready native launch is `current` when its live ownership and identity
+  match the client running the check and saved settings and there is no
+  interrupted key renewal or retained previous key. A Python refresh request
+  does not affect the native check. A live native launch whose identity
+  differs reports `stale` with stop and run commands for the same profile and store. The
+  restart reconnects the tunnel. Other running or uncertain launches are
+  `stale` and stay in place. A Python-supervised launch names the Python
+  client as the client to use to stop it. A record with no profile beside it is
   listed by file name, `leftover` when its process is gone, `stale` when it
   runs or may run. A profile `load` does not read is `unread` (named with
   the reason, the field at fault where there is one), or `stale` when its tunnel runs or may run. The top-level state is `stale` when any entry is, else `current`,
