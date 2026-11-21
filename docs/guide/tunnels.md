@@ -25,6 +25,8 @@ and an authenticated daemon check. Resume the prepared profile with
 `--tunnel-id`, then import its first runtime key in a separate setup command
 using `--read-key` at a terminal or an owner-only `--key-file`. Use
 `pseudolife-mcp tunnel run` to keep a prepared tunnel in the foreground.
+On first launch it installs the pinned tunnel-client program automatically
+and checks the downloaded archive against its expected checksum.
 In another terminal, `pseudolife-mcp tunnel stop` asks that native
 supervisor to stop its runtime. Pass the same `--profile` and
 `--profile-dir` in both commands if you selected a different profile or
@@ -80,14 +82,17 @@ store is unreadable, the tunnel stops during refresh, or the supervisor cannot
 confirm a child's exit or disappears before reporting the result. The outer
 `pseudolife-mcp update` reports this failure with exit 5.
 
-An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
+An older native foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
 followed by `pseudolife-mcp tunnel run` for the same profile and directory.
 Use the same commands when the updated client pins a different vendor version.
 If a service or scheduled task started that supervisor, restart the existing
-registration through its manager. A Python-supervised tunnel stays running
-until stopped with the Python client that started it. Then use native
-`tunnel run` for a foreground launch. The client switch continues to require
-removal of Python tunnel autostart before changing engines.
+registration through its manager. A Python-supervised tunnel keeps serving
+after an opted-in client move, and native `tunnel stop` refuses to stop it.
+For a planned switch, stop the old tunnel with the Python client before
+changing clients. If you already switched, end the old process before
+reusing its profile. Then run `pseudolife-mcp tunnel run` in a terminal you
+can keep open. Removing a Python autostart registration also removes
+automatic starts for that profile. Keep the Python client if you need them.
 
 An interrupted key renewal or a retained previous key reports `stale` with
 guidance for that state. A pending refresh request written by the Python
@@ -119,15 +124,17 @@ Python client (see [Autostart and private storage](#autostart-and-private-storag
 ## Start or resume
 
 Use an always-on host if you need access while a laptop sleeps. Both its daemon
-and tunnel must remain running. Install Pseudolife normally, then run:
+and tunnel must remain running. With the Python client, install Pseudolife
+normally, then start guided setup:
 
 ```sh
 pseudolife-mcp tunnel setup
 ```
 
-The installer can enter this same flow with `ops/install.sh --tunnel` or
-`ops/install.ps1 -Tunnel`. Existing users can run the command directly. Setup
-reuses saved choices and does not ask again for access consent or a saved key.
+With the Python client, the installer can enter this guided flow with
+`ops/install.sh --tunnel` or `ops/install.ps1 -Tunnel`. Native clients use the
+explicit profile and key setup described above. Setup reuses saved choices
+and does not ask again for access consent or a saved key.
 If discovery finds conflicting registrations or only a literal token, select the
 connection explicitly using an existing owner-only token file:
 
@@ -151,13 +158,17 @@ separate connections. `--profile-dir <directory>` selects private profile storag
    Creating or editing a tunnel separately needs **Read + Manage**. Enter the
    runtime key privately with `pseudolife-mcp tunnel setup --read-key`, or use
    `--key-file <owner-only-file>`. Keep it out of chat, command arguments and
-   environment variables. If its expiry is known, add
-   `--key-expires-at 2026-12-01T00:00:00Z`; a date such as `2026-12-01` means
-   midnight UTC. Timestamps need a timezone; otherwise status reports unknown
-   when no expiry is supplied.
-3. Start with `pseudolife-mcp tunnel start`, or use `tunnel run` in a foreground
-   terminal. `tunnel setup --start` resumes setup and starts the managed process.
-   Use `tunnel doctor` for local MCP and vendor checks.
+   environment variables. If its expiry is known, save it with
+   `pseudolife-mcp tunnel setup --key-expires-at 2026-12-01T00:00:00Z`.
+   The native client requires a separate call to save the expiry before
+   importing the first key. The Python client accepts expiry and key input
+   in one command. A date such as `2026-12-01` means midnight UTC. Give full
+   timestamps a timezone. Without an expiry, status reports it as unknown.
+3. With the native client, use `pseudolife-mcp tunnel run` in a foreground
+   terminal. With the Python client, use `tunnel start` for a managed launch
+   or `tunnel run` in the foreground. The Python client's `tunnel setup --start`
+   resumes setup and starts the managed process. Its `tunnel doctor` checks
+   the local MCP connection and vendor runtime.
 4. In the intended ChatGPT workspace, open [developer apps](https://chatgpt.com/plugins),
    enable developer mode where available, create a developer app, choose
    **Connection: Tunnel**, and select this tunnel. Review the workspace
@@ -179,18 +190,17 @@ child to repeat the prompt; no model API spending is launched by the CLI.
 
 ```sh
 pseudolife-mcp tunnel status
-pseudolife-mcp tunnel doctor --json
 ```
 
 Only successful real responses to both challenge calls establish cloud verification.
 The tunnel forwards the installed shim's MCP traffic and saves private receipts
 containing tool names, success flags and timestamps, never memory or board contents.
 Receipts match the actual ready launch, its saved profile, connection, key and
-challenge. After changing a key, daemon, tunnel, organization or catalog, use
-`tunnel setup --start` to start or refresh the managed tunnel before a new challenge.
-An existing foreground run needs an explicit stop/start. Saved changes alone cannot
-prove that the running tunnel adopted them. Vendor doctor checks and
-`/readyz` remain separate local signals; they cannot establish cloud verification.
+challenge. After changing a key, daemon, tunnel, organization or catalog,
+restart a foreground launch with `tunnel stop` and `tunnel run` before issuing
+a new challenge. Use `tunnel setup --start` for a Python-managed background
+launch. `tunnel status` reports the active launch's verification. With the
+Python client, `tunnel doctor --json` also reports the local checks.
 
 ## Discovery, updates and renewal
 
@@ -275,9 +285,10 @@ a sleeping or powered-off host available.
 
 **A machine with an autostart service stays on the Python client.** The
 service starts the tunnel through the installed `pseudolife-mcp` launcher,
-and the native client cannot run a tunnel yet. So a run that would move this
-machine to the native client refuses while a tunnel service it installed is
-registered and runs that launcher, even a disabled one. An update with
+and the native client supports foreground operation only. A run that would
+move this machine to the native client refuses while an installer-owned
+tunnel service is registered and runs that launcher, including a disabled
+service. An update with
 `PSEUDOLIFE_SHIM_ENGINE=native` exits 2, and the installer with it stops in
 its preflight; `runtime install --check` is the check both use. The refusal
 names the service and changes nothing. Rerun without
@@ -285,9 +296,9 @@ names the service and changes nothing. Rerun without
 first run the `pseudolife-mcp tunnel service remove` command the refusal
 prints (it carries the service's `--profile`, `--profile-dir` and, for a root
 service, `--system-service`), then rerun. An unattended update on the
-daemon's host instead updates the daemon alone and says why, on each run that
-installs a release, until the autostart is gone; after that, the next
-unattended run that installs a release moves the client.
+daemon's host that was configured to opt in instead updates the daemon alone
+and says why. Once the autostart is gone, a release update can move the
+client when it runs with `PSEUDOLIFE_SHIM_ENGINE=native`.
 
 A saved profile without a service, or a service that runs another program,
 does not block the move. A service you made by hand (no owner marker, but its
