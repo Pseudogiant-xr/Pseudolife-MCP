@@ -208,21 +208,24 @@ def _export_line(values) -> bytes:
     return (json.dumps(row, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
 
 
+def _stored_audit_rows(conn):
+    conn.execute("SET LOCAL extra_float_digits = 3")
+    has_body, = conn.execute(
+        "SELECT EXISTS (SELECT FROM pg_attribute "
+        "WHERE attrelid = 'coordination_events'::regclass "
+        "AND attname = 'body' AND NOT attisdropped)"
+    ).fetchone()
+    body = "body,body_salt" if has_body else "NULL::text,NULL::text"
+    columns = ",".join(_EXPORT_FIELDS)
+    return conn.execute(f"SELECT {columns},{body} FROM coordination_events ORDER BY seq")
+
+
 def export_bytes(kind: str) -> bytes:
     """Project a seeded bank into the archive format independently of the CLI."""
     _bank.NAMES.require_process()
     if kind not in _ARCHIVES:
         with _bank.connect(ensure(kind)) as conn:
-            conn.execute("SET LOCAL extra_float_digits = 3")
-            has_body, = conn.execute(
-                "SELECT EXISTS (SELECT FROM pg_attribute "
-                "WHERE attrelid = 'coordination_events'::regclass "
-                "AND attname = 'body' AND NOT attisdropped)"
-            ).fetchone()
-            body = "body,body_salt" if has_body else "NULL::text,NULL::text"
-            columns = ",".join(_EXPORT_FIELDS)
-            rows = conn.execute(f"SELECT {columns},{body} FROM coordination_events ORDER BY seq")
-            _ARCHIVES[kind] = b"".join(_export_line(row) for row in rows)
+            _ARCHIVES[kind] = b"".join(_export_line(row) for row in _stored_audit_rows(conn))
     return _ARCHIVES[kind]
 
 
@@ -523,6 +526,43 @@ def _files(arm, files) -> None:
         path = arm.home / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data() if callable(data) else data)
+
+
+def _bank_verify_reference(case, kind, home):
+    """Verify the seeded bank with the frozen chain rules before launching the CLI."""
+    core._reset(home)
+    arm = core.Arm("reference", home, home / "cwd")
+    arm.cwd.mkdir()
+    case.setup(arm)
+    newline = b"\r\n" if core.WINDOWS else b"\n"
+    if kind == "nolog":
+        code, stdout = 2, b""
+        stderr = (b"board-audit: this bank has no audit log yet (schema older than v42); "
+                  b"start a v42 daemon once to create it" + newline)
+    else:
+        expect = None
+        if case.argv[2:]:
+            seq, digest = case.argv[3].split(":", 1)
+            expect = (int(seq), digest)
+        with _bank.connect(arm.state["name"]) as conn:
+            # Bank verification hashes the stored payload text. Archive
+            # projection decodes it and can change its spelling.
+            rows = (dict(zip(_EXPORT_FIELDS + _BODY_FIELDS, row, strict=True))
+                    for row in _stored_audit_rows(conn))
+            report = verify_audit_chain(rows, expect_head=expect)
+        code, stderr = int(not report["ok"]), b""
+        stdout = json.dumps(report).encode("utf-8") + newline
+    return {"home": str(home), "exit": code, "stdout": _encoded(stdout), "stderr": _encoded(stderr),
+            "files": arm.state["before"], "modes": core.modes(home), "db": "unchanged"}
+
+
+def bank_verify_case(case_id, kind, *, expect_head=None, env=None):
+    argv = ["verify"]
+    if expect_head is not None:
+        argv.extend(["--expect-head", expect_head])
+    case = read_case(case_id, kind, argv, env=env)
+    case.reference = partial(_bank_verify_reference, case, kind)
+    return case
 
 
 def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
@@ -1109,8 +1149,8 @@ def cases() -> list[core.Case]:
         read_case("export-negative-time", "rich", ["export", "--since", "-5"]),
         read_case("export-underscore-time", "rich", ["export", "--since=١_٧٠٠_٠٠٠_٠٠٠"]),
         read_case("export-payload-domain", "payload", ["export"]),
-        read_case("bank-verify-payload-domain", "payload", ["verify"]),
-        read_case("bank-verify-surrogate-send", "surrogate_send", ["verify"]),
+        bank_verify_case("bank-verify-payload-domain", "payload"),
+        bank_verify_case("bank-verify-surrogate-send", "surrogate_send"),
         read_case("export-surrogate-send", "surrogate_send", ["export"]),
         redact_case("redact-surrogate-send", "surrogate_send", _Lazy(lambda: ids("surrogate_send")["message"]), "old paste"),
         redact_case("redact-nonfinite-fanout", "payload_send", _Lazy(lambda: ids("payload_send")["message"]), "old paste"),
@@ -1118,19 +1158,18 @@ def cases() -> list[core.Case]:
         file_case("input-payload-domain", ["verify", "--input", _home("archive.jsonl")],
                   files={"archive.jsonl": lambda: export_bytes("payload")}),
         # verify against the bank
-        read_case("bank-verify-rich", "rich", ["verify"]),
-        read_case("bank-verify-expect-head", "rich", ["verify", "--expect-head", rich_head]),
-        read_case("bank-verify-head-mismatch", "rich",
-                  ["verify", "--expect-head", _Lazy(lambda: head("rich", digest="0" * 64))]),
-        read_case("bank-verify-head-missing", "rich",
-                  ["verify", "--expect-head", _Lazy(lambda: head("rich", seq=9999))]),
-        read_case("bank-verify-pruned", "pruned", ["verify"]),
-        read_case("bank-verify-head-pruned", "pruned",
-                  ["verify", "--expect-head", "2:" + "b" * 64]),
-        read_case("bank-verify-empty", "empty", ["verify"]),
-        read_case("bank-verify-nolog", "nolog", ["verify"]),
-        read_case("bank-verify-tampered", "tampered", ["verify"]),
-        read_case("bank-verify-legacy", "legacy", ["verify"]),
+        bank_verify_case("bank-verify-rich", "rich"),
+        bank_verify_case("bank-verify-expect-head", "rich", expect_head=rich_head),
+        bank_verify_case("bank-verify-head-mismatch", "rich",
+                         expect_head=_Lazy(lambda: head("rich", digest="0" * 64))),
+        bank_verify_case("bank-verify-head-missing", "rich",
+                         expect_head=_Lazy(lambda: head("rich", seq=9999))),
+        bank_verify_case("bank-verify-pruned", "pruned"),
+        bank_verify_case("bank-verify-head-pruned", "pruned", expect_head="2:" + "b" * 64),
+        bank_verify_case("bank-verify-empty", "empty"),
+        bank_verify_case("bank-verify-nolog", "nolog"),
+        bank_verify_case("bank-verify-tampered", "tampered"),
+        bank_verify_case("bank-verify-legacy", "legacy"),
         # export
         read_case("export-all", "rich", ["export"]),
         read_case("export-task", "rich", ["export", "--task", "t1"]),
@@ -1191,9 +1230,9 @@ def cases() -> list[core.Case]:
         read_case("export-joined-option", "rich", ["export", "--task=t1"]),
         read_case("export-float-spelling", "rich", ["export", "--since", "1.7e9"]),
         # Empty-chain verification pins native DSN options without random head bytes.
-        read_case("defer-dsn-option", "empty", ["verify"],
-                  env={"PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name("empty"))
-                       + "?application_name=audit"}),
+        bank_verify_case("defer-dsn-option", "empty",
+                         env={"PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name("empty"))
+                              + "?application_name=audit"}),
         read_case("export-out-missing-dir-before-agent", "rich",
                   ["export", "--agent", "ffffffff0", "--out", _home("missing/out.jsonl")]),
         file_case("no-bank", ["verify"]),
@@ -1228,7 +1267,7 @@ def cases() -> list[core.Case]:
         read_case("export-agent-twin", "rich", ["export", "--agent", "ab12cd34ef57"]),
         redact_case("redact-ambiguous-prefix", "rich", "cd34ef56", "wrong paste"),
         redact_case("redact-twin-prefix", "rich", "cd34ef56ab13", "wrong paste"),
-        read_case("bank-verify-prev46", "prev46", ["verify"]),
+        bank_verify_case("bank-verify-prev46", "prev46"),
         read_case("export-prev46", "prev46", ["export"]),
         redact_case("redact-prev46", "prev46", _Lazy(lambda: ids("legacy")["legacy"]), "why"),
         redact_case("redact-vacuum-warning", "rich", _rich("to_redact"), "wrong paste",

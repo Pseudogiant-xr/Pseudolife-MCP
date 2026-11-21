@@ -288,6 +288,57 @@ def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     assert edited["hash"] == expected["hash"]
 
 
+@pytest.mark.parametrize("variant", ["matching-head", "stored-text-edit", "no-log"])
+def test_audit_bank_verify_reference_without_the_frozen_package(monkeypatch, tmp_path, variant):
+    row = event()
+    head = "1:" + row["hash"]
+    kind = "nolog" if variant == "no-log" else "rich"
+    if variant == "no-log":
+        code, stdout = 2, b""
+        stderr = (b"board-audit: this bank has no audit log yet (schema older than v42); "
+                  b"start a v42 daemon once to create it")
+    elif variant == "stored-text-edit":
+        row["payload"] = '{"safe": "雪"}'  # Same JSON value, different stored hash input.
+        code, stderr = 1, b""
+        stdout = b'{"ok": false, "seq": 1, "reason": "hash_mismatch"}'
+    else:
+        code, stderr = 0, b""
+        stdout = (b'{"ok": true, "events": 1, "first_seq": 1, "head_seq": 1, "head_hash": "'
+                  + row["hash"].encode("ascii") + b'", "head_created_at": 1700000000.0, "start_cut": null}')
+
+    with _cold_audit(monkeypatch) as audit:
+        name = audit._name(kind)
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        values = tuple(row[key] for key in audit._EXPORT_FIELDS + audit._BODY_FIELDS)
+        conn.execute.side_effect = [None, SimpleNamespace(fetchone=lambda: (True,)), [values]]
+        connect = MagicMock(return_value=conn)
+        monkeypatch.setattr(audit, "ensure", lambda _: name)
+        monkeypatch.setattr(_bank, "url", lambda label: f"postgresql://localhost/{label}")
+        monkeypatch.setattr(_bank, "connect", connect)
+        case = audit.bank_verify_case("bank-verify-control", kind,
+                                      expect_head=None if kind == "nolog" else audit._Lazy(lambda: head))
+        previous_umask = audit.core.pin_umask()
+        try:
+            observation = case.reference(tmp_path / "bank-verify")
+        finally:
+            if previous_umask is not None:
+                os.umask(previous_umask)
+
+    newline = b"\r\n" if audit.core.WINDOWS else b"\n"
+    assert observation["exit"] == code
+    assert audit.core.decode(observation, "stdout") == (stdout + newline if stdout else b"")
+    assert audit.core.decode(observation, "stderr") == (stderr + newline if stderr else b"")
+    assert observation["files"] == {"cwd": "dir"}
+    assert observation["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755"})
+    assert observation["db"] == "unchanged"
+    if kind == "nolog":
+        connect.assert_not_called()
+    else:
+        connect.assert_called_once_with(name)
+        assert case.argv == ["board-audit", "verify", "--expect-head", head]
+
+
 def test_audit_export_preserves_field_order_and_legacy_payload():
     from .rows import audit
 
