@@ -22,7 +22,7 @@ from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
-from tests.test_installer_client_only_native import COMPLETION_CASES
+from tests.test_installer_client_only_native import COMPLETION_CASES, DENIED_CREDENTIAL
 from tests.test_installer_existing_upgrade import _between, user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -1117,7 +1117,7 @@ FRESH_CONNECT = '{"url": null, "rows": [], "exit": 3, "error": "none"}'
 
 
 def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRESH_CONNECT, connect_exit: int = 3,
-                           gemini_body: str | None = None):
+                           gemini_body: str | None = None, current_recovery: str = ""):
     """The whole client-only run, with a configurable Claude Code connect result.
     ``gemini_body`` replaces the gemini CLI stub's answers."""
     ps = _PowerShell(tmp_path)
@@ -1133,10 +1133,18 @@ def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRE
     # installer steps through the stand-in, which runs this checkout's
     # helpers as the native client carries its own.
     standin = ROOT / "tests" / "native_helper_standin.py"
+    verify = ""
+    if current_recovery:
+        report = json.dumps({"status": "failed", "recovery": current_recovery})
+        verify = (
+            "if [ \"$1 $2 $3\" = 'installer connect-report current' ]; then cat >/dev/null; echo current; exit 0; fi\n"
+            "if [ \"$1 $2 $3\" = 'installer credentials verify-token-file' ]; then\n"
+            f"  printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'; echo '{report}'; exit 1\nfi\n"
+        )
     version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
     release_env = native_stub.write_release(
         tmp_path / "release", version,
-        "if [ \"$1\" = installer ] && [ \"$2\" != migrate-registrations ]; then\n"
+        verify + "if [ \"$1\" = installer ] && [ \"$2\" != migrate-registrations ]; then\n"
         f"  shift; exec '{sys.executable}' '{standin}' '{ROOT}' \"$@\"\nfi\n"
         f"printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'\n"
         "if [ \"$1\" = connect ]; then\n"
@@ -1250,6 +1258,19 @@ def test_client_only_connect_failure_keeps_the_native_client_and_reports_partial
     settings = json.loads((ps.home / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
     assert settings["env"]["PSEUDOLIFE_MCP_DAEMON_URL"] == "http://127.0.0.1:8765"
     assert settings["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"] == "/fixture/local/claude-code.token"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the staged native fixture is a POSIX launcher script")
+def test_client_only_current_registration_with_refused_token_is_incomplete(tmp_path, daemon_server):
+    plan = json.dumps({"rows": [{"place": "registration", "client": "claude-code", "state": "current"}], "exit": 0})
+    _, _, proc, ps, _, _, _ = _whole_client_only_run(
+        tmp_path, daemon_server, connect_report=plan, connect_exit=0, current_recovery=DENIED_CREDENTIAL)
+    assert proc.returncode == 5, _output(proc)
+    assert proc.stderr.splitlines()[-1] == "Requested client setup incomplete (Claude Code). " + DENIED_CREDENTIAL
+    calls = ps.logged()
+    assert len([call for call in calls if call.startswith("shim|installer credentials verify-token-file")]) == 1
+    assert not any(call.startswith("shim|connect") and "--yes" in call for call in calls)
+    assert any(call.startswith("gemini|mcp add -s user") for call in calls)
 
 
 @pytest.mark.skipif(os.name == "nt", reason=(

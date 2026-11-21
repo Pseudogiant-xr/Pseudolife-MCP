@@ -155,6 +155,7 @@ def _bash_variants() -> list[str]:
 def _run_bash_existing(
     bash: str, tmp_path: Path, *, client: str, config: str, manager_exit: int,
     shadowed_path: bool = False, existing: bool = True, migrate_exit: int = 3,
+    gemini_guard: str = "absent", complete: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     """``manager_exit``: the native client install's result (0 installs);
     ``migrate_exit``: 0 makes the launcher's registration move report a
@@ -163,6 +164,17 @@ def _run_bash_existing(
     helper = _between("ops/install-native.sh", "resolve_installed_shim() {", "\n}\n\n# Two env pairs") + "\n}"
     loop = "\n".join("\n".join(_marker_block(install, section)) for section in (
         "client registration state", "client registration helpers", "client registrations"))
+    completion = "\n".join(_marker_block(install, "client setup result")) if complete else ""
+    installer_stub = native_stub.BASH.replace("native_helper() {", "fixture_native_helper() {") + f"""
+native_helper() {{
+    if [ "$1 $2" = "credentials gemini-guard" ]; then
+        [ "$3" = --config ] && [ "$4" = "$HOME/.gemini/settings.json" ] || return 1
+        printf '%s\\n' '{{"status":"{gemini_guard}"}}'
+        return 0
+    fi
+    fixture_native_helper "$@"
+}}
+"""
     describe = _between("ops/install-native.sh", "describe_mcp() {", "\n}\ndescribe_instr()") + "\n}"
     marker = _between("ops/install-native.sh", "mcp_marker() {", "\n}\ndescribe_mcp()") + "\n}"
     fake_bin = tmp_path / "bin"
@@ -210,6 +222,7 @@ export FAKE_LAUNCHER='{installed_bin_shell}/pseudolife-mcp' FAKE_MIGRATE_EXIT='{
 export PSEUDOLIFE_SHIM_RUNTIMES='{installed_bin_shell}/runtimes' PSEUDOLIFE_SHIM_LAUNCHER='{installed_bin_shell}/pseudolife-mcp'
 repo='{repo}'
 CLIENTS='{client}'
+REQUESTED_CLIENTS='{client}'
 TRANSPORT=shim
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED=''
 CODEX_CONNECTION_CONFIGURED=''
@@ -221,7 +234,7 @@ SHIM_TRIED='' SHIM_OK='' SHIM_PATH='{installed_shim_shell}'
 step() {{ printf 'STEP: %s\\n' "$*"; }}
 configure_codex_runtime_defaults() {{ CODEX_RUNTIME_DEFAULTS=preserved; }}
 {helper}
-{native_stub.BASH}
+{installer_stub}
 {marker}
 {describe}
 {loop}
@@ -232,6 +245,7 @@ case '{client}' in
 esac
 printf 'STATE=%s\\n' "$state"
 printf 'STATUS=%s %s\\n' "$(mcp_marker "$state")" "$(describe_mcp "$state")"
+{completion}
 """
     return subprocess.run(
         [bash], input=script.encode(), capture_output=True, check=False, timeout=15,
@@ -436,6 +450,7 @@ def test_install_sh_flagless_fresh_cli_fails_before_registration(
 def _run_powershell_existing(
     tmp_path: Path, *, client: str, config: str, manager_exit: int,
     shadowed_path: bool = False, existing: bool = True, migrate_exit: int = 3,
+    gemini_guard: str = "absent", complete: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     """``manager_exit`` and ``migrate_exit`` as for ``_run_bash_existing``."""
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
@@ -447,6 +462,21 @@ def _run_powershell_existing(
     install = (ROOT / "ops" / "install-native.ps1").read_text(encoding="utf-8")
     loop = "\n".join("\n".join(_marker_block(install, section)) for section in (
         "client registration state", "client registration helpers", "client registrations"))
+    completion = "\n".join(_marker_block(install, "client setup result")) if complete else ""
+    installer_stub = native_stub.POWERSHELL.replace(
+        "function Invoke-NativeHelper", "function Invoke-FixtureNativeHelper") + f"""
+function Invoke-NativeHelper {{
+    if ($args[0] -eq 'credentials' -and $args[1] -eq 'gemini-guard') {{
+        $global:LASTEXITCODE = 0
+        if ($args[2] -eq '--config' -and $args[3] -eq (Join-Path $env:USERPROFILE ".gemini\\settings.json")) {{
+            return '{{"status":"{gemini_guard}"}}'
+        }}
+        return
+    }}
+    if ($MyInvocation.ExpectingInput) {{ $input | Invoke-FixtureNativeHelper @args }}
+    else {{ Invoke-FixtureNativeHelper @args }}
+}}
+"""
     register = _between("ops/install-native.ps1", "function Register-Result(", "\n}\nfunction Set-CodexRuntimeDefaults") + "\n}"
     describe = _between("ops/install-native.ps1", "function Describe-Mcp($state) {", "\n}\nfunction Get-McpMarker") + "\n}"
     marker = _between("ops/install-native.ps1", "function Get-McpMarker($state) {", "\n}\nfunction Describe-Instr") + "\n}"
@@ -489,6 +519,10 @@ def _run_powershell_existing(
     script = f"""$ErrorActionPreference = 'Stop'
 $repo = '{escaped_repo}'
 $clients = @('{client}')
+$requestedClients = $clients
+$hookState = @{{}}
+$instrState = @{{}}
+$tunnelExit = 0
 $Transport = 'shim'
 $codexCredentialBootstrapFailed = $false
 $codexConnectionConfigured = $false
@@ -513,7 +547,7 @@ function Set-CodexRuntimeDefaults {{ $script:codexRuntimeDefaults = 'preserved' 
 $env:PSEUDOLIFE_SHIM_RUNTIMES = '{str(installed_bin / "runtimes").replace("'", "''")}'
 $env:PSEUDOLIFE_SHIM_LAUNCHER = '{escaped_installed_shim}'
 {helper}
-{native_stub.POWERSHELL}
+{installer_stub}
 {describe}
 {marker}
 {register}
@@ -521,6 +555,7 @@ $env:PSEUDOLIFE_SHIM_LAUNCHER = '{escaped_installed_shim}'
 $state = $mcpState['{client}']
 Write-Output "STATE=$state"
 Write-Output ("STATUS=" + (Get-McpMarker $state) + " " + (Describe-Mcp $state))
+{completion}
 """
     runner = tmp_path / "run-existing.ps1"
     runner.write_text(script, encoding="utf-8")
@@ -529,6 +564,32 @@ Write-Output ("STATUS=" + (Get-McpMarker $state) + " " + (Describe-Mcp $state))
         capture_output=True, check=False, timeout=15,
         env=_fixture_env(tmp_path / "powershell-env"),
     )
+
+
+@pytest.mark.parametrize("guard_status, exit_code", [("enabled", 0), ("not-verified", 0), ("absent", 5)])
+@pytest.mark.parametrize("shell", [*_bash_variants(), "powershell"], ids=lambda name: Path(name).name)
+def test_requested_gemini_rerun_checks_settings_when_listing_hides_guard(
+    tmp_path: Path, shell: str, guard_status: str, exit_code: int,
+) -> None:
+    config = _managed_config("gemini")
+    assert "PSEUDOLIFE_MCP_NO_SPAWN" not in config
+    args = dict(client="gemini", config=config, manager_exit=0, migrate_exit=4,
+                gemini_guard=guard_status, complete=True)
+    if shell == "powershell":
+        proc = _run_powershell_existing(tmp_path, **args)
+    else:
+        proc = _run_bash_existing(shell, tmp_path, **args)
+    output = (proc.stdout + proc.stderr).decode(errors="replace")
+    assert proc.returncode == exit_code, output
+    assert ("was not verified" in output) == (guard_status == "not-verified")
+    assert ("Requested client setup incomplete (Gemini CLI)" in output) == (exit_code == 5)
+    if exit_code == 5:
+        assert output.splitlines()[-1].endswith("Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun.")
+    else:
+        assert "STATE=present-current" in output
+    calls = (tmp_path / "calls.txt").read_text(encoding="utf-8")
+    assert "mcp add" not in calls
+    assert "mcp remove" not in calls
 
 
 @pytest.mark.parametrize("client", VISIBLE_ENV_CLIENTS)

@@ -2325,6 +2325,8 @@ function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
 # >>> client registration state >>>
 $script:connectedClients = @()
 $script:connectCheckedClients = @()
+$script:currentClientTokenChecked = $false
+$script:currentClientTokenFailure = $null
 $script:clientSetupFailures = @{}
 function Set-ClientSetupFailure([string]$Provider, [string]$Reason) {
     $script:clientSetupFailures[$Provider] = $Reason
@@ -2362,6 +2364,22 @@ function Write-ConnectPlan($report, [switch]$ManualOnly) {
         if ($row.detail) { Write-Host "             $($row.detail)" }
     }
 }
+function Test-CurrentClientToken {
+    if (-not $script:currentClientTokenChecked) {
+        $script:currentClientTokenChecked = $true
+        try {
+            $raw = Invoke-NativeHelper credentials verify-token-file --daemon-url $DaemonUrl --token-file $TokenFile
+            $status = $LASTEXITCODE
+            $report = ($raw -join "`n") | ConvertFrom-Json
+            if ($status -eq 0 -and $report.status -eq "ready") { return $true }
+            $script:currentClientTokenFailure = [string]$report.recovery
+        } catch { }
+        if (-not $script:currentClientTokenFailure) {
+            $script:currentClientTokenFailure = "The current registration's credential could not be verified. Check the daemon and rerun the installer."
+        }
+    }
+    return -not $script:currentClientTokenFailure
+}
 function Connect-ExistingRegistration([string[]]$Provider, [string]$Name, [switch]$Grouped) {
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): the pseudolife-mcp shim is unavailable (see above). One that names another daemon stays as it is."
@@ -2377,7 +2395,8 @@ function Connect-ExistingRegistration([string[]]$Provider, [string]$Name, [switc
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): $shim could not be run ($($_.Exception.Message)). One that names another daemon stays as it is."
         return $true
     }
-    $report = try { (@($planOutput) -join "`n") | ConvertFrom-Json } catch { $null }
+    $planJson = @($planOutput) -join "`n"
+    $report = try { $planJson | ConvertFrom-Json } catch { $null }
     # Only connect's own report is trusted. Anything else (a shim from before
     # connect, a held one) leaves the install as it was: the registrars run,
     # with their earlier advice for a mismatch.
@@ -2403,29 +2422,37 @@ function Connect-ExistingRegistration([string[]]$Provider, [string]$Name, [switc
         Write-ClientSetupFailure $Provider[0] "pseudolife-mcp connect could not check the existing registration (exit $planExit$reason). Fix the reported problem and rerun the installer."
         return $false
     }
-    Step "Existing registrations: pseudolife-mcp connect points them at $($DaemonUrl):"
-    Write-ConnectPlan $report
-    try {
-        $global:LASTEXITCODE = 0
-        $applyOutput = @(& $shim connect $DaemonUrl --token-file $TokenFile --client $Name --yes 2>&1)
-        $applyExit = $LASTEXITCODE
-    } catch {
-        $applyOutput = @($_.Exception.Message)
-        $applyExit = 1
-    }
-    $applyOutput | Out-Host
-    if ($applyExit -ne 0) {
-        if ($Grouped) { return $false }
-        $meaning = switch ($applyExit) {
-            1 { "a write failed, and every file it wrote was rolled back" }
-            4 { "verification failed, and nothing was written (see its reason above)" }
-            5 { "the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" }
-            default { "see its message above" }
+    if (($planJson | Invoke-NativeHelper connect-report current 2>$null) -ceq "current") {
+        if (-not (Test-CurrentClientToken)) {
+            if (-not $Grouped) { Write-ClientSetupFailure $Provider[0] $script:currentClientTokenFailure }
+            return $false
         }
-        $reported = $applyOutput | ForEach-Object { "$_" } | Where-Object { $_.StartsWith("connect: ") } | Select-Object -Last 1
-        if ($reported) { $meaning = $reported.Substring("connect: ".Length) }
-        Write-ClientSetupFailure $Provider[0] "pseudolife-mcp connect exited ${applyExit}: $meaning. Fix the reported problem and rerun the installer."
-        return $false
+        Step "Verified the current credential for $Name at $DaemonUrl. Nothing to write."
+    } else {
+        Step "Existing registrations: pseudolife-mcp connect points them at $($DaemonUrl):"
+        Write-ConnectPlan $report
+        try {
+            $global:LASTEXITCODE = 0
+            $applyOutput = @(& $shim connect $DaemonUrl --token-file $TokenFile --client $Name --yes 2>&1)
+            $applyExit = $LASTEXITCODE
+        } catch {
+            $applyOutput = @($_.Exception.Message)
+            $applyExit = 1
+        }
+        $applyOutput | Out-Host
+        if ($applyExit -ne 0) {
+            if ($Grouped) { return $false }
+            $meaning = switch ($applyExit) {
+                1 { "a write failed, and every file it wrote was rolled back" }
+                4 { "verification failed, and nothing was written (see its reason above)" }
+                5 { "the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" }
+                default { "see its message above" }
+            }
+            $reported = $applyOutput | ForEach-Object { "$_" } | Where-Object { $_.StartsWith("connect: ") } | Select-Object -Last 1
+            if ($reported) { $meaning = $reported.Substring("connect: ".Length) }
+            Write-ClientSetupFailure $Provider[0] "pseudolife-mcp connect exited ${applyExit}: $meaning. Fix the reported problem and rerun the installer."
+            return $false
+        }
     }
     $script:connectedClients += @(Get-ConnectRows $report |
         Where-Object { ($_.place -eq "registration") -and ($_.state -in "current", "change") } |
@@ -3190,11 +3217,21 @@ function Install-SelectedClient([string]$selectedClient) {
             $geminiRegistration = ("$geminiList" -split "`r?`n" | Where-Object { $_ -match 'pseudolife-memory:' } | Select-Object -First 1)
             $geminiGuardUnverified = $false
             if (($Transport -eq "shim") -and -not (Test-McpHttpRegistration "$geminiRegistration")) {
-                # `gemini mcp list` does not expose env values, so an existing
-                # stdio guard cannot be verified without inspecting settings.
-                if ($script:connectedClients -notcontains "gemini") {
-                    Write-UnverifiedNoSpawnGuard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
-                    $geminiGuardUnverified = $true
+                # The CLI list omits env. Inspect only the named registration
+                # and distinguish "missing guard" from "cannot read settings".
+                $geminiSettings = Join-Path $env:USERPROFILE ".gemini\settings.json"
+                $guardOutput = Invoke-NativeHelper credentials gemini-guard --config $geminiSettings 2>$null
+                $guardStatus = try { ($guardOutput -join "`n" | ConvertFrom-Json).status } catch { $null }
+                switch ($guardStatus) {
+                    "enabled" { }
+                    "absent" {
+                        Write-UnverifiedNoSpawnGuard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
+                        $geminiGuardUnverified = $true
+                    }
+                    default {
+                        $script:geminiGuardWarning = $true
+                        Write-Warning "The existing Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json."
+                    }
                 }
                 $bareRegisteredShim = "$geminiRegistration" -match '(?i)pseudolife-memory:\s*pseudolife-mcp(?:\.exe)?\s*\(stdio\)'
                 $managedRegisteredShim = $bareRegisteredShim
@@ -4131,6 +4168,7 @@ function Get-ClientSetupWarnings {
     }
     if ($script:codexRuntimeDefaults -eq "failed") { "Codex runtime defaults were not confirmed. $script:codexRuntimeRecovery" }
     if ($script:clientHookSettingsWarning) { "Claude Code hook credential settings were not written. See the repair above." }
+    if ($script:geminiGuardWarning) { "Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json." }
     if ($script:codexInstructionWarning) { "Codex standing instructions could not be written. Check the Codex home and file permissions." }
     foreach ($state in $instrState.Values) {
         if ($state -like "failed:*") { "Standing instructions could not be written to $($state.Substring(7)). Check permissions and rerun." }

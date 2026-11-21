@@ -2401,6 +2401,8 @@ MCP_GEMINI=""
 # its all-client schedule step. Isolate the providers if that move fails.
 CONNECTED_CLIENTS=""
 CONNECT_CHECKED_CLIENTS=""
+CONNECT_CURRENT_CHECKED=""
+CONNECT_CURRENT_FAILURE=""
 # >>> client registration state >>>
 set_client_state() {
     case "$1" in
@@ -2436,10 +2438,24 @@ client_connect_checked() {
     return 1
 }
 # <<< client registration state <<<
-connect_report_lines() {  # $1 = valid|error|plan|manual|handled; connect's --json report on stdin
+connect_report_lines() {  # mode and the connect --json report on stdin
     # valid: status 0 for connect's report (a JSON object with rows and
     # exit); the others print its error, its changes or the handled clients.
     native_helper connect-report "$1"
+}
+verify_current_client_token() {
+    if [ -z "$CONNECT_CURRENT_CHECKED" ]; then
+        CONNECT_CURRENT_CHECKED=1
+        local report status=0
+        report=$(native_helper credentials verify-token-file --daemon-url "$DAEMON_URL" --token-file "$TOKEN_FILE") || status=$?
+        if [ "$status" -ne 0 ] || [ "$(native_helper json-field status <<< "$report" 2>/dev/null)" != ready ]; then
+            CONNECT_CURRENT_FAILURE=$(native_helper json-field recovery <<< "$report" 2>/dev/null) || CONNECT_CURRENT_FAILURE=""
+            if [ -z "$CONNECT_CURRENT_FAILURE" ]; then
+                CONNECT_CURRENT_FAILURE="The current registration's credential could not be verified. Check the daemon and rerun the installer."
+            fi
+        fi
+    fi
+    [ -z "$CONNECT_CURRENT_FAILURE" ]
 }
 connect_existing_registration() {
     local provider="$1" connect_name="$2" grouped="${3:-}"
@@ -2476,22 +2492,31 @@ connect_existing_registration() {
             warn_client_failure "$provider" "pseudolife-mcp connect could not check the existing registration (exit $connect_rc${connect_error:+: $connect_error}). Fix the reported problem and rerun the installer."
             return 0 ;;
     esac
-    step "Existing registrations: pseudolife-mcp connect points them at $DAEMON_URL:"
-    printf '%s' "$connect_report" | connect_report_lines plan || true
-    connect_rc=0
-    connect_result=$("$SHIM_PATH" connect "$DAEMON_URL" --token-file "$TOKEN_FILE" --client "$connect_name" --yes </dev/null 2>&1) || connect_rc=$?
-    [ -z "$connect_result" ] || printf '%s\n' "$connect_result"
-    if [ "$connect_rc" -ne 0 ]; then
-        [ -z "$grouped" ] || return 1
-        case "$connect_rc" in
-            1) connect_meaning="a write failed, and every file it wrote was rolled back" ;;
-            4) connect_meaning="verification failed, and nothing was written (see its reason above)" ;;
-            5) connect_meaning="the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" ;;
-            *) connect_meaning="see its message above" ;;
-        esac
-        connect_error="$(printf '%s\n' "$connect_result" | sed -n 's/^connect: //p' | tail -1)"
-        warn_client_failure "$provider" "pseudolife-mcp connect exited $connect_rc: ${connect_error:-$connect_meaning}. Fix the reported problem and rerun the installer."
-        return 0
+    if [ "$(printf '%s' "$connect_report" | connect_report_lines current 2>/dev/null)" = current ]; then
+        if ! verify_current_client_token; then
+            [ -z "$grouped" ] || return 1
+            warn_client_failure "$provider" "$CONNECT_CURRENT_FAILURE"
+            return 0
+        fi
+        step "Verified the current credential for $connect_name at $DAEMON_URL. Nothing to write."
+    else
+        step "Existing registrations: pseudolife-mcp connect points them at $DAEMON_URL:"
+        printf '%s' "$connect_report" | connect_report_lines plan || true
+        connect_rc=0
+        connect_result=$("$SHIM_PATH" connect "$DAEMON_URL" --token-file "$TOKEN_FILE" --client "$connect_name" --yes </dev/null 2>&1) || connect_rc=$?
+        [ -z "$connect_result" ] || printf '%s\n' "$connect_result"
+        if [ "$connect_rc" -ne 0 ]; then
+            [ -z "$grouped" ] || return 1
+            case "$connect_rc" in
+                1) connect_meaning="a write failed, and every file it wrote was rolled back" ;;
+                4) connect_meaning="verification failed, and nothing was written (see its reason above)" ;;
+                5) connect_meaning="the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" ;;
+                *) connect_meaning="see its message above" ;;
+            esac
+            connect_error="$(printf '%s\n' "$connect_result" | sed -n 's/^connect: //p' | tail -1)"
+            warn_client_failure "$provider" "pseudolife-mcp connect exited $connect_rc: ${connect_error:-$connect_meaning}. Fix the reported problem and rerun the installer."
+            return 0
+        fi
     fi
     connect_handled=$(printf '%s' "$connect_report" | connect_report_lines handled) || connect_handled=""
     CONNECTED_CLIENTS="$CONNECTED_CLIENTS $connect_handled"
@@ -3263,11 +3288,18 @@ for selected_client in $CLIENTS; do
             gemini_registration=$(printf '%s\n' "$existing_gemini" | grep -E 'pseudolife-memory:' | sed -n '1p')
             gemini_guard_unverified=""
             if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$gemini_registration"; then
-                # `gemini mcp list` does not expose env values, so an existing
-                # stdio guard cannot be verified without inspecting settings.
-                case " ${CONNECTED_CLIENTS:-} " in *" gemini "*) ;; *)
-                    warn_unverified_no_spawn_guard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
-                    gemini_guard_unverified=1 ;;
+                # The CLI list omits env. Inspect only the named registration
+                # and distinguish "missing guard" from "cannot read settings".
+                gemini_settings_check=$(native_helper credentials gemini-guard --config "$HOME/.gemini/settings.json" 2>/dev/null) || gemini_settings_check=""
+                gemini_guard_status=$(native_helper json-field status <<< "$gemini_settings_check" 2>/dev/null) || gemini_guard_status=""
+                case "$gemini_guard_status" in
+                    enabled) ;;
+                    absent)
+                        warn_unverified_no_spawn_guard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
+                        gemini_guard_unverified=1 ;;
+                    *)
+                        GEMINI_GUARD_WARNING=1
+                        echo "WARNING: The existing Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json." >&2 ;;
                 esac
                 managed_registered_shim=""
                 bare_registered_shim=""
@@ -4263,6 +4295,7 @@ client_setup_warnings() {
     fi
     if [ "${CODEX_RUNTIME_DEFAULTS:-}" = failed ]; then printf 'Codex runtime defaults were not confirmed. %s\n' "$CODEX_RUNTIME_RECOVERY"; fi
     if [ -n "${CLIENT_HOOK_SETTINGS_WARNING:-}" ]; then echo "Claude Code hook credential settings were not written. See the repair above."; fi
+    if [ -n "${GEMINI_GUARD_WARNING:-}" ]; then echo "Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json."; fi
     for state in "${INSTR_CLAUDE:-}" "${INSTR_CODEX:-}" "${INSTR_GEMINI:-}" "${INSTR_GENERIC:-}"; do
         case "$state" in failed:*) printf 'Standing instructions could not be written to %s. Check permissions and rerun.\n' "${state#*:}" ;; esac
     done

@@ -1164,7 +1164,8 @@ def _copy_repo(tmp_path: Path) -> Path:
 FRESH_CONNECT = '{"url": null, "rows": [], "exit": 3, "error": "none"}'
 
 
-def _whole_client_only_run(bash, tmp_path, board_server, *, connect_report: str = FRESH_CONNECT, connect_exit: int = 3):
+def _whole_client_only_run(bash, tmp_path, board_server, *, connect_report: str = FRESH_CONNECT,
+                           connect_exit: int = 3, current_recovery: str = ""):
     """The whole client-only run, with a configurable Claude Code connect result."""
     shell = _Shell(bash, tmp_path)
     token = _token(shell)
@@ -1175,9 +1176,17 @@ def _whole_client_only_run(bash, tmp_path, board_server, *, connect_report: str 
     # The staged client's installer steps are answered by the stand-in, which
     # runs this checkout's helpers as the native client carries its own.
     standin = shell.path(ROOT / "tests" / "native_helper_standin.py")
+    verify = ""
+    if current_recovery:
+        report = json.dumps({"status": "failed", "recovery": current_recovery})
+        verify = (
+            "if [ \"$1 $2 $3\" = 'installer connect-report current' ]; then cat >/dev/null; echo current; exit 0; fi\n"
+            "if [ \"$1 $2 $3\" = 'installer credentials verify-token-file' ]; then\n"
+            f"  printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"; echo '{report}'; exit 1\nfi\n"
+        )
     release_env = native_stub.write_release(
         tmp_path / "release", version,
-        "if [ \"$1\" = installer ] && [ \"$2\" != migrate-registrations ]; then\n"
+        verify + "if [ \"$1\" = installer ] && [ \"$2\" != migrate-registrations ]; then\n"
         f"  shift; exec '{shell.path(sys.executable)}' '{standin}' '{shell.path(ROOT)}' \"$@\"\nfi\n"
         "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
         "if [ \"$1\" = connect ]; then\n"
@@ -1384,3 +1393,16 @@ def test_client_only_connect_failure_keeps_the_native_client_and_reports_partial
     settings = json.loads((shell.home / ".claude" / "settings.json").read_text(encoding="utf-8"))
     assert settings["env"]["PSEUDOLIFE_MCP_DAEMON_URL"] == "http://127.0.0.1:8765"
     assert settings["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"] == "/fixture/local/claude-code.token"
+
+
+@BASH
+def test_client_only_current_registration_with_refused_token_is_incomplete(bash, tmp_path, board_server):
+    plan = json.dumps({"rows": [{"place": "registration", "client": "claude-code", "state": "current"}], "exit": 0})
+    _, proc, _, _, shell, _ = _whole_client_only_run(
+        bash, tmp_path, board_server, connect_report=plan, connect_exit=0, current_recovery=DENIED_CREDENTIAL)
+    assert proc.returncode == 5, proc.stdout + proc.stderr
+    assert proc.stderr.splitlines()[-1] == "Requested client setup incomplete (Claude Code). " + DENIED_CREDENTIAL
+    calls = shell.logged()
+    assert len([call for call in calls if call.startswith("shim|installer credentials verify-token-file")]) == 1
+    assert not any(call.startswith("shim|connect") and "--yes" in call for call in calls)
+    assert any(call.startswith("gemini|mcp add -s user") for call in calls)
