@@ -1020,6 +1020,61 @@ def test_a_tunnel_failure_cannot_hide_incomplete_requested_clients(tmp_path):
     assert proc.stderr.splitlines()[-1].startswith("Requested client setup incomplete (Codex).")
 
 
+@pytest.mark.parametrize("accepted", [True, False], ids=["accepted", "rejected"])
+def test_current_credential_probe_in_native_powershell(tmp_path, accepted):
+    ps = _PowerShell(tmp_path)
+    recovery = ("The installer credential was not accepted by the configured daemon. "
+                "Supply a token accepted by that daemon, then rerun the installer.")
+    report = json.dumps({"status": "ready"} if accepted else {"status": "failed", "recovery": recovery})
+    plan = json.dumps({"exit": 0, "rows": [
+        {"client": "claude-code", "place": "registration", "state": "current"}]})
+    body = f"""$clients = @('claude', 'gemini')
+$requestedClients = $clients
+$DaemonUrl = '{REMOTE}'
+$TokenFile = 'fixture.token'
+$tunnelExit = 0
+$hookState = @{{}}
+$instrState = @{{}}
+$mcpState = @{{}}
+function claude {{ }}
+function gemini {{ }}
+function Step($message) {{ Write-Output $message | Out-Host }}
+function Install-ShimOnce {{ $script:shimInstallPath = 'fake-shim'; return $true }}
+function fake-shim {{
+    Add-Content -LiteralPath '{_q(ps.calls)}' -Value ('shim|' + ($args -join ' '))
+    if ($args -contains '--yes') {{ throw 'A current registration must not be rewritten.' }}
+    if ($args -contains 'gemini') {{
+        $global:LASTEXITCODE = 3
+        return '{{"exit":3,"rows":[]}}'
+    }}
+    $global:LASTEXITCODE = 0
+    return '{plan}'
+}}
+function Invoke-NativeHelper {{
+    if ($args[0] -eq 'connect-report' -and $args[1] -eq 'current') {{
+        return 'current'
+    }}
+    Add-Content -LiteralPath '{_q(ps.calls)}' -Value ('installer|' + ($args -join ' '))
+    $global:LASTEXITCODE = {0 if accepted else 1}
+    return '{report}'
+}}
+{_block("client-only connect")}
+Invoke-ClientOnlyConnect
+if (-not $script:clientSetupFailures['gemini']) {{ Write-Output 'GEMINI_REGISTRAR_ELIGIBLE' }}
+{_block("client setup result")}
+"""
+    proc = ps.run(body)
+    assert proc.returncode == (0 if accepted else 5), _output(proc)
+    assert "GEMINI_REGISTRAR_ELIGIBLE" in proc.stdout
+    assert not any("--yes" in call for call in ps.logged())
+    assert [call for call in ps.logged() if call.startswith("installer|")] == [
+        f"installer|credentials verify-token-file --daemon-url {REMOTE} --token-file fixture.token"]
+    if accepted:
+        assert "Nothing to write." in proc.stdout
+    else:
+        assert proc.stderr.splitlines()[-1] == f"Requested client setup incomplete (Claude Code). {recovery}"
+
+
 @pytest.mark.parametrize("outcome,recovery", [
     ("refused", "The installer credential was not accepted by the configured daemon. "
      "Supply a token accepted by that daemon, then rerun the installer."),

@@ -2321,7 +2321,8 @@ function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
 # section 11: those create only what is still missing, and the Codex setup
 # refuses a daemon URL its configured server does not name. The dry run sends
 # no token and writes nothing; when it finds no registration (exit 3),
-# connect is not run again. A failed connect stops the install.
+# connect is not run again. Keep the grouped plan on success, including
+# its all-client schedule step. Isolate the providers after a failed plan.
 # >>> client registration state >>>
 $script:connectedClients = @()
 $script:connectCheckedClients = @()
