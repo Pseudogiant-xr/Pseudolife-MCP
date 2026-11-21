@@ -297,8 +297,10 @@ pub(crate) mod windows_job {
             },
             JobObjects::{
                 AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-                JobObjectExtendedLimitInformation, SetInformationJobObject,
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
+                JobObjectExtendedLimitInformation, QueryInformationJobObject,
+                SetInformationJobObject, TerminateJobObject,
             },
             Threading::{
                 GetProcessIdOfThread, OpenThread, ResumeThread, THREAD_QUERY_LIMITED_INFORMATION,
@@ -308,6 +310,14 @@ pub(crate) mod windows_job {
     };
 
     pub(crate) fn create() -> io::Result<OwnedHandle> {
+        create_with_flags(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK)
+    }
+
+    pub(crate) fn create_contained() -> io::Result<OwnedHandle> {
+        create_with_flags(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+    }
+
+    fn create_with_flags(flags: u32) -> io::Result<OwnedHandle> {
         // SAFETY: null attributes/name create an unnamed, non-inheritable job.
         let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if raw.is_null() {
@@ -318,8 +328,7 @@ pub(crate) mod windows_job {
         let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         // Explicit detached spawns may leave; ordinary descendants stay owned.
         // SILENT_BREAKAWAY_OK would incorrectly release ordinary children too.
-        info.BasicLimitInformation.LimitFlags =
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+        info.BasicLimitInformation.LimitFlags = flags;
         // SAFETY: the owned job and correctly sized information stay live.
         if unsafe {
             SetInformationJobObject(
@@ -333,6 +342,35 @@ pub(crate) mod windows_job {
             return Err(io::Error::last_os_error());
         }
         Ok(job)
+    }
+
+    pub(crate) fn terminate(job: &OwnedHandle) -> io::Result<()> {
+        // SAFETY: the handle belongs to the caller's live, unnamed job.
+        if unsafe { TerminateJobObject(job.as_raw_handle(), 1) } == 0 {
+            let error = io::Error::last_os_error();
+            if !is_empty(job).unwrap_or(false) {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_empty(job: &OwnedHandle) -> io::Result<bool> {
+        let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: the job and correctly sized accounting buffer remain live.
+        if unsafe {
+            QueryInformationJobObject(
+                job.as_raw_handle(),
+                JobObjectBasicAccountingInformation,
+                (&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of_val(&info) as u32,
+                std::ptr::null_mut(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(info.ActiveProcesses == 0)
     }
 
     pub(crate) fn assign_and_resume(

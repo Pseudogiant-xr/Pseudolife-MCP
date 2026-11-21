@@ -20,6 +20,9 @@ mod diagnostics;
 pub(super) mod identity;
 mod key;
 mod process;
+pub(super) mod readiness;
+mod refresh;
+pub(super) mod restart;
 #[cfg(test)]
 mod tests;
 
@@ -70,15 +73,40 @@ pub(super) fn run(root: &Path, name: &str) -> Output {
     } else {
         STARTUP
     };
-    launch(prepared, &executable, deadline, |config| {
-        let mut command = Command::new(installed.binary);
-        command
-            .args(["run", "--profile-file"])
-            .arg(config)
-            .env_clear()
-            .envs(vendor::probe_environment(std::env::vars_os()));
-        command
-    })
+    launch_with_vendor(
+        prepared,
+        &executable,
+        deadline,
+        Some(&installed.binary),
+        |config| {
+            let mut command = Command::new(&installed.binary);
+            command
+                .args(["run", "--profile-file"])
+                .arg(config)
+                .env_clear()
+                .envs(vendor::probe_environment(std::env::vars_os()));
+            command
+        },
+    )
+}
+
+fn check_executable_path(path: &Path) -> Result<(), Fail> {
+    store::checked_path(path).map_err(|_| CHILD_ERROR)?;
+    if !path.is_absolute() || !crate::runtime::plain_file(path) {
+        return Err(CHILD_ERROR);
+    }
+    #[cfg(windows)]
+    if path
+        .file_name()
+        .is_some_and(|name| name == crate::runtime::BINARY)
+    {
+        state::open(path).map_err(|_| CHILD_ERROR)?;
+    }
+    #[cfg(unix)]
+    if rustix::process::geteuid().is_root() {
+        trusted_root_paths([path])?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -278,6 +306,12 @@ struct LaunchRecord {
     supervisor: Identity,
     target: Option<Identity>,
     ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh: Option<refresh::Capability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh_outcome: Option<refresh::Outcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bridge_attempt: Option<readiness::Attempt>,
 }
 
 const OWNER_LOCK: &str = "supervisor.lock";
@@ -312,6 +346,7 @@ fn recover_launch(root: &Path, name: &str) -> Result<(), Fail> {
             path.display()
         )));
     }
+    refresh::repair_outcome(root, name, &launch).map_err(|_| conflict(root, name))?;
     remove_launch_files(&directory, &format!("{name}.profile.json"))?;
     store::sharing_retry(|| fs::remove_file(&path)).map_err(|_| conflict(root, name))
 }
@@ -336,21 +371,55 @@ fn remove_launch_files(directory: &Path, profile: &str) -> Result<(), Fail> {
         "health.url",
         "stop",
         OWNER_LOCK,
+        refresh::REQUEST,
+        refresh::CLAIM,
+        refresh::PUBLISHER,
+        refresh::ISSUE,
     ];
+    let mut senders = Vec::new();
+    let mut stages = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_| blocked())?;
-        if !entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| known.contains(&name))
-            || !entry.file_type().is_ok_and(|kind| kind.is_file())
+        let name = entry.file_name();
+        let name = name.to_str().ok_or_else(&blocked)?;
+        if !entry.file_type().is_ok_and(|kind| kind.is_file())
             || store::checked_path(&entry.path()).is_err()
         {
             return Err(blocked());
         }
+        if refresh::sender_file(name) || readiness::lock_name(name) {
+            senders.push(entry.path());
+        } else if setup::publication_stage(name) && state::open(&entry.path()).is_ok() {
+            stages.push(entry.path());
+        } else if !known.contains(&name) {
+            return Err(blocked());
+        }
     }
-    for name in known {
-        if let Err(error) = store::sharing_retry(|| fs::remove_file(directory.join(name)))
+    if !stages.is_empty() {
+        let publication = directory.join(refresh::PUBLISHER);
+        let _publisher = if store::occupied(&publication).map_err(|_| blocked())? {
+            let lock = state::open_with_write(&publication, true)
+                .map_err(|_| blocked())?
+                .file;
+            lock.try_lock().map_err(|_| blocked())?;
+            Some(lock)
+        } else {
+            None
+        };
+        for staged in stages {
+            if let Err(error) = store::sharing_retry(|| fs::remove_file(&staged))
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(blocked());
+            }
+        }
+    }
+    for path in known
+        .into_iter()
+        .map(|name| directory.join(name))
+        .chain(senders)
+    {
+        if let Err(error) = store::sharing_retry(|| fs::remove_file(&path))
             && error.kind() != std::io::ErrorKind::NotFound
         {
             return Err(blocked());
@@ -416,7 +485,7 @@ impl Stage {
             if existing.native_launch != record.native_launch {
                 return Err(UNSAFE_STORE);
             }
-            state::atomic_write(&self.record, &bytes, Some(&identity)).map_err(|_| UNSAFE_STORE)
+            setup::replace_private_if(&self.record, &bytes, &identity)
         } else {
             setup::publish_new(&self.record, |file| file.write_all(&bytes))?;
             self.owns_record = true;
@@ -427,6 +496,17 @@ impl Stage {
 
 impl Drop for Stage {
     fn drop(&mut self) {
+        if self.owns_record
+            && let (Some(root), Some(name)) = (
+                self.record.parent(),
+                self.profile.strip_suffix(".profile.json"),
+            )
+            && let Ok(record) = read_record(&self.record)
+            && record.native_launch == self.launch
+            && refresh::repair_outcome(root, name, &record).is_err()
+        {
+            self.retain = true;
+        }
         drop(self.owner.take());
         if self.retain {
             crate::stderrln!(
@@ -456,6 +536,7 @@ fn bridge_command(
     directory: &Path,
     name: &str,
     launch: Uuid,
+    attempt: &str,
 ) -> Result<String, Fail> {
     let quote = |path: &Path| -> Result<String, Fail> {
         let text = path
@@ -467,25 +548,54 @@ fn bridge_command(
         // The vendor parses this with Go shellwords on Windows too.
         Ok(format!("'{}'", text.replace('\'', "'\\''")))
     };
+    #[cfg(test)]
+    if std::env::var_os(tests::restart_cases::FIXTURE_ENV).as_deref()
+        == Some(std::ffi::OsStr::new("supervisor"))
+    {
+        let fixture = std::env::current_exe().map_err(|_| CHILD_ERROR)?;
+        return Ok(format!(
+            "{} --exact {} --nocapture --selected-image {} --bridge-attempt {attempt}",
+            quote(&fixture)?,
+            tests::restart_cases::FIXTURE,
+            quote(executable)?
+        ));
+    }
     Ok(format!(
-        "{} tunnel shim --profile {name} --profile-dir {} --launch-id {}",
+        "{} tunnel shim --profile {name} --profile-dir {} --launch-id {} --bridge-attempt {attempt}",
         quote(executable)?,
         quote(directory)?,
         launch.simple(),
     ))
 }
 
+#[cfg(test)]
 fn launch(
     prepared: Prepared<'_>,
     executable: &Path,
     deadline: Duration,
-    command: impl FnOnce(&Path) -> Command,
+    command: impl Fn(&Path) -> Command,
+) -> Output {
+    launch_with_vendor(prepared, executable, deadline, None, command)
+}
+
+fn launch_with_vendor(
+    prepared: Prepared<'_>,
+    executable: &Path,
+    deadline: Duration,
+    vendor_path: Option<&Path>,
+    command: impl Fn(&Path) -> Command,
 ) -> Output {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|_| CHILD_ERROR)?;
-    let result = runtime.block_on(supervise(prepared, executable, deadline, command));
+    let result = runtime.block_on(supervise(
+        prepared,
+        executable,
+        deadline,
+        vendor_path,
+        command,
+    ));
     runtime.shutdown_background();
     result
 }
@@ -494,169 +604,392 @@ async fn supervise(
     prepared: Prepared<'_>,
     executable: &Path,
     deadline: Duration,
-    command: impl FnOnce(&Path) -> Command,
+    vendor_path: Option<&Path>,
+    command: impl Fn(&Path) -> Command,
 ) -> Output {
+    let Prepared {
+        root,
+        profile,
+        profile_bytes,
+        key,
+        previous_key,
+        _locks,
+    } = prepared;
     let mut signals = process::Signals::new().map_err(|_| CHILD_ERROR)?;
     let id = Uuid::new_v4();
-    let name = &prepared.profile.name;
+    let name = &profile.name;
+    let image = refresh::Image {
+        path: executable.to_owned(),
+        digest: crate::runtime::hash_file(executable).map_err(|_| CHILD_ERROR)?,
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        vendor_version: vendor::VERSION.to_owned(),
+    };
+    identity::ensure_signing_key(root).map_err(Fail::Tunnel)?;
     let launch_identity =
-        identity::compute(prepared.root, &prepared.profile, &prepared.key, executable)?;
-    let mut stage = Stage::new(prepared.root, name, id)?;
+        identity::sign_image(root, &profile, &key, &image).map_err(Fail::Tunnel)?;
+    let supervisor = std::env::current_exe().map_err(|_| CHILD_ERROR)?;
+    let mut stage = Stage::new(root, name, id)?;
     let mut record = LaunchRecord {
         native_launch: id.simple().to_string(),
         launch_identity: Some(launch_identity),
         spawn_started: Some(false),
         supervisor: Identity {
             pid: std::process::id(),
-            exe: executable.to_owned(),
+            exe: crate::cli::update::seams::command_path(supervisor),
         },
         target: None,
         ready: false,
+        refresh: Some(refresh::Capability {
+            epoch: Uuid::new_v4().simple().to_string(),
+            image,
+        }),
+        refresh_outcome: None,
+        bridge_attempt: None,
     };
-    // Record ownership before a Unix launch writes its plaintext key.
+    // Publish ownership before staging the private runtime key.
     stage.announce(&record)?;
-    let profile_path = stage.directory.join(&stage.profile);
-    state::atomic_create(&profile_path, &prepared.profile_bytes).map_err(|_| UNSAFE_STORE)?;
-    let key = prepared.key.stage(&stage.directory, id)?;
-    let health = stage.directory.join("health.url");
-    let mut control = json!({
-        "base_url": "https://api.openai.com", "tunnel_id": prepared.profile.tunnel_id,
-        "api_key": key.reference
-    });
-    if let Some(org) = &prepared.profile.organization_id {
-        control["organization_id"] = json!(org);
-    }
-    let config = json!({
-        "config_version": 1, "control_plane": control,
-        "health": {"listen_addr": "127.0.0.1:0", "url_file": health},
-        "admin_ui": {"open_browser": false},
-        "log": {"level": "info", "format": "json"},
-        "mcp": {"commands": [{"channel": "main", "command": bridge_command(executable, &stage.directory, name, id)?}]}
-    });
-    let config_path = stage.config();
-    state::atomic_create(
-        &config_path,
-        &serde_json::to_vec(&config).map_err(|_| UNSAFE_STORE)?,
-    )
-    .map_err(|_| UNSAFE_STORE)?;
-    if stop_marker(&stage.directory, id)? {
-        return Ok((format!("Tunnel {name} stopped.\n"), 0));
-    }
-    // A crash between spawn and publication of the target is ambiguous.
-    // Durably record that spawning can occur before taking that step.
-    record.spawn_started = Some(true);
-    stage.announce(&record)?;
-    let mut command = command(&config_path);
-    let target = PathBuf::from(command.as_std().get_program());
-    command
-        .current_dir(&stage.directory)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    let mut child = process::Child::spawn(command).map_err(|_| CHILD_ERROR)?;
-    let mut stderr = child
-        .take_stderr()
-        .map(|pipe| tokio::spawn(diagnostics::drain(pipe)));
-    let mut awaiting_poll = prepared.previous_key;
-    let result = async {
-        let pid = child.id().ok_or(CHILD_ERROR)?;
-        record.target = Some(Identity { pid, exe: target });
-        stage.announce(&record)?;
-        let client = reqwest::Client::builder().no_proxy().retry(reqwest::retry::never())
-            .redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(1))
-            .build().map_err(|_| NOT_READY)?;
-        let limit = tokio::time::Instant::now() + deadline;
-        loop {
+    refresh::retire_outcome(root, name)?;
+    state::atomic_create(&stage.directory.join(&stage.profile), &profile_bytes)
+        .map_err(|_| UNSAFE_STORE)?;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .retry(reqwest::retry::never())
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(1))
+        .build()
+        .map_err(|_| NOT_READY)?;
+    let session = Session {
+        root,
+        profile: &profile,
+        profile_bytes: &profile_bytes,
+        id,
+        vendor_path,
+        command: &command,
+        client,
+    };
+    let mut active = session
+        .start(
+            &mut stage,
+            &mut record,
+            &key,
+            deadline,
+            previous_key,
+            &mut signals,
+        )
+        .await?;
+    drop(key);
+    // Hold the selected image through its bridge lifetime and a possible rollback.
+    let mut refresh_driver = restart::Driver::default();
+    loop {
+        restart::flush_outcome(&session, &mut record);
+        let Some(mut running) = active.take() else {
+            return stopped(name);
+        };
+        let decision = async {
             if stop_marker(&stage.directory, id)? {
-                return Ok((format!("Tunnel {name} stopped.\n"), 0));
+                return Ok(Some(stopped(name)));
             }
-            if let Some(code) = child.exit_code().map_err(|_| CHILD_ERROR)? {
-                return if record.ready {
-                    Ok((format!("Tunnel {name} exited.\n"), code))
-                } else {
-                    Err(NOT_READY)
-                };
+            if let Some(code) = running.child.exit_code().map_err(|_| CHILD_ERROR)? {
+                return Ok(Some(Ok((format!("Tunnel {name} exited.\n"), code))));
             }
-            if !record.ready {
+            Ok(None)
+        }
+        .await;
+        match decision {
+            Ok(Some(output)) => return running.finish(root, name, &mut stage, output, false).await,
+            Err(error) => {
+                return running
+                    .finish(root, name, &mut stage, Err(error), false)
+                    .await;
+            }
+            Ok(None) => {}
+        }
+        active = restart::handle(
+            &session,
+            &mut stage,
+            &mut record,
+            &mut signals,
+            &mut refresh_driver,
+            running,
+        )
+        .await?;
+        tokio::select! {
+            biased;
+            _ = signals.wait() => {
+                if let Some(running) = active.take() {
+                    return running.finish(root, name, &mut stage, stopped(name), false).await;
+                }
+                return stopped(name);
+            }
+            () = tokio::time::sleep(POLL) => {},
+        }
+    }
+}
+
+fn stopped(name: &str) -> Output {
+    Ok((format!("Tunnel {name} stopped.\n"), 0))
+}
+
+struct Session<'a> {
+    root: &'a Path,
+    profile: &'a Profile,
+    profile_bytes: &'a [u8],
+    id: Uuid,
+    vendor_path: Option<&'a Path>,
+    command: &'a dyn Fn(&Path) -> Command,
+    client: reqwest::Client,
+}
+
+impl Session<'_> {
+    #[cfg(unix)]
+    fn verify_vendor_paths(&self) -> Result<(), Fail> {
+        if let Some(vendor_path) = self.vendor_path
+            && rustix::process::geteuid().is_root()
+        {
+            trusted_root_paths([self.root, vendor_path, Path::new(&self.profile.token_file)])?;
+        }
+        Ok(())
+    }
+
+    fn verify_vendor(&self) -> Result<(), vendor::IntegrityIssue> {
+        self.vendor_path
+            .map_or(Ok(()), |path| vendor::reverify(self.root, path))
+    }
+
+    fn configure(
+        &self,
+        stage: &Stage,
+        executable: &Path,
+        key: &key::Key,
+        attempt: &str,
+    ) -> Result<key::Staged, Fail> {
+        let staged_key = key.stage(&stage.directory)?;
+        let mut control = json!({
+            "base_url": "https://api.openai.com", "tunnel_id": self.profile.tunnel_id,
+            "api_key": staged_key.reference
+        });
+        if let Some(org) = &self.profile.organization_id {
+            control["organization_id"] = json!(org);
+        }
+        let config = json!({
+            "config_version": 1, "control_plane": control,
+            "health": {"listen_addr": "127.0.0.1:0", "url_file": stage.directory.join("health.url")},
+            "admin_ui": {"open_browser": false},
+            "log": {"level": "info", "format": "json"},
+            "mcp": {"commands": [{"channel": "main", "command": bridge_command(executable, &stage.directory, &self.profile.name, self.id, attempt)?}]}
+        });
+        let path = stage.config();
+        let bytes = serde_json::to_vec(&config).map_err(|_| UNSAFE_STORE)?;
+        if store::occupied(&path)? {
+            setup::replace_private(&path, &bytes)?;
+        } else {
+            setup::publish_new(&path, |file| file.write_all(&bytes))?;
+        }
+        Ok(staged_key)
+    }
+
+    async fn start(
+        &self,
+        stage: &mut Stage,
+        record: &mut LaunchRecord,
+        key: &key::Key,
+        deadline: Duration,
+        mut awaiting_poll: bool,
+        signals: &mut process::Signals,
+    ) -> Result<Option<RunningChild>, Fail> {
+        let name = &self.profile.name;
+        if stop_marker(&stage.directory, self.id)? {
+            return Ok(None);
+        }
+        #[cfg(unix)]
+        self.verify_vendor_paths()?;
+        self.verify_vendor()
+            .map_err(|issue| Fail::Detail(issue.repair(self.root, "retry")))?;
+        let health = stage.directory.join("health.url");
+        store::checked_path(&health)?;
+        if let Err(error) = store::sharing_retry(|| fs::remove_file(&health))
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(NOT_READY);
+        }
+        let executable = &record.refresh.as_ref().ok_or(CHILD_ERROR)?.image.path;
+        let launch_identity = record.launch_identity.as_deref().ok_or(CHILD_ERROR)?;
+        let attempt = readiness::Attempt::new(self.root, &record.native_launch, launch_identity)
+            .map_err(Fail::Tunnel)?;
+        let staged_key = self.configure(stage, executable, key, &attempt.id)?;
+        // A crash between spawn and publication of the target is ambiguous.
+        record.ready = false;
+        record.bridge_attempt = Some(attempt.clone());
+        record.target = None;
+        record.spawn_started = Some(true);
+        stage.announce(record)?;
+        let mut command = (self.command)(&stage.config());
+        let target = PathBuf::from(command.as_std().get_program());
+        command
+            .current_dir(&stage.directory)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        let child = match process::Child::spawn(command) {
+            Ok(child) => child,
+            Err(_) => {
+                // Spawn can fail after the OS created a child. Preserve the
+                // ambiguous record instead of trying to launch a second one.
+                stage.retain = true;
+                return Err(CHILD_ERROR);
+            }
+        };
+        let mut running = RunningChild::new(child, staged_key);
+        let ready = async {
+            let pid = running.child.id().ok_or(CHILD_ERROR)?;
+            record.target = Some(Identity { pid, exe: target });
+            stage.announce(record)?;
+            let limit = tokio::time::Instant::now() + deadline;
+            loop {
+                if stop_marker(&stage.directory, self.id)? {
+                    return Ok(false);
+                }
+                if running.child.exit_code().map_err(|_| CHILD_ERROR)?.is_some() {
+                    return Err(NOT_READY);
+                }
                 if tokio::time::Instant::now() >= limit {
                     return Err(READINESS_TIMEOUT);
                 }
                 if let Some(url) = health_url(&health) {
-                    let probe = ready_probe(&client, &url, awaiting_poll);
+                    let probe = ready_probe(&self.client, &url, awaiting_poll);
                     let (ready, confirmed) = tokio::select! {
                         biased;
-                        _ = signals.wait() => return Ok((format!("Tunnel {name} stopped.\n"), 0)),
+                        _ = signals.wait() => return Ok(false),
                         response = tokio::time::timeout_at(limit, probe) => response.unwrap_or(Ok((false, false)))?,
                     };
                     if confirmed {
-                        setup::qualify_previous_key(prepared.root, name)?;
+                        setup::qualify_previous_key(self.root, name)?;
                         awaiting_poll = false;
                     }
-                    if ready && !awaiting_poll {
+                    if ready && !awaiting_poll && attempt.held(&stage.directory) {
+                        #[cfg(test)]
+                        tests::restart_cases::before_settling_readiness(self.root, &stage.directory, record, &mut running.child).await;
+                        if stop_marker(&stage.directory, self.id)? {
+                            return Ok(false);
+                        }
+                        if running.child.exit_code().map_err(|_| CHILD_ERROR)?.is_some() {
+                            return Err(NOT_READY);
+                        }
+                        if !attempt.held(&stage.directory) {
+                            continue;
+                        }
                         record.ready = true;
-                        stage.announce(&record)?;
+                        stage.announce(record)?;
                         crate::stderrln!("Tunnel {name} is ready.");
+                        return Ok(true);
                     }
                 }
+                tokio::select! {
+                    _ = signals.wait() => return Ok(false),
+                    () = tokio::time::sleep(POLL) => {},
+                }
             }
-            tokio::select! {
-                _ = signals.wait() => return Ok((format!("Tunnel {name} stopped.\n"), 0)),
-                () = tokio::time::sleep(POLL) => {},
+        }.await;
+        match ready {
+            Ok(true) => Ok(Some(running)),
+            Ok(false) => {
+                running
+                    .finish(self.root, name, stage, stopped(name), awaiting_poll)
+                    .await?;
+                Ok(None)
+            }
+            Err(error) => running
+                .finish(self.root, name, stage, Err(error), awaiting_poll)
+                .await
+                .map(|_| None),
+        }
+    }
+}
+
+struct RunningChild {
+    child: process::Child,
+    stderr: Option<tokio::task::JoinHandle<u8>>,
+    _key: key::Staged,
+}
+
+impl RunningChild {
+    fn new(mut child: process::Child, key: key::Staged) -> Self {
+        let stderr = child
+            .take_stderr()
+            .map(|pipe| tokio::spawn(diagnostics::drain(pipe)));
+        Self {
+            child,
+            stderr,
+            _key: key,
+        }
+    }
+
+    async fn finish(
+        self,
+        root: &Path,
+        name: &str,
+        stage: &mut Stage,
+        result: Output,
+        awaiting_poll: bool,
+    ) -> Output {
+        let Self {
+            child,
+            mut stderr,
+            _key,
+        } = self;
+        if child.close().await.is_err() {
+            stage.retain = true;
+            if let Some(task) = &stderr {
+                task.abort();
+            }
+            return Err(CHILD_ERROR);
+        }
+        let mut notes = 0;
+        if let Some(task) = stderr.as_mut() {
+            match tokio::time::timeout(Duration::from_millis(250), &mut *task).await {
+                Ok(Ok(read)) => notes = read,
+                _ => task.abort(),
             }
         }
-    }.await;
-    if child.close().await.is_err() {
-        stage.retain = true;
-        if let Some(task) = &stderr {
-            task.abort();
+        if notes != 0
+            && (result == Err(NOT_READY)
+                || result == Err(READINESS_TIMEOUT)
+                || result == Err(TRIAL_AUTH)
+                || result.as_ref().is_ok_and(|(_, code)| *code != 0))
+            && let Some((log, reason)) = diagnostics::save(root, name, notes)
+        {
+            let reason = reason.map_or_else(String::new, |reason| format!(" {reason}"));
+            let retained = if awaiting_poll {
+                " The previous key is retained. Run `pseudolife-mcp tunnel setup --restore-key` with the same profile and directory."
+            } else {
+                ""
+            };
+            return match result {
+                Err(error) => {
+                    let cause = match error {
+                        READINESS_TIMEOUT => "the tunnel readiness deadline elapsed",
+                        TRIAL_AUTH => "the tunnel control plane refused the replacement key",
+                        _ => "the tunnel did not become ready",
+                    };
+                    Err(Fail::Detail(format!(
+                        "{cause}.{reason} Check the runtime diagnostics at {}.{retained}",
+                        log.display()
+                    )))
+                }
+                Ok((output, code)) => Ok((
+                    format!(
+                        "{output}Runtime diagnostics:{reason} See {}\n",
+                        log.display()
+                    ),
+                    code,
+                )),
+            };
         }
-        return Err(CHILD_ERROR);
-    }
-    let mut notes = 0;
-    if let Some(task) = stderr.as_mut() {
-        match tokio::time::timeout(Duration::from_millis(250), &mut *task).await {
-            Ok(Ok(read)) => notes = read,
-            _ => task.abort(),
+        if awaiting_poll && (result == Err(NOT_READY) || result == Err(READINESS_TIMEOUT)) {
+            return Err(TRIAL_UNCONFIRMED);
         }
+        result
     }
-    if notes != 0
-        && (result == Err(NOT_READY)
-            || result == Err(READINESS_TIMEOUT)
-            || result == Err(TRIAL_AUTH)
-            || result.as_ref().is_ok_and(|(_, code)| *code != 0))
-        && let Some((log, reason)) = diagnostics::save(prepared.root, name, notes)
-    {
-        let reason = reason.map_or_else(String::new, |reason| format!(" {reason}"));
-        let retained = if awaiting_poll {
-            " The previous key is retained. Run `pseudolife-mcp tunnel setup --restore-key` with the same profile and directory."
-        } else {
-            ""
-        };
-        return match result {
-            Err(error) => {
-                let cause = match error {
-                    READINESS_TIMEOUT => "the tunnel readiness deadline elapsed",
-                    TRIAL_AUTH => "the tunnel control plane refused the replacement key",
-                    _ => "the tunnel did not become ready",
-                };
-                Err(Fail::Detail(format!(
-                    "{cause}.{reason} Check the runtime diagnostics at {}.{retained}",
-                    log.display()
-                )))
-            }
-            Ok((output, code)) => Ok((
-                format!(
-                    "{output}Runtime diagnostics:{reason} See {}\n",
-                    log.display()
-                ),
-                code,
-            )),
-        };
-    }
-    if awaiting_poll && (result == Err(NOT_READY) || result == Err(READINESS_TIMEOUT)) {
-        return Err(TRIAL_UNCONFIRMED);
-    }
-    result
 }
 
 async fn ready_probe(

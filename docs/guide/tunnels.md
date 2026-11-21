@@ -30,7 +30,7 @@ supervisor to stop its runtime. Pass the same `--profile` and
 `--profile-dir` in both commands if you selected a different profile or
 store. Use the same client to manage a running tunnel. The Python client's
 status can report a native launch as stopped, and Python stop leaves that
-launch running. Background start and refresh still require the Python client.
+launch running. Background start still requires the Python client.
 
 To renew a key with the native client, stop the tunnel, then run
 `pseudolife-mcp tunnel setup --profile dot --read-key --key-expires-at <ISO timestamp>`
@@ -52,15 +52,46 @@ runs. `tunnel update` reports a tunnel that is not running, and names a
 process record left by a stopped tunnel as a file you can delete (a
 `leftover` when no saved profile is beside it). It reports `current` for
 a ready native launch whose identity matches the client running the check and
-the saved settings. If the launch differs from that client or the saved settings,
-`tunnel update` reports `stale` and leaves it running. Use
-`pseudolife-mcp tunnel stop` followed by `pseudolife-mcp tunnel run` for the
-same profile and directory. This reconnects the tunnel and interrupts its
-current session. An interrupted key renewal or a retained previous key also
-reports `stale` and gives guidance for that state. A pending refresh request
-written by the Python client does not affect the native launch check. Native
-update leaves a Python-supervised launch running and tells you to use the
-Python client that started it to stop it.
+the saved settings. After an installed client update, a compatible native
+supervisor verifies and pins the installed shim and checks its readiness
+protocol and saved daemon connection while the current tunnel serves. It
+then stops its owned vendor process, confirms exit, and starts the new
+launch. As with a plain `tunnel run`, readiness requires the vendor to
+remain alive, answer its local readiness probe, and have a bridge that
+accepted the signed launch and started the stdio shim. This reconnects the
+tunnel and interrupts its current session. A refused preflight leaves the
+previous tunnel serving.
+
+If the candidate fails readiness, the supervisor tries the previous shim
+after confirming the replacement exited. A successful rollback can mean a
+second reconnect and preserves verification for the previous identity.
+Further updates skip that failed build for the same launch. After a readiness
+timeout, stop and run the tunnel to retry that build. After a startup failure
+or vendor diagnostic, keep serving on the previous runtime until a corrected
+runtime is installed, then run `tunnel update`. If rollback fails, status
+says the tunnel stopped and gives the run command. If the
+supervisor cannot confirm a child's exit, it blocks recovery until exit
+can be established. Status also shows when a refreshed launch needs a new
+verification challenge.
+
+`tunnel update` exits 0 for a current or refreshed launch and for a refusal
+or rollback that leaves the previous tunnel serving. It exits 2 if the
+store is unreadable, the tunnel stops during refresh, or the supervisor cannot
+confirm a child's exit or disappears before reporting the result. The outer
+`pseudolife-mcp update` reports this failure with exit 5.
+
+An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
+followed by `pseudolife-mcp tunnel run` for the same profile and directory.
+Use the same commands when the updated client pins a different vendor version.
+If a service or scheduled task started that supervisor, restart the existing
+registration through its manager. A Python-supervised tunnel stays running
+until stopped with the Python client that started it. Then use native
+`tunnel run` for a foreground launch. The client switch continues to require
+removal of Python tunnel autostart before changing engines.
+
+An interrupted key renewal or a retained previous key reports `stale` with
+guidance for that state. A pending refresh request written by the Python
+client does not affect the native launch check.
 A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native
