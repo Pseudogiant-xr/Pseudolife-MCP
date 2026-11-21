@@ -283,11 +283,24 @@ pub fn tunnel_runtimes(
         if ids.is_empty() && record.get("snapshot").is_some_and(|v| !v.is_null()) {
             return Err("tunnel snapshot has no process identity; no runtime was removed".into());
         }
-        if !record_keeps_runtime(&record, processes) {
+        let refresh = record.get("refresh").filter(|value| !value.is_null());
+        let uncertain_spawn = refresh.is_some()
+            && record["native_launch"].is_string()
+            && record["spawn_started"] == true
+            && record["target"].is_null();
+        if !uncertain_spawn && !record_keeps_runtime(&record, processes) {
             continue;
         }
         // Native supervisors may pin a runtime directly. No profile credentials
         // or remote endpoints are read while determining local dependencies.
+        if let Some(refresh) = refresh {
+            let path = refresh["image"]["path"]
+                .as_str()
+                .ok_or("native tunnel refresh image is unreadable; no runtime was removed")?;
+            if let Some(runtime) = registrations::runtime_path(Path::new(path), layout) {
+                pinned.insert(runtime);
+            }
+        }
         for key in ["executable", "runtime_path", "interpreter"] {
             if let Some(path) = record.get(key).and_then(Value::as_str)
                 && let Some(runtime) = registrations::runtime_path(Path::new(path), layout)
@@ -425,6 +438,16 @@ fn literal_paths(text: &str) -> Result<Vec<String>> {
 /// Only directories with a verified native marker are candidates:
 /// legacy Python runtimes and malformed/incomplete directories remain intact.
 pub fn remove_unused(layout: &Layout, evidence: Result<Evidence>) -> Value {
+    remove_unused_with(layout, evidence, |processes| {
+        tunnel_runtimes(layout, &default_tunnel_root(), processes)
+    })
+}
+
+fn remove_unused_with(
+    layout: &Layout,
+    evidence: Result<Evidence>,
+    recheck_tunnels: impl Fn(&[Process]) -> Result<BTreeSet<PathBuf>>,
+) -> Value {
     let mut removed = Vec::new();
     let mut held = Vec::new();
     let mut kept = Vec::new();
@@ -482,6 +505,16 @@ pub fn remove_unused(layout: &Layout, evidence: Result<Evidence>) -> Value {
         // update locks. A launch cannot select an old directory concurrently.
         if current_runtime(layout).is_some_and(|r| r.sequence == runtime.sequence)
             || read_runtime(path).is_err()
+        {
+            kept.push(path.clone());
+            continue;
+        }
+        // A refresh can publish an unproven spawn after the initial scan
+        // and release its usage pin. Our exclusive pin now fences all new
+        // users of this image, so check the current record before removal.
+        if recheck_tunnels(&evidence.processes)
+            .ok()
+            .is_none_or(|paths| paths.iter().any(|p| same_path(p, path)))
         {
             kept.push(path.clone());
             continue;
