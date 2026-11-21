@@ -44,6 +44,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -1119,14 +1120,33 @@ def require_requested_reranker(cases: list[dict], pairs: list, logs: dict[str, s
                 f"{fallbacks[side]} Fix: {RERANKER_SIDES[side][1]}." for side in degraded))
 
 
+def run_seed_child(argv, *, env, timeout):
+    with subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          text=True, start_new_session=os.name != "nt") as proc:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            if os.name == "nt":
+                proc.kill()  # The seed child's lifetime job owns its daemon.
+            else:
+                # The unreaped child owns this process group and its daemon.
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            proc.communicate()
+            raise
+        return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
 def seed_template(name: str, paragraphs: int, binary: Path) -> None:
     dsn = pg.create(name)
     home = daemons.make_home(daemons.scratch_root(), "w2d-seed", None)
     env = daemons.base_env(home, rust_env({"PL_HARNESS_SEED_DSN": dsn,
                                           "PL_HARNESS_SEED_RUST": str(binary.resolve())}))
     env.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
-    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), str(paragraphs)],
-                       env=dict(env, PYTHONPATH=str(REPO)), capture_output=True, text=True, timeout=3600)
+    r = run_seed_child([sys.executable, str(HERE / "w2d_seed.py"), str(paragraphs)],
+                       env=dict(env, PYTHONPATH=str(REPO)), timeout=3600)
     if r.returncode != 0:
         raise RuntimeError(f"seeding failed: {r.stderr[-3000:]}")
     print(r.stdout.strip(), flush=True)
@@ -1345,8 +1365,8 @@ def derive_template(template: str, tag: str, binary: Path, flags=("--mcp-extra",
     env = daemons.base_env(home, rust_env({"PL_HARNESS_SEED_DSN": dsn,
                                           "PL_HARNESS_SEED_RUST": str(binary.resolve())}))
     env.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
-    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), *flags],
-                       env=dict(env, PYTHONPATH=str(REPO)), capture_output=True, text=True, timeout=900)
+    r = run_seed_child([sys.executable, str(HERE / "w2d_seed.py"), *flags],
+                       env=dict(env, PYTHONPATH=str(REPO)), timeout=900)
     if r.returncode != 0:
         raise RuntimeError(f"mcp seeding failed: {r.stderr[-3000:]}")
     return name

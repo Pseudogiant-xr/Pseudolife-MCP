@@ -19,7 +19,6 @@ import ipaddress
 import json
 import os
 from pathlib import Path
-import re
 import sys
 import tempfile
 
@@ -171,16 +170,14 @@ def bank_space(harness, host_port: str, login_file: Path):
     class Banks(harness.pgdisposable.Slice):
         def __init__(self):
             super().__init__("w2d")
-            self.PREFIX = "r2_"
-            self.DISPOSABLE_NAME = re.compile(r"r2_[a-z0-9_]{1,40}")
             self.NAMES = RunNames()
             self.HOST_PORT = host_port
 
         def name(self, label):
             if not label.startswith("pl_cf_w2d_"):
                 raise ValueError("unexpected service fixture label")
-            label = "r2_" + label.removeprefix("pl_cf_w2d_")
-            return self.NAMES.name(self._check(label), max_length=43)
+            label = f"{self.PREFIX}r2_" + label.removeprefix(self.PREFIX)
+            return self.NAMES.name(self._check(label), max_length=len(self.PREFIX) + 40)
 
         def _login(self):
             return user, password

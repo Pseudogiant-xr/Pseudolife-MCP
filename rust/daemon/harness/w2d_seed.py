@@ -30,6 +30,7 @@ from rust.harness_support.bank_fixture import assert_fixture_database
 
 SEED_TOKEN = "synthetic-w2d-fixture-token"
 CHILD_TEXT = "Episode filter probe: the child step reran the deploy health check."
+RESTATEMENT = "OS: Debian 13"
 
 DOCS = ["docs/guide/configuration.md", "docs/guide/dreaming.md", "README.md",
         "docs/guide/agent-isolation.md", "CONTRIBUTING.md"]
@@ -144,17 +145,23 @@ def write_base(session, port, docs):
     tool(session, "fact_set", entity="homelab box", attribute="gpu", value="RTX 4090", confidence=0.6)
 
 
+def checked_root(conn):
+    roots = conn.execute("SELECT id FROM episodes WHERE title = 'W2-D seed session' "
+                         "AND session_key = %s AND ended_at IS NULL AND parent_id IS NULL",
+                         (EPISODE_KEY,)).fetchall()
+    require_fixture(len(roots) == 1, "expected one open W2-D seed root")
+    return roots[0][0]
+
+
 def write_extras(session, dsn, fact):
     with open_bank(dsn) as conn:
-        roots = conn.execute("SELECT id FROM episodes WHERE title = 'W2-D seed session' "
-                             "AND session_key = %s AND ended_at IS NULL", (EPISODE_KEY,)).fetchall()
-    require_fixture(len(roots) == 1, "extras need the open W2-D seed root")
+        root = checked_root(conn)
     tool(session, "fact_set", entity="deploy window", attribute="weekday", value="thursday afternoon",
          confidence=0.8, freshness_class="volatile")
     out = tool(session, "fact_set", entity="homelab box", attribute="os", value="Ubuntu 24.04", confidence=0.7)
     require_fixture(out.get("action") == "contested", "the competing OS was not parked")
-    tool(session, "store", text="OS: Debian 13", source="notes")
-    child = tool(session, "episode_start", title="W2-D child step", episode=roots[0][0])
+    tool(session, "store", text=RESTATEMENT, source="notes")
+    child = tool(session, "episode_start", title="W2-D child step", episode=root)
     tool(session, "store", text=CHILD_TEXT, source="session-notes", episode=child["id"])
     if fact:
         tool(session, "fact_set", entity="dev box", attribute="cpu", value="Ryzen 9 7950X", confidence=0.8)
@@ -178,15 +185,13 @@ def check_base(conn, docs, cutoff):
                          (cutoff, [text for text, _, _ in CRAFTED])).fetchall()
     require_fixture(notes == [(text, source, tags or []) for text, source, tags in CRAFTED],
                     "crafted notes or tags are missing")
-    root = conn.execute("SELECT id FROM episodes WHERE session_key=%s AND title='W2-D seed session' "
-                        "AND ended_at IS NULL", (EPISODE_KEY,)).fetchone()
-    require_fixture(root is not None, "missing open seed episode")
+    root = checked_root(conn)
     steps = [text for text, in conn.execute("SELECT text FROM entries WHERE episode_id = %s "
-                                           "AND source = 'session-notes' ORDER BY id", root)]
+                                           "AND source = 'session-notes' AND id > %s ORDER BY id", (root, cutoff))]
     require_fixture(steps == EPISODE_TEXTS, "session episode is missing seeded steps")
-    pair = conn.execute("SELECT text, superseded_by_text FROM entries WHERE id > %s "
+    pair = conn.execute("SELECT text, superseded_by_text, superseded_at IS NOT NULL FROM entries WHERE id > %s "
                         "AND text = ANY(%s) ORDER BY id", (cutoff, list(SUPERSEDED))).fetchall()
-    require_fixture(pair == [(SUPERSEDED[0], SUPERSEDED[1]), (SUPERSEDED[1], None)],
+    require_fixture(pair == [(SUPERSEDED[0], SUPERSEDED[1], True), (SUPERSEDED[1], None, False)],
                     "missing superseded entry or replacement")
 
 
@@ -199,26 +204,37 @@ def finish_base(conn, docs, cutoff):
     for date, phrase, actor, desc in EVENTS:
         # These literals use ASCII words, digits and punctuation.
         desc_norm = re.sub(r"[\s._\-/]+", "-", desc.casefold()).strip("-")
+        occurred = f"{date}T00:00:00+00:00" if date else None
         conn.execute("INSERT INTO chronicle_events (occurred_at,occurred_phrase,recorded_at,actor,actor_norm,"
-                     "description,description_norm) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                     (f"{date}T00:00:00+00:00" if date else None, phrase, now, actor, actor, desc, desc_norm))
+                     "description,description_norm) SELECT %s::timestamptz,%s,%s,%s,%s,%s,%s "
+                     "WHERE NOT EXISTS (SELECT 1 FROM chronicle_events WHERE actor_norm=%s AND description_norm=%s "
+                     "AND occurred_at IS NOT DISTINCT FROM %s::timestamptz AND invalidated_at IS NULL)",
+                     (occurred, phrase, now, actor, actor, desc, desc_norm, actor, desc_norm, occurred))
 
 
-def finish_extras(conn, fact, stats):
+def finish_extras(conn, fact, stats, cutoff):
     now = time.time()
+    root = checked_root(conn)
     child = conn.execute("SELECT e.parent_id FROM episodes e JOIN entries t ON t.episode_id=e.id "
-                         "JOIN episodes parent ON parent.id=e.parent_id "
-                         "WHERE e.title='W2-D child step' AND t.text=%s AND parent.session_key=%s",
-                         (CHILD_TEXT, EPISODE_KEY)).fetchone()
-    require_fixture(child is not None, "child-episode search input is missing")
-    updates = [("deploy-window", "weekday", 30)]
+                         "WHERE e.title='W2-D child step' AND t.text=%s AND t.id > %s AND e.parent_id=%s",
+                         (CHILD_TEXT, cutoff, root)).fetchall()
+    require_fixture(child == [(root,)], "child-episode search input is missing")
+    os_facts = conn.execute("SELECT status,value FROM facts WHERE entity_norm='homelab-box' "
+                            "AND attribute_norm='os' AND status IN ('current','contested') "
+                            "ORDER BY status,value").fetchall()
+    require_fixture(os_facts == [("contested", "Ubuntu 24.04"), ("current", "Debian 13")],
+                    "current and competing OS facts are missing")
+    note = conn.execute("SELECT count(*) FROM entries WHERE source='notes' AND text=%s AND id > %s",
+                        (RESTATEMENT, cutoff)).fetchone()
+    require_fixture(note == (1,), "new restatement for search deduplication is missing")
+    updates = [("deploy-window", "weekday", "thursday afternoon", 30)]
     if fact:
-        updates.append(("build-cache", "state", 60))
-    for entity, attribute, days in updates:
+        updates.append(("build-cache", "state", "warm", 60))
+    for entity, attribute, value, days in updates:
         age = now - days * 86400
         row = conn.execute("UPDATE facts SET asserted_at=%s,last_confirmed=%s WHERE entity_norm=%s "
-                           "AND attribute_norm=%s AND status='current' AND freshness_class='volatile' RETURNING id",
-                           (age, age, entity, attribute)).fetchall()
+                           "AND attribute_norm=%s AND value=%s AND status='current' "
+                           "AND freshness_class='volatile' RETURNING id", (age, age, entity, attribute, value)).fetchall()
         require_fixture(len(row) == 1, f"expected one volatile {entity}/{attribute} fact")
     if fact:
         entry, = conn.execute("SELECT min(id) FROM entries").fetchone()
@@ -254,21 +270,30 @@ def stats_extra(conn):
     ids = [i for i, in conn.execute("SELECT id FROM entries WHERE source='docs' ORDER BY id LIMIT %s",
                                     (len(STATS_SERVED),))]
     last, = conn.execute("SELECT coalesce(max(id),0) FROM retrieval_events").fetchone()
+    last_community, = conn.execute("SELECT coalesce(max(id),0) FROM communities").fetchone()
+    event_time = now - 3600
     expected = []
     for s in range(STATS_SESSIONS):
         served = [{"entry_id": e, "rank": i, "score": 0.9}
                   for i, (e, n) in enumerate(zip(ids, STATS_SERVED)) if s < n]
         conn.execute("INSERT INTO retrieval_events (query_text,origin,session_id,served,created_at) "
                      "VALUES (%s,'search',%s,%s,%s)",
-                     (f"graduation probe {s}", f"grad-session-{s}", Json(served), now - 3600))
-        expected.append((f"grad-session-{s}", served))
-    got = conn.execute("SELECT session_id,served FROM retrieval_events WHERE id > %s ORDER BY id", (last,)).fetchall()
+                     (f"graduation probe {s}", f"grad-session-{s}", Json(served), event_time))
+        expected.append((f"grad-session-{s}", served, event_time))
+    got = conn.execute("SELECT session_id,served,created_at FROM retrieval_events "
+                       "WHERE id > %s ORDER BY id", (last,)).fetchall()
     require_fixture(got == expected, "graduation probes lack their expected session and served-entry pattern")
     conn.execute("INSERT INTO communities (id,label,size,cohesion,computed_at) "
                  "SELECT coalesce(max(id),0)+1,'deploy tooling',3,0.5,%s FROM communities", (now - 7200,))
     conn.execute("INSERT INTO meta (key,value) VALUES ('graph_digest',%s) "
                  "ON CONFLICT (key) DO UPDATE SET value=excluded.value",
                  (Json({"computed_at": 1791000000.25, "communities": 1}),))
+    graph = conn.execute("SELECT id,label,size,cohesion,computed_at FROM communities WHERE id > %s",
+                         (last_community,)).fetchall()
+    digest = conn.execute("SELECT value FROM meta WHERE key='graph_digest'").fetchone()
+    require_fixture(graph == [(last_community + 1, "deploy tooling", 3, 0.5, now - 7200)]
+                    and digest == ({"computed_at": 1791000000.25, "communities": 1},),
+                    "statistics community or graph digest is missing")
 
 
 def seed(binary, dsn, home, docs, *, extra, fact, stats):
@@ -303,7 +328,7 @@ def seed(binary, dsn, home, docs, *, extra, fact, stats):
         candidate.stop()
     with open_bank(dsn) as conn:
         if extra:
-            finish_extras(conn, fact, stats)
+            finish_extras(conn, fact, stats, cutoff)
         else:
             finish_base(conn, docs, cutoff)
 
@@ -313,6 +338,10 @@ def main() -> int:
         from rust.harness_support.database_turn import require_turn
 
         require_turn(holder="standalone database harness", contain=True)
+    if os.name == "nt":
+        from rust.harness_support._database_turn_windows import contain_process_tree
+
+        contain_process_tree()
     dsn = os.environ["PL_HARNESS_SEED_DSN"]
     binary = Path(os.environ["PL_HARNESS_SEED_RUST"]).resolve(strict=True)
     limit = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 150
