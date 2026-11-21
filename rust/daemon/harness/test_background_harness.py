@@ -335,23 +335,34 @@ def test_reaper_title_validation_still_rejects_missing_durable_effect(scenario, 
 
 
 @pytest.mark.parametrize("effect, message", [
-    ("client", "unexpected durable client session"),
-    ("episode", "unexpected durable episode"),
-    ("entry", "changed the durable fixture entry"),
+    ("client", "public.client_sessions"),
+    ("episode", "public.episodes"),
+    ("entry", "public.entries"),
     ("cursor", "wrong durable cursor"),
-    ("deferred", "did not defer the empty fixture"),
-    ("tombstone", "did not move the empty fixture"),
-    ("unrelated", "changed unrelated durable rows"),
+    ("deferred", "deferred_empty_roots"),
+    ("tombstone", "episode_tombstones"),
+    ("unrelated", "public.facts"),
+    ("extra-client", "public.client_sessions"),
+    ("extra-episode", "public.episodes"),
+    ("extra-entry", "public.entries"),
+    ("extra-meta", "unexpected_fixture_meta"),
+    ("meta-write", "session_digest_cursor"),
+    ("title", "public.episodes"),
+    ("swap", "empty root must close before the work root"),
+    ("later-tick", "different reaper ticks"),
 ])
 def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, message):
+    import time
     from background_seed_rows import ROWS
     from background_sessions import validate_session_writes
 
     monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
-    initial = ROWS["sessions"]
+    initial = copy.deepcopy(ROWS["sessions"])
+    initial["meta"].append({"key": "writer_lease_epoch", "value": 1})
     after = copy.deepcopy(initial)
     episodes = {r["title"]: r for r in after["episodes"]}
     empty = episodes["empty fixture"]["id"]
+    work = episodes["work fixture"]["id"]
     for row in after["episodes"]:
         if row["ended_at"] is None:
             row["ended_at"] = f"<close:{row['id']}>"
@@ -362,21 +373,36 @@ def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, m
     entry["dream_state"] = "acknowledged"
     cursor = next(row for row in after["meta"] if row["key"] == "cortex_dream_cursor")
     cursor["value"] = entry["ts"]
+    after["meta"][-1]["value"] = 2
     sweep = effect == "tombstone"
+    auto_title = effect == "title"
     if sweep:
         after["episodes"].remove(episodes["empty fixture"])
         metadata = {empty: {"session_key": "empty", "ended_at": f"<close:{empty}>", "title": "empty fixture"}}
         after["meta"].append({"key": "episode_tombstones", "value": metadata})
+        after["meta"].append({"key": "deferred_empty_roots", "value": {}})
     else:
         metadata = {empty: f"<close:{empty}>"}
         after["meta"].append({"key": "deferred_empty_roots", "value": metadata})
+    if auto_title:
+        stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(1700000000))
+        title = f"fixture - {stamp}: The background lifecycle fixture retains a nested session…"
+        episodes["work fixture"]["title"] = entry["episode_title"] = title
+    order = [[empty], [work]]
 
     def dump(tables):
+        tables = {**tables, "meta": sorted(tables["meta"], key=lambda row: row["key"])}
         return {"rows": {"public." + table: {"columns": list(rows[0]),
                                             "rows": [list(row.values()) for row in rows]}
-                         for table, rows in tables.items()}}
+                         for table, rows in tables.items()}, "root_close_order": order}
 
-    validate_session_writes(dump(after), dump(initial), sweep, False, 1)
+    raw = dump(after)
+    table = raw["rows"]["public.client_sessions"]
+    key, ended = map(table["columns"].index, ("session_key", "ended_at"))
+    for row in table["rows"]:
+        if row[key] in {"empty", "work"}:
+            row[ended] = 100.0 if row[key] == "empty" else 100.01
+    validate_session_writes(dump(after), dump(initial), sweep, auto_title, 1, raw=raw)
     if effect == "client":
         next(row for row in after["client_sessions"] if row["session_key"] == "work")["end_reason"] = "end"
     elif effect == "episode":
@@ -387,12 +413,29 @@ def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, m
         cursor["value"] = 0.0
     elif effect == "unrelated":
         after["facts"] = [{"id": 12}]
+    elif effect == "extra-client":
+        after["client_sessions"].append(dict(after["client_sessions"][0], session_key="extra"))
+    elif effect == "extra-episode":
+        after["episodes"].append(dict(episodes["work fixture"], id="extra"))
+    elif effect == "extra-entry":
+        after["entries"].append(dict(entry, id=50))
+    elif effect == "extra-meta":
+        after["meta"].append({"key": "unexpected_fixture_meta", "value": 1})
+    elif effect == "meta-write":
+        next(row for row in after["meta"] if row["key"] == "session_digest_cursor")["value"] = {"ts": 1}
+    elif effect == "title":
+        episodes["work fixture"]["title"] += " changed"
+        entry["episode_title"] = episodes["work fixture"]["title"]
+    elif effect == "swap":
+        order.reverse()
+    elif effect == "later-tick":
+        next(row for row in table["rows"] if row[key] == "work")[ended] = 100.3
     elif sweep:
         metadata[empty]["title"] = "another title"
     else:
         del metadata[empty]
     with pytest.raises(RuntimeError, match=message):
-        validate_session_writes(dump(after), dump(initial), sweep, False, 1)
+        validate_session_writes(dump(after), dump(initial), sweep, auto_title, 1, raw=raw)
 
 
 # A copy of a real bank (the forced mirror run's PL_HARNESS_BASE_DATABASE)

@@ -33,6 +33,7 @@ def register(harness):
         def prepare_template(self, dsn):
             seed_bank(dsn, "sessions", auto_title=self.auto_title)
             self.before = dbstate.dump(dsn)
+            self.refreshes_graph = bool(self.expected_triggers and pg.base_database() and live_edges(dsn))
 
         def timeline(self, procs, holders):
             rows = []
@@ -82,7 +83,8 @@ def register(harness):
                 self.closed_states[side] = state
                 normalized = normalize_closes(state, self.before, daemon.started_at_unix, captured)
                 validate_session_writes(normalized, self.before, self.sweep, self.auto_title,
-                                        self.expected_triggers)
+                                        self.expected_triggers, raw=state,
+                                        graph_refresh=self.refreshes_graph)
                 scrubbed = keyed_meta(normalize_refresh_clocks(
                     harness.scrub_declared_rows(normalized, self.before)["state"],
                     self.before, [(daemon.started_at_unix, captured)]))
@@ -104,7 +106,8 @@ def register(harness):
                     now = time.time()
                     normalized = normalize_closes(state, self.before, self.starts[side], now)
                     validate_session_writes(normalized, self.before, self.sweep, self.auto_title,
-                                            self.expected_triggers)
+                                            self.expected_triggers, boots=2, raw=state,
+                                            graph_refresh=self.refreshes_graph)
                     triggers = daemon.log.read_text(errors="replace").count("session-end dream trigger:")
                     if triggers:
                         raise RuntimeError("restart triggered a second session-end dream")
@@ -129,7 +132,8 @@ def register(harness):
             normalized = normalize_closes(state, before, self.starts["rust"], time.time())
             self.validate_expected(state)
             validate_session_writes(normalized, before, self.sweep, self.auto_title,
-                                    self.expected_triggers)
+                                    self.expected_triggers, boots=1 + self.restart, raw=state,
+                                    graph_refresh=self.refreshes_graph)
 
         def validate_expected(self, state):
             table = state["rows"]["public.episodes"]
@@ -186,82 +190,100 @@ def register(harness):
     return {s.name: s for s in (SessionReap, SessionSweep, SessionRestart, TombstoneRestart, ResumeRefusal)}
 
 
-def validate_session_writes(state, before, sweep, auto_title, expected_triggers):
-    """Check the fixture's durable row delta after checking the raw close clocks."""
-    has_base = pg.base_database() is not None
-    written = {"public.client_sessions", "public.episodes", "public.entries", "public.meta"}
-    if has_base and expected_triggers:
-        # A session-end dream on a populated base also refreshes its graph.
-        # normalize_refresh_clocks checks the observed refresh windows.
-        written.update(f"public.{table}" for table in
-                       ("communities", "entity_communities", "entity_sources", "edges"))
-    unchanged = [{name: table for name, table in snap["rows"].items() if name not in written}
-                 for snap in (before, state)]
-    if differences := dbstate.diff(*unchanged):
-        raise RuntimeError(f"session lifecycle changed unrelated durable rows: {differences[:8]}")
+def session_rows(snapshot, table):
+    data = snapshot["rows"]["public." + table]
+    return [dict(zip(data["columns"], row)) for row in data["rows"]]
 
-    def rows(snapshot, table, key):
-        data = snapshot["rows"]["public." + table]
-        records = (dict(zip(data["columns"], row)) for row in data["rows"])
-        return {row[key]: row for row in records}
 
-    initial_clients = rows(before, "client_sessions", "session_key")
-    clients = rows(state, "client_sessions", "session_key")
-    roots = {key: initial_clients[key]["episode_ids"][0] for key in ("empty", "work", "history")}
-    for key, root in roots.items():
-        want = dict(initial_clients[key])
-        if key != "history":
-            want.update(ended_at=f"<close:{root}>", end_reason="idle")
-        if clients.get(key) != want:
-            raise RuntimeError(f"unexpected durable client session: {key}")
+def validate_session_writes(state, before, sweep, auto_title, expected_triggers, *,
+                            boots=1, raw=None, graph_refresh=False):
+    """Compare the entire expected bank after closing the captured fixture."""
+    expected = copy.deepcopy(before["rows"])
+    observed = state["rows"]
+    clients = session_rows(before, "client_sessions")
+    roots = {row["session_key"]: row["episode_ids"][0] for row in clients
+             if row["session_key"] in {"empty", "work"}}
+    empty, work = roots["empty"], roots["work"]
+    order = [[root for root in group if root in roots.values()] for group in state["root_close_order"]]
+    if [group for group in order if group] not in ([[empty], [work]], [[empty, work]]):
+        raise RuntimeError("the empty root must close before the work root")
+    if raw is not None:
+        clocks = {row["session_key"]: row["ended_at"] for row in session_rows(raw, "client_sessions")}
+        if clocks["work"] - clocks["empty"] >= 0.2:
+            raise RuntimeError("the two fixture roots closed in different reaper ticks")
 
-    episodes = rows(state, "episodes", "id")
-    for id, initial in rows(before, "episodes", "id").items():
-        key = initial["session_key"]
-        if key not in roots or (id != roots[key] and initial["parent_id"] != roots[key]):
-            continue
-        want = dict(initial)
-        if key == "empty" and sweep:
-            want = None
-        elif key != "history":
-            want["ended_at"] = f"<close:{id}>"
-            if auto_title and id == roots["work"] and id in episodes:
-                want["title"] = episodes[id]["title"]  # validated before the row comparison
-        if episodes.get(id) != want:
-            raise RuntimeError(f"unexpected durable episode: {key}")
-
-    entries = rows(state, "entries", "id")
-    fixture_timestamps = []
-    for id, initial in rows(before, "entries", "id").items():
-        if initial["episode_id"] == roots["work"]:
-            want = dict(initial, episode_title=episodes[roots["work"]]["title"])
-            if expected_triggers:
-                want["dream_state"] = "acknowledged"
-                fixture_timestamps.append(want["ts"])
-            if entries.get(id) != want:
-                raise RuntimeError("reaper changed the durable fixture entry unexpectedly")
-
-    meta = rows(state, "meta", "key")
-    # A base-relative dump omits an unchanged cursor from both snapshots.
-    prior_meta = dict(dbstate.prior_rows(before, "public.meta", [["cortex_dream_cursor"]]))
-    prior_cursor = prior_meta["cortex_dream_cursor"]
-    cursor = (meta.get("cortex_dream_cursor", {"value": prior_cursor}) if has_base
-              else meta["cortex_dream_cursor"])["value"]
-    minimum = max([prior_cursor, *fixture_timestamps])
-    if cursor < minimum or (not (expected_triggers and has_base) and cursor != minimum):
-        raise RuntimeError("session-end dream left the wrong durable cursor")
-
-    empty = roots["empty"]
-    close = f"<close:{empty}>"
-    deferred = meta.get("deferred_empty_roots", {}).get("value", {})
-    tombs = meta.get("episode_tombstones", {}).get("value", {})
+    for row in clients:
+        if row["session_key"] in roots:
+            row.update(ended_at=f"<close:{roots[row['session_key']]}>", end_reason="idle")
+    episodes = session_rows(before, "episodes")
+    root = next(row for row in episodes if row["id"] == work)
+    # The pinned entry has one source and one snippet. Chrono formats the
+    # fixture start minute in the daemon's local zone, which we inherit.
+    if auto_title:
+        stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(root["started_at"]))
+        root["title"] = f"fixture - {stamp}: The background lifecycle fixture retains a nested session…"
+    for row in episodes:
+        if row["id"] in (empty, work) or row["parent_id"] == work:
+            row["ended_at"] = f"<close:{row['id']}>"
     if sweep:
-        if empty in deferred or tombs.get(empty) != {
-            "session_key": "empty", "ended_at": close, "title": "empty fixture",
-        }:
-            raise RuntimeError("sweep did not move the empty fixture's close to its tombstone")
-    elif deferred.get(empty) != close or empty in tombs:
-        raise RuntimeError("idle close did not defer the empty fixture for resume")
+        episodes = [row for row in episodes if row["id"] != empty]
+    entries = session_rows(before, "entries")
+    fixture_timestamps = []
+    for row in entries:
+        if row["episode_id"] == work:
+            row["episode_title"] = root["title"]
+            if expected_triggers:
+                row["dream_state"] = "acknowledged"
+                fixture_timestamps.append(row["ts"])
+
+    for name, rows in (("client_sessions", clients), ("episodes", episodes), ("entries", entries)):
+        table = expected["public." + name]
+        table["rows"] = [[row[column] for column in table["columns"]] for row in rows]
+
+    has_base = pg.base_database() is not None
+    meta = dict(expected["public.meta"]["rows"])
+    prior = dict(dbstate.prior_rows(before, "public.meta",
+                                  [["cortex_dream_cursor"], ["deferred_empty_roots"], ["episode_tombstones"]]))
+    current = dict(observed["public.meta"]["rows"])
+    meta["writer_lease_epoch"] += boots
+    prior_cursor = prior["cortex_dream_cursor"]
+    minimum = max([prior_cursor, *fixture_timestamps])
+    cursor = current.get("cortex_dream_cursor", prior_cursor) if has_base else current.get("cortex_dream_cursor")
+    if type(cursor) not in (int, float) or not math.isfinite(cursor) or cursor < minimum \
+            or (not (expected_triggers and has_base) and cursor != minimum):
+        raise RuntimeError("session-end dream left the wrong durable cursor")
+    if "cortex_dream_cursor" in meta or cursor != prior_cursor:
+        meta["cortex_dream_cursor"] = cursor if expected_triggers and has_base else minimum
+    deferred = dict(prior.get("deferred_empty_roots") or {})
+    tombs = dict(prior.get("episode_tombstones") or {})
+    close = f"<close:{empty}>"
+    if sweep:
+        tombs[empty] = {"session_key": "empty", "ended_at": close, "title": "empty fixture"}
+        meta["episode_tombstones"] = tombs
+    else:
+        deferred[empty] = close
+    meta["deferred_empty_roots"] = deferred
+
+    if graph_refresh:
+        digest = current.get("graph_digest")
+        fields = ("id", "label", "size", "cohesion")
+        summaries = [{key: row[key] for key in fields} for row in session_rows(state, "communities")]
+        if (not isinstance(digest, dict)
+                or set(digest) != {"computed_at", "communities", "god_nodes", "surprises", "questions", "totals"}
+                or sorted(digest["communities"], key=lambda row: row["id"]) !=
+                sorted(summaries, key=lambda row: row["id"])
+                or digest.get("totals", {}).get("communities") != len(summaries)):
+            raise RuntimeError("graph digest does not describe the persisted community refresh")
+        # The remaining digest fields are derived graph output. Their
+        # algorithms have independent corpus tests in the Rust crate.
+        meta["graph_digest"] = digest
+    expected["public.meta"]["rows"] = [[key, value] for key, value in sorted(meta.items())]
+    if graph_refresh:
+        refresh = {"public.communities", "public.entity_communities", "public.entity_sources", "public.edges"}
+        expected = {key: table for key, table in expected.items() if key not in refresh}
+        observed = {key: table for key, table in observed.items() if key not in refresh}
+    if differences := dbstate.diff(expected, observed):
+        raise RuntimeError(f"session bank differs from the fixture contract: {differences[:8]}")
 
 
 def validate_restart_clocks(state, closed):

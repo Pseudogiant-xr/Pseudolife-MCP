@@ -256,6 +256,7 @@ def test_inventory_rejects_empty_exception_reason(monkeypatch):
 @pytest.mark.parametrize('name', ['session-reap', 'session-restart', 'session-resume-refusal',
                                  'session-sweep', 'session-tombstone-restart'])
 def test_background_seed_uses_fixture_with_empty_model_cache(tmp_path, monkeypatch, name):
+    import os
     import subprocess
 
     import background_seed
@@ -285,6 +286,11 @@ def test_background_seed_uses_fixture_with_empty_model_cache(tmp_path, monkeypat
 
     inserted = []
     monkeypatch.setattr(subprocess, 'Popen', refuse_spawn)
+    for launcher in dir(os):
+        if launcher.startswith(('spawn', 'posix_spawn', 'exec')) or launcher in {
+            'system', 'startfile', 'fork', 'forkpty',
+        }:
+            monkeypatch.setattr(os, launcher, refuse_spawn)
     monkeypatch.setattr(background_seed.psycopg, 'connect', lambda dsn: Bank())
     monkeypatch.setattr(background_seed, 'initialize_bank', lambda conn: None)
     monkeypatch.setattr(background_seed, 'checked_fixture_insert',

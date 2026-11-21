@@ -132,6 +132,7 @@ def test_no_wait_policy_still_detects_bank_changes(snapshot_harness, tmp_path, m
 @pytest.mark.parametrize("mutate_catalog", [False, True])
 def test_sweep_compares_the_rust_snapshot_without_waiting(
         snapshot_harness, tmp_path, monkeypatch, name, mutate_catalog):
+    monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
     events, _ = snapshot_harness
     seed = {"catalog": {"sequences": []}, "rows": {
         "public.meta": {"columns": ["key", "value"], "rows": [["writer_lease_epoch", 1]]},
