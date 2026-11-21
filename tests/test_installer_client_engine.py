@@ -184,8 +184,6 @@ def test_tunnel_switch_is_only_for_the_python_installer(tmp_path, engine, tunnel
     entry = repo / "ops" / name
     entry.write_text(python.split(early, 1)[0] + setup + python[python.index(tail):], encoding="utf-8", newline="\n")
     env = _env(tmp_path, engine)
-    # PowerShell writes its own startup cache before entering the script.
-    env["XDG_CACHE_HOME"] = str(tmp_path / "shell-cache")
     command = ([program, _bash_path(entry)] if shell == "bash" else
                [program, "-NoProfile", "-NonInteractive", "-File", str(entry)])
     with user_path_unchanged(tmp_path):
@@ -195,7 +193,11 @@ def test_tunnel_switch_is_only_for_the_python_installer(tmp_path, engine, tunnel
     if engine == "native" and tunnel:
         assert proc.returncode == 1, output
         assert _native_args(tmp_path) is None
-        assert not list((tmp_path / "home").iterdir())
+        # PowerShell can create its own cache before the script is entered.
+        home = tmp_path / "home"
+        for state in (".pseudolife-mcp", "runtimes", "bin", ".claude", ".codex"):
+            assert not (home / state).exists(), state
+        assert not (repo / "ops" / ".env").exists()
         assert "The native client has no guided tunnel setup yet" in output
         assert "Nothing was changed" in output
         assert f"Rerun without {switch}" in output
