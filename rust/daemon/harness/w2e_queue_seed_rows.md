@@ -47,3 +47,10 @@ fixture supplies complete row sets and exact sequence positions. Other
 catalog properties are compared with the prepared bank. No generator
 runs during native verification, and the runner never records this data
 from the daemon under test.
+
+Some frozen signatures hash the dynamically allocated stub URL. During
+capture, record the frozen arm's SHA-256 preimages containing the URL or
+a hash already depending on it. Replace the origin with `@QUEUE_STUB@`
+in the recorded preimage and resolve hash references in dependency order.
+The verifier reconstructs the expected hashes from these preimages using
+its own stub's address, independently of the candidate's stored hashes.

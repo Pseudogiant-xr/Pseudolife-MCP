@@ -1,10 +1,14 @@
 """Checked observations of the frozen queue reference on the captured seeds."""
 
 from functools import lru_cache
+import hashlib
 import json
 from pathlib import Path
+import re
 
 from stub_extractor import CHAT_PATHS, judge_reply, parse_chat
+
+HASH_REF = re.compile(r"<queue-sha:(\d+)>")
 
 
 @lru_cache(maxsize=1)
@@ -55,12 +59,38 @@ def unpack_vectors(value, vectors):
     return value
 
 
-def step_diffs(harness, contract, reference, op, actual, raw, before, windows, origin, tol):
+def expected_hashes(contract, origin):
+    """Bind frozen SHA-256 preimages to this run's allocated stub address."""
+    hashes = []
+    for template in contract["hashes"]:
+        payload = HASH_REF.sub(lambda m: hashes[int(m[1])], template.replace("@QUEUE_STUB@", origin))
+        hashes.append(hashlib.sha256(payload.encode()).hexdigest())
+    return hashes
+
+
+def resolve_hashes(value, hashes):
+    if isinstance(value, str):
+        return HASH_REF.sub(lambda m: hashes[int(m[1])], value)
+    if isinstance(value, list):
+        return [resolve_hashes(item, hashes) for item in value]
+    if isinstance(value, dict):
+        return {resolve_hashes(key, hashes): resolve_hashes(item, hashes) for key, item in value.items()}
+    return value
+
+
+def pinned_bank(contract, reference, catalog, hashes):
+    rows = {table: resolve_hashes(contract["tables"][index], hashes)
+            for table, index in reference["tables"].items()}
+    for key, table in rows.items():
+        if key != "public.entries":
+            table["rows"].sort(key=lambda row: json.dumps(row, sort_keys=True))
+    return {"catalog": {**catalog, "sequences": reference["sequences"]}, "rows": rows}
+
+
+def step_diffs(harness, contract, reference, op, actual, raw, before, windows, origin, tol, hashes):
     """Compare exact rows and sequences, independent answers, and numeric tolerances."""
     state, numeric, episodes = harness.normalize_state(raw, before, harness.ts_tokens(raw), windows)
-    expected = {"catalog": {**before["catalog"], "sequences": reference["sequences"]},
-                "rows": {table: contract["tables"][index]
-                         for table, index in reference["tables"].items()}}
+    expected = pinned_bank(contract, reference, before["catalog"], hashes)
     diffs = [f"queue bank {diff}" for diff in harness.state_and_events_diff(expected, state)]
     known_numeric = unpack_vectors(contract["numeric"][reference["numeric"]], contract["vectors"])
     # JSON's object keys are strings. Keep the same identity on both sides.
@@ -73,6 +103,7 @@ def step_diffs(harness, contract, reference, op, actual, raw, before, windows, o
         if op.get("name") == "memory_dream":
             observed = harness.dream_tokens(observed, harness.ts_tokens(raw))
         observed = harness.rename_prefixes(observed, episodes)
+        answer = resolve_hashes(reference["answer"], hashes)
         diffs.extend(f"queue answer {diff}" for diff in
-                     harness.compare_response(reference["answer"], observed, tol, {}))
+                     harness.compare_response(answer, observed, tol, {}))
     return diffs

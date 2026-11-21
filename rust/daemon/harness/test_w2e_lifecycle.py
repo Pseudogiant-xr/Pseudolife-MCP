@@ -624,6 +624,29 @@ def test_explicit_queue_recording_refuses_before_any_writes(harness, monkeypatch
     assert "omit --record for link-auto" in capsys.readouterr().err
 
 
+def queue_fixture_observation(harness, monkeypatch, name):
+    from w2e_queue_contract import (
+        expected_hashes, load_contract, pinned_bank, resolve_hashes, step_diffs, unpack_vectors,
+    )
+
+    contract = load_contract()
+    reference = contract["scenarios"][name][-1]
+    origin = "http://127.0.0.1:1"
+    hashes = expected_hashes(contract, origin)
+    state = pinned_bank(contract, reference, {}, hashes)
+    answer = resolve_hashes(reference["answer"], hashes)
+    numeric = unpack_vectors(contract["numeric"][reference["numeric"]], contract["vectors"])
+    monkeypatch.setattr(harness, "normalize_state", lambda *a: (state, numeric, {}))
+    monkeypatch.setattr(harness, "ts_tokens", lambda *a: {})
+
+    def check():
+        return step_diffs(harness, contract, reference, {"op": "tool"}, answer, state,
+                          {"catalog": state["catalog"]}, [], origin, {}, hashes)
+
+    assert check() == []
+    return state, answer, check
+
+
 @pytest.mark.parametrize("name,table", [
     ("link-auto", "public.dismissed_pairs"),
     ("candidate-auto", "public.edge_proposals"),
@@ -631,20 +654,7 @@ def test_explicit_queue_recording_refuses_before_any_writes(harness, monkeypatch
     ("junk-auto", "public.dismissed_pairs"),
 ])
 def test_queue_contract_rejects_an_extra_durable_row(harness, monkeypatch, name, table):
-    from w2e_queue_contract import load_contract, step_diffs, unpack_vectors
-
-    contract = load_contract()
-    reference = contract["scenarios"][name][-1]
-    state = {"catalog": {"sequences": reference["sequences"]},
-             "rows": {key: copy.deepcopy(contract["tables"][index])
-                      for key, index in reference["tables"].items()}}
-    numeric = unpack_vectors(contract["numeric"][reference["numeric"]], contract["vectors"])
-    monkeypatch.setattr(harness, "normalize_state", lambda *a: (state, numeric, {}))
-    monkeypatch.setattr(harness, "ts_tokens", lambda *a: {})
-    def check():
-        return step_diffs(harness, contract, reference, {"op": "tool"}, reference["answer"],
-                          state, {"catalog": state["catalog"]}, [], "http://127.0.0.1:1", {})
-    assert check() == []
+    state, _, check = queue_fixture_observation(harness, monkeypatch, name)
     rows = state["rows"][table]["rows"]
     extra = copy.deepcopy(rows[0])
     extra[0] = 9999 if isinstance(extra[0], int) else "unexpected fixture row"
@@ -653,20 +663,16 @@ def test_queue_contract_rejects_an_extra_durable_row(harness, monkeypatch, name,
 
 
 def test_queue_contract_rejects_a_self_consistent_empty_review(harness, monkeypatch):
-    from w2e_queue_contract import load_contract, step_diffs, unpack_vectors
-
-    contract = load_contract()
-    reference = contract["scenarios"]["link-auto"][-1]
-    state = {"catalog": {"sequences": reference["sequences"]},
-             "rows": {key: contract["tables"][index] for key, index in reference["tables"].items()}}
-    numeric = unpack_vectors(contract["numeric"][reference["numeric"]], contract["vectors"])
-    monkeypatch.setattr(harness, "normalize_state", lambda *a: (state, numeric, {}))
-    monkeypatch.setattr(harness, "ts_tokens", lambda *a: {})
-    answer = copy.deepcopy(reference["answer"])
+    _, answer, check = queue_fixture_observation(harness, monkeypatch, "link-auto")
     answer["value"].update(findings=[], counts={"total": 0})
-    diffs = step_diffs(harness, contract, reference, {"op": "tool"}, answer, state,
-                      {"catalog": state["catalog"]}, [], "http://127.0.0.1:1", {})
-    assert any("queue answer" in diff and "findings" in diff for diff in diffs)
+    assert any("queue answer" in diff and "findings" in diff for diff in check())
+
+
+def test_queue_contract_rejects_a_plausible_but_wrong_policy(harness, monkeypatch):
+    state, _, check = queue_fixture_observation(harness, monkeypatch, "link-auto")
+    identity = dict(state["rows"]["public.meta"]["rows"])["review_response_identity_v1_link"]
+    identity["policy"] = "0" * 64
+    assert any("review_response_identity_v1_link" in diff for diff in check())
 
 
 def test_queue_request_contract_pins_every_verdict_key_and_tick(harness):
@@ -791,6 +797,8 @@ def test_dream_stage_scenarios_key_their_replies_and_register_their_mutants(harn
 
 
 def test_dream_stage_stub_input_keeps_splits_and_signal_fields(harness):
+    import hashlib
+
     # The native format and split also have direct tests in dream/stage_calls.rs.
     assert harness.split_context("ab\ncd", 1) == ["a", "b", "c", "d"]
     assert harness.split_context("xxxxxxxxx\ny", 4) == ["xxxx", "xxxx", "x\ny"]
@@ -803,6 +811,15 @@ def test_dream_stage_stub_input_keeps_splits_and_signal_fields(harness):
         "[machine-inferred] [success] task='write a note' about=\"a 'quoted' topic\" "
         "detail='two\\nlines' polarity=+"
     )
+    signals = (harness.RULE_SIGNALS, harness.LESSON_SIGNALS, [harness.INFERRED_SIGNAL],
+               harness.LESSON_SIGNALS_3 + harness.LESSON_SIGNALS_4 + harness.LESSON_SIGNALS_5)
+    # Frozen _format_signals at 88787b0e2, on the original four inputs.
+    assert [hashlib.sha256(harness.fmt_signals(part).encode()).hexdigest() for part in signals] == [
+        "d3a7134489dbadafdb6e7c278f6c4981d44e3f37f20dac21b575940e140146b2",
+        "4c185d24fe9bdd522ff1baa3b43f6d2cd1a0228d9a016e997f5e507995935080",
+        "a1862d216edf576e2e808781a0ddb4017302a8ea8ce95c0f272178468e630c38",
+        "f2e37c63e284663f15369e3490dd4a3063a8b4060f787aac454818e392d85b98",
+    ]
 
 
 def test_lesson_write_clocks_and_episode_tokens_normalize(harness):

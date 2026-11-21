@@ -64,7 +64,9 @@ from psycopg.types.json import Json
 from rust.harness_support.bank_fixture import initialize_bank, require_fixture_database
 from rust.harness_support.database_guard import dsn_database_name
 from rust.harness_support.fixture_rows import checked_fixture_insert
-from w2e_queue_contract import load_contract, request_diffs, request_shape, step_diffs, verdict_keys
+from w2e_queue_contract import (
+    expected_hashes, load_contract, request_diffs, request_shape, step_diffs, verdict_keys,
+)
 
 JUNK_ALL_JUDGED = ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals "
                    "WHERE kind = 'junk' AND status = 'pending' AND judge_verdict IS NULL)")
@@ -273,6 +275,7 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
     daemon = None
     try:
         stub = stubs["rust"]
+        hashes = expected_hashes(contract, stub.origin)
         home = harness.daemons.make_home(root, f"{tag}-rs", harness.scenario_config(scenario, stub))
         extra = harness.extractor_env(scenario, stub, "rust")
         env = harness.w1a.rust_env(harness.side_env(scenario, dsn, extra))
@@ -340,7 +343,7 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
             diffs.extend(harness.run_clock_diffs("rust", raw, result if op.get("name") == "memory_dream" else None))
             windows = [(first_start, time.time())]
             diffs.extend(step_diffs(harness, contract, expected, op, result, raw, before["rust"],
-                                    windows, stub.origin, tol))
+                                    windows, stub.origin, tol, hashes))
             steps.append({"step": index, "op": op, "diffs": diffs, "rust": result,
                           "wall_s": time.monotonic() - begun,
                           "extractor": {"rust": harness.extractor_summary(sent)}})
