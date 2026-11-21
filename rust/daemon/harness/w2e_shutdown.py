@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import copy
 import json
-import math
 import os
 import signal
 import time
@@ -15,6 +14,7 @@ _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-
 import psycopg
 
 import w2e as h
+from embedding_fixture import mean_unit_vector
 from rust.harness_support.bank_fixture import assert_fixture_database
 from w2e_shutdown_seed import prepare_empty
 
@@ -22,6 +22,12 @@ from w2e_shutdown_seed import prepare_empty
 SCENARIO = {"config": "memory:\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n"}
 TEXT = ("A disconnected store must finish before daemon shutdown. " * 160).strip()
 DRAIN_WITNESS = "shutdown: admitted writes still running; the final save runs beside them"
+# The drain ends 6 s after the signal (HTTP_DRAIN + WRITES_DRAIN in
+# rust/daemon/src/background.rs); the harness releases the paused store only
+# then, and the exit budget ends at 9 s, so the store has 3 s to commit. A box
+# too slow for that prints this line, and the run fails naming it.
+BUDGET_WITNESS = "shutdown: admitted writes still running at the end of the exit budget"
+LOST_STORE = "admitted store did not survive shutdown exactly once"
 STORE_PAUSE_SQL = """
 CREATE FUNCTION public.w2e_pause_store() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -51,40 +57,16 @@ def store_rows(state, text):
             if row[text_column] == text]
 
 
-def durable_diffs(before, stopped, restarted, text, window):
-    """The store adds one valid row and one sequence value; restart preserves them."""
-    diffs = []
-    written = store_rows(stopped, text)
-    if len(written) != 1:
-        diffs.append("admitted store did not survive shutdown exactly once")
-    else:
-        row, = written
-        stable = {"band": "flat", "source": "fixture", "dream_state": "pending",
-                  "episode_id": None, "access_count": 0, "reinforcements": 0,
-                  "explicit_reinforcements": 0, "superseded_at": None,
-                  "superseded_by_text": None, "tags": [], "slots": []}
-        if any(row.get(key) != expected for key, expected in stable.items()):
-            diffs.append("shutdown store has incorrect durable attributes")
-        if not isinstance(row.get("ts"), float) or not window[0] <= row["ts"] <= window[1]:
-            diffs.append("shutdown store clock is outside its invocation window")
-        embedding = json.loads(row["embedding"]) if row.get("embedding") else []
-        if (len(embedding) != 1024 or not all(math.isfinite(value) for value in embedding)
-                or not any(embedding)):
-            diffs.append("shutdown store has an invalid durable embedding")
+def durable_diffs(before, stopped, restarted, text, window, *, surprise, vector):
+    """The store adds exactly its expected row and one sequence value, every
+    column a literal or checked (``w2e_clean_state.store_diffs``: the clock
+    against the window, ``vector`` and ``surprise`` where known); the restart
+    preserves the bank but for the writer epoch."""
+    import w2e_clean_state
 
-    expected_stop = copy.deepcopy(before)
-    entries = expected_stop["rows"]["public.entries"]
-    if len(written) == 1:
-        entries["rows"].append([written[0][key] for key in entries["columns"]])
-        id_column = entries["columns"].index("id")
-        entries["rows"].sort(key=lambda row: str(row[id_column]))
-    seq = next(row for row in expected_stop["catalog"]["sequences"]
-               if row[:2] == ["public", "entries_id_seq"])
-    seq[5] = seq[3] if seq[5] is None else seq[5] + seq[4]
-    if len(written) == 1 and written[0]["id"] != seq[5]:
-        diffs.append("shutdown store used an unexpected entry sequence value")
-    diffs.extend(h.dbstate.diff(expected_stop, stopped))
-
+    diffs = [] if len(store_rows(stopped, text)) == 1 else [LOST_STORE]
+    diffs += w2e_clean_state.store_diffs(before, stopped, text=text, source="fixture", tags=[],
+                                         window=window, surprise=surprise, vector=vector)
     expected_restart = copy.deepcopy(stopped)
     for item in expected_restart["rows"]["public.meta"]["rows"]:
         if item[0] == "writer_lease_epoch":
@@ -138,7 +120,9 @@ def run_arm(binary, root, template, label, mutant, owned):
                     raise RuntimeError(f"{label}: owned daemon neither reached the drain nor exited")
                 time.sleep(0.05)
         exit_code = proc.wait(timeout=120)
-        drain_observed = DRAIN_WITNESS in daemon.log.read_text(encoding="utf-8", errors="replace")
+        log = daemon.log.read_text(encoding="utf-8", errors="replace")
+        drain_observed = DRAIN_WITNESS in log
+        budget_spent = BUDGET_WITNESS in log
         daemon.stop()
         stopped = h.dbstate.dump(dsn)
         ended = time.time()
@@ -146,13 +130,23 @@ def run_arm(binary, root, template, label, mutant, owned):
         h.w1a.wait_settled([daemon.port], token=h.TOKEN)
         restarted = h.dbstate.dump(dsn)
         evidence = {"pending_at_signal": True, "exit": exit_code, "tracked_drain": drain_observed,
+                    "budget_spent": budget_spent,
                     "persisted": len(store_rows(stopped, TEXT)),
                     "after_restart": len(store_rows(restarted, TEXT))}
-        differences = durable_diffs(before, stopped, restarted, TEXT, (began, ended))
+        # The template is empty, so the store is the band's first: surprise 1
+        # under any model. A copied real bank has neighbours; its surprise
+        # is checked for range only.
+        differences = durable_diffs(
+            before, stopped, restarted, TEXT, (began, ended),
+            surprise=None if h.pg.base_database() is not None else 1.0,
+            vector=mean_unit_vector(TEXT) if h.offline_fixture_model(env) else None)
         if exit_code:
             differences.append(f"{label}: owned daemon exited {exit_code}")
         if not drain_observed:
             differences.append(f"{label}: blocked store did not appear in the admitted-write drain")
+        if budget_spent:
+            differences.append(f"{label}: the released store was still running when the exit "
+                               "budget ended (a box too slow for the 3 s margin)")
         return evidence, differences
     finally:
         daemon.stop()
@@ -186,7 +180,11 @@ def main() -> int:
         if differences:
             return 1
         if args.mutant:
-            caught = arms["mutant"]["exit"] == 0 and not arms["mutant"]["tracked_drain"]
+            # The untracked store is neither drained nor kept: the process
+            # exits beside it and the fixture trigger's transaction dies.
+            mutant = arms["mutant"]
+            caught = (mutant["exit"] == 0 and not mutant["tracked_drain"]
+                      and mutant["persisted"] == 0 and LOST_STORE in mutant_differences)
             print(f"mutant {args.mutant}: {'caught' if caught else 'MISSED'}")
             return int(not caught)
         return 0

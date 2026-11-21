@@ -6276,6 +6276,43 @@ import w2e_live_config  # noqa: E402
 SCENARIOS.update(w2e_live_config.register(sys.modules[__name__]))
 
 
+# rust/daemon/src/store.rs SELF_SIMILARITY_EPSILON: a surprise below it is an
+# exact duplicate's, stored as exactly 0.
+SELF_SIMILARITY_EPSILON = 1e-5
+
+
+def offline_fixture_model(env) -> bool:
+    """Whether ``env`` points the daemon at embedding_fixture.py's mean-pooled
+    1,024-dimensional graph (the shape ``harness_fixture`` in
+    rust/daemon/src/embed.rs admits), whose vectors follow from its text."""
+    root = env.get("PSEUDOLIFE_DAEMON_ONNX_DIR")
+    if not root:
+        return False
+    try:
+        config = json.loads((Path(root) / "config.json").read_text(encoding="utf-8"))
+        pooling = json.loads((Path(root) / "1_Pooling/config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (config.get("model_type") == "bert" and config.get("vocab_size") == 9
+            and config.get("hidden_size") == 1024 and pooling.get("pooling_mode_mean_tokens") is True)
+
+
+def fixture_surprises(texts):
+    """Each store's surprise when ``texts`` are stored in order into an empty
+    flat bank under the offline fixture: 1 for the first, then one minus the
+    best cosine against the earlier stores (store.rs ``surprise_from``)."""
+    from embedding_fixture import mean_unit_vector
+
+    vectors, surprises = [], []
+    for text in texts:
+        vector = mean_unit_vector(text)
+        best = max((sum(a * b for a, b in zip(vector, other)) for other in vectors), default=None)
+        surprise = 1.0 if best is None else min(1.0, 1.0 - best)
+        surprises.append(0.0 if surprise < SELF_SIMILARITY_EPSILON else surprise)
+        vectors.append(vector)
+    return surprises
+
+
 def saved_counter_history_matches(value, expected):
     if not value or value["preset_name"] != "flat" or value["interaction_count"] != len(expected):
         return False
@@ -6307,17 +6344,66 @@ def restart_served_diffs(entries, served, prior=None):
     return diffs
 
 
+# rust/daemon/src/config.rs DEFAULT_QUERY_PREFIX: what the daemon embeds a
+# search query with when the config sets no embedding.query_prefix.
+DEFAULT_QUERY_PREFIX = ("Instruct: Given a web search query, retrieve relevant passages that "
+                        "answer the query\nQuery:")
+# The normalized BM25 each clean-exit search serves, in rank order, on an
+# empty bank. "build cache" has one candidate (its tag filter leaves one), so
+# it is the best and scores 1. The restart query shares "bench" and "port"
+# with the first restart text but only "Postgres", which both texts hold,
+# with the second, whose BM25 normalizes to 0. Under the offline fixture both
+# restart texts embed alike (every word is out of vocabulary), so their dense
+# scores tie and BM25 alone decides the order: the rank pins the lexical
+# fusion, not the embedding order.
+def clean_search_bm25():
+    return {
+        ("counters-restore", "build cache"): [("The counters note about the build cache.", 1.0)],
+        ("search-after-restart", RESTART_QUERY): [(RESTART_TEXTS[0], 1.0),
+                                                  (RESTART_TEXTS[1], 0.0)],
+    }
+
+
+def fixture_search_expectation(name, op, stored):
+    """The served rows and params a clean-exit search logs on an empty bank
+    under the offline fixture; ``stored`` maps each stored text to its
+    (entry id, expected surprise)."""
+    import w2e_clean_state
+    from embedding_fixture import mean_unit_vector
+
+    args = op["args"]
+    query = mean_unit_vector(DEFAULT_QUERY_PREFIX + args["query"])
+    hits = []
+    for text, bm25 in clean_search_bm25()[(name, args["query"])]:
+        entry_id, surprise = stored[text]
+        dense = sum(a * b for a, b in zip(query, mean_unit_vector(text)))
+        hits.append((entry_id, dense, bm25, surprise))
+    # A tag filter leaves only the tagged entries as candidates.
+    candidates = len(hits) if args.get("tags") else len(stored)
+    return {"served": w2e_clean_state.served_rows(hits),
+            "params": w2e_clean_state.search_params(args.get("top_k", 1), args.get("tags"),
+                                                    candidates)}
+
+
 def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
-    """Check the native clean-exit rows before and after an owned restart."""
+    """Run a clean-exit scenario on the native daemon alone and hold every
+    step to the whole bank state it must leave (``w2e_clean_state``): each
+    store and search, each graceful stop, and each restart. Under the offline
+    embedding fixture on an empty bank the computed values are pinned too:
+    each store's surprise and vector, and each search's served rows."""
     import psycopg
+    import w2e_clean_state as clean
     from background_sessions import graceful_stop
+    from collections import Counter
+    from embedding_fixture import mean_unit_vector
     from w2e_shutdown_seed import prepare_empty
 
     if scn["seed"]:
         raise ValueError("clean-exit scenario requires a captured seed")
+    copied = pg.base_database() is not None
     seed = pg.name(f"pl_cf_w2e_{tag}_t")
     owned.append(seed)
-    prepare_empty(pg.create(seed), name, copied=pg.base_database() is not None)
+    prepare_empty(pg.create(seed), name, copied=copied)
     bank = pg.name(f"pl_cf_w2e_{tag}_rs")
     owned.append(bank)
     dsn = pg.create(bank, template=seed)
@@ -6325,8 +6411,11 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
     env = w1a.rust_env(side_env(scn, dsn))
     if mutant:
         env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
+    fixture = offline_fixture_model(env)
+    pinned = fixture and not copied
     daemon = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, env))
     steps = []
+    served = Counter()
     try:
         def start(before, config):
             daemon.start(300)
@@ -6337,18 +6426,27 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
             client.init()
             return client, warmup
 
+        def stop():
+            before = dbstate.dump(dsn)
+            graceful_stop(daemon)
+            stopped = dbstate.dump(dsn)
+            found = [f"graceful stop: {diff}" for diff in clean.stop_diffs(before, stopped, served)]
+            served.clear()
+            return stopped, found
+
         client, diffs = start(dbstate.dump(dsn), scn["config"])
         steps.append({"step": 0, "op": {"op": "init"}, "diffs": diffs})
         hit_ids = None
         pre_restart_components = None
         surprises = []
+        stored = {}
         for index, op in enumerate(scn["ops"], 1):
             diffs = []
             if op["op"] == "restart":
-                graceful_stop(daemon)
-                stopped = dbstate.dump(dsn)
+                stopped, diffs = stop()
                 (home / "data/config.yaml").write_text(op["config"], encoding="utf-8")
-                client, diffs = start(stopped, op["config"])
+                client, warmup = start(stopped, op["config"])
+                diffs += warmup
                 restarted = w1a.scrub_declared_rows(dbstate.dump(dsn), stopped)["state"]
                 for row in stopped["rows"]["public.meta"]["rows"]:
                     if row[0] == "writer_lease_epoch":
@@ -6357,49 +6455,65 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                 answer = {"isError": False, "value": None}
             elif op["op"] == "counters":
                 if op["stop"]:
-                    graceful_stop(daemon)
+                    diffs += stop()[1]
                 value = read_counters(dsn)
-                expected = surprises if op["stop"] else surprises[:2]
+                count = len(surprises) if op["stop"] else 2
+                # Pinned: the fixture's own surprises; otherwise the values
+                # the stores persisted (a copied bank's neighbours move them).
+                expected = (fixture_surprises(list(stored))[:count] if pinned
+                            else surprises[:count])
                 if not saved_counter_history_matches(value, expected):
                     diffs.append("saved counter history differs from the successful stores")
                 answer = {"isError": False, "value": value}
-            else:
+            elif op["op"] == "tool" and op["name"] in {"memory_store", "memory_search"}:
+                before = dbstate.dump(dsn)
+                began = time.time()
                 answer = run_op(op, daemon.port, client, dsn)
+                window = (began, time.time())
+                after = dbstate.dump(dsn)
                 if not answer or answer["isError"]:
-                    diffs.append(f"{op.get('name', op['op'])} did not succeed")
-                elif name == "counters-restore" and op.get("name") == "memory_store":
-                    # MCP's answer rounds surprise. Compare the history
-                    # with the full value persisted on the stored entry.
+                    diffs.append(f"{op['name']} did not succeed")
+                elif op["name"] == "memory_store":
+                    text = op["args"]["text"]
+                    surprise = fixture_surprises([*stored, text])[-1] if pinned else None
+                    diffs += clean.store_diffs(
+                        before, after, text=text, source=op["args"].get("source", "agent"),
+                        tags=op["args"].get("tags", []), window=window, surprise=surprise,
+                        vector=mean_unit_vector(text) if fixture else None)
                     with psycopg.connect(dsn, autocommit=True) as conn:
                         entry = conn.execute(
-                            "SELECT surprise FROM entries WHERE text = %s ORDER BY id DESC LIMIT 1",
-                            (op["args"]["text"],),
-                        ).fetchone()
+                            "SELECT id, surprise FROM entries WHERE text = %s "
+                            "ORDER BY id DESC LIMIT 1", (text,)).fetchone()
                     if answer["value"].get("stored") is not True or not entry:
                         diffs.append("fixture store did not persist its entry")
                     else:
-                        surprises.append(entry[0])
-                elif name == "search-after-restart" and op.get("name") == "memory_search":
+                        # MCP's answer rounds surprise; the history is
+                        # compared with the full persisted value.
+                        surprises.append(entry[1])
+                        stored[text] = (entry[0], surprise)
+                else:
                     items = answer["value"].get("entries", [])
-                    if {item["text"] for item in items} != set(RESTART_TEXTS):
-                        diffs.append("search did not return both restart fixture entries")
-                    ids = {item["id"] for item in items}
-                    if hit_ids is not None and ids != hit_ids:
-                        diffs.append("search returned different entry IDs after restart")
-                    hit_ids = ids
-                    with psycopg.connect(dsn, autocommit=True) as conn:
-                        event = conn.execute(
-                            "SELECT served FROM retrieval_events WHERE query_text = %s "
-                            "AND origin = 'search' ORDER BY id DESC LIMIT 1",
-                            (op["args"]["query"],),
-                        ).fetchone()
-                    served = event[0] if event else None
-                    diffs.extend(restart_served_diffs(items, served, pre_restart_components))
-                    if pre_restart_components is None and isinstance(served, list):
-                        pre_restart_components = {
-                            row["entry_id"]: row["components"] for row in served
-                            if isinstance(row, dict) and "entry_id" in row and "components" in row
-                        }
+                    served.update(item["id"] for item in items)
+                    expected = fixture_search_expectation(name, op, stored) if pinned else None
+                    diffs += clean.search_diffs(before, after, query=op["args"]["query"],
+                                                window=window, expected=expected)
+                    if name == "search-after-restart":
+                        if {item["text"] for item in items} != set(RESTART_TEXTS):
+                            diffs.append("search did not return both restart fixture entries")
+                        ids = {item["id"] for item in items}
+                        if hit_ids is not None and ids != hit_ids:
+                            diffs.append("search returned different entry IDs after restart")
+                        hit_ids = ids
+                        logged = clean.logged_served(after, op["args"]["query"])
+                        diffs.extend(restart_served_diffs(items, logged, pre_restart_components))
+                        if pre_restart_components is None and isinstance(logged, list):
+                            pre_restart_components = {
+                                row["entry_id"]: row["components"] for row in logged
+                                if isinstance(row, dict) and "entry_id" in row
+                                and "components" in row
+                            }
+            else:
+                raise ValueError(f"{name}: no whole-state contract for step {op!r}")
             if op.get("expect"):
                 with psycopg.connect(dsn, autocommit=True) as conn:
                     for query in op["expect"]:
@@ -6407,7 +6521,8 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                         if not row or not row[0]:
                             diffs.append(f"expect rust: {query}")
             steps.append({"step": index, "op": op, "diffs": diffs, "rust": answer})
-        return {"scenario": name, "steps": steps, "stats": {}}
+        return {"scenario": name, "steps": steps, "stats": {},
+                "pins": {"fixture_values": pinned, "fixture_vectors": fixture}}
     finally:
         daemon.stop()
 

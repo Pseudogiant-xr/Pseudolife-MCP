@@ -7,7 +7,32 @@ the separate embedding row and is never inferred from this fixture.
 from __future__ import annotations
 
 import json
+import math
+import re
 from pathlib import Path
+
+
+VOCAB = {"[PAD]": 0, "[UNK]": 1, "memory": 2, "cursor": 3, "cache": 4,
+         "query": 5, "document": 6, "normalize": 7, "partition": 8}
+MAX_TOKENS = 128
+
+
+def mean_unit_vector(text, dimension=1024):
+    """The unit vector a daemon embeds ``text`` as under the mean-pooled
+    fixture, from this file's definition alone: whitespace word pieces
+    (``tokenizers``' ``Whitespace``), unknown pieces as ``[UNK]``, at most
+    ``MAX_TOKENS`` of them (the graph's own cap; a config can lower it), the
+    mean of their ``fixture_weights`` rows, then L2 normalization. Every row
+    is (4, +-3, 0, ...), so only the share of even and odd token ids moves the
+    direction."""
+    pieces = re.findall(r"\w+|[^\w\s]+", text)[:MAX_TOKENS]
+    if not pieces:
+        raise ValueError("the fixture embeds no empty text")
+    weights = fixture_weights(len(VOCAB), dimension)
+    ids = [VOCAB.get(piece, VOCAB["[UNK]"]) for piece in pieces]
+    mean = [sum(float(weights[i][column]) for i in ids) / len(ids) for column in range(dimension)]
+    norm = math.sqrt(sum(value * value for value in mean))
+    return [value / norm for value in mean]
 
 
 def fixture_weights(size, dimension=4):
@@ -28,8 +53,7 @@ def create(root: Path, *, last_token=False, dimension=4):
     root.mkdir(parents=True)
     (root / "onnx").mkdir()
     (root / "1_Pooling").mkdir()
-    vocab = {"[PAD]": 0, "[UNK]": 1, "memory": 2, "cursor": 3, "cache": 4,
-             "query": 5, "document": 6, "normalize": 7, "partition": 8}
+    vocab = dict(VOCAB)
     tok = Tokenizer(models.WordLevel(vocab, unk_token="[UNK]"))
     tok.pre_tokenizer = pre_tokenizers.Whitespace()
     tok.save(str(root / "tokenizer.json"))

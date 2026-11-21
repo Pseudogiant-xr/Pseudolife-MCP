@@ -136,8 +136,18 @@ class CommitCutProxy:
         return self
 
     def close(self) -> None:
-        if self._server is not None:
-            self.loop.call_soon_threadsafe(self._server.close)
+        async def shut_down():
+            if self._server is not None:
+                self._server.close()
+            # A connection the fault cut can still have its handler parked on
+            # a read; cancel it so the stopped loop holds no pending task.
+            handlers = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in handlers:
+                task.cancel()
+            await asyncio.gather(*handlers, return_exceptions=True)
+
+        if self._thread.is_alive():
+            asyncio.run_coroutine_threadsafe(shut_down(), self.loop).result(10)
         self.loop.call_soon_threadsafe(self.loop.stop)
         self._thread.join(5)
 
@@ -392,128 +402,15 @@ class Mcp:
         return {"isError": bool(res.get("isError")), "value": value}
 
 
-# ── seeds (the same shapes as w2e.py) ────────────────────────────────────
-
-def tool(name, headers=(), **args) -> dict:
-    return {"op": "tool", "name": name, "args": args, "headers": list(headers)}
-
-
-def store(text, **kw) -> dict:
-    return tool("memory_store", text=text, **kw)
-
-
-def sql(statement: str) -> dict:
-    """Seed-only: run after the seeding daemon stopped (its exit flush
-    rewrites the slots it holds)."""
-    return {"op": "sql", "sql": statement}
-
-
-def _q(v):
-    return "NULL" if v is None else "'" + v.replace("'", "''") + "'"
-
-
-def lineage_lesson(task, aspect, task_norm, aspect_norm, lesson, source_texts,
-                   embedding_text) -> list[dict]:
-    """w2e.lineage_lesson: a current lesson whose provenance and synthesis
-    lineage audit name the entries with ``source_texts``."""
-    texts = ", ".join(_q(t) for t in source_texts)
-    return [
-        sql("INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, about, "
-            "polarity, outcome, status, confidence, origin, support, provenance, asserted_at, "
-            "last_confirmed, embedding) SELECT "
-            f"{_q(task)}, {_q(aspect)}, {_q(task_norm)}, {_q(aspect_norm)}, {_q(lesson)}, NULL, "
-            "'+', 'success', 'current', 0.7, 'agent', '[\"signal:1\"]', "
-            "(SELECT jsonb_agg('entry:' || id ORDER BY id) FROM entries "
-            f"WHERE text IN ({texts})), 1700000000, 1700000000, embedding "
-            f"FROM entries WHERE text = {_q(embedding_text)}"),
-        sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
-            "decided_by, reason, record, decided_at) SELECT 'lesson', "
-            f"{_q(task_norm)}, {_q(aspect_norm)}, 'lineage', 'lesson_synthesis', "
-            "'verified_dependencies', jsonb_build_object('lesson', "
-            f"{_q(lesson)}, 'asserted_at', 1700000000, 'source_entry_ids', "
-            f"(SELECT jsonb_agg(id ORDER BY id) FROM entries WHERE text IN ({texts}))), "
-            "1700000000.5"),
-    ]
-
-
 def slot_norm(s: str) -> str:
     return re.sub(r"[\s._\-/]+", "-", s.strip().casefold()).strip("-")
 
 
-def evidence_fp(record: dict) -> str:
-    return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"),
-                                     ensure_ascii=False, allow_nan=False)
-                          .encode("utf-8")).hexdigest()
-
-
-def _lit(v) -> str:
-    if v is None:
-        return "NULL"
-    if isinstance(v, (int, float)):
-        return repr(v)
-    if isinstance(v, (list, dict)):
-        return "'" + json.dumps(v).replace("'", "''") + "'::jsonb"
-    return "'" + str(v).replace("'", "''") + "'"
-
-
-SLOT_STAMP = 1700000000.0
-_SLOT_COMMON = ("entity", "attribute", "value", "polarity", "status", "confidence", "origin",
-                "support", "provenance", "asserted_at", "last_confirmed", "supersedes_value",
-                "superseded_by_value", "superseded_at", "tx_time", "valid_time", "hlc_phys",
-                "hlc_logical", "writer_id", "session_id", "version")
-
-
-def slot_world(entity, attribute, value, *, status="current", asserted=SLOT_STAMP,
-               superseded_at=None, hlc_logical=0) -> dict:
-    return {"entity": entity, "attribute": attribute, "value": value, "polarity": "+",
-            "status": status, "confidence": 0.9, "origin": "source", "support": ["source"],
-            "provenance": [], "asserted_at": asserted, "last_confirmed": asserted,
-            "supersedes_value": None, "superseded_by_value": None,
-            "superseded_at": superseded_at, "tx_time": asserted, "valid_time": asserted,
-            "hlc_phys": int(asserted * 1000), "hlc_logical": hlc_logical, "writer_id": "seed",
-            "session_id": None, "version": 1, "source_url": "https://example.org/host",
-            "source_quote": value, "retrieved_at": SLOT_STAMP, "freshness_class": "evergreen",
-            "content_hash": None, "source_doc_id": None}
-
-
-def slot_row_sql(row: dict) -> dict:
-    cols = dict(row, entity_norm=slot_norm(row["entity"]),
-                attribute_norm=slot_norm(row["attribute"]))
-    return sql(f"INSERT INTO world_facts ({', '.join(cols)}) "
-               f"VALUES ({', '.join(_lit(v) for v in cols.values())})")
-
-
-def slot_snapshot(row: dict, **changes) -> dict:
-    row = dict(row, **changes)
-    en, an = slot_norm(row["entity"]), slot_norm(row["attribute"])
-    snap = {"store": "world", "key": f"{en}|{an}", "entity_norm": en, "attribute_norm": an}
-    snap.update({k: row[k] for k in _SLOT_COMMON})
-    snap.update({k: row[k] for k in ("source_url", "source_quote", "retrieved_at",
-                                     "freshness_class", "content_hash", "source_doc_id")})
-    snap["embedding"] = None
-    return snap
-
-
-def curated_retire(survivor: dict, loser: dict, decided_at=SLOT_STAMP + 500) -> dict:
-    """w2e.curated_retire for a world pair kept on side a."""
-    retired = dict(loser, status="retired", superseded_at=decided_at)
-    record = dict(retired)
-    record.update({
-        "_curation_evidence_fingerprint": evidence_fp(loser),
-        "_curation_retired_fingerprint": evidence_fp(retired),
-        "_curation_duplicate": {"version": 1, "keep": "a", "a": survivor, "b": loser,
-                                "a_fingerprint": evidence_fp(survivor),
-                                "b_fingerprint": evidence_fp(loser),
-                                "loser_embedding": None},
-    })
-    record.pop("embedding")
-    return sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
-               f"decided_by, reason, record, decided_at) VALUES ('world', "
-               f"{_lit(loser['entity_norm'])}, {_lit(loser['attribute_norm'])}, 'retire', "
-               f"'dream-curation', 'duplicate', {_lit(record)}, {decided_at!r})")
-
-
 # ── cases ─────────────────────────────────────────────────────────────────
+# Each case's starting bank is its captured template in
+# commit_loss_seed_rows.json (replayed by w2e_shutdown_seed.replay); the
+# seeding calls that produced it are the frozen prepare_template at the
+# commit commit_loss_seed_rows.md names.
 
 BACKUP = "The backup job runs at 02:00 nightly."
 LUNCH = "A note about the team lunch near the office."
@@ -522,9 +419,6 @@ TTL = "The cache TTL is 300 seconds."
 TTL_NEW = "The cache TTL is 600 seconds."
 STAGE = ["The staging cluster runs three nodes.", "Staging cluster has three nodes running."]
 STAGE_NEW = "The staging cluster runs three nodes in total."
-HOST = slot_world("Curate Host", "OS", "Debian 12")
-HOST_LOSER = slot_world("Curate Host", "Operating System", "Debian 12 (bookworm)",
-                        asserted=SLOT_STAMP + 50, hlc_logical=1)
 
 # Markers: a regex over the statements of the transaction to cut (both
 # engines' SQL, checked against pseudolife_memory/storage/postgres.py and
@@ -552,9 +446,6 @@ def _reinstate_args(dsn: str) -> dict:
 CASES: dict[str, dict] = {
     "forget-lesson-source": {
         "about": "memory_forget(scope='memory') of the only entry a current lesson cites",
-        "seed": [store(BACKUP), store(LUNCH),
-                 *lineage_lesson("schedule backups", "timing", "schedule-backups", "timing",
-                                 BACKUP_LESSON, [BACKUP], BACKUP)],
         "marker": DELETE_ENTRY,
         "op": lambda dsn: ("memory_forget", {"scope": "memory", "text": BACKUP}, ()),
         "entries": [BACKUP, LUNCH],
@@ -566,7 +457,6 @@ CASES: dict[str, dict] = {
     },
     "supersede": {
         "about": "memory_supersede of one live entry by exact text",
-        "seed": [store(TTL)],
         "marker": RETIRE_ENTRY,
         "op": lambda dsn: ("memory_supersede", {"new_text": TTL_NEW, "old_text": TTL}, ()),
         "entries": [TTL, TTL_NEW],
@@ -576,7 +466,6 @@ CASES: dict[str, dict] = {
     },
     "reinstate": {
         "about": "memory_reinstate of a superseded entry (reviewer principal)",
-        "seed": [store(TTL), tool("memory_supersede", new_text=TTL_NEW, old_text=TTL)],
         "marker": REINSTATE_DECISION,
         "op": lambda dsn: ("memory_reinstate", _reinstate_args(dsn), (REVIEWER,)),
         "entries": [TTL, TTL_NEW],
@@ -586,7 +475,6 @@ CASES: dict[str, dict] = {
     },
     "consolidate": {
         "about": "memory_consolidate of two live entries into one",
-        "seed": [store(STAGE[0]), store(STAGE[1])],
         "marker": RETIRE_ENTRY,
         "op": lambda dsn: ("memory_consolidate",
                            {"new_text": STAGE_NEW, "replaces": list(STAGE)}, ()),
@@ -600,10 +488,6 @@ CASES: dict[str, dict] = {
         "about": "memory_graph_review(restore_slot) of a forgotten world fact (legacy path: "
                  "resident restore, one store_decisions txn per record, then the slot save); "
                  "the cut is the decision's COMMIT",
-        "seed": [store("A note so the bank is not empty."),
-                 tool("memory_world_set", entity="Rust", attribute="edition", value="2024",
-                      source_url="https://doc.rust-lang.org/"),
-                 tool("memory_forget", scope="world", entity="Rust", attribute="edition")],
         "marker": STORE_DECISION,
         "op": lambda dsn: ("memory_graph_review",
                            {"action": "restore_slot", "store": "world", "src": "rust|edition"},
@@ -620,11 +504,6 @@ CASES: dict[str, dict] = {
         "about": "memory_graph_review(restore_slot) of a curated duplicate retirement (one "
                  "transaction: locked-row validation, slot rewrite, restore decision; "
                  "recovery: reconcile_restore / recover_slot_curation)",
-        "seed": [store("A note so the bank is not empty."),
-                 slot_row_sql(HOST),
-                 slot_row_sql(dict(HOST_LOSER, status="retired",
-                                   superseded_at=SLOT_STAMP + 500)),
-                 curated_retire(slot_snapshot(HOST), slot_snapshot(HOST_LOSER))],
         "marker": STORE_DECISION,
         "op": lambda dsn: ("memory_graph_review",
                            {"action": "restore_slot", "store": "world",
@@ -1012,6 +891,10 @@ def _health(port: int) -> dict:
 def prepare_template(name: str, owned: list[str]) -> str:
     from w2e_shutdown_seed import replay
 
+    if pg.base_database() is not None:
+        raise RuntimeError(
+            f"{pgdisposable.BASE_ENV} is set, but commit-loss cases replay captured rows into an "
+            f"empty bank and cannot start from a copied real bank; unset {pgdisposable.BASE_ENV}")
     template = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:24]}_t")
     owned.append(template)
     replay(pg.create(template), name)
