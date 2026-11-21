@@ -309,7 +309,7 @@ def test_the_offline_fact_rebuild_mirrors_the_assistant_demotion():
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from rebuild_contexts import rebuild_fact_lines
+    from _python_rebuild_contexts import rebuild_fact_lines
 
     class _Emb:
         """Every text and the query share one unit vector: a forced tie."""
@@ -338,7 +338,7 @@ def ladder():
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import ladder_sweep
+    import _python_ladder_sweep as ladder_sweep
     return ladder_sweep
 
 
@@ -414,7 +414,7 @@ def test_the_policy_rides_in_the_bench_summary_stamp(monkeypatch):
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import longmemeval_bench as B
+    import _python_longmemeval_bench as B
 
     monkeypatch.setenv("PSEUDOLIFE_BENCH_ASSISTANT_CLAIMS", "supersede")
     assert B.bench_env_knobs()["dream"] == {"assistant_claims": "supersede"}
@@ -517,7 +517,7 @@ def test_a_prompt_file_reaches_the_extractor_with_the_hints_appended(
     from pseudolife_memory.memory.dream import _facts_hint, _vocab_hint
     from pseudolife_memory.utils import no_redirect
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import longmemeval_bench as B
+    import _python_longmemeval_bench as B
 
     path = (Path(__file__).resolve().parents[1] / "evals" / "prompts"
             / "assistant_facts_provenance.txt")

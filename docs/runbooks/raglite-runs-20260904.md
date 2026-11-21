@@ -1,5 +1,7 @@
 # Runbook — token-matched rag arms (2026-09-04)
 
+The runs recorded here measured the frozen Python engine.
+
 Every memory-vs-RAG comparison this project has published scores a ~100-token
 fact context against a ~1,200-token raw-turn context, and reports the accuracy
 gap and the token gap as two separate findings. They are one trade-off. These

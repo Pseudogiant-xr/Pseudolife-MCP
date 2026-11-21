@@ -43,6 +43,8 @@ What you get:
 - **A web console to watch it think** — the Cortex Console above, plus cited
   world facts, session episodes, and document RAG.
 
+These LongMemEval and BEAM numbers were measured on the Python engine.
+
 Measured, with receipts — the **full 500-question LongMemEval sweep**, all
 six question types, and every number ships with its committed run artifact:
 
@@ -1322,6 +1324,8 @@ sidecar fallback, the full-corpus **deep dream** graph pass, and the
 privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 ## Benchmarks
+
+The LongMemEval, BEAM and retrieval results below are historical measurements of the Python engine.
 
 The headline is the **whole benchmark, not a slice**: all six
 [LongMemEval](https://arxiv.org/abs/2410.10813) question types, 500

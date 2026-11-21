@@ -459,8 +459,9 @@ prove are yours.
   retrofit sweeps.
 - **Eval- or retrieval-affecting changes run `evals/regression_gate.ps1`
   before commit, and extraction or dream-path changes re-run the ladder
-  instead**; the bench server, comparator and control-arm rules are "Eval
-  discipline" at the top of `evals/README.md`, read before any eval run.
+  instead**, on Rust, when the maintainer authorises the run; PRs record
+  the judged result or pending status per "Eval discipline"
+  (`evals/README.md`), read before any eval run.
 - **A published benchmark number** commits its artifact with the claim and
   adds its row to `tests/test_eval_evidence.py` in the same change.
 

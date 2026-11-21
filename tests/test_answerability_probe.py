@@ -776,7 +776,7 @@ def test_beam_report_omits_the_block_for_context_less_rows(
 
 
 def test_lme_report_carries_the_answerability_block(tmp_path, monkeypatch):
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
 
     monkeypatch.setattr(lme, "RESULTS_DIR", tmp_path)
     rows = []

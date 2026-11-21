@@ -54,7 +54,7 @@ def test_rebuild_uses_single_document_cosine_contract(bm25):
     from pathlib import Path
     import torch
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from rebuild_contexts import rebuild_fact_lines
+    from _python_rebuild_contexts import rebuild_fact_lines
 
     class Embedder:
         def encode_single(self, text):
@@ -187,7 +187,7 @@ def test_rebuild_fact_ranking_matches_service_fusion(seeded_service):
     import sys as _sys
     from pathlib import Path as _Path
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))
-    from rebuild_contexts import rebuild_fact_lines
+    from _python_rebuild_contexts import rebuild_fact_lines
 
     facts = [
         {"entity": e, "attribute": a, "value": v, "history": [v]}
@@ -263,7 +263,7 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot(
     import sys as _sys
     from pathlib import Path as _Path
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))
-    from rebuild_contexts import rebuild_fact_lines
+    from _python_rebuild_contexts import rebuild_fact_lines
 
     query = ("recommend the best option for a beginner cyclist SNHHH999 "
              "SNHHH999 SNHHH999 SNGGG111 SNGGG111 SNRRR555")
@@ -341,7 +341,7 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot_mixed_corpus(
     import sys as _sys
     from pathlib import Path as _Path
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))
-    from rebuild_contexts import rebuild_fact_lines
+    from _python_rebuild_contexts import rebuild_fact_lines
 
     query = "what bikes does the user own"
 
@@ -406,7 +406,7 @@ def test_rebuild_fact_lines_legacy_bank_byte_identical(seeded_service):
 
     import sys as _sys
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))
-    from rebuild_contexts import rebuild_fact_lines
+    from _python_rebuild_contexts import rebuild_fact_lines
 
     bank_path = (_Path(__file__).resolve().parent / "fixtures"
                 / "rebuild_fact_lines_legacy_bank.json.gz")

@@ -3,8 +3,125 @@
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
+
+
+@pytest.mark.parametrize(("has_fixture", "has_baseline", "expected"), [
+    (False, False, "fixture missing"),
+    (True, False, "baseline missing"),
+    (True, True, "mock preflight refuses"),
+])
+def test_rust_gate_refuses_unmeasured_inputs_before_loading_qwen(
+        tmp_path, has_fixture, has_baseline, expected):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is not installed")
+    repo = Path(__file__).resolve().parents[1]
+    gate = tmp_path / "regression_gate.ps1"
+    shutil.copyfile(repo / "evals" / gate.name, gate)
+    (tmp_path / "qwen_server.ps1").write_text(
+        "Set-Content (Join-Path $PSScriptRoot 'loaded') 'yes'\n"
+        "function Start-Qwen { throw 'must not launch' }\n", encoding="utf-8")
+    (tmp_path / "regression_gate.py").write_text(
+        "import sys\nassert sys.argv[-1] == '--preflight'\nprint('mock preflight refuses')\nsys.exit(2)\n",
+        encoding="utf-8")
+    fixture, baseline = tmp_path / "fixture.json", tmp_path / "baseline.json"
+    if has_fixture:
+        fixture.write_text("{}", encoding="utf-8")
+    if has_baseline:
+        baseline.write_text("{}", encoding="utf-8")
+    reply = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(gate), "-Fixture", str(fixture), "-Baseline", str(baseline),
+         "-Out", str(tmp_path / "out"), "-Daemon", "mock", "-DaemonRevision", "mock",
+         "-OnnxDir", "mock", "-OrtLibrary", "mock", "-Scratch", "mock", "-Python", sys.executable],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert reply.returncode == 2 and expected in reply.stdout, reply.stdout + reply.stderr
+    assert not (tmp_path / "loaded").exists()
+
+
+@pytest.mark.parametrize(("driver_exit", "signal_regression", "verdict", "verified", "expected"), [
+    (0, False, None, True, 0),
+    (1, True, {"regressions": ["rag accuracy regressed"]}, True, 1),
+    (1, True, {"regressions": []}, True, 2),
+    (1, True, None, True, 2),
+    (1, False, {"regressions": ["stale verdict"]}, True, 2),
+    (2, True, {"regressions": ["must not count"]}, True, 2),
+    (0, False, None, False, 2),
+])
+def test_rust_gate_maps_post_preflight_exit_and_stops_owned_qwen(
+        tmp_path, driver_exit, signal_regression, verdict, verified, expected):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is not installed")
+    repo = Path(__file__).resolve().parents[1]
+    gate = tmp_path / "regression_gate.ps1"
+    shutil.copyfile(repo / "evals" / gate.name, gate)
+    (tmp_path / "qwen_server.ps1").write_text(
+        "function Start-Qwen { param([switch]$Owned); if (-not $Owned) { throw 'not owned' }; "
+        "Set-Content (Join-Path $PSScriptRoot 'started') 'yes'; return $true }\n"
+        f"function Test-QwenReproducibleListener {{ return ${str(verified).lower()} }}\n"
+        "function Stop-Qwen { param([switch]$Owned); if (-not $Owned) { throw 'not owned' }; "
+        "Set-Content (Join-Path $PSScriptRoot 'stopped') 'yes' }\n", encoding="utf-8")
+    (tmp_path / "regression_gate.py").write_text(
+        "import json, sys\nfrom pathlib import Path\n"
+        "if sys.argv[-1] == '--preflight':\n    sys.exit(0)\n"
+        "out = Path(sys.argv[sys.argv.index('--out') + 1])\nout.mkdir()\n"
+        f"result = {verdict!r}\n"
+        "if result is not None:\n    (out / 'verdict.json').write_text(json.dumps(result), encoding='utf-8')\n"
+        f"if {signal_regression!r}:\n    print('Rust retrieval gate regressed')\n"
+        f"sys.exit({driver_exit})\n", encoding="utf-8")
+    fixture, baseline = tmp_path / "fixture.json", tmp_path / "baseline.json"
+    for path in (fixture, baseline):
+        path.write_text("{}", encoding="utf-8")
+    reply = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(gate), "-Fixture", str(fixture), "-Baseline", str(baseline),
+         "-Out", str(tmp_path / "out"), "-Daemon", "mock", "-DaemonRevision", "mock",
+         "-OnnxDir", "mock", "-OrtLibrary", "mock", "-Scratch", "mock", "-Python", sys.executable],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert reply.returncode == expected, reply.stdout + reply.stderr
+    assert (tmp_path / "started").is_file()
+    assert (tmp_path / "stopped").is_file()
+    assert (tmp_path / "out").is_dir() == verified
+
+
+def test_qwen_gate_verifies_the_process_serving_the_stock_profile(tmp_path):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is not installed")
+    helper = Path(__file__).resolve().parents[1] / "evals/qwen_server.ps1"
+    harness = tmp_path / "listener.ps1"
+    harness.write_text(f"""
+$ErrorActionPreference = 'Stop'
+. '{helper.as_posix()}'
+function Get-NetTCPConnection {{
+    param($State, $LocalPort, $ErrorAction)
+    if ($State -ne 'Listen' -or $LocalPort -ne 1234) {{ throw 'wrong listener query' }}
+    [pscustomobject]@{{ LocalAddress = '127.0.0.1'; OwningProcess = 4242 }}
+}}
+function Get-CimInstance {{
+    param($ClassName, $Filter, $ErrorAction)
+    if ($ClassName -ne 'Win32_Process' -or $Filter -ne 'ProcessId = 4242') {{ throw 'wrong owner query' }}
+    $script:serving
+}}
+$stock = (Get-QwenReproducibleArguments) -join ' '
+$script:serving = [pscustomobject]@{{
+    ExecutablePath = "$script:QwenEngine\\llama-server.exe"
+    CommandLine = '"C:\\model engines\\llama-server.exe" ' + $stock
+}}
+if (-not (Test-QwenReproducibleListener)) {{ throw 'expected stock profile' }}
+$script:serving.CommandLine = 'llama-server.exe ' + $stock.Replace('--cache-type-k q8_0', '--cache-type-k f16')
+if (Test-QwenReproducibleListener) {{ throw 'accepted changed KV profile' }}
+$script:serving.CommandLine = 'llama-server.exe ' + $stock
+$script:serving.ExecutablePath = 'C:\\other-engine\\llama-server.exe'
+if (Test-QwenReproducibleListener) {{ throw 'accepted changed engine' }}
+""", encoding="utf-8")
+    reply = subprocess.run([pwsh, "-NoProfile", "-File", str(harness)],
+                           capture_output=True, text=True, timeout=30)
+    assert reply.returncode == 0, reply.stdout + reply.stderr
 
 
 def test_missing_bank_directory_preserves_prior_results_and_does_not_launch(tmp_path):
@@ -15,7 +132,7 @@ def test_missing_bank_directory_preserves_prior_results_and_does_not_launch(tmp_
     evals = tmp_path / "evals"
     results = evals / "results"
     results.mkdir(parents=True)
-    shutil.copyfile(root / "evals/regression_gate.ps1", evals / "regression_gate.ps1")
+    shutil.copyfile(root / "evals/_python_regression_gate.ps1", evals / "_python_regression_gate.ps1")
     # A fake helper makes an accidental launch observable without using a GPU.
     (evals / "qwen_server.ps1").write_text(
         'function Start-Qwen { Set-Content (Join-Path $PSScriptRoot "launched") "yes"; return $false }\n'
@@ -23,7 +140,7 @@ def test_missing_bank_directory_preserves_prior_results_and_does_not_launch(tmp_
     prior = results / "longmemeval-ku-oracle-e4b-ft-arm1-gate-prior.json"
     prior.write_text('prior evidence', encoding="utf-8")
     result = subprocess.run(
-        [pwsh, "-NoProfile", "-File", str(evals / "regression_gate.ps1")],
+        [pwsh, "-NoProfile", "-File", str(evals / "_python_regression_gate.ps1")],
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 2, result.stdout + result.stderr
@@ -141,7 +258,7 @@ Write-Output "OWNED_RESULT=$result,$script:launches,$($script:fake.Kills),$scrip
 
 
 def test_regression_gate_uses_owned_qwen_lifecycle():
-    gate = Path(__file__).resolve().parents[1] / "evals/regression_gate.ps1"
+    gate = Path(__file__).resolve().parents[1] / "evals/_python_regression_gate.ps1"
     source = gate.read_text(encoding="utf-8")
     assert "Start-Qwen -Owned" in source
     assert "Stop-Qwen -Owned" in source

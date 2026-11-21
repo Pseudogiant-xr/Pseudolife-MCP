@@ -845,7 +845,7 @@ FLOOR_EXTRACTOR = "floor"
 def _probe(url: str) -> bool:
     """Is an OpenAI-compatible endpoint answering? Indirected through a
     module-level name so the abort path is testable without a server."""
-    import longmemeval_bench as lmb
+    import _python_longmemeval_bench as lmb
 
     return lmb.probe(url)
 
@@ -858,7 +858,7 @@ def extractor_url(name: str) -> str | None:
     """
     if name == FLOOR_EXTRACTOR:
         return None
-    import longmemeval_bench as lmb
+    import _python_longmemeval_bench as lmb
 
     if name not in lmb.EXTRACTORS:
         raise SystemExit(f"unknown --extractor {name!r}. Known rungs: "
@@ -894,7 +894,7 @@ def make_extractor(name: str, url: str | None):
         from pseudolife_memory.memory.dream import RegexExtractor
 
         return RegexExtractor()
-    import longmemeval_bench as lmb
+    import _python_longmemeval_bench as lmb
 
     return lmb._make_extractor(url, None)
 
@@ -976,7 +976,7 @@ def serve_arms(svc, question: str) -> dict[str, Served]:
     payload channel from silently diverging from the text channel the
     first time a knob is turned on.
     """
-    import longmemeval_bench as lmb
+    import _python_longmemeval_bench as lmb
 
     contexts = lmb.build_contexts(svc, question)
     lmb.serve_comparator_arms(contexts, question, nomem=True)
@@ -1195,8 +1195,8 @@ def run_synthetic(args) -> int:
                                  "differently or pass --force")
 
     import embedder_stamp
-    import longmemeval_bench as lmb                      # noqa: F401
-    from ladder_sweep import build_service
+    import _python_longmemeval_bench as lmb                      # noqa: F401
+    from _python_ladder_sweep import build_service
 
     t0 = time.perf_counter()
     tmp = Path(tempfile.mkdtemp(prefix="epistemic_"))
@@ -1346,8 +1346,8 @@ def run_lme(args) -> int:
     import tempfile
 
     import embedder_stamp
-    import longmemeval_bench as lmb
-    from ladder_sweep import build_service
+    import _python_longmemeval_bench as lmb
+    from _python_ladder_sweep import build_service
 
     db_name = _bench_db_name()
     os.environ["PSEUDOLIFE_BENCH_DB"] = db_name

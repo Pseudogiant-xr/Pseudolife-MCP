@@ -3009,6 +3009,8 @@ every variant.
 
 ## Built-in defaults (tuned for Claude's use case)
 
+The LongMemEval measurements cited in this section came from the Python engine.
+
 - **Embedding backbone `Qwen/Qwen3-Embedding-0.6B`** (`EmbeddingConfig.model_name`,
   default since schema v25) — torch on the CPU, no GPU sidecar, in the
   precision `EmbeddingConfig.cpu_dtype` picks: `auto` (the default) loads
