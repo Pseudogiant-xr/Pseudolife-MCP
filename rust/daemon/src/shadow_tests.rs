@@ -167,19 +167,21 @@ async fn db_candidate_edges_preserve_decimal_confidence() {
                     ('candidate-real-dst', 'Candidate dst', 1)",
         )
         .await;
-    let edge_id: i64 = fixture
+    let inserted = fixture
         .writer
         .client()
         .query_one(
-            "INSERT INTO edges (src_id, relation, dst_id, confidence, asserted_at) \
-             SELECT src.id, 'uses', dst.id, 0.7, 1 FROM entities src, entities dst \
+            "INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) \
+             SELECT src.id, 'uses', dst.id, 0.7, 'fixture', 17.25 FROM entities src, entities dst \
              WHERE src.canonical = 'candidate-real-src' AND dst.canonical = 'candidate-real-dst' \
-             RETURNING id",
+             RETURNING id, src_id, dst_id",
             &[],
         )
         .await
-        .expect("insert candidate edge")
-        .get(0);
+        .expect("insert candidate edge");
+    let edge_id: i64 = inserted.get(0);
+    let src_id: i64 = inserted.get(1);
+    let dst_id: i64 = inserted.get(2);
     let inputs = crate::dream::candidates::load_inputs(&fixture.reader)
         .await
         .expect("read candidate inputs");
@@ -189,13 +191,17 @@ async fn db_candidate_edges_preserve_decimal_confidence() {
         )
         .await;
     fixture.close().await;
+    let loaded = inputs
+        .edges
+        .into_iter()
+        .find(|row| row["id"].as_i64() == Some(edge_id))
+        .expect("the fixture edge was loaded");
     assert_eq!(
-        inputs
-            .edges
-            .iter()
-            .find(|row| row["id"].as_i64() == Some(edge_id))
-            .map(|row| &row["confidence"]),
-        Some(&serde_json::json!(0.7))
+        serde_json::Value::Object(loaded),
+        serde_json::json!({
+            "id": edge_id, "src_id": src_id, "dst_id": dst_id, "relation": "uses",
+            "confidence": 0.7, "origin": "fixture", "asserted_at": 17.25,
+        })
     );
 }
 

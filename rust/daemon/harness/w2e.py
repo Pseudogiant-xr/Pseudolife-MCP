@@ -7060,9 +7060,14 @@ def main() -> int:
         ap.error("--write needs --record-candidate")
     if args.record_candidate and args.mutant:
         ap.error("never record a golden from a mutant")
+    names = args.only or list(SCENARIOS)
+    if args.record and args.mode in {"live", "calibrate"}:
+        native_only = sorted(set(names) & _QUEUE_JUDGES.keys())
+        if args.only and native_only:
+            ap.error(f"queue judges use native contract checks: omit --record for {', '.join(native_only)}")
+        names = [name for name in names if name not in _QUEUE_JUDGES]
     args.rust_bin = args.rust_bin.resolve()
     root = run_root()
-    names = args.only or list(SCENARIOS)
     tol = {} if args.mode == "calibrate" else json.loads(TOLERANCE_FILE.read_text(encoding="utf-8"))
     results = []
     if args.mode == "mutants":

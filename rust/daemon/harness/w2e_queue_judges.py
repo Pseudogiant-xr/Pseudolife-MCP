@@ -173,6 +173,15 @@ def candidate_bindings(conn):
     return generation, evidence, out
 
 
+def archived_evidence(conn, fingerprint):
+    return conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
+        "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened' "
+        f"AND {own_pairs(DISMISSED_PAIR)} AND value->>'evidence_fingerprint' = %s)",
+        (fingerprint,),
+    ).fetchone()[0]
+
+
 def seed_shape(name):
     if name == "curation-auto-fold":
         return "fold"
@@ -323,6 +332,9 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
             if op.get("candidate_binding_check"):
                 with psycopg.connect(dsn, autocommit=True) as conn:
                     current_generation, current_evidence, binding_diffs = candidate_bindings(conn)
+                    if op["candidate_binding_check"] == "reopen" and not archived_evidence(
+                            conn, evidence.get(DISMISSED_PAIR)):
+                        binding_diffs.append("reopened dismissal did not preserve the old pair evidence")
                 diffs.extend(binding_diffs)
                 if op["candidate_binding_check"] == "reopen":
                     if current_generation == generation:
@@ -503,6 +515,8 @@ def scenarios(w) -> dict:
                           "'automatic_review_decision_v1:%' AND value->>'queue' = 'candidate' "
                           "AND value->>'action' = 'dismiss' AND value->>'state' = 'active' "
                           f"AND {own_pairs(DISMISSED_PAIR)})")
+    candidate_edge = (f"src_id = {w.eid('postgres')} AND dst_id = {w.eid('ocean')} "
+                      "AND relation = 'uses' AND superseded_at IS NULL")
     memo_count = ("SELECT (SELECT COUNT(*) FROM jsonb_object_keys("
                   "(SELECT value->'pairs' FROM meta WHERE key = 'deep_candidate_verdicts'))) "
                   "> 0")
@@ -624,6 +638,14 @@ def scenarios(w) -> dict:
                 "0.8, NULL, 1.0)"),
                 "settle": {**w.JUDGE_SETTLE, "until": CANDIDATE_REOPENED},
                 "candidate_binding_check": "reopen"},
+                candidate_pair("postgres", "kafka-broker"), candidate_decision),
+            # Only change the edge clock. A loader that ignores asserted_at
+            # still notices the insertion above but misses this new binding.
+            w.expect({**w.external(
+                f"UPDATE edges SET asserted_at = asserted_at + 1 WHERE {candidate_edge}"),
+                "settle": {**w.JUDGE_SETTLE, "until": CANDIDATES_DONE},
+                "candidate_binding_check": "reopen"},
+                f"SELECT EXISTS (SELECT 1 FROM edges WHERE {candidate_edge} AND asserted_at = 2.0)",
                 candidate_pair("postgres", "kafka-broker"), candidate_decision),
             w.review()]),
         "link-shadow": w.judge_scenario(

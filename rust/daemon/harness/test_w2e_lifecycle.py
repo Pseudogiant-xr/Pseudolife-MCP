@@ -596,6 +596,33 @@ def test_curation_judge_scenarios_settle_before_their_first_comparison(harness):
             "mcp-dream-curation-fold-unaudited"} <= set(qj.MUTANTS)
 
 
+def test_recording_without_only_keeps_nonqueue_rows(harness, monkeypatch, tmp_path):
+    selected = {"store-defaults": {}, "link-auto": {}, "counters-restore": {}}
+    monkeypatch.setattr(harness, "SCENARIOS", selected)
+    monkeypatch.setattr(harness, "run_root", lambda: tmp_path)
+    monkeypatch.setattr(sys, "argv", ["w2e.py", "live", "--record", "--rust-bin", "candidate"])
+    seen = []
+
+    def scenario(name, binary, root, mode, record, tol, **kwargs):
+        assert record
+        seen.append(name)
+        return {"scenario": name, "steps": [], "stats": {}}
+
+    monkeypatch.setattr(harness, "run_scenario", scenario)
+    assert harness.main() == 0
+    assert seen == ["store-defaults", "counters-restore"]
+
+
+def test_explicit_queue_recording_refuses_before_any_writes(harness, monkeypatch, capsys):
+    monkeypatch.setattr(harness, "run_root", lambda: pytest.fail("recording made a scratch root"))
+    monkeypatch.setattr(sys, "argv", [
+        "w2e.py", "live", "--record", "--rust-bin", "candidate", "--only", "store-defaults", "link-auto",
+    ])
+    with pytest.raises(SystemExit, match="2"):
+        harness.main()
+    assert "omit --record for link-auto" in capsys.readouterr().err
+
+
 def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
     """Each sweep scenario's ``until`` must hold under its mutant too (a
     settle that times out crashes the mutants run instead of counting a

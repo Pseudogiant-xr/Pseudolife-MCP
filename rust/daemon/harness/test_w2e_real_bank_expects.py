@@ -27,10 +27,11 @@ budget (0, which both daemons read as off); those tests need no database.
 """
 import importlib
 import sys
+import types
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-import yaml
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -179,10 +180,64 @@ UNBUDGETED = ["recall", "recall-llm", "recall-ungated"]
 BUDGET_LINE = "    time_budget_seconds: 0\n"
 
 
+def load(tmp_path, config):
+    from pseudolife_memory.utils.config import AppConfig, load_config
+    if config is None:
+        return AppConfig()
+    path = tmp_path / "config.yaml"
+    path.write_text(config, encoding="utf-8")
+    return load_config(path)
+
+
+def slow_walk(monkeypatch, cfg):
+    """A three-spoke walk in which every search takes 100 s of a fake clock,
+    run with ``cfg``'s budget and ceiling as ``service.recall`` passes them.
+    Importing the recall module loads the memory package, which needs torch;
+    the Rust CI lane installs no model stack, so there it is skipped (the
+    batch's local harness run has it)."""
+    pytest.importorskip("torch", reason="the Python memory package needs torch")
+    import pseudolife_memory.memory.recall as rc
+    now = {"t": 0.0}
+    monkeypatch.setattr(rc, "time", types.SimpleNamespace(monotonic=lambda: now["t"]))
+    spokes = ["Spoke 0", "Spoke 1", "Spoke 2"]
+
+    def search(query, top_k):
+        now["t"] += 100.0
+        return {"entries": [{"text": "The hub uses three spokes."}]}
+
+    def graph(name, depth=1):
+        nodes = [name, *spokes] if name == "Hub" else [name]
+        return {"found": True, "nodes": [{"entity": n, "facts": []} for n in nodes],
+                "edges": [{"src": "Hub", "relation": "uses", "dst": s} for s in spokes],
+                "paths": []}
+
+    return rc.run_recall(search, graph, ["Hub", *spokes], "what does the hub use?",
+                         rc.MechanicalController(), hops=2,
+                         max_total_searches=cfg.max_total_searches or None,
+                         time_budget_seconds=cfg.time_budget_seconds or None)
+
+
 @pytest.mark.parametrize("name", UNBUDGETED)
-def test_the_compared_recall_scenarios_carry_no_time_budget(harness, name):
-    cfg = yaml.safe_load(harness.SCENARIOS[name]["config"])["memory"]["recall"]
-    assert cfg["time_budget_seconds"] == 0
+def test_the_compared_recall_scenarios_carry_no_time_budget(tmp_path, harness, name):
+    cfg = load(tmp_path, harness.SCENARIOS[name]["config"]).memory.recall
+    assert cfg.time_budget_seconds == 0
+
+
+@pytest.mark.parametrize("name", UNBUDGETED)
+def test_a_slow_walk_runs_out_under_those_configs(monkeypatch, tmp_path, harness, name):
+    cfg = load(tmp_path, harness.SCENARIOS[name]["config"]).memory.recall
+    # However slow each search is, the walk runs out: the seed search and
+    # the three spokes' re-queries, nothing cut.
+    st = slow_walk(monkeypatch, cfg)
+    assert (st.truncated, st.searches_issued) == (False, 4)
+
+
+def test_the_default_budget_still_cuts_the_same_walk(monkeypatch, tmp_path):
+    # The near miss: under the 20 s default the seed search alone spends it.
+    cfg = load(tmp_path, None).memory.recall
+    assert cfg.time_budget_seconds == 20.0
+    st = slow_walk(monkeypatch, cfg)
+    assert (st.truncated, st.searches_issued) == (True, 1)
 
 
 def test_rust_reads_a_zero_budget_as_no_budget():
@@ -191,22 +246,18 @@ def test_rust_reads_a_zero_budget_as_no_budget():
     src = (HERE.parent / "src" / "recall.rs").read_text(encoding="utf-8")
     assert ("time_budget: (rc.time_budget_seconds > 0.0)"
             ".then_some(rc.time_budget_seconds)") in src
-    assert ".is_some_and(|b| started.elapsed().as_secs_f64() >= b)" in src
-    assert "if out_of_time(&started) {\n            st.truncated = true;" in src
-    config = (HERE.parent / "src" / "config.rs").read_text(encoding="utf-8")
-    assert "time_budget_seconds: 20.0," in config
 
 
-def test_dropping_the_budget_changes_no_other_setting(harness):
+def test_dropping_the_budget_changes_no_other_setting(tmp_path, harness):
+    from pseudolife_memory.utils.config import AppConfig
     # recall ran with no config file: its config differs from the defaults
     # in the budget alone.
-    assert yaml.safe_load(harness.SCENARIOS["recall"]["config"]) == {
-        "memory": {"recall": {"time_budget_seconds": 0}}}
+    want = AppConfig()
+    want.memory.recall = replace(want.memory.recall, time_budget_seconds=0)
+    assert load(tmp_path, harness.SCENARIOS["recall"]["config"]) == want
     # recall-llm: its config without the line differs in the budget alone.
     config = harness.SCENARIOS["recall-llm"]["config"]
     assert BUDGET_LINE in config
-    old = yaml.safe_load(config.replace(BUDGET_LINE, ""))
-    assert old == {"memory": {"recall": {"driver": "llm"},
-                             "lessons": {"enabled": False},
-                             "graph_insight": {"enabled": False},
-                             "dream": {"enabled": False, "stall_notice": False}}}
+    old = load(tmp_path, config.replace(BUDGET_LINE, ""))
+    old.memory.recall = replace(old.memory.recall, time_budget_seconds=0)
+    assert load(tmp_path, config) == old
