@@ -1,3 +1,0 @@
-### Fixed (2026-11-20 — Upgrade legacy Docker banks after Python releases end)
-- Release-mode `pseudolife-mcp update` uses the archived Python 0.23.1 daemon to import legacy banks before deploying the selected Rust release. It checks the import before moving clients and keeps the original bank and image available for recovery.
-- This bridge runs in the native updater and requires Linux amd64 containers. For a legacy bank on a host using Linux arm64 containers, restore a verified backup on a Linux amd64 Docker host and complete the upgrade there before moving the bank back. The Python updater uses its own import path.
