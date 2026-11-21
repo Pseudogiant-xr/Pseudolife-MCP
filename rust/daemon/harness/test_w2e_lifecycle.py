@@ -124,7 +124,7 @@ def test_overlapping_invocations_preserve_each_others_homes(harness, monkeypatch
     roots = []
 
     def overlap(*args, **kwargs):
-        root = args[2]
+        root = args[2] if driver == "w2e" else args[1]
         roots.append(root)
         marker = harness.daemons.make_home(root, "same-scenario", None) / f"run-{len(roots)}"
         marker.write_text("owned evidence", encoding="utf-8")
@@ -134,7 +134,11 @@ def test_overlapping_invocations_preserve_each_others_homes(harness, monkeypatch
             assert marker.read_text(encoding="utf-8") == "owned evidence"
         raise FixtureFailure("after home creation")
 
-    monkeypatch.setattr(harness, "run_scenario" if driver == "w2e" else "prepare_template", overlap)
+    if driver == "w2e":
+        monkeypatch.setattr(harness, "run_scenario", overlap)
+    else:
+        monkeypatch.setattr(module, "prepare_template", lambda owned: None)
+        monkeypatch.setattr(module, "run_arm", overlap)
     with pytest.raises(FixtureFailure, match="after home creation"):
         module.main()
     assert len(set(roots)) == 2
@@ -163,10 +167,100 @@ def test_relative_binary_is_resolved_before_provisioning(harness, monkeypatch, t
     monkeypatch.setattr(argparse.ArgumentParser, "parse_args", capture)
     monkeypatch.setattr(harness.daemons, "scratch_root", lambda: tmp_path)
     monkeypatch.setattr(harness, "run_scenario", stop)
-    monkeypatch.setattr(harness, "prepare_template", stop)
+    if driver == "w2e_shutdown":
+        monkeypatch.setattr(module, "prepare_template", stop)
     with pytest.raises(FixtureFailure, match="before provisioning"):
         module.main()
     assert seen[0].rust_bin == tmp_path / "candidate"
+
+
+@pytest.mark.parametrize("change, expected", [
+    ("lost", "did not survive shutdown exactly once"),
+    ("extra-sequence", "/catalog/sequences"),
+    ("clock", "clock is outside its invocation window"),
+    ("vector", "invalid durable embedding"),
+    ("restart-rewrite", "after restart:"),
+])
+def test_shutdown_durable_contract_rejects_wrong_state(harness, change, expected):
+    import copy
+    from w2e_shutdown import durable_diffs
+
+    row = {"id": 1, "text": "shutdown witness", "band": "flat", "source": "fixture",
+           "dream_state": "pending", "episode_id": None, "access_count": 0,
+           "reinforcements": 0, "explicit_reinforcements": 0, "superseded_at": None,
+           "superseded_by_text": None, "tags": [], "slots": [], "ts": 10.0,
+           "embedding": json.dumps([0.5] * 1024)}
+    before = {"catalog": {"sequences": [["public", "entries_id_seq", "bigint", 1, 1, None]]},
+              "rows": {"public.entries": {"columns": list(row), "rows": []},
+                       "public.meta": {"columns": ["key", "value"],
+                                       "rows": [["writer_lease_epoch", 2]]}}}
+    stopped = copy.deepcopy(before)
+    stopped["catalog"]["sequences"][0][5] = 1
+    stopped["rows"]["public.entries"]["rows"].append(list(row.values()))
+    restarted = copy.deepcopy(stopped)
+    restarted["rows"]["public.meta"]["rows"][0][1] = 3
+
+    def differences():
+        return durable_diffs(before, stopped, restarted, row["text"], (9.0, 11.0))
+
+    assert not differences()
+    if change == "lost":
+        stopped["rows"]["public.entries"]["rows"].clear()
+    elif change == "extra-sequence":
+        stopped["catalog"]["sequences"][0][5] = 2
+    elif change == "clock":
+        stopped["rows"]["public.entries"]["rows"][0][list(row).index("ts")] = 3.0
+    elif change == "vector":
+        stopped["rows"]["public.entries"]["rows"][0][list(row).index("embedding")] = "[]"
+    else:
+        restarted["rows"]["public.entries"]["rows"][0][list(row).index("access_count")] = 1
+    assert any(expected in difference for difference in differences())
+
+
+@pytest.mark.parametrize("scenario", ["counters-restore", "search-after-restart"])
+def test_clean_exit_uses_native_lifecycle_runner(harness, monkeypatch, tmp_path, scenario):
+    def reject_oracle(*args, **kwargs):
+        pytest.fail("clean-exit scenario prepared a Python template")
+
+    def native(name, config, tag, binary, root, owned, mutant):
+        assert name == scenario
+        assert config is harness.SCENARIOS[scenario]
+        assert tag == scenario.replace("-", "_")
+        assert root == tmp_path
+        return {"scenario": name, "steps": [], "stats": {}}
+
+    monkeypatch.setattr(harness, "prepare_template", reject_oracle)
+    monkeypatch.setattr(harness, "run_clean_lifecycle", native, raising=False)
+    result = harness.run_scenario(scenario, tmp_path / "candidate", tmp_path, "live", False, {})
+    assert result["scenario"] == scenario
+
+
+def test_recording_keeps_other_scenarios_after_clean_exit_rows(harness, monkeypatch, tmp_path):
+    monkeypatch.setattr(harness, "SCENARIOS", {
+        "store-defaults": {}, "counters-restore": {"clean_stop": True}, "health-consistency": {},
+    })
+    monkeypatch.setattr(harness, "run_root", lambda: tmp_path)
+    monkeypatch.setattr(sys, "argv", ["w2e.py", "live", "--record", "--rust-bin", "candidate"])
+    seen = []
+
+    def scenario(name, binary, root, mode, record, tol, **kwargs):
+        assert record
+        seen.append(name)
+        return {"scenario": name, "steps": [], "stats": {}}
+
+    monkeypatch.setattr(harness, "run_scenario", scenario)
+    assert harness.main() == 0
+    assert seen == ["store-defaults", "health-consistency"]
+
+
+def test_explicit_clean_exit_recording_refuses_before_any_writes(harness, monkeypatch, capsys):
+    monkeypatch.setattr(harness, "run_root", lambda: pytest.fail("recording made a scratch root"))
+    monkeypatch.setattr(sys, "argv", [
+        "w2e.py", "live", "--record", "--rust-bin", "candidate", "--only", "store-defaults", "counters-restore",
+    ])
+    with pytest.raises(SystemExit, match="2"):
+        harness.main()
+    assert "omit --record for counters-restore" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("mode,stage", [

@@ -1,23 +1,13 @@
-"""Abandon a store, signal shutdown while it is pending, then restart.
-
-The same raw request and owned-process signal run against Python and Rust.
-The entry must be absent when shutdown is requested, present after exit,
-and present after restart; full database states use the existing W2-E
-comparator and tolerances. Signal exit codes are reported, not normalized.
-
-``--mutant NAME`` (a ``--features mutants`` build) also runs a Rust arm with
-that deliberate break. It passes only when the Python oracle persisted the
-store, the unmutated Rust arm matches it, and the mutated arm differs: the
-``store-cancellable`` control, whose store is not tracked for the shutdown
-drain, is observable only here (over MCP a disconnect never cancels a call).
-"""
+"""Abandon a native store, signal shutdown while it is pending, then restart."""
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import math
 import os
 import signal
-import sys
+import time
 from pathlib import Path
 
 _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
@@ -25,131 +15,178 @@ _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-
 import psycopg
 
 import w2e as h
+from rust.harness_support.bank_fixture import assert_fixture_database
+from w2e_shutdown_seed import replay
+
+
+SCENARIO = {"config": "memory:\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n"}
+TEXT = ("A disconnected store must finish before daemon shutdown. " * 160).strip()
+DRAIN_WITNESS = "shutdown: admitted writes still running; the final save runs beside them"
+# background.rs gives the HTTP and write drain a combined six seconds and
+# keeps the final save available through nine seconds. Hold across the
+# former deadline so the daemon reports whether it was tracking the write.
+HOLD_AFTER_SIGNAL_SECONDS = 6.5
+STORE_PAUSE_SQL = """
+CREATE FUNCTION public.w2e_pause_store() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    -- A try-lock does not run into the daemon writer's lock_timeout.
+    WHILE NOT pg_try_advisory_xact_lock(730, 650) LOOP
+        PERFORM pg_sleep(0.05);
+    END LOOP;
+    RETURN NEW;
+END
+$$;
+CREATE TRIGGER w2e_pause_store BEFORE INSERT ON public.entries
+FOR EACH ROW EXECUTE FUNCTION public.w2e_pause_store();
+"""
+
+
+def prepare_template(owned):
+    name = h.pg.name("pl_cf_w2e_shutdown_t")
+    owned.append(name)
+    replay(h.pg.create(name), "standalone-shutdown")
+    return name
+
+
+def store_rows(state, text):
+    rows = state["rows"]["public.entries"]
+    text_column = rows["columns"].index("text")
+    return [dict(zip(rows["columns"], row)) for row in rows["rows"]
+            if row[text_column] == text]
+
+
+def durable_diffs(before, stopped, restarted, text, window):
+    """The store adds one valid row and one sequence value; restart preserves them."""
+    diffs = []
+    written = store_rows(stopped, text)
+    if len(written) != 1:
+        diffs.append("admitted store did not survive shutdown exactly once")
+    else:
+        row, = written
+        stable = {"band": "flat", "source": "fixture", "dream_state": "pending",
+                  "episode_id": None, "access_count": 0, "reinforcements": 0,
+                  "explicit_reinforcements": 0, "superseded_at": None,
+                  "superseded_by_text": None, "tags": [], "slots": []}
+        if any(row.get(key) != expected for key, expected in stable.items()):
+            diffs.append("shutdown store has incorrect durable attributes")
+        if not isinstance(row.get("ts"), float) or not window[0] <= row["ts"] <= window[1]:
+            diffs.append("shutdown store clock is outside its invocation window")
+        embedding = json.loads(row["embedding"]) if row.get("embedding") else []
+        if (len(embedding) != 1024 or not all(math.isfinite(value) for value in embedding)
+                or not any(embedding)):
+            diffs.append("shutdown store has an invalid durable embedding")
+
+    expected_stop = copy.deepcopy(before)
+    entries = expected_stop["rows"]["public.entries"]
+    if len(written) == 1:
+        entries["rows"].append([written[0][key] for key in entries["columns"]])
+        id_column = entries["columns"].index("id")
+        entries["rows"].sort(key=lambda row: str(row[id_column]))
+    seq = next(row for row in expected_stop["catalog"]["sequences"]
+               if row[:2] == ["public", "entries_id_seq"])
+    seq[5] = seq[3] if seq[5] is None else seq[5] + seq[4]
+    if len(written) == 1 and written[0]["id"] != seq[5]:
+        diffs.append("shutdown store used an unexpected entry sequence value")
+    diffs.extend(h.dbstate.diff(expected_stop, stopped))
+
+    expected_restart = copy.deepcopy(stopped)
+    for item in expected_restart["rows"]["public.meta"]["rows"]:
+        if item[0] == "writer_lease_epoch":
+            item[1] += 1
+    diffs.extend(f"after restart: {diff}" for diff in h.dbstate.diff(expected_restart, restarted))
+    return diffs
+
+
+def run_arm(binary, root, template, label, mutant, owned):
+    name = h.pg.name(f"pl_cf_w2e_shutdown_{label}")
+    owned.append(name)
+    dsn = h.pg.create(name, template=template)
+    with psycopg.connect(dsn) as conn:
+        assert_fixture_database(conn)
+        conn.execute(STORE_PAUSE_SQL)
+    home = h.daemons.make_home(root, label, SCENARIO["config"])
+    env = h.w1a.rust_env(h.side_env(SCENARIO, dsn))
+    if mutant:
+        env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
+    daemon = h.daemons.rust_daemon(binary, home, h.daemons.free_port(), h.daemons.base_env(home, env))
+    try:
+        daemon.start(300)
+        h.w1a.wait_settled([daemon.port], token=h.TOKEN)
+        mcp = h.Mcp(daemon.port)
+        mcp.init()
+        before = h.dbstate.dump(dsn)
+        began = time.time()
+        with psycopg.connect(dsn, autocommit=True) as gate:
+            gate.execute("SELECT pg_advisory_lock(730, 650)")
+            mcp.abandon("memory_store", {"text": TEXT, "source": "fixture"})
+            deadline = time.monotonic() + 30
+            while not gate.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                "WHERE datname = current_database() AND wait_event = 'PgSleep' "
+                "AND query LIKE '%INSERT INTO entries%')"
+            ).fetchone()[0]:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"{label}: the abandoned store never reached the fixture trigger")
+                time.sleep(0.05)
+            proc = daemon.proc
+            if proc is None or proc.poll() is not None:
+                raise RuntimeError(f"{label}: owned daemon exited before the shutdown signal")
+            proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
+            time.sleep(HOLD_AFTER_SIGNAL_SECONDS)
+        exit_code = proc.wait(timeout=120)
+        drain_observed = DRAIN_WITNESS in daemon.log.read_text(encoding="utf-8", errors="replace")
+        daemon.stop()
+        stopped = h.dbstate.dump(dsn)
+        ended = time.time()
+        daemon.start(300)
+        h.w1a.wait_settled([daemon.port], token=h.TOKEN)
+        restarted = h.dbstate.dump(dsn)
+        evidence = {"pending_at_signal": True, "exit": exit_code, "tracked_drain": drain_observed,
+                    "persisted": len(store_rows(stopped, TEXT)),
+                    "after_restart": len(store_rows(restarted, TEXT))}
+        differences = durable_diffs(before, stopped, restarted, TEXT, (began, ended))
+        if exit_code:
+            differences.append(f"{label}: owned daemon exited {exit_code}")
+        if not drain_observed:
+            differences.append(f"{label}: blocked store did not appear in the admitted-write drain")
+        return evidence, differences
+    finally:
+        daemon.stop()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rust-bin", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--mutant")
     args = parser.parse_args()
     if _DATABASE_TURN_MARKER.exists():
-        _turn_sys = __import__("sys")
-        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
-        _turn_sys.path.insert(0, _turn_root)
-        try:
-            from rust.harness_support.database_turn import require_turn
+        from rust.harness_support.database_turn import require_turn
 
-            require_turn(holder="standalone database harness", contain=True)
-        finally:
-            _turn_sys.path.remove(_turn_root)
+        require_turn(holder="standalone database harness", contain=True)
     args.rust_bin = args.rust_bin.resolve()
     root = h.run_root("w2e-shutdown")
-    scenario = {"config": "memory:\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n", "seed": []}
-    procs = {}
-    owned = []
-    results = {}
-    text = ("A disconnected store must finish before daemon shutdown. " * 160).strip()
-    call_args = {"text": text, "source": "fixture"}
-    arms = [("python", None), ("rust", None)] + ([("mutant", args.mutant)] if args.mutant else [])
+    arms, owned = {}, []
     try:
-        template = h.prepare_template(scenario, "shutdown", root, owned)
-        for label, mutant in arms:
-            side = "python" if label == "python" else "rust"
-            name = h.pg.name(f"pl_cf_w2e_shutdown_{label}")
-            owned.append(name)
-            dsn = h.pg.create(name, template=template)
-            before = h.dbstate.dump(dsn)
-            home = h.daemons.make_home(root, label, scenario["config"])
-            env = h.side_env(scenario, dsn)
-            if side == "rust":
-                env = h.w1a.rust_env(env)
-                if mutant:
-                    env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
-            env = h.daemons.base_env(home, env)
-            port = h.daemons.free_port()
-            daemon = (h.daemons.python_daemon(home, port, env) if side == "python"
-                      else h.daemons.rust_daemon(args.rust_bin, home, port, env))
-            if side == "python":
-                # Match background_sessions.py's normal-return fixture:
-                # uvicorn rethrows signals to the previous handler. Let
-                # that handler return so Python's registered exit save runs.
-                # Ordinary CLI signal exit semantics remain a separate test.
-                daemon.argv = [sys.executable, "-c", """
-import signal
-from pseudolife_memory import mcp_server
-for sig in (signal.SIGTERM, getattr(signal, 'SIGBREAK', signal.SIGTERM)):
-    signal.signal(sig, lambda *_: None)
-from pseudolife_memory.daemon import run_daemon
-run_daemon()
-"""]
-            procs[label] = daemon
-            daemon.start(300)
-            h.w1a.wait_settled([port], token=h.TOKEN)
-            mcp = h.Mcp(port)
-            mcp.init()
-            mcp.abandon("memory_store", call_args)
-            with psycopg.connect(dsn) as conn:
-                pending = conn.execute("SELECT count(*) FROM entries WHERE text=%s", (text,)).fetchone()[0] == 0
-            if not pending:
-                raise RuntimeError(f"{label}: store completed before the shutdown probe")
-            daemon.proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
-            exit_code = daemon.proc.wait(timeout=120)
-            daemon.stop()
-            stopped = h.dbstate.dump(dsn)
-            with psycopg.connect(dsn) as conn:
-                persisted = conn.execute("SELECT count(*) FROM entries WHERE text=%s", (text,)).fetchone()[0]
-            daemon.start(300)
-            h.w1a.wait_settled([port], token=h.TOKEN)
-            restarted = h.dbstate.dump(dsn)
-            with psycopg.connect(dsn) as conn:
-                after_restart = conn.execute("SELECT count(*) FROM entries WHERE text=%s", (text,)).fetchone()[0]
-            results[label] = {"pending_at_signal": pending, "exit": exit_code,
-                             "persisted": persisted, "after_restart": after_restart,
-                             "states": [h.normalize_state(state, before) for state in (stopped, restarted)]}
-            daemon.stop()
-        tolerance = json.loads(h.TOLERANCE_FILE.read_text(encoding="utf-8"))
-        stats = {}
-
-        def survived(label):
-            r = results[label]
-            return r["persisted"] == 1 and r["after_restart"] == 1
-
-        def compare(label):
-            """Differences of one Rust arm against the Python oracle."""
-            out = []
-            for milestone in range(2):
-                a, b = (results[x]["states"][milestone] for x in ("python", label))
-                out += h.state_diff(a[0], b[0])
-                out += h.compare_numeric(a[1], b[1], tolerance, stats)
-            if not survived(label):
-                out.append(f"{label}: admitted store did not survive shutdown/restart")
-            return out
-
-        differences = compare("rust")
-        if not survived("python"):
-            differences.append("python: admitted store did not survive shutdown/restart")
-        mutant_differences = compare("mutant") if args.mutant else []
-        for result in results.values():
-            del result["states"]
-        result = {"arms": results, "differences": differences,
-                  "mutant_differences": mutant_differences, "stats": stats}
+        template = prepare_template(owned)
+        arms["rust"], differences = run_arm(args.rust_bin, root, template, "rust", None, owned)
+        mutant_differences = []
+        if args.mutant and not differences:
+            arms["mutant"], mutant_differences = run_arm(
+                args.rust_bin, root, template, "mutant", args.mutant, owned)
+        result = {"arms": arms, "differences": differences,
+                  "mutant_differences": mutant_differences, "stats": {}}
         args.out.write_text(json.dumps(result, indent=1), encoding="utf-8")
-        print(json.dumps({"arms": results, "difference_count": len(differences),
-                          "mutant_difference_count": len(mutant_differences), "stats": stats,
-                          "mutant": args.mutant}))
+        print(json.dumps({"arms": arms, "difference_count": len(differences),
+                          "mutant_difference_count": len(mutant_differences), "mutant": args.mutant}))
+        if differences:
+            return 1
         if args.mutant:
-            # A kill counts only against a healthy oracle and a clean baseline.
-            if differences:
-                print(f"mutant {args.mutant}: INCONCLUSIVE (the unmutated baseline differs)")
-                return 1
-            caught = bool(mutant_differences)
+            caught = arms["mutant"]["exit"] == 0 and not arms["mutant"]["tracked_drain"]
             print(f"mutant {args.mutant}: {'caught' if caught else 'MISSED'}")
             return int(not caught)
-        return int(bool(differences))
+        return 0
     finally:
-        for daemon in procs.values():
-            daemon.stop()
         for name in reversed(owned):
             h.pg.drop(name)
 

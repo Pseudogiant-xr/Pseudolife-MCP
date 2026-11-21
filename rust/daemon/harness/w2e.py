@@ -3215,18 +3215,20 @@ COUNTERS_COLUMNS = ("preset_name", "interaction_count", "logical_turn_count", "t
 COUNTERS_SURPRISE_TOL = 1e-5
 
 
+def read_counters(dsn):
+    import psycopg
+
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        row = conn.execute(f"SELECT {', '.join(COUNTERS_COLUMNS)} FROM cms_counters "
+                           "WHERE id = 1").fetchone()
+    return None if row is None else dict(zip(COUNTERS_COLUMNS, row))
+
+
 def counters_rows(dsns: dict) -> tuple[dict, dict]:
     """Both sides' rows, ``updated_at`` as null-or-not, and each band's
     surprise history as its length once every value agrees within
     ``COUNTERS_SURPRISE_TOL`` (raw on both sides otherwise, so it differs)."""
-    import psycopg
-    rows = {}
-    for side in ("python", "rust"):
-        with psycopg.connect(dsns[side], autocommit=True) as conn:
-            r = conn.execute(f"SELECT {', '.join(COUNTERS_COLUMNS)} FROM cms_counters "
-                             "WHERE id = 1").fetchone()
-        rows[side] = None if r is None else dict(zip(COUNTERS_COLUMNS, r))
-    py, rs = rows["python"], rows["rust"]
+    py, rs = [read_counters(dsns[side]) for side in ("python", "rust")]
     for row in (py, rs):
         if row is not None:
             row["updated_at"] = _clock(row["updated_at"])
@@ -6272,30 +6274,84 @@ import w2e_live_config  # noqa: E402
 SCENARIOS.update(w2e_live_config.register(sys.modules[__name__]))
 
 
-def configure_clean_exit(procs: dict, scn: dict) -> None:
-    """Use the existing lifecycle harness's normal-return signal fixture.
+def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
+    """Check the native clean-exit rows before and after an owned restart."""
+    import psycopg
+    from background_sessions import graceful_stop
+    from w2e_shutdown_seed import replay
 
-    Uvicorn rethrows the signal to the previous handler; a returning handler
-    lets Python return normally on both platforms, as in SessionReap.
-    Its lifespan shutdown performs the flush before atexit runs again.
-    Durable rows, not merely process exit, prove the flush took effect.
-    """
-    if not scn.get("clean_stop"):
-        return
-    procs["python"].argv = [sys.executable, "-c", """
-import signal
-for sig in (signal.SIGTERM, getattr(signal, "SIGBREAK", signal.SIGTERM)):
-    signal.signal(sig, lambda *_: None)
-from pseudolife_memory.daemon import run_daemon
-run_daemon()
-"""]
+    if scn["seed"]:
+        raise ValueError("clean-exit scenario requires a captured seed")
+    seed = pg.name(f"pl_cf_w2e_{tag}_t")
+    owned.append(seed)
+    replay(pg.create(seed), name)
+    bank = pg.name(f"pl_cf_w2e_{tag}_rs")
+    owned.append(bank)
+    dsn = pg.create(bank, template=seed)
+    home = daemons.make_home(root, f"{tag}-rs", scn["config"])
+    env = w1a.rust_env(side_env(scn, dsn))
+    if mutant:
+        env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
+    daemon = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, env))
+    steps = []
+    try:
+        def start(before, config):
+            daemon.start(300)
+            w1a.wait_settled([daemon.port], token=TOKEN)
+            warmup = wait_warmups({"rust": dsn}, {"rust": before}) if warmup_expected(
+                {"config": config}) else []
+            client = Mcp(daemon.port)
+            client.init()
+            return client, warmup
 
-
-def stop_for_scenario(daemon, scn: dict) -> None:
-    if scn.get("clean_stop"):
-        from background_sessions import graceful_stop
-        graceful_stop(daemon)
-    else:
+        client, diffs = start(dbstate.dump(dsn), scn["config"])
+        steps.append({"step": 0, "op": {"op": "init"}, "diffs": diffs})
+        hit_ids = None
+        for index, op in enumerate(scn["ops"], 1):
+            diffs = []
+            if op["op"] == "restart":
+                graceful_stop(daemon)
+                stopped = dbstate.dump(dsn)
+                (home / "data/config.yaml").write_text(op["config"], encoding="utf-8")
+                client, diffs = start(stopped, op["config"])
+                restarted = w1a.scrub_declared_rows(dbstate.dump(dsn), stopped)["state"]
+                for row in stopped["rows"]["public.meta"]["rows"]:
+                    if row[0] == "writer_lease_epoch":
+                        row[1] += 1
+                diffs.extend(f"restart: {diff}" for diff in dbstate.diff(stopped, restarted))
+                answer = {"isError": False, "value": None}
+            elif op["op"] == "counters":
+                if op["stop"]:
+                    graceful_stop(daemon)
+                value = read_counters(dsn)
+                expected_count = 3 if op["stop"] else 2
+                if (not value or value["preset_name"] != "flat"
+                        or value["interaction_count"] != expected_count
+                        or len(value["surprise_history"].get("flat", [])) != expected_count
+                        or not value["updated_at"]):
+                    diffs.append("successful stores did not persist the expected counters")
+                answer = {"isError": False, "value": value}
+            else:
+                answer = run_op(op, daemon.port, client, dsn)
+                if not answer or answer["isError"]:
+                    diffs.append(f"{op.get('name', op['op'])} did not succeed")
+                elif name == "search-after-restart" and op.get("name") == "memory_search":
+                    items = answer["value"].get("entries", [])
+                    if {item["text"] for item in items} != set(RESTART_TEXTS):
+                        diffs.append("search did not return both restart fixture entries")
+                    ids = {item["id"] for item in items}
+                    if hit_ids is not None and ids != hit_ids:
+                        diffs.append("search returned different entry IDs after restart")
+                    hit_ids = ids
+            if op.get("expect"):
+                with psycopg.connect(dsn, autocommit=True) as conn:
+                    for query in op["expect"]:
+                        row = conn.execute(query).fetchone()
+                        if not row or not row[0]:
+                            diffs.append(f"expect rust: {query}")
+            steps.append({"step": index, "op": op, "diffs": diffs, "rust": answer})
+        return {"scenario": name, "steps": steps, "stats": {}}
+    finally:
         daemon.stop()
 
 
@@ -6315,7 +6371,7 @@ def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
             return conn.execute(probes).fetchone()[0]
     booted = {side: count(side) + 1 for side in procs}
     for d in procs.values():
-        stop_for_scenario(d, scn)
+        d.stop()
     for side in ("python", "rust"):
         config = op["config"]
         if stubs.get(side) is not None:
@@ -6325,7 +6381,6 @@ def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
         homes["python"], daemons.free_port(), daemons.base_env(homes["python"], envs["python"]))
     procs["rust"] = daemons.rust_daemon(
         binary, homes["rust"], daemons.free_port(), daemons.base_env(homes["rust"], envs["rust"]))
-    configure_clean_exit(procs, scn)
     for d in procs.values():
         d.start(300)
     w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
@@ -6517,6 +6572,10 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: bool,
               tol: dict, mutant: str | None, owned: list[str],
               stubs: dict[str, StubExtractor]) -> dict:
+    if scn.get("clean_stop"):
+        if record:
+            raise ValueError("clean-exit scenarios use native contract checks; omit --record")
+        return run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant)
     if name in w2e_documents.SCENARIOS:
         w2e_documents.require_document_oracles()
     template = prepare_template(scn, tag, root, owned, stubs.get("seed"))
@@ -6542,7 +6601,6 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         homes["rust"] = home
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
         envs = {"python": penv, "rust": renv}
-        configure_clean_exit(procs, scn)
         daemons.start_all(procs, 300)
         # Each arm's clock window opens at its daemon's first start (a
         # restart step moves started_at_unix) and closes after each dump.
@@ -6579,7 +6637,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 elif op["op"] == "counters":
                     if op["stop"]:
                         for d in procs.values():
-                            stop_for_scenario(d, scn)
+                            d.stop()
                     py, rs = counters_rows(dsns)
                 else:
                     t0 = time.time()
@@ -7052,6 +7110,11 @@ def main() -> int:
         finally:
             _turn_sys.path.remove(_turn_root)
     args = ap.parse_args()
+    recording = args.record and args.mode in {"live", "calibrate"}
+    if recording and args.only:
+        clean_only = [name for name in args.only if SCENARIOS.get(name, {}).get("clean_stop")]
+        if clean_only:
+            ap.error(f"clean-exit scenarios use native contract checks: omit --record for {', '.join(clean_only)}")
     if (args.record_candidate or args.write or args.mutant) and args.mode != "golden":
         ap.error("--record-candidate, --write and --mutant belong to golden mode")
     if args.write and not args.record_candidate:
@@ -7062,6 +7125,8 @@ def main() -> int:
     root = run_root()
     names = args.only or list(SCENARIOS)
     tol = {} if args.mode == "calibrate" else json.loads(TOLERANCE_FILE.read_text(encoding="utf-8"))
+    if recording and not args.only:
+        names = [name for name in names if not SCENARIOS[name].get("clean_stop")]
     results = []
     if args.mode == "mutants":
         caught = {}
