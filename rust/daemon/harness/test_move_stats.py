@@ -6,7 +6,7 @@ Parent-only heavy command (prebuilt daemon and offline models required):
 
 No shared registry edit is needed. This driver loads a private w2d_search module,
 reuses its config, seed, requests, complete stats comparator, coverage and bank
-diff, and confines every created/cloned/dropped fixture database to r2_* names.
+diff, and confines every created/cloned/dropped database to pl_cf_w2d_r2_* fixtures.
 --self-check is pure: no database, daemon, network, model or subprocess access.
 """
 from __future__ import annotations

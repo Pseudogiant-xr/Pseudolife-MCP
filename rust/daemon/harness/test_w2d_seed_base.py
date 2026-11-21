@@ -9,6 +9,7 @@ before.
 """
 import sys
 from pathlib import Path
+from struct import pack, unpack
 from unittest.mock import MagicMock
 
 import pytest
@@ -67,7 +68,8 @@ def test_on_an_empty_bank_the_seed_is_unchanged(bank):
     assert bank.execute("SELECT id, label FROM communities").fetchall() == [(1, "deploy tooling")]
 
 
-@pytest.mark.parametrize("name", ["pseudolife_memory", "outside_fixture_namespace"])
+@pytest.mark.parametrize("name", ["pseudolife_memory", "outside_fixture_namespace",
+                                  "pl_cf_w1a_x", "pl_cf_mir_x"])
 def test_seed_connection_refuses_foreign_names_before_connecting(monkeypatch, name):
     import w2d_seed
 
@@ -80,22 +82,25 @@ def test_seed_connection_refuses_foreign_names_before_connecting(monkeypatch, na
     connect.assert_not_called()
 
 
-def test_move_stats_fixture_name_passes_the_seed_guard(tmp_path):
+def test_move_stats_fixture_name_passes_the_seed_guard(tmp_path, monkeypatch):
     import test_move_stats
     import w2d_search
-    from principal_fixtures import check_target
+    import w2d_seed
 
     login = tmp_path / "synthetic-login.env"
     login.write_text("PSEUDOLIFE_TEST_PG_USER=fixture\nPSEUDOLIFE_TEST_PG_PASSWORD=synthetic\n",
                      encoding="utf-8")
     space = test_move_stats.bank_space(w2d_search, "127.0.0.1:1", login)
     name = space.name("pl_cf_w2d_template")
-    check_target(space.dsn(name))
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = (name,)
+    monkeypatch.setattr(w2d_seed.psycopg, "connect", MagicMock(return_value=conn))
+    assert w2d_seed.open_bank(space.dsn(name)) is conn
     assert name.startswith("pl_cf_w2d_r2_")
 
 
 @pytest.mark.parametrize("missing", [None, "docs", "crafted", "root", "parentless", "steps", "new_steps",
-                                    "supersede", "retirement"])
+                                    "supersede", "retirement", "confidence", "tolerance", "base_member"])
 def test_seed_bank_witness_rejects_missing_inputs(missing):
     import w2d_seed as seed
 
@@ -113,11 +118,32 @@ def test_seed_bank_witness_rejects_missing_inputs(missing):
     if missing == "retirement":
         rows["supersede"][0] = (seed.SUPERSEDED[0], seed.SUPERSEDED[1], False)
     slots = iter(rows)
+    facts = {
+        ("rounding-boundary", "confidence"): ("small decimal confidence", 0.00005, None),
+        ("homelab-box", "os"): ("Debian 13", 0.9, None),
+        ("staging-database", "host"): ("pg-staging-2", 0.8, None),
+        ("daemon", "port"): ("8765", 0.9, "constraint"),
+        ("jacque", "type"): ("cat", 0.9, None),
+        ("homelab-box", "gpu"): ("RTX 4090", 0.6, None),
+    }
+    if missing == "confidence":
+        facts["rounding-boundary", "confidence"] = ("small decimal confidence", 0.0001, None)
+    if missing == "tolerance":
+        facts["daemon", "port"] = ("8765", 0.9, None)
 
     def result(query, params):
+        cursor = MagicMock()
+        if query.startswith("SELECT value, confidence::double precision"):
+            value, confidence, tolerance = facts[params]
+            cursor.fetchall.return_value = [(value, unpack("f", pack("f", confidence))[0], tolerance)]
+            return cursor
+        if query.startswith("SELECT status, value FROM facts"):
+            assert params == ("homelab-box", "services")
+            members = [("current", "a GPU judge"), ("current", "postgres"), ("current", "the memory daemon")]
+            cursor.fetchall.return_value = members[1:] if missing == "base_member" else members
+            return cursor
         slot = next(slots)
         entries = rows[slot]
-        cursor = MagicMock()
         if slot == "root":
             if missing == "parentless" and "parent_id IS NULL" in query:
                 entries = []
@@ -142,9 +168,12 @@ def test_seed_bank_witness_rejects_missing_inputs(missing):
         assert conn.execute.call_args_list[0].args[1] == (42,)
 
 
-@pytest.mark.parametrize("missing", [None, "contender", "restatement", "volatile"])
+@pytest.mark.parametrize("missing", [None, "contender", "restatement", "volatile",
+                                    "extra_fact", "alias", "removed_member", "complete_facts"])
 def test_extras_require_the_persisted_inputs(missing):
     import w2d_seed as seed
+
+    fact = missing in {"extra_fact", "alias", "removed_member", "complete_facts"}
 
     def query(sql, params=()):
         result = MagicMock()
@@ -157,19 +186,41 @@ def test_extras_require_the_persisted_inputs(missing):
             result.fetchall.return_value = values[1:] if missing == "contender" else values
         elif sql.startswith("SELECT count(*) FROM entries"):
             result.fetchone.return_value = (0 if missing == "restatement" else 1,)
-        else:
-            assert sql.startswith("UPDATE facts")
+        elif sql.startswith("UPDATE facts"):
             # The copied bank always has Friday, and only the ordinary cell has Thursday.
             result.fetchall.return_value = [] if missing == "volatile" and "thursday afternoon" in params else [(1,)]
+        elif sql.startswith("SELECT value, confidence::double precision"):
+            facts = {("dev-box", "cpu"): ("Ryzen 9 7950X", 0.8), ("printer", "firmware"): ("2.1.0", 0.7)}
+            value, confidence = facts[params]
+            result.fetchall.return_value = ([(value, unpack("f", pack("f", confidence))[0], None)]
+                                             if missing != "extra_fact" or params[1] != "cpu" else [])
+        elif sql.startswith("SELECT a.alias, e.canonical"):
+            aliases = [("builder", "dev-box"), ("laser", "printer"), ("printer", "dev-box")]
+            result.fetchall.return_value = aliases[:-1] if missing == "alias" else aliases
+        elif sql.startswith("SELECT status, value FROM facts"):
+            if params == ("dev-box", "users"):
+                status = "current" if missing == "removed_member" else "removed"
+                result.fetchall.return_value = [("current", "alice"), (status, "bob")]
+            else:
+                assert params == ("dev-box", "groups")
+                result.fetchall.return_value = [("removed", "admins")]
+        elif sql.startswith("SELECT min(id) FROM entries"):
+            result.fetchone.return_value = (1,)
+        elif sql.startswith("SELECT entry_id FROM memory_traces"):
+            result.fetchall.return_value = [(1,)]
+        elif sql.startswith("SELECT attribute_norm FROM memory_trace_invalidations"):
+            result.fetchall.return_value = [("cpu",), ("users",)]
+        else:
+            assert sql.startswith(("INSERT INTO memory_traces", "INSERT INTO memory_trace_invalidations"))
         return result
 
     conn = MagicMock()
     conn.execute.side_effect = query
-    if missing:
+    if missing and missing != "complete_facts":
         with pytest.raises(RuntimeError, match="seed precondition not met"):
-            seed.finish_extras(conn, fact=False, stats=False, cutoff=42)
+            seed.finish_extras(conn, fact=fact, stats=False, cutoff=42)
     else:
-        seed.finish_extras(conn, fact=False, stats=False, cutoff=42)
+        seed.finish_extras(conn, fact=fact, stats=False, cutoff=42)
 
 
 def test_chronicle_seed_deduplicates_dated_and_undated_events(bank, monkeypatch):

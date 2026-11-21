@@ -14,6 +14,7 @@ import tempfile
 import time
 from contextlib import closing
 from pathlib import Path
+from struct import pack, unpack
 
 _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 
@@ -25,12 +26,15 @@ from psycopg.types.json import Json
 
 import daemons
 from mcp_wire import Session, sse_data
-from principal_fixtures import check_target
 from rust.harness_support.bank_fixture import assert_fixture_database
+from rust.harness_support.database_guard import (
+    assert_disposable_database, dsn_database_name, fixture_database_pattern, refuse_production_database,
+)
 
 SEED_TOKEN = "synthetic-w2d-fixture-token"
 CHILD_TEXT = "Episode filter probe: the child step reran the deploy health check."
 RESTATEMENT = "OS: Debian 13"
+SEED_DATABASE = fixture_database_pattern("w2d")
 
 DOCS = ["docs/guide/configuration.md", "docs/guide/dreaming.md", "README.md",
         "docs/guide/agent-isolation.md", "CONTRIBUTING.md"]
@@ -73,6 +77,14 @@ FACTS = [
     ("Jacque", "type", "cat", 0.9, "auto"),
 ]
 SET_MEMBERS = [("homelab box", "services", m) for m in ("postgres", "the memory daemon", "a GPU judge")]
+HOMELAB_GPU = ("homelab box", "gpu", "RTX 4090", 0.6, "auto")
+EXTRA_FACTS = [
+    ("dev box", "cpu", "Ryzen 9 7950X", 0.8, "auto"),
+    ("printer", "firmware", "2.1.0", 0.7, "auto"),
+]
+EXTRA_ALIASES = [("printer", "laser"), ("dev box", "builder"), ("dev box", "printer")]
+EXTRA_CURRENT_MEMBERS = [("users", "alice")]
+EXTRA_REMOVED_MEMBERS = [("users", "bob"), ("groups", "admins")]
 
 
 def paragraphs(limit: int) -> list[str]:
@@ -117,10 +129,14 @@ def root_episode(port):
 
 
 def open_bank(dsn):
-    check_target(dsn)
+    name = dsn_database_name(dsn)
+    if name is None or not SEED_DATABASE.fullmatch(name):
+        raise ValueError("W2-D seeding requires a disposable pl_cf_w2d_* database")
+    refuse_production_database(name)
     conn = psycopg.connect(dsn)
     try:
-        assert_fixture_database(conn)
+        if assert_disposable_database(conn) != name:
+            raise ValueError("W2-D seed connection reached a different database")
     except BaseException:
         conn.close()
         raise
@@ -142,7 +158,9 @@ def write_base(session, port, docs):
              confidence=conf, distortion_tolerance=tol)
     for entity, attribute, member in SET_MEMBERS:
         tool(session, "set_add", entity=entity, attribute=attribute, member=member)
-    tool(session, "fact_set", entity="homelab box", attribute="gpu", value="RTX 4090", confidence=0.6)
+    entity, attribute, value, confidence, tolerance = HOMELAB_GPU
+    tool(session, "fact_set", entity=entity, attribute=attribute, value=value,
+         confidence=confidence, distortion_tolerance=tolerance)
 
 
 def checked_root(conn):
@@ -164,16 +182,42 @@ def write_extras(session, dsn, fact):
     child = tool(session, "episode_start", title="W2-D child step", episode=root)
     tool(session, "store", text=CHILD_TEXT, source="session-notes", episode=child["id"])
     if fact:
-        tool(session, "fact_set", entity="dev box", attribute="cpu", value="Ryzen 9 7950X", confidence=0.8)
-        tool(session, "fact_set", entity="printer", attribute="firmware", value="2.1.0", confidence=0.7)
-        for entity, alias in (("printer", "laser"), ("dev box", "builder"), ("dev box", "printer")):
+        for entity, attribute, value, confidence, tolerance in EXTRA_FACTS:
+            tool(session, "fact_set", entity=entity, attribute=attribute, value=value,
+                 confidence=confidence, distortion_tolerance=tolerance)
+        for entity, alias in EXTRA_ALIASES:
             tool(session, "alias", entity=entity, alias=alias)
-        for attribute, member in (("users", "alice"), ("users", "bob"), ("groups", "admins")):
+        for attribute, member in EXTRA_CURRENT_MEMBERS + EXTRA_REMOVED_MEMBERS:
             tool(session, "set_add", entity="dev box", attribute=attribute, member=member)
-        for attribute, member in (("users", "bob"), ("groups", "admins")):
+        for attribute, member in EXTRA_REMOVED_MEMBERS:
             tool(session, "set_remove", entity="dev box", attribute=attribute, member=member)
         tool(session, "fact_set", entity="build cache", attribute="state", value="warm",
              confidence=0.6, freshness_class="volatile")
+
+
+def fixture_key(text):
+    # Fixture keys contain only ASCII words separated by single spaces.
+    return text.lower().replace(" ", "-")
+
+
+def check_facts(conn, facts):
+    for entity, attribute, value, confidence, tolerance in facts:
+        rows = conn.execute("SELECT value, confidence::double precision, distortion_tolerance FROM facts "
+                            "WHERE entity_norm=%s AND attribute_norm=%s AND kind='scalar' AND status='current'",
+                            (fixture_key(entity), fixture_key(attribute))).fetchall()
+        # The confidence column stores REAL. Widening both sides compares the
+        # stored float32 exactly, including the deliberately tiny confidence.
+        stored_confidence = unpack("f", pack("f", confidence))[0]
+        expected_tolerance = None if tolerance == "auto" else tolerance
+        require_fixture(rows == [(value, stored_confidence, expected_tolerance)],
+                        f"missing or incorrect scalar fact {entity}/{attribute}")
+
+
+def check_members(conn, entity, attribute, expected):
+    rows = conn.execute("SELECT status, value FROM facts WHERE entity_norm=%s AND attribute_norm=%s "
+                        "AND kind='member' AND status IN ('current','removed')",
+                        (fixture_key(entity), fixture_key(attribute))).fetchall()
+    require_fixture(sorted(rows) == sorted(expected), f"incorrect set membership for {entity}/{attribute}")
 
 
 def check_base(conn, docs, cutoff):
@@ -193,6 +237,8 @@ def check_base(conn, docs, cutoff):
                         "AND text = ANY(%s) ORDER BY id", (cutoff, list(SUPERSEDED))).fetchall()
     require_fixture(pair == [(SUPERSEDED[0], SUPERSEDED[1], True), (SUPERSEDED[1], None, False)],
                     "missing superseded entry or replacement")
+    check_facts(conn, [*FACTS, HOMELAB_GPU])
+    check_members(conn, "homelab box", "services", [("current", member) for _, _, member in SET_MEMBERS])
 
 
 def finish_base(conn, docs, cutoff):
@@ -237,6 +283,15 @@ def finish_extras(conn, fact, stats, cutoff):
                            "AND freshness_class='volatile' RETURNING id", (age, age, entity, attribute, value)).fetchall()
         require_fixture(len(row) == 1, f"expected one volatile {entity}/{attribute} fact")
     if fact:
+        check_facts(conn, EXTRA_FACTS)
+        targets = [(alias, fixture_key(entity)) for entity, alias in EXTRA_ALIASES]
+        aliases = conn.execute("SELECT a.alias, e.canonical FROM entity_aliases a JOIN entities e ON e.id=a.entity_id "
+                               "WHERE a.alias = ANY(%s)", ([alias for alias, _ in targets],)).fetchall()
+        require_fixture(sorted(aliases) == sorted(targets), "incorrect persisted fact aliases")
+        for attribute in ("users", "groups"):
+            expected = [("current", value) for slot, value in EXTRA_CURRENT_MEMBERS if slot == attribute]
+            expected += [("removed", value) for slot, value in EXTRA_REMOVED_MEMBERS if slot == attribute]
+            check_members(conn, "dev box", attribute, expected)
         entry, = conn.execute("SELECT min(id) FROM entries").fetchone()
         require_fixture(entry is not None, "trace source entry is missing")
         conn.execute("INSERT INTO memory_traces VALUES ('dev-box','cpu',%s,%s)", (entry, now))
