@@ -56,9 +56,15 @@ def fact_lines(bank, result):
         history = bank.tool("memory_history", entity=entity, attribute=attribute)
         if not isinstance(history.get("versions"), list):
             raise BenchError("Rust history returned no versions list")
-        earlier = list(dict.fromkeys(version["value"] for version in history["versions"]
-                                    if version["value"] != current))
-        suffix = f" (previous values: {'; '.join(earlier)})" if earlier else ""
+        if history.get("kind") == "set":
+            last_events = {event["value"].strip().casefold(): event for event in history["versions"]}
+            earlier = [event["value"] for event in last_events.values() if event["event"] == "removed"]
+            label = "former members"
+        else:
+            earlier = list(dict.fromkeys(version["value"] for version in history["versions"]
+                                        if version["value"] != current))
+            label = "previous values"
+        suffix = f" ({label}: {'; '.join(earlier)})" if earlier else ""
         lines.append(f"{entity} / {attribute}: {current}{suffix}")
     return lines
 

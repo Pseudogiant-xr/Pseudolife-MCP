@@ -77,6 +77,23 @@ def test_longmemeval_uses_isolated_no_dream_control_and_drains_each_session():
     assert "live raw" in row["contexts"]["hybrid"]
 
 
+def test_set_history_labels_only_removed_members_as_former():
+    class SetHistory:
+        def tool(self, name, **args):
+            assert name == "memory_history"
+            return {"kind": "set", "versions": [
+                {"value": "lint", "event": "added"},
+                {"value": "format", "event": "added"},
+                {"value": "scan", "event": "added"},
+                {"value": "format", "event": "removed"},
+                {"value": "scan", "event": "removed"},
+                {"value": "FORMAT", "event": "added"},
+            ]}
+
+    hits = {"cortex": [{"entity": "build", "attribute": "checks", "value": "lint; FORMAT (2 members)"}]}
+    assert lme.fact_lines(SetHistory(), hits) == ["build / checks: lint; FORMAT (2 members) (former members: scan)"]
+
+
 def test_dream_retries_a_held_batch_and_counts_only_acknowledged_work():
     replies = iter([
         {"pulled": 2, "extractor_failed": True, "hold_phase": "extract", "extractor": "primary"},
