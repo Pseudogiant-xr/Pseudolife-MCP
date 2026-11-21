@@ -1,4 +1,5 @@
 """The lease-recovery checks read the scenario's own lease, not the only one."""
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +35,28 @@ def test_the_holder_check_still_refuses_a_wrong_holder_or_a_missing_lease():
         step.check(None, _ctx(), {"status": 200, "json": {"leases": [_lease("resource", "id-B")]}}, None)
     with pytest.raises(AssertionError):
         step.check(None, _ctx(), {"status": 200, "json": {"leases": [_lease("full-suite", "id-A")]}}, None)
+
+
+def test_lease_fixture_limits_match_rust_board_policy():
+    from board import seed_rows
+
+    sources = Path(__file__).resolve().parents[2] / "src" / "board"
+    mail = (sources / "mail.rs").read_text(encoding="utf-8")
+    lease = (sources / "lease.rs").read_text(encoding="utf-8")
+    notice = (sources / "notice.rs").read_text(encoding="utf-8")
+    drain = notice.split("fn drain_lease_grants_locked(", 1)[1].split("\n    }", 1)[0]
+    constants = (
+        (mail, "MAX_PENDING", seed_rows.PENDING_MAIL),
+        (mail, "SEND_RATE", seed_rows.MAIL_PER_SENDER),
+        (mail, "MESSAGE_TTL", seed_rows.MESSAGE_TTL),
+        (lease, "LEASE_GRANT_WINDOW", seed_rows.GRANT_WINDOW),
+    )
+    for source, name, fixture in constants:
+        matches = re.findall(rf"\bconst\s+{name}\s*:\s*\w+\s*=\s*(\d[\d_.]*)\s*;", source)
+        assert len(matches) == 1, f"expected one Rust definition for {name}"
+        assert float(matches[0]) == fixture, f"fixture drifted from Rust {name}"
+    pages = re.findall(r'ORDER BY l\.name\s+LIMIT\s+(\d+)"', drain)
+    assert pages == [str(seed_rows.FIRST_GRANT_PAGE)], "fixture drifted from the Rust grant page size"
 
 
 @pytest.fixture
@@ -133,3 +156,28 @@ def test_startup_seed_keeps_first_acquisition_before_second_registration(seed_ba
         assert conn.execute("SELECT event, agent_id FROM coordination_events ORDER BY seq").fetchall() == [
             ("register", a), ("lease_acquire", a), ("register", b), ("lease_queue", b),
             ("lease_release", a), ("lease_grant", b)]
+
+
+@pytest.mark.parametrize("ttl,expected", [(120, 120), (600, 300)])
+def test_queued_grant_uses_the_smaller_window(seed_bank_dsn, ttl, expected):
+    import psycopg
+    from board.scenarios import seed_bank
+    from board.seed_rows import queued_grant
+
+    with psycopg.connect(seed_bank_dsn, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO coordination_agents (agent_id,principal,created_at,last_activity) "
+            "VALUES ('id-A','default',1,1),('id-B','default',1,1)")
+        conn.execute(
+            "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,acquired_at,expires_at) "
+            "VALUES ('resource','id-A','default',nextval('coordination_lease_fence'),1,601)")
+        conn.execute(
+            "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
+            "VALUES ('resource','id-B','default',%s,1)", (ttl,))
+        seed_bank(seed_bank_dsn, queued_grant, _ctx())
+        assert conn.execute(
+            "SELECT holder_agent_id,expires_at-acquired_at FROM coordination_leases WHERE name='resource'"
+        ).fetchone() == ("id-B", expected)
+        assert conn.execute(
+            "SELECT (payload::jsonb->>'window')::integer FROM coordination_events WHERE event='lease_grant'"
+        ).fetchone() == (expected,)
