@@ -463,7 +463,7 @@ async fn request(
         Ok(reply) => reply,
         Err(NoReply::Connect(error)) => return Err(RequestError::NoReply(reason(error.as_ref()))),
         // The transport does not distinguish DNS, TLS and HTTP failures here.
-        Err(NoReply::Other) => {
+        Err(NoReply::Io(_) | NoReply::Other) => {
             return Err(RequestError::NoReply("no usable HTTP reply".to_owned()));
         }
     };

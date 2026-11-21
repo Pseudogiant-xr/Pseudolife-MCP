@@ -25,6 +25,8 @@ pub(super) struct Reply {
     /// (a timeout, a reset, a cut-short body read to its end). [`get`]
     /// answers `None` there instead.
     pub(super) body_failed: bool,
+    /// The I/O cause, when available, of a failed body read.
+    pub(super) body_io_error: Option<io::ErrorKind>,
     /// [`get_bounded`] only: a redirect this port does not follow where
     /// urllib would (an `ftp:` target, a target that is not text).
     pub(super) unsupported: bool,
@@ -127,6 +129,27 @@ pub(super) async fn get_bounded(
     .await
 }
 
+/// The non-redirecting bounded GET with the reason a reply could not be read.
+pub(super) async fn get_bounded_no_redirect(
+    origin: &str,
+    target: &str,
+    authorization: &[u8],
+    timeout: Duration,
+    limits: Limits,
+) -> Result<Reply, NoReply> {
+    exchange(
+        &format!("{origin}{target}"),
+        Some(authorization),
+        None,
+        timeout,
+        limits,
+        true,
+        None,
+        false,
+    )
+    .await
+}
+
 async fn get_with(
     origin: &str,
     target: &str,
@@ -223,20 +246,6 @@ async fn request(
     }
 }
 
-/// A body cut short of its length: hyper's length decoder fails with an
-/// `UnexpectedEof` I/O error, which `HTTPResponse.read(amt)` treats as the
-/// end of the body.
-fn ended_early(error: &hyper::Error) -> bool {
-    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    while let Some(current) = source {
-        if let Some(io) = current.downcast_ref::<io::Error>() {
-            return io.kind() == io::ErrorKind::UnexpectedEof;
-        }
-        source = current.source();
-    }
-    false
-}
-
 trait Stream: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T: AsyncRead + AsyncWrite + Send + Unpin> Stream for T {}
 
@@ -247,9 +256,22 @@ pub(super) enum NoReply {
     /// `socket.create_connection` raises it, or `None` where that connect
     /// timed out. No request byte was sent.
     Connect(Option<io::Error>),
+    /// A known I/O kind while opening TLS or exchanging HTTP.
+    Io(io::ErrorKind),
     /// Anything else: an unusable URL, name resolution, TLS, or a failure
     /// once connected (the request may have reached the server).
     Other,
+}
+
+impl NoReply {
+    pub(super) fn io_kind(&self) -> Option<io::ErrorKind> {
+        match self {
+            Self::Connect(Some(error)) => Some(error.kind()),
+            Self::Connect(None) => Some(io::ErrorKind::TimedOut),
+            Self::Io(kind) => Some(*kind),
+            Self::Other => None,
+        }
+    }
 }
 
 /// One request as `urlopen(Request(url, data, headers={"Authorization": ...,
@@ -305,6 +327,10 @@ async fn once(
 /// Any failure that is not a connect failure.
 fn other<E>(_: E) -> NoReply {
     NoReply::Other
+}
+
+fn transport(error: impl std::error::Error + 'static) -> NoReply {
+    crate::errors::io_error_kind(&error).map_or(NoReply::Other, NoReply::Io)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -371,8 +397,8 @@ async fn exchange(
             tokio_rustls::TlsConnector::from(config).connect(name, socket),
         )
         .await
-        .map_err(other)?
-        .map_err(other)?;
+        .map_err(|_| NoReply::Io(io::ErrorKind::TimedOut))?
+        .map_err(transport)?;
         Box::new(Inactivity::new(RaggedEof(tls), timeout))
     } else {
         Box::new(Inactivity::new(socket, timeout))
@@ -384,8 +410,8 @@ async fn exchange(
             .title_case_headers(true)
             .handshake(hyper_util::rt::TokioIo::new(stream))
             .await
-            .map_err(other)?;
-    let driver = tokio::spawn(connection);
+            .map_err(transport)?;
+    let _driver = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(connection));
     let method = if body.is_some() {
         http::Method::POST
     } else {
@@ -414,8 +440,8 @@ async fn exchange(
         .header("Connection", "close")
         .body(payload)
         .map_err(other)?;
-    let reply = async {
-        let response = sender.send_request(request).await.ok()?;
+    async {
+        let response = sender.send_request(request).await.map_err(transport)?;
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         let limit = if (200..300).contains(&status) {
@@ -427,6 +453,7 @@ async fn exchange(
         let chunked = headers.contains_key(http::header::TRANSFER_ENCODING);
         let mut body = Vec::new();
         let mut body_failed = false;
+        let mut body_io_error = None;
         let mut incoming = response.into_body();
         while limit.is_none_or(|limit| body.len() < limit) {
             match incoming.frame().await {
@@ -437,8 +464,16 @@ async fn exchange(
                     }
                 }
                 Some(Err(error)) => {
-                    body_failed =
-                        !(short_reads && limit.is_some() && !chunked && ended_early(&error));
+                    let kind = crate::errors::io_error_kind(&error);
+                    // Python's bounded read treats a cut-short Content-Length
+                    // body as EOF, while a cut-short chunked body is an error.
+                    body_failed = !(short_reads
+                        && limit.is_some()
+                        && !chunked
+                        && kind == Some(io::ErrorKind::UnexpectedEof));
+                    if body_failed {
+                        body_io_error = kind;
+                    }
                     break;
                 }
             }
@@ -446,17 +481,16 @@ async fn exchange(
         if let Some(limit) = limit {
             body.truncate(limit);
         }
-        Some(Reply {
+        Ok(Reply {
             status,
             body,
             headers,
             body_failed,
+            body_io_error,
             unsupported: false,
         })
     }
-    .await;
-    driver.abort();
-    reply.ok_or(NoReply::Other)
+    .await
 }
 
 /// CPython's default context: the system trust store (or `SSL_CERT_FILE` /

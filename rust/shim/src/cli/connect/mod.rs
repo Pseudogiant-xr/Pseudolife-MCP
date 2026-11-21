@@ -498,13 +498,8 @@ async fn verify(ctx: &Ctx, rows: &[Row], auth: bool) -> Result<(Vec<J>, Vec<Stri
             }
             Cred::None => None,
         };
-        if let Some(token) = &token
-            && !net::credential_valid(&ctx.url, token).await
-        {
-            return Err(format!(
-                "the daemon at {} refused {shown} (an authenticated request that follows no redirects did not succeed)",
-                ctx.url
-            ));
+        if let Some(token) = &token {
+            net::verify_credential(&ctx.url, &shown, token).await?;
         }
         let tools = net::handshake(&ctx.url, &credential).await.map_err(|error| {
             format!(
