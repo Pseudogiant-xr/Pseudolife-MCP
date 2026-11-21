@@ -122,15 +122,20 @@ class MutantQualification(unittest.TestCase):
     def test_cortex_requires_one_result_per_oracle_case(self):
         cases = [{"query": "first", "entries": []}, {"query": "second", "entries": []}]
         state = {"rows": {}}
+        reference = {"at": 0, "bank": {}, "modes": {"default": {
+            "cases": cases, "delta": {},
+            "terminal": {"public.slot_reads": None, "public.retrieval_events": None},
+        }}}
         for count in (1, 2, 3):
             with (self.subTest(results=count),
                   patch.object(sys, "argv", ["w2d_cortex_check.py", "--mode", "default"]),
-                  patch.dict(cortex.os.environ, {"CARGO_TARGET_DIR": "unused"}),
+                  patch.dict(cortex.os.environ, {"CARGO_TARGET_DIR": "unused"}, clear=True),
                   patch.object(cortex.tempfile, "mkdtemp", return_value="unused"),
-                  patch.object(cortex, "seed", return_value=(0, [])),
+                  patch.object(cortex, "QUERIES", ["first", "second"]),
+                  patch.object(cortex, "load_capture", return_value=reference),
                   patch.object(cortex, "create", return_value="fixture"),
+                  patch.object(cortex, "replay"),
                   patch.object(cortex, "drop"),
-                  patch.object(cortex, "run_python", return_value=(cases, state, state)),
                   patch.object(cortex, "run_rust", return_value=([{"entries": []}] * count, state, state)),
                   contextlib.redirect_stdout(io.StringIO())):
                 self.assertEqual(cortex.main(), 0 if count == len(cases) else 1)
