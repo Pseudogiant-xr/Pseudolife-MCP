@@ -123,7 +123,7 @@ async fn preflight(
     #[cfg(unix)]
     if rustix::process::geteuid().is_root() {
         trusted_root_paths([session.root, Path::new(&profile.token_file)])
-            .map_err(|_| Cause::ProfileChanged)?;
+            .map_err(|_| Cause::RootPathTrust)?;
     }
     let provider =
         crate::credentials::CredentialProvider::new(None, Some((&profile.token_file).into()))
@@ -158,9 +158,11 @@ async fn preflight(
     if selected.image != candidate.image {
         return Err(Cause::CandidateChanged);
     }
+    #[cfg(unix)]
     session
-        .verify_vendor()
-        .map_err(|_| Cause::VendorUnavailable)?;
+        .verify_vendor_paths()
+        .map_err(|_| Cause::RootPathTrust)?;
+    session.verify_vendor().map_err(Cause::VendorIntegrity)?;
     provider
         .require_current(&snapshot)
         .map_err(|_| Cause::DaemonHandshake)?;
@@ -238,8 +240,19 @@ pub(super) async fn handle(
     let mut claim = match claim {
         Ok(Some(claim)) => claim,
         Ok(None) => {
-            if driver.channel_issue.is_some() {
+            #[cfg(test)]
+            let foreign = driver.channel_issue == Some(ChannelIssue::ForeignGeneration);
+            // A caller still needs the rejection of its consumed request.
+            // Only channel conditions can heal without a new authenticated claim.
+            if matches!(
+                driver.channel_issue,
+                Some(ChannelIssue::NonFile | ChannelIssue::ClaimBlocked | ChannelIssue::ClaimMove)
+            ) {
                 driver.clear_issue(stage);
+            }
+            #[cfg(test)]
+            if foreign {
+                super::tests::restart_cases::observed_idle_after_foreign_request(session.root);
             }
             return Ok(Some(running));
         }
@@ -581,6 +594,23 @@ fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String
     let run = || super::super::tunnel_command("run", name, root.to_str());
     let stop = || super::super::tunnel_command("stop", name, root.to_str());
     let reconnect = || format!("Run `{}`, then `{}` to reconnect", stop(), run());
+    let rollback_advice = |failure| match failure {
+        Some(CandidateFailure::ReadinessDeadline) => reconnect(),
+        _ => {
+            let update = root.to_str().map_or_else(
+                || "pseudolife-mcp tunnel update".to_owned(),
+                |path| {
+                    format!(
+                        "pseudolife-mcp tunnel update --profile-dir {}",
+                        crate::cli::update::seams::quote(path)
+                    )
+                },
+            );
+            format!(
+                "No action is needed while it serves. Install a corrected runtime, then run `{update}`"
+            )
+        }
+    };
     match (phase, cause) {
         (Phase::Pending, _) => {
             "tunnel refresh is pending. The supervisor has not reported its final outcome"
@@ -590,11 +620,11 @@ fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String
         (Phase::RolledBack, Some(Cause::CandidateStartup(failure))) => format!(
             "{} The tunnel reconnected on its previous runtime and saved verification for that identity still applies. {}",
             failure_detail(root, name, failure),
-            reconnect()
+            rollback_advice(Some(failure))
         ),
         (Phase::RolledBack, _) => format!(
             "the tunnel reconnected on its previous runtime. {}",
-            reconnect()
+            rollback_advice(None)
         ),
         (
             Phase::Failed,
@@ -636,6 +666,11 @@ fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String
                 Some(Cause::CandidateChanged) => {
                     "the installed runtime could not be verified or changed during preflight"
                 }
+                Some(Cause::RootPathTrust) => return "refresh was refused because root cannot trust the tunnel store, the saved credential path or the tunnel client path. The old tunnel is still running. Run as the account that owns the saved profile or secure those paths".to_owned(),
+                Some(Cause::VendorIntegrity(issue)) => return format!(
+                    "refresh was refused. The old tunnel is still running. {}",
+                    issue.repair(root, &format!("run `{}` to reinstall the pinned tunnel client and start the tunnel", run()))
+                ),
                 Some(Cause::VendorUnavailable) => "the pinned tunnel client could not be verified",
                 Some(Cause::BridgeProtocol) => {
                     "the installed runtime did not confirm readiness protocol v1"
@@ -650,7 +685,7 @@ fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String
                     return format!(
                         "this exact installed runtime already failed and rolled back. {} The previous tunnel is still running. {}",
                         failure_detail(root, name, failure),
-                        reconnect()
+                        rollback_advice(Some(failure))
                     );
                 }
                 _ => "the launch state could not be saved",
@@ -724,6 +759,15 @@ pub(in crate::cli::tunnel) fn attempt(
     name: &str,
     executable: &Path,
 ) -> Option<Report> {
+    attempt_with(root, name, executable, refresh::submit)
+}
+
+pub(super) fn attempt_with(
+    root: &Path,
+    name: &str,
+    executable: &Path,
+    submit: impl FnOnce(&Path, &str, &LaunchRecord, &Image) -> Result<refresh::Ticket, &'static str>,
+) -> Option<Report> {
     let record = read_record(&record::path(root, name)).ok()?;
     let capability = record.refresh.as_ref()?;
     let refuse = |reason| Report {
@@ -745,7 +789,7 @@ pub(in crate::cli::tunnel) fn attempt(
         // restart on a different installed runtime.
         _ => return None,
     };
-    let ticket = match refresh::submit(root, name, &record, &candidate.image) {
+    let ticket = match submit(root, name, &record, &candidate.image) {
         Ok(ticket) => ticket,
         Err(reason) => return Some(refuse(reason)),
     };

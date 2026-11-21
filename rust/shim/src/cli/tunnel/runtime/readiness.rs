@@ -8,9 +8,11 @@
 //! A later bridge that serves v1 supervisors must keep `--bridge-attempt`,
 //! accept the exact `Attempt` fields `version`, `id` and `tag`, use the
 //! `bridge-ready-<id>.lock` name and the v1 MAC domain and inputs below, and
-//! answer `--readiness-protocol` with version 1. A version increase that
-//! drops this contract makes already-running v1 supervisors refuse refresh
-//! before stopping anything. Start a new supervisor to use the new version.
+//! answer `--readiness-protocol` with version 1. The bridge locks the file
+//! exclusively after starting the stdio shim and holds it while forwarding.
+//! A version increase that drops this contract makes already-running v1
+//! supervisors refuse refresh before stopping anything. Start a new
+//! supervisor to use the new version.
 use std::{
     fs::File,
     path::{Path, PathBuf},

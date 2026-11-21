@@ -269,10 +269,9 @@ fn a_later_spawn_refuses_a_tampered_vendor_image() {
     let installed = ensure_with(&store.root, pin, &Fake::new(0), |_, _| Ok(archive)).unwrap();
     assert!(reverify(&store.root, &installed.binary).is_ok());
     fs::write(&installed.binary, b"changed wrapper fixture").unwrap();
-    assert!(
-        reverify(&store.root, &installed.binary)
-            .unwrap_err()
-            .contains("failed its integrity check")
+    assert_eq!(
+        reverify(&store.root, &installed.binary),
+        Err(IntegrityIssue::ChecksumMismatch)
     );
 }
 

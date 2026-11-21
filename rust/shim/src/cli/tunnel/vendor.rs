@@ -314,12 +314,13 @@ pub(super) fn ensure(root: &Path) -> Result<Installed, String> {
 
 /// Verify the existing vendor installation before another spawn. Reconnect
 /// never installs a different vendor or fetches one while replacing a child.
-pub(super) fn reverify(root: &Path, executable: &Path) -> Result<(), String> {
-    let pin = pin_for(std::env::consts::OS, std::env::consts::ARCH)?;
+pub(super) fn reverify(root: &Path, executable: &Path) -> Result<(), IntegrityIssue> {
+    let pin = pin_for(std::env::consts::OS, std::env::consts::ARCH)
+        .map_err(|_| IntegrityIssue::UnsupportedPlatform)?;
     let target = root.join(folder_name(&pin));
-    let installed = installed(&target, &pin)?.ok_or_else(|| corrupt(&target, "it is missing"))?;
+    let installed = inspect_installation(&target, &pin)?.ok_or(IntegrityIssue::Missing)?;
     if installed.binary != executable {
-        return Err(corrupt(&target, "the selected vendor executable changed"));
+        return Err(IntegrityIssue::DifferentExecutable);
     }
     Ok(())
 }
@@ -451,52 +452,104 @@ fn prepare_root(root: &Path) -> Result<(), String> {
 /// A verified runtime at `target`, `None` when nothing is there, or a
 /// refusal when something is there that is not one.
 fn installed(target: &Path, pin: &Pin) -> Result<Option<Installed>, String> {
+    inspect_installation(target, pin).map_err(|why| corrupt(target, why, "retry"))
+}
+
+fn inspect_installation(target: &Path, pin: &Pin) -> Result<Option<Installed>, IntegrityIssue> {
     match fs::symlink_metadata(target) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(corrupt(target, "it cannot be inspected")),
+        Err(_) => return Err(IntegrityIssue::CannotInspect),
         Ok(_) => {}
     }
-    verify(target, pin).map_err(|why| corrupt(target, why))?;
+    verify(target, pin)?;
     Ok(Some(Installed {
         binary: target.join(binary_name(pin)),
         changed: false,
     }))
 }
 
-fn corrupt(target: &Path, why: &str) -> String {
+fn corrupt(target: &Path, why: IntegrityIssue, next: &str) -> String {
     format!(
-        "the installed tunnel runtime at {} failed its integrity check ({why}); stop any tunnel that uses it, move that folder aside, then retry",
-        target.display()
+        "the installed tunnel runtime at {} failed its integrity check ({}); stop any tunnel that uses it, move that folder aside, then {next}",
+        target.display(),
+        why.message()
     )
+}
+
+// Persist an allowlisted verifier reason. Readers reconstruct the pinned
+// installation path from their store.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum IntegrityIssue {
+    UnsupportedPlatform,
+    Missing,
+    DifferentExecutable,
+    CannotInspect,
+    NotDirectory,
+    NotPrivate,
+    ManifestUnavailable,
+    ManifestInvalid,
+    CannotList,
+    UnexpectedFiles,
+    ManifestFilesDiffer,
+    FileUnavailable,
+    ChecksumMismatch,
+}
+
+impl IntegrityIssue {
+    pub(super) fn repair(self, root: &Path, next: &str) -> String {
+        match pin_for(std::env::consts::OS, std::env::consts::ARCH) {
+            Ok(pin) => corrupt(&root.join(folder_name(&pin)), self, next),
+            Err(reason) => reason,
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Self::UnsupportedPlatform => "this platform has no pinned tunnel runtime",
+            Self::Missing => "it is missing",
+            Self::DifferentExecutable => "the selected vendor executable changed",
+            Self::CannotInspect => "it cannot be inspected",
+            Self::NotDirectory => "it is not a plain folder",
+            Self::NotPrivate => "the folder is not owner-only",
+            Self::ManifestUnavailable => "its checksums.json is missing, not owner-only or a link",
+            Self::ManifestInvalid => "its checksums.json is invalid",
+            Self::CannotList => "it cannot be listed",
+            Self::UnexpectedFiles => "it holds an unexpected file",
+            Self::ManifestFilesDiffer => {
+                "it holds files its checksums.json does not name, or lacks some"
+            }
+            Self::FileUnavailable => "a file in it is not an owner-only regular file with one link",
+            Self::ChecksumMismatch => "a file in it does not match its recorded checksum",
+        }
+    }
 }
 
 /// Check an installed runtime: an owner-only plain folder holding exactly
 /// its manifest and the files the manifest names, each owner-only, with one
 /// link, and matching its recorded digest.
-fn verify(target: &Path, pin: &Pin) -> Result<(), &'static str> {
-    let info = fs::symlink_metadata(target).map_err(|_| "it cannot be inspected")?;
+fn verify(target: &Path, pin: &Pin) -> Result<(), IntegrityIssue> {
+    use IntegrityIssue::*;
+    let info = fs::symlink_metadata(target).map_err(|_| CannotInspect)?;
     if !info.is_dir() {
-        return Err("it is not a plain folder");
+        return Err(NotDirectory);
     }
-    store::owner_only_directory(target, &info).map_err(|_| "the folder is not owner-only")?;
+    store::owner_only_directory(target, &info).map_err(|_| NotPrivate)?;
     let bytes = store::private_read(&target.join(MANIFEST), MANIFEST_LIMIT)
-        .map_err(|_| "its checksums.json is missing, not owner-only or a link")?;
+        .map_err(|_| ManifestUnavailable)?;
     let manifest: BTreeMap<String, String> =
-        serde_json::from_slice(&bytes).map_err(|_| "its checksums.json is invalid")?;
+        serde_json::from_slice(&bytes).map_err(|_| ManifestInvalid)?;
     if !manifest.contains_key(binary_name(pin))
         || manifest
             .iter()
             .any(|(name, digest)| member_problem(name).is_some() || !is_digest(digest))
     {
-        return Err("its checksums.json is invalid");
+        return Err(ManifestInvalid);
     }
     let mut present = BTreeSet::new();
-    for entry in fs::read_dir(target).map_err(|_| "it cannot be listed")? {
-        let name = entry.map_err(|_| "it cannot be listed")?.file_name();
-        present.insert(
-            name.into_string()
-                .map_err(|_| "it holds an unexpected file")?,
-        );
+    for entry in fs::read_dir(target).map_err(|_| CannotList)? {
+        let name = entry.map_err(|_| CannotList)?.file_name();
+        present.insert(name.into_string().map_err(|_| UnexpectedFiles)?);
     }
     let expected: BTreeSet<String> = manifest
         .keys()
@@ -504,14 +557,14 @@ fn verify(target: &Path, pin: &Pin) -> Result<(), &'static str> {
         .chain([MANIFEST.to_owned()])
         .collect();
     if present != expected {
-        return Err("it holds files its checksums.json does not name, or lacks some");
+        return Err(ManifestFilesDiffer);
     }
     for (name, digest) in &manifest {
         // Never blocks: a FIFO in place of a file is refused, not opened.
         let data = store::private_read(&target.join(name), UNPACKED_LIMIT as usize)
-            .map_err(|_| "a file in it is not an owner-only regular file with one link")?;
+            .map_err(|_| FileUnavailable)?;
         if format!("{:x}", Sha256::digest(&data)) != *digest {
-            return Err("a file in it does not match its recorded checksum");
+            return Err(ChecksumMismatch);
         }
     }
     Ok(())
@@ -675,7 +728,7 @@ fn install(
         verify(&stage, &pin).map_err(|why| {
             format!(
                 "the unpacked tunnel runtime changed while it was checked ({why}); nothing was installed; if this repeats, check whether a security tool adds or alters files in {}, then retry",
-                root.display()
+                root.display(), why = why.message()
             )
         })?;
         let target = root.join(folder_name(&pin));

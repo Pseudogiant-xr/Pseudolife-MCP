@@ -10,7 +10,7 @@ use hmac::Mac;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{Fail, LaunchRecord, identity, launch_id, setup, stage_path, state, store};
+use super::{Fail, LaunchRecord, identity, launch_id, setup, stage_path, state, store, vendor};
 
 pub(super) const REQUEST: &str = "refresh.request";
 pub(super) const CLAIM: &str = "refresh.claim";
@@ -119,6 +119,9 @@ pub(super) enum Cause {
     ProfileChanged,
     DaemonHandshake,
     CandidateChanged,
+    RootPathTrust,
+    VendorIntegrity(vendor::IntegrityIssue),
+    // Decode refusals written before the integrity diagnosis was recorded.
     VendorUnavailable,
     BridgeProtocol,
     BridgeProtocolTimeout,

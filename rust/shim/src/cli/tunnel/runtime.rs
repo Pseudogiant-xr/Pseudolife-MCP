@@ -741,15 +741,19 @@ struct Session<'a> {
 }
 
 impl Session<'_> {
-    fn verify_vendor(&self) -> Result<(), Fail> {
-        if let Some(vendor_path) = self.vendor_path {
-            #[cfg(unix)]
-            if rustix::process::geteuid().is_root() {
-                trusted_root_paths([self.root, vendor_path, Path::new(&self.profile.token_file)])?;
-            }
-            vendor::reverify(self.root, vendor_path).map_err(Fail::Detail)?;
+    #[cfg(unix)]
+    fn verify_vendor_paths(&self) -> Result<(), Fail> {
+        if let Some(vendor_path) = self.vendor_path
+            && rustix::process::geteuid().is_root()
+        {
+            trusted_root_paths([self.root, vendor_path, Path::new(&self.profile.token_file)])?;
         }
         Ok(())
+    }
+
+    fn verify_vendor(&self) -> Result<(), vendor::IntegrityIssue> {
+        self.vendor_path
+            .map_or(Ok(()), |path| vendor::reverify(self.root, path))
     }
 
     fn configure(
@@ -797,7 +801,10 @@ impl Session<'_> {
         if stop_marker(&stage.directory, self.id)? {
             return Ok(None);
         }
-        self.verify_vendor()?;
+        #[cfg(unix)]
+        self.verify_vendor_paths()?;
+        self.verify_vendor()
+            .map_err(|issue| Fail::Detail(issue.repair(self.root, "retry")))?;
         let health = stage.directory.join("health.url");
         store::checked_path(&health)?;
         if let Err(error) = store::sharing_retry(|| fs::remove_file(&health))

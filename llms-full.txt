@@ -13895,9 +13895,11 @@ previous tunnel serving.
 If the candidate fails readiness, the supervisor tries the previous shim
 after confirming the replacement exited. A successful rollback can mean a
 second reconnect and preserves verification for the previous identity.
-Further updates skip that failed build for the same launch and give the stop
-and run commands that reconnect it. If rollback fails, status says the tunnel
-stopped and gives the run command. If the
+Further updates skip that failed build for the same launch. After a readiness
+timeout, stop and run the tunnel to retry that build. After a startup failure
+or vendor diagnostic, keep serving on the previous runtime until a corrected
+runtime is installed, then run `tunnel update`. If rollback fails, status
+says the tunnel stopped and gives the run command. If the
 supervisor cannot confirm a child's exit, it blocks recovery until exit
 can be established. Status also shows when a refreshed launch needs a new
 verification challenge.

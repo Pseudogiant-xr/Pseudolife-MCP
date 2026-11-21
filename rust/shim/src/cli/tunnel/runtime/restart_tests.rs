@@ -65,6 +65,33 @@ fn supervised_fixture() {
             std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
         }
         "vendor" => eager_vendor(&path),
+        "foreign-updater" => {
+            let candidate =
+                crate::runtime::current_runtime(&crate::runtime::default_layout().unwrap())
+                    .unwrap();
+            let result = restart::attempt_with(
+                &path,
+                "dot",
+                &candidate.executable(),
+                |root, name, record, image| {
+                    let mut request = refresh::Request::for_launch(record, image)?;
+                    request.generation = Uuid::new_v4().simple().to_string();
+                    let ticket = refresh::submit_request(root, name, record, request)?;
+                    wait_until(|| root.join("idle-after-foreign-request").is_file());
+                    Ok(ticket)
+                },
+            )
+            .unwrap();
+            assert_eq!(result.state, "stale");
+            assert_eq!(result.running, "true");
+            assert!(
+                result
+                    .detail
+                    .contains("the refresh request is for a different launch generation"),
+                "{}",
+                result.detail
+            );
+        }
         "updater" | "invalid-updater" | "failing-updater" | "stopped-updater"
         | "exited-updater" => {
             let candidate =
@@ -110,6 +137,15 @@ fn supervised_fixture() {
             );
         }
         _ => panic!("unknown supervised fixture mode"),
+    }
+}
+
+pub(in crate::cli::tunnel::runtime) fn observed_idle_after_foreign_request(root: &Path) {
+    let marker = root.join("idle-after-foreign-request");
+    if fs::read_to_string(root.join("scenario")).is_ok_and(|mode| mode == "foreign-request")
+        && !marker.is_file()
+    {
+        state::atomic_create(&marker, b"").unwrap();
     }
 }
 
@@ -895,12 +931,9 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
             refresh::CandidateFailure::VendorDiagnostics
         ))
     );
-    assert!(
-        restart::status(scenario.root(), "dot")
-            .unwrap()
-            .1
-            .contains("dot.native-runtime.log")
-    );
+    let (_, detail) = restart::status(scenario.root(), "dot").unwrap();
+    assert!(detail.contains("dot.native-runtime.log"));
+    assert_corrected_runtime_advice(&detail);
     assert!(scenario.root().join("dot.native-runtime.log").is_file());
     drop(ticket);
     let restored_pid = scenario.record().target.unwrap().pid;
@@ -914,10 +947,7 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
     assert_eq!(scenario.record().target.unwrap().pid, restored_pid);
     let (state, detail) = restart::status(scenario.root(), "dot").unwrap();
     assert_eq!(state, "refused");
-    assert!(detail.contains("tunnel stop --profile dot"));
-    assert!(detail.contains("tunnel run --profile dot"));
-    assert!(detail.contains("to reconnect"));
-    assert!(!detail.contains("Install a corrected runtime"));
+    assert_corrected_runtime_advice(&detail);
     drop(again);
     assert!(
         restart::verify(scenario.root(), "dot")
@@ -944,6 +974,20 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
         challenge
     );
     assert!(!scenario.root().join("overlap").exists());
+}
+
+fn assert_corrected_runtime_advice(detail: &str) {
+    assert!(
+        detail.contains("No action is needed while it serves"),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(
+            "Install a corrected runtime, then run `pseudolife-mcp tunnel update --profile-dir "
+        ),
+        "{detail}"
+    );
+    assert!(!detail.contains("tunnel stop --profile dot"), "{detail}");
 }
 
 #[test]
@@ -1053,6 +1097,33 @@ fn healed_claim_failure_clears_its_issue_and_can_recur() {
 }
 
 #[test]
+fn updater_reports_foreign_generation_after_the_supervisor_returns_to_idle() {
+    let scenario = Scenario::start();
+    let old_pid = scenario.record().target.unwrap().pid;
+    scenario.mode("foreign-request");
+    assert!(
+        Scenario::child(
+            &std::env::current_exe().unwrap(),
+            scenario.root(),
+            "foreign-updater"
+        )
+        .status()
+        .unwrap()
+        .success()
+    );
+    assert_eq!(scenario.record().target.unwrap().pid, old_pid);
+
+    let mut wrong = scenario.candidate.clone();
+    wrong.digest = "f".repeat(64);
+    let ticket = scenario.submit(&wrong);
+    assert_eq!(
+        scenario.outcome(&ticket, refresh::Phase::Refused).cause,
+        Some(refresh::Cause::CandidateChanged)
+    );
+    assert!(ticket.issue().is_none());
+}
+
+#[test]
 fn vendor_integrity_is_checked_in_preflight_and_again_before_spawn() {
     use refresh::{Cause, Phase};
     let scenario = Scenario::start_configured(None, None, true);
@@ -1067,8 +1138,21 @@ fn vendor_integrity_is_checked_in_preflight_and_again_before_spawn() {
     let ticket = scenario.submit(&scenario.candidate);
     assert_eq!(
         scenario.outcome(&ticket, Phase::Refused).cause,
-        Some(Cause::VendorUnavailable)
+        Some(Cause::VendorIntegrity(
+            vendor::IntegrityIssue::ChecksumMismatch
+        ))
     );
+    let (state, detail) = restart::status(scenario.root(), "dot").unwrap();
+    assert_eq!(state, "refused");
+    assert!(
+        detail.contains(&vendor.parent().unwrap().display().to_string()),
+        "{detail}"
+    );
+    assert!(
+        detail.contains("does not match its recorded checksum"),
+        "{detail}"
+    );
+    assert!(detail.contains("stop any tunnel that uses it, move that folder aside, then run `pseudolife-mcp tunnel run --profile dot"), "{detail}");
     assert_eq!(scenario.record().target.unwrap().pid, old_pid);
     assert!(scenario.daemon.observed.load(Ordering::SeqCst) > before);
     let poller =
@@ -1114,6 +1198,20 @@ fn readiness_requires_the_acknowledgment_to_still_be_held_after_the_probe() {
             refresh::CandidateFailure::ReadinessDeadline
         ))
     );
+    let (_, detail) = restart::status(scenario.root(), "dot").unwrap();
+    assert!(detail.contains("tunnel stop --profile dot"), "{detail}");
+    assert!(detail.contains("tunnel run --profile dot"), "{detail}");
+    drop(ticket);
+    let repeat = scenario.submit(&scenario.candidate);
+    assert_eq!(
+        scenario.outcome(&repeat, refresh::Phase::Refused).cause,
+        Some(refresh::Cause::CandidateAlreadyRolledBack(
+            refresh::CandidateFailure::ReadinessDeadline
+        ))
+    );
+    let (_, detail) = restart::status(scenario.root(), "dot").unwrap();
+    assert!(detail.contains("tunnel stop --profile dot"), "{detail}");
+    assert!(detail.contains("tunnel run --profile dot"), "{detail}");
 }
 
 #[test]
