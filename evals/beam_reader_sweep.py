@@ -50,7 +50,7 @@ from beam_adapter import (  # noqa: E402
     load_chat_turns, load_judge_prompt, load_questions,
 )
 from beam_rejudge import CliJudge, DEFAULT_CLI  # noqa: E402
-from longmemeval_bench import RESULTS_DIR, load_rows  # noqa: E402
+from _python_longmemeval_bench import RESULTS_DIR, load_rows  # noqa: E402
 import embedder_stamp  # noqa: E402
 
 BUDGETS = (6, 16, 48)
@@ -65,7 +65,7 @@ def resolve_chat_fns(answerer: str, answer_model: str, judge_model: str,
     0.02, so curves stay comparable across transports); ``cli`` is the
     headless claude -p contract."""
     if answerer == "local":
-        import longmemeval_bench as lme
+        import _python_longmemeval_bench as lme
 
         def local_chat(system, user, *, max_tokens=1024, **_):
             return lme._chat(system, user, max_tokens=max_tokens)
@@ -91,7 +91,7 @@ def serve(beam_root: Path, tier: str, tag: str,
           limit_chats: int | None) -> None:
     """CPU-only context build: store turns, never dream — the rag arm is
     extraction-independent, which is what makes this phase GPU-free."""
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     out = serve_path(tag)
     done = {(r["chat_id"], r["type"], r["index"]) for r in load_rows(out)}
     chats = iter_chats(beam_root, tier)
@@ -213,8 +213,8 @@ def answer(beam_root: Path, tag: str, budgets: tuple[int, ...],
     answerer, judge = resolve_chat_fns(answerer_kind, answer_model,
                                        judge_model, cli, call_timeout)
     if answerer_kind == "local":
-        from ladder_sweep import probe
-        from longmemeval_bench import QWEN_URL
+        from _python_ladder_sweep import probe
+        from _python_longmemeval_bench import QWEN_URL
         if not probe(QWEN_URL):
             sys.exit(f"no local answer/judge server at {QWEN_URL}")
         answer_model = judge_model = f"local ({QWEN_URL})"

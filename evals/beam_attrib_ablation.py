@@ -34,8 +34,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import longmemeval_bench as lme                       # noqa: E402
-from longmemeval_bench import _chat, QWEN_URL, load_rows, probe  # noqa: E402
+import _python_longmemeval_bench as lme                       # noqa: E402
+from _python_longmemeval_bench import _chat, QWEN_URL, load_rows, probe  # noqa: E402
 import embedder_stamp                                 # noqa: E402
 from beam_adapter import (                            # noqa: E402
     _BEAM_ANSWER_SYSTEM, judge_response, load_judge_prompt)

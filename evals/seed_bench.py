@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ladder_sweep import build_service  # noqa: E402
+from _python_ladder_sweep import build_service  # noqa: E402
 import embedder_stamp  # noqa: E402
 from pseudolife_memory.memory.recall import _mentions, run_recall  # noqa: E402
 

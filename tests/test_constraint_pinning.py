@@ -251,7 +251,7 @@ def recall_svc(tmp_path_factory):
     if not _pg_reachable(os.environ.get("PSEUDOLIFE_BENCH_ADMIN_URL") or default_admin_url()):
         pytest.skip("bench Postgres not reachable")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path_factory.mktemp("pins"))
     svc.store("payments-db runs on host-a", source="bench")
     svc.graph_relate("payments-db", "runs-on", "host-a")

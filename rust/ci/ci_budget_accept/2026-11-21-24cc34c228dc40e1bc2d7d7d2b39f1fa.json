@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "57b17d53c98b6e14",
+  "fingerprint": "49211123d3e99e42",
+  "reason": "Adds the existing model-free retained eval contract tests to the guards pytest selection. The targeted workstation run was under two seconds. No job, dependency install, or setup step was added."
+}

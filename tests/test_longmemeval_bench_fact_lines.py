@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-from longmemeval_bench import _compose_fact_line  # noqa: E402
+from _python_longmemeval_bench import _compose_fact_line  # noqa: E402
 
 
 def test_scalar_fact_line_has_no_garnish_without_history():
@@ -135,7 +135,7 @@ def test_make_extractor_threads_system_prompt_file(tmp_path):
     """--system-prompt-file makes prompt-variant runs first-class (the
     extraction-variance baseline runs the control prompt through the
     identical code path). Absent file -> the shipped prompt, untouched."""
-    from longmemeval_bench import _make_extractor
+    from _python_longmemeval_bench import _make_extractor
     from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
 
     default = _make_extractor("http://127.0.0.1:9/v1", None)

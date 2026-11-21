@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-import ladder_sweep  # noqa: E402
+import _python_ladder_sweep as ladder_sweep  # noqa: E402
 import lme_v2_smoke as smoke  # noqa: E402
 
 

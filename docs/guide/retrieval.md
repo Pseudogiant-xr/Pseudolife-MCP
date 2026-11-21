@@ -182,6 +182,8 @@ probes (`evals/serving_policy_replay.py`, artifact
 `evals/results/serving-policy-replay-20260925-r3.json`). Leave both knobs at
 their defaults until a real answerability signal exists.
 
+The LongMemEval retrieval replay cited below measured the frozen Python engine.
+
 `memory.cortex.guard_min_score` (default `0.2`) decides which cortex facts
 are served at all (a LongMemEval retrieval replay showed the old `0.3`
 floor served *zero* facts for 60% of questions, because terse fact

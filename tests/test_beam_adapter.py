@@ -50,7 +50,7 @@ def test_parse_judge_score_json_fenced_and_regex():
 
 
 def test_arms_for_chronicle_appends_hybrid_ev():
-    from longmemeval_bench import ARMS
+    from _python_longmemeval_bench import ARMS
     assert arms_for(False) == ARMS
     assert arms_for(True) == (*ARMS, "hybrid_ev")
 
@@ -152,7 +152,7 @@ def test_beam_answer_policy_surfaces_contradictions():
     assert "contradict" in s.lower()
     assert "both" in s.lower()
     assert "most CURRENT value" in s          # update semantics retained
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
     assert "contradict" not in lme._ANSWER_SYSTEM.lower()
 
 
@@ -211,14 +211,14 @@ def test_hybrid_budget_matches_rag_by_default():
     """The 2026-08-21 decision: the hybrid arm is a SUPERSET of the rag arm
     by default, so hybrid-vs-rag deltas isolate the fact spine instead of
     confounding it with a halved raw-turn budget."""
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
     assert lme.HYBRID_TOP_K == lme.RAG_TOP_K
 
 
 def test_build_contexts_with_parts_exposes_serve_state():
     """Persisted BEAM rows carry the structured serve state so serving-knob
     reruns recompose contexts offline instead of re-paying ingest."""
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
     ctx = lme.build_contexts(_ServeSvc(), "q?", with_parts=True)
     parts = ctx["parts"]
     assert parts["raw"] == [f"t{i}" for i in range(lme.RAG_TOP_K)]
@@ -254,7 +254,7 @@ def test_hybrid_top_k_is_read_at_call_time():
     """beam_adapter --hybrid-top-k works by setting lme.HYBRID_TOP_K before
     questions are answered; that only holds if build_contexts reads the
     module global at call time rather than binding it at import."""
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
 
     class _Svc:
         def search(self, q, top_k, **kw):
@@ -366,7 +366,7 @@ class _DigestBankSvc:
 def test_build_contexts_off_is_byte_identical_call_shape():
     """Byte-identity contract: with DIGEST_ARM off the search calls carry
     no sources kwarg and the original top_k — the pre-digest shape."""
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
     svc = _DigestBankSvc()
     ctx = lme.build_contexts(svc, "q?")
     assert "hybrid_digest" not in ctx
@@ -380,7 +380,7 @@ def test_build_contexts_digest_arm_preserves_control_width(monkeypatch):
     over-fetches by the bank's digest count and drops post-hoc — the rag
     control must serve its FULL turn budget, digest-free, in the ranking
     a digest-free bank would produce."""
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
     monkeypatch.setattr(lme, "DIGEST_ARM", True)
     monkeypatch.setattr(lme, "DIGEST_COUNT", 1)
     svc = _DigestBankSvc()
@@ -532,7 +532,7 @@ def test_refind_budget_is_read_at_call_time():
     --rag-top-k has been applied. Resolving it earlier would leave the arm
     on 6 turns against a widened rag control while every row cheerfully
     recorded the number it never served."""
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
     archive = beam_adapter.archive_from_beam_turns([
         {"batch": 1, "time_anchor": None, "role": "user",
          "content": f"turn {i} about bikes"} for i in range(10)])
@@ -566,7 +566,7 @@ def test_refind_knob_validation_is_loud_and_fires_before_any_global_moves():
     """A bad ReFind flag must die before the bench globals are touched —
     the same contract the rag/hybrid budget knobs carry."""
     from pathlib import Path
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
     before = (lme.RAG_TOP_K, lme.HYBRID_TOP_K, lme.CHRONICLE, lme.DIGEST_ARM)
     for kwargs, match in (({"refind_top_k": 0}, "positive"),
                           ({"refind_rounds": 0}, "positive"),

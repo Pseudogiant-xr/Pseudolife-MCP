@@ -14,9 +14,8 @@ statistics honest:
     gate-check  compare replicate means against the committed baseline
     baseline    (re)establish evals/results/regression_gate.baseline.json
 
-Import-light by design: the bench module (and through it ladder_sweep /
-torch) is imported ONLY inside ``cmd_run``. Naming/IO helpers are small
-local mirrors of the bench's, kept in lockstep by tests.
+The frozen launcher supplies its answer callback. Historical statistics
+and naming helpers can be used without either engine or any model.
 
 Spec: docs/superpowers/specs/2026-07-18-eval-hygiene-sprint-design.md
 """
@@ -45,6 +44,8 @@ _JUDGE_SUFFIXES = ("response", "correct", "context_tokens",
                    # a rebuilt/replicated row must not carry a stale one.
                    "answerable_judge")
 _REPLICA_SUFFIX = re.compile(r"-r\d+$")
+# The Python q8_0 run on 27 July 2026 (n=7) had zero spread across server
+# restarts, leaving the 0.03 floor as its margin. No Rust baseline exists yet.
 BASELINE_FLOOR = 0.03
 DEFAULT_BASELINE = RESULTS_DIR / "regression_gate.baseline.json"
 
@@ -345,7 +346,7 @@ def gate_verdict(agg: dict, baseline: dict) -> list[str]:
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
-def cmd_run(args) -> int:
+def cmd_run(args, run_one=None) -> int:
     found = discover(args.dataset, args.extractor, args.tag,
                      args.results_dir)
     if not found:
@@ -361,10 +362,10 @@ def cmd_run(args) -> int:
     if args.results_dir != RESULTS_DIR:
         sys.exit("run only operates on the real results dir "
                  "(the bench owns file placement)")
-    from longmemeval_bench import report, run_answer  # noqa: PLC0415 — heavy
+    if run_one is None:
+        sys.exit("use evals/_python_replicate.py for frozen runs or evals/regression_gate.ps1 for Rust")
     for t in pending:
-        run_answer(args.dataset, args.extractor, t)
-        report(args.dataset, args.extractor, t)
+        run_one(args.dataset, args.extractor, t)
     return 0
 
 
@@ -429,14 +430,14 @@ def cmd_gate_check(args) -> int:
     if not args.baseline.exists():
         print(f"no baseline at {args.baseline}\n"
               "establish one on a known-good tree with:\n"
-              "  evals\\regression_gate.ps1 -Establish")
+              "  evals\\_python_regression_gate.ps1 -Establish")
         sys.exit(2)
     try:
         baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
         baseline["arms"]
     except (ValueError, KeyError):
         print(f"invalid baseline file: {args.baseline}\n"
-              "re-establish with: evals\\regression_gate.ps1 -Establish")
+              "re-establish with: evals\\_python_regression_gate.ps1 -Establish")
         sys.exit(2)
     found = discover(args.dataset, args.extractor, args.tag,
                      args.results_dir)
@@ -567,7 +568,7 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, run_one=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -589,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run", help="answer-phase all pending replicates")
     _common(p)
     p.add_argument("--dry-run", action="store_true")
-    p.set_defaults(fn=cmd_run)
+    p.set_defaults(fn=lambda args: cmd_run(args, run_one))
 
     p = sub.add_parser("compare", help="paired permutation test A vs B")
     _common(p)
