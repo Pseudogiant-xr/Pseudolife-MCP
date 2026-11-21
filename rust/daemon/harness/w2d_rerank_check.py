@@ -36,6 +36,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 REFERENCE = HERE / "fixtures" / "w2d-rerank-reference.json"
+REFERENCE_SHA256 = "1b3de9adf61824ede796b8afd700267b1783eea8b3670743bad954828cc356cd"
 SIGMOID_TOL = 1e-4
 # Case number (1-based) -> the ledger entry declaring its tie order.
 DECLARED_TIES = {
@@ -127,7 +128,10 @@ def build_cases() -> list[dict]:
 
 
 def load_reference(cases: list[dict]) -> list[dict]:
-    reference = json.loads(REFERENCE.read_text(encoding="utf-8"))
+    captured = REFERENCE.read_text(encoding="utf-8")
+    if hashlib.sha256(captured.encode("utf-8")).hexdigest() != REFERENCE_SHA256:
+        raise ValueError("reranker reference differs from the pinned capture")
+    reference = json.loads(captured)
     encoded = json.dumps(cases, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if hashlib.sha256(encoded).hexdigest() != reference["case_sha256"]:
         raise ValueError("reranker cases differ from the captured reference")

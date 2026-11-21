@@ -1,6 +1,6 @@
 """The reranker parity check's order verdict: only the declared tie passes."""
 
-import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -118,6 +118,11 @@ def test_the_reference_binds_the_exact_case_inputs():
         check.load_reference(cases)
 
 
-def test_the_capture_is_pinned():
-    captured = check.REFERENCE.read_text(encoding="utf-8").encode("utf-8")
-    assert hashlib.sha256(captured).hexdigest() == "1b3de9adf61824ede796b8afd700267b1783eea8b3670743bad954828cc356cd"
+def test_the_capture_is_pinned(tmp_path, monkeypatch):
+    captured = json.loads(check.REFERENCE.read_text(encoding="utf-8"))
+    captured["results"][0]["logits"][0] += 1.0
+    changed = tmp_path / "changed-reference.json"
+    changed.write_text(json.dumps(captured), encoding="utf-8")
+    monkeypatch.setattr(check, "REFERENCE", changed)
+    with pytest.raises(ValueError, match="reference differs from the pinned capture"):
+        check.load_reference(check.build_cases())
