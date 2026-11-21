@@ -204,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.exit(f"--compare-to artifact does not exist: {args.compare_to}")
 
     t_start = time.perf_counter()
-    from longmemeval_bench import load_questions  # noqa: PLC0415 — heavy (torch)
+    from _python_longmemeval_bench import load_questions  # noqa: PLC0415 — heavy (torch)
 
     dump_dir = resolve_dump_dir(args.dumps)
     print(f"dumps: {dump_dir.name}", flush=True)

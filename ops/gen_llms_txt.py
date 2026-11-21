@@ -60,6 +60,8 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/benchmarks.md",
      "LongMemEval methodology and results, with the committed evidence "
      "artifacts behind each number"),
+    ("evals/RUST-DRIVERS.md",
+     "Measurement differences between the Rust drivers and frozen Python evals"),
     ("docs/guide/comparison.md",
      "Where this sits among agent-memory projects, the axes it is built "
      "around, and when to use something else instead"),

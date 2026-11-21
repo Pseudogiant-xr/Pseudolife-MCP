@@ -534,7 +534,7 @@ def main(argv: list[str] | None = None) -> int:
     _dsp.DUMP_DIR = dump_dir
     print(f"dumps: {dump_dir.name}", flush=True)
 
-    from longmemeval_bench import load_questions  # noqa: PLC0415 — heavy (torch)
+    from _python_longmemeval_bench import load_questions  # noqa: PLC0415 — heavy (torch)
 
     questions = {q["question_id"]: q for q in load_questions("s")}
     dumps = load_dumps()

@@ -249,7 +249,7 @@ def test_bench_db_is_private_to_this_run():
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import ladder_sweep
+    import _python_ladder_sweep as ladder_sweep
     from psycopg.conninfo import conninfo_to_dict
 
     assert conninfo_to_dict(ladder_sweep.bench_url())["dbname"] == (

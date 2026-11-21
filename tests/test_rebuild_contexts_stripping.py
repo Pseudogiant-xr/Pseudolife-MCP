@@ -43,7 +43,7 @@ def test_is_judge_field_is_the_one_rule_both_strippers_use():
 
 
 def test_rebuild_contexts_strips_every_arm_not_just_the_canonical_three():
-    import rebuild_contexts
+    import _python_rebuild_contexts as rebuild_contexts
 
     row = _row()
     rebuild_contexts.strip_verdicts(row)

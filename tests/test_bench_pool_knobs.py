@@ -1,7 +1,7 @@
 """Sanctioned override for the associative candidate-pool knobs in evals.
 
 ``memory.search.candidate_pool_multiplier`` / ``memory.search.fusion`` live
-on the ASSOCIATIVE path (``cms.retrieve``), which ``rebuild_contexts.py``
+on the ASSOCIATIVE path (``cms.retrieve``), which ``_python_rebuild_contexts.py``
 cannot reach: it rebuilds the CORTEX fact ranking offline and copies the
 ``rag`` context verbatim. So a judged run with these knobs on is only ever a
 full ``--phase extract`` re-run, and the knob state has to travel with the
@@ -21,7 +21,7 @@ def ladder():
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import ladder_sweep
+    import _python_ladder_sweep as ladder_sweep
     return ladder_sweep
 
 
@@ -79,7 +79,7 @@ def test_the_knob_state_rides_in_the_bench_summary_stamp(monkeypatch):
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import longmemeval_bench as B
+    import _python_longmemeval_bench as B
 
     monkeypatch.setenv("PSEUDOLIFE_BENCH_POOL_MULT", "4")
     monkeypatch.setenv("PSEUDOLIFE_BENCH_FUSION", "rrf")
@@ -122,7 +122,7 @@ def test_the_rerank_knob_state_rides_in_the_bench_summary_stamp(monkeypatch):
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import longmemeval_bench as B
+    import _python_longmemeval_bench as B
 
     monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK", "1")
     monkeypatch.setenv("PSEUDOLIFE_BENCH_RERANK_TOP_N", "32")
@@ -173,28 +173,28 @@ def test_a_bad_rerank_top_n_aborts_rather_than_serving_the_default(
 
 
 def test_rebuild_contexts_does_not_claim_to_honour_the_pool_knobs():
-    """Scope guard. ``rebuild_contexts.py`` is the regression gate's stage 1
+    """Scope guard. ``_python_rebuild_contexts.py`` is the regression gate's stage 1
     and rebuilds the CORTEX ranking only; it copies the associative context
     verbatim. If someone teaches it ``memory.search``, the lockstep it needs
     is NOT the cortex one (test_cortex_bm25.py) but a new associative
     mirror — so make that a deliberate edit, not a silent one."""
     from pathlib import Path
     path = (Path(__file__).resolve().parents[1]
-            / "evals" / "rebuild_contexts.py")
+            / "evals" / "_python_rebuild_contexts.py")
     text = path.read_text(encoding="utf-8")
     # The module docstring EXPLAINS the scope gap and names the knobs, so
     # the guard reads the code below it, not the prose above it. Split on
     # the docstring delimiters rather than ast.get_docstring, whose value
     # is normalised and does not match the file text.
     head, doc, src = text.split('"""', 2)
-    assert not head.strip(), "rebuild_contexts.py: expected a module docstring"
+    assert not head.strip(), "_python_rebuild_contexts.py: expected a module docstring"
     assert "copied verbatim" in doc, (
-        "rebuild_contexts.py no longer documents that the rag/associative "
+        "_python_rebuild_contexts.py no longer documents that the rag/associative "
         "context is copied verbatim — the gate's scope note is load-bearing")
     for knob in ("candidate_pool_multiplier", "SearchConfig",
                  "memory.search"):
         assert knob not in src, (
-            f"rebuild_contexts.py now references {knob!r} — it rebuilds the "
+            f"_python_rebuild_contexts.py now references {knob!r} — it rebuilds the "
             "cortex ranking only. Teaching it the associative path needs an "
             "associative lockstep test beside "
             "test_rebuild_fact_ranking_matches_service_fusion.")

@@ -21,7 +21,7 @@ from psycopg.conninfo import conninfo_to_dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-import ladder_sweep as ladder  # noqa: E402
+import _python_ladder_sweep as ladder  # noqa: E402
 
 
 @pytest.mark.parametrize("admin", [

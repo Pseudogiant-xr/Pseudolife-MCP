@@ -18,7 +18,7 @@
 # The shim wraps the ChatGPT-plan `codex` CLI as an OpenAI-compatible endpoint
 # for the daemon's dream pass. Requires a signed-in CLI (`codex login`).
 # Extraction quality is UNMEASURED for Codex-served models — run
-# `evals/ladder_sweep.py --rung terra` before trusting one with
+# `evals/_python_ladder_sweep.py --rung terra` before trusting one with
 # consolidation. No --prompt-file on purpose: the v2 extraction-prompt
 # override is Sonnet-tuned, so the codex shim runs the production prompt
 # until a ladder run measures a Codex variant.

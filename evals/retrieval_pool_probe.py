@@ -75,7 +75,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
 from bank_dumps import (  # noqa: E402
     BANKS_ROOT, digest_texts, haystack_texts, resolve_dump_dir,
 )
-from ladder_sweep import DISTRACTORS, PAIRS, value_present  # noqa: E402
+from _python_ladder_sweep import DISTRACTORS, PAIRS, value_present  # noqa: E402
 import embedder_stamp  # noqa: E402
 
 TOP_K = 6

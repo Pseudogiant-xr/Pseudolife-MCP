@@ -19,7 +19,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "evals"))
 
-import longmemeval_bench as lmb  # noqa: E402
+import _python_longmemeval_bench as lmb  # noqa: E402
 import replicate  # noqa: E402
 
 
@@ -203,7 +203,7 @@ def test_answer_phase_refuses_the_context_building_flags(monkeypatch):
 
 # ── the arms survive the answer/report/replicate path ─────────────────────
 def _answer_with_stub(row):
-    import longmemeval_bench as m
+    import _python_longmemeval_bench as m
     calls = []
 
     def fake_chat(system, prompt, max_tokens=256, **_):
@@ -531,7 +531,7 @@ def test_beam_rag_lite_validation_fires_before_any_global_moves():
     """A bad rag-lite width must die before the bench globals are touched —
     the contract every other budget knob on this adapter carries."""
     beam = _beam()
-    import longmemeval_bench as lme
+    import _python_longmemeval_bench as lme
     before = (lme.RAG_TOP_K, lme.HYBRID_TOP_K, lme.RAG_LITE_TOP_KS,
               lme.RAG_BUDGET_TOKENS, lme.CHRONICLE)
     for kwargs, match in ((({"rag_lite_top_ks": (0,)}), "positive"),
