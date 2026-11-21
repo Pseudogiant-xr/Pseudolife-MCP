@@ -35,7 +35,7 @@ impl Fixture {
 
     fn prune(&self, evidence: Result<Evidence>) -> Value {
         let _lock = UpdateLock::acquire(&self.layout).unwrap();
-        remove_unused(&self.layout, evidence)
+        remove_unused_with(&self.layout, evidence, |_| Ok(BTreeSet::new()))
     }
 
     fn windows_evidence(&self) -> Evidence {
@@ -133,6 +133,62 @@ fn tunnel_with_an_unopenable_windows_pid_still_pins_its_runtime() {
     let report = f.prune(Ok(evidence));
     assert_eq!(report["removed"], json!([]), "{report}");
     assert!(old.path.is_dir());
+}
+
+#[test]
+fn supervised_refresh_pins_an_image_until_its_child_is_proven_gone() {
+    let f = Fixture::new();
+    let selected = f.install("1.0.0");
+    f.install("1.0.1");
+    let root = f.path.join("tunnel");
+    crate::board::state::private_dir(&root).unwrap();
+    let path = root.join("fixture.process.json");
+    let mut record = json!({"native_launch":"generation", "spawn_started":true,
+        "supervisor":{"pid":88}, "target":null, "refresh":{"image":{"path":selected.executable()}}});
+    let save = |record: &Value| {
+        crate::board::state::atomic_write(&path, record.to_string().as_bytes(), None).unwrap()
+    };
+    save(&record);
+    assert!(
+        tunnel_runtimes(&f.layout, &root, &[])
+            .unwrap()
+            .contains(&selected.path)
+    );
+    record["target"] = json!({"pid":99});
+    save(&record);
+    assert!(
+        tunnel_runtimes(&f.layout, &root, &f.windows_evidence().processes)
+            .unwrap()
+            .contains(&selected.path)
+    );
+    assert!(tunnel_runtimes(&f.layout, &root, &[]).unwrap().is_empty());
+}
+
+#[test]
+fn pruning_rechecks_for_an_uncertain_refresh_under_the_usage_pin() {
+    let f = Fixture::new();
+    let selected = f.install("1.0.0");
+    f.install("1.0.1");
+    let root = f.path.join("tunnel");
+    crate::board::state::private_dir(&root).unwrap();
+    let evidence = f.windows_evidence();
+    let _guard = UpdateLock::acquire(&f.layout).unwrap();
+    let result = remove_unused_with(&f.layout, Ok(evidence), |processes| {
+        let usage = launch::usage_file(&selected.usage_lock_path()).unwrap();
+        assert!(matches!(
+            usage.try_lock_shared(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        let record = json!({"native_launch":"new-generation", "spawn_started":true,
+            "supervisor":{"pid":88}, "target":null, "refresh":{"image":{"path":selected.executable()}}});
+        crate::board::state::atomic_create(
+            &root.join("fixture.process.json"),
+            record.to_string().as_bytes(),
+        )
+        .unwrap();
+        tunnel_runtimes(&f.layout, &root, processes)
+    });
+    assert!(result["removed"].as_array().unwrap().is_empty() && selected.path.is_dir());
 }
 
 #[test]

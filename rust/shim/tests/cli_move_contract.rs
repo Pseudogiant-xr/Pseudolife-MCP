@@ -2,8 +2,8 @@
 //! `move` without a daemon: argparse help and usage, the refusals made
 //! before any effect, the native answers to the argv that passes them (a
 //! dry run's own refusals, and its preflight refusing when no ssh is on an
-//! absolute PATH entry), and the deferral of shapes the native parser does
-//! not take. The differential proof against the Python oracle is the CLI
+//! absolute PATH entry), and native usage for unsupported argument shapes.
+//! The differential proof against the Python oracle is the CLI
 //! harness (`rust/cli_harness --row move`); the dry run against both hosts
 //! is unit-tested in `restore_cli/move_native/tests.rs`.
 #[path = "common/cli.rs"]
@@ -16,11 +16,10 @@ use std::{
     process::{Command, Output},
 };
 
-const DEFERRED: &str = "pseudolife-stdio: mode 'move' is deferred in this candidate\n";
+const TO_VALUE: &str = "move: --to needs the target host as ssh takes it, such as --to user@box; the value cannot start with -. Nothing was changed\n";
 const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
-const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
 const URL_REQUIRED: &str = "move: --target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765. Nothing was changed\n";
 const NO_CHECKOUT: &str = "move: --target-checkout selects a checkout rebuild and stopped handover. Native move requires an installed release Docker deployment and the native client on the target. Retry against that deployment with --target-release and omit --target-checkout. Nothing was changed\n";
 const NO_SSH: &str = "move: no ssh program is on PATH (only absolute PATH entries are searched); install the OpenSSH client, then retry. Nothing was changed\n";
@@ -226,6 +225,22 @@ fn valid_argv_gets_the_native_answer_without_a_connection() {
         // anything is changed or asked.
         (&DRY[..DRY.len() - 1], 4, NO_SSH),
         (&[&DRY[..DRY.len() - 1], &["--yes"]].concat(), 4, NO_SSH),
+        // Repeated compose files are overlays in order, not a repeat.
+        (
+            &[
+                "--to",
+                "root@box",
+                "--target-url",
+                "http://100.64.0.2:8765",
+                "--target-compose-file",
+                "/srv/pl/compose.yml",
+                "--target-compose-file",
+                "/srv/pl/compose.override.yml",
+                "--dry-run",
+            ],
+            4,
+            NO_SSH,
+        ),
     ] {
         let output = run(&home.0, &url, "80", args);
         assert_answer(&output, code, "", stderr);
@@ -286,23 +301,199 @@ fn an_ssh_planted_in_the_working_directory_is_never_run() {
 }
 
 #[test]
-fn argparse_shapes_defer() {
+fn unsupported_argument_shapes_receive_native_usage() {
     let home = Home::new("shapes");
     let (socket, url) = listener();
+    let nothing = ". Nothing was changed\n";
+    for (args, problem) in [
+        (
+            &["--to=root@box"][..],
+            "write the option and its value as two arguments (--to VALUE); move does not read --to=VALUE",
+        ),
+        (
+            &["--dry", "--to", "root@box"],
+            "--dry is short for --dry-run; write the full option name",
+        ),
+        (
+            &["--yes", "--yes", "--to", "root@box"],
+            "--yes is given twice; give it once",
+        ),
+        (
+            &["--to", "root@box", "extra"],
+            "argument 3 is neither an option nor an option's value; each value follows its option, such as --to user@box",
+        ),
+        (
+            &["--to", "root@box", "--bogus"],
+            "--bogus is not a move option; see pseudolife-mcp move --help",
+        ),
+    ] {
+        let want = format!("move: {problem}{nothing}");
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", &want);
+    }
+    // --target-checkout in any spelling gets the transaction parser's text.
     for args in [
-        &["--to=root@box"][..],
-        &["--to"],
+        &["--to", "root@box", "--target-checkout", "-x"][..],
+        &["--target-checkout=/srv", "--to", "root@box"],
+    ] {
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", NO_CHECKOUT);
+    }
+    // A --to value starting with `-` would be an ssh option: never taken.
+    for args in [
+        &["--to"][..],
         &["--to", "-1"],
         &["--to", "-oProxyCommand=evil"],
-        &["--dry", "--to", "root@box"],
-        &["--yes", "--yes", "--to", "root@box"],
-        &["--to", "root@box", "extra"],
     ] {
-        assert_answer(&run(&home.0, &url, "80", args), 1, "", DEFERRED);
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", TO_VALUE);
     }
-    assert_answer(&run(&home.0, &url, "100", &["--help"]), 1, "", DEFERRED);
-    assert_answer(&run(&home.0, &url, "100", &[]), 1, "", DEFERRED);
+    let narrow_help = run(&home.0, &url, "80", &["--help"]);
+    let wide_help = run(&home.0, &url, "100", &["--help"]);
+    assert_eq!(wide_help.status.code(), Some(0));
+    assert!(wide_help.stderr.is_empty());
+    assert_eq!(narrow_help.stdout, wide_help.stdout);
+    // Help wherever it appears, before any check.
+    for args in [
+        &["--to", "root@box", "--dry-run", "--help"][..],
+        &["--rollback", "--help"],
+        &["--rollback", MOVE_ID, "--help"],
+        &["--release-target", "-h"],
+    ] {
+        let output = run(&home.0, &url, "100", args);
+        assert_eq!(output.status.code(), Some(0), "{args:?}");
+        assert_eq!(output.stdout, wide_help.stdout, "{args:?}");
+        assert!(output.stderr.is_empty(), "{args:?}");
+    }
+    // A missing --to is named at every width.
+    let required =
+        format!("{USAGE}pseudolife-mcp move: error: the following arguments are required: --to\n");
+    for columns in ["80", "100", ""] {
+        assert_answer(&run(&home.0, &url, columns, &[]), 2, "", &required);
+        assert_answer(&run(&home.0, &url, columns, &["--yes"]), 2, "", &required);
+    }
     assert_quiet(&socket);
+    assert!(listing(&home.0).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_argv_is_named_by_position() {
+    use std::os::unix::ffi::OsStrExt;
+    let home = Home::new("non-unicode");
+    let output = cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+        .arg("move")
+        .arg("--to")
+        .arg(std::ffi::OsStr::from_bytes(b"b\xff"))
+        .current_dir(&home.0)
+        .env("HOME", &home.0)
+        .env("PATH", &home.0)
+        .output()
+        .unwrap();
+    assert_answer(
+        &output,
+        2,
+        "",
+        "move: argument 2 is not valid Unicode text; retype it. Nothing was changed\n",
+    );
+    // Help still answers beside such an argument.
+    let help = cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+        .arg("move")
+        .arg("--to")
+        .arg(std::ffi::OsStr::from_bytes(b"b\xff"))
+        .arg("--help")
+        .current_dir(&home.0)
+        .env("HOME", &home.0)
+        .env("PATH", &home.0)
+        .output()
+        .unwrap();
+    assert_eq!(help.status.code(), Some(0), "{help:?}");
+    assert!(help.stdout.starts_with(b"usage: pseudolife-mcp move"));
+    assert!(help.stderr.is_empty());
+    assert!(listing(&home.0).is_empty());
+}
+
+#[test]
+fn usage_refusals_come_before_any_move_record_is_read() {
+    let home = Home::new("unreadable-records");
+    let (socket, url) = listener();
+    // A record that is a directory: any read of the records fails, on
+    // every OS, with "cannot read" (an empty home would say "no record").
+    let record = home
+        .0
+        .join(".pseudolife-mcp")
+        .join("moves")
+        .join(MOVE_ID)
+        .join("record.json");
+    fs::create_dir_all(&record).unwrap();
+    // The controls: well-formed command lines read the records and fail on
+    // the planted directory, so a refusal below that reads them would say so.
+    for control in [
+        rollback(&home.0, &url, &["--rollback", MOVE_ID]),
+        run(&home.0, &url, "80", DRY),
+    ] {
+        let stderr = String::from_utf8_lossy(&control.stderr);
+        assert_eq!(control.status.code(), Some(4), "{control:?}");
+        assert!(stderr.contains("cannot read"), "{control:?}");
+    }
+    let nothing = ". Nothing was changed\n";
+    for (args, problem) in [
+        (
+            &["--to", "root@box", "extra"][..],
+            "argument 3 is neither an option nor an option's value; each value follows its option, such as --to user@box",
+        ),
+        (
+            &["--rollback"],
+            "--rollback needs the id of the move to recover, as --rollback MOVE-ID (the failed move printed it)",
+        ),
+        (
+            &["--release-target", MOVE_ID, "--dry-run"],
+            "--dry-run cannot be used with --release-target, which takes only a move id, --target-gone, --yes and --json",
+        ),
+    ] {
+        let want = format!("move: {problem}{nothing}");
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", &want);
+    }
+    assert_quiet(&socket);
+}
+
+#[test]
+fn malformed_recovery_forms_name_their_cause_before_reading_records() {
+    let home = Home::new("recovery-shapes");
+    let (socket, url) = listener();
+    let nothing = ". Nothing was changed\n";
+    for (args, problem) in [
+        (
+            &["--rollback"][..],
+            "--rollback needs the id of the move to recover, as --rollback MOVE-ID (the failed move printed it)",
+        ),
+        (
+            &["--release-target", "--yes"],
+            "--release-target needs the id of the move to recover, as --release-target MOVE-ID (the failed move printed it)",
+        ),
+        (
+            &["--rollback", MOVE_ID, "--target-gone"],
+            "--target-gone applies only to --release-target MOVE-ID, not to --rollback",
+        ),
+        (
+            &["--rollback", MOVE_ID, "--release-target", MOVE_ID],
+            "give --rollback or --release-target, not both",
+        ),
+        (
+            &["--rollback", MOVE_ID, "--to", "root@box"],
+            "--to cannot be used with --rollback, which takes only a move id, --yes and --json",
+        ),
+        (
+            &["--release-target", MOVE_ID, "--dry-run"],
+            "--dry-run cannot be used with --release-target, which takes only a move id, --target-gone, --yes and --json",
+        ),
+        (
+            &["--to", "root@box", "--target-gone"],
+            "--target-gone applies only to the recovery form pseudolife-mcp move --release-target MOVE-ID --target-gone",
+        ),
+    ] {
+        let want = format!("move: {problem}{nothing}");
+        assert_answer(&run(&home.0, &url, "80", args), 2, "", &want);
+    }
+    assert_quiet(&socket);
+    assert!(listing(&home.0).is_empty());
 }
 
 #[test]
@@ -315,6 +506,8 @@ fn help_and_usage_at_80_columns() {
         let text = String::from_utf8(output.stdout).unwrap();
         assert!(text.starts_with(&String::from_utf8(cli::native_text(USAGE)).unwrap()));
         assert!(text.contains("--json                one JSON report on stdout"));
+        assert!(text.contains("move --rollback MOVE-ID"));
+        assert!(text.contains("move --release-target MOVE-ID"));
         // The example target is an ordinary account, never a root login.
         assert!(
             text.contains("(user@box, or a") && !text.contains("root@"),
@@ -350,13 +543,14 @@ fn refusals_before_any_effect() {
         (&["--to", "root\u{1c}box", "--json"], BAD_TO),
         (&["--to", "root\u{1}box"], BAD_TO),
         (&["--to", "a b", "--target-url", "http://box:8765/"], BAD_TO),
+        // Whatever its value, --target-checkout is refused as unsupported.
         (
             &["--to", "root@box", "--target-checkout", "/srv/x\ny"],
-            BAD_CHECKOUT,
+            NO_CHECKOUT,
         ),
         (
             &["--to", "root@box", "--target-checkout", "\r//"],
-            BAD_CHECKOUT,
+            NO_CHECKOUT,
         ),
     ] {
         assert_answer(&run(&home.0, &url, "80", args), 2, "", stderr);

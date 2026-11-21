@@ -6,6 +6,7 @@ test, and lets a test break any one field. Never used outside tests.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -14,7 +15,8 @@ import struct
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
 
-from pseudolife_memory.maintainer_webauthn import b64url_encode
+def b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 RP_ID = "console.example.com"
 ORIGIN = "https://console.example.com:8443"
