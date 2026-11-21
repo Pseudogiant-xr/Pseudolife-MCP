@@ -16,16 +16,12 @@ import psycopg
 
 import w2e as h
 from rust.harness_support.bank_fixture import assert_fixture_database
-from w2e_shutdown_seed import replay
+from w2e_shutdown_seed import prepare_empty
 
 
 SCENARIO = {"config": "memory:\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n"}
 TEXT = ("A disconnected store must finish before daemon shutdown. " * 160).strip()
 DRAIN_WITNESS = "shutdown: admitted writes still running; the final save runs beside them"
-# background.rs gives the HTTP and write drain a combined six seconds and
-# keeps the final save available through nine seconds. Hold across the
-# former deadline so the daemon reports whether it was tracking the write.
-HOLD_AFTER_SIGNAL_SECONDS = 6.5
 STORE_PAUSE_SQL = """
 CREATE FUNCTION public.w2e_pause_store() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -44,7 +40,7 @@ FOR EACH ROW EXECUTE FUNCTION public.w2e_pause_store();
 def prepare_template(owned):
     name = h.pg.name("pl_cf_w2e_shutdown_t")
     owned.append(name)
-    replay(h.pg.create(name), "standalone-shutdown")
+    prepare_empty(h.pg.create(name), "standalone-shutdown", copied=h.pg.base_database() is not None)
     return name
 
 
@@ -132,7 +128,15 @@ def run_arm(binary, root, template, label, mutant, owned):
             if proc is None or proc.poll() is not None:
                 raise RuntimeError(f"{label}: owned daemon exited before the shutdown signal")
             proc.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
-            time.sleep(HOLD_AFTER_SIGNAL_SECONDS)
+            # A tracked write reaches the drain deadline before the final
+            # save. Without tracking, the process can finish its exit while
+            # the trigger still holds the abandoned store.
+            deadline = time.monotonic() + 120
+            while (DRAIN_WITNESS not in daemon.log.read_text(encoding="utf-8", errors="replace")
+                   and proc.poll() is None):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"{label}: owned daemon neither reached the drain nor exited")
+                time.sleep(0.05)
         exit_code = proc.wait(timeout=120)
         drain_observed = DRAIN_WITNESS in daemon.log.read_text(encoding="utf-8", errors="replace")
         daemon.stop()

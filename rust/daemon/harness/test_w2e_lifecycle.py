@@ -235,6 +235,25 @@ def test_clean_exit_uses_native_lifecycle_runner(harness, monkeypatch, tmp_path,
     assert result["scenario"] == scenario
 
 
+def test_saved_counter_history_rejects_a_same_length_rewrite(harness):
+    value = {"preset_name": "flat", "interaction_count": 2, "updated_at": 5.0,
+             "surprise_history": {"flat": [0.75, 0.25]}}
+    assert harness.saved_counter_history_matches(value, [0.75, 0.25])
+    value["surprise_history"]["flat"] = [0.0, 0.0]
+    assert not harness.saved_counter_history_matches(value, [0.75, 0.25])
+
+
+@pytest.mark.parametrize("field", ["entry_id", "score", "components"])
+def test_restart_served_witness_rejects_wrong_retrieval_log(harness, field):
+    entries = [{"id": 1, "score": 0.8, "via": None, "bank": None}]
+    logged = [{"entry_id": 1, "score": 0.8, "rank": 0, "via": None, "bank": None,
+               "components": {"dense": 0.8}}]
+    prior = {1: {"dense": 0.8}}
+    assert not harness.restart_served_diffs(entries, logged, prior)
+    logged[0][field] = {"entry_id": 2, "score": 0.0, "components": {"dense": 0.0}}[field]
+    assert harness.restart_served_diffs(entries, logged, prior)
+
+
 def test_recording_keeps_other_scenarios_after_clean_exit_rows(harness, monkeypatch, tmp_path):
     monkeypatch.setattr(harness, "SCENARIOS", {
         "store-defaults": {}, "counters-restore": {"clean_stop": True}, "health-consistency": {},

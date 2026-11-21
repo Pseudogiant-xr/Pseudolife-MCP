@@ -6276,17 +6276,48 @@ import w2e_live_config  # noqa: E402
 SCENARIOS.update(w2e_live_config.register(sys.modules[__name__]))
 
 
+def saved_counter_history_matches(value, expected):
+    if not value or value["preset_name"] != "flat" or value["interaction_count"] != len(expected):
+        return False
+    history = value["surprise_history"]
+    if not isinstance(history, dict) or set(history) != {"flat"}:
+        return False
+    flat = history["flat"]
+    return (bool(value["updated_at"]) and isinstance(flat, list) and len(flat) == len(expected)
+            and all(type(a) in (int, float) and abs(a - b) <= COUNTERS_SURPRISE_TOL
+                    for a, b in zip(flat, expected)))
+
+
+def restart_served_diffs(entries, served, prior=None):
+    if not isinstance(served, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get("components"), dict)
+            for item in served):
+        return ["search did not persist the served entries and score components"]
+    expected = [{"entry_id": entry["id"], "score": entry.get("score"), "rank": i,
+                 "via": entry.get("via"), "bank": entry.get("bank")} for i, entry in enumerate(entries)]
+    projected = [{key: value for key, value in item.items() if key != "components"} for item in served]
+    _float_pair_free(expected, projected)
+    diffs = [f"retrieval event served{diff}" for diff in w1a.diff_values(expected, projected)]
+    if prior is not None:
+        initial = copy.deepcopy(prior)
+        current = {row["entry_id"]: copy.deepcopy(row["components"]) for row in served}
+        _float_pair_free(initial, current)
+        diffs += [f"retrieval event components after restart{diff}"
+                  for diff in w1a.diff_values(initial, current)]
+    return diffs
+
+
 def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
     """Check the native clean-exit rows before and after an owned restart."""
     import psycopg
     from background_sessions import graceful_stop
-    from w2e_shutdown_seed import replay
+    from w2e_shutdown_seed import prepare_empty
 
     if scn["seed"]:
         raise ValueError("clean-exit scenario requires a captured seed")
     seed = pg.name(f"pl_cf_w2e_{tag}_t")
     owned.append(seed)
-    replay(pg.create(seed), name)
+    prepare_empty(pg.create(seed), name, copied=pg.base_database() is not None)
     bank = pg.name(f"pl_cf_w2e_{tag}_rs")
     owned.append(bank)
     dsn = pg.create(bank, template=seed)
@@ -6309,6 +6340,8 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
         client, diffs = start(dbstate.dump(dsn), scn["config"])
         steps.append({"step": 0, "op": {"op": "init"}, "diffs": diffs})
         hit_ids = None
+        pre_restart_components = None
+        surprises = []
         for index, op in enumerate(scn["ops"], 1):
             diffs = []
             if op["op"] == "restart":
@@ -6326,17 +6359,20 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                 if op["stop"]:
                     graceful_stop(daemon)
                 value = read_counters(dsn)
-                expected_count = 3 if op["stop"] else 2
-                if (not value or value["preset_name"] != "flat"
-                        or value["interaction_count"] != expected_count
-                        or len(value["surprise_history"].get("flat", [])) != expected_count
-                        or not value["updated_at"]):
-                    diffs.append("successful stores did not persist the expected counters")
+                expected = surprises if op["stop"] else surprises[:2]
+                if not saved_counter_history_matches(value, expected):
+                    diffs.append("saved counter history differs from the successful stores")
                 answer = {"isError": False, "value": value}
             else:
                 answer = run_op(op, daemon.port, client, dsn)
                 if not answer or answer["isError"]:
                     diffs.append(f"{op.get('name', op['op'])} did not succeed")
+                elif op.get("name") == "memory_store":
+                    surprise = answer["value"].get("surprise")
+                    if answer["value"].get("stored") is not True or type(surprise) not in (int, float):
+                        diffs.append("fixture store did not return its stored surprise")
+                    else:
+                        surprises.append(surprise)
                 elif name == "search-after-restart" and op.get("name") == "memory_search":
                     items = answer["value"].get("entries", [])
                     if {item["text"] for item in items} != set(RESTART_TEXTS):
@@ -6345,6 +6381,19 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                     if hit_ids is not None and ids != hit_ids:
                         diffs.append("search returned different entry IDs after restart")
                     hit_ids = ids
+                    with psycopg.connect(dsn, autocommit=True) as conn:
+                        event = conn.execute(
+                            "SELECT served FROM retrieval_events WHERE query_text = %s "
+                            "AND origin = 'search' ORDER BY id DESC LIMIT 1",
+                            (op["args"]["query"],),
+                        ).fetchone()
+                    served = event[0] if event else None
+                    diffs.extend(restart_served_diffs(items, served, pre_restart_components))
+                    if pre_restart_components is None and isinstance(served, list):
+                        pre_restart_components = {
+                            row["entry_id"]: row["components"] for row in served
+                            if isinstance(row, dict) and "entry_id" in row and "components" in row
+                        }
             if op.get("expect"):
                 with psycopg.connect(dsn, autocommit=True) as conn:
                     for query in op["expect"]:
@@ -7058,14 +7107,14 @@ SCENARIOS.update({
         "seed": [],
         "ops": [
             *[store(t) for t in RESTART_TEXTS],
-            dict(search(RESTART_QUERY, top_k=2), expect=[
+            dict(tool("memory_search", query=RESTART_QUERY, top_k=2, verbose=True), expect=[
                 f"SELECT count(*) = 1 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
             # A restart writes some config: the default board setting, unchanged.
             {"op": "restart", "config": "coordination:\n  enabled: true\n",
              # The scenario's own entries: a real bank's copy holds others read once.
              "expect": ["SELECT count(*) = 2 FROM entries WHERE access_count = 1 AND text IN ("
                         + ", ".join("'%s'" % t.replace("'", "''") for t in RESTART_TEXTS) + ")"]},
-            dict(search(RESTART_QUERY, top_k=2), expect=[
+            dict(tool("memory_search", query=RESTART_QUERY, top_k=2, verbose=True), expect=[
                 f"SELECT count(*) = 2 FROM retrieval_events WHERE query_text = '{RESTART_QUERY}'"]),
         ],
     },

@@ -9,6 +9,15 @@ from rust.harness_support.database_guard import dsn_database_name
 from rust.harness_support.fixture_rows import checked_fixture_insert
 
 
+def prepare_empty(dsn, name, *, copied):
+    if not copied:
+        replay(dsn, name)
+        return
+    require_fixture_database(dsn_database_name(dsn) or "")
+    with psycopg.connect(dsn) as conn:
+        initialize_bank(conn)
+
+
 def replay(dsn, name):
     require_fixture_database(dsn_database_name(dsn) or "")
     path = Path(__file__).with_name("commit_loss_seed_rows.json")
