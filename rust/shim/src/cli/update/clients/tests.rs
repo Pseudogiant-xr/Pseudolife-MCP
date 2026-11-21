@@ -896,7 +896,9 @@ fn tunnel_step_fails_an_invalid_store_with_its_cause() {
     // reason".
     let detail = detail_of(124, "");
     assert!(
-        detail.contains("did not answer tunnel update within 150 s"),
+        detail.contains("did not answer tunnel update within 180 s")
+            && detail.contains("may still finish a refresh it accepted")
+            && detail.contains("pseudolife-mcp tunnel status"),
         "{detail}"
     );
     let detail = detail_of(1, "");
@@ -933,6 +935,22 @@ fn tunnel_step_fails_an_invalid_store_with_its_cause() {
         detail.contains("answered stale with exit 1, a pairing this step does not accept"),
         "{detail}"
     );
+}
+
+#[test]
+fn tunnel_step_reports_a_completed_supervised_restart() {
+    let fixture = Fixture::new();
+    let root = tunnel_store(&fixture);
+    let detail = "the tunnel reconnected on the installed runtime";
+    let answer = json!({"state":"refreshed","needs_attention":false,"detail":detail}).to_string();
+    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(0, &answer));
+    let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
+    assert_eq!(step["state"], "refreshed");
+    assert_eq!(
+        step["detail"],
+        format!("{detail}; run by the installed native launcher")
+    );
+    assert!(ladder_ok(&json!({"tunnel":step})));
 }
 
 #[test]

@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-import longmemeval_bench as lmb  # noqa: E402
+import _python_longmemeval_bench as lmb  # noqa: E402
 
 BF16 = {"backend": "torch", "device": "cpu", "dtype": "bf16"}
 FP32 = {"backend": "torch", "device": "cpu", "dtype": "fp32"}
@@ -133,7 +133,7 @@ def test_rebuild_contexts_stamps_its_stage_and_keeps_extracts(tmp_path,
     cortex facts with a fresh CPU embedder while the rag block stays the
     source run's. Both provenances must survive on the row."""
     pytest.importorskip("torch")
-    import rebuild_contexts
+    import _python_rebuild_contexts as rebuild_contexts
     from context_format import FACTS_HEADER, MEMS_HEADER
 
     monkeypatch.setattr(lmb, "RESULTS_DIR", tmp_path)
@@ -374,18 +374,18 @@ def test_the_guard_sees_every_known_construction_path():
     SentenceTransformer, build_service imported by name, ls.build_service
     through a module alias, and a helper two hops away (ls.run_rung)."""
     found = _analyse()
-    assert {"rebuild_contexts", "retrieval_replay", "embedder_recall",
-            "longmemeval_bench", "quarantine_gate", "warm_cache_probe",
+    assert {"_python_rebuild_contexts", "retrieval_replay", "embedder_recall",
+            "_python_longmemeval_bench", "quarantine_gate", "warm_cache_probe",
             } <= found["constructs"]
     # the ones that only read rows back are not flagged
     assert not {"replicate", "leak_check", "lme_rejudge", "context_format",
                 } & found["constructs"]
     # factories are recognised through a chain (seed_bench's helper returns
     # what ladder_sweep.build_service built), and are not sites themselves
-    assert {("ladder_sweep", "build_service"),
+    assert {("_python_ladder_sweep", "build_service"),
             ("seed_bench", "_seed_bench_service"),
             ("live_replay_flat_ab", "_build")} <= found["factories"]
-    assert {("longmemeval_bench", "run_extract"), ("beam_adapter", "run"),
+    assert {("_python_longmemeval_bench", "run_extract"), ("beam_adapter", "run"),
             ("seed_bench", "run")} <= found["sites"]
 
 

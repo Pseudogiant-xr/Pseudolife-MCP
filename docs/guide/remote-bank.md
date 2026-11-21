@@ -740,7 +740,10 @@ client](configuration.md#the-native-client)), `pseudolife-mcp move --to
 <ssh-target> --target-url <url> --no-keep-tokens` moves the bank, asking
 first (or `--yes`).
 Add `--dry-run` to check both hosts without changing anything and print the
-plan. The target needs:
+plan. Use `--help` to see the move and recovery commands. Write option values
+as separate arguments, such as `--to <ssh-target>`, and use full option names.
+The native client reports usage errors before inspecting the host or move
+records. The target needs:
 - the native client installed: an update with `PSEUDOLIFE_SHIM_ENGINE=native`
   set moves a host to it (`update --clients-only` for one that already has
   its daemon), or `pseudolife-mcp runtime install --archive`. A target whose
@@ -895,11 +898,10 @@ undo uses the recorded deployment. Both clients must support carrying
 settings with explicit target files. When using `--no-keep-tokens`, leave the
 file flags off.
 
-**Checkout handover.** `--target-checkout` selects the contributor
-workflow that rebuilds from a source checkout and hands over the stopped
-daemon. Prepare an empty installed release Docker deployment with the
-native client on the target for a native move. Select it with
-`--target-release` and leave off `--target-checkout`.
+**Checkout handover.** Native `move` uses the target's installed release by
+default. `--target-release` makes that choice explicit. The native client
+refuses `--target-checkout` before inspecting either host. Prepare an empty
+installed Docker deployment with the native client on the target.
 
 **Tailnet exposure during a native move.** Use `--expose-target` to use
 Tailscale Serve on the target's existing `127.0.0.1` HTTP port. A dry run
@@ -1238,10 +1240,11 @@ relayed (DERP) tailnet path adds tens of milliseconds per call.
 
 The daemon host does not have to be your workstation. Plan for:
 
-- **Disk:** tens of GB. The images are about 5 GB (daemon), 12 GB (extractor
-  sidecar) and 0.6 GB (Postgres), plus the bank volumes.
+- **Disk:** allow for the daemon image, its models, Postgres, and growing
+  bank volumes. See [image and model sizes](../../README.md#install--containerized-any-os)
+  for the Rust and Python daemon footprints and the optional extractor image.
 - **Memory:** the reference deployment caps the daemon container at 6 GiB
-  (`PSEUDOLIFE_DAEMON_MEM_LIMIT`); it runs at about 3 GB in steady state.
+  (`PSEUDOLIFE_DAEMON_MEM_LIMIT`).
 - **Extractor:** dreams need an extractor the daemon host can reach: the
   in-stack sidecar, or an extractor endpoint reachable from that host
   ([Dreaming](dreaming.md)).

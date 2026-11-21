@@ -467,6 +467,7 @@ frozen test_reranker.py
 frozen test_reranker_margin_gate.py
 live test_rescore_strict_mc.py
 live test_restore_from_pt.py
+live test_retained_evals.py
 live test_retention_bench.py
 frozen test_retention_boost.py
 live test_retention_eval.py

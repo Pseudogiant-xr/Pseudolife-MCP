@@ -1015,6 +1015,26 @@ def test_codex_registers_with_the_remote_url_and_its_credential_file(bash, tmp_p
     assert "MCP_CODEX=shim-env" in proc.stdout
 
 
+@pytest.mark.parametrize("outcome,recovery", [
+    ("refused", "The installer credential was not accepted by the configured daemon. "
+     "Supply a token accepted by that daemon, then rerun the installer."),
+    ("not-ready", "The authenticated check at https://daemon.example.com did not succeed "
+     "within 180 seconds. The last attempt returned HTTP 503. Check that the daemon is "
+     "reachable, then rerun the installer."),
+])
+@BASH
+def test_codex_credential_bootstrap_reports_failure(bash, tmp_path, outcome, recovery):
+    cred = json.dumps({
+        "status": "needs-configuration", "credential_check": outcome, "recovery": recovery,
+    })
+    proc, adds = _codex_wiring(_Shell(bash, tmp_path), cred=cred, cred_exit=1)
+    assert proc.returncode == 0, proc.stderr
+    assert adds == []
+    assert "MCP_CODEX=failed" in proc.stdout
+    assert recovery in proc.stdout + proc.stderr
+    assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
+
+
 @pytest.mark.parametrize("scenario,kwargs,says", [
     ("credential setup failed",
      {"cred": '{"status":"needs-configuration","recovery":"fixture"}', "cred_exit": 1},

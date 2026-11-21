@@ -205,7 +205,7 @@ fn run_handshake(probe: impl Future<Output = bool>, deadline: Duration) -> Resul
     Err(Fail::Tunnel(HANDSHAKE))
 }
 
-async fn handshake(url: &str, token: &str) -> bool {
+pub(super) async fn handshake(url: &str, token: &str) -> bool {
     let Ok(mut auth) = HeaderValue::from_str(&format!("Bearer {token}")) else {
         return false;
     };
@@ -388,11 +388,7 @@ pub(super) fn warn_for_stages(root: &Path) {
     let mut stages: Vec<_> = entries
         .filter_map(Result::ok)
         .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .and_then(|name| name.strip_prefix(STAGE_PREFIX))
-                .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            entry.file_name().to_str().is_some_and(publication_stage)
                 && entry.file_type().is_ok_and(|kind| kind.is_file())
         })
         .map(|entry| entry.path())
@@ -404,6 +400,11 @@ pub(super) fn warn_for_stages(root: &Path) {
             stage.display()
         );
     }
+}
+
+pub(super) fn publication_stage(name: &str) -> bool {
+    name.strip_prefix(STAGE_PREFIX)
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 fn prepare_directory(root: &Path) -> Result<(), Fail> {
@@ -460,7 +461,25 @@ fn stage_and_publish(
     finish_publication(result, &stage, || fs::remove_file(&stage))
 }
 
-fn sync_directory(path: &Path) -> Result<(), Fail> {
+pub(super) fn replace_private(path: &Path, bytes: &[u8]) -> Result<(), Fail> {
+    let expected = state::open(path).map_err(|_| Fail::Tunnel(WRITE))?.identity;
+    replace_private_if(path, bytes, &expected)
+}
+
+pub(super) fn replace_private_if(path: &Path, bytes: &[u8], expected: &[u128]) -> Result<(), Fail> {
+    stage_and_publish(
+        path,
+        |file| file.write_all(bytes),
+        |stage| {
+            if !state::open(path).is_ok_and(|current| current.identity == expected) {
+                return Err(Fail::Tunnel(CONFLICT));
+            }
+            store::sharing_retry(|| fs::rename(stage, path)).map_err(publication_error)
+        },
+    )
+}
+
+pub(super) fn sync_directory(path: &Path) -> Result<(), Fail> {
     #[cfg(unix)]
     fs::File::open(path)
         .and_then(|dir| dir.sync_all())
@@ -502,14 +521,14 @@ fn publication_error(error: io::Error) -> Fail {
 }
 
 #[cfg(unix)]
-fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
+pub(super) fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
     use rustix::fs::{CWD, RenameFlags, renameat_with};
     renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(Into::into)
 }
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
+pub(super) fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::MoveFileW;
 

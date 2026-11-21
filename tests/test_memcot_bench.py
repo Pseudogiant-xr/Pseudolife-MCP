@@ -120,7 +120,7 @@ def bench_pg() -> None:
 
 def test_run_all_arm_graph_beats_baseline_on_a_two_hop_case(bench_pg):
     import tempfile
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     with tempfile.TemporaryDirectory(prefix="plmemcot_", ignore_cleanup_errors=True) as td:
         svc = build_service(Path(td))
         mb.seed_bench(svc)

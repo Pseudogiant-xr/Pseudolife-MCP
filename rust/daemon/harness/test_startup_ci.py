@@ -83,6 +83,11 @@ class ShadowRefresh(unittest.TestCase):
             command, 0, f"test result: ok. {startup_ci.SHADOW_DB_TESTS - 1} passed; 0 failed\n", ""))
         self.assertFalse(result["accepted"], result)
 
+    def test_more_passes_fail(self):
+        result = self.run_step(lambda command, **kw: subprocess.CompletedProcess(
+            command, 0, f"test result: ok. {startup_ci.SHADOW_DB_TESTS + 1} passed; 0 failed\n", ""))
+        self.assertFalse(result["accepted"], result)
+
     def test_a_nonzero_exit_fails(self):
         result = self.run_step(lambda command, **kw: subprocess.CompletedProcess(
             command, 101, f"test result: ok. {startup_ci.SHADOW_DB_TESTS} passed; 0 failed\n", ""))

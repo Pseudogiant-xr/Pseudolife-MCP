@@ -1,6 +1,5 @@
-"""Parity check for the Rust cross-encoder reranker (``src/read/rerank.rs``)
-against the Python oracle (``pseudolife_memory/memory/reranker.py`` on
-sentence-transformers' ``CrossEncoder``).
+"""Regression check for the Rust cross-encoder reranker (``src/read/rerank.rs``)
+against the captured output of the frozen Python reranker.
 
 usage:
   python w2d_rerank_check.py --model-dir DIR [--keep DIR]
@@ -8,26 +7,25 @@ usage:
 ``DIR`` (or ``W2D_RERANK_MODEL_DIR``) is the ``reranker`` directory installed
 by ``pseudolife-daemon provision models``. Its graph, tokenizer and metadata
 must match the compiled pins; arbitrary local exports are refused.
-``ORT_DYLIB_PATH`` must name the ONNX Runtime library
-for the Rust side. Python loads the model from the Hugging Face cache (set
-``HF_HUB_OFFLINE=1``). ``CARGO_TARGET_DIR`` is passed through to cargo.
+``ORT_DYLIB_PATH`` must name the ONNX Runtime library for the Rust side.
+``CARGO_TARGET_DIR`` is passed through to cargo.
 
-Per case it compares the raw logits (Rust ``Reranker::logits`` against
-``CrossEncoder.predict``), the squashed scores (``Reranker::rerank`` against
-``CrossEncoderReranker.rerank``) and the ranked candidate order (by text, so
-identical candidates cannot flip it). Exit 1 when any order differs, any
-rerank result differs in length, or the max sigmoid diff exceeds 1e-4.
+Per case it compares the raw logits, the squashed scores and the ranked
+candidate order by text, so identical candidates cannot flip it. Exit 1
+when an order differs outside the declared tie, a rerank result differs in
+length, or the max sigmoid diff exceeds 1e-4.
 
-One order difference is declared (``DECLARED_TIES``): in case 20, different
-passages that truncate to identical tokens tie exactly in Rust while Python's
-scores differ by numeric noise. A swap there is reported as a declared tie,
-not a failure, only when the two orders agree once passages with identical
-truncated tokens are treated as one, and every squashed score is within
-tolerance. Any other order difference fails.
+The captured reference and the pinned Rust export tie the two passages in
+case 20 that truncate to identical tokens, so their orders agree. An earlier
+run separated their Python scores by roundoff. ``DECLARED_TIES`` allows a
+swap in case 20 only when the two orders agree after grouping identical
+truncated token sequences and every squashed score stays within tolerance.
+Any other order difference fails.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -37,6 +35,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
+REFERENCE = HERE / "fixtures" / "w2d-rerank-reference.json"
+REFERENCE_SHA256 = "1b3de9adf61824ede796b8afd700267b1783eea8b3670743bad954828cc356cd"
 SIGMOID_TOL = 1e-4
 # Case number (1-based) -> the ledger entry declaring its tie order.
 DECLARED_TIES = {
@@ -127,24 +127,15 @@ def build_cases() -> list[dict]:
     return cases
 
 
-def python_side(cases: list[dict]) -> list[dict]:
-    sys.path.insert(0, str(REPO))
-    from pseudolife_memory.memory.reranker import CrossEncoderReranker  # noqa: PLC0415
-
-    rr = CrossEncoderReranker()
-    if not rr._ensure_loaded():
-        raise SystemExit("python: cross-encoder failed to load")
-    model = rr._model
-    max_length = getattr(model, "max_length", None)
-    out = []
-    for c in cases:
-        pairs = [(c["query"], d) for d in c["candidates"]]
-        logits = [float(x) for x in model.predict(pairs)] if pairs else []
-        # The truncated model input of each pair, as predict() tokenizes it.
-        tokens = [list(model.tokenizer(q, d, truncation="longest_first", max_length=max_length)["input_ids"])
-                  for q, d in pairs]
-        out.append({"logits": logits, "rerank": rr.rerank(c["query"], c["candidates"]), "tokens": tokens})
-    return out
+def load_reference(cases: list[dict]) -> list[dict]:
+    captured = REFERENCE.read_text(encoding="utf-8")
+    if hashlib.sha256(captured.encode("utf-8")).hexdigest() != REFERENCE_SHA256:
+        raise ValueError("reranker reference differs from the pinned capture")
+    reference = json.loads(captured)
+    encoded = json.dumps(cases, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if hashlib.sha256(encoded).hexdigest() != reference["case_sha256"]:
+        raise ValueError("reranker cases differ from the captured reference")
+    return reference["results"]
 
 
 def rust_side(cases_path: Path, out_path: Path, model_dir: str) -> list[dict]:
@@ -169,7 +160,7 @@ def ranked(cands: list[str], scores: list[float]) -> list[str]:
 
 def order_verdict(n: int, case: dict, p: dict, r: dict) -> str:
     """``agree``, ``declared`` (a declared tie, see ``DECLARED_TIES``) or
-    ``differs`` for case ``n`` (1-based), Python result ``p``, Rust ``r``."""
+    ``differs`` for case ``n`` (1-based), captured result ``p``, Rust ``r``."""
     cands = case["candidates"]
     if ranked(cands, p["logits"]) == ranked(cands, r["logits"]):
         return "agree"
@@ -193,7 +184,7 @@ def order_verdict(n: int, case: dict, p: dict, r: dict) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-dir", default=os.environ.get("W2D_RERANK_MODEL_DIR"))
-    ap.add_argument("--keep", help="directory to keep cases/py/rust JSON in")
+    ap.add_argument("--keep", help="directory to keep cases/reference/rust JSON in")
     args = ap.parse_args()
     if not args.model_dir:
         ap.error("--model-dir or W2D_RERANK_MODEL_DIR is required")
@@ -204,8 +195,8 @@ def main() -> int:
     cases_path = work / "cases.json"
     cases_path.write_text(json.dumps(cases, ensure_ascii=False), encoding="utf-8")
 
-    py = python_side(cases)
-    (work / "python.json").write_text(json.dumps(py), encoding="utf-8")
+    reference = load_reference(cases)
+    (work / "reference.json").write_text(json.dumps(reference), encoding="utf-8")
     rs = rust_side(cases_path, work / "rust.json", args.model_dir)
 
     max_logit = 0.0
@@ -213,7 +204,7 @@ def main() -> int:
     failures: list[str] = []
     order_ok = 0
     declared = 0
-    for n, (c, p, r) in enumerate(zip(cases, py, rs, strict=True), 1):
+    for n, (c, p, r) in enumerate(zip(cases, reference, rs, strict=True), 1):
         if len(p["logits"]) != len(r["logits"]):
             failures.append(f"case {n}: logit count {len(p['logits'])} vs {len(r['logits'])}")
             continue

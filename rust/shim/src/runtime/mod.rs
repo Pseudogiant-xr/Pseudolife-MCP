@@ -268,6 +268,11 @@ pub fn current_runtime(layout: &Layout) -> Option<Runtime> {
     newest_runtime(layout, true)
 }
 
+/// Select an installed image and keep its usage pin through a tunnel restart.
+pub(crate) fn select_pinned_runtime(layout: &Layout) -> Result<(Runtime, fs::File)> {
+    launch::select_pin_with(layout, launch::pin_now)
+}
+
 fn newest_runtime(layout: &Layout, verify_digest: bool) -> Option<Runtime> {
     // Verify candidates newest first. Old sessions can retain many large
     // binaries; starting a new session only needs the first valid candidate.

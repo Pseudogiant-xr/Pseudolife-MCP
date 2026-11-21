@@ -49,15 +49,16 @@ import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-GATE = REPO / "evals" / "regression_gate.ps1"
+FROZEN_GATE = REPO / "evals" / "_python_regression_gate.ps1"
+RUST_GATE = REPO / "evals" / "regression_gate.ps1"
 BASELINE = REPO / "evals" / "results" / "regression_gate.baseline.json"
 
 # 2: one run plus one canary. Not an estimator — see the module docstring.
 DEFAULT_REPLICATES = 2
 
 
-def _declared_default() -> int:
-    m = re.search(r"param\(\[int\]\$Replicates\s*=\s*(\d+)", GATE.read_text(encoding="utf-8"))
+def _declared_default(gate: Path) -> int:
+    m = re.search(r"param\(\s*\[int\]\$Replicates\s*=\s*(\d+)", gate.read_text(encoding="utf-8"))
     assert m, "could not find the -Replicates parameter declaration"
     return int(m.group(1))
 
@@ -66,7 +67,11 @@ def test_gate_default_keeps_a_determinism_canary():
     """The default must run at least two replicates. One replicate cannot
     disagree with anything, so it cannot detect a drift back onto the
     nondeterministic server — which is the only thing replicates still buy."""
-    assert _declared_default() >= DEFAULT_REPLICATES
+    assert _declared_default(FROZEN_GATE) >= DEFAULT_REPLICATES
+
+
+def test_rust_gate_default_keeps_a_determinism_canary():
+    assert _declared_default(RUST_GATE) >= DEFAULT_REPLICATES
 
 
 def test_committed_baseline_was_established_at_the_default_or_more():

@@ -1,8 +1,12 @@
 """The stats comparison must retain every computed field and reject bad clocks."""
 import base64
 import copy
+import hashlib
 import json
+import os
 from pathlib import Path
+import sys
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +14,7 @@ import pytest
 from rust.harness_support.database_guard import ProductionDatabaseError
 from rust.harness_support.import_blocker import cold_harness_imports
 
+from . import core
 from .rows import audit
 
 
@@ -18,6 +23,103 @@ STATS_FIXTURE = Path(__file__).resolve().parents[1] / "shim/src/cli/board_audit/
 
 def stats_corpus():
     return json.loads(STATS_FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_stats_references_match_the_frozen_capture():
+    # Frozen 0c5de1488 reports captured on Linux and Windows, represented
+    # as deltas against the committed Rust stats corpus. Normalize checkout
+    # line endings before checking the captured reference file.
+    references = audit._STATS_REFERENCES.read_text(encoding="utf-8")
+    assert hashlib.sha256(references.encode("utf-8")).hexdigest() == (
+        "07b3751c0f966cbc4d9633d3478f394c4e094ec524752fccf4e303164cab1d26"
+    ), "audit stats references differ from the frozen capture"
+
+
+@pytest.mark.skipif(core.WINDOWS, reason="POSIX permission bits")
+def test_transport_export_requires_owner_only_permissions(tmp_path):
+    case = next(case for case in audit.transport_cases() if case.id == "transport-rust-export-0")
+    arm = core.Arm("rust", tmp_path, tmp_path / "cwd")
+    arm.cwd.mkdir()
+    case.setup(arm)
+    calls = [
+        ["inspect", "-f", "{{.State.Running}}", "pseudolife-mcp-daemon"],
+        ["inspect", "-f", '{{index .Config.Labels "org.pseudolife.engine"}}', "pseudolife-mcp-daemon"],
+        ["exec", "-i", "-e", "PSEUDOLIFE_DAEMON_EXEC=1", "pseudolife-mcp-daemon",
+         "pseudolife-mcp", "board-audit", "export", "--task", "fixture task"],
+    ]
+    (tmp_path / "docker.jsonl").write_text("".join(json.dumps(call) + "\n" for call in calls))
+    (tmp_path / "docker.stdin").write_bytes(b"")
+    destination = tmp_path / "out.jsonl"
+    destination.write_bytes(b'{"container":"fixture"}\n')
+    destination.chmod(0o644)
+    with pytest.raises(AssertionError, match="transport export must be owner-only"):
+        case.after(arm, {"exit": 0})
+
+    destination.chmod(0o600)
+    case.after(arm, {"exit": 0})
+
+
+def test_live_reference_runs_only_the_candidate(monkeypatch, tmp_path):
+    calls = []
+
+    def reference(home):
+        calls.append(("reference", home))
+        return {"exit": 0, "stdout": "", "stderr": ""}
+
+    def run_arm(case, target, home):
+        assert target.name == "rust", "the live reference launched the Python arm"
+        calls.append(("rust", home))
+        return {"exit": 1, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(core, "_home_root", lambda: tmp_path / "case")
+    monkeypatch.setattr(core, "run_arm", run_arm)
+    case = core.Case("reference", [])
+    case.reference = reference
+    expected, actual = core.run_case(case, core.Target("python", []), core.Target("rust", []))
+
+    assert calls == [("reference", tmp_path / "case/h"), ("rust", tmp_path / "case/h")]
+    assert expected["exit"] == 0 and actual["exit"] == 1
+
+
+@pytest.mark.skipif(core.WINDOWS, reason="POSIX permission bits")
+@pytest.mark.parametrize(("mask", "directory", "file_mode"), [
+    (0o002, "0o775", "0o664"),
+    (0o077, "0o700", "0o600"),
+])
+def test_live_recorded_reference_retains_permission_checks(tmp_path, mask, directory, file_mode):
+    previous = os.umask(mask)
+    try:
+        want = audit._recorded_reference("transport-rust-export-0", tmp_path / "h")
+    finally:
+        os.umask(previous)
+    assert want["modes"] == {
+        "cwd": directory, "docker.jsonl": file_mode, "docker.stdin": file_mode, "out.jsonl": "0o600",
+    }
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not Path("/usr/share/zoneinfo/Etc/GMT+8").is_file(),
+    reason="requires Linux zoneinfo data for a conflicting TZDIR",
+)
+def test_system_zone_reference_uses_the_cli_timezone_inputs(monkeypatch, tmp_path):
+    alternate = tmp_path / "Etc" / "UTC"
+    alternate.parent.mkdir()
+    alternate.write_bytes(Path("/usr/share/zoneinfo/Etc/GMT+8").read_bytes())
+    case = core.Case("stats-local-system-zone", [
+        "board-audit", "stats", "--since", "2026-10-11T12:00:00", "--until", "2026-10-13T00:00:00Z",
+    ])
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setenv("TZ", "Etc/UTC")
+            patch.setenv("TZDIR", str(tmp_path))
+            time.tzset()
+            assert time.strftime("%z") == "-0800"
+            report = json.loads(audit._stats_report(case, case.id))
+    finally:
+        time.tzset()
+
+    assert report["window"] == {"since": 1791720000.0, "until": 1791849600.0, "hours": 36.0}
 
 
 def test_committed_stats_fixture_matches_its_synthetic_inputs_and_report_bytes():

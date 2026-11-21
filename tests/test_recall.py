@@ -327,7 +327,7 @@ def bench_pg() -> None:
 
 def test_recall_bridges_two_hop_on_real_service(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service  # reuse isolated bench DB
+    from _python_ladder_sweep import build_service  # reuse isolated bench DB
     svc = build_service(tmp_path)
     svc.store("checkout-svc depends on the billing-lib package.", source="bench")
     svc.store("billing-lib is compiled against the jdk-21 toolchain.", source="bench")
@@ -345,7 +345,7 @@ def test_recall_bridges_two_hop_on_real_service(bench_pg, tmp_path):
 @pytest.mark.real_model
 def test_recall_low_confidence_when_query_names_no_entity(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     svc.store("checkout-svc depends on the billing-lib package.", source="bench")
     svc.graph_relate("checkout-svc", "depends-on", "billing-lib")
@@ -443,7 +443,7 @@ def _seed_two_communities(svc):
 
 def test_refresh_graph_insight_persists_and_is_stable(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     _seed_two_communities(svc)
     out = svc._refresh_graph_insight()  # noqa: SLF001
@@ -462,7 +462,7 @@ def test_refresh_graph_insight_persists_and_is_stable(bench_pg, tmp_path):
 
 def test_graph_neighborhood_carries_community(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     _seed_two_communities(svc)
     svc._refresh_graph_insight()  # noqa: SLF001
@@ -491,7 +491,7 @@ def test_recall_config_hub_defaults():
 
 def test_memory_graph_relation_filter(bench_pg, tmp_path, monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     import pseudolife_memory.mcp_server as srv
     svc = build_service(tmp_path)
     svc.graph_relate("gnx", "depends-on", "gny")
@@ -506,7 +506,7 @@ def test_graph_path_service_shortest_path(bench_pg, tmp_path):
     # The memory_path MCP tool was folded into memory_graph(to=...); the
     # Console still reaches this via /api/graph/path -> service.graph_path.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     svc.graph_relate("mp-a", "depends-on", "mp-b")
     svc.graph_relate("mp-b", "depends-on", "mp-c")
@@ -516,7 +516,7 @@ def test_graph_path_service_shortest_path(bench_pg, tmp_path):
 
 def test_memory_recall_tool_delegates(bench_pg, monkeypatch, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     import pseudolife_memory.mcp_server as srv
     svc = build_service(tmp_path)
     svc.store("web-portal uses the gateway-proxy for calls.", source="bench")
@@ -675,7 +675,7 @@ def _seed_hub_graph(svc):
 
 def test_recall_hub_gating_keeps_gold_drops_blast_radius(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     _seed_hub_graph(svc)
     svc.config.memory.recall.hub_gate = True
@@ -688,7 +688,7 @@ def test_recall_hub_gating_keeps_gold_drops_blast_radius(bench_pg, tmp_path):
 
 def test_recall_no_gating_pulls_in_hub_siblings(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     _seed_hub_graph(svc)
     svc.config.memory.recall.hub_gate = False
@@ -704,7 +704,7 @@ def test_recall_no_gating_pulls_in_hub_siblings(bench_pg, tmp_path):
 def test_communities_service(bench_pg, tmp_path):
     # communities left the MCP surface (Console-only via /api/graph/communities).
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     _seed_two_communities(svc)
     svc._refresh_graph_insight()  # noqa: SLF001
@@ -718,7 +718,7 @@ def test_dream_run_refreshes_digest_with_no_backlog(bench_pg, tmp_path):
     # A dream with no memory backlog must still recompute the graph digest, so
     # manual graph edits (cleanup / direct graph_relate) are reflected promptly.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     from pseudolife_memory.memory.dream import NoOpExtractor
     svc = build_service(tmp_path)
     _seed_two_communities(svc)            # graph edges only — no stored memories
@@ -730,7 +730,7 @@ def test_dream_run_refreshes_digest_with_no_backlog(bench_pg, tmp_path):
 
 def test_dream_writes_fact_traces(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     from pseudolife_memory.memory.dream import RegexExtractor
     svc = build_service(tmp_path)
     # A memory whose text the regex floor extracts a fact from (lexicon-gated
@@ -752,7 +752,7 @@ def test_dream_writes_fact_traces(bench_pg, tmp_path):
 
 def test_memory_get_and_reinforce_roundtrip(bench_pg, tmp_path, monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     from pseudolife_memory.memory.dream import RegexExtractor
     import pseudolife_memory.mcp_server as srv
     svc = build_service(tmp_path)
@@ -781,7 +781,7 @@ def test_memory_get_and_reinforce_roundtrip(bench_pg, tmp_path, monkeypatch):
 
 def test_reinforcements_loads_into_entry(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     from pseudolife_memory.storage.sync import row_to_entry
     svc = build_service(tmp_path)
     svc.store("retain-me runtime: jdk-21", source="general")
@@ -795,7 +795,7 @@ def test_reinforcements_loads_into_entry(bench_pg, tmp_path):
 
 def test_memory_get_surfaces_reinforcements(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     svc.store("retainshow runtime: jdk-21", source="general")
     st = svc._storage  # noqa: SLF001
@@ -808,7 +808,7 @@ def test_memory_get_surfaces_reinforcements(bench_pg, tmp_path):
 
 def test_memory_get_syncs_access_count_no_clobber(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     svc.store("accesssync runtime: jdk-21", source="general")
     st = svc._storage  # noqa: SLF001
@@ -833,7 +833,7 @@ def test_memory_get_syncs_access_count_no_clobber(bench_pg, tmp_path):
 
 def test_reinforce_syncs_in_memory(bench_pg, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     svc.store("sync-me runtime: jdk-21", source="general")
     st = svc._storage  # noqa: SLF001
@@ -875,7 +875,7 @@ def recall_cap_service(tmp_path_factory):
     if not _pg_up():
         pytest.skip("bench Postgres not reachable")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path_factory.mktemp("recall-caps"))
     base_query = "what does root-svc connect to"
     _seed_recall_cap_fixture(svc, base_query)
@@ -1194,7 +1194,7 @@ def test_service_recall_passes_the_caps_through(bench_pg, tmp_path, monkeypatch)
     """The knobs are useless if ``service.recall`` doesn't hand them to the
     walk — the seam every other recall config item is wired through."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     svc = build_service(tmp_path)
     svc.config.memory.recall.max_searches_per_hop = 2
     svc.config.memory.recall.max_total_searches = 7

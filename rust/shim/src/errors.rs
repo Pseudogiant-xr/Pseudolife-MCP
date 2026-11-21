@@ -1,6 +1,31 @@
 use crate::raw_http::Observation;
 use rmcp::{ErrorData, model::ErrorCode, service::ServiceError};
 
+/// Find the I/O cause nested inside an HTTP client error.
+pub(crate) fn io_error_kind(
+    mut error: &(dyn std::error::Error + 'static),
+) -> Option<std::io::ErrorKind> {
+    let mut fallback = None;
+    loop {
+        if let Some(io) = error.downcast_ref::<std::io::Error>() {
+            let kind = io.kind();
+            if kind != std::io::ErrorKind::Other {
+                return Some(kind);
+            }
+            fallback = Some(kind);
+            // TLS adapters may wrap a specific I/O error in Error::other.
+            if let Some(inner) = io.get_ref() {
+                error = inner;
+                continue;
+            }
+        }
+        let Some(source) = error.source() else {
+            return fallback;
+        };
+        error = source;
+    }
+}
+
 fn nested_io_failure(error: Option<&ServiceError>) -> Option<&'static str> {
     let Some(ServiceError::TransportSend(error)) = error else {
         return None;

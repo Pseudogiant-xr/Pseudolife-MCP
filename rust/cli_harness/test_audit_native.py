@@ -2,17 +2,22 @@
 from __future__ import annotations
 
 import atexit
+import base64
+from contextlib import contextmanager
 import hashlib
 from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from . import normalize
 from .rows import _bank
+from rust.harness_support.database_guard import ProductionDatabaseError
 from rust.harness_support.import_blocker import cold_harness_imports
 
 
@@ -255,25 +260,192 @@ def test_audit_verifier_rejects_invalid_prune_record(audit_rules, actor, days, t
     }
 
 
-def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
-    # Load the row afresh even when test_audit_stats already imported it.
+@contextmanager
+def _cold_audit(monkeypatch):
+    # Load the row afresh even when another test already imported it.
     path = Path(__file__).with_name("rows") / "audit.py"
     spec = spec_from_file_location(f"{__package__}.rows._audit_probe", path)
     isolated = module_from_spec(spec)
-    monkeypatch.setattr(normalize, "RULES", normalize.RULES.copy())
+    with monkeypatch.context() as patch, cold_harness_imports():
+        patch.setattr(normalize, "RULES", normalize.RULES.copy())
+        patch.setattr(_bank.NAMES, "labels", _bank.NAMES.labels.copy())
+        try:
+            spec.loader.exec_module(isolated)
+            yield isolated
+        finally:
+            if cleanup := getattr(isolated, "_drop_all", None):
+                atexit.unregister(cleanup)
+
+
+def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     raw = event()
     raw["payload"] = json.loads(raw["payload"])
-    with cold_harness_imports():
-        spec.loader.exec_module(isolated)
-        try:
-            monkeypatch.setattr(isolated, "export_rows", lambda _: [raw])
-            edited = json.loads(isolated.archive("reserved-number-key-single"))
-        finally:
-            atexit.unregister(isolated._drop_all)
+    with _cold_audit(monkeypatch) as isolated:
+        monkeypatch.setattr(isolated, "export_rows", lambda _: [raw])
+        edited = json.loads(isolated.archive("reserved-number-key-single"))
 
     expected = event(payload='{"safe":"雪","$serde_json::private::Number":"1"}')
     assert edited["payload"] == json.loads(expected["payload"])
     assert edited["hash"] == expected["hash"]
+
+
+def test_audit_export_preserves_field_order_and_legacy_payload():
+    from .rows import audit
+
+    with cold_harness_imports():
+        line = audit._export_line((
+            7, "send", "agent", "alice", "a", "b", "p", "t", "m",
+            r'{"odd":NaN,"text":"\ud800"}', 1500.0, "", "prev", "hash", None, None,
+        ))
+    assert line == (
+        b'{"seq":7,"event":"send","actor":"agent","principal":"alice","agent_id":"a",'
+        b'"recipient_agent_id":"b","project":"p","task":"t","message_id":"m",'
+        b'"payload":{"odd":NaN,"text":"\\ud800"},"created_at":1500.0,"hlc":"",'
+        b'"prev_hash":"prev","hash":"hash","body":null,"body_salt":null}\n'
+    )
+
+
+@pytest.mark.parametrize(("platform", "digest"), [
+    ("linux", "5b9189e673014d9a990c13aedb153357ab16f7395e806cb65a1cdc369ea240a2"),
+    ("windows", "f26d56b53d52eef92094496e9a1e26501823492307445680656c6db2b459ce1c"),
+])
+def test_audit_file_references_are_frozen_and_registered(monkeypatch, platform, digest):
+    from .rows import audit
+
+    # Frozen Python file observations at f1faebaa7, captured on each
+    # platform. Normalize checkout line endings before hashing the file.
+    fixture = Path(audit.__file__).with_name(f"audit.file.{platform}.json")
+    raw = fixture.read_text(encoding="utf-8")
+    assert hashlib.sha256(raw.encode("utf-8")).hexdigest() == digest, (
+        "audit file references differ from the frozen capture")
+
+    monkeypatch.setattr(audit.core, "PLATFORM", platform)
+    monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+    hooked = {case.id for case in audit.cases() if platform in case.platforms
+              and getattr(case.reference, "func", None) is audit._file_reference}
+    assert hooked == set(json.loads(raw))
+
+
+def test_audit_file_reference_resolves_the_supplied_archive_head(tmp_path):
+    from .rows import audit
+
+    digest = "d" * 64
+    archive = json.dumps({"hash": digest, "created_at": 17.25}).encode() + b"\r\n\r\n"
+    case = audit.file_case("reference-control", ["verify", "--input", "{HOME}/archive.jsonl"],
+                           files={"archive.jsonl": archive})
+    recorded = [0, '{"head_hash": "<archive-head-hash>", "head_created_at": <archive-head-created-at>}\n', ""]
+    want = audit._file_reference(case, recorded, tmp_path / "case")
+    assert audit.core.decode(want, "stdout") == (
+        '{"head_hash": "' + digest + '", "head_created_at": 17.25}\n').encode()
+    assert base64.b64decode(want["files"]["archive.jsonl"][5:]) == archive
+    assert want["modes"] == audit.core.modes(tmp_path / "case")
+
+
+def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):
+    from .rows import audit
+
+    with cold_harness_imports():
+        fixture = json.loads(audit._FIXTURE.read_text(encoding="utf-8"))
+        variant = fixture["variants"]["rich"]
+        rows = variant["rows"]
+        events = rows["coordination_events"]
+        events.sort(key=lambda row: row["seq"])
+        anchor = fixture["clock_anchor"]
+        fixed = [dict(row) for row in events if row["created_at"] < anchor]
+        now = anchor + 123.125
+        monkeypatch.setattr(audit, "time", SimpleNamespace(time=lambda: now))
+        audit._shift_rich_clock(rows, anchor)
+        assert events[:len(fixed)] == fixed
+        assert audit.verify_audit_chain(events)["ok"]
+        message_id = variant["ids"]["future"]
+        [message] = [row for row in rows["coordination_messages"] if row["message_id"] == message_id]
+        [send] = [row for row in events if row["message_id"] == message_id]
+        assert message["created_at"] == send["created_at"] == now
+        assert message["expires_at"] == json.loads(send["payload"])["expires_at"] == now + audit.DAY
+
+
+def test_audit_fixture_checks_the_database_before_inserts(monkeypatch):
+    from .rows import audit
+
+    name = audit._name("fixture_guard")
+    other = audit._name("other_guard")
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = (other,)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    with pytest.raises(ValueError, match="audit fixture connection did not reach"):
+        audit._seed_captured(conn, name, "legacy")
+    conn.execute.assert_called_once_with("SELECT current_database()")
+
+
+@pytest.mark.parametrize("kind", ["rich", "stats", "empty", "nolog", "tampered", "prev49", "prev46"])
+def test_audit_ensure_refuses_before_database_setup(monkeypatch, kind):
+    from .rows import audit
+    from rust.harness_support import fixture_rows
+
+    name = audit._name(kind)
+    monkeypatch.setenv("_PSEUDOLIFE_PRODUCTION_DB", name)
+    monkeypatch.setattr(audit, "_BASELINE", {})
+    monkeypatch.setattr(audit, "_CREATED", set())
+    actions = (
+        (_bank, "create"), (_bank, "connect"), (_bank, "drop"),
+        (_bank, "_admin"), (_bank, "dump"), (fixture_rows, "checked_fixture_insert"),
+    )
+    stubs = []
+    for module, action in actions:
+        stub = MagicMock(side_effect=AssertionError(f"database action {action} ran before the audit guard"))
+        monkeypatch.setattr(module, action, stub)
+        stubs.append(stub)
+
+    with pytest.raises(ProductionDatabaseError, match="it is a production bank"):
+        audit.ensure(kind)
+    for stub in stubs:
+        stub.assert_not_called()
+    assert audit._CREATED == set()
+    assert audit._BASELINE == {}
+
+
+def test_audit_captured_seed_runs_without_the_frozen_package(monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    conn = MagicMock()
+    cursor = conn.execute.return_value
+
+    with _cold_audit(monkeypatch) as audit:
+        name = audit._name("payload")
+        cursor.fetchone.return_value = (name,)
+        cursor.__enter__.return_value.description = [
+            SimpleNamespace(name=column) for column in audit._EXPORT_FIELDS + audit._BODY_FIELDS
+        ]
+        ids = audit._seed_captured(conn, name, "payload")
+
+    assert ids == {"legacy": "ef12ab34cd5600000000000000000001"}
+    insert, (payload,) = conn.execute.call_args.args
+    assert insert.as_string().startswith('INSERT INTO "public"."coordination_events" ')
+    assert [row["event"] for row in payload.obj] == ["register", "send", "register"]
+    assert payload.obj[1]["message_id"] == ids["legacy"]
+
+
+@pytest.mark.parametrize("target_type,error,message", [
+    ("unowned", ValueError, "not owned by this harness run"),
+    ("non_audit", ValueError, "expected a disposable audit database"),
+    ("production", ProductionDatabaseError, "it is a production bank"),
+])
+def test_audit_copy_checks_the_target_before_opening_a_connection(
+        monkeypatch, target_type, error, message):
+    from .rows import audit
+
+    target = {
+        "unowned": "pl_cf_w1c_audit_from_another_run",
+        "non_audit": _bank.name("pl_cf_w1c_non_audit"),
+        "production": audit._name("protected"),
+    }[target_type]
+    monkeypatch.setenv("_PSEUDOLIFE_PRODUCTION_DB", audit._name("protected"))
+    connect = MagicMock()
+    monkeypatch.setattr(_bank, "connect", connect)
+    with pytest.raises(error, match=message):
+        audit._copy(audit._name("legacy"), target)
+    connect.assert_not_called()
 
 
 def assert_refused(result, parameter):
