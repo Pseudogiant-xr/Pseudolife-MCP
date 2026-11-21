@@ -53,11 +53,12 @@ def test_installers_wire_codex_via_shim_by_default() -> None:
     native client cannot be installed."""
     ps = _read("ops/install-native.ps1")
     sh = _read("ops/install-native.sh")
-    for text in (ps, sh):
-        assert any("codex mcp add pseudolife-memory" in line
-                   and "PSEUDOLIFE_MCP_NO_SPAWN=1" in line
-                   for line in text.splitlines())
-        assert "codex mcp add pseudolife-memory --url" in text
+    for text, stdio, http in (
+        (ps, "codex mcp add pseudolife-memory", "codex mcp add pseudolife-memory --url"),
+        (sh, "register_client codex shim-env pseudolife-memory", "register_client codex http pseudolife-memory --url"),
+    ):
+        assert any(stdio in line and "PSEUDOLIFE_MCP_NO_SPAWN=1" in line for line in text.splitlines())
+        assert http in text
 
 
 def test_hook_installers_wire_user_prompt_submit_for_both_clients() -> None:
@@ -158,8 +159,8 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
     assert "Set-CodexRuntimeDefaults" not in ps.split(
         '$existingCodex = codex mcp get pseudolife-memory', 1)[1].split(
             '} elseif (($Transport -eq "shim")', 1)[0]
-    assert "MCP_CODEX=failed" in sh
-    assert '$mcpState["codex"] = "failed"' in ps
+    assert 'CODEX_RUNTIME_DEFAULTS=failed' in sh
+    assert '$script:codexRuntimeDefaults = "failed"' in ps
 
 
 def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:

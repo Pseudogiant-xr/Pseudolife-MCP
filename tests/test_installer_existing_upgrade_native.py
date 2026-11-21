@@ -16,6 +16,7 @@ import pytest
 
 from tests import installer_sandbox
 from tests import native_client_stub as native_stub
+from tests.test_client_install_ux import _marker_block
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -160,8 +161,8 @@ def _run_bash_existing(
     move (native_client_stub)."""
     install = (ROOT / "ops" / "install-native.sh").read_text(encoding="utf-8")
     helper = _between("ops/install-native.sh", "resolve_installed_shim() {", "\n}\n\n# Two env pairs") + "\n}"
-    loop_start = 'for selected_client in $CLIENTS; do\n    if [ "$selected_client" = claude-desktop ]; then'
-    loop = _between("ops/install-native.sh", loop_start, "\ndone\n\n# ── 12. health") + "\ndone"
+    loop = "\n".join("\n".join(_marker_block(install, section)) for section in (
+        "client registration state", "client registration helpers", "client registrations"))
     describe = _between("ops/install-native.sh", "describe_mcp() {", "\n}\ndescribe_instr()") + "\n}"
     marker = _between("ops/install-native.sh", "mcp_marker() {", "\n}\ndescribe_mcp()") + "\n}"
     fake_bin = tmp_path / "bin"
@@ -443,8 +444,10 @@ def _run_powershell_existing(
     helper = _between(
         "ops/install-native.ps1", "function Resolve-InstalledShimPath", "\n}\n\n# Two env pairs"
     ) + "\n}"
-    loop_start = 'foreach ($selectedClient in $clients) {\n    if ($selectedClient -eq "claude-desktop") {'
-    loop = _between("ops/install-native.ps1", loop_start, "\n}\n\n# -- 12. health") + "\n}"
+    install = (ROOT / "ops" / "install-native.ps1").read_text(encoding="utf-8")
+    loop = "\n".join("\n".join(_marker_block(install, section)) for section in (
+        "client registration state", "client registration helpers", "client registrations"))
+    register = _between("ops/install-native.ps1", "function Register-Result(", "\n}\nfunction Set-CodexRuntimeDefaults") + "\n}"
     describe = _between("ops/install-native.ps1", "function Describe-Mcp($state) {", "\n}\nfunction Get-McpMarker") + "\n}"
     marker = _between("ops/install-native.ps1", "function Get-McpMarker($state) {", "\n}\nfunction Describe-Instr") + "\n}"
     log = tmp_path / "calls.txt"
@@ -513,6 +516,7 @@ $env:PSEUDOLIFE_SHIM_LAUNCHER = '{escaped_installed_shim}'
 {native_stub.POWERSHELL}
 {describe}
 {marker}
+{register}
 {loop}
 $state = $mcpState['{client}']
 Write-Output "STATE=$state"

@@ -2322,6 +2322,7 @@ function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
 # refuses a daemon URL its configured server does not name. The dry run sends
 # no token and writes nothing; when it finds no registration (exit 3),
 # connect is not run again. A failed connect stops the install.
+# >>> client registration state >>>
 $script:connectedClients = @()
 $script:connectCheckedClients = @()
 $script:clientSetupFailures = @{}
@@ -2333,6 +2334,7 @@ function Write-ClientSetupFailure([string]$Provider, [string]$Reason) {
     Set-ClientSetupFailure $Provider $Reason
     Write-Warning $Reason
 }
+# <<< client registration state <<<
 function Test-ConnectReport($report) {
     # connect's report, or nothing to trust: a JSON object with rows and exit.
     return ($report -is [pscustomobject]) -and
@@ -2360,10 +2362,10 @@ function Write-ConnectPlan($report, [switch]$ManualOnly) {
         if ($row.detail) { Write-Host "             $($row.detail)" }
     }
 }
-function Connect-ExistingRegistration([string]$Provider, [string]$Name) {
+function Connect-ExistingRegistration([string[]]$Provider, [string]$Name, [switch]$Grouped) {
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): the pseudolife-mcp shim is unavailable (see above). One that names another daemon stays as it is."
-        return
+        return $true
     }
     $shim = $script:shimInstallPath
     $PSNativeCommandUseErrorActionPreference = $false
@@ -2373,7 +2375,7 @@ function Connect-ExistingRegistration([string]$Provider, [string]$Name) {
         $planExit = $LASTEXITCODE
     } catch {
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): $shim could not be run ($($_.Exception.Message)). One that names another daemon stays as it is."
-        return
+        return $true
     }
     $report = try { (@($planOutput) -join "`n") | ConvertFrom-Json } catch { $null }
     # Only connect's own report is trusted. Anything else (a shim from before
@@ -2383,7 +2385,7 @@ function Connect-ExistingRegistration([string]$Provider, [string]$Name) {
         $why = "$shim did not answer with connect's plan (exit $planExit; a shim from before connect has none)"
         if ($script:shimUpgradeHeld) { $why += ". It is the shim left in place: $($script:shimUpgradeHeld)" }
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): $why. One that names another daemon stays as it is."
-        return
+        return $true
     }
     $script:connectCheckedClients += $Provider
     if ($planExit -eq 3) {
@@ -2392,13 +2394,14 @@ function Connect-ExistingRegistration([string]$Provider, [string]$Name) {
             Write-Warning "pseudolife-mcp connect found entries it does not rewrite; change them by hand:"
             Write-ConnectPlan $report -ManualOnly
         }
-        return
+        return $true
     }
     if ($planExit -ne 0) {
+        if ($Grouped) { return $false }
         # Under --json the reason is only in the report.
         $reason = if ($report.PSObject.Properties.Name -contains "error" -and $report.error) { ": $($report.error)" } else { "" }
-        Write-ClientSetupFailure $Provider "pseudolife-mcp connect could not check the existing registration (exit $planExit$reason). Fix the reported problem and rerun the installer."
-        return
+        Write-ClientSetupFailure $Provider[0] "pseudolife-mcp connect could not check the existing registration (exit $planExit$reason). Fix the reported problem and rerun the installer."
+        return $false
     }
     Step "Existing registrations: pseudolife-mcp connect points them at $($DaemonUrl):"
     Write-ConnectPlan $report
@@ -2412,6 +2415,7 @@ function Connect-ExistingRegistration([string]$Provider, [string]$Name) {
     }
     $applyOutput | Out-Host
     if ($applyExit -ne 0) {
+        if ($Grouped) { return $false }
         $meaning = switch ($applyExit) {
             1 { "a write failed, and every file it wrote was rolled back" }
             4 { "verification failed, and nothing was written (see its reason above)" }
@@ -2420,21 +2424,25 @@ function Connect-ExistingRegistration([string]$Provider, [string]$Name) {
         }
         $reported = $applyOutput | ForEach-Object { "$_" } | Where-Object { $_.StartsWith("connect: ") } | Select-Object -Last 1
         if ($reported) { $meaning = $reported.Substring("connect: ".Length) }
-        Write-ClientSetupFailure $Provider "pseudolife-mcp connect exited ${applyExit}: $meaning. Fix the reported problem and rerun the installer."
-        return
+        Write-ClientSetupFailure $Provider[0] "pseudolife-mcp connect exited ${applyExit}: $meaning. Fix the reported problem and rerun the installer."
+        return $false
     }
     $script:connectedClients += @(Get-ConnectRows $report |
         Where-Object { ($_.place -eq "registration") -and ($_.state -in "current", "change") } |
         ForEach-Object { [string]$_.client })
+    return $true
 }
 function Invoke-ClientOnlyConnect {
-    # A failed existing registration must leave the other clients eligible.
-    foreach ($provider in $clients) {
-        if ($provider -in "claude", "codex", "gemini" -and -not (Get-Command $provider -ErrorAction SilentlyContinue)) { continue }
-        switch ($provider) {
-            "claude" { Connect-ExistingRegistration $provider "claude-code" }
-            { $_ -in "claude-desktop", "codex", "gemini" } { Connect-ExistingRegistration $provider $provider }
-        }
+    $providers = @($clients | Where-Object {
+        $_ -eq "claude-desktop" -or ($_ -in "claude", "codex", "gemini" -and (Get-Command $_ -ErrorAction SilentlyContinue))
+    })
+    $names = @($providers | ForEach-Object { if ($_ -eq "claude") { "claude-code" } else { $_ } })
+    if ($providers.Count -gt 1) {
+        if (Connect-ExistingRegistration $providers ($names -join ",") -Grouped) { return }
+        Step "Checking existing registrations individually after the grouped connection failed."
+    }
+    for ($index = 0; $index -lt $providers.Count; $index++) {
+        $null = Connect-ExistingRegistration $providers[$index] $names[$index]
     }
 }
 # <<< client-only connect <<<
@@ -2881,8 +2889,13 @@ function Set-CodexRuntimeDefaults {
         Write-Warning "Codex was registered, but its runtime defaults were not confirmed. $script:codexRuntimeRecovery"
     }
 }
-function Write-ClientHttpRefusal([string]$Provider) {
-    Write-ClientSetupFailure $Provider "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with -Transport shim."
+# >>> client registration helpers >>>
+function Write-ClientHttpRefusal([string]$Provider, [switch]$Existing) {
+    if ($Existing) {
+        Write-ClientSetupFailure $Provider "The existing pseudolife-memory HTTP registration cannot carry the daemon's required bearer token. Edit that entry to use the pseudolife-mcp stdio shim and a token file, then rerun."
+    } else {
+        Write-ClientSetupFailure $Provider "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with -Transport shim."
+    }
 }
 function Test-ClientTransport([string]$Provider, [string]$State) {
     if ($tokenState -notin "minted", "present", "remote") { return $true }
@@ -2896,6 +2909,7 @@ function Test-ClientTransport([string]$Provider, [string]$State) {
     Write-ClientSetupFailure $Provider "The daemon requires a bearer token, and the client credential file could not be prepared. Repair its credential setup and rerun the installer."
     return $false
 }
+# <<< client registration helpers <<<
 # Board credentials for the Claude Code and Gemini shims: an owner-only token
 # file per client holding its principal's own PSEUDOLIFE_MCP_TOKENS entry,
 # else the singular token; the shim re-reads it per call. Claude Code also
@@ -2937,7 +2951,8 @@ $claudeTokenFile = if ($clients -notcontains "claude") { $null } elseif ($Client
 $geminiTokenFile = if ($clients -notcontains "gemini") { $null } elseif ($ClientOnly) { $TokenFile } else { Get-ClientTokenFile "gemini" }
 # A client-only install's settings.json hooks run the host shim, which needs
 # the file and the URL there as much as the plugin's hooks do.
-if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile) {
+if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile -and
+    -not $script:clientSetupFailures["claude"]) {
     $claudeSettingsHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
     $settingsArgs = @("credentials", "claude-settings-env",
         "--settings", (Join-Path $claudeSettingsHome "settings.json"),
@@ -2964,6 +2979,7 @@ if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile)
     }
 }
 # <<< client token files <<<
+# >>> client registrations >>>
 function Install-SelectedClient([string]$selectedClient) {
     $PSNativeCommandUseErrorActionPreference = $false
     if ($selectedClient -eq "claude-desktop") {
@@ -3121,7 +3137,7 @@ function Install-SelectedClient([string]$selectedClient) {
                 $mcpState["codex"] = "present"
             }
             if ($tokenState -in "minted", "present", "remote" -and ((Test-McpHttpRegistration $existingCodex) -or (Test-McpHttpRegistration $existingCodexGuard))) {
-                Write-ClientHttpRefusal "codex"
+                Write-ClientHttpRefusal "codex" -Existing
             }
             $script:codexRuntimeDefaults = "preserved"
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
@@ -3252,7 +3268,7 @@ function Install-SelectedClient([string]$selectedClient) {
                 $mcpState["gemini"] = "present"
             }
             if ($tokenState -in "minted", "present", "remote" -and (Test-McpHttpRegistration "$geminiRegistration")) {
-                Write-ClientHttpRefusal "gemini"
+                Write-ClientHttpRefusal "gemini" -Existing
             }
             # `gemini mcp list` shows no env, so the installer cannot tell
             # whether this registration carries a token; say how to add one,
@@ -3374,7 +3390,7 @@ function Install-SelectedClient([string]$selectedClient) {
                 $mcpState["claude"] = "present"
             }
             if ($tokenState -in "minted", "present", "remote" -and (Test-McpHttpRegistration $existingClaude)) {
-                Write-ClientHttpRefusal "claude"
+                Write-ClientHttpRefusal "claude" -Existing
             }
             # An install from before the board token: the upgraded shim reads
             # a token file, so add it, the daemon URL and the state directory
@@ -3467,6 +3483,7 @@ foreach ($selectedClient in $clients) {
     }
 }
 
+# <<< client registrations <<<
 # -- 12. health -----------------------------------------------------------------------
 # >>> claude profile scope >>>
 if ($mcpState["claude"] -and $mcpState["claude"] -notin "skipped", "failed") {
@@ -4075,31 +4092,35 @@ function Invoke-ClientUpdateScheduleOffer {
 # <<< client update schedule offer <<<
 if ($ClientOnly) { Invoke-ClientUpdateScheduleOffer }
 Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly) -PairingHintUrl "$script:pairingHintUrl" -Scheduled:($script:clientScheduleState -eq "scheduled")
+$tunnelExit = 0
 if ($Tunnel -and -not $interactive) {
     Write-Host "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
 } elseif ($Tunnel) {
     if (-not $script:shimInstallPath) {
-        throw "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup."
-    }
-    $tunnelOldUrl = $env:PSEUDOLIFE_MCP_DAEMON_URL
-    $tunnelOldFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
-    try {
-        if ($boardFile) {
-            $env:PSEUDOLIFE_MCP_DAEMON_URL = $script:ClientDaemonUrl
-            $env:PSEUDOLIFE_MCP_TOKEN_FILE = $boardFile
+        [Console]::Error.WriteLine("Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup.")
+        $tunnelExit = 1
+    } else {
+        $tunnelOldUrl = $env:PSEUDOLIFE_MCP_DAEMON_URL
+        $tunnelOldFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
+        try {
+            if ($boardFile) {
+                $env:PSEUDOLIFE_MCP_DAEMON_URL = $script:ClientDaemonUrl
+                $env:PSEUDOLIFE_MCP_TOKEN_FILE = $boardFile
+            }
+            & $script:shimInstallPath tunnel setup
+            $tunnelExit = $LASTEXITCODE
+        } catch {
+            [Console]::Error.WriteLine($_.Exception.Message)
+            $tunnelExit = 1
+        } finally {
+            $env:PSEUDOLIFE_MCP_DAEMON_URL = $tunnelOldUrl
+            $env:PSEUDOLIFE_MCP_TOKEN_FILE = $tunnelOldFile
         }
-        & $script:shimInstallPath tunnel setup
-        $tunnelExit = $LASTEXITCODE
-    } finally {
-        $env:PSEUDOLIFE_MCP_DAEMON_URL = $tunnelOldUrl
-        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $tunnelOldFile
     }
-    if ($tunnelExit -ne 0) { exit $tunnelExit }
 } else {
     Write-Host "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
 }
 Remove-NativeStage
-$script:nativeRunDone = $true
 # >>> client setup result >>>
 function Get-ClientSetupWarnings {
     if ($script:pluginClaude -in "failed", "no-cli") { "Claude Code plugin: $($script:pluginClaudeRecovery)" }
@@ -4141,9 +4162,12 @@ if ($clientWarnings.Count) {
     foreach ($warning in $clientWarnings) { [Console]::Error.WriteLine($warning) }
 }
 if ($failedRequests.Count) {
+    $script:nativeRunDone = $true
     foreach ($failure in $failedRequests) { [Console]::Error.WriteLine($failure) }
     exit 5
 }
+if ($tunnelExit) { exit $tunnelExit }
+$script:nativeRunDone = $true
 Write-Host "Done. First session: tell your coding agent to remember something."
 # <<< client setup result <<<
 } finally {

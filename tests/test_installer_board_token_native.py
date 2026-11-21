@@ -15,6 +15,7 @@ import pytest
 from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider
+from tests.test_client_install_ux import _marker_block
 from tests.test_installer_existing_upgrade import _bash_fixture_path, _bash_variants, _between
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -227,9 +228,9 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
         (fake_bin / name).chmod(0o755)
     helper = _between("ops/install-native.sh", "resolve_installed_shim() {",
                       "\n}\n\n# Two env pairs") + "\n}"
-    loop = _between("ops/install-native.sh",
-                    'for selected_client in $CLIENTS; do\n    if [ "$selected_client" = claude-desktop ]; then',
-                    "\ndone\n\n# ── 12. health") + "\ndone"
+    install = (ROOT / "ops/install-native.sh").read_text(encoding="utf-8")
+    loop = "\n".join("\n".join(_marker_block(install, section)) for section in (
+        "client registration state", "client registration helpers", "client registrations"))
     config = ("pseudolife-memory\n" + existing) if existing else ""
     body = f"""PATH='{shell.path(installed_bin)}:{shell.path(fake_bin)}:/usr/bin:/bin'
 export PATH CALL_LOG='{shell.path(call_log)}' FAKE_CONFIG='{_q(config)}'

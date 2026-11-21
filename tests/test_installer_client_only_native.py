@@ -968,7 +968,7 @@ CRED_READY = ('{"status":"ready","credential_file_configured":true,"connection_c
 def _codex_wiring(shell: _Shell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
-                  runtime_failed: bool = False):
+                  runtime_failed: bool = False, tunnel_exit: int = 0):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex calls."""
@@ -995,7 +995,8 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
               "if [ \"$*\" = 'mcp add --help' ]; then echo '  -e, --env'; fi\n"
               "exit 0\n")
         finish_fixture = ("\nprintf 'MCP_GEMINI=%s\\n' \"$MCP_GEMINI\"\n"
-                          "echo REMAINING_STEPS_FINISHED\n" + _block("client setup result"))
+                          f"echo REMAINING_STEPS_FINISHED\ntunnel_rc={tunnel_exit}\n"
+                          + _block("client setup result"))
     source = (ROOT / "ops" / "install-native.sh").read_text(encoding="utf-8")
     stages = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)"
                        r"^# [^\n]*12\. health", source)[1]
@@ -1071,6 +1072,13 @@ def test_successful_client_setup_and_rerun_exit_zero(bash, tmp_path, kwargs):
     assert "Done. First session" in proc.stdout
     if kwargs.get("runtime_failed"):
         assert "Warnings\nCodex runtime defaults were not confirmed." in proc.stderr
+
+
+@BASH
+def test_a_tunnel_failure_cannot_hide_incomplete_requested_clients(bash, tmp_path):
+    proc, _ = _codex_wiring(_Shell(bash, tmp_path), requested="codex gemini", add_exit=17, tunnel_exit=2)
+    assert proc.returncode == 5, proc.stdout + proc.stderr
+    assert proc.stderr.splitlines()[-1].startswith("Requested client setup incomplete (Codex).")
 
 
 @pytest.mark.parametrize("outcome,recovery", [
@@ -1261,8 +1269,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     assert "Waiting for the daemon" not in proc.stdout
     # A fresh machine: connect's dry run found nothing, so it was not run again.
     connects = [call for call in calls if call.startswith("shim|connect")]
-    assert [call.split("--client ", 1)[1] for call in connects] == [
-        "claude-code --dry-run --json", "gemini --dry-run --json"]
+    assert [call.split("--client ", 1)[1] for call in connects] == ["claude-code,gemini --dry-run --json"]
     assert "not checked" not in output
 
 
@@ -1374,3 +1381,6 @@ def test_client_only_connect_failure_keeps_the_native_client_and_reports_partial
     assert "Requested client setup incomplete (Claude Code)." in proc.stderr.splitlines()[-1]
     assert any(call.startswith("gemini|mcp add -s user") for call in shell.logged())
     assert (installed / "pseudolife-mcp").is_file()
+    settings = json.loads((shell.home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["env"]["PSEUDOLIFE_MCP_DAEMON_URL"] == "http://127.0.0.1:8765"
+    assert settings["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"] == "/fixture/local/claude-code.token"

@@ -577,16 +577,18 @@ def test_the_staging_folder_is_gone_when_the_installer_returns_to_an_open_sessio
     temp.mkdir()
     installer = repo / "ops" / "install.ps1"
     # A pairing code: the token file is made only after the daemon answers.
-    # The first run stops on a thrown error (no claude CLI on PATH); the
+    # The first run stops on a thrown error (a missing token file); the
     # second reaches the health check and exits 1 (port 9 answers nothing).
     # A throw is caught, so the check after it runs in the same session.
-    def run(client: str) -> str:
-        return (f"try {{ & '{installer}' -ClientOnly -DaemonUrl http://127.0.0.1:9 -PairingCode ABCD-EFGH-JKMN "
+    def run(client: str, credential: str) -> str:
+        return (f"try {{ & '{installer}' -ClientOnly -DaemonUrl http://127.0.0.1:9 {credential} "
                 f"-Client {client} -ClaudePlugin skip -Instructions skip -NoArt -ClientUpdateSchedule no }} "
                 "catch { Write-Host \"THREW: $_\" }")
     command = "; ".join([
-        run("claude"), "Write-Host \"FIRST=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
-        run("generic"), "Write-Host \"SECOND=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
+        run("claude", f"-TokenFile '{tmp_path / 'absent.token'}'"),
+        "Write-Host \"FIRST=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
+        run("generic", "-PairingCode ABCD-EFGH-JKMN"),
+        "Write-Host \"SECOND=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
         "Write-Host \"SUBSCRIBERS=$(@(Get-EventSubscriber).Count)\"",
     ])
     env = {key: value for key, value in os.environ.items() if not key.startswith("PSEUDOLIFE_")}

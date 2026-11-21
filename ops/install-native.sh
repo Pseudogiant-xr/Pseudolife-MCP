@@ -2397,10 +2397,11 @@ MCP_GEMINI=""
 # section 11: those create only what is still missing, and the Codex setup
 # refuses a daemon URL its configured server does not name. The dry run sends
 # no token and writes nothing; when it finds no registration (exit 3),
-# connect is not run again. Check providers individually so an incomplete
-# registration cannot prevent the other clients from being set up.
+# connect is not run again. Keep the grouped move on success, including
+# its all-client schedule step. Isolate the providers if that move fails.
 CONNECTED_CLIENTS=""
 CONNECT_CHECKED_CLIENTS=""
+# >>> client registration state >>>
 set_client_state() {
     case "$1" in
         claude) MCP_CLAUDE="$2" ;;
@@ -2434,13 +2435,14 @@ client_connect_checked() {
     case " ${CONNECT_CHECKED_CLIENTS:-} " in *" $1 "*) return 0 ;; esac
     return 1
 }
+# <<< client registration state <<<
 connect_report_lines() {  # $1 = valid|error|plan|manual|handled; connect's --json report on stdin
     # valid: status 0 for connect's report (a JSON object with rows and
     # exit); the others print its error, its changes or the handled clients.
     native_helper connect-report "$1"
 }
 connect_existing_registration() {
-    local provider="$1" connect_name="$2"
+    local provider="$1" connect_name="$2" grouped="${3:-}"
     ensure_shim
     if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
         echo "WARNING: existing registrations were not checked against $DAEMON_URL: the pseudolife-mcp shim is unavailable (see above). One that names another daemon stays as it is." >&2
@@ -2468,6 +2470,7 @@ connect_existing_registration() {
             fi
             return 0 ;;
         *)
+            [ -z "$grouped" ] || return 1
             # Under --json the reason is only in the report.
             connect_error=$(printf '%s' "$connect_report" | connect_report_lines error) || connect_error=""
             warn_client_failure "$provider" "pseudolife-mcp connect could not check the existing registration (exit $connect_rc${connect_error:+: $connect_error}). Fix the reported problem and rerun the installer."
@@ -2479,6 +2482,7 @@ connect_existing_registration() {
     connect_result=$("$SHIM_PATH" connect "$DAEMON_URL" --token-file "$TOKEN_FILE" --client "$connect_name" --yes </dev/null 2>&1) || connect_rc=$?
     [ -z "$connect_result" ] || printf '%s\n' "$connect_result"
     if [ "$connect_rc" -ne 0 ]; then
+        [ -z "$grouped" ] || return 1
         case "$connect_rc" in
             1) connect_meaning="a write failed, and every file it wrote was rolled back" ;;
             4) connect_meaning="verification failed, and nothing was written (see its reason above)" ;;
@@ -2493,16 +2497,30 @@ connect_existing_registration() {
     CONNECTED_CLIENTS="$CONNECTED_CLIENTS $connect_handled"
 }
 connect_existing_registrations() {
-    local provider
+    local provider name providers="" names=""
     for provider in $CLIENTS; do
         case "$provider" in
             claude|codex|gemini)
                 command -v "$provider" >/dev/null 2>&1 || continue ;;
         esac
         case "$provider" in
-            claude) connect_existing_registration claude claude-code ;;
-            claude-desktop|codex|gemini) connect_existing_registration "$provider" "$provider" ;;
+            claude) name=claude-code ;;
+            claude-desktop|codex|gemini) name="$provider" ;;
+            *) continue ;;
         esac
+        providers="${providers:+$providers }$provider"
+        names="${names:+$names,}$name"
+    done
+    case "$names" in
+        "") return 0 ;;
+        *,*)
+            if connect_existing_registration "$providers" "$names" grouped; then return 0; fi
+            step "Checking existing registrations individually after the grouped connection failed." ;;
+    esac
+    for provider in $providers; do
+        name="$provider"
+        [ "$provider" != claude ] || name=claude-code
+        connect_existing_registration "$provider" "$name"
     done
 }
 # <<< client-only connect <<<
@@ -2915,12 +2933,17 @@ configure_codex_runtime_defaults() {
     fi
     return 0
 }
+# >>> client registration helpers >>>
 client_requires_bearer() {
     case "${TOKEN_STATE:-}" in minted|present|remote) return 0 ;; esac
     return 1
 }
 client_http_refusal() {
-    warn_client_failure "$1" "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with --transport shim."
+    if [ "${2:-}" = existing ]; then
+        warn_client_failure "$1" "The existing pseudolife-memory HTTP registration cannot carry the daemon's required bearer token. Edit that entry to use the pseudolife-mcp stdio shim and a token file, then rerun."
+    else
+        warn_client_failure "$1" "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with --transport shim."
+    fi
 }
 register_client() {
     local provider="$1" state="$2" result credential_file
@@ -2944,6 +2967,7 @@ register_client() {
         warn_client_failure "$provider" "MCP registration failed (exit $result). Fix the CLI error above and rerun the installer."
     fi
 }
+# <<< client registration helpers <<<
 # Board credentials for the Claude Code and Gemini shims: an owner-only token
 # file per client holding its principal's own PSEUDOLIFE_MCP_TOKENS entry,
 # else the singular token; the shim re-reads it per call. Claude Code also
@@ -2982,7 +3006,8 @@ else
 fi
 # A client-only install's settings.json hooks run the host shim, which needs
 # the file and the URL there as much as the plugin's hooks do.
-if { [ "${HOOK_CLAUDE:-}" = plugin ] || [ -n "${CLIENT_ONLY:-}" ]; } && [ -n "$CLAUDE_TOKEN_FILE" ]; then
+if { [ "${HOOK_CLAUDE:-}" = plugin ] || [ -n "${CLIENT_ONLY:-}" ]; } && [ -n "$CLAUDE_TOKEN_FILE" ] &&
+        [ -z "${CLAUDE_CLIENT_FAILURE:-}" ]; then
     settings_args=(credentials claude-settings-env
         --settings "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
         --token-file "$CLAUDE_TOKEN_FILE" --daemon-url "$CLIENT_DAEMON_URL")
@@ -3005,6 +3030,7 @@ if { [ "${HOOK_CLAUDE:-}" = plugin ] || [ -n "${CLIENT_ONLY:-}" ]; } && [ -n "$C
     esac
 fi
 # <<< client token files <<<
+# >>> client registrations >>>
 for selected_client in $CLIENTS; do
     [ -z "$(client_setup_failure "$selected_client")" ] || continue
     case "$selected_client" in claude|codex|gemini)
@@ -3179,7 +3205,7 @@ for selected_client in $CLIENTS; do
                 MCP_CODEX=present
             fi
             if client_requires_bearer && { registration_is_http "$existing_codex_guard" || registration_is_http "$existing_codex"; }; then
-                client_http_refusal codex
+                client_http_refusal codex existing
             fi
             CODEX_RUNTIME_DEFAULTS=preserved
         elif [ "$TRANSPORT" = "shim" ]; then
@@ -3318,7 +3344,7 @@ for selected_client in $CLIENTS; do
                 step "MCP server already wired into Gemini CLI — registration preserved."
                 MCP_GEMINI=present
             fi
-            if client_requires_bearer && registration_is_http "$gemini_registration"; then client_http_refusal gemini; fi
+            if client_requires_bearer && registration_is_http "$gemini_registration"; then client_http_refusal gemini existing; fi
             # `gemini mcp list` shows no env, so the installer cannot tell
             # whether this registration carries a token; say how to add one,
             # unless pseudolife-mcp connect just wrote or confirmed it.
@@ -3453,7 +3479,7 @@ for selected_client in $CLIENTS; do
             step "MCP server already wired into Claude Code — registration preserved."
             MCP_CLAUDE=present
         fi
-        if client_requires_bearer && registration_is_http "$existing_claude"; then client_http_refusal claude; fi
+        if client_requires_bearer && registration_is_http "$existing_claude"; then client_http_refusal claude existing; fi
         # An install from before the board token: the upgraded shim reads a
         # token file, so add it, the daemon URL and the state directory to
         # the registration in place (never a remove and re-add), keeping any
@@ -3533,6 +3559,7 @@ for selected_client in $CLIENTS; do
     fi
 done
 
+# <<< client registrations <<<
 # ── 12. health ─────────────────────────────────────────────────────────────
 # >>> claude profile scope >>>
 case "${MCP_CLAUDE:-}" in
@@ -4210,17 +4237,17 @@ offer_client_update_schedule() {
 # <<< client update schedule offer <<<
 if [ -n "$CLIENT_ONLY" ]; then offer_client_update_schedule; fi
 print_update_line
+tunnel_rc=0
 if [ -n "$TUNNEL" ] && [ -n "${INSTALLER_UNATTENDED:-}" ]; then
     echo "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
 elif [ -n "$TUNNEL" ]; then
     if [ -z "${SHIM_PATH:-}" ]; then
         echo "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup." >&2
-        exit 2
-    fi
-    if [ -n "${board_file:-}" ]; then
-        PSEUDOLIFE_MCP_DAEMON_URL="$CLIENT_DAEMON_URL" PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" tunnel setup
+        tunnel_rc=2
+    elif [ -n "${board_file:-}" ]; then
+        PSEUDOLIFE_MCP_DAEMON_URL="$CLIENT_DAEMON_URL" PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" tunnel setup || tunnel_rc=$?
     else
-        "$SHIM_PATH" tunnel setup
+        "$SHIM_PATH" tunnel setup || tunnel_rc=$?
     fi
 else
     echo "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
@@ -4264,11 +4291,13 @@ finish_client_setup() {
     done
     if [ -n "$warnings" ]; then printf '\nWarnings\n%s\n' "$warnings" >&2; fi
     if [ -n "$failures" ]; then
+        NATIVE_RUN_DONE=1
         printf '%s\n' "$failures" >&2
         return 5
     fi
+    if [ "${tunnel_rc:-0}" -ne 0 ]; then return "$tunnel_rc"; fi
+    NATIVE_RUN_DONE=1
     echo "Done. First session: tell your coding agent to remember something."
 }
-NATIVE_RUN_DONE=1
 finish_client_setup
 # <<< client setup result <<<
