@@ -3398,7 +3398,7 @@ for selected_client in $CLIENTS; do
                 if [ "$gemini_credential" = missing ] && [ -z "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
                     warn_client_failure gemini "The daemon requires a bearer token, and the existing Gemini CLI stdio entry has no credential in its settings or this launch environment. Set PSEUDOLIFE_MCP_TOKEN_FILE in ~/.gemini/settings.json to a valid token file, then rerun."
                 elif [ -z "$gemini_credential" ] && [ -n "${GEMINI_TOKEN_FILE:-}" ]; then
-                    GEMINI_CREDENTIAL_WARNING="The daemon requires a bearer token. Verify the existing Gemini CLI registration, or edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE."
+                    GEMINI_CREDENTIAL_WARNING="The daemon requires a bearer token. Verify the existing Gemini CLI registration. Edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE if it has no credential."
                     printf 'WARNING: %s\n' "$GEMINI_CREDENTIAL_WARNING" >&2
                 fi
             fi

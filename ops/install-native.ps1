@@ -3327,7 +3327,7 @@ function Install-SelectedClient([string]$selectedClient) {
                 if ($geminiCredential -eq "missing" -and -not ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKEN_FILE)) {
                     Write-ClientSetupFailure "gemini" "The daemon requires a bearer token, and the existing Gemini CLI stdio entry has no credential in its settings or this launch environment. Set PSEUDOLIFE_MCP_TOKEN_FILE in ~/.gemini/settings.json to a valid token file, then rerun."
                 } elseif (-not $geminiCredential -and $geminiTokenFile) {
-                    $script:geminiCredentialWarning = "The daemon requires a bearer token. Verify the existing Gemini CLI registration, or edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$geminiTokenFile."
+                    $script:geminiCredentialWarning = "The daemon requires a bearer token. Verify the existing Gemini CLI registration. Edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$geminiTokenFile if it has no credential."
                     Write-Warning $script:geminiCredentialWarning
                 }
             }
