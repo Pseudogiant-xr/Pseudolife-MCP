@@ -415,16 +415,26 @@ fn setup_command(name: &str, directory: Option<&str>) -> String {
 fn tunnel_command(action: &str, name: &str, directory: Option<&str>) -> String {
     let mut command = format!("pseudolife-mcp tunnel {action} --profile {name}");
     if let Some(directory) = directory {
-        command.push_str(&format!(
-            " --profile-dir {}",
-            crate::cli::update::seams::quote(directory)
-        ));
+        command.push_str(&format!(" --profile-dir {}", quote_tunnel_arg(directory)));
     }
     command
 }
 
+fn quote_tunnel_arg(text: &str) -> String {
+    let quoted = crate::cli::update::seams::quote(text);
+    if cfg!(windows) {
+        // PowerShell treats each of these as a single quote delimiter.
+        quoted
+            .replace('‘', "‘‘")
+            .replace('’', "’’")
+            .replace('‚', "‚‚")
+            .replace('‛', "‛‛")
+    } else {
+        quoted
+    }
+}
+
 fn legacy_handoff(name: &str, record: &record::Record) -> String {
-    let quote = crate::cli::update::seams::quote;
     let directory = record.path.parent().and_then(Path::to_str);
     if let Some((console, directory)) = record
         .legacy_console
@@ -435,8 +445,8 @@ fn legacy_handoff(name: &str, record: &record::Record) -> String {
         let invoke = if cfg!(windows) { "& " } else { "" };
         return format!(
             "Stop it with `{invoke}{} tunnel stop --profile {name} --profile-dir {}`",
-            quote(console),
-            quote(directory)
+            quote_tunnel_arg(console),
+            quote_tunnel_arg(directory)
         );
     }
     let status = tunnel_command("status", name, directory);
@@ -1253,10 +1263,13 @@ mod tests {
 
     #[test]
     fn update_and_stop_name_the_retained_python_console() {
-        let store = Store::new();
+        let mut store = Store::new();
+        let directory = store.0.with_file_name("tunnel’s data");
+        std::fs::rename(&store.0, &directory).unwrap();
+        store.0 = directory;
         store.profile("dot", true);
         store.key("dot");
-        let venv = store.0.join("old runtime's venv");
+        let venv = store.0.join("old runtime’s venv");
         let console = venv.join(if cfg!(windows) {
             "Scripts/pseudolife-mcp.exe"
         } else {
@@ -1273,7 +1286,14 @@ mod tests {
         });
         store.put("dot.process.json", &serde_json::to_vec(&process).unwrap());
 
-        let quote = crate::cli::update::seams::quote;
+        let quote = |text| {
+            let quoted = crate::cli::update::seams::quote(text);
+            if cfg!(windows) {
+                quoted.replace('’', "’’")
+            } else {
+                quoted
+            }
+        };
         let invoke = if cfg!(windows) { "& " } else { "" };
         let console = store::checked_path(&console).unwrap();
         let expected = format!(
@@ -1291,6 +1311,21 @@ mod tests {
             if message.contains(&expected) && !message.contains("stop it with the client that started it"))
         );
         assert!(store.0.join("dot.process.json").is_file());
+    }
+
+    #[test]
+    fn stop_a_live_python_orphan_names_the_missing_profile() {
+        let store = Store::new();
+        store.record("dot", u64::from(std::process::id()), &own_exe());
+        let outcome = runtime::stop(&store.0, "dot");
+        let profile = store.0.join("dot.profile.json");
+        assert!(
+            matches!(outcome, Err(Fail::Detail(ref message))
+                if message.contains("Restore the saved tunnel profile")
+                    && message.contains(profile.to_str().unwrap())
+                    && !message.contains("tunnel run")),
+            "{outcome:?}"
+        );
     }
 
     #[test]

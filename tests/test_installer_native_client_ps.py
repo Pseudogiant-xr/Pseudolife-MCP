@@ -225,7 +225,7 @@ Write-Host "INSTALLED"
     assert "INSTALLED" not in result.stdout
     assert "runtime install refused: this machine stays on the Python client" in result.stderr
     assert "pseudolife-mcp tunnel run" in result.stderr
-    assert "cannot run a tunnel yet" not in result.stderr
+    assert ("cannot run " "a tunnel yet") not in result.stderr
     assert "the tunnel will no longer start on its own" in result.stderr
     # The verified download is kept for the rerun; nothing else changed.
     assert "Nothing else was changed: the download in" in result.stderr

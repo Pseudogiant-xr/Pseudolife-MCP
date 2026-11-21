@@ -3601,7 +3601,7 @@ def test_a_registered_tunnel_service_keeps_the_python_client_and_changes_nothing
         out = result.stdout + result.stderr
         assert "this machine stays on the Python client" in out, out
         assert "pseudolife-mcp tunnel run" in out, out
-        assert "cannot run a tunnel yet" not in out, out
+        assert ("cannot run " "a tunnel yet") not in out, out
         assert f"systemd user unit {unit}" in out, out
         assert "Nothing was changed" in out, out
         assert stages(json.loads(state_path.read_text())) == [], "no pull, backup or recreate"

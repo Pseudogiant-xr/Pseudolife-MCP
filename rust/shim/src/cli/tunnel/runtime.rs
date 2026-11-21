@@ -1095,7 +1095,7 @@ fn stop_marker(directory: &Path, id: Uuid) -> Result<bool, Fail> {
 }
 
 pub(super) fn stop(root: &Path, name: &str) -> Output {
-    store::profile_path(root, name)?;
+    let profile_path = store::profile_path(root, name)?;
     let record_path = record::path(root, name);
     let stopped = || Ok((format!("Tunnel {name} is stopped.\n"), 0));
     if !store::occupied(&record_path).map_err(|_| conflict(root, name))? {
@@ -1113,10 +1113,17 @@ pub(super) fn stop(root: &Path, name: &str) -> Output {
         if let Some(observed) =
             observed.filter(|seen| !seen.native && seen.liveness == record::Liveness::Running)
         {
-            Fail::Detail(format!(
-                "cannot prove native ownership of {}. {}",
-                record_path.display(),
+            let next = if store::exists(&profile_path) == Ok(false) {
+                format!(
+                    "Restore the saved tunnel profile at {} before stopping it",
+                    profile_path.display()
+                )
+            } else {
                 super::legacy_handoff(name, &observed)
+            };
+            Fail::Detail(format!(
+                "cannot prove native ownership of {}. {next}",
+                record_path.display()
             ))
         } else {
             failure

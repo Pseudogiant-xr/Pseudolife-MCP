@@ -58,15 +58,15 @@
 #   --agents-file <path>             standing-file target for generic agents
 #   --no-art                         plain output (no banner, no color)
 #   --no-token                       open-loopback install: mint no bearer
+#                                    token, so the agent board stays off
 #   --engine rust|python             the Docker daemon: rust pulls the release's
 #                                    published Rust image; a rerun keeps the
 #                                    engine installed (default for a new
 #                                    install: rust, or python without a bearer
 #                                    or a published image); naming the other engine
 #                                    switches it through pseudolife-mcp update
-#   --tunnel                         enter optional guided ChatGPT Secure MCP
-#                                    Tunnel setup after local installation
-#                                    token, so the agent board stays off
+#   --tunnel                         guided Secure MCP Tunnel setup needs the
+#                                    Python client
 #   --test-login                     also give the test suite its own Postgres
 #                                    login, which cannot open the bank
 #                                    (`pseudolife-mcp test-login create`): for
@@ -217,6 +217,14 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
 done
+if [ -n "$TUNNEL" ]; then
+    printf '%s\n' \
+        'The native client has no guided tunnel setup yet. Nothing was changed. Rerun without --tunnel.' \
+        'After install, prepare a native tunnel profile with pseudolife-mcp tunnel setup --daemon-url "<daemon-url>" --token-file "<owner-only token file>" --accept-access.' \
+        'Save its ID with pseudolife-mcp tunnel setup --tunnel-id "<tunnel-id>", import the key with pseudolife-mcp tunnel setup --read-key, then run pseudolife-mcp tunnel run in a terminal you keep open. See docs/guide/tunnels.md.' \
+        'For guided setup, unset PSEUDOLIFE_SHIM_ENGINE and rerun bash ops/install.sh --tunnel with your other install options.' >&2
+    exit 1
+fi
 # >>> unattended mode >>>
 # A pty cannot tell a person from an agent. Agents explicitly opt out of
 # questions with --yes or PSEUDOLIFE_UNATTENDED=1; redirected stdin also does.
@@ -4118,19 +4126,5 @@ offer_client_update_schedule() {
 # <<< client update schedule offer <<<
 if [ -n "$CLIENT_ONLY" ]; then offer_client_update_schedule; fi
 print_update_line
-if [ -n "$TUNNEL" ] && [ -n "${INSTALLER_UNATTENDED:-}" ]; then
-    echo "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
-elif [ -n "$TUNNEL" ]; then
-    if [ -z "${SHIM_PATH:-}" ]; then
-        echo "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup." >&2
-        exit 2
-    fi
-    if [ -n "${board_file:-}" ]; then
-        PSEUDOLIFE_MCP_DAEMON_URL="$CLIENT_DAEMON_URL" PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" tunnel setup
-    else
-        "$SHIM_PATH" tunnel setup
-    fi
-else
-    echo "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
-fi
+echo "Optional ChatGPT access: follow the native tunnel profile steps in docs/guide/tunnels.md."
 echo "Done. First session: tell your coding agent to remember something."

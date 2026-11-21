@@ -151,6 +151,60 @@ def test_ps_native_hands_every_parameter_to_the_native_installer(tmp_path):
                                       "NoArt=True", "Yes=True"]
 
 
+@pytest.mark.parametrize("engine, tunnel", [
+    ("native", True), ("native", False), ("python", True),
+], ids=["native-with-tunnel", "native-without-tunnel", "python-with-tunnel"])
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_tunnel_switch_is_only_for_the_python_installer(tmp_path, engine, tunnel, shell):
+    # Exercise the actual routing and argument prologues, stopping the native
+    # installer at a stand-in for its first write. The Python tail gets a fake
+    # installed shim in place of a real guided setup.
+    program = BASH if shell == "bash" else PWSH
+    if program is None:
+        pytest.skip(f"needs {shell}")
+    suffix = ".sh" if shell == "bash" else ".ps1"
+    name = "install" + suffix
+    native_name = "install-native" + suffix
+    early = "# >>> extractor modes >>>"
+    python = (ROOT / "ops" / name).read_text(encoding="utf-8")
+    native = (ROOT / "ops" / native_name).read_text(encoding="utf-8").split(early, 1)[0]
+    if shell == "bash":
+        native += 'printf "%s\\n" "native install reached" >"$NATIVE_ARGS"\n'
+        tail = '\nif [ -n "$TUNNEL" ] && [ -n "${INSTALLER_UNATTENDED:-}" ]; then'
+        setup = ('\nINSTALLER_UNATTENDED=""\nSHIM_PATH=tunnel_fixture\n'
+                 'tunnel_fixture() { printf "%s\\n" "$*" >"$NATIVE_ARGS"; }\n')
+        switch = "--tunnel"
+    else:
+        native += "Set-Content -LiteralPath $env:NATIVE_ARGS -Value 'native install reached'\n"
+        tail = "\nif ($Tunnel -and -not $interactive) {"
+        setup = ("\n$interactive = $true\n$boardFile = $null\n$script:shimInstallPath = 'Invoke-TunnelFixture'\n"
+                 'function Invoke-TunnelFixture { Set-Content -LiteralPath $env:NATIVE_ARGS -Value ($args -join " "); $global:LASTEXITCODE = 0 }\n')
+        switch = "-Tunnel"
+    repo = _repo(tmp_path, name, native, native_name)
+    entry = repo / "ops" / name
+    entry.write_text(python.split(early, 1)[0] + setup + python[python.index(tail):], encoding="utf-8", newline="\n")
+    env = _env(tmp_path, engine)
+    command = ([program, _bash_path(entry)] if shell == "bash" else
+               [program, "-NoProfile", "-NonInteractive", "-File", str(entry)])
+    with user_path_unchanged(tmp_path):
+        proc = subprocess.run([*command, *([switch] if tunnel else [])], env=env,
+                              capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
+    output = proc.stdout + proc.stderr
+    if engine == "native" and tunnel:
+        assert proc.returncode == 1, output
+        assert _native_args(tmp_path) is None
+        assert not list((tmp_path / "home").iterdir())
+        assert "The native client has no guided tunnel setup yet" in output
+        assert "Nothing was changed" in output
+        assert f"Rerun without {switch}" in output
+        assert "pseudolife-mcp tunnel setup --daemon-url" in output
+        assert "--token-file" in output and "--accept-access" in output
+    else:
+        expected = "native install reached" if engine == "native" else "tunnel setup"
+        assert proc.returncode == 0, output
+        assert _native_args(tmp_path) == [expected]
+
+
 # A native command that fails along the way (a probe the native installer
 # expects to fail, such as schtasks /Query for a task that is not there)
 # leaves $LASTEXITCODE non-zero; how the native installer ends decides.

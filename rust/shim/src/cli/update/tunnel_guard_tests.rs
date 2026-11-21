@@ -307,7 +307,7 @@ fn a_registered_user_unit_refuses_the_move_and_changes_nothing() {
             "The native client can run it in the foreground with pseudolife-mcp tunnel run"
         ) && line.contains("has no automatic or background start")
             && line.contains("Removing autostart means the tunnel will no longer start on its own")
-            && !line.contains("cannot run a tunnel yet"),
+            && !line.contains(concat!("cannot run ", "a tunnel yet")),
         "{line}"
     );
     assert!(
@@ -327,7 +327,7 @@ fn a_registered_user_unit_refuses_the_move_and_changes_nothing() {
 #[test]
 fn a_disabled_unit_still_refuses_because_it_stays_registered() {
     // `systemctl --user disable` removes only the default.target.wants link;
-    // the unit render_service wrote stays, and enabling it again loops.
+    // the unit render_service wrote stays and can still be enabled.
     let f = Fixture::new();
     f.python_launcher();
     let unit = f.write(
@@ -465,7 +465,7 @@ fn a_unit_without_the_owner_marker_is_only_warned_about() {
 }
 
 #[test]
-fn an_already_native_machine_moves_on_and_says_how_to_stop_the_failing_service() {
+fn an_already_native_machine_moves_on_and_names_the_service_removal_command() {
     let f = Fixture::new();
     f.native_launcher();
     f.write(".pseudolife-mcp/tunnel/dot.json", "{}");
@@ -500,7 +500,8 @@ fn an_already_native_machine_moves_on_and_says_how_to_stop_the_failing_service()
         .join("user")
         .join("pseudolife-tunnel-dot.service");
     assert!(
-        lines[0].contains("now the native client, which cannot run a tunnel yet"),
+        lines[0].contains("can run a tunnel in the foreground and has no tunnel service command")
+            && !lines[0].contains(concat!("cannot run ", "a tunnel yet")),
         "{lines:?}"
     );
     assert!(
@@ -556,7 +557,8 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
         panic!()
     };
     assert!(
-        lines[0].contains("it fails at each logon")
+        lines[0].contains("can run a tunnel in the foreground and has no tunnel service command")
+            && !lines[0].contains("fails at each logon")
             && lines[0]
                 .contains("Remove it with: schtasks /Delete /TN \\pseudolife-tunnel-dot /F ;"),
         "{lines:?}"
@@ -1054,7 +1056,8 @@ fn a_service_made_by_hand_is_warned_about_never_refused() {
         "{lines:?}"
     );
     assert!(
-        lines[0].contains("once this machine runs the native client it fails at each start"),
+        lines[0].contains("can run a tunnel in the foreground and has no tunnel service command")
+            && !lines[0].contains("fails at each start"),
         "{lines:?}"
     );
     assert!(
@@ -1106,7 +1109,8 @@ fn a_service_made_by_hand_is_warned_about_never_refused() {
     };
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(
-        lines[0].contains("on this client it fails at each start"),
+        lines[0].contains("can run a tunnel in the foreground and has no tunnel service command")
+            && !lines[0].contains("fails at each start"),
         "{lines:?}"
     );
 }
@@ -1252,7 +1256,8 @@ fn an_already_native_machine_says_what_it_could_not_check() {
         "{notes:?}"
     );
     assert!(
-        notes[0].contains("fails at each start under the native client"),
+        notes[0].contains("can run a tunnel in the foreground and has no tunnel service command")
+            && !notes[0].contains("fails at each start"),
         "{notes:?}"
     );
 }
