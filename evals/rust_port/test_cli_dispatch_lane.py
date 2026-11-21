@@ -217,12 +217,18 @@ PINNED_USAGE_SHA256 = "5806d34185cdd94f2c83af42426d2954a6202abd10aba75d6dcfd9e53
 
 # The native help is Python's usage with two modes the native client refuses
 # (14 November 2026: serve is the separate pseudolife-daemon, embedded was
-# retired with file mode); Python is frozen, so only these lines differ.
+# retired with file mode) and move's target, an installed release (21
+# November 2026: native move refuses checkout targets); Python is frozen, so
+# only these lines differ.
 NATIVE_HELP_LINES = (
     (b"  serve          run the HTTP memory daemon (deployment mode)\n",
      b"  serve          refused: the daemon is pseudolife-daemon, in the Docker tier\n"),
     (b"  embedded       in-process stdio server \xe2\x80\x94 no daemon, no Postgres (escape hatch)\n",
      b"  embedded       refused: retired with file mode\n"),
+    (b"  move           move this host's Docker-tier bank to another Docker-tier\n"
+     b"                 checkout host over key-based ssh (`move --to <ssh-target>`):\n",
+     b"  move           move this host's Docker-tier bank to an installed release on\n"
+     b"                 another host over key-based ssh (`move --to <ssh-target>`):\n"),
 )
 
 
