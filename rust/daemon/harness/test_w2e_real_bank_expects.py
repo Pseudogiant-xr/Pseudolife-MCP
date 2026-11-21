@@ -77,6 +77,40 @@ def holds(conn, query) -> bool:
     return bool(row and row[0])
 
 
+def test_queue_seed_capture_is_pinned():
+    import hashlib
+
+    capture = (HERE / "w2e_queue_seed_rows.json").read_text(encoding="utf-8")
+    # The recipe independently captured all four seed shapes, including their
+    # sequence reservations. Pin the complete normalized file across platforms.
+    assert hashlib.sha256(capture.encode()).hexdigest() == (
+        "ab08f5b5e968a2ecfc23171a1c7900e30afd1634c5c4fbc42510936655d3f719"
+    )
+
+
+@pytest.mark.parametrize("conflict", [False, True])
+def test_queue_copied_seed_only_adopts_existing_entities(bank, conflict):
+    from w2e_queue_judges import seed_queue
+
+    conn, dsn = bank
+    (entity,) = conn.execute(
+        "INSERT INTO entities (canonical,display,created_at) VALUES ('alpha-node','Inherited Alpha',2) "
+        "RETURNING id"
+    ).fetchone()
+    if conflict:
+        conn.execute("INSERT INTO meta (key,value) VALUES ('dream_ack_secret_v1','false'::jsonb)")
+        with pytest.raises(ValueError, match=r"public\.meta fixture rows.*dream_ack_secret_v1"):
+            seed_queue(dsn, "judge", copied=True)
+        assert conn.execute("SELECT value FROM meta WHERE key='dream_ack_secret_v1'").fetchone() == (False,)
+        assert conn.execute("SELECT count(*) FROM entries").fetchone() == (0,)
+    else:
+        seed_queue(dsn, "judge", copied=True)
+        assert conn.execute("SELECT id,display FROM entities WHERE canonical='alpha-node'").fetchall() == [
+            (entity, "Inherited Alpha")
+        ]
+        assert holds(conn, f"SELECT EXISTS (SELECT 1 FROM edges WHERE src_id={entity} OR dst_id={entity})")
+
+
 def expects(harness, scenario):
     """Every expect of a scenario's operations, in order."""
     return [q for op in harness.SCENARIOS[scenario]["ops"] for q in op.get("expect", ())]

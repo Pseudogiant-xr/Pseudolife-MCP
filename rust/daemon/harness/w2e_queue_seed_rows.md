@@ -30,3 +30,20 @@ adds two lessons and raises the lessons sequence position from five to seven.
 Equivalence uses a fresh disposable bank for each capture and replay, pins
 the shared initializer to the same clock, and compares every captured table,
 sequence position and catalog section.
+
+`w2e_queue_contract.json` holds the corresponding step contracts. For
+each registered queue scenario, clone the checked seed into the two banks
+used by the frozen W2-E runner at `88787b0e2`. Use the harness's offline
+1,024-dimensional ONNX fixture in both daemons. Collect the Python arm's
+normalized rows, sequences, numeric values, answers and drained stub
+requests after each step. Require the old two-arm comparator to report
+zero differences. Copy only the frozen arm's observations into the
+contract. Deduplicate identical table bodies and numeric vectors without
+changing their content. Preserve request order and endpoint, include the
+body digest, and enumerate the verdict-table keys asked on that request.
+
+The live check uses the established clock and numeric normalization. The
+fixture supplies complete row sets and exact sequence positions. Other
+catalog properties are compared with the prepared bank. No generator
+runs during native verification, and the runner never records this data
+from the daemon under test.

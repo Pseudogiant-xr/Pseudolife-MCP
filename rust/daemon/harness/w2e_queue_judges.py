@@ -59,10 +59,12 @@ from pathlib import Path
 
 import psycopg
 from psycopg import sql
+from psycopg.types.json import Json
 
 from rust.harness_support.bank_fixture import initialize_bank, require_fixture_database
 from rust.harness_support.database_guard import dsn_database_name
 from rust.harness_support.fixture_rows import checked_fixture_insert
+from w2e_queue_contract import load_contract, request_diffs, request_shape, step_diffs, verdict_keys
 
 JUNK_ALL_JUDGED = ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals "
                    "WHERE kind = 'junk' AND status = 'pending' AND judge_verdict IS NULL)")
@@ -209,6 +211,7 @@ def seed_queue(dsn, shape, *, copied=False):
             ids[name] = dict(enumerate(
                 (i for (i,) in conn.execute("SELECT nextval(%s::regclass) FROM generate_series(1,%s)",
                                             (f"public.{name}_id_seq", count))), start=1))
+        adopted = set()
         if copied:
             # A cloned graph may already contain one of the fixture's named
             # entities. Attach new references to its identity in this bank.
@@ -216,12 +219,15 @@ def seed_queue(dsn, shape, *, copied=False):
                 previous = conn.execute("SELECT id FROM entities WHERE canonical=%s",
                                         (row["canonical"],)).fetchone()
                 if previous:
+                    adopted.add(row["id"])
                     ids["entities"][row["id"]] = previous[0]
 
         references = {"src_id": "entities", "dst_id": "entities", "entity_id": "entities",
                       "object_entity_id": "entities", "into_id": "entities",
                       "entry_id": "entries", "proposal_id": "entity_proposals"}
         for name, records in rows.items():
+            if name == "entities" and adopted:
+                records[:] = [row for row in records if row["id"] not in adopted]
             for row in records:
                 for column, source in references.items():
                     if row.get(column):
@@ -231,50 +237,27 @@ def seed_queue(dsn, shape, *, copied=False):
             statement, params = inserts[name]
             if copied:
                 statement += sql.SQL(" ON CONFLICT DO NOTHING")
-            conn.execute(statement, params)
-
-
-def answer_diffs(op, answer, dsn):
-    if not isinstance(answer, dict) or answer.get("isError") is not False:
-        return [f"{op['op']} did not succeed"]
-    value = answer.get("value")
-    if op["op"] == "snapshot_file":
-        entities = (value or {}).get("tables", {}).get("entities", {})
-        if not value or not all(value.get(key) for key in ("files", "name_shape", "ascii")):
-            return ["junk removal did not leave a valid graph snapshot"]
-        columns = entities.get("columns", [])
-        if "canonical" not in columns or not any(
-                row[columns.index("canonical")] == "alpha-node" for row in entities["rows"]):
-            return ["junk snapshot did not retain the deleted fixture entity"]
-    elif op.get("name") == "memory_dream":
-        if not isinstance(value, dict) or value.get("applied") is not True:
-            return ["deep dream did not report applying the candidate scan"]
-    elif op.get("name") == "memory_graph_review":
-        if not isinstance(value, dict) or not isinstance(value.get("findings"), list):
-            return ["graph review did not return its findings"]
-        out = []
-        if value.get("counts") != {"total": len(value["findings"])}:
-            out.append("graph review count differs from its findings")
-        with psycopg.connect(dsn, autocommit=True) as conn:
-            records = conn.execute(
-                "SELECT record.value FROM meta i CROSS JOIN LATERAL "
-                "jsonb_array_elements_text(i.value->'recent_ids') WITH ORDINALITY AS ids(id, position) "
-                "JOIN meta record ON record.key = 'automatic_review_decision_v1:' || ids.id "
-                "WHERE i.key = 'automatic_review_decisions_v1' AND i.value->>'version' = '1' "
-                "AND record.value <> '{}'::jsonb "
-                "ORDER BY ids.position DESC LIMIT 20"
-            ).fetchall()
-        fields = ("queue", "action", "state", "proposal_id", "pair", "recorded_at", "ended_at", "end_reason")
-        if value.get("automatic_decisions") != [{key: record.get(key) for key in fields}
-                                                  for (record,) in records]:
-            out.append("graph review automatic decisions differ from the durable decision index")
-        return out
-    return []
+                refused = []
+                for row in records:
+                    if conn.execute(statement, (Json([row]),)).rowcount != 1:
+                        fields = ("id",) if "id" in row else (
+                            "key", "preset", "a_norm", "b_norm", "entity_id", "entry_id",
+                            "entity_norm", "attribute_norm", "source")
+                        refused.append({field: row[field] for field in fields if field in row})
+                if refused:
+                    raise ValueError(f"copied bank conflicts with public.{name} fixture rows: {refused}")
+            else:
+                conn.execute(statement, params)
 
 
 def run_native(harness, name, scenario, binary, root, owned, mutant=None):
-    """Exercise the queue's durable witnesses with the native daemon alone."""
-    from stub_extractor import parse_chat
+    """Exercise the queue's independent response, bank and request contracts."""
+    contract = load_contract()
+    reference = contract["scenarios"][name]
+    ops = [{"op": "init"}, *scenario["ops"]]
+    if len(ops) != len(reference):
+        raise ValueError(f"{name}: queue contract has a different operation count")
+    tol = json.loads(harness.TOLERANCE_FILE.read_text(encoding="utf-8"))
 
     tag = name.replace("-", "_")
     template = harness.pg.name(f"pl_cf_w2e_{tag}_t")
@@ -306,12 +289,12 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
             return client
 
         client = start()
+        first_start = daemon.started_at_unix
         diffs = harness.wait_warmups(sides, before) if harness.warmup_expected(scenario) else []
         steps = []
-        expected_kind = scenario["extractor"]["replies"][0]["kind"]
-        requested_judge = False
+        asked = set()
         generation, evidence = None, {}
-        for index, op in enumerate([{"op": "init"}, *scenario["ops"]]):
+        for index, (op, expected) in enumerate(zip(ops, reference, strict=True)):
             result = None
             begun = time.monotonic()
             settle = op.get("settle")
@@ -322,10 +305,10 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
                 (home / "data/config.yaml").write_text(
                     op["config"].replace("@STUB@", stub.origin), encoding="utf-8")
                 client = start()
+                result = {"isError": False, "value": None}
             else:
                 result = (harness.home_op(op, home) if op["op"] in harness.HOME_OPS
                           else harness.run_op(op, daemon.port, client, dsn))
-                diffs.extend(answer_diffs(op, result, dsn))
             if settle:
                 harness.settle_sides(settle, sides, stubs, scenario)
             diffs.extend(harness.expect_diffs(settle if op["op"] == "init" and settle else op, sides))
@@ -344,21 +327,26 @@ def run_native(harness, name, scenario, binary, root, owned, mutant=None):
                 generation, evidence = current_generation, current_evidence
             sent = stub.drain()
             diffs.extend(harness.extractor_unanswered("rust", sent))
+            observed_requests = request_shape(sent, scenario)
+            diffs.extend(request_diffs(expected["requests"], observed_requests))
+            asked.update((kind, endpoint, key) for _, _, _, kind, endpoint, keys in observed_requests
+                         for key in keys)
             for request in sent:
                 if request["method"] != "POST":
                     continue
-                parsed = parse_chat((request.get("body") or "").encode("utf-8"))
-                requested_judge |= bool(parsed and parsed[0] == expected_kind)
                 if request.get("authorization") != harness.side_auth("rust"):
                     diffs.append("judge request did not carry the fixture's caller key")
             raw = harness.dbstate.dump(dsn)
             diffs.extend(harness.run_clock_diffs("rust", raw, result if op.get("name") == "memory_dream" else None))
+            windows = [(first_start, time.time())]
+            diffs.extend(step_diffs(harness, contract, expected, op, result, raw, before["rust"],
+                                    windows, stub.origin, tol))
             steps.append({"step": index, "op": op, "diffs": diffs, "rust": result,
                           "wall_s": time.monotonic() - begun,
                           "extractor": {"rust": harness.extractor_summary(sent)}})
             diffs = []
-        if not requested_judge:
-            steps[-1]["diffs"].append(f"native daemon did not request {expected_kind}")
+        if missing := verdict_keys(scenario) - asked:
+            steps[-1]["diffs"].append(f"native daemon did not ask for pinned judge verdict keys: {sorted(missing)}")
         return {"scenario": name, "steps": steps, "stats": {}}
     finally:
         if daemon is not None:

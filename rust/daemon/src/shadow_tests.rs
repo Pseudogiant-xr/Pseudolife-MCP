@@ -160,48 +160,144 @@ async fn db_candidate_edges_preserve_decimal_confidence() {
     let Some(dsn) = test_dsn() else { return };
     let _serial = DB.lock().await;
     let fixture = Fixture::open(&dsn, MemoryConfig::default()).await;
-    fixture
-        .exec(
-            "INSERT INTO entities (canonical, display, created_at) \
-             VALUES ('candidate-real-src', 'Candidate src', 1), \
-                    ('candidate-real-dst', 'Candidate dst', 1)",
-        )
-        .await;
-    let inserted = fixture
-        .writer
-        .client()
-        .query_one(
-            "INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) \
-             SELECT src.id, 'uses', dst.id, 0.7, 'fixture', 17.25 FROM entities src, entities dst \
-             WHERE src.canonical = 'candidate-real-src' AND dst.canonical = 'candidate-real-dst' \
-             RETURNING id, src_id, dst_id",
-            &[],
+    let client = fixture.writer.client();
+    client
+        .batch_execute(
+            "BEGIN;
+             TRUNCATE entities, entries, lessons, dismissed_pairs CASCADE;
+             INSERT INTO entities (id, canonical, display, etype, created_at)
+                 VALUES (11, 'candidate-dst', 'Candidate dst', NULL, 2.5),
+                        (7, 'candidate-src', 'Candidate src', 'artifact', 1.25);
+             INSERT INTO entity_aliases (alias, entity_id)
+                 VALUES ('src-z', 7), ('dst-a', 11), ('src-a', 7);
+             INSERT INTO edges (id, src_id, relation, dst_id, confidence, origin, asserted_at, superseded_at)
+                 VALUES (31, 7, 'uses', 11, 0.7, 'fixture', 17.25, NULL),
+                        (32, 11, 'uses', 7, 0.3, 'old', 10, 12);
+             INSERT INTO entries (id, band, text, embedding, ts) VALUES
+                 (41, 'flat', 'candidate evidence',
+                  (ARRAY[0,0,0.25,0,0,0,0,0,0,-0.75]::real[]
+                   || array_fill(0.0::real, ARRAY[1014]))::vector, 3);
+             INSERT INTO entity_sources (entity_id, source, updated_at)
+                 VALUES (7, 'zeta', 4), (7, 'alpha', 4), (11, 'beta', 4);
+             INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at)
+                 VALUES ('candidate-src', 'build', 41, 4), ('candidate-dst', 'build', 41, 4);
+             INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, value, status,
+                                confidence, asserted_at, last_confirmed, entity_id)
+                 VALUES ('Candidate src', 'os', 'candidate-src', 'os', 'a', 'current', 1, 5, 5, 7),
+                        ('Candidate src', 'owner', 'candidate-src', 'owner', 'b', 'current', 1, 5, 5, 7),
+                        ('Unlinked', 'os', 'unlinked', 'os', 'c', 'current', 1, 5, 5, NULL),
+                        ('Candidate dst', 'os', 'candidate-dst', 'os', 'd', 'superseded', 1, 5, 5, 11);
+             INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, status,
+                                  confidence, asserted_at, last_confirmed, entity_id, object_entity_id)
+                 VALUES ('Candidate src', 'uses', 'candidate-src', 'uses', 'Candidate dst',
+                         'current', 1, 5, 5, 7, 11);
+             INSERT INTO entity_proposals (id, kind, entity_id, into_id, score, reason, status, created_at)
+                 VALUES (51, 'merge', 7, 11, 0.6, 'fixture merge', 'pending', 6.25),
+                        (52, 'junk', 11, NULL, 0.2, 'already reviewed', 'dismissed', 6);
+             INSERT INTO edge_proposals (id, src_id, relation, dst_id, confidence, similarity,
+                                         rationale, source, created_at, status)
+                 VALUES (61, 7, 'uses', 11, 0.8, 0.75, 'fixture link', 'fixture', 7.25, 'pending'),
+                        (62, 11, 'uses', 7, 0.4, NULL, NULL, 'fixture', 7, 'dismissed');
+             INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at)
+                 VALUES ('candidate-src', 'related', 9), ('candidate-dst', 'other', 8);",
         )
         .await
-        .expect("insert candidate edge");
-    let edge_id: i64 = inserted.get(0);
-    let src_id: i64 = inserted.get(1);
-    let dst_id: i64 = inserted.get(2);
-    let inputs = crate::dream::candidates::load_inputs(&fixture.reader)
+        .expect("seed each candidate loader input");
+    let inputs = crate::dream::candidates::load_inputs(client)
         .await
         .expect("read candidate inputs");
-    fixture
-        .exec(
-            "DELETE FROM entities WHERE canonical IN ('candidate-real-src', 'candidate-real-dst')",
-        )
-        .await;
+    client.batch_execute("ROLLBACK").await.unwrap();
     fixture.close().await;
-    let loaded = inputs
-        .edges
-        .into_iter()
-        .find(|row| row["id"].as_i64() == Some(edge_id))
-        .expect("the fixture edge was loaded");
+
+    use serde_json::json;
+    let crate::dream::candidates::CandInputs {
+        entities,
+        mut aliases,
+        edges,
+        entries,
+        scopes,
+        traces,
+        mut facts,
+        mut fact_texts,
+        pending_entities,
+        lesson_refs,
+        pending_links,
+        dismissed,
+    } = inputs;
     assert_eq!(
-        serde_json::Value::Object(loaded),
-        serde_json::json!({
-            "id": edge_id, "src_id": src_id, "dst_id": dst_id, "relation": "uses",
+        json!(entities),
+        json!([
+            {"id": 7, "canonical": "candidate-src", "display": "Candidate src",
+             "etype": "artifact", "created_at": 1.25},
+            {"id": 11, "canonical": "candidate-dst", "display": "Candidate dst",
+             "etype": null, "created_at": 2.5},
+        ])
+    );
+    aliases.sort_by_key(|(id, _)| *id);
+    assert_eq!(
+        json!(aliases),
+        json!([[7, ["src-a", "src-z"]], [11, ["dst-a"]]])
+    );
+    assert_eq!(
+        json!(edges),
+        json!([{
+            "id": 31, "src_id": 7, "dst_id": 11, "relation": "uses",
             "confidence": 0.7, "origin": "fixture", "asserted_at": 17.25,
-        })
+        }])
+    );
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, 41);
+    assert_eq!(entries[0].text, json!("candidate evidence"));
+    let mut vector = vec![0.0; DIM];
+    vector[2] = 0.25;
+    vector[9] = -0.75;
+    assert_eq!(entries[0].embedding.as_deref(), Some(vector.as_slice()));
+    assert_eq!(
+        json!(scopes),
+        json!([[7, ["alpha", "zeta"]], [11, ["beta"]]])
+    );
+    assert_eq!(
+        json!(traces),
+        json!([["candidate-dst", [41]], ["candidate-src", [41]]])
+    );
+    facts.sort();
+    assert_eq!(facts, [(7, 2)]);
+    fact_texts.sort();
+    assert_eq!(
+        json!(fact_texts),
+        json!([["Candidate src", 2], ["Unlinked", 1]])
+    );
+    assert_eq!(lesson_refs, [11, 7]);
+    assert_eq!(
+        json!(dismissed),
+        json!([["candidate-dst", "other"], ["candidate-src", "related"]])
+    );
+    assert_eq!(
+        json!(pending_entities),
+        json!([{
+            "id": 51, "kind": "merge", "entity_id": 7, "into_id": 11, "score": 0.6,
+            "reason": "fixture merge", "status": "pending", "created_at": 6.25,
+            "judge_verdict": null, "judge_confidence": null, "judge_note": null,
+            "judge_model": null, "judged_at": null, "judge2_verdict": null,
+            "judge2_confidence": null, "judge2_model": null, "judged2_at": null,
+            "judge3_verdict": null, "judge3_confidence": null, "judge3_model": null,
+            "judged3_at": null, "judge2_served_model": null, "judge2_policy": null,
+            "judge3_served_model": null, "judge3_policy": null,
+            "entity": "Candidate src", "into": "Candidate dst",
+        }])
+    );
+    assert_eq!(
+        json!(pending_links),
+        json!([{
+            "id": 61, "src_id": 7, "relation": "uses", "dst_id": 11, "confidence": 0.8,
+            "similarity": 0.75, "rationale": "fixture link", "source": "fixture",
+            "created_at": 7.25, "status": "pending", "judge_verdict": null,
+            "judge_confidence": null, "judge_note": null, "judge_model": null,
+            "judged_at": null, "judge_relation": null, "judge2_verdict": null,
+            "judge2_confidence": null, "judge2_model": null, "judged2_at": null,
+            "judge2_relation": null, "judge2_served_model": null, "judge2_policy": null,
+            "src": "Candidate src", "dst": "Candidate dst",
+        }])
     );
 }
 

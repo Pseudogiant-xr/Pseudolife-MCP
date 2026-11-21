@@ -1,5 +1,6 @@
 """Numeric comparison and run ownership without starting real daemons."""
 import argparse
+import copy
 import importlib
 import json
 import sys
@@ -621,6 +622,69 @@ def test_explicit_queue_recording_refuses_before_any_writes(harness, monkeypatch
     with pytest.raises(SystemExit, match="2"):
         harness.main()
     assert "omit --record for link-auto" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name,table", [
+    ("link-auto", "public.dismissed_pairs"),
+    ("candidate-auto", "public.edge_proposals"),
+    ("candidate-auto", "public.meta"),
+    ("junk-auto", "public.dismissed_pairs"),
+])
+def test_queue_contract_rejects_an_extra_durable_row(harness, monkeypatch, name, table):
+    from w2e_queue_contract import load_contract, step_diffs, unpack_vectors
+
+    contract = load_contract()
+    reference = contract["scenarios"][name][-1]
+    state = {"catalog": {"sequences": reference["sequences"]},
+             "rows": {key: copy.deepcopy(contract["tables"][index])
+                      for key, index in reference["tables"].items()}}
+    numeric = unpack_vectors(contract["numeric"][reference["numeric"]], contract["vectors"])
+    monkeypatch.setattr(harness, "normalize_state", lambda *a: (state, numeric, {}))
+    monkeypatch.setattr(harness, "ts_tokens", lambda *a: {})
+    def check():
+        return step_diffs(harness, contract, reference, {"op": "tool"}, reference["answer"],
+                          state, {"catalog": state["catalog"]}, [], "http://127.0.0.1:1", {})
+    assert check() == []
+    rows = state["rows"][table]["rows"]
+    extra = copy.deepcopy(rows[0])
+    extra[0] = 9999 if isinstance(extra[0], int) else "unexpected fixture row"
+    rows.append(extra)
+    assert any(table in diff for diff in check())
+
+
+def test_queue_contract_rejects_a_self_consistent_empty_review(harness, monkeypatch):
+    from w2e_queue_contract import load_contract, step_diffs, unpack_vectors
+
+    contract = load_contract()
+    reference = contract["scenarios"]["link-auto"][-1]
+    state = {"catalog": {"sequences": reference["sequences"]},
+             "rows": {key: contract["tables"][index] for key, index in reference["tables"].items()}}
+    numeric = unpack_vectors(contract["numeric"][reference["numeric"]], contract["vectors"])
+    monkeypatch.setattr(harness, "normalize_state", lambda *a: (state, numeric, {}))
+    monkeypatch.setattr(harness, "ts_tokens", lambda *a: {})
+    answer = copy.deepcopy(reference["answer"])
+    answer["value"].update(findings=[], counts={"total": 0})
+    diffs = step_diffs(harness, contract, reference, {"op": "tool"}, answer, state,
+                      {"catalog": state["catalog"]}, [], "http://127.0.0.1:1", {})
+    assert any("queue answer" in diff and "findings" in diff for diff in diffs)
+
+
+def test_queue_request_contract_pins_every_verdict_key_and_tick(harness):
+    from w2e_queue_contract import load_contract, request_diffs, verdict_keys
+
+    pinned = load_contract()["scenarios"]
+    assert pinned.keys() == harness._QUEUE_JUDGES.keys()
+    for name, scenario in harness._QUEUE_JUDGES.items():
+        assert len(pinned[name]) == len(scenario["ops"]) + 1
+        asked = {(kind, endpoint, key) for step in pinned[name]
+                 for _, _, _, kind, endpoint, keys in step["requests"] for key in keys}
+        assert verdict_keys(scenario) == asked, name
+    first, deferred = pinned["link-auto"][1]["requests"]
+    assert deferred[5] == ["Beta Store|Hub"]
+    assert request_diffs([first, deferred], [deferred, first])
+    assert request_diffs([first, deferred], [first])
+    requests = pinned["link-shadow"][1]["requests"]
+    assert [row[4] for row in requests] == ["primary", "second"]
 
 
 def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
