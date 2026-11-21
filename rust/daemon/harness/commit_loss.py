@@ -1,8 +1,7 @@
-"""Commit-loss fault injection: what each daemon serves when PostgreSQL
-commits a write and the daemon never receives the COMMIT reply.
+"""Observe native recovery when PostgreSQL commits and the reply is lost.
 
 usage:
-  python commit_loss.py --rust-bin PATH [--only CASE ...] [--engines python,rust]
+  python commit_loss.py --rust-bin PATH [--only CASE ...]
                         [--fault lost-reply|rollback] [--out FILE] [--report FILE] [--keep]
   python commit_loss.py --smoke        (the proxy alone, against plain psycopg)
 
@@ -21,10 +20,8 @@ itself. ``SSLRequest`` and
 ``GSSENCRequest`` are refused by the proxy itself (``N``), so the stream
 stays plaintext; daemon DSNs to the proxy carry ``sslmode=disable``.
 
-Each case prepares a template bank through the Python daemon's own tools
-(plus declared SQL seeds after the seeding daemon stopped, for rows only
-the dream or curation writes), clones it per engine, and then for each
-engine:
+Each case replays its captured template and checks the native daemon
+against the durable bank:
 
 * (a) arms the proxy and runs the operation: the tool answer;
 * (b) what the daemon serves right after (``memory_search`` for each
@@ -39,7 +36,7 @@ engine:
 
 None of the probe reads are pure (``memory_get`` reinforces, a search logs
 a retrieval event); the first probe after the fault is also what triggers
-the reconnect on both engines, so (b) and (d) may agree.
+the reconnect, so (b) and (d) may agree.
 
 A case whose proxy never fired is invalid (``fault.fired: false``), not a
 pass. Results: a JSON file and a markdown report (paths printed). Never
@@ -857,20 +854,9 @@ def base_side_env(dsn: str) -> dict:
             "PSEUDOLIFE_MCP_TOKENS": f"{REVIEWER_TOKEN}:reviewer"}
 
 
-def make_daemon(engine: str, binary: Path | None, home: Path, dsn: str) -> daemons.Daemon:
+def make_daemon(binary: Path, home: Path, dsn: str) -> daemons.Daemon:
     env = base_side_env(dsn)
     port = daemons.free_port()
-    if engine == "python":
-        d = daemons.python_daemon(home, port, daemons.base_env(home, env))
-        # A returning signal handler: uvicorn's lifespan shutdown (and the
-        # exit flush) runs on SIGTERM, as in w2e.configure_clean_exit.
-        d.argv = [sys.executable, "-c", (
-            "import signal\n"
-            "for sig in (signal.SIGTERM, getattr(signal, 'SIGBREAK', signal.SIGTERM)):\n"
-            "    signal.signal(sig, lambda *_: None)\n"
-            "from pseudolife_memory.daemon import run_daemon\n"
-            "run_daemon()\n")]
-        return d
     return daemons.rust_daemon(binary, home, port, daemons.base_env(home, w1a.rust_env(env)))
 
 
@@ -941,17 +927,17 @@ VARIANTS = {
 }
 
 
-def run_engine(name: str, case: dict, engine: str, binary: Path | None, template: str,
+def run_engine(name: str, case: dict, binary: Path, template: str,
                root: Path, owned: list[str], variant: str = "unrelated",
                fault: str = "lost-reply") -> dict:
-    db = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:20]}_{engine[:2]}_{variant[:2]}_{fault[:2]}")
+    db = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:20]}_ru_{variant[:2]}_{fault[:2]}")
     owned.append(db)
     dsn = pg.create(db, template=template)
     proxy = CommitCutProxy(*upstream(), mode=fault).start()
-    home = daemons.make_home(root, f"{name}-{engine}-{variant}-{fault}", None)
-    result: dict = {"case": name, "engine": engine, "variant": variant, "fault_mode": fault,
+    home = daemons.make_home(root, f"{name}-rust-{variant}-{fault}", None)
+    result: dict = {"case": name, "engine": "rust", "variant": variant, "fault_mode": fault,
                     "about": case["about"], "marker": case["marker"]}
-    d = make_daemon(engine, binary, home, proxied_dsn(dsn, proxy.port))
+    d = make_daemon(binary, home, proxied_dsn(dsn, proxy.port))
     known: dict[str, set[int]] = {}
     try:
         start(d)
@@ -983,7 +969,7 @@ def run_engine(name: str, case: dict, engine: str, binary: Path | None, template
                                 "value": again["value"]}
         else:
             again = mcp.call("memory_store", {
-                "text": f"An unrelated note stored after the fault ({engine}, {name})."})
+                "text": f"An unrelated note stored after the fault (rust, {name})."})
             result["d_call"] = {"tool": "memory_store", "isError": again["isError"],
                                 "value": again["value"]}
         result["d"] = checkpoint(mcp, case, dsn, known)
@@ -994,7 +980,7 @@ def run_engine(name: str, case: dict, engine: str, binary: Path | None, template
         result["stop_db_changed"] = _truth_diff(result["d"]["db"], result["stop_db"])
         result["log_before_restart"] = log_excerpt(d.log)
         shutil.copy(d.log, home / "daemon-first.log")
-        d = make_daemon(engine, binary, home, dsn)
+        d = make_daemon(binary, home, dsn)
         start(d)
         mcp = Mcp(d.port)
         mcp.init()
@@ -1023,30 +1009,12 @@ def _health(port: int) -> dict:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
-def prepare_template(name: str, case: dict, root: Path, owned: list[str]) -> str:
+def prepare_template(name: str, owned: list[str]) -> str:
+    from w2e_shutdown_seed import replay
+
     template = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:24]}_t")
     owned.append(template)
-    dsn = pg.create(template)
-    home = daemons.make_home(root, f"{name}-seed", None)
-    d = daemons.python_daemon(home, daemons.free_port(),
-                              daemons.base_env(home, base_side_env(dsn)))
-    try:
-        start(d)
-        mcp = Mcp(d.port)
-        mcp.init()
-        for op in case["seed"]:
-            if op["op"] != "tool":
-                continue
-            r = mcp.call(op["name"], op["args"], [tuple(h) for h in op["headers"]])
-            if r["isError"]:
-                raise RuntimeError(f"seed op failed: {op} -> {r}")
-    finally:
-        d.stop()
-    import psycopg
-    with psycopg.connect(dsn, autocommit=True) as conn:
-        for op in case["seed"]:
-            if op["op"] == "sql":
-                conn.execute(op["sql"])
+    replay(pg.create(template), name)
     return template
 
 
@@ -1255,7 +1223,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--rust-bin", type=Path)
     ap.add_argument("--only", nargs="*", choices=sorted(CASES))
-    ap.add_argument("--engines", default="python,rust")
+    ap.add_argument("--engines", default="rust", choices=["rust"], help="the native engine")
     ap.add_argument("--variants", default=",".join(VARIANTS))
     ap.add_argument("--fault", choices=sorted(FAULTS), default="lost-reply")
     ap.add_argument("--out", type=Path)
@@ -1276,16 +1244,16 @@ def main() -> int:
             _turn_sys.path.remove(_turn_root)
     if a.smoke:
         return smoke()
-    engines = [e.strip() for e in a.engines.split(",") if e.strip()]
     variants = [v.strip() for v in a.variants.split(",") if v.strip()]
     if not set(variants) <= set(VARIANTS):
         ap.error(f"--variants: expected some of {sorted(VARIANTS)}")
-    if "rust" in engines and not a.rust_bin:
+    if not a.rust_bin:
         ap.error("--rust-bin is required for the rust engine")
+    a.rust_bin = a.rust_bin.resolve()
     root = Path(tempfile.mkdtemp(prefix=f"commit-loss-{os.getpid()}-", dir=daemons.scratch_root()))
     out = a.out or root / "commit-loss.json"
     rep = a.report or out.with_suffix(".md")
-    meta = {"started": time.time(), "engines": engines, "variants": variants,
+    meta = {"started": time.time(), "engines": ["rust"], "variants": variants,
             "fault": a.fault}
     if a.rust_bin:
         meta["rust_sha256"] = hashlib.sha256(a.rust_bin.read_bytes()).hexdigest()
@@ -1308,20 +1276,16 @@ def main() -> int:
             owned: list[str] = []
             try:
                 print(f"[{time.strftime('%H:%M:%S')}] {name}: seeding", flush=True)
-                template = prepare_template(name, case, root, owned)
+                template = prepare_template(name, owned)
                 for variant in variants:
-                    for engine in engines:
-                        print(f"[{time.strftime('%H:%M:%S')}] {name}: {engine} / {variant}",
-                              flush=True)
-                        r = run_engine(name, case, engine, a.rust_bin, template, root, owned,
-                                       variant, a.fault)
-                        r["verdict"] = verdict(r)
-                        results.append(r)
-                        print(f"  {engine}/{variant}: "
-                              f"{json.dumps(r['verdict'], ensure_ascii=False)}", flush=True)
-                        gb = free_gb(root)
-                        if gb < a.min_free_gb:
-                            raise RuntimeError(f"{gb:.2f} GB free, below the floor")
+                    print(f"[{time.strftime('%H:%M:%S')}] {name}: rust / {variant}", flush=True)
+                    r = run_engine(name, case, a.rust_bin, template, root, owned, variant, a.fault)
+                    r["verdict"] = verdict(r)
+                    results.append(r)
+                    print(f"  rust/{variant}: {json.dumps(r['verdict'], ensure_ascii=False)}", flush=True)
+                    gb = free_gb(root)
+                    if gb < a.min_free_gb:
+                        raise RuntimeError(f"{gb:.2f} GB free, below the floor")
             except Exception as exc:  # noqa: BLE001
                 results.append({"case": name, "engine": "-", "variant": "-",
                                 "fault_mode": a.fault, "about": case["about"],
