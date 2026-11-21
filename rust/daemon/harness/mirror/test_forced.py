@@ -590,7 +590,7 @@ def test_sweep_analyzer_tick_skips_only_its_real_bank_arms(tmp_path):
     assert counted["excluded"] == 1 and counted["pass"] == 1 and counted["new"] == 1
     assert "every entity" in forced.REAL_BANK_EXCLUDED["w2e/sweep-analyzer-tick"]
     assert sorted(forced.REAL_BANK_EXCLUDED) == [
-        "routes/stamped", "w2d_search/hide-superseded", "w2d_search/mcp-stats", "w2e/candidate-auto",
+        "routes/seeded", "routes/stamped", "w2d_search/hide-superseded", "w2d_search/mcp-stats", "w2e/candidate-auto",
         "w2e/candidate-auto-reopen", "w2e/search-after-restart", "w2e/sweep-analyzer-tick"]
 
 
@@ -635,6 +635,18 @@ def test_candidate_auto_reopen_is_excluded_beside_candidate_auto(tmp_path):
 BIND_FIXTURE = ["security-remote-open", "security-remote-auth", "trust-bind"]
 
 
+def test_seeded_routes_keep_the_synthetic_arm_on_a_real_bank(tmp_path):
+    runner = FakeRunner(tmp_path, {"seeded": {"real": PASS, "synthetic": PASS},
+                                   "static-build": {"real": PASS}})
+    report, _ = forced.run(runner, ["routes"], None, names=lambda s: ["seeded", "static-build"])
+    assert [call for call in runner.calls if call[1] == "seeded"] == [
+        ("routes", "seeded", "synthetic", False)]
+    assert ("routes", "static-build", "real", True) in runner.calls
+    rows = {row["scenario"]: row for row in report["suites"]["routes"]["rows"]}
+    assert rows["seeded"]["class"] == "excluded"
+    assert rows["static-build"]["class"] == "pass"
+
+
 @pytest.mark.parametrize("jobs", [1, 2])
 def test_the_bind_fixture_scenarios_are_not_forced_and_invoke_nothing(tmp_path, jobs):
     """The conductor's ruling G under the maintainer's delegation of
@@ -642,7 +654,7 @@ def test_the_bind_fixture_scenarios_are_not_forced_and_invoke_nothing(tmp_path, 
     need the debug mutants bind fixture refuse before any listener on the
     release binary the forced runner uses, so no arm of theirs runs. They
     are listed as not forced, in no class."""
-    answers = {"seeded": {"real": PASS}, "static-build": {"real": PASS}}
+    answers = {"seeded": {"synthetic": PASS}, "static-build": {"real": PASS}}
     workers = [FakeRunner(tmp_path / f"w{n}", answers) for n in range(jobs)]
     report, private = forced.run(workers[0], ["routes"], None,
                                  names=lambda s: ["seeded", *BIND_FIXTURE, "static-build"],
@@ -654,11 +666,12 @@ def test_the_bind_fixture_scenarios_are_not_forced_and_invoke_nothing(tmp_path, 
     assert [r["scenario"] for r in body["rows"]] == ["seeded", "static-build"]
     assert report["complete"] and private == {}
     counted = forced.counts(report)["routes"]
-    assert counted["not_forced"] == BIND_FIXTURE and counted["run"] == 2 and counted["pass"] == 2
+    assert counted["not_forced"] == BIND_FIXTURE and counted["run"] == 2 and counted["pass"] == 1
+    assert counted["excluded"] == 1
     assert counted["preexisting"] == 0 and counted["error"] == 0
-    # Near miss: another routes scenario, the debug binary's other user
-    # included, still runs its real arm.
-    assert ("routes", "seeded", "real", True) in calls and ("routes", "static-build", "real", True) in calls
+    assert ("routes", "seeded", "synthetic", False) in calls
+    # The debug binary's other user still runs its real arm.
+    assert ("routes", "static-build", "real", True) in calls
     for name in BIND_FIXTURE:
         reason = report["not_forced"][f"routes/{name}"]
         for word in ("debug mutants bind fixture", "release image",
@@ -674,7 +687,7 @@ def test_the_bind_fixture_scenarios_are_not_forced_and_invoke_nothing(tmp_path, 
 
 
 def test_only_naming_a_not_forced_scenario_runs_nothing_for_it(tmp_path):
-    runner = FakeRunner(tmp_path, {"seeded": {"real": PASS}})
+    runner = FakeRunner(tmp_path, {"seeded": {"synthetic": PASS}})
     report, _ = forced.run(runner, ["routes"], ["trust-bind", "seeded"],
                            names=lambda s: ["seeded", "trust-bind", "security-remote-open"])
     assert [c[1] for c in runner.calls] == ["seeded"]
@@ -2217,9 +2230,9 @@ def test_side_by_side_each_attempt_reads_its_own_out_json(tmp_path, monkeypatch)
             shutil.copy(RECORDED / f"routes--{name}.json", out)
             return 1, (RECORDED / f"routes--{name}.log").read_text(encoding="utf-8")
 
-    # The recorded trust-bind run is used only as a one-line routes result:
-    # lift ruling G so it runs.
+    # Lift the exclusions to replay both historical real-bank recordings.
     monkeypatch.setattr(forced, "NOT_FORCED_SCENARIOS", {})
+    monkeypatch.delitem(forced.REAL_BANK_EXCLUDED, "routes/seeded")
     workers = [Recorded(Path("rust-bin"), tmp_path / "out", 60, tmp_path / "STOP", scratch=tmp_path / f"s{n}",
                         sweep=lambda attempt: 0, oom_kills=lambda: None) for n in range(2)]
     _, private = forced.run(workers[0], ["routes"], None, names=lambda s: ["seeded", "trust-bind"],

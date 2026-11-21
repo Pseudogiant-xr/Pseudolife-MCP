@@ -835,6 +835,15 @@ def test_tracked_tree_carries_no_maintainer_identifiers(
     assert hits == [], f"maintainer identifiers in tracked files: {hits}"
 
 
+@pytest.mark.parametrize("name", ["continuum", "cortex"])
+def test_fixed_seed_capture_carries_no_maintainer_identifiers(name):
+    repo = Path(__file__).resolve().parents[1]
+    rel = f"rust/daemon/harness/fixtures/{name}.json.gz"
+    hits = []
+    _scan_identifiers(rel, gzip.decompress((repo / rel).read_bytes()).lower(), hits)
+    assert not hits, f"maintainer identifiers in fixed seed capture: {hits}"
+
+
 @pytest.mark.parametrize("value, rejected", [
     (b"S-1-5-21-100-200-300-1001", False),
     (b"O:S-1-5-32-544D:AI", False),
