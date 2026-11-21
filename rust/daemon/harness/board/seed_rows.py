@@ -21,8 +21,11 @@ from rust.harness_support.fixture_rows import checked_fixture_insert
 
 @lru_cache(maxsize=1)
 def _captured():
-    path = Path(__file__).with_name("fixtures") / "seed_rows.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+    folder = Path(__file__).with_name("fixtures")
+    captured = {}
+    for file in ("seed_rows.json", "host_seed_rows.json"):
+        captured.update(json.loads((folder / file).read_text(encoding="utf-8")))
+    return captured
 
 
 def _bind(value, bindings):
@@ -92,11 +95,13 @@ def conductor_legacy(name, who, record=None):
     return replay
 
 
-# The captured paging case fills one mailbox to its pending cap, spreading
-# the sends across the number of senders the frozen minute cap allowed.
+# These recorded limits must still fill the live daemon's first grant page
+# and the recipient's mailbox. test_lease_recovery.py checks the Rust policy.
 PENDING_MAIL = 256
 MAIL_PER_SENDER = 60
 FIRST_GRANT_PAGE = 50
+GRANT_WINDOW = 300
+MESSAGE_TTL = 86400
 
 
 def _register(rows):
@@ -116,7 +121,7 @@ def _mail(rows, sender, recipient, text, request_id, reason=None):
         "RETURNING next_sequence", (recipient,)).fetchone()
     rows.conn.execute("UPDATE coordination_agents SET last_activity=%s WHERE agent_id=%s",
                       (rows.now, sender))
-    expires = rows.now + 86400
+    expires = rows.now + MESSAGE_TTL
     fingerprint = hashlib.sha256(canonical_payload([recipient, text, None, None]).encode()).hexdigest()
     record = "pending" if reason is None else "prior"
     bindings = dict(message=message, sender=sender, recipient=recipient, request=request_id,
@@ -151,7 +156,7 @@ def _grant_after_queue(rows, name, sender, recipient, fence):
     # the crash boundary even though only the granted lease survives.
     rows.next("coordination_lease_waiters_ticket_seq")
     rows.event("lease_queue", name=name, holder=recipient)
-    _grant(rows, name, sender, recipient, fence, 300)
+    _grant(rows, name, sender, recipient, fence, GRANT_WINDOW)
     rows.conn.execute("UPDATE coordination_agents SET last_activity=%s WHERE agent_id=%s",
                       (rows.now, recipient))
 
@@ -161,10 +166,10 @@ def queued_grant(rows, ctx):
     fence, = rows.conn.execute(
         "DELETE FROM coordination_leases WHERE name=%s AND holder_agent_id=%s RETURNING fence",
         (name, old)).fetchone()
-    window, = rows.conn.execute(
+    ttl, = rows.conn.execute(
         "DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s RETURNING ttl",
         (name, new)).fetchone()
-    _grant(rows, name, old, new, fence, window)
+    _grant(rows, name, old, new, fence, min(ttl, GRANT_WINDOW))
 
 
 def grant_pages(rows, ctx):

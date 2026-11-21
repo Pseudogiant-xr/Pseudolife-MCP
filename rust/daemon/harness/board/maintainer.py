@@ -20,6 +20,7 @@ RP_ID = "console.example.com"
 ORIGIN = "https://console.example.com:8443"
 SECRET = "42" * 32
 TABLES = ("maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces")
+ROLE_PROJECT = "w2f-maintainer-role-fixture"
 CONFIG = S.BASE_CONFIG.replace("  wake:\n", f"  maintainer:\n    rp_id: {RP_ID}\n"
                                f"    origin: {ORIGIN}\n  wake:\n")
 
@@ -150,20 +151,18 @@ def complete(name, route, *, source=None, signer="primary", edit=None, reuse=Fal
 
 
 def host(title, fn):
-    from pseudolife_memory.storage.maintainer import MaintainerStore
-
-    def seed(board, ctx):
-        fn(MaintainerStore(board.storage, rp_id=RP_ID, origin=ORIGIN, clock=board.clock), ctx)
-    return S.seed(title, seed)
+    return S.fixture_seed(title, fn)
 
 
 def bootstrap(*, confirm=True, wrong_code=False):
-    def prepare(store, ctx):
+    from board.host_fixtures import confirm_key, issue_bootstrap
+
+    def prepare(rows, ctx):
         from psycopg.types.json import Jsonb
-        store.storage.conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s) "
-                                   "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
-                                   ("maintainer_secret_v1", Jsonb(SECRET)))
-        ctx.vals["code"] = store.bootstrap_code()
+        rows.conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s) "
+                          "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+                          ("maintainer_secret_v1", Jsonb(SECRET)))
+        issue_bootstrap(rows, ctx)
 
     def registration(ctx):
         issued = ctx.vals["bootstrap"]
@@ -178,7 +177,7 @@ def bootstrap(*, confirm=True, wrong_code=False):
                           expected=403, error="bootstrap_code_invalid"))
     steps.append(post("bootstrap enrolment", "enrol", registration))
     if confirm:
-        steps.append(host("host confirms primary key", lambda store, ctx: store.confirm(auth(ctx).id)))
+        steps.append(host("host confirms primary key", lambda rows, ctx: confirm_key(rows, auth(ctx).id)))
     return steps
 
 
@@ -210,10 +209,12 @@ class Enrol(MaintainerScenario):
     name = "maintainer-enrol"
 
     def steps(self):
+        from board.host_fixtures import confirm_key
+
         return [*bootstrap(confirm=False, wrong_code=True),
                 challenge("closed bootstrap", "enrol-bootstrap", {"label": "Too late"},
                           expected=409, error="enrolment_closed", rollback=True),
-                host("host confirms primary key", lambda store, ctx: store.confirm(auth(ctx).id)),
+                host("host confirms primary key", lambda rows, ctx: confirm_key(rows, auth(ctx).id)),
                 *add_key("spare"),
                 challenge("quarantined", "revoke-self", lambda ctx: {"credential_id": auth(ctx, "spare").id}),
                 complete("quarantined", "revoke", signer="spare", expected=403,
@@ -232,25 +233,27 @@ class Roles(MaintainerScenario):
     name = "maintainer-roles"
 
     def steps(self):
-        fields = lambda ctx: {"project": "p", "agent_id": ctx.id("A"), "hold": 3600}
-        return [*bootstrap(), S.reg("register role recipient", "A", project="p", label="Role fixture"),
+        from board.host_fixtures import break_coordinator, operator_role
+
+        fields = lambda ctx: {"project": ROLE_PROJECT, "agent_id": ctx.id("A"), "hold": 3600}
+        return [*bootstrap(), S.reg("register role recipient", "A", project=ROLE_PROJECT, label="Role fixture"),
                 challenge("grant", "grant-conductor", fields), complete("grant", "role"),
                 challenge("assign", "assign-coordinator", fields), complete("assign", "role"),
                 challenge("stale", "grant-conductor", fields),
-                S.seed("operator replaces coordinator after preview",
-                       lambda store, ctx: store.break_lease("coordinator:p")),
+                host("operator replaces coordinator after preview",
+                     lambda rows, _ctx: break_coordinator(rows, ROLE_PROJECT)),
                 complete("stale", "role", expected=409, error="role_changed", rollback=True),
-                S.seed("operator restores the approved other holder",
-                       lambda store, ctx: store.assign_coordinator("p", ctx.id("A"), hold=3600)),
+                host("operator restores the approved other holder",
+                     lambda rows, ctx: operator_role(rows, ROLE_PROJECT, ctx.id("A"), coordinator=True)),
                 complete("stale", "role", reuse=True),
                 complete("spent role nonce", "role", source="stale", expected=410,
                          error="challenge_spent", rollback=True),
-                challenge("revoke conductor", "revoke-conductor", {"project": "p"}),
+                challenge("revoke conductor", "revoke-conductor", {"project": ROLE_PROJECT}),
                 complete("revoke conductor", "role"),
                 challenge("legacy", "grant-delegate", fields), complete("legacy", "role"),
-                challenge("legacy revoke", "revoke-delegate", {"project": "p"}),
+                challenge("legacy revoke", "revoke-delegate", {"project": ROLE_PROJECT}),
                 complete("legacy revoke", "role"),
-                challenge("revoke coordinator", "revoke-coordinator", {"project": "p"}),
+                challenge("revoke coordinator", "revoke-coordinator", {"project": ROLE_PROJECT}),
                 complete("revoke coordinator", "role"), status()]
 
 
