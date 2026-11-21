@@ -277,6 +277,7 @@ $env:FAKE_LAUNCHER = '{_q(shim)}'
 $env:FAKE_KEEP_LAUNCHER = '1'
 $clients = @('{client}')
 $Transport = 'shim'
+$tokenState = '{"present" if token_file else "opted-out"}'
 $codexCredentialBootstrapFailed = $false
 $codexConnectionConfigured = $false
 $codexCredentialFile = $null
@@ -427,6 +428,20 @@ def test_tokenless_existing_gemini_registration_gets_no_token_warning(tmp_path):
                         existing="pseudolife-memory: pseudolife-mcp (stdio) - Connected")
     assert proc.returncode == 0, _output(proc)
     assert "Edit it in place in ~/.gemini/settings.json" not in _output(proc)
+
+
+def test_existing_http_registration_is_reported_with_the_transport_repair(tmp_path):
+    proc, calls = _wire(
+        _PowerShell(tmp_path), "claude", token_file=r"C:\fixture\claude-code.token",
+        existing="Type: http\nURL: http://127.0.0.1:8765/mcp",
+    )
+    output = _output(proc)
+    assert proc.returncode == 0, output
+    assert _adds(calls) == []
+    [warning] = [line for line in output.splitlines() if "WARNING:" in line]
+    assert "requires a bearer token" in warning and "HTTP registration cannot carry it" in warning
+    assert "use the pseudolife-mcp stdio shim and a token file" in warning
+    assert "STATE=failed" in proc.stdout
 
 
 def _board(ps: _PowerShell, *, token_state: str, mcp_state: str = "@{}"):

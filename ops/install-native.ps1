@@ -2920,7 +2920,7 @@ function Set-CodexRuntimeDefaults {
 # >>> client registration helpers >>>
 function Write-ClientHttpRefusal([string]$Provider, [switch]$Existing) {
     if ($Existing) {
-        Write-ClientSetupFailure $Provider "The existing pseudolife-memory HTTP registration cannot carry the daemon's required bearer token. Edit that entry to use the pseudolife-mcp stdio shim and a token file, then rerun."
+        Write-ClientSetupFailure $Provider "The daemon requires a bearer token, and the existing pseudolife-memory HTTP registration cannot carry it. Edit that entry to use the pseudolife-mcp stdio shim and a token file, then rerun."
     } else {
         Write-ClientSetupFailure $Provider "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with -Transport shim."
     }
@@ -3307,6 +3307,7 @@ function Install-SelectedClient([string]$selectedClient) {
             }
             if ($tokenState -in "minted", "present", "remote" -and (Test-McpHttpRegistration "$geminiRegistration")) {
                 Write-ClientHttpRefusal "gemini" -Existing
+                return
             }
             # `gemini mcp list` shows no env, so the installer cannot tell
             # whether this registration carries a token; say how to add one,
@@ -3429,6 +3430,7 @@ function Install-SelectedClient([string]$selectedClient) {
             }
             if ($tokenState -in "minted", "present", "remote" -and (Test-McpHttpRegistration $existingClaude)) {
                 Write-ClientHttpRefusal "claude" -Existing
+                return
             }
             # An install from before the board token: the upgraded shim reads
             # a token file, so add it, the daemon URL and the state directory

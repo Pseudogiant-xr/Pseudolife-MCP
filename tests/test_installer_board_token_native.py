@@ -237,6 +237,7 @@ export PATH CALL_LOG='{shell.path(call_log)}' FAKE_CONFIG='{_q(config)}'
 export FAKE_LAUNCHER='{shell.path(installed_bin / "pseudolife-mcp")}' {"FAKE_KEEP_LAUNCHER=1" if migrate_exit is None else f"FAKE_MIGRATE_EXIT={migrate_exit}"}
 CLIENTS='{client}'
 TRANSPORT=shim
+TOKEN_STATE='{"present" if token_file else "opted-out"}'
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED='' CODEX_CONNECTION_CONFIGURED='' CODEX_CREDENTIAL_FILE=''
 CODEX_CREDENTIAL_URL='' CODEX_RUNTIME_DEFAULTS=''
 MCP_CODEX='' MCP_CLAUDE='' MCP_GEMINI=''
@@ -375,8 +376,10 @@ def test_existing_http_registration_is_warned_about_not_broken_silently(bash, tm
                         existing="Type: http\nURL: http://127.0.0.1:8765/mcp")
     assert proc.returncode == 0, proc.stderr
     assert _adds(calls) == []
-    assert "requires a bearer token" in proc.stderr
-    assert "register the stdio shim instead" in proc.stderr
+    [warning] = [line for line in proc.stderr.splitlines() if line.startswith("WARNING:")]
+    assert "requires a bearer token" in warning and "HTTP registration cannot carry it" in warning
+    assert "use the pseudolife-mcp stdio shim and a token file" in warning
+    assert "STATE=failed/" in proc.stdout
 
 
 @BASH

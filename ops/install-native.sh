@@ -2965,7 +2965,7 @@ client_requires_bearer() {
 }
 client_http_refusal() {
     if [ "${2:-}" = existing ]; then
-        warn_client_failure "$1" "The existing pseudolife-memory HTTP registration cannot carry the daemon's required bearer token. Edit that entry to use the pseudolife-mcp stdio shim and a token file, then rerun."
+        warn_client_failure "$1" "The daemon requires a bearer token, and the existing pseudolife-memory HTTP registration cannot carry it. Edit that entry to use the pseudolife-mcp stdio shim and a token file, then rerun."
     else
         warn_client_failure "$1" "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with --transport shim."
     fi
@@ -3376,7 +3376,10 @@ for selected_client in $CLIENTS; do
                 step "MCP server already wired into Gemini CLI — registration preserved."
                 MCP_GEMINI=present
             fi
-            if client_requires_bearer && registration_is_http "$gemini_registration"; then client_http_refusal gemini existing; fi
+            if client_requires_bearer && registration_is_http "$gemini_registration"; then
+                client_http_refusal gemini existing
+                continue
+            fi
             # `gemini mcp list` shows no env, so the installer cannot tell
             # whether this registration carries a token; say how to add one,
             # unless pseudolife-mcp connect just wrote or confirmed it.
@@ -3511,7 +3514,10 @@ for selected_client in $CLIENTS; do
             step "MCP server already wired into Claude Code — registration preserved."
             MCP_CLAUDE=present
         fi
-        if client_requires_bearer && registration_is_http "$existing_claude"; then client_http_refusal claude existing; fi
+        if client_requires_bearer && registration_is_http "$existing_claude"; then
+            client_http_refusal claude existing
+            continue
+        fi
         # An install from before the board token: the upgraded shim reads a
         # token file, so add it, the daemon URL and the state directory to
         # the registration in place (never a remove and re-add), keeping any
