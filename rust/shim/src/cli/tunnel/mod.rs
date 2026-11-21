@@ -1279,7 +1279,7 @@ mod tests {
         store.0 = directory;
         store.profile("dot", true);
         store.key("dot");
-        let venv = store.0.join("old runtime’s venv");
+        let venv = store.0.parent().unwrap().join("old runtime’s venv");
         let console = venv.join(if cfg!(windows) {
             "Scripts/pseudolife-mcp.exe"
         } else {
