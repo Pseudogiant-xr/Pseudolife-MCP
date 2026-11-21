@@ -1167,7 +1167,7 @@
    "d": [
     "The installers default to the Python client. With PSEUDOLIFE_SHIM_ENGINE=native, the installer verifies the release archive and runs setup without host Python. The client choice is separate from the Docker daemon engine.",
     "providers (multi-select + capability matrix) → preflight → extractor mode",
-    "volumes → managed .env → compose up --build → hooks → MCP registration",
+    "volumes → managed .env → Compose startup → hooks → MCP registration. Native reruns skip Compose for an unchanged stack, use up --no-build to start existing images, and use up --build when the checkout or images changed.",
     "Providers: claude / claude-desktop / codex / gemini / generic; per-provider writer ids",
     "Modes: sidecar / claude-* / openai-* / endpoint[-fallback] (-only and endpoint = ~11.8 GB lighter)",
     "Ends with a per-agent [x]/[-]/[!] wiring ladder; /health poll",

@@ -28,7 +28,7 @@ Python wheel ship the Cortex Console at its existing runtime path.
 - Native tunnel launches require a live bridge acknowledgment as well as vendor readiness. Refresh keeps the previous launch active when the installed shim cannot confirm a compatible protocol, and skips a build this supervisor already rolled back.
 
 ### Changed (2026-11-21 — Native tunnel restart guidance)
-- Native tunnel update recognizes a verified current launch. When the running launch differs, update leaves it running and prints the commands to stop and run the same profile to reconnect.
+- Native tunnel update recognizes a verified current launch. When the running launch differs and cannot refresh in place, update leaves it running and prints the commands to stop and run the same profile to reconnect.
 - Native tunnel status tells you to use the client that started a Python-supervised tunnel to stop it. Native update explains why it leaves that launch running.
 
 ### Changed (2026-11-21 — Native move command dispatch)
@@ -43,7 +43,7 @@ Python wheel ship the Cortex Console at its existing runtime path.
 - Native installers retry the authenticated Codex credential check while the daemon starts and show the last failure if setup cannot finish. A rejected credential still fails immediately. Native `connect` uses the same startup budget. Both checks report unexpected responses, such as HTTP redirects or 404, by status.
 
 ### Added (2026-11-20 — Native foreground tunnel)
-- Run a prepared Secure MCP Tunnel with `pseudolife-mcp tunnel run`. Use `tunnel stop` to stop a tunnel started by this native client. The supervisor checks local readiness and owns the runtime and its launch files. Use the Python client for background start and refresh.
+- Run a prepared Secure MCP Tunnel with `pseudolife-mcp tunnel run`. Use `tunnel stop` to stop a tunnel started by this native client. The supervisor checks local readiness and owns the runtime and its launch files. Use the Python client for background start or to refresh a Python-managed launch. A compatible native supervisor can reconnect a foreground launch in place.
 - Native verification binds receipts to the saved credential, runtime and active launch. A later run removes private launch files only when it can confirm the old runtime has stopped. Recognized vendor startup errors appear in a bounded diagnostic summary.
 
 ### Changed (2026-11-20 — Retained tunnel keys)
@@ -91,7 +91,7 @@ Python wheel ship the Cortex Console at its existing runtime path.
 - The native `tunnel setup` command saves a new profile after explicit consent and an MCP handshake with the supplied daemon URL and owner-only credential file. Rerunning with equivalent settings reuses a profile saved by either client. Changes to a saved profile still follow the existing deferral.
 
 ### Added (2026-11-19 — Native tunnel profile continuation)
-- Native `tunnel setup` can resume a prepared profile and import its first runtime key through a private file or a terminal without echo. Windows stores the key with DPAPI. Setup and status point to the Python client for key renewal. Setup requires a saved tunnel ID before importing the first key and both connection flags to repoint a profile. Edits to profiles with a key, process record or autostart settings still defer at preflight. If a key or process record appears during setup, the refusal names the file. Setup and status name unpublished staging files left in the store.
+- Native `tunnel setup` can resume a prepared profile and import its first runtime key through a private file or a terminal without echo. Windows stores the key with DPAPI. For key renewal on a stopped native tunnel, use native `tunnel setup`. It retains the previous key during the replacement trial. Setup requires a saved tunnel ID before importing the first key and both connection flags to repoint a profile. Edits to profiles with a key, process record or autostart settings still defer at preflight. If a key or process record appears during setup, the refusal names the file. Setup and status name unpublished staging files left in the store.
 
 ### Changed (2026-11-19 — Native client release discovery)
 
@@ -112,7 +112,7 @@ Python wheel ship the Cortex Console at its existing runtime path.
 - Native `move` can carry the source daemon's bearer settings to an installed Linux Docker target. The target verifies its Compose configuration and local bearer authentication before the move commits.
 
 ### Added (2026-11-19 — Check bearer settings before a native bank move)
-- Native `move --dry-run` checks whether the source's bearer settings can be carried into an installed Linux Docker target. The check sends only which settings are present to the target. Running the move still requires `--no-keep-tokens` until the native handover is available.
+- Native `move --dry-run` checks whether the source's bearer settings can be carried into an installed Linux Docker target. The check sends only which settings are present to the target. A compatible installed target can carry the bearer settings during execution. A target that supports only carried-identity preflight must be updated or run with `--no-keep-tokens` to keep its existing settings.
 
 ### Fixed (2026-11-19 — macOS integration test timeout)
 - Give the macOS lite CI job 37 minutes so the test selection can finish on slower hosted runners.
