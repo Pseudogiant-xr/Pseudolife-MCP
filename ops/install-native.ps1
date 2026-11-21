@@ -2701,7 +2701,7 @@ foreach ($selectedClient in $clients) {
         $hookState["claude"] = "hook"
     } catch {
         $hookState["claude"] = "failed"
-        Write-Warning "The Claude Code session hook could not be written. $($_.Exception.Message) Check the hook error above and rerun the installer."
+        Write-Warning "The Claude Code session hook could not be written. Check the settings file's JSON and permissions, then rerun the installer."
     }
 }
 
@@ -3763,7 +3763,7 @@ if ($hookState["claude"] -eq "deferred") {
             $hookState["claude"] = "hook"
         } catch {
             $hookState["claude"] = "failed"
-            Write-Warning "The Claude Code session hook could not be written. $($_.Exception.Message) Check the hook error above and rerun the installer."
+            Write-Warning "The Claude Code session hook could not be written. Check the settings file's JSON and permissions, then rerun the installer."
         }
     } else {
         Write-Warning "The Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)."

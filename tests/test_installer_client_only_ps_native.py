@@ -1039,6 +1039,7 @@ def test_a_claude_hook_write_failure_stays_a_warning(tmp_path, deferred, failure
     assert proc.returncode == 0, _output(proc)
     assert "CLIENT_SETUP_CONTINUED" in proc.stdout
     assert "Warnings\nClaude Code hooks were not installed." in proc.stderr
+    assert "fixture hook write failure" not in _output(proc)
 
 
 @pytest.mark.parametrize("accepted", [True, False], ids=["accepted", "rejected"])
