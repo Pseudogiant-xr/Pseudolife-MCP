@@ -17,8 +17,10 @@ Python wheel ship the Cortex Console at its existing runtime path.
 
 - If the Python client registered tunnel autostart, opting in stops in preflight and prints the command to remove the service. Keep the Python client to retain autostart. Native tunnels run in the foreground.
 - A tunnel already started by the Python client keeps serving after an opt-in update. The update reports that it left the launch running. Stop it with the Python client before switching. If you already switched, end the earlier process before starting `pseudolife-mcp tunnel run` in a terminal that stays open.
-- A legacy bank that needs the archived Python 0.23.1 import hop can use it on Linux amd64 containers. On a host using Linux arm64 containers, native update stops before its backup and asks you to restore a verified backup on a Linux amd64 Docker host, finish the update there, and move the bank back.
+- A legacy bank that needs the archived Python 0.23.1 import hop can use it on Linux amd64 containers. On Apple-silicon Macs and other hosts using Linux arm64 containers, native update stops before its backup and asks you to restore a verified backup on a Linux amd64 Docker host, finish the update there, and move the bank back.
 - When a fresh native install explicitly requests Codex and the credential check fails, the installer warns with the cause and skips Codex registration. The remaining installation can complete with exit 0. Resolve the cause and rerun the installer.
+- On an attended native install, `--tunnel` or `-Tunnel` calls bare `tunnel setup`. It reports deferred setup or asks for the daemon URL and token file. The installer exits nonzero and keeps the host changes already made. Complete the [explicit native `pseudolife-mcp tunnel setup` steps](docs/guide/tunnels.md) afterwards.
+- When the native updater reports `needs-approval` for Codex hooks, it still suggests `python ops/setup-codex-hooks.py --source plugin --trust ask`. Open `/hooks` in Codex to review and approve the changed Pseudolife handlers.
 
 ### Added (2026-11-21 — Python package retirement checks)
 - The batch harness checks that dependencies on the frozen Python package are classified. A manual probe reports how selected tools behave in a disposable copy with the package absent.
@@ -106,7 +108,7 @@ Python wheel ship the Cortex Console at its existing runtime path.
 ### Fixed (2026-11-19 — Keep native move tied to its selected source containers)
 - Native `move` refuses a source whose daemon or PostgreSQL lacks an immutable Docker container ID or whose containers belong to different Compose projects.
 - Stops, starts, restart policy changes, and moved-marker writes and removal use the selected daemon. PostgreSQL sessions, dumps and database fences use the selected PostgreSQL container.
-- JSON dry-run plans include an `executable` flag. Plans that verify carried bearer settings report `false` while execution is unavailable.
+- JSON dry-run plans include an `executable` flag. For a move carrying bearer settings, it is `true` when the target can execute the handover and `false` when the target can only preflight it.
 
 ### Added (2026-11-19 — Carry daemon bearer settings during a native move)
 - Native `move` can carry the source daemon's bearer settings to an installed Linux Docker target. The target verifies its Compose configuration and local bearer authentication before the move commits.
@@ -344,9 +346,10 @@ Python wheel ship the Cortex Console at its existing runtime path.
   registered and runs the launcher the move replaces. Such a service is a
   systemd unit (a root `--system-service` unit included) or a launchd job
   carrying the Pseudolife tunnel owner marker, or a scheduled task whose
-  source is that marker; disabled ones count. The native client cannot run a
-  tunnel yet. On a disposable systemd user unit the service then restarted
-  every 5 seconds without end. This covers the update bridge from a Python
+  source is that marker; disabled ones count. The native client cannot start
+  a tunnel in the background or register one as a service. On a disposable
+  systemd user unit the service then restarted every 5 seconds without end.
+  This covers the update bridge from a Python
   client, `--clients-only`, a client machine, a release deploy (after its
   "nothing to do" check), a checkout `--all` deploy and unattended client
   updates. An unattended update on the daemon's host updates the daemon
