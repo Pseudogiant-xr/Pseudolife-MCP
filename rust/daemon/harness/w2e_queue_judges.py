@@ -195,6 +195,10 @@ def candidate_reopen_wait(generation, evidence):
 # rust/daemon/src/storage/graph.rs). The judge ticks' own alias read
 # (``load_inputs`` in rust/daemon/src/dream/candidates.rs) adds ORDER BY, so
 # a backend waiting on this text is the console holding the mutex.
+# PostgreSQL shows another backend's query and wait event only to the same
+# role or a member of pg_read_all_stats. The harness connects with the
+# daemon's own login, so it sees them; any other role never sees the console
+# parked, and the gate times out loudly instead of writing.
 CONSOLE_ALIAS_READ = "SELECT alias,entity_id FROM entity_aliases"
 WAITING_ON = (
     "SELECT EXISTS (SELECT 1 FROM pg_stat_activity a JOIN pg_locks l ON l.pid = a.pid "
@@ -230,6 +234,9 @@ def write_between_ticks(harness, port, dsn, statement, *, timeout_s=60.0, park_s
                 answer["error"] = failed
 
         with psycopg.connect(dsn) as gate, psycopg.connect(dsn, autocommit=True) as probe:
+            # A daemon transaction that never ends fails the step here
+            # instead of hanging it; daemon reads of aliases take milliseconds.
+            gate.execute("SET lock_timeout = '30s'")
             gate.execute("LOCK TABLE entity_aliases IN ACCESS EXCLUSIVE MODE")
             reader = threading.Thread(target=console, daemon=True)
             reader.start()

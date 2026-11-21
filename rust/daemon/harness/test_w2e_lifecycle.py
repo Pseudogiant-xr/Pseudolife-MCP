@@ -694,10 +694,11 @@ def test_queue_request_contract_pins_every_verdict_key_and_tick(harness):
 
 
 class _GateConn:
-    """A psycopg connection double for ``write_between_ticks``."""
+    """A psycopg connection double for ``write_between_ticks``: ``park()``
+    answers the probe for the parked console read."""
 
-    def __init__(self, log, parked):
-        self.log, self.parked = log, parked
+    def __init__(self, log, park):
+        self.log, self.park = log, park
 
     def __enter__(self):
         return self
@@ -707,7 +708,7 @@ class _GateConn:
 
     def execute(self, statement, params=None):
         self.log.append(("probe", params) if params else ("execute", statement))
-        return SimpleNamespace(fetchone=lambda: (self.parked.pop(0) if self.parked else False,))
+        return SimpleNamespace(fetchone=lambda: (self.park(),))
 
     def commit(self):
         self.log.append(("commit", None))
@@ -716,40 +717,73 @@ class _GateConn:
         self.log.append(("rollback", None))
 
 
-def _gate_harness(log):
+class _GateClock:
+    """The gate's clock: ``sleep`` advances it, so attempts, not wall time,
+    decide when the deadline passes. The real thread join keeps the whole
+    ``timeout_s`` for a console double that returns at once."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def _gate_harness(log, called=None):
     def call(port, method, path, headers, body, timeout):
         log.append(("console", f"{method} {path}"))
+        if called is not None:
+            called.set()
         return {"status": 200}
     return SimpleNamespace(w1a=SimpleNamespace(call=call), AUTH=("Authorization", "Bearer t"))
 
 
 def test_queue_external_write_commits_only_while_the_console_read_is_parked(harness, monkeypatch):
+    import threading
+
     import w2e_queue_judges as q
 
-    log, parked = [], [False, True]
+    log, called = [], threading.Event()
+    clock = _GateClock()
+    monkeypatch.setattr(q, "time", SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep))
+    # The console read is parked only once the console call was made.
     monkeypatch.setattr(q.psycopg, "connect",
-                        lambda dsn, autocommit=False: _GateConn(log, parked))
-    result = q.write_between_ticks(_gate_harness(log), 1, "dsn", "INSERT INTO edges VALUES (1)")
+                        lambda dsn, autocommit=False: _GateConn(log, lambda: called.wait(60)))
+    result = q.write_between_ticks(_gate_harness(log, called), 1, "dsn",
+                                   "INSERT INTO edges VALUES (1)")
     assert result == {"isError": False, "value": None}
     steps = [entry for entry in log if entry[0] != "probe"]
-    assert steps[0] == ("execute", "LOCK TABLE entity_aliases IN ACCESS EXCLUSIVE MODE")
-    assert ("console", "GET /api/facts?limit=1") in steps
+    assert steps[:2] == [("execute", "SET lock_timeout = '30s'"),
+                         ("execute", "LOCK TABLE entity_aliases IN ACCESS EXCLUSIVE MODE")]
+    console = steps.index(("console", "GET /api/facts?limit=1"))
+    write = steps.index(("execute", "INSERT INTO edges VALUES (1)"))
+    assert console < write
     assert steps[-2:] == [("execute", "INSERT INTO edges VALUES (1)"), ("commit", None)]
+    assert ("rollback", None) not in steps
     probes = [entry[1] for entry in log if entry[0] == "probe"]
-    assert probes == [("entity_aliases", q.CONSOLE_ALIAS_READ)] * 2
+    assert probes == [("entity_aliases", q.CONSOLE_ALIAS_READ)]
 
 
 def test_queue_external_write_is_never_made_while_a_tick_holds_the_mutex(harness, monkeypatch):
     import w2e_queue_judges as q
 
     log = []
-    monkeypatch.setattr(q.psycopg, "connect", lambda dsn, autocommit=False: _GateConn(log, []))
+    clock = _GateClock()
+    monkeypatch.setattr(q, "time", SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep))
+    monkeypatch.setattr(q.psycopg, "connect",
+                        lambda dsn, autocommit=False: _GateConn(log, lambda: False))
     with pytest.raises(RuntimeError, match="was not made"):
         q.write_between_ticks(_gate_harness(log), 1, "dsn", "INSERT INTO edges VALUES (1)",
-                              timeout_s=0.3, park_s=0.1)
+                              timeout_s=60.0, park_s=20.0)
     assert ("execute", "INSERT INTO edges VALUES (1)") not in log
     assert ("commit", None) not in log
-    assert sum(entry == ("rollback", None) for entry in log) >= 2
+    rollbacks = sum(entry == ("rollback", None) for entry in log)
+    assert rollbacks >= 2
+    assert rollbacks == sum(entry[0] == "console" for entry in log)
+    assert clock.now >= 60.0
 
 
 def test_queue_external_writes_are_all_sql_ops_the_gate_runs(harness):
