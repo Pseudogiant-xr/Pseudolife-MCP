@@ -556,6 +556,15 @@ impl Scenario {
         let home = Home::new();
         let root = &home.0;
         let executable = std::env::current_exe().unwrap();
+        // The Linux debug CLI can be hundreds of megabytes. Exercise the
+        // same production command and digest checks with a disposable image
+        // that omits debug symbols. CI can run several such witnesses at once.
+        #[cfg(target_os = "linux")]
+        let compact = production.map(|binary| compact_fixture(root, binary));
+        #[cfg(target_os = "linux")]
+        let production = compact.as_deref().or(production);
+        #[cfg(target_os = "linux")]
+        let candidate_source = candidate_source.and(production);
         let candidate = install_candidate(root, candidate_source, 1);
         let mock_image = root.join("original-image");
         if production.is_none() {
@@ -642,9 +651,43 @@ impl Scenario {
         let read = || {
             refresh::read_outcome(self.root(), "dot").filter(|outcome| outcome.for_ticket(ticket))
         };
-        wait_until(|| read().is_some_and(|outcome| outcome.phase == phase));
+        wait_until(|| {
+            read().is_some_and(|outcome| {
+                assert!(
+                    outcome.phase == phase || outcome.phase == refresh::Phase::Pending,
+                    "expected {phase:?}, got {:?} ({:?})",
+                    outcome.phase,
+                    outcome.cause
+                );
+                outcome.phase == phase
+            })
+        });
         read().unwrap()
     }
+}
+
+#[cfg(target_os = "linux")]
+fn compact_fixture(root: &Path, binary: &Path) -> PathBuf {
+    let destination = root.join("original-bridge");
+    match std::process::Command::new("/usr/bin/strip")
+        .args(["--strip-debug", "-o"])
+        .arg(&destination)
+        .arg(binary)
+        .status()
+    {
+        Ok(status) => assert!(
+            status.success(),
+            "could not prepare the compact production bridge fixture"
+        ),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && std::env::var_os("GITHUB_ACTIONS").is_none() =>
+        {
+            return binary.to_owned();
+        }
+        Err(error) => panic!("could not prepare the compact production bridge fixture: {error}"),
+    }
+    destination
 }
 
 impl Drop for Scenario {
