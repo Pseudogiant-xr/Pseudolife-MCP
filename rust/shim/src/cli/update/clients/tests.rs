@@ -809,11 +809,13 @@ fn launcher(fixture: &Fixture) -> impl FnOnce() -> Result<Option<PathBuf>, Strin
 }
 
 #[test]
-fn tunnel_step_accepts_a_running_tunnel_it_cannot_refresh_as_stale() {
+fn tunnel_step_preserves_the_restart_instructions_for_a_stale_tunnel() {
     let fixture = Fixture::new();
     let root = tunnel_store(&fixture);
-    // `tunnel update`'s answer for a running Python-era tunnel.
-    let answer = r#"{"state": "stale", "needs_attention": false, "detail": "1 saved tunnel profiles checked; local client registrations preserved; tunnel dot keeps running on its current runtime (process record X); this client cannot refresh or stop it yet, so it was left as it is", "profiles": [{"profile": "dot", "state": "stale", "running": true, "detail": "..."}]}"#;
+    let detail = "Run `pseudolife-mcp tunnel stop --profile dot`, then `pseudolife-mcp tunnel run --profile dot` to reconnect the tunnel";
+    let answer = json!({"state":"stale","needs_attention":false,"detail":detail,
+        "profiles":[{"profile":"dot","state":"stale","running":true,"detail":detail}]})
+    .to_string();
     let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(0, &format!("{answer}\n")));
     let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
     // The command reads the directory the step scanned.
@@ -825,7 +827,7 @@ fn tunnel_step_accepts_a_running_tunnel_it_cannot_refresh_as_stale() {
     assert_eq!(step["state"], "stale");
     assert_eq!(
         step["detail"],
-        "1 saved tunnel profiles checked; local client registrations preserved; tunnel dot keeps running on its current runtime (process record X); this client cannot refresh or stop it yet, so it was left as it is; run by the installed native launcher"
+        format!("{detail}; run by the installed native launcher")
     );
     // The ladder's verdict: a stale tunnel step is not a failed client step.
     assert!(ladder_ok(
@@ -835,7 +837,7 @@ fn tunnel_step_accepts_a_running_tunnel_it_cannot_refresh_as_stale() {
         &json!({"shim": {"state": "current"}, "tunnel": {"state": "failed"}})
     ));
     // A stale answer with a failing exit is not an answer.
-    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(1, answer));
+    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(1, &answer));
     let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
     assert_eq!(step["state"], "failed");
 }
