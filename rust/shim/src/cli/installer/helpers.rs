@@ -42,7 +42,18 @@ pub(super) fn json_string() -> u8 {
     }
 }
 
-/// `connect-report valid|error|plan|manual|handled` over `connect --json`.
+fn needs_current_verification(report: &Value) -> bool {
+    let Some(rows) = report["rows"].as_array() else {
+        return false;
+    };
+    report["exit"] == 0
+        && !rows.iter().any(|row| row["state"] == "change")
+        && rows
+            .iter()
+            .any(|row| row["place"] == "registration" && row["state"] == "current")
+}
+
+/// `connect-report valid|error|plan|manual|handled|current` over `connect --json`.
 pub(super) fn connect_report(mode: &str) -> u8 {
     let report = stdin_json();
     let valid = report.as_ref().is_some_and(|r| {
@@ -50,6 +61,13 @@ pub(super) fn connect_report(mode: &str) -> u8 {
     });
     if mode == "valid" {
         return u8::from(!valid);
+    }
+    if mode == "current" {
+        return out(if report.as_ref().is_some_and(needs_current_verification) {
+            "current"
+        } else {
+            ""
+        });
     }
     let Some(report) = report.filter(|_| valid) else {
         return 0;
@@ -260,6 +278,20 @@ pub(super) fn pairing_code_valid() -> u8 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_successful_plan_without_changes_needs_current_verification() {
+        use serde_json::json;
+        let current = json!({"place":"registration","state":"current"});
+        let change = json!({"place":"schedule","state":"change"});
+        let check = super::needs_current_verification;
+        assert!(check(&json!({"exit": 0, "rows": [current]})));
+        assert!(!check(&json!({"exit": 0, "rows": [current, change]})));
+        assert!(!check(&json!({"exit": 3, "rows": [current]})));
+        assert!(!check(
+            &json!({"exit": 0, "rows": [{"place":"schedule","state":"current"}]})
+        ));
+    }
+
     use serde_json::json;
 
     #[test]

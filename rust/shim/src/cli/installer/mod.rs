@@ -65,10 +65,13 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         },
         Some("json-string") if arguments.len() == 1 => helpers::json_string(),
         Some("connect-report") => match &arguments[1..] {
-            [mode] if ["valid", "error", "plan", "manual", "handled"].contains(&mode.as_str()) => {
+            [mode]
+                if ["valid", "error", "plan", "manual", "handled", "current"]
+                    .contains(&mode.as_str()) =>
+            {
                 helpers::connect_report(mode)
             }
-            _ => usage("connect-report takes valid, error, plan, manual or handled"),
+            _ => usage("connect-report takes valid, error, plan, manual, handled or current"),
         },
         Some("is-loopback") => match &arguments[1..] {
             [url] => helpers::is_loopback(url),

@@ -122,7 +122,7 @@ pub(crate) async fn wait_for_credential(
     }
 }
 
-async fn verify_installer_credential(url: &str, token: &str) -> Result<(), SetupError> {
+pub(crate) async fn verify_installer_credential(url: &str, token: &str) -> Result<(), SetupError> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
