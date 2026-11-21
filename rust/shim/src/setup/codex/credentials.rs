@@ -122,7 +122,7 @@ pub(crate) async fn wait_for_credential(
     }
 }
 
-async fn verify_installer_credential(url: &str, token: &str) -> Result<(), SetupError> {
+pub(crate) async fn verify_installer_credential(url: &str, token: &str) -> Result<(), SetupError> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -153,7 +153,7 @@ async fn installer_check_result(
     url: &str,
     probe: impl AsyncFnMut(Duration) -> Result<StatusCode, ProbeFailure>,
 ) -> Result<(), SetupError> {
-    let (mut error, failure) = match wait_for_credential(probe).await {
+    let (error, failure) = match wait_for_credential(probe).await {
         CredentialCheck::Accepted => return Ok(()),
         CredentialCheck::Refused => (
             SetupError(
@@ -176,8 +176,7 @@ async fn installer_check_result(
             CredentialCheckFailure::UnexpectedStatus,
         ),
     };
-    error.credential_check = Some(failure);
-    Err(error)
+    Err(error.with_credential_check(failure))
 }
 
 /// Installer credential bootstrap; configured credentials outrank installer or
