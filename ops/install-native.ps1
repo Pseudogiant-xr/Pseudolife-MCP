@@ -2557,7 +2557,7 @@ foreach ($selectedClient in $clients) {
             }
         } catch {
             $codexCredentialBootstrapFailed = $true
-            $codexSetup.recovery = "Codex credential setup did not return a usable report. Rerun the installer to retry."
+            $codexSetup.recovery = "Codex credential setup failed. The helper did not return a usable report. Rerun the installer to retry."
         }
         # pseudolife-mcp connect (the client-only connect block)
         # re-pointed an existing registration already; one still naming

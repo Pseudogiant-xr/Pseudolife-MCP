@@ -2575,7 +2575,7 @@ for selected_client in $CLIENTS; do
                 if [ "$credential_exit" -ne 0 ]; then
                     CODEX_HOOK_RECOVERY=$(native_helper json-field recovery <<< "$credential_output" 2>/dev/null) || CODEX_HOOK_RECOVERY=""
                 fi
-                CODEX_HOOK_RECOVERY="${CODEX_HOOK_RECOVERY:-Codex credential setup did not return a usable report. Rerun the installer to retry.}"
+                CODEX_HOOK_RECOVERY="${CODEX_HOOK_RECOVERY:-Codex credential setup failed. The helper did not return a usable report. Rerun the installer to retry.}"
             fi
             if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
                 setup_args=(codex-hooks --checkout "$repo" --source "$CODEX_HOOKS"
