@@ -2,6 +2,7 @@
 //! through a local owner-only pipe so the saved DPAPI blob is the only
 //! persistent copy of the key.
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use uuid::Uuid;
 
 use super::super::{Fail, store};
@@ -66,21 +67,28 @@ impl Key {
     }
 
     #[cfg(unix)]
-    pub(super) fn stage(self, directory: &Path, _launch: Uuid) -> Result<Staged, Fail> {
+    pub(super) fn stage(&self, directory: &Path) -> Result<Staged, Fail> {
         let path = directory.join("key");
-        crate::board::state::atomic_create(&path, &self.0).map_err(|_| super::UNSAFE_STORE)?;
+        if store::occupied(&path)? {
+            let staged = Self(store::private_read(&path, 16384)?);
+            if !self.matches(&staged.0) {
+                return Err(super::UNSAFE_STORE);
+            }
+        } else {
+            crate::board::state::atomic_create(&path, &self.0).map_err(|_| super::UNSAFE_STORE)?;
+        }
         Ok(Staged {
             reference: format!("file:{}", path.display()),
         })
     }
 
     #[cfg(windows)]
-    pub(super) fn stage(self, _directory: &Path, launch: Uuid) -> Result<Staged, Fail> {
-        let pipe_name = format!(r"\\.\pipe\pseudolife-tunnel-{}", launch.simple());
+    pub(super) fn stage(&self, _directory: &Path) -> Result<Staged, Fail> {
+        let pipe_name = format!(r"\\.\pipe\pseudolife-tunnel-{}", Uuid::new_v4().simple());
         let server = pipe(&pipe_name).map_err(|_| Fail::Tunnel(
             "cannot create the local private runtime-key pipe. Check the account's access and retry",
         ))?;
-        let task = tokio::spawn(deliver(server, self));
+        let task = tokio::spawn(deliver(server, Self(self.0.clone())));
         Ok(Staged {
             reference: format!("file:{pipe_name}"),
             _task: tokio_util::task::AbortOnDropHandle::new(task),

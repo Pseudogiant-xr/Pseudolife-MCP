@@ -1,7 +1,10 @@
 """Conductor delivery and grant fencing, checked independently on both arms."""
-from board.scenarios import BASE_CONFIG, Scenario, act, msg, reg, seed
+from board.scenarios import BASE_CONFIG, Scenario, act, fixture_seed, msg, reg
+from board.host_fixtures import operator_role
 from board.norm import Normalizer
 from board.maintainer import CONFIG, TABLES, SignedNormalizer, bootstrap, challenge, complete
+
+PROJECT = "w2f-conductor-wake-fixture"
 
 
 class ExpiredGrantNormalizer(Normalizer):
@@ -33,16 +36,16 @@ def immediate_offer(step):
 
 def setup():
     return [
-        reg("conductor", "A", project="p1"),
-        reg("peer", "C", project="p1", label="conductor"),
-        reg("recipient", "B", project="p1", capabilities={"ring": True, "codex": False}),
+        reg("conductor", "A", project=PROJECT),
+        reg("peer", "C", project=PROJECT, label="conductor"),
+        reg("recipient", "B", project=PROJECT, capabilities={"ring": True, "codex": False}),
         act("recipient listening", "attach", agent="B", body=lambda c: {
             "attachment_id": "listener", "ring": True, "ring_armed_until": c.now + 60},
             save=lambda c, r: c.vals.__setitem__("generation", r["generation"])),
         act("recipient needs maintainer approval", "update", agent="B", body={
             "park_reason": "needs_approval", "park_needs": "maintainer approval",
             "park_clear_by": "maintainer"}),
-        seed("operator grant", lambda s, c: s.grant_conductor("p1", c.id("A"), hold=3600)),
+        fixture_seed("operator grant", lambda rows, ctx: operator_role(rows, PROJECT, ctx.id("A"))),
     ]
 
 
@@ -73,19 +76,19 @@ class ConductorWakeFences(Scenario):
 
     def steps(self):
         return setup() + [
-            seed("expire grant", lambda s, c: s.storage.conn.execute(
-                "UPDATE coordination_leases SET expires_at=1 WHERE name='conductor:p1'")),
+            fixture_seed("expire grant", lambda rows, _ctx: rows.conn.execute(
+                "UPDATE coordination_leases SET expires_at=1 WHERE name=%s", (f"conductor:{PROJECT}",))),
             expect(msg("expired grant withheld", "A", "B", "expired"), "withheld", "need_not_cleared"),
-            seed("grant new holder", lambda s, c: s.grant_conductor("p1", c.id("C"), hold=3600)),
+            fixture_seed("grant new holder", lambda rows, ctx: operator_role(rows, PROJECT, ctx.id("C"))),
             expect(msg("old holder withheld", "A", "B", "stolen"), "withheld", "need_not_cleared"),
             expect(msg("new holder rings", "C", "B", "current"), "rung", "conductor"),
-            seed("hold no longer matches grant fence", lambda s, c: s.storage.conn.execute(
+            fixture_seed("hold no longer matches grant fence", lambda rows, _ctx: rows.conn.execute(
                 "UPDATE coordination_leases SET fence=nextval('coordination_lease_fence') "
-                "WHERE name='conductor:p1'")),
+                "WHERE name=%s", (f"conductor:{PROJECT}",))),
             expect(msg("stale fence withheld", "C", "B", "stale fence"), "withheld", "need_not_cleared"),
             expect(msg("ordinary urgency", "C", "B", "first", urgent=True), "rung", "urgent"),
             expect(msg("staggered peer urgency", "C", "B", "second", urgent=True), "rung", "urgent"),
-            seed("restore conductor", lambda s, c: s.grant_conductor("p1", c.id("A"), hold=3600)),
+            fixture_seed("restore conductor", lambda rows, ctx: operator_role(rows, PROJECT, ctx.id("A"))),
             expect(msg("conductor bypasses pending stagger", "A", "B", "immediate"), "rung", "conductor"),
             immediate_offer(expect(act("serve immediately", "heartbeat", agent="B", body=lambda c: {
                 "attachment_id": "listener", "generation": c.vals["generation"],

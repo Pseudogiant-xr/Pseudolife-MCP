@@ -1,0 +1,118 @@
+{
+  "host_bootstrap": {
+    "used_at": null,
+    "code_hash": "$code_hash",
+    "expires_at": "$expires",
+    "credential_id": null,
+    "failed_attempts": 0
+  },
+  "host_key_change": {
+    "hlc": "",
+    "seq": "$seq",
+    "body": null,
+    "hash": null,
+    "task": "",
+    "actor": "operator",
+    "event": "maintainer_key",
+    "payload": {
+      "by": "host",
+      "change": "$change",
+      "credential_id": "$credential",
+      "label": "$label",
+      "path": "host",
+      "revoked": null
+    },
+    "project": "",
+    "agent_id": "",
+    "body_salt": null,
+    "prev_hash": "$prev_hash",
+    "principal": "",
+    "created_at": "$now",
+    "message_id": null,
+    "recipient_agent_id": null
+  },
+  "host_spare": {
+    "alg": -8,
+    "label": "$label",
+    "state": "$state",
+    "created_at": "$now",
+    "flagged_at": null,
+    "public_key": "$public_key",
+    "revoked_at": null,
+    "revoked_by": null,
+    "sign_count": "$sign_count",
+    "active_from": "$active_from",
+    "enrolled_by": "bootstrap",
+    "signs_in_as": null,
+    "last_used_at": null,
+    "credential_id": "$credential"
+  },
+  "empty_role": {
+    "name": "$name",
+    "fence": 0,
+    "expect": null,
+    "purpose": "",
+    "freed_at": null,
+    "expires_at": null,
+    "acquired_at": null,
+    "expected_end": null,
+    "holder_agent_id": null,
+    "holder_principal": ""
+  },
+  "operator_role": {
+    "name": "$name",
+    "fence": "$fence",
+    "expect": null,
+    "purpose": "$purpose",
+    "freed_at": null,
+    "expires_at": "$expires",
+    "acquired_at": "$now",
+    "expected_end": null,
+    "holder_agent_id": "$holder",
+    "holder_principal": "$principal"
+  },
+  "operator_role_event": {
+    "hlc": "",
+    "seq": "$seq",
+    "body": null,
+    "hash": null,
+    "task": "$task",
+    "actor": "operator",
+    "event": "$event",
+    "payload": {
+      "fence": "$fence",
+      "hold": 3600,
+      "name": "$name",
+      "replaced": "$replaced"
+    },
+    "project": "$project",
+    "agent_id": "$holder",
+    "body_salt": null,
+    "prev_hash": "$prev_hash",
+    "principal": "",
+    "created_at": "$now",
+    "message_id": null,
+    "recipient_agent_id": null
+  },
+  "operator_end_event": {
+    "hlc": "",
+    "seq": "$seq",
+    "body": null,
+    "hash": null,
+    "task": "",
+    "actor": "$actor",
+    "event": "$event",
+    "payload": {
+      "fence": "$fence",
+      "name": "$name"
+    },
+    "project": "",
+    "agent_id": "$holder",
+    "body_salt": null,
+    "prev_hash": "$prev_hash",
+    "principal": "",
+    "created_at": "$now",
+    "message_id": null,
+    "recipient_agent_id": null
+  }
+}

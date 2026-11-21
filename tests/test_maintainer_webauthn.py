@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 
 import pytest
 
@@ -16,6 +17,16 @@ from tests.maintainer_authenticator import ORIGIN, RP_ID, RawPairs, SoftAuthenti
 
 CHALLENGE = hashlib.sha256(b"payload").digest()
 ALGS = [-7, -8, -257]
+
+
+def test_fixture_base64url_matches_the_frozen_encoder():
+    from tests.maintainer_authenticator import b64url_encode as fixture_encode
+
+    rng = random.Random(502)
+    samples = [b"", b"a", b"ab", b"abc", b"abcd", b"\xfb\xff", b"\xff\xff\xff"]
+    samples.extend(rng.randbytes(rng.randint(0, 512)) for _ in range(400))
+    for raw in samples:
+        assert fixture_encode(raw) == b64url_encode(raw)
 
 
 def _register(response, *, challenge=CHALLENGE, origin=ORIGIN, rp_id=RP_ID):
