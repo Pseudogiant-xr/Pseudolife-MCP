@@ -133,9 +133,10 @@ def test_without_a_registration_the_codex_setup_follows_the_dry_run(bash, tmp_pa
 
 
 @BASH
-def test_a_failed_connect_stops_before_the_codex_setup(bash, tmp_path):
+def test_a_failed_connect_skips_only_the_failed_clients_setup(bash, tmp_path):
     proc, calls = _connect_stages_sh(_Shell(bash, tmp_path), plan=PLAN_EXISTING, apply_exit=4)
-    assert proc.returncode == 1
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "MCP_CODEX=failed" in proc.stdout
     assert not any(call.startswith(("codex-setup|", "codex|")) for call in calls)
 
 

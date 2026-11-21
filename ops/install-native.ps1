@@ -684,6 +684,8 @@ $script:installerRerun = $false
 $script:recordedBankLocation = $null
 $script:recordedInstructionChoices = @{}
 $restoredExtractor = $false
+$restoredClient = $false
+$clientExplicit = [bool]$Client
 if (-not $ClientOnly -and -not $DaemonUrl -and -not $env:PSEUDOLIFE_MCP_DAEMON_URL -and (Test-Path -LiteralPath $envFile)) {
     $recordedChoices = @(Invoke-InstallerState choices --env-file $envFile)
     foreach ($recordedLine in $recordedChoices) {
@@ -693,7 +695,7 @@ if (-not $ClientOnly -and -not $DaemonUrl -and -not $env:PSEUDOLIFE_MCP_DAEMON_U
             'MODEL' { if ($restoredExtractor -and -not $Model) { $Model = $value } }
             'EXTRACTOR_URL' { if ($restoredExtractor -and -not $ExtractorUrl) { $ExtractorUrl = $value } }
             'SHIM_PORT' { if ($restoredExtractor -and $ShimPort -eq 0 -and -not $PSBoundParameters.ContainsKey('ShimPort')) { $ShimPort = [int]$value } }
-            'CLIENT' { if (-not $Client) { $Client = $value } }
+            'CLIENT' { if (-not $Client) { $Client = $value; $restoredClient = $true } }
             'BANK_LOCATION' { $script:recordedBankLocation = $value; $script:installerRerun = $true }
             'INSTRUCTIONS_GEMINI' { $script:recordedInstructionChoices['gemini'] = $value }
             'INSTRUCTIONS_GENERIC' { $script:recordedInstructionChoices['generic'] = $value }
@@ -705,6 +707,20 @@ if (-not $ClientOnly -and -not $DaemonUrl -and -not $env:PSEUDOLIFE_MCP_DAEMON_U
             'TRANSPORT' { if (-not $PSBoundParameters.ContainsKey('Transport')) { $Transport = $value } }
             'NO_TOKEN' { if (-not $PSBoundParameters.ContainsKey('NoToken') -and $value -eq '1') { $NoToken = [switch]$true } }
         }
+    }
+    if ($restoredClient -and $Client) {
+        # Old records lack provenance. The marker must name the exact saved
+        # client list and be inside the installer's managed block.
+        $insideManaged = $false
+        $savedRequest = $null
+        foreach ($line in (Get-Content -LiteralPath $envFile)) {
+            if ($line -ceq $EnvBegin) { $insideManaged = $true; continue }
+            if ($line -ceq $EnvEnd) { $insideManaged = $false; continue }
+            if ($insideManaged -and $line -cmatch '^PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=(.*)$') {
+                $savedRequest = $Matches[1]
+            }
+        }
+        $clientExplicit = $savedRequest -ceq $Client
     }
     if ($restoredExtractor) { Assert-ExtractorArgs }
 }
@@ -960,6 +976,7 @@ function Invoke-ConsoleSignin {
     }
     if (-not $haveShim) {
         Write-Warning "The pseudolife-mcp shim is unavailable (see above), so the Console was not opened: run pseudolife-mcp console once it is installed."
+        $script:consoleSigninWarning = $true
         return
     }
     $oldTokenFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
@@ -976,6 +993,7 @@ function Invoke-ConsoleSignin {
     }
     if ($consoleExit -ne 0) {
         Write-Warning "pseudolife-mcp console exited $consoleExit (see its message above). The install itself is complete: run pseudolife-mcp console to open the Console signed in."
+        $script:consoleSigninWarning = $true
     }
 }
 # <<< console sign-in <<<
@@ -1331,12 +1349,14 @@ if (-not $Client) {
                 Write-Host '  please answer with numbers 1-5 (e.g. "1 3")'
             } else {
                 $Client = $picked -join ","
+                $clientExplicit = $true
             }
         }
     }
 }
 $clients = @(Get-ProviderList $Client)
 $clientList = $clients -join ","
+$requestedClients = if ($clientExplicit) { $clients }
 Step "Providers: $($clients -join ' ')"
 if ($interactive -and -not $script:installerRerun) {
     Write-Host ""
@@ -1450,12 +1470,6 @@ function Invoke-ClientOnlyPreflight {
         }
         Assert-ClientTokenFile
     }
-    foreach ($selectedClient in $clients) {
-        if (($selectedClient -in "claude", "codex", "gemini") -and
-            -not (Get-Command $selectedClient -ErrorAction SilentlyContinue)) {
-            throw "client-only install: the $selectedClient CLI is not on PATH. Install it, or drop it from -Client, then re-run"
-        }
-    }
     # A redirect is refused, as curl -f and the shim refuse one.
     $daemonHealth = $null
     try {
@@ -1489,6 +1503,12 @@ Step "Preflight..."
 if ($ClientOnly) {
     Invoke-ClientOnlyPreflight
 } else {
+    # Missing client tools are reported after the host prerequisites. Do
+    # not change the standalone preflight's CLI checks.
+    $preflightClients = @($clients | Where-Object {
+        $_ -notin "claude", "codex", "gemini" -or (Get-Command $_ -ErrorAction SilentlyContinue)
+    }) -join ","
+    if (-not $preflightClients) { $preflightClients = "generic" }
     # `&` on a .ps1 only refreshes $LASTEXITCODE when the script exits explicitly;
     # clear the stale value a prior native command may have left.
     $global:LASTEXITCODE = 0
@@ -1496,7 +1516,7 @@ if ($ClientOnly) {
     $savedNativeCli = $env:PSEUDOLIFE_NATIVE_CLI
     $env:PSEUDOLIFE_NATIVE_CLI = if ($script:nativeStaged) { $script:nativeStaged } else { $script:nativeHelper }
     try {
-        & (Join-Path $PSScriptRoot "preflight-native.ps1") -Client $clientList
+        & (Join-Path $PSScriptRoot "preflight-native.ps1") -Client $preflightClients
     } finally {
         $env:PSEUDOLIFE_NATIVE_CLI = $savedNativeCli
     }
@@ -1847,6 +1867,7 @@ if (-not $ClientOnly) {
     $block.Add("PSEUDOLIFE_INSTALL_EXTRACTOR_URL=$ExtractorUrl")
     $block.Add("PSEUDOLIFE_INSTALL_SHIM_PORT=$ShimPort")
     $block.Add("PSEUDOLIFE_INSTALL_CLIENT=$clientList")
+    if ($requestedClients) { $block.Add("PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=$clientList") }
     $block.Add("PSEUDOLIFE_INSTALL_BANK_LOCATION=$($script:BankLocation)")
     $block.Add("PSEUDOLIFE_INSTALL_INSTRUCTIONS=$(if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { 'auto' })")
     $block.Add("PSEUDOLIFE_INSTALL_CODEX_HOOKS=$CodexHooks")
@@ -2302,16 +2323,15 @@ function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
 # no token and writes nothing; when it finds no registration (exit 3),
 # connect is not run again. A failed connect stops the install.
 $script:connectedClients = @()
-$script:connectChecked = $false
-function Get-ConnectClientNames {
-    # The selected clients as connect names them, comma-separated.
-    $names = foreach ($selectedClient in $clients) {
-        switch ($selectedClient) {
-            "claude" { "claude-code" }
-            { $_ -in "claude-desktop", "codex", "gemini" } { $_ }
-        }
-    }
-    return (@($names) -join ",")
+$script:connectCheckedClients = @()
+$script:clientSetupFailures = @{}
+function Set-ClientSetupFailure([string]$Provider, [string]$Reason) {
+    $script:clientSetupFailures[$Provider] = $Reason
+    if ($null -ne $mcpState) { $mcpState[$Provider] = "failed" }
+}
+function Write-ClientSetupFailure([string]$Provider, [string]$Reason) {
+    Set-ClientSetupFailure $Provider $Reason
+    Write-Warning $Reason
 }
 function Test-ConnectReport($report) {
     # connect's report, or nothing to trust: a JSON object with rows and exit.
@@ -2340,17 +2360,16 @@ function Write-ConnectPlan($report, [switch]$ManualOnly) {
         if ($row.detail) { Write-Host "             $($row.detail)" }
     }
 }
-function Invoke-ClientOnlyConnect {
-    $names = Get-ConnectClientNames
-    if (-not $names) { return }
+function Connect-ExistingRegistration([string]$Provider, [string]$Name) {
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): the pseudolife-mcp shim is unavailable (see above). One that names another daemon stays as it is."
         return
     }
     $shim = $script:shimInstallPath
+    $PSNativeCommandUseErrorActionPreference = $false
     try {
         $global:LASTEXITCODE = 0
-        $planOutput = & $shim connect $DaemonUrl --token-file $TokenFile --client $names --dry-run --json
+        $planOutput = & $shim connect $DaemonUrl --token-file $TokenFile --client $Name --dry-run --json
         $planExit = $LASTEXITCODE
     } catch {
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): $shim could not be run ($($_.Exception.Message)). One that names another daemon stays as it is."
@@ -2366,7 +2385,7 @@ function Invoke-ClientOnlyConnect {
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): $why. One that names another daemon stays as it is."
         return
     }
-    $script:connectChecked = $true
+    $script:connectCheckedClients += $Provider
     if ($planExit -eq 3) {
         # No registration connect can write: the registrars create them.
         if (@(Get-ConnectRows $report | Where-Object { $_.state -eq "manual" }).Count -gt 0) {
@@ -2378,19 +2397,20 @@ function Invoke-ClientOnlyConnect {
     if ($planExit -ne 0) {
         # Under --json the reason is only in the report.
         $reason = if ($report.PSObject.Properties.Name -contains "error" -and $report.error) { ": $($report.error)" } else { "" }
-        Write-Host "client-only install: pseudolife-mcp connect could not check this machine's existing registrations (it exited $planExit$reason). Fix that, then re-run"
-        exit 1
+        Write-ClientSetupFailure $Provider "pseudolife-mcp connect could not check the existing registration (exit $planExit$reason). Fix the reported problem and rerun the installer."
+        return
     }
     Step "Existing registrations: pseudolife-mcp connect points them at $($DaemonUrl):"
     Write-ConnectPlan $report
     try {
         $global:LASTEXITCODE = 0
-        & $shim connect $DaemonUrl --token-file $TokenFile --client $names --yes | Out-Host
+        $applyOutput = @(& $shim connect $DaemonUrl --token-file $TokenFile --client $Name --yes 2>&1)
         $applyExit = $LASTEXITCODE
     } catch {
-        Write-Host "  $($_.Exception.Message)"
+        $applyOutput = @($_.Exception.Message)
         $applyExit = 1
     }
+    $applyOutput | Out-Host
     if ($applyExit -ne 0) {
         $meaning = switch ($applyExit) {
             1 { "a write failed, and every file it wrote was rolled back" }
@@ -2398,12 +2418,24 @@ function Invoke-ClientOnlyConnect {
             5 { "the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" }
             default { "see its message above" }
         }
-        Write-Host "client-only install: pseudolife-mcp connect exited $($applyExit): $meaning. The install stopped before the Codex setup and the registrations; fix that, then re-run"
-        exit 1
+        $reported = $applyOutput | ForEach-Object { "$_" } | Where-Object { $_.StartsWith("connect: ") } | Select-Object -Last 1
+        if ($reported) { $meaning = $reported.Substring("connect: ".Length) }
+        Write-ClientSetupFailure $Provider "pseudolife-mcp connect exited ${applyExit}: $meaning. Fix the reported problem and rerun the installer."
+        return
     }
-    $script:connectedClients = @(Get-ConnectRows $report |
+    $script:connectedClients += @(Get-ConnectRows $report |
         Where-Object { ($_.place -eq "registration") -and ($_.state -in "current", "change") } |
         ForEach-Object { [string]$_.client })
+}
+function Invoke-ClientOnlyConnect {
+    # A failed existing registration must leave the other clients eligible.
+    foreach ($provider in $clients) {
+        if ($provider -in "claude", "codex", "gemini" -and -not (Get-Command $provider -ErrorAction SilentlyContinue)) { continue }
+        switch ($provider) {
+            "claude" { Connect-ExistingRegistration $provider "claude-code" }
+            { $_ -in "claude-desktop", "codex", "gemini" } { Connect-ExistingRegistration $provider $provider }
+        }
+    }
 }
 # <<< client-only connect <<<
 # >>> client-only pair >>>
@@ -2482,10 +2514,12 @@ $codexCredentialFile = $null
 $codexCredentialUrl = $null
 $codexConnectionConfigured = $false
 $codexCredentialBootstrapFailed = $false
+$codexCredentialFailure = $null
 $codexRuntimeDefaults = $null
 $codexRuntimeRecovery = $null
 $briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 foreach ($selectedClient in $clients) {
+    if ($script:clientSetupFailures.ContainsKey($selectedClient)) { continue }
     if ($selectedClient -notin "claude", "codex") { continue }
     if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
         $hookState["claude"] = "plugin"
@@ -2566,7 +2600,7 @@ foreach ($selectedClient in $clients) {
         if ($ClientOnly -and -not $codexCredentialBootstrapFailed -and
             ("$codexCredentialUrl".TrimEnd("/") -ne $DaemonUrl)) {
             $codexCredentialBootstrapFailed = $true
-            $codexSetup.recovery = if ($script:connectChecked) {
+            $codexSetup.recovery = if ($script:connectCheckedClients -contains "codex") {
                 "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl where that Codex configuration sets it, or run pseudolife-mcp connect $DaemonUrl --client codex --token-file $TokenFile, then re-run."
             } else {
                 "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl in [mcp_servers.pseudolife-memory.env], then re-run."
@@ -2575,7 +2609,9 @@ foreach ($selectedClient in $clients) {
             [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
             [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
         }
-        if (-not $codexCredentialBootstrapFailed) {
+        if ($codexCredentialBootstrapFailed) {
+            $codexCredentialFailure = $codexSetup.recovery
+        } else {
             $setupArgs = @("codex-hooks", "--checkout", $repo, "--source", $CodexHooks,
                 "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
             if (-not $interactive -or $script:installerRerun) { $setupArgs += "--non-interactive" }
@@ -2677,6 +2713,7 @@ foreach ($selectedClient in $clients) {
                 Step "Codex standing instructions: $($codexSetup.instructions) ($fallbackPath). Hooks still require setup."
             } catch {
                 $codexSetup.recovery += " Could not write standing instructions; check the Codex home and file permissions."
+                $script:codexInstructionWarning = $true
                 Step $codexSetup.recovery
             }
         }
@@ -2761,7 +2798,12 @@ foreach ($selectedClient in $clients) {
     }
     if ($selectedClient -in 'gemini', 'generic') { $resolvedInstructionChoices[$selectedClient] = $choice }
     if ($choice -eq "append") {
-        Add-MemoryBlock $instructionPath $selectedClient
+        try {
+            Add-MemoryBlock $instructionPath $selectedClient
+        } catch {
+            Write-Warning "Could not write standing instructions to $instructionPath. $($_.Exception.Message) Check its permissions and rerun the installer."
+            $instrState[$selectedClient] = "failed:$instructionPath"
+        }
     } else {
         $hintPath = if ($instructionPath) { $instructionPath } else { "<your AGENTS.md>" }
         Step "Standing memory block not written for $selectedClient. To add it:"
@@ -2819,8 +2861,7 @@ function Register-Result($provider, $okState, $okMessage) {
         $mcpState[$provider] = $okState
         if ($okMessage) { Step $okMessage }
     } else {
-        Write-Warning "$provider MCP registration failed (exit $LASTEXITCODE) - see the error above."
-        $mcpState[$provider] = "failed"
+        Write-ClientSetupFailure $provider "MCP registration failed (exit $LASTEXITCODE). Fix the CLI error above and rerun the installer."
     }
 }
 function Set-CodexRuntimeDefaults {
@@ -2835,11 +2876,25 @@ function Set-CodexRuntimeDefaults {
         $script:codexRuntimeDefaults = [string]$runtimeResult.runtime_defaults
         Step "Codex runtime defaults ready (startup 240s, tools 240s, required)."
     } catch {
-        $mcpState["codex"] = "failed"
         $script:codexRuntimeDefaults = "failed"
         $script:codexRuntimeRecovery = "Rerun this installer with -Client codex, then retry the Codex task."
         Write-Warning "Codex was registered, but its runtime defaults were not confirmed. $script:codexRuntimeRecovery"
     }
+}
+function Write-ClientHttpRefusal([string]$Provider) {
+    Write-ClientSetupFailure $Provider "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with -Transport shim."
+}
+function Test-ClientTransport([string]$Provider, [string]$State) {
+    if ($tokenState -notin "minted", "present", "remote") { return $true }
+    if ($State -eq "http") { Write-ClientHttpRefusal $Provider; return $false }
+    $credentialFile = switch ($Provider) {
+        "claude" { $claudeTokenFile }
+        "codex" { $codexCredentialFile }
+        "gemini" { $geminiTokenFile }
+    }
+    if ($credentialFile) { return $true }
+    Write-ClientSetupFailure $Provider "The daemon requires a bearer token, and the client credential file could not be prepared. Repair its credential setup and rerun the installer."
+    return $false
 }
 # Board credentials for the Claude Code and Gemini shims: an owner-only token
 # file per client holding its principal's own PSEUDOLIFE_MCP_TOKENS entry,
@@ -2902,11 +2957,15 @@ if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile)
             }
         }
         { $_ -in "kept", "unchanged" } { }
-        default { Write-Warning "Could not give the Claude Code hooks the token file ($($settingsOutput -join ' ')). Set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile and PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl in the env block of ~/.claude/settings.json." }
+        default {
+            $script:clientHookSettingsWarning = $true
+            Write-Warning "Could not give the Claude Code hooks the token file ($($settingsOutput -join ' ')). Set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile and PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl in the env block of ~/.claude/settings.json."
+        }
     }
 }
 # <<< client token files <<<
-foreach ($selectedClient in $clients) {
+function Install-SelectedClient([string]$selectedClient) {
+    $PSNativeCommandUseErrorActionPreference = $false
     if ($selectedClient -eq "claude-desktop") {
         # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
         # by the native client's installer step (absolute shim path - Desktop's
@@ -2918,9 +2977,8 @@ foreach ($selectedClient in $clients) {
         }
         $shimReady = Install-ShimOnce
         if ((-not $shimReady) -or (-not $script:shimInstallPath)) {
-            Write-Warning "pseudolife-mcp shim installation did not yield a usable executable - Claude Desktop not wired. Re-run once the native client installs."
-            $mcpState["claude-desktop"] = "failed"
-            continue
+            Write-ClientSetupFailure "claude-desktop" "pseudolife-mcp shim installation did not yield a usable executable - Claude Desktop not wired. Re-run once the native client installs."
+            return
         }
         $desktopArgs = @("--command", $script:shimInstallPath, "--writer-id", "claude-desktop")
         $desktopTokenFile = Get-DesktopTokenFile
@@ -2945,11 +3003,14 @@ foreach ($selectedClient in $clients) {
                 Write-Warning "The daemon is token-gated but no token source is set (environment or ops\.env) - the registrar can only reuse a credential already in the Desktop entry. If registration fails, configure a singular token or exactly one claude-desktop principal in PSEUDOLIFE_MCP_TOKENS."
             }
         }
-        Invoke-NativeHelper claude-desktop @desktopArgs 2>&1 | Out-Host
-        $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = $null
-        $env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = $null
+        try {
+            Invoke-NativeHelper claude-desktop @desktopArgs 2>&1 | Out-Host
+        } finally {
+            $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = $null
+            $env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = $null
+        }
         Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop as pseudolife-desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
-        continue
+        return
     }
     if ($selectedClient -eq "generic") {
         Write-Host ""
@@ -2964,19 +3025,18 @@ foreach ($selectedClient in $clients) {
             Write-Host "  (the HTTP shape cannot carry the token)."
             Write-Host ""
         }
-        continue
+        return
     }
     if ($selectedClient -eq "codex") {
         if ($codexCredentialBootstrapFailed) {
-            $mcpState["codex"] = "failed"
+            Set-ClientSetupFailure "codex" ([string]$codexCredentialFailure)
             Write-Warning "Codex MCP registration was skipped because credential setup failed."
-            continue
+            return
         }
         if ($ClientOnly -and -not $codexCredentialFile) {
             # Without it Codex would reach whatever daemon its defaults name.
-            $mcpState["codex"] = "failed"
-            Write-Warning "Codex was not registered: a client-only install points it at $clientDaemonUrl through the Codex credential setup, which did not finish (see above). Fix that, then re-run."
-            continue
+            Write-ClientSetupFailure "codex" "Codex was not registered: credential setup for the daemon at $clientDaemonUrl did not produce a token file. Fix the error above and rerun the installer."
+            return
         }
         $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
@@ -3010,8 +3070,7 @@ foreach ($selectedClient in $clients) {
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
-                            Write-Warning "The existing Codex registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
-                            $mcpState["codex"] = "failed"
+                            Write-ClientSetupFailure "codex" "The existing Codex registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
                         } elseif (-not $bareRegisteredShim) {
                             # a pipx or pip launcher registration moves to the native launcher
                             if ($script:shimManagerKind -ne "runtime") {
@@ -3026,8 +3085,7 @@ foreach ($selectedClient in $clients) {
                                     $mcpState["codex"] = "present-upgraded"
                                 }
                             } else {
-                                Write-Warning "The Codex registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client codex"
-                                $mcpState["codex"] = "failed"
+                                Write-ClientSetupFailure "codex" "The Codex registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client codex"
                             }
                         } elseif (Test-ShimRegistrationMigrates "codex") {
                             if ($script:shimMigrated -eq "current") {
@@ -3045,27 +3103,31 @@ foreach ($selectedClient in $clients) {
                             Step "Codex registration preserved; it runs the native client installed from this release."
                             $mcpState["codex"] = "present-upgraded"
                         } else {
-                            Write-Warning "The existing Codex registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
-                            $mcpState["codex"] = "failed"
+                            Write-ClientSetupFailure "codex" "The existing Codex registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
                         }
                         }
                     } else {
-                        Write-Warning "The existing Codex registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
-                        $mcpState["codex"] = "failed"
+                        Write-ClientSetupFailure "codex" "The existing Codex registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
                     }
                 } else {
                     Write-Warning "The existing Codex stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update."
                     $mcpState["codex"] = "present-custom"
                 }
-                if ($codexGuardUnverified) { $mcpState["codex"] = "failed" }
+                if ($codexGuardUnverified) {
+                    Set-ClientSetupFailure "codex" "The existing stdio registration has no verifiable no-spawn guard. Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun."
+                }
             } else {
                 Step "MCP server already wired into Codex - registration preserved."
                 $mcpState["codex"] = "present"
             }
-            $codexRuntimeDefaults = "preserved"
+            if ($tokenState -in "minted", "present", "remote" -and ((Test-McpHttpRegistration $existingCodex) -or (Test-McpHttpRegistration $existingCodexGuard))) {
+                Write-ClientHttpRefusal "codex"
+            }
+            $script:codexRuntimeDefaults = "preserved"
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
             $envFlag = Get-EnvFlag "codex"
             if ($envFlag) {
+                if (-not (Test-ClientTransport "codex" "shim-env")) { return }
                 # Name first, env after — the documented codex form (an env
                 # flag directly before the name risks the variadic-option
                 # parse that breaks claude's CLI).
@@ -3085,8 +3147,7 @@ foreach ($selectedClient in $clients) {
                 Register-Result "codex" "shim-env" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
                 if ($mcpState["codex"] -eq "shim-env") { Set-CodexRuntimeDefaults }
             } else {
-                Write-Warning "This Codex CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
-                $mcpState["codex"] = "failed"
+                Write-ClientSetupFailure "codex" "This Codex CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
             }
         } else {
             if ($Transport -eq "shim") {
@@ -3094,14 +3155,14 @@ foreach ($selectedClient in $clients) {
                 Write-Host "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity."
             }
             if ($codexCredentialFile -or $ClientOnly) {
-                Write-Warning "Codex authentication requires the stdio shim; HTTP fallback was not registered."
-                $mcpState["codex"] = "failed"
+                Write-ClientSetupFailure "codex" "Codex authentication requires the stdio shim; HTTP fallback was not registered."
             } else {
                 $codexHttpUrl = if ($codexCredentialUrl) {
                     "$codexCredentialUrl/mcp"
                 } else {
                     "http://127.0.0.1:8765/mcp"
                 }
+                if (-not (Test-ClientTransport "codex" "http")) { return }
                 codex mcp add pseudolife-memory --url $codexHttpUrl
                 Register-Result "codex" "http" "Wired into Codex (codex mcp add, HTTP)."
                 if ($mcpState["codex"] -eq "http") { Set-CodexRuntimeDefaults }
@@ -3115,8 +3176,10 @@ foreach ($selectedClient in $clients) {
             if (($Transport -eq "shim") -and -not (Test-McpHttpRegistration "$geminiRegistration")) {
                 # `gemini mcp list` does not expose env values, so an existing
                 # stdio guard cannot be verified without inspecting settings.
-                Write-UnverifiedNoSpawnGuard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
-                $geminiGuardUnverified = $true
+                if ($script:connectedClients -notcontains "gemini") {
+                    Write-UnverifiedNoSpawnGuard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
+                    $geminiGuardUnverified = $true
+                }
                 $bareRegisteredShim = "$geminiRegistration" -match '(?i)pseudolife-memory:\s*pseudolife-mcp(?:\.exe)?\s*\(stdio\)'
                 $managedRegisteredShim = $bareRegisteredShim
                 if (-not $managedRegisteredShim) {
@@ -3138,8 +3201,7 @@ foreach ($selectedClient in $clients) {
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
-                            Write-Warning "The existing Gemini CLI registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
-                            $mcpState["gemini"] = "failed"
+                            Write-ClientSetupFailure "gemini" "The existing Gemini CLI registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
                         } elseif (-not $bareRegisteredShim) {
                             # a pipx or pip launcher registration moves to the native launcher
                             if ($script:shimManagerKind -ne "runtime") {
@@ -3154,8 +3216,7 @@ foreach ($selectedClient in $clients) {
                                     $mcpState["gemini"] = "present-upgraded"
                                 }
                             } else {
-                                Write-Warning "The Gemini CLI registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client gemini"
-                                $mcpState["gemini"] = "failed"
+                                Write-ClientSetupFailure "gemini" "The Gemini CLI registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client gemini"
                             }
                         } elseif (Test-ShimRegistrationMigrates "gemini") {
                             if ($script:shimMigrated -eq "current") {
@@ -3173,22 +3234,25 @@ foreach ($selectedClient in $clients) {
                             Step "Gemini CLI registration preserved; it runs the native client installed from this release."
                             $mcpState["gemini"] = "present-upgraded"
                         } else {
-                            Write-Warning "The existing Gemini CLI registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
-                            $mcpState["gemini"] = "failed"
+                            Write-ClientSetupFailure "gemini" "The existing Gemini CLI registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
                         }
                         }
                     } else {
-                        Write-Warning "The existing Gemini CLI registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
-                        $mcpState["gemini"] = "failed"
+                        Write-ClientSetupFailure "gemini" "The existing Gemini CLI registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
                     }
                 } else {
                     Write-Warning "The existing Gemini CLI stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update."
                     $mcpState["gemini"] = "present-custom"
                 }
-                if ($geminiGuardUnverified) { $mcpState["gemini"] = "failed" }
+                if ($geminiGuardUnverified) {
+                    Set-ClientSetupFailure "gemini" "The existing stdio registration has no verifiable no-spawn guard. Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun."
+                }
             } else {
                 Step "MCP server already wired into Gemini CLI - registration preserved."
                 $mcpState["gemini"] = "present"
+            }
+            if ($tokenState -in "minted", "present", "remote" -and (Test-McpHttpRegistration "$geminiRegistration")) {
+                Write-ClientHttpRefusal "gemini"
             }
             # `gemini mcp list` shows no env, so the installer cannot tell
             # whether this registration carries a token; say how to add one,
@@ -3204,6 +3268,7 @@ foreach ($selectedClient in $clients) {
             $geminiHelp = gemini mcp add --help 2>$null
             $envFlag = if ("$geminiHelp" -match '--env|-e,') { "-e" } else { $null }
             if ($envFlag) {
+                if (-not (Test-ClientTransport "gemini" "shim-env")) { return }
                 # -e repeated per pair (one KEY=VALUE each, verified on
                 # gemini CLI 0.57.0); PSEUDOLIFE_MCP_NO_SPAWN carries the
                 # same Docker-tier no-spawn guard as the claude and codex
@@ -3215,16 +3280,15 @@ foreach ($selectedClient in $clients) {
                 }
                 Register-Result "gemini" "shim-env" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
             } else {
-                Write-Warning "This Gemini CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
-                $mcpState["gemini"] = "failed"
+                Write-ClientSetupFailure "gemini" "This Gemini CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
             }
         } elseif ($ClientOnly) {
-            Write-Warning "Shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
-            $mcpState["gemini"] = "failed"
+            Write-ClientSetupFailure "gemini" "Shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
         } else {
             if ($Transport -eq "shim") {
                 Write-Warning "Shim unavailable for Gemini CLI (see warnings above) - falling back to HTTP."
             }
+            if (-not (Test-ClientTransport "gemini" "http")) { return }
             gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
             Register-Result "gemini" "http" "Wired into Gemini CLI (gemini mcp add, HTTP)."
         }
@@ -3259,8 +3323,7 @@ foreach ($selectedClient in $clients) {
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
-                            Write-Warning "The existing Claude Code registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
-                            $mcpState["claude"] = "failed"
+                            Write-ClientSetupFailure "claude" "The existing Claude Code registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
                         } elseif (-not $bareRegisteredShim) {
                             # a pipx or pip launcher registration moves to the native launcher
                             if ($script:shimManagerKind -ne "runtime") {
@@ -3275,8 +3338,7 @@ foreach ($selectedClient in $clients) {
                                     $mcpState["claude"] = "present-upgraded"
                                 }
                             } else {
-                                Write-Warning "The Claude Code registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client claude-code"
-                                $mcpState["claude"] = "failed"
+                                Write-ClientSetupFailure "claude" "The Claude Code registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client claude-code"
                             }
                         } elseif (Test-ShimRegistrationMigrates "claude-code") {
                             if ($script:shimMigrated -eq "current") {
@@ -3294,22 +3356,25 @@ foreach ($selectedClient in $clients) {
                             Step "Claude Code registration preserved; it runs the native client installed from this release."
                             $mcpState["claude"] = "present-upgraded"
                         } else {
-                            Write-Warning "The existing Claude Code registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
-                            $mcpState["claude"] = "failed"
+                            Write-ClientSetupFailure "claude" "The existing Claude Code registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
                         }
                         }
                     } else {
-                        Write-Warning "The existing Claude Code registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
-                        $mcpState["claude"] = "failed"
+                        Write-ClientSetupFailure "claude" "The existing Claude Code registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
                     }
                 } else {
                     Write-Warning "The existing Claude Code stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update."
                     $mcpState["claude"] = "present-custom"
                 }
-                if ($claudeGuardUnverified) { $mcpState["claude"] = "failed" }
+                if ($claudeGuardUnverified) {
+                    Set-ClientSetupFailure "claude" "The existing stdio registration has no verifiable no-spawn guard. Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun."
+                }
             } else {
                 Step "MCP server already wired into Claude Code - registration preserved."
                 $mcpState["claude"] = "present"
+            }
+            if ($tokenState -in "minted", "present", "remote" -and (Test-McpHttpRegistration $existingClaude)) {
+                Write-ClientHttpRefusal "claude"
             }
             # An install from before the board token: the upgraded shim reads
             # a token file, so add it, the daemon URL and the state directory
@@ -3328,23 +3393,24 @@ foreach ($selectedClient in $clients) {
                 }
             }
             if ((-not $claudeCredentialOk) -and $claudeTokenFile -and ($existingClaude -notmatch 'PSEUDOLIFE_MCP_TOKEN')) {
-                Write-Warning "The daemon requires a bearer token, but the existing Claude Code registration carries none, so its memory calls will be refused. Edit the registration in place and set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with -NoToken."
+                Write-ClientSetupFailure "claude" "The daemon requires a bearer token, but the existing Claude Code registration carries none. Set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile in its stdio registration, then rerun."
             }
             # pseudolife-mcp connect (the client-only connect block)
             # re-pointed an existing registration already; one still naming
             # another daemon is one it could not write (a project scope, an
             # HTTP entry), or connect did not run (a shim from before it).
             if ($ClientOnly -and -not ([string](claude mcp get pseudolife-memory 2>$null | Out-String)).Contains($clientDaemonUrl)) {
-                if ($script:connectChecked) {
-                    Write-Warning "The existing Claude Code registration does not name the daemon at $clientDaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile in the entry it names, or run pseudolife-mcp connect $clientDaemonUrl --client claude-code --token-file $claudeTokenFile."
+                if ($script:connectCheckedClients -contains "claude") {
+                    Write-ClientSetupFailure "claude" "The existing Claude Code registration does not name the daemon at $clientDaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile in the entry it names."
                 } else {
-                    Write-Warning "The existing Claude Code registration does not name the daemon at $clientDaemonUrl. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile."
+                    Write-ClientSetupFailure "claude" "The existing Claude Code registration does not name the daemon at $clientDaemonUrl. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile."
                 }
             }
         } elseif ($Transport -eq "shim") {
             if (Install-ShimOnce) {
                 $envFlag = Get-EnvFlag "claude"
                 if ($envFlag) {
+                    if (-not (Test-ClientTransport "claude" "shim-env")) { return }
                     # --env is variadic and must come AFTER the server name:
                     # placed earlier it swallows the name as another
                     # KEY=value pair and the whole add fails (verified
@@ -3365,23 +3431,39 @@ foreach ($selectedClient in $clients) {
                     }
                     Register-Result "claude" "shim-env" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
                 } else {
-                    Write-Warning "This Claude CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
-                    $mcpState["claude"] = "failed"
+                    Write-ClientSetupFailure "claude" "This Claude CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
                 }
             } elseif ($ClientOnly) {
-                Write-Warning "Could not install the pseudolife-mcp shim (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
-                $mcpState["claude"] = "failed"
+                Write-ClientSetupFailure "claude" "Could not install the pseudolife-mcp shim (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
             } else {
                 Write-Warning "Could not install the pseudolife-mcp shim: the native client install failed (see warnings above)."
                 Write-Host "  Without the shim, concurrent Claude Code sessions share one episode identity."
                 Write-Host "  Re-run once that is fixed (the verified download is reused), or pass -Transport http to silence this."
+                if (-not (Test-ClientTransport "claude" "http")) { return }
                 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
                 Register-Result "claude" "http" "Wired into Claude Code via HTTP (fallback - shim tooling not found or shim install failed)."
             }
         } else {
+            if (-not (Test-ClientTransport "claude" "http")) { return }
             claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
             Register-Result "claude" "http" "Wired into Claude Code via HTTP (-Transport http)."
         }
+    }
+}
+
+foreach ($selectedClient in $clients) {
+    if ($script:clientSetupFailures.ContainsKey($selectedClient)) {
+        $mcpState[$selectedClient] = "failed"
+        continue
+    }
+    if ($selectedClient -in "claude", "codex", "gemini" -and -not (Get-Command $selectedClient -ErrorAction SilentlyContinue)) {
+        Write-ClientSetupFailure $selectedClient "The $selectedClient CLI is not on PATH. Install it and rerun the installer."
+        continue
+    }
+    try {
+        Install-SelectedClient $selectedClient
+    } catch {
+        Write-ClientSetupFailure $selectedClient "MCP setup failed. $($_.Exception.Message) Fix the reported problem and rerun the installer."
     }
 }
 
@@ -3524,6 +3606,7 @@ if ($shimAutostartFamily) {
     $rerun = "pseudolife-mcp " + ($autostartArgs -join " ")
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
         Write-Warning "Shim autostart was not registered: the native client is unavailable (see above)."
+        $script:extractorAutostartWarning = $true
         Write-Host "  Re-run later in a normal (not elevated) pwsh: $rerun"
     } else {
         $autostartCode = 1
@@ -3539,6 +3622,7 @@ if ($shimAutostartFamily) {
             # client printed its one line, and its shim keeps serving.
         } elseif ($autostartCode -ne 0) {
             Write-Warning "Shim autostart registration or start failed (see the message above)."
+            $script:extractorAutostartWarning = $true
             Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with: & `"$($script:shimInstallPath)`" $($autostartArgs -join ' ')"
             # Only on a free port: on Windows a second shim fails to bind while one listens.
             if (-not (Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)) {
@@ -3632,6 +3716,7 @@ function Describe-Instr($state) {
     $tail = ($state -split ":", 2)[-1]
     switch -Wildcard ($state) {
         "appended:*" { "[x] Standing file        $tail" }
+        "failed:*" { "[!] Standing file        could not write $tail" }
         "present:*" { "[x] Standing file        $tail" }
         "covered-by-plugin" { "[-] Standing file        skipped - the plugin serves a compact memory core; append examples\CLAUDE.memory.md for the full guide" }
         "covered-by-hooks" { "[-] Standing file        skipped - verified hooks serve a compact memory core; append examples\CLAUDE.memory.md for the full guide" }
@@ -4015,7 +4100,52 @@ if ($Tunnel -and -not $interactive) {
 }
 Remove-NativeStage
 $script:nativeRunDone = $true
+# >>> client setup result >>>
+function Get-ClientSetupWarnings {
+    if ($script:pluginClaude -in "failed", "no-cli") { "Claude Code plugin: $($script:pluginClaudeRecovery)" }
+    if ($script:legacyClaude -eq "error") { "Claude Code legacy hook cleanup failed. See the repair above." }
+    if ($hookState["claude"] -eq "failed") { "Claude Code hooks were not installed. Fix the shim setup and rerun." }
+    if (-not $script:clientSetupFailures.ContainsKey("codex") -and $hookState["codex"] -in "pending", "unavailable") {
+        "Codex hooks: $($hookState['codex']). $($codexSetup.recovery)"
+    }
+    if ($script:codexRuntimeDefaults -eq "failed") { "Codex runtime defaults were not confirmed. $script:codexRuntimeRecovery" }
+    if ($script:clientHookSettingsWarning) { "Claude Code hook credential settings were not written. See the repair above." }
+    if ($script:codexInstructionWarning) { "Codex standing instructions could not be written. Check the Codex home and file permissions." }
+    foreach ($state in $instrState.Values) {
+        if ($state -like "failed:*") { "Standing instructions could not be written to $($state.Substring(7)). Check permissions and rerun." }
+    }
+    if ($script:extractorAutostartWarning) { "Extractor shim autostart failed. See the repair command above." }
+    if ($script:clientScheduleState -eq "failed") { "Automatic client updates were not scheduled. See the scheduling command above." }
+    if ($script:consoleSigninWarning) { "Console sign-in did not finish. Run pseudolife-mcp console once the reported problem is fixed." }
+}
+$clientWarnings = @(Get-ClientSetupWarnings)
+$failedRequests = @()
+foreach ($provider in $clients) {
+    $reason = $script:clientSetupFailures[$provider]
+    if (-not $reason) { continue }
+    $reason = $reason -replace '[\r\n]+', ' '
+    $label = switch ($provider) {
+        "claude" { "Claude Code" }
+        "claude-desktop" { "Claude Desktop" }
+        "codex" { "Codex" }
+        "gemini" { "Gemini CLI" }
+    }
+    if ($requestedClients -contains $provider) {
+        $failedRequests += "Requested client setup incomplete ($label). $reason"
+    } else {
+        $clientWarnings += "Detected client setup incomplete ($label). $reason"
+    }
+}
+if ($clientWarnings.Count) {
+    [Console]::Error.WriteLine("Warnings")
+    foreach ($warning in $clientWarnings) { [Console]::Error.WriteLine($warning) }
+}
+if ($failedRequests.Count) {
+    foreach ($failure in $failedRequests) { [Console]::Error.WriteLine($failure) }
+    exit 5
+}
 Write-Host "Done. First session: tell your coding agent to remember something."
+# <<< client setup result <<<
 } finally {
     Remove-NativeStage
     # An exit after the run's first change to the host (an exit, an error or

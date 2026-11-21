@@ -22,6 +22,7 @@ from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
+from tests.test_installer_client_only_native import COMPLETION_CASES
 from tests.test_installer_existing_upgrade import _between, user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -603,13 +604,13 @@ def test_a_relative_token_file_is_made_absolute(tmp_path):
     assert f"TOKEN_FILE={token}" in proc.stdout.splitlines()
 
 
-def test_a_selected_cli_that_is_missing_is_refused_up_front(tmp_path):
+def test_a_missing_selected_cli_does_not_block_host_preflight(tmp_path):
     ps = _PowerShell(tmp_path)
     token = _token(ps)
     proc = _preflight(ps, token_file=str(token), clients=("claude", "gemini"),
                       missing=("gemini",))
-    assert proc.returncode == 1
-    assert "gemini CLI is not on PATH" in _output(proc)
+    assert proc.returncode == 0, _output(proc)
+    assert "Daemon answered" in proc.stdout
 
 
 PS_PAIR_SHIM = """function global:fake-shim {{
@@ -923,7 +924,9 @@ CODEX_STUB = """$global:LASTEXITCODE = 0
 
 
 def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
-                  cred_exit: int = 0, native_exit: int = 0, existing: str = ""):
+                  cred_exit: int = 0, native_exit: int = 0, existing: str = "",
+                  requested: str | None = None, add_exit: int = 0, missing: bool = False,
+                  runtime_failed: bool = False):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex adds."""
@@ -938,22 +941,39 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
                        (ROOT / INSTALL).read_text(encoding="utf-8"))[1]
     steps = _codex_steps_ps(
         "$null = @($input); $global:LASTEXITCODE = [int]$env:FAKE_CRED_EXIT; return $env:FAKE_CRED")
+    if runtime_failed:
+        steps = steps.replace(
+            """return '{"status":"ready","runtime_defaults":"configured"}'""",
+            """$global:LASTEXITCODE = 1; return '{"status":"needs-configuration"}'""",
+        )
+    codex = "" if missing else ps.stub_function("codex", CODEX_STUB + "\n$global:LASTEXITCODE = [int]$env:FAKE_MCP_ADD_EXIT")
+    gemini = "" if requested is None else ps.stub_function(
+        "gemini", "$global:LASTEXITCODE = 0; if ($args -contains '--help') { '  -e, --env' }")
+    providers = "'codex'" if requested is None else "'codex','gemini'"
+    finish_fixture = "" if requested is None else (
+        "Write-Output ('MCP_GEMINI=' + $mcpState['gemini'])\n"
+        "Write-Output 'REMAINING_STEPS_FINISHED'\n" + _block("client setup result")
+    )
     body = f"""$env:PATH = '{_q(ps.tmp)}'
-$clients = @('codex'); $CodexHooks = 'auto'; $CodexHookTrust = 'yes'
+$clients = @({providers}); $CodexHooks = 'auto'; $CodexHookTrust = 'yes'
+$requestedClients = '{requested or ''}' -split ' '
 $Instructions = 'auto'; $ClaudeMd = ''; $AgentsFile = ''; $interactive = $false
 $Transport = 'shim'
 $ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
 function Get-EnvValue($name) {{ return $null }}
 {native_stub.POWERSHELL}
 {steps}
-{ps.stub_function("codex", CODEX_STUB)}
+{codex}
+{gemini}
 {stages}
 Write-Output ("MCP_CODEX=" + $mcpState['codex'])
+{finish_fixture}
 """
     proc = ps.run(body, extra_env={
         "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
         "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(native_exit),
-        "FAKE_EXISTING": existing, "FAKE_LAUNCHER": str(launcher), "FAKE_KEEP_LAUNCHER": "1"})
+        "FAKE_EXISTING": existing, "FAKE_MCP_ADD_EXIT": str(add_exit),
+        "FAKE_LAUNCHER": str(launcher), "FAKE_KEEP_LAUNCHER": "1"})
     adds = [call for call in ps.logged()
             if call.startswith("codex|mcp add") and "--help" not in call]
     return proc, adds
@@ -967,6 +987,30 @@ def test_codex_registers_with_the_remote_url_and_its_credential_file(tmp_path):
     assert "PSEUDOLIFE_MCP_TOKEN_FILE=/fixture/codex/token" in add
     assert "PSEUDOLIFE_MCP_NO_SPAWN=1" in add
     assert "MCP_CODEX=shim-env" in proc.stdout.splitlines()
+
+
+@pytest.mark.parametrize("kwargs,reason", COMPLETION_CASES)
+@pytest.mark.parametrize("requested,status", [("codex gemini", 5), ("", 0)])
+def test_incomplete_client_leaves_other_steps_running(tmp_path, kwargs, reason, requested, status):
+    proc, _ = _codex_wiring(_PowerShell(tmp_path), requested=requested, **kwargs)
+    assert proc.returncode == status, _output(proc)
+    assert "MCP_GEMINI=shim-env" in proc.stdout
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    label = "Requested" if requested else "Detected"
+    assert f"{label} client setup incomplete (Codex)." in proc.stderr.splitlines()[-1]
+    assert reason in proc.stderr.splitlines()[-1]
+    assert FIXTURE_TOKEN not in _output(proc)
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"runtime_failed": True},
+                                    {"existing": "pseudolife-memory\ncommand: custom-shim\n{PSEUDOLIFE_MCP_NO_SPAWN=1}"}])
+def test_successful_client_setup_and_rerun_exit_zero(tmp_path, kwargs):
+    proc, _ = _codex_wiring(_PowerShell(tmp_path), requested="codex gemini", **kwargs)
+    assert proc.returncode == 0, _output(proc)
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert "Done. First session" in proc.stdout
+    if kwargs.get("runtime_failed"):
+        assert "Warnings\nCodex runtime defaults were not confirmed." in proc.stderr
 
 
 @pytest.mark.parametrize("outcome,recovery", [
@@ -1067,8 +1111,7 @@ FRESH_CONNECT = '{"url": null, "rows": [], "exit": 3, "error": "none"}'
 
 def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRESH_CONNECT, connect_exit: int = 3,
                            gemini_body: str | None = None):
-    """The whole client-only run; the staged client answers connect's dry run with
-    ``connect_report`` and exit ``connect_exit`` (a fresh machine's: no registration, 3).
+    """The whole client-only run, with a configurable Claude Code connect result.
     ``gemini_body`` replaces the gemini CLI stub's answers."""
     ps = _PowerShell(tmp_path)
     token = _token(ps)
@@ -1090,6 +1133,7 @@ def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRE
         f"  shift; exec '{sys.executable}' '{standin}' '{ROOT}' \"$@\"\nfi\n"
         f"printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'\n"
         "if [ \"$1\" = connect ]; then\n"
+        f"  case \" $* \" in *' --client gemini '*) echo '{FRESH_CONNECT}'; exit 3 ;; esac\n"
         f"  echo '{connect_report}'; exit {connect_exit}\nfi\n"
         "exit 0\n")
     calls = ps.calls
@@ -1178,7 +1222,8 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     if os.name == "nt":
         assert connects == [] and "not checked" in output
     else:
-        assert len(connects) == 1 and "--dry-run" in connects[0]
+        assert [call.split("--client ", 1)[1] for call in connects] == [
+            "claude-code --dry-run --json", "gemini --dry-run --json"]
         assert "not checked" not in output
 
 
@@ -1186,29 +1231,30 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     "the installer runs the staged native client before anything else, and a "
     "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
     "that stage with a real binary"))
-def test_an_exit_after_the_native_client_is_installed_says_the_run_stopped_part_way(tmp_path, daemon_server):
+def test_client_only_connect_failure_keeps_the_native_client_and_reports_partial_setup(tmp_path, daemon_server):
     env, installed, proc, ps, repo, shim, token = _whole_client_only_run(tmp_path, daemon_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
     output = _output(proc)
-    assert proc.returncode == 1, output
-    assert "could not check this machine's existing registrations" in output
+    assert proc.returncode == 5, output
+    assert "could not check the existing registration" in output and "the fixture refuses" in output
     assert "Nothing was changed" not in output and "nothing was changed" not in output
-    assert "stopped part way" in output and "the native client" in output and "Rerun the installer" in output
+    assert "stopped part way" not in output
+    assert "Requested client setup incomplete (Claude Code)." in proc.stderr.splitlines()[-1]
+    assert any(call.startswith("gemini|mcp add -s user") for call in ps.logged())
+    assert shim.is_file()
 
 
 @pytest.mark.skipif(os.name == "nt", reason=(
     "the installer runs the staged native client before anything else, and a "
     "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
     "that stage with a real binary"))
-def test_a_thrown_error_after_the_native_client_is_installed_says_the_run_stopped_part_way(tmp_path, daemon_server):
-    # PowerShell displays a thrown error after the finally block's line, so
-    # that line must not point "above" at a cause that comes below it.
+def test_a_cli_exception_is_reported_as_an_incomplete_requested_client(tmp_path, daemon_server):
     env, installed, proc, ps, repo, shim, token = _whole_client_only_run(
         tmp_path, daemon_server,
         gemini_body="if ($args -contains '--help') { throw 'the fixture gemini CLI broke' }\nexit 0")
     output = _output(proc)
-    assert proc.returncode == 1, output
+    assert proc.returncode == 5, output
     assert "the fixture gemini CLI broke" in output
     assert "Nothing was changed" not in output and "nothing was changed" not in output
-    [part_way] = [line for line in output.splitlines() if "stopped part way" in line]
-    assert "the native client" in part_way and "Rerun the installer" in part_way
-    assert "above is fixed" not in part_way and "once the cause this run reports is fixed" in part_way
+    assert "stopped part way" not in output
+    assert "Requested client setup incomplete (Gemini CLI)." in proc.stderr.splitlines()[-1]
+    assert "the fixture gemini CLI broke" in proc.stderr.splitlines()[-1]
