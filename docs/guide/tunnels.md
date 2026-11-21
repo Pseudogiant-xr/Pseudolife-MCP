@@ -48,12 +48,20 @@ previous key at the provider.
 
 The native client answers `tunnel status` for a profile it
 can load, reading the tunnel's process record to say whether the tunnel
-runs. It also answers `tunnel update`, which starts, stops and signals
-nothing. `tunnel update` reports a tunnel that is not running, and names a
+runs. `tunnel update` reports a tunnel that is not running, and names a
 process record left by a stopped tunnel as a file you can delete (a
-`leftover` when no saved profile is beside it). It reports a tunnel that
-runs, or may run, as `stale`: it is left as it is, because this client
-cannot refresh it yet. A record it cannot judge (unreadable, or naming no
+`leftover` when no saved profile is beside it). It reports `current` for
+a ready native launch whose identity matches the client running the check and
+the saved settings. If the launch differs from that client or the saved settings,
+`tunnel update` reports `stale` and leaves it running. Use
+`pseudolife-mcp tunnel stop` followed by `pseudolife-mcp tunnel run` for the
+same profile and directory. This reconnects the tunnel and interrupts its
+current session. An interrupted key renewal or a retained previous key also
+reports `stale` and gives guidance for that state. A pending refresh request
+written by the Python client does not affect the native launch check. Native
+update leaves a Python-supervised launch running and tells you to use the
+Python client that started it to stop it.
+A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native
 client also answers preflight refusals for `tunnel verify` and `tunnel setup`.
@@ -162,7 +170,8 @@ daemon principal, including its other sessions; it does not change authenticatio
 permissions or create a dedicated principal. Each tools/list request rechecks full
 discovery and restores it when needed, then reports an error if it cannot do so.
 
-`pseudolife-mcp update` (and `ops/update_clients.py` from a checkout) refreshes
+With the Python client, `pseudolife-mcp update` (and `ops/update_clients.py`
+from a checkout) refreshes
 running saved tunnels after it installs the new shim runtime, by running
 `tunnel update` through the installed launcher. A refresh freezes the bridge and
 packages of the process that runs it, so this moves running tunnels onto the
@@ -175,7 +184,7 @@ bridge; a refresh that times out is reported as timed out, with the command to
 run again after `tunnel status`. Removing old shim runtimes keeps any runtime a
 running tunnel's bridge still imports from while that tunnel's processes are
 alive, and removes nothing when saved tunnel records cannot be read.
-`pseudolife-mcp tunnel update` updates only saved tunnels. Running managed tunnels
+The Python client's `pseudolife-mcp tunnel update` updates only saved tunnels. Running managed tunnels
 refresh their bridge and shim, even when the vendor version stays the same, and
 must become locally ready before the update succeeds. A failed candidate attempts
 to restore the previous immutable bridge/shim snapshot and readiness; a successful

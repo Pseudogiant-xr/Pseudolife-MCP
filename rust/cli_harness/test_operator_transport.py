@@ -1,6 +1,7 @@
 """Exercise the oracle side of native transport rows with real child processes."""
 import sys
 import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -64,6 +65,19 @@ def recovery_row():
         finally:
             if cleanup := getattr(row, "_cleanup", None):
                 atexit.unregister(cleanup)
+
+
+def _fixture_descriptors(rows):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    return {f'SELECT * FROM "public"."{table}" LIMIT 0': nullcontext(SimpleNamespace(
+        description=[SimpleNamespace(name=key) for key in records[0]],
+    )) for table, records in rows.items()}
+
+
+def _sql_text(statement):
+    return statement if isinstance(statement, str) else statement.as_string()
 
 
 @pytest.mark.parametrize("server_name", ["fixture", "pseudolife_memory", "pseudolife_bench", "r1_other"])
@@ -137,7 +151,11 @@ def test_recovery_bank_setup_runs_without_frozen_imports(monkeypatch, recovery_r
     monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
     admin, target = MagicMock(), MagicMock()
     admin.execute.return_value.fetchone.return_value = None
-    target.execute.return_value.fetchone.return_value = (name,)
+    reply = MagicMock()
+    reply.fetchone.return_value = (name,)
+    rows = json.loads(row._HISTORY.read_text(encoding="utf-8"))["variants"][kind]["rows"]
+    descriptors = _fixture_descriptors(rows)
+    target.execute.side_effect = lambda statement, *_: descriptors.get(_sql_text(statement), reply)
     monkeypatch.setattr(row, "_admin", lambda: nullcontext(admin))
     monkeypatch.setattr(row, "_url", lambda _: "fixture-only")
     monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: nullcontext(target))
@@ -151,10 +169,31 @@ def test_recovery_bank_setup_runs_without_frozen_imports(monkeypatch, recovery_r
     )
 
 
+def test_recovery_seed_checks_live_columns(recovery_row, monkeypatch):
+    from unittest.mock import MagicMock
+
+    row = recovery_row
+    name = row.NAMES.name("r1_fixture", max_length=63)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    conn = MagicMock()
+    reply = MagicMock()
+    reply.fetchone.return_value = (name,)
+    captured = json.loads(row._HISTORY.read_text(encoding="utf-8"))["variants"]["recover"]["rows"]
+    columns = captured["coordination_agents"][0].keys() - {"credential_hash"}
+    descriptor, = _fixture_descriptors({"coordination_agents": [dict.fromkeys(columns)]}).values()
+    conn.execute.side_effect = [reply, None, None, descriptor, None]
+    with pytest.raises(ValueError, match="public.coordination_agents .*unexpected credential_hash"):
+        row._seed_history(conn, name, "recover")
+    assert len(conn.execute.call_args_list) == 4
+
+
 @pytest.mark.parametrize("damage,reason", [
     ("principals", "incomplete recovery history"),
     ("coordination_lease_fence", "incomplete recovery history"),
     ("board", "wrong paired owner"),
+    ("old-principal", "public.principals .*missing principal, unexpected old_key"),
+    ("old-board", "public.principals .*missing board, unexpected old_key"),
 ])
 def test_recovery_seed_refuses_an_incomplete_history(monkeypatch, recovery_row, tmp_path, damage, reason):
     import json
@@ -166,20 +205,26 @@ def test_recovery_seed_refuses_an_incomplete_history(monkeypatch, recovery_row, 
     monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
     history = json.loads(row._HISTORY.read_text(encoding="utf-8"))
     variant = history["variants"]["invited"]
+    descriptors = _fixture_descriptors(variant["rows"])
     if damage == "principals":
         del variant["rows"]["principals"]
     elif damage == "board":
         variant["rows"]["principals"][0]["board"] = False
+    elif damage.startswith("old-"):
+        principal = variant["rows"]["principals"][0]
+        principal["old_key"] = principal.pop(damage.removeprefix("old-"))
     else:
         del variant["sequences"][damage]
     broken = tmp_path / "history.json"
     broken.write_text(json.dumps(history), encoding="utf-8")
     monkeypatch.setattr(row, "_HISTORY", broken)
     connection = MagicMock()
-    connection.execute.return_value.fetchone.return_value = (name,)
+    reply = MagicMock()
+    reply.fetchone.return_value = (name,)
+    connection.execute.side_effect = lambda statement, *_: descriptors.get(_sql_text(statement), reply)
     with pytest.raises(ValueError, match=reason):
         row._seed_history(connection, name, "invited")
-    connection.transaction.assert_not_called()
+    assert not any(_sql_text(call.args[0]).startswith("INSERT ") for call in connection.execute.call_args_list)
 
 
 def test_recovery_reservation_replacement_keeps_both_files(recovery_row, tmp_path):
