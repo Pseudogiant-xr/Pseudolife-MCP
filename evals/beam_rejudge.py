@@ -44,7 +44,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
 
 from beam_adapter import judge_response, load_judge_prompt  # noqa: E402
-from longmemeval_bench import ARMS, load_rows  # noqa: E402
+from _python_longmemeval_bench import ARMS, load_rows  # noqa: E402
 
 # Canonical arm order (report() convention: hybrid_ev only after the rest).
 ALL_ARMS = (*ARMS, "hybrid_ev")

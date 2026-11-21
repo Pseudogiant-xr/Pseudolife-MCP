@@ -38,7 +38,7 @@ _DUPLICATED = {
     "beam_adapter.py": ("_BEAM_ANSWER_SYSTEM", "load_judge_prompt", "iter_chats",
                         "load_chat_turns", "load_questions", "_SCORE_RE",
                         "parse_judge_score", "judge_response", "format_turn"),
-    "longmemeval_bench.py": ("_chat", "_THINKING_LEVELS", "_SAMPLER_PROTECTED"),
+    "_python_longmemeval_bench.py": ("_chat", "_THINKING_LEVELS", "_SAMPLER_PROTECTED"),
 }
 
 _ENV_KEYS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "LLM_PROVIDER",

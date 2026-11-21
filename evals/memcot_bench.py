@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ladder_sweep import approx_tokens, value_present  # noqa: E402
+from _python_ladder_sweep import approx_tokens, value_present  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Corpus — each fact appears twice: as an ingested snippet AND a seeded edge.
@@ -442,7 +442,7 @@ def main() -> int:
     if args.run:
         import tempfile
         import embedder_stamp
-        from ladder_sweep import build_service
+        from _python_ladder_sweep import build_service
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="plmemcot_",
                                          ignore_cleanup_errors=True) as td:
