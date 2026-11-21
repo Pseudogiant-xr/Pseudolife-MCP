@@ -71,5 +71,5 @@ def test_missing_question_type_falls_back_to_ku_judge():
     # refactor cannot silently re-judge old artifacts with the generic
     # prompt.
     src = (Path(__file__).resolve().parents[1] / "evals"
-           / "longmemeval_bench.py").read_text(encoding="utf-8")
+           / "_python_longmemeval_bench.py").read_text(encoding="utf-8")
     assert 'row.get("question_type", "knowledge-update")' in src

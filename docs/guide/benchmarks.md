@@ -4,7 +4,7 @@ What the memory actually buys, measured. Part of the
 [user guide](../../README.md#documentation); the full methodology and every
 finding live in [`evals/README.md`](../../evals/README.md).
 
-The engine measurements on this page were made on the frozen Python implementation.
+Pseudolife's quality measurements on this page were made on the frozen Python engine.
 
 **The bench instrument changed on 2026-08-17.** Every accuracy on this page
 was graded by a local **Qwen3.6-27B** answerer/judge; the bench stack has

@@ -38,8 +38,9 @@ def chronological_turns(question):
 
     try:
         sessions = zip(question["haystack_dates"], question["haystack_sessions"], strict=True)
-        return [[f"[{date}] {turn['role']}: {turn['content'].strip()}" for turn in session
-                 if turn["content"].strip()] for date, session in sorted(sessions, key=dated)]
+        return [[f"[{date}] {turn['role']}: {content}" for turn in session
+                 if (content := (turn.get("content") or "").strip())]
+                for date, session in sorted(sessions, key=dated)]
     except (AttributeError, TypeError, ValueError, KeyError):
         raise BenchError("question has invalid or unpaired dated sessions") from None
 
