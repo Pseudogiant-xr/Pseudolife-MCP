@@ -332,6 +332,49 @@ def test_audit_fixture_checks_the_database_before_inserts(monkeypatch):
     conn.execute.assert_called_once_with("SELECT current_database()")
 
 
+@pytest.mark.parametrize("kind", ["rich", "stats", "empty", "nolog", "tampered", "prev49", "prev46"])
+def test_audit_ensure_refuses_before_database_setup(monkeypatch, kind):
+    from .rows import audit
+
+    name = audit._name(kind)
+    monkeypatch.setenv("_PSEUDOLIFE_PRODUCTION_DB", name)
+    monkeypatch.setattr(audit, "_BASELINE", {})
+    monkeypatch.setattr(audit, "_CREATED", set())
+    create = MagicMock(side_effect=AssertionError("database setup ran before the audit guard"))
+    connect = MagicMock(side_effect=AssertionError("database connection ran before the audit guard"))
+    monkeypatch.setattr(_bank, "create", create)
+    monkeypatch.setattr(_bank, "connect", connect)
+
+    with pytest.raises(ProductionDatabaseError, match="it is a production bank"):
+        audit.ensure(kind)
+    create.assert_not_called()
+    connect.assert_not_called()
+    assert audit._CREATED == set()
+
+
+def test_audit_captured_seed_runs_without_the_frozen_package(monkeypatch):
+    from .rows import audit
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    name = audit._name("payload")
+    conn = MagicMock()
+    cursor = conn.execute.return_value
+    cursor.fetchone.return_value = (name,)
+    cursor.__enter__.return_value.description = [
+        SimpleNamespace(name=column) for column in audit._EXPORT_FIELDS + audit._BODY_FIELDS
+    ]
+
+    with cold_harness_imports():
+        ids = audit._seed_captured(conn, name, "payload")
+
+    assert ids == {"legacy": "ef12ab34cd5600000000000000000001"}
+    insert, (payload,) = conn.execute.call_args.args
+    assert insert.as_string().startswith('INSERT INTO "public"."coordination_events" ')
+    assert [row["event"] for row in payload.obj] == ["register", "send", "register"]
+    assert payload.obj[1]["message_id"] == ids["legacy"]
+
+
 @pytest.mark.parametrize("target_type,error,message", [
     ("unowned", ValueError, "not owned by this harness run"),
     ("non_audit", ValueError, "expected a disposable audit database"),

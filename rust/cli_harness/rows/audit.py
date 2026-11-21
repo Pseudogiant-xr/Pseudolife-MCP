@@ -154,6 +154,7 @@ def _copy(source: str, target: str) -> None:
 def ensure(kind: str) -> str:
     """The seeded bank of this kind (created once per harness process)."""
     name = _name(kind)
+    _require_audit_name(name)
     if name in _BASELINE:
         return name
     _CREATED.add(name)
