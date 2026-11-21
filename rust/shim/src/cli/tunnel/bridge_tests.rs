@@ -1887,6 +1887,22 @@ fn argv(values: &[&str]) -> Vec<OsString> {
     values.iter().map(OsString::from).collect()
 }
 
+#[tokio::test]
+async fn failed_stdio_shim_spawn_never_creates_a_readiness_lock() {
+    let store = Store::new();
+    store.profile("dot");
+    let readiness = store.0.join("bridge-ready-fixture.lock");
+    let start = Start {
+        profile: store.load("dot"),
+        root: store.0.clone(),
+        verification: None,
+        readiness: Some(readiness.clone()),
+    };
+    let missing = store.0.join("missing-shim.exe");
+    assert_eq!(serve_with_image(start, &missing).await, ExitCode::FAILURE);
+    assert!(!readiness.exists());
+}
+
 #[test]
 fn the_bridge_needs_its_profile_and_a_ready_one() {
     for values in [

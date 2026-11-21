@@ -105,13 +105,6 @@ def age(seconds):
     return Step(f"age {seconds}", kind="age", seconds=seconds)
 
 
-def seed(title, fn):
-    """Run a signed-maintainer or conductor-wake seed through the frozen store."""
-    step = Step(title, kind="seed", write=False)
-    step.fn = lambda dsn, ctx: _seed_frozen_bank(dsn, fn, ctx)
-    return step
-
-
 def fixture_seed(title, fn):
     """Replay fixture rows against the arm's already initialized schema."""
     step = Step(title, kind="seed", write=False)
@@ -133,28 +126,6 @@ def seed_bank(dsn: str, fn, ctx) -> None:
         rows = BoardRows(conn, time.time())
         fn(rows, ctx)
         rows.append_events()
-
-
-def _seed_frozen_bank(dsn: str, fn, ctx) -> None:
-    import time
-    from contextlib import contextmanager
-
-    import psycopg
-    from pseudolife_memory.storage.coordination import CoordinationStore
-
-    class _Storage:
-        def __init__(self, conn):
-            self.conn = conn
-
-        @contextmanager
-        def _txn(self):
-            with self.conn.transaction():
-                yield
-
-    with psycopg.connect(dsn, autocommit=True) as conn:
-        store = CoordinationStore(_Storage(conn), clock=time.time)
-        with store.storage._txn():
-            fn(store, ctx)
 
 
 def age_bank(dsn: str, seconds: float) -> None:

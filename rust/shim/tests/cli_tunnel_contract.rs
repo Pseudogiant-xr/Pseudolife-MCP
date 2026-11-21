@@ -121,6 +121,20 @@ fn assert_refused(home: &Home, args: &[&str], env: &[(&str, &str)], message: &st
 }
 
 #[test]
+fn bridge_readiness_protocol_query_is_local_and_inert() {
+    let home = Home::new();
+    let before = tree(&home.0);
+    let answer = run(&home, &["shim", "--readiness-protocol"], &[]);
+    assert!(answer.status.success());
+    assert!(answer.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&answer.stdout).unwrap(),
+        serde_json::json!({"version":1})
+    );
+    assert_eq!(tree(&home.0), before);
+}
+
+#[test]
 fn unported_commands_and_argv_shapes_defer_without_effect() {
     let home = Home::new();
     let dir = home.dir();
