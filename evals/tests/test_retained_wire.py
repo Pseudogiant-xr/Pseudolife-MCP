@@ -3,19 +3,31 @@ import json
 import os
 from pathlib import Path
 
-from evals import longmemeval_bench as lme
+import pytest
+
+from evals import ladder_sweep as ladder, longmemeval_bench as lme, regression_gate as gate
 from evals.retained_daemon import DaemonSetup, Endpoint, bench_config
 from rust.daemon.harness import embedding_fixture
 from rust.daemon.harness.stub_extractor import StubExtractor
 
 
-def test_longmemeval_uses_the_rust_public_wire(tmp_path):
+@pytest.fixture
+def setup(tmp_path):
     binary = Path(os.environ["PL_RETAINED_TEST_DAEMON"])
     library = Path(os.environ["ORT_DYLIB_PATH"])
     model_dir = tmp_path / "embedding"
     embedding_fixture.create(model_dir, dimension=1024)
-    setup = DaemonSetup(binary, "0" * 40, model_dir, library, tmp_path / "banks")
+    return DaemonSetup(binary, os.environ["PL_RETAINED_TEST_REVISION"], model_dir, library,
+                       tmp_path / "banks")
 
+
+def fixture_config():
+    config = bench_config()
+    config["embedding"]["model_name"] = "fixture-embedding"
+    return config
+
+
+def test_longmemeval_uses_the_rust_public_wire(setup):
     old_date, new_date = "2024/11/01", "2024/11/02"
     old_line = "The build tool is maple."
     new_line = "The build tool is now cedar."
@@ -31,8 +43,7 @@ def test_longmemeval_uses_the_rust_public_wire(tmp_path):
                                                     "value": value, "source": 1,
                                                     "confidence": 0.9}]})}
 
-    config = bench_config()
-    config["embedding"]["model_name"] = "fixture-embedding"
+    config = fixture_config()
     with StubExtractor({"served_model": "fixture-extractor", "replies": [
             reply(old_date, old_line, "maple"), reply(new_date, new_line, "cedar"),
     ]}, "retained-wire") as stub:
@@ -45,3 +56,35 @@ def test_longmemeval_uses_the_rust_public_wire(tmp_path):
     assert "cedar" in row["contexts"]["cortex"]
     assert "maple" in row["contexts"]["cortex"]
     assert "cedar" in row["contexts"]["rag_control"]
+
+
+def test_gate_replays_current_sets_and_scalar_history_over_mcp(setup):
+    question = {"question_id": "gate", "question_type": "knowledge-update", "answer": "cedar",
+                "question": "What is the build tool?", "question_date": "2024/11/02",
+                "haystack_dates": ["2024/11/01"],
+                "haystack_sessions": [[{"role": "user", "content": "The build tool is cedar."}]]}
+    slots = [{"entity": "build", "attribute": "tool", "kind": "scalar", "values": ["maple", "cedar"]},
+             {"entity": "build", "attribute": "checks", "kind": "set", "values": ["lint", "format"]}]
+    row = gate.contexts_for(question, "frozen raw bytes", slots, lambda: setup.bank(fixture_config()))
+    assert row["contexts"]["rag_control"] == "frozen raw bytes"
+    assert all(value in row["contexts"]["cortex"] for value in ("maple", "cedar", "lint", "format"))
+
+
+def test_ladder_uses_rust_dream_results_and_separate_raw_control(setup, monkeypatch):
+    old_line, new_line = "The build tool was maple.", "The build tool is now cedar."
+    monkeypatch.setattr(ladder, "CORPUS", [old_line, new_line])
+    monkeypatch.setattr(ladder, "PAIRS", [{"question": "What is the build tool?", "gold": "cedar", "stale": "maple"}])
+    config = fixture_config()
+    with setup.bank(config) as bank:
+        ladder.ingest(bank, ladder.CORPUS)
+        contexts, _ = ladder.read_contexts(bank, cortex=False)
+    assert ladder.measure(contexts)["stale_leak"] == 1
+    reply = {"kind": "claims", "user": f"[1] {old_line}\n\n[2] {new_line}", "times": 1,
+             "content": json.dumps({"claims": [{"entity": "build", "attribute": "tool", "value": "cedar",
+                                                 "source": 2, "confidence": 0.9}]})}
+    with StubExtractor({"served_model": "fixture-extractor", "replies": [reply]}, "ladder-wire") as stub:
+        endpoint = Endpoint(stub.base_url, "bench", "synthetic", "fixture-extractor")
+        result = ladder.run_rung(setup.bank, config, endpoint)
+        assert not stub.unused()
+    assert result["gold_recoverable"] == 1
+    assert result["stale_leak"] == 0

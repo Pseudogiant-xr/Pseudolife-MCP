@@ -91,7 +91,7 @@ def serve(beam_root: Path, tier: str, tag: str,
           limit_chats: int | None) -> None:
     """CPU-only context build: store turns, never dream — the rag arm is
     extraction-independent, which is what makes this phase GPU-free."""
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
     out = serve_path(tag)
     done = {(r["chat_id"], r["type"], r["index"]) for r in load_rows(out)}
     chats = iter_chats(beam_root, tier)
@@ -213,7 +213,7 @@ def answer(beam_root: Path, tag: str, budgets: tuple[int, ...],
     answerer, judge = resolve_chat_fns(answerer_kind, answer_model,
                                        judge_model, cli, call_timeout)
     if answerer_kind == "local":
-        from ladder_sweep import probe
+        from _python_ladder_sweep import probe
         from _python_longmemeval_bench import QWEN_URL
         if not probe(QWEN_URL):
             sys.exit(f"no local answer/judge server at {QWEN_URL}")

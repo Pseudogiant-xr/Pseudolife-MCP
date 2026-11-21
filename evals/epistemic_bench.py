@@ -1196,7 +1196,7 @@ def run_synthetic(args) -> int:
 
     import embedder_stamp
     import _python_longmemeval_bench as lmb                      # noqa: F401
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
 
     t0 = time.perf_counter()
     tmp = Path(tempfile.mkdtemp(prefix="epistemic_"))
@@ -1347,7 +1347,7 @@ def run_lme(args) -> int:
 
     import embedder_stamp
     import _python_longmemeval_bench as lmb
-    from ladder_sweep import build_service
+    from _python_ladder_sweep import build_service
 
     db_name = _bench_db_name()
     os.environ["PSEUDOLIFE_BENCH_DB"] = db_name

@@ -14,9 +14,8 @@ statistics honest:
     gate-check  compare replicate means against the committed baseline
     baseline    (re)establish evals/results/regression_gate.baseline.json
 
-Import-light by design: the bench module (and through it ladder_sweep /
-torch) is imported ONLY inside ``cmd_run``. Naming/IO helpers are small
-local mirrors of the bench's, kept in lockstep by tests.
+The frozen launcher supplies its answer callback. Historical statistics
+and naming helpers can be used without either engine or any model.
 
 Spec: docs/superpowers/specs/2026-07-18-eval-hygiene-sprint-design.md
 """
@@ -345,7 +344,7 @@ def gate_verdict(agg: dict, baseline: dict) -> list[str]:
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
-def cmd_run(args) -> int:
+def cmd_run(args, run_one=None) -> int:
     found = discover(args.dataset, args.extractor, args.tag,
                      args.results_dir)
     if not found:
@@ -361,10 +360,10 @@ def cmd_run(args) -> int:
     if args.results_dir != RESULTS_DIR:
         sys.exit("run only operates on the real results dir "
                  "(the bench owns file placement)")
-    from _python_longmemeval_bench import report, run_answer  # noqa: PLC0415 — heavy
+    if run_one is None:
+        sys.exit("use evals/_python_replicate.py for frozen runs or evals/regression_gate.ps1 for Rust")
     for t in pending:
-        run_answer(args.dataset, args.extractor, t)
-        report(args.dataset, args.extractor, t)
+        run_one(args.dataset, args.extractor, t)
     return 0
 
 
@@ -567,7 +566,7 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, run_one=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -589,7 +588,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run", help="answer-phase all pending replicates")
     _common(p)
     p.add_argument("--dry-run", action="store_true")
-    p.set_defaults(fn=cmd_run)
+    p.set_defaults(fn=lambda args: cmd_run(args, run_one))
 
     p = sub.add_parser("compare", help="paired permutation test A vs B")
     _common(p)

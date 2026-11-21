@@ -319,7 +319,7 @@ def cmd_replay(args) -> int:
     from _python_longmemeval_bench import (  # noqa: PLC0415 — heavy (torch)
         _parse_date, load_questions,
     )
-    from ladder_sweep import build_service  # noqa: PLC0415
+    from _python_ladder_sweep import build_service  # noqa: PLC0415
 
     served = load_rows(out_file(args.dataset, args.extractor, args.src_tag))
     if not served:
@@ -905,7 +905,7 @@ def cmd_rebuild(args) -> int:
 for each TAG in {' '.join(tags)}:
   python evals/longmemeval_bench.py --dataset {args.dataset} --extractor {ex} --tag TAG --phase answer
   python evals/replicate.py spawn --dataset {args.dataset} --extractor {ex} --tag TAG -n 4
-  python evals/replicate.py run   --dataset {args.dataset} --extractor {ex} --tag TAG
+  python evals/_python_replicate.py run   --dataset {args.dataset} --extractor {ex} --tag TAG
   python evals/replicate.py agg   --dataset {args.dataset} --extractor {ex} --tag TAG
 {compare_hint}
 """)

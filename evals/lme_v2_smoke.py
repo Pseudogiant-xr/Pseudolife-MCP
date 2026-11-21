@@ -583,7 +583,7 @@ def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:
     composition-aware variant. The primary metric is LME-V2's deterministic
     eval_function; the LLM judge is a secondary signal."""
     from _python_longmemeval_bench import (_chat, _ANSWER_SYSTEM, _JUDGE_SYSTEM)
-    from ladder_sweep import approx_tokens
+    from _python_ladder_sweep import approx_tokens
     system = answer_system if answer_system is not None else _ANSWER_SYSTEM
     # The compose prompt permits brief reasoning before the boxed answer, so
     # it needs headroom the terse KU prompt does not (256 truncates mid-reason).
@@ -686,7 +686,7 @@ def build_contexts_v2(svc, question: str,
 # --------------------------------------------------------------------------- #
 def run_smoke(limit: int, max_traj: int, retrv: dict | None = None,
               answer_system: str | None = None) -> None:
-    from ladder_sweep import build_service, probe
+    from _python_ladder_sweep import build_service, probe
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
     from _python_longmemeval_bench import build_contexts
 
@@ -799,7 +799,7 @@ def reanswer(from_tag: str, answer_system: str | None) -> None:
     rows = load_rows(src)
     if not rows:
         sys.exit(f"no rows in {src}")
-    from ladder_sweep import probe
+    from _python_ladder_sweep import probe
     if not probe(EXTRACTOR_URL):
         sys.exit(f"no answerer endpoint at {EXTRACTOR_URL}")
     # Resume from our own output, exactly as run_smoke does: this path used

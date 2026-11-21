@@ -1,5 +1,7 @@
 """Model-free contracts of the retained Rust quality drivers."""
 from contextlib import contextmanager
+import gzip
+import json
 
 import pytest
 
@@ -145,3 +147,95 @@ def test_answer_resume_and_independent_judge_use_the_saved_rust_contexts(tmp_pat
     assert lme_rejudge.run(source, alternative, second)["arms"]["cortex"]["accuracy"] == 0
     assert len(answerer.calls) == 8 and len(second.calls) == 8
     assert read_json(alternative / "comparison.json")["disagreements"]["cortex"] == 1
+
+
+def test_projected_gate_fixture_keeps_only_public_write_inputs(tmp_path):
+    from evals import rebuild_contexts
+
+    q = question()
+    dump = {**q, "facts": [
+        {"entity": "build", "attribute": "tool", "value": "new", "history": ["old", "new"],
+         "embedding": [0.1, 0.9], "tx_time": 100},
+        {"entity": "build", "attribute": "checks", "kind": "member", "value": "lint"},
+        {"entity": "build", "attribute": "checks", "kind": "member", "value": "format"},
+    ]}
+    with gzip.open(tmp_path / "q1.json.gz", "wt", encoding="utf-8") as fh:
+        json.dump(dump, fh)
+    fixture = rebuild_contexts.project(tmp_path, [q])
+    cells = rebuild_contexts.fixture_cells(fixture, [q])
+    assert cells["q1"] == [
+        {"entity": "build", "attribute": "tool", "kind": "scalar", "values": ["old", "new"]},
+        {"entity": "build", "attribute": "checks", "kind": "set", "values": ["lint", "format"]},
+    ]
+    with pytest.raises(BenchError, match="question"):
+        rebuild_contexts.fixture_cells(fixture, [{**q, "question": "wrong corpus"}])
+
+
+def test_gate_refuses_missing_or_mismatched_baseline_before_answering(tmp_path):
+    from evals import regression_gate as gate
+
+    manifest = {"engine": "rust", "policy": "test", "question_ids": ["q1"]}
+    path = tmp_path / "baseline.json"
+    with pytest.raises(BenchError, match="missing"):
+        gate.baseline_for(path, manifest)
+    record(path, {"manifest": {**manifest, "engine": "python"}, "revision": "0" * 40, "arms": {}})
+    with pytest.raises(BenchError, match="baseline"):
+        gate.baseline_for(path, manifest)
+
+
+def test_gate_detects_row_level_replica_drift_even_when_averages_match():
+    from evals import regression_gate as gate
+
+    def row(qid, yes):
+        return {"question_id": qid, "contexts": dict.fromkeys(lme.ARMS, "a"),
+                **{f"{arm}_response": "a" for arm in lme.ARMS},
+                **{f"{arm}_correct": yes for arm in lme.ARMS},
+                **{f"{arm}_context_tokens": 1 for arm in lme.ARMS}}
+
+    good = [row("q1", True), row("q2", False)]
+    flipped = [row("q1", False), row("q2", True)]
+    with pytest.raises(BenchError, match="replicates disagree"):
+        gate.aggregate([good, flipped])
+
+
+def test_gate_scores_regression_and_rejects_control_drift(tmp_path):
+    from evals import regression_gate as gate
+
+    @contextmanager
+    def open_bank():
+        yield Bank(True)
+
+    identity = {"revision": "0" * 40, "binary_sha256": "1" * 64}
+    manifest = {"engine": "rust", "question_ids": ["q1"]}
+    fixed = {"q1": "frozen raw"}
+    slots = {"q1": []}
+    judge = Instrument("judge", lambda prompt: "yes" if prompt.endswith("response: new") else "no")
+    all_correct = Instrument("answerer", lambda _prompt: "new")
+    establish = tmp_path / "establish"
+    assert gate.run(establish, manifest, identity, [question()], fixed, slots, open_bank,
+                    all_correct, judge, repetitions=2, baseline=None) == 0
+    baseline = gate.baseline_for(establish / "baseline-candidate.json", manifest)
+    assert gate.run(tmp_path / "pass", manifest, identity, [question()], fixed, slots, open_bank,
+                    all_correct, judge, repetitions=2, baseline=baseline) == 0
+
+    regression = Instrument("answerer", lambda prompt: "new" if "frozen raw" in prompt else "old")
+    assert gate.run(tmp_path / "regression", manifest, identity, [question()], fixed, slots, open_bank,
+                    regression, judge, repetitions=2, baseline=baseline) == 1
+
+    drift = Instrument("answerer", lambda _prompt: "old")
+    with pytest.raises(BenchError, match="drifted on the pinned raw control"):
+        gate.run(tmp_path / "drift", manifest, identity, [question()], fixed, slots, open_bank,
+                 drift, judge, repetitions=2, baseline=baseline)
+
+
+def test_ladder_keeps_the_naive_control_fixed_across_rungs():
+    from evals import ladder_sweep as ladder
+
+    contexts = [[pair["gold"]] for pair in ladder.PAIRS]
+    naive = ladder.measure(contexts)
+    assert naive["gold_recoverable"] == 1
+    assert naive["stale_leak"] == 0
+    control = ladder.control_measurement(contexts, {"engine": "rust"})
+    assert ladder.check_control(control, {"engine": "rust"}) == naive
+    with pytest.raises(BenchError, match="control"):
+        ladder.check_control(control, {"engine": "python"})

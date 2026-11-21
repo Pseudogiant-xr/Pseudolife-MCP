@@ -56,7 +56,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")               # CPU only
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-from ladder_sweep import build_service  # noqa: E402
+from _python_ladder_sweep import build_service  # noqa: E402
 import _python_longmemeval_bench as lmb  # noqa: E402
 from replicate import is_judge_field  # noqa: E402
 import embedder_stamp  # noqa: E402

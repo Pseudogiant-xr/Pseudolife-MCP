@@ -47,7 +47,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-from ladder_sweep import build_service, probe  # noqa: E402
+from _python_ladder_sweep import build_service, probe  # noqa: E402
 import answerability_probe  # noqa: E402
 import embedder_stamp  # noqa: E402
 import leak_check  # noqa: E402

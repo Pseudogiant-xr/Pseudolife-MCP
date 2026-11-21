@@ -30,7 +30,7 @@ from pseudolife_memory.memory.relation_quality import TYPE_CONSTRAINTS as RELATI
 from pseudolife_memory.storage.postgres import _BUILTIN_RELATIONS
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ladder_sweep import RUNGS, make_extractor, probe  # noqa: E402
+from _python_ladder_sweep import RUNGS, make_extractor, probe  # noqa: E402
 
 # Relation vocab handed to the model — same as service._dream_extract_relations
 # (builtins minus the lesson-only prefers/avoids).

@@ -65,7 +65,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from context_format import hybrid_context  # noqa: E402
-from ladder_sweep import (approx_tokens, build_service,  # noqa: E402
+from _python_ladder_sweep import (approx_tokens, build_service,  # noqa: E402
                           dream_env_knobs, pool_env_knobs, probe,
                           rerank_env_knobs)
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402

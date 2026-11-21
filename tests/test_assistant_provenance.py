@@ -309,7 +309,7 @@ def test_the_offline_fact_rebuild_mirrors_the_assistant_demotion():
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from rebuild_contexts import rebuild_fact_lines
+    from _python_rebuild_contexts import rebuild_fact_lines
 
     class _Emb:
         """Every text and the query share one unit vector: a forced tie."""
@@ -338,7 +338,7 @@ def ladder():
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    import ladder_sweep
+    import _python_ladder_sweep as ladder_sweep
     return ladder_sweep
 
 
