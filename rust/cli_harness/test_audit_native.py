@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+from contextlib import contextmanager
 import hashlib
 from importlib.util import module_from_spec, spec_from_file_location
 import json
@@ -258,25 +259,49 @@ def test_audit_verifier_rejects_invalid_prune_record(audit_rules, actor, days, t
     }
 
 
-def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
-    # Load the row afresh even when test_audit_stats already imported it.
+@contextmanager
+def _cold_audit(monkeypatch):
+    # Load the row afresh even when another test already imported it.
     path = Path(__file__).with_name("rows") / "audit.py"
     spec = spec_from_file_location(f"{__package__}.rows._audit_probe", path)
     isolated = module_from_spec(spec)
-    monkeypatch.setattr(normalize, "RULES", normalize.RULES.copy())
+    with monkeypatch.context() as patch, cold_harness_imports():
+        patch.setattr(normalize, "RULES", normalize.RULES.copy())
+        patch.setattr(_bank.NAMES, "labels", _bank.NAMES.labels.copy())
+        try:
+            spec.loader.exec_module(isolated)
+            yield isolated
+        finally:
+            if cleanup := getattr(isolated, "_drop_all", None):
+                atexit.unregister(cleanup)
+
+
+def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     raw = event()
     raw["payload"] = json.loads(raw["payload"])
-    with cold_harness_imports():
-        spec.loader.exec_module(isolated)
-        try:
-            monkeypatch.setattr(isolated, "export_rows", lambda _: [raw])
-            edited = json.loads(isolated.archive("reserved-number-key-single"))
-        finally:
-            atexit.unregister(isolated._drop_all)
+    with _cold_audit(monkeypatch) as isolated:
+        monkeypatch.setattr(isolated, "export_rows", lambda _: [raw])
+        edited = json.loads(isolated.archive("reserved-number-key-single"))
 
     expected = event(payload='{"safe":"雪","$serde_json::private::Number":"1"}')
     assert edited["payload"] == json.loads(expected["payload"])
     assert edited["hash"] == expected["hash"]
+
+
+def test_audit_export_preserves_field_order_and_legacy_payload():
+    from .rows import audit
+
+    with cold_harness_imports():
+        line = audit._export_line((
+            7, "send", "agent", "alice", "a", "b", "p", "t", "m",
+            r'{"odd":NaN,"text":"\ud800"}', 1500.0, "", "prev", "hash", None, None,
+        ))
+    assert line == (
+        b'{"seq":7,"event":"send","actor":"agent","principal":"alice","agent_id":"a",'
+        b'"recipient_agent_id":"b","project":"p","task":"t","message_id":"m",'
+        b'"payload":{"odd":NaN,"text":"\\ud800"},"created_at":1500.0,"hlc":"",'
+        b'"prev_hash":"prev","hash":"hash","body":null,"body_salt":null}\n'
+    )
 
 
 def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):
@@ -314,6 +339,54 @@ def test_audit_fixture_checks_the_database_before_inserts(monkeypatch):
     with pytest.raises(ValueError, match="audit fixture connection did not reach"):
         audit._seed_captured(conn, name, "legacy")
     conn.execute.assert_called_once_with("SELECT current_database()")
+
+
+@pytest.mark.parametrize("kind", ["rich", "stats", "empty", "nolog", "tampered", "prev49", "prev46"])
+def test_audit_ensure_refuses_before_database_setup(monkeypatch, kind):
+    from .rows import audit
+    from rust.harness_support import fixture_rows
+
+    name = audit._name(kind)
+    monkeypatch.setenv("_PSEUDOLIFE_PRODUCTION_DB", name)
+    monkeypatch.setattr(audit, "_BASELINE", {})
+    monkeypatch.setattr(audit, "_CREATED", set())
+    actions = (
+        (_bank, "create"), (_bank, "connect"), (_bank, "drop"),
+        (_bank, "_admin"), (_bank, "dump"), (fixture_rows, "checked_fixture_insert"),
+    )
+    stubs = []
+    for module, action in actions:
+        stub = MagicMock(side_effect=AssertionError(f"database action {action} ran before the audit guard"))
+        monkeypatch.setattr(module, action, stub)
+        stubs.append(stub)
+
+    with pytest.raises(ProductionDatabaseError, match="it is a production bank"):
+        audit.ensure(kind)
+    for stub in stubs:
+        stub.assert_not_called()
+    assert audit._CREATED == set()
+    assert audit._BASELINE == {}
+
+
+def test_audit_captured_seed_runs_without_the_frozen_package(monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    conn = MagicMock()
+    cursor = conn.execute.return_value
+
+    with _cold_audit(monkeypatch) as audit:
+        name = audit._name("payload")
+        cursor.fetchone.return_value = (name,)
+        cursor.__enter__.return_value.description = [
+            SimpleNamespace(name=column) for column in audit._EXPORT_FIELDS + audit._BODY_FIELDS
+        ]
+        ids = audit._seed_captured(conn, name, "payload")
+
+    assert ids == {"legacy": "ef12ab34cd5600000000000000000001"}
+    insert, (payload,) = conn.execute.call_args.args
+    assert insert.as_string().startswith('INSERT INTO "public"."coordination_events" ')
+    assert [row["event"] for row in payload.obj] == ["register", "send", "register"]
+    assert payload.obj[1]["message_id"] == ids["legacy"]
 
 
 @pytest.mark.parametrize("target_type,error,message", [
