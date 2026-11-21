@@ -26,7 +26,8 @@ def replay(dsn, captured):
     check_target(dsn)
     with psycopg.connect(dsn) as conn:
         assert_fixture_database(conn)
-        if conn.execute("SELECT to_regclass('public.meta') IS NOT NULL").fetchone()[0]:
+        if conn.execute("SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                        "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'S'))").fetchone()[0]:
             raise ValueError("fixed seed requires a fresh disposable bank; create it without a base template")
         ensure_schema(conn)
         for table, rows in captured["tables"].items():

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -19,13 +18,6 @@ CAPTURE_SHA256 = "c41b4a93c2ddcbb14c642f872749489be90fec6966a69717633a1aa0f317ba
 
 def seed(dsn):
     capture = load_capture("continuum", CAPTURE_SHA256)
-    # Match the original writer's fresh timestamps, preserving offsets in the
-    # capture. The bank comparisons still check these stamps between arms.
-    offset = time.time() - capture["at"]
-    for table, column in (("entries", "ts"), ("relations", "created_at"),
-                          ("cms_counters", "updated_at")):
-        for row in capture["bank"]["tables"][table]:
-            row[column] += offset
     replay(dsn, capture["bank"])
 
 

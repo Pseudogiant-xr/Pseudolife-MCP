@@ -119,6 +119,37 @@ class Scenario:
 
 
 class MutantQualification(unittest.TestCase):
+    def test_continuum_seed_retains_its_captured_clock(self):
+        import seed_entries
+
+        with (patch("time.time", return_value=1800000000.0),
+              patch.object(seed_entries, "replay") as replay):
+            seed_entries.seed("dbname=pl_cf_w2d_fixture")
+        bank = replay.call_args.args[1]
+        row = next(entry for entry in bank["tables"]["entries"] if entry["id"] == 1)
+        self.assertEqual(row["ts"], 1795000000.25)
+
+    def test_fixed_seed_refuses_partial_schema_without_meta(self):
+        import w2d_seed_rows as seed_rows
+
+        conn = unittest.mock.MagicMock()
+        conn.__enter__.return_value = conn
+
+        def query(sql):
+            result = unittest.mock.MagicMock()
+            # The partial bank contains an entries table and no meta table.
+            result.fetchone.return_value = ("pg_class" in sql,)
+            return result
+
+        conn.execute.side_effect = query
+        with (patch.object(seed_rows, "check_target"),
+              patch.object(seed_rows.psycopg, "connect", return_value=conn),
+              patch.object(seed_rows, "assert_fixture_database"),
+              patch.object(seed_rows, "ensure_schema") as ensure):
+            with self.assertRaisesRegex(ValueError, "requires a fresh disposable bank"):
+                seed_rows.replay("dbname=pl_cf_w2d_fixture", {"tables": {}, "sequences": {}})
+        ensure.assert_not_called()
+
     def test_cortex_requires_one_result_per_oracle_case(self):
         cases = [{"query": "first", "entries": []}, {"query": "second", "entries": []}]
         state = {"rows": {}}
