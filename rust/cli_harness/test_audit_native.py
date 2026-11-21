@@ -384,12 +384,36 @@ def test_audit_file_reference_resolves_the_supplied_archive_head(tmp_path):
     archive = json.dumps({"hash": digest, "created_at": 17.25}).encode() + b"\r\n\r\n"
     case = audit.file_case("reference-control", ["verify", "--input", "{HOME}/archive.jsonl"],
                            files={"archive.jsonl": archive})
-    recorded = [0, '{"head_hash": "<archive-head-hash>", "head_created_at": <archive-head-created-at>}\n', ""]
-    want = audit._file_reference(case, recorded, tmp_path / "case")
+    recorded = [1, '{"head_hash": "<archive-head-hash>", "head_created_at": <archive-head-created-at>}\n',
+                "fixture diagnostic\n"]
+    previous_umask = audit.core.pin_umask()
+    try:
+        want = audit._file_reference(case, recorded, tmp_path / "case")
+    finally:
+        if previous_umask is not None:
+            os.umask(previous_umask)
+
+    assert want["exit"] == 1
     assert audit.core.decode(want, "stdout") == (
         '{"head_hash": "' + digest + '", "head_created_at": 17.25}\n').encode()
-    assert base64.b64decode(want["files"]["archive.jsonl"][5:]) == archive
-    assert want["modes"] == audit.core.modes(tmp_path / "case")
+    assert audit.core.decode(want, "stderr") == b"fixture diagnostic\n"
+    assert want["files"] == {"cwd": "dir", "archive.jsonl": "file:" + base64.b64encode(archive).decode()}
+    assert want["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755", "archive.jsonl": "0o644"})
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_audit_file_reference_streams_match_shared_goldens(platform):
+    from .rows import audit
+
+    references = audit._file_references(platform)
+    goldens = audit._recorded_cases(platform)
+    shared = references.keys() & goldens.keys()
+    assert shared == {"audit-reserved-number-key-duplicates", "input-empty", "input-missing"}
+    for case_id in sorted(shared):
+        record = goldens[case_id]
+        assert references[case_id] == [record["exit"],
+                                       audit.core.decode(record, "stdout").decode(),
+                                       audit.core.decode(record, "stderr").decode()], case_id
 
 
 def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):
