@@ -22,27 +22,29 @@ def mean_unit_vector(text, dimension=1024):
     fixture, from this file's definition alone: whitespace word pieces
     (``tokenizers``' ``Whitespace``), unknown pieces as ``[UNK]``, at most
     ``MAX_TOKENS`` of them (the graph's own cap; a config can lower it), the
-    mean of their ``fixture_weights`` rows, then L2 normalization. Every row
+    mean of their ``fixture_row`` rows, then L2 normalization. Every row
     is (4, +-3, 0, ...), so only the share of even and odd token ids moves the
     direction."""
     pieces = re.findall(r"\w+|[^\w\s]+", text)[:MAX_TOKENS]
     if not pieces:
         raise ValueError("the fixture embeds no empty text")
-    weights = fixture_weights(len(VOCAB), dimension)
-    ids = [VOCAB.get(piece, VOCAB["[UNK]"]) for piece in pieces]
-    mean = [sum(float(weights[i][column]) for i in ids) / len(ids) for column in range(dimension)]
+    rows = [fixture_row(VOCAB.get(piece, VOCAB["[UNK]"]), dimension) for piece in pieces]
+    mean = [sum(row[column] for row in rows) / len(rows) for column in range(dimension)]
     norm = math.sqrt(sum(value * value for value in mean))
     return [value / norm for value in mean]
 
 
+def fixture_row(token_id, dimension=4):
+    """Token ``token_id``'s row of the graph's weights, without numpy (the
+    hosted Rust lane installs none). Two active columns keep the exact fp32
+    norm arithmetic simple while retaining direction changes, mixed signs and
+    nonzero padding values."""
+    return [4.0, -3.0 if token_id % 2 else 3.0] + [0.0] * (dimension - 2)
+
+
 def fixture_weights(size, dimension=4):
     import numpy as np
-    weights = np.zeros((size, dimension), dtype="f4")
-    # Two active columns keep the exact fp32 norm arithmetic simple while
-    # retaining direction changes, mixed signs and nonzero padding values.
-    weights[:, 0] = 4
-    weights[:, 1] = np.where(np.arange(size) % 2, -3, 3)
-    return weights
+    return np.array([fixture_row(i, dimension) for i in range(size)], dtype="f4")
 
 
 def create(root: Path, *, last_token=False, dimension=4):
