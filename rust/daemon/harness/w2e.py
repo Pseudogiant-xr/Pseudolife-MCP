@@ -6367,12 +6367,18 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                 answer = run_op(op, daemon.port, client, dsn)
                 if not answer or answer["isError"]:
                     diffs.append(f"{op.get('name', op['op'])} did not succeed")
-                elif op.get("name") == "memory_store":
-                    surprise = answer["value"].get("surprise")
-                    if answer["value"].get("stored") is not True or type(surprise) not in (int, float):
-                        diffs.append("fixture store did not return its stored surprise")
+                elif name == "counters-restore" and op.get("name") == "memory_store":
+                    # MCP's answer rounds surprise. Compare the history
+                    # with the full value persisted on the stored entry.
+                    with psycopg.connect(dsn, autocommit=True) as conn:
+                        entry = conn.execute(
+                            "SELECT surprise FROM entries WHERE text = %s ORDER BY id DESC LIMIT 1",
+                            (op["args"]["text"],),
+                        ).fetchone()
+                    if answer["value"].get("stored") is not True or not entry:
+                        diffs.append("fixture store did not persist its entry")
                     else:
-                        surprises.append(surprise)
+                        surprises.append(entry[0])
                 elif name == "search-after-restart" and op.get("name") == "memory_search":
                     items = answer["value"].get("entries", [])
                     if {item["text"] for item in items} != set(RESTART_TEXTS):
