@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import base64
 from contextlib import contextmanager
 import hashlib
 from importlib.util import module_from_spec, spec_from_file_location
@@ -302,6 +303,42 @@ def test_audit_export_preserves_field_order_and_legacy_payload():
         b'"payload":{"odd":NaN,"text":"\\ud800"},"created_at":1500.0,"hlc":"",'
         b'"prev_hash":"prev","hash":"hash","body":null,"body_salt":null}\n'
     )
+
+
+@pytest.mark.parametrize(("platform", "digest"), [
+    ("linux", "5b9189e673014d9a990c13aedb153357ab16f7395e806cb65a1cdc369ea240a2"),
+    ("windows", "f26d56b53d52eef92094496e9a1e26501823492307445680656c6db2b459ce1c"),
+])
+def test_audit_file_references_are_frozen_and_registered(monkeypatch, platform, digest):
+    from .rows import audit
+
+    # Frozen Python file observations at f1faebaa7, captured on each
+    # platform. Normalize checkout line endings before hashing the file.
+    fixture = Path(audit.__file__).with_name(f"audit.file.{platform}.json")
+    raw = fixture.read_text(encoding="utf-8")
+    assert hashlib.sha256(raw.encode("utf-8")).hexdigest() == digest, (
+        "audit file references differ from the frozen capture")
+
+    monkeypatch.setattr(audit.core, "PLATFORM", platform)
+    monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+    hooked = {case.id for case in audit.cases() if platform in case.platforms
+              and getattr(case.reference, "func", None) is audit._file_reference}
+    assert hooked == set(json.loads(raw))
+
+
+def test_audit_file_reference_resolves_the_supplied_archive_head(tmp_path):
+    from .rows import audit
+
+    digest = "d" * 64
+    archive = json.dumps({"hash": digest, "created_at": 17.25}).encode() + b"\r\n\r\n"
+    case = audit.file_case("reference-control", ["verify", "--input", "{HOME}/archive.jsonl"],
+                           files={"archive.jsonl": archive})
+    recorded = [0, '{"head_hash": "<archive-head-hash>", "head_created_at": <archive-head-created-at>}\n', ""]
+    want = audit._file_reference(case, recorded, tmp_path / "case")
+    assert audit.core.decode(want, "stdout") == (
+        '{"head_hash": "' + digest + '", "head_created_at": 17.25}\n').encode()
+    assert base64.b64decode(want["files"]["archive.jsonl"][5:]) == archive
+    assert want["modes"] == audit.core.modes(tmp_path / "case")
 
 
 def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):

@@ -1,12 +1,10 @@
-"""The review-queue judges' differential scenarios (task P3b), merged into
+"""The review-queue judges' native scenarios (task P3b), merged into
 ``w2e.py``'s ``SCENARIOS`` by ``scenarios(w2e_module)``.
 
-Each judge runs from the sweep, as the merge judge does, so these follow the
-``judge-merge-*`` pattern: the merge judge's seed (twelve entities on a
-hub, notes mentioning them), one shared stub answering by display, the
-pending proposals inserted out of band on both banks at once, then the
-judges' settle, and the banks, answers and request sequences compared. The
-judge under test is on; every other judge and sweep step is off.
+Each judge runs from the sweep. The harness loads a captured seed, serves
+the judge's prompts from a local stub, inserts pending proposals and waits
+for durable witnesses. Each scenario enables its own judge and keeps other
+judges and sweep steps out of the way.
 
 The link judge (``link-*``): shadow records first opinions and asks a
 second opinion on a below-gate accept or reject; auto promotes an accept at
@@ -28,8 +26,9 @@ link proposal (the slice's later rows sharing an endpoint wait for the next
 tick), dismisses a pair and records the automatic dismissal, leaves a
 propose naming another pair or under its gate, and stamps a skipped row.
 ``candidate-auto-reopen`` moves a dismissed pair's evidence, so the
-dismissal reopens and the pair is judged again. The memo, the watermark and
-the decision records carry Python's fingerprints, compared as they are.
+dismissal reopens and the pair is judged again. The scan and pair bindings
+must move with the evidence, and Rust's queue corpus pins their exact
+fingerprint format.
 
 The curation judge (``curation-*``) judges the deep dream seed's lesson and
 world duplicate listings from the daemons' start, so each scenario settles
@@ -52,6 +51,23 @@ model skipped as a zero-confidence leave. ``junk-auto-reopen`` moves a kept
 entity's evidence, so the automatic keep is reopened and judged again.
 """
 from __future__ import annotations
+
+import json
+import re
+import threading
+import time
+from pathlib import Path
+
+import psycopg
+from psycopg import sql
+from psycopg.types.json import Json
+
+from rust.harness_support.bank_fixture import initialize_bank, require_fixture_database
+from rust.harness_support.database_guard import dsn_database_name
+from rust.harness_support.fixture_rows import checked_fixture_insert
+from w2e_queue_contract import (
+    expected_hashes, load_contract, request_diffs, request_shape, step_diffs, verdict_keys,
+)
 
 JUNK_ALL_JUDGED = ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals "
                    "WHERE kind = 'junk' AND status = 'pending' AND judge_verdict IS NULL)")
@@ -81,16 +97,14 @@ LINK_KEYS = {"P1": "Alpha Node|Beta Store", "P7": "Beta Store|Hub",
              "P4": "Epsilon Box|Llama 26B", "P5": "Beta Node|Delta Node",
              "P6": "Epsilon Node|Alpha Service"}
 
-# The judge mutants (src/dream/queue_judges.rs, src/dream/candidates.rs),
-# caught by the scenario beside each.
+# The live judge mutants caught by the scenario beside each. The float4
+# decoding mutant runs against db_candidate_edges_preserve_decimal_confidence.
 MUTANTS = ["mcp-dream-junk-no-evidence-bar",          # junk-auto
            "mcp-dream-junk-keep-unrecorded",          # junk-auto
            "mcp-dream-link-retype-applied",           # link-auto
            "mcp-dream-link-two-vote-same-model",      # link-two-vote-same-model
            "mcp-dream-candidate-dismiss-unrecorded",  # candidate-auto
            "mcp-dream-candidate-endpoint-stale",      # candidate-auto
-           # candidate-auto, by Python's fingerprints over the bank
-           "mcp-dream-candidate-real-binary",
            "mcp-dream-curation-distinct-unmarked",    # curation-auto-distinct
            "mcp-dream-curation-shadow-dismisses",     # curation-shadow
            "mcp-dream-curation-fold-unaudited"]       # curation-auto-fold
@@ -138,65 +152,304 @@ def candidate_records_sql(pairs: tuple = CANDIDATE_PAIRS) -> str:
             f"AND {own_pairs(*pairs)}")
 
 
-CANDIDATE_REOPENED = (
-    "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
-    "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened' "
-    f"AND {own_pairs(DISMISSED_PAIR)}) "
-    "AND EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
-    f"AND value->>'queue' = 'candidate' AND value->>'state' = 'active' "
-    f"AND {own_pairs(DISMISSED_PAIR)})")
-
-
-def fingerprint_diffs(dsns: dict, config_text: str,
-                      pairs: tuple = CANDIDATE_PAIRS) -> list[str]:
-    """Python's own candidate fingerprints over each side's bank: the scan
-    generation against the bank's watermark, and each active automatic
-    dismissal's evidence against its record. The bank is the same on both
-    sides of each comparison, so each side's clocks cancel out, and a read
-    that renders a column unlike ``storage/postgres.py`` shows here even
-    though the cross-side comparison only sees the hashes' presence."""
-    import tempfile
-    from types import SimpleNamespace
-
-    import psycopg
-    from pseudolife_memory.memory.review_decisions import candidate_evidence_fingerprints
-    from pseudolife_memory.memory.review_judgments import candidate_generation
-    from pseudolife_memory.storage import postgres
-    from pseudolife_memory.utils.config import load_config
-
-    class ReadStorage:
-        """The storage reads the candidate inputs make, on one plain
-        connection: no schema work, no writer lease."""
-        def __init__(self, conn):
-            self.conn = conn
-
-    for name in ("load_graph", "load_entries", "entity_sources_map", "traces_by_entity_norm",
-                 "entity_fact_counts", "current_fact_counts_by_entity_text",
-                 "pending_entity_proposals", "lesson_entity_ids", "pending_proposals",
-                 "dismissed_pairs"):
-        setattr(ReadStorage, name, getattr(postgres.PostgresStorage, name))
-    with tempfile.TemporaryDirectory() as tmp:
-        path = f"{tmp}/config.yaml"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(config_text)
-        cfg = load_config(path)
+def candidate_bindings(conn):
+    """Read the scan generation and the fixture pairs' active evidence."""
     out = []
-    for side in ("python", "rust"):
-        with psycopg.connect(dsns[side], autocommit=True) as conn:
-            postgres.register_vector(conn)
-            svc = SimpleNamespace(_storage=ReadStorage(conn), config=cfg)
-            mark = conn.execute(
-                "SELECT value FROM meta WHERE key = 'deep_candidates_judged'").fetchone()
-            want = candidate_generation(svc)
-            if not mark or mark[0].get("generation") != want:
-                out.append(f"candidate generation {side}: bank {want}, watermark "
-                           f"{mark[0].get('generation') if mark else None}")
-            for (rec,) in conn.execute(candidate_records_sql(pairs)):
-                got = candidate_evidence_fingerprints(svc, [rec.get("candidate") or {}])[0]
-                if got != rec.get("evidence_fingerprint"):
-                    out.append(f"candidate evidence {side} {rec.get('target')}: bank {got}, "
-                               f"record {rec.get('evidence_fingerprint')}")
-    return out
+    digest = re.compile(r"[0-9a-f]{64}")
+    mark = conn.execute("SELECT value FROM meta WHERE key = 'deep_candidates_judged'").fetchone()
+    generation = mark[0].get("generation") if mark else None
+    if not isinstance(generation, str) or not digest.fullmatch(generation):
+        out.append("candidate watermark has no generation digest")
+    evidence = {}
+    for (record,) in conn.execute(candidate_records_sql()):
+        value = record.get("evidence_fingerprint")
+        if not isinstance(value, str) or not digest.fullmatch(value):
+            out.append(f"candidate {record.get('target')} has no evidence digest")
+        evidence[tuple(record["pair"])] = value
+    return generation, evidence, out
+
+
+def archived_evidence_query(fingerprint):
+    return sql.SQL(
+        "SELECT EXISTS (SELECT 1 FROM meta WHERE key LIKE 'automatic_review_decision_v1:%' "
+        "AND value->>'queue' = 'candidate' AND value->>'state' = 'reopened' "
+        f"AND {own_pairs(DISMISSED_PAIR)} AND value->>'evidence_fingerprint' = {{}})"
+    ).format(sql.Literal(fingerprint))
+
+
+def candidate_reopen_wait(generation, evidence):
+    """Require this step's old evidence to be archived and its new scan complete."""
+    return sql.SQL(
+        f"{CANDIDATES_DONE} "
+        "AND EXISTS (SELECT 1 FROM meta WHERE key = 'deep_candidates_judged' "
+        "AND value->>'generation' <> {generation}) "
+        f"AND EXISTS (SELECT 1 FROM ({candidate_records_sql((DISMISSED_PAIR,))}) active "
+        "WHERE active.value->>'evidence_fingerprint' <> {evidence}) "
+        "AND ({archived})"
+    ).format(generation=sql.Literal(generation), evidence=sql.Literal(evidence),
+             archived=archived_evidence_query(evidence))
+
+
+# The console facts dump (GET /api/facts) takes the daemon's write mutex,
+# then reads aliases with exactly this statement (``entity_id_map_body`` in
+# rust/daemon/src/storage/graph.rs). The judge ticks' own alias read
+# (``load_inputs`` in rust/daemon/src/dream/candidates.rs) adds ORDER BY, so
+# a backend waiting on this text is the console holding the mutex.
+# PostgreSQL shows another backend's query and wait event only to the same
+# role or a member of pg_read_all_stats. The harness connects with the
+# daemon's own login, so it sees them; any other role never sees the console
+# parked, and the gate times out loudly instead of writing.
+CONSOLE_ALIAS_READ = "SELECT alias,entity_id FROM entity_aliases"
+WAITING_ON = (
+    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity a JOIN pg_locks l ON l.pid = a.pid "
+    "WHERE a.datname = current_database() AND a.pid <> pg_backend_pid() "
+    "AND a.wait_event_type = 'Lock' AND NOT l.granted "
+    "AND l.relation = %s::regclass AND a.query = %s)")
+
+
+def write_between_ticks(harness, port, dsn, statement, *, timeout_s=60.0, park_s=2.0):
+    """Commit an out-of-band write while no daemon task is inside a write section.
+
+    The candidate tick reads the inputs of its dismissal refresh and of its
+    scan in two queries inside one write-mutex section (``candidate_tick``,
+    ``refresh_candidate_dismissals``). A write committed between them reopens
+    nothing yet changes the scan, so one batch of re-judgments is split over
+    two ticks (two in 30 runs on the Windows dev VM in 8.3 temp mode, ordering
+    the requests differently from the contract). In-process writes hold the
+    same mutex; this write cannot, so it parks a console read that holds the
+    mutex on a table lock it waits for, commits inside that lock, then lets
+    the read finish. A tick that read before the commit sees the generation
+    move and is retried whole by the daemon's stale-evidence check."""
+    deadline = time.monotonic() + timeout_s
+    attempts = 0
+    while time.monotonic() < deadline:
+        attempts += 1
+        answer = {}
+
+        def console():
+            try:
+                answer["r"] = harness.w1a.call(port, "GET", "/api/facts?limit=1",
+                                               [harness.AUTH], None, timeout=timeout_s)
+            except Exception as failed:  # reported below, after the lock is released
+                answer["error"] = failed
+
+        with psycopg.connect(dsn) as gate, psycopg.connect(dsn, autocommit=True) as probe:
+            # A daemon transaction that never ends fails the step here
+            # instead of hanging it; daemon reads of aliases take milliseconds.
+            gate.execute("SET lock_timeout = '30s'")
+            gate.execute("LOCK TABLE entity_aliases IN ACCESS EXCLUSIVE MODE")
+            reader = threading.Thread(target=console, daemon=True)
+            reader.start()
+            parked = False
+            until = min(deadline, time.monotonic() + park_s)
+            while not parked and time.monotonic() < until:
+                parked = probe.execute(WAITING_ON, ("entity_aliases", CONSOLE_ALIAS_READ)
+                                       ).fetchone()[0]
+                if not parked:
+                    time.sleep(0.02)
+            if parked:
+                gate.execute(statement)
+                gate.commit()
+            else:
+                # A tick holding the mutex reached the locked table first.
+                gate.rollback()
+        reader.join(timeout_s)
+        if reader.is_alive() or "error" in answer or answer["r"]["status"] != 200:
+            raise RuntimeError(f"console read for the write gate failed: "
+                               f"{answer.get('error') or answer.get('r', {}).get('status')}")
+        if parked:
+            return {"isError": False, "value": None}
+    raise RuntimeError(f"no console read parked on the write gate in {attempts} attempts "
+                       f"within {timeout_s:g}s; the out-of-band write was not made")
+
+
+def seed_shape(name):
+    if name == "curation-auto-fold":
+        return "fold"
+    if name == "junk-auto":
+        return "junk"
+    return "deep" if name.startswith(("candidate-", "curation-")) else "judge"
+
+
+def seed_queue(dsn, shape, *, copied=False):
+    require_fixture_database(dsn_database_name(dsn) or "")
+    fixture = json.loads(Path(__file__).with_name("w2e_queue_seed_rows.json").read_text(encoding="utf-8"))
+    selected = fixture[shape]
+    base = fixture[selected["base"]] if selected["base"] else selected
+    rows = {**base["rows"], **selected["rows"]}
+    positions = {**base["positions"], **selected["positions"]}
+    with psycopg.connect(dsn) as conn:
+        initialize_bank(conn)
+        for records in rows.values():
+            for row in records:
+                if row.get("embedding") is not None:
+                    row["embedding"] = fixture["vectors"][row["embedding"]]
+        inserts = {name: checked_fixture_insert(conn, name, records) for name, records in rows.items()}
+        ids = {}
+        for name, count in positions.items():
+            ids[name] = dict(enumerate(
+                (i for (i,) in conn.execute("SELECT nextval(%s::regclass) FROM generate_series(1,%s)",
+                                            (f"public.{name}_id_seq", count))), start=1))
+        adopted = set()
+        if copied:
+            # A cloned graph may already contain one of the fixture's named
+            # entities. Attach new references to its identity in this bank.
+            for row in rows["entities"]:
+                previous = conn.execute("SELECT id FROM entities WHERE canonical=%s",
+                                        (row["canonical"],)).fetchone()
+                if previous:
+                    adopted.add(row["id"])
+                    ids["entities"][row["id"]] = previous[0]
+
+        references = {"src_id": "entities", "dst_id": "entities", "entity_id": "entities",
+                      "object_entity_id": "entities", "into_id": "entities",
+                      "entry_id": "entries", "proposal_id": "entity_proposals"}
+        for name, records in rows.items():
+            if name == "entities" and adopted:
+                records[:] = [row for row in records if row["id"] not in adopted]
+            for row in records:
+                for column, source in references.items():
+                    if row.get(column):
+                        row[column] = ids[source][row[column]]
+                if name in ids:
+                    row["id"] = ids[name][row["id"]]
+            statement, params = inserts[name]
+            if copied:
+                statement += sql.SQL(" ON CONFLICT DO NOTHING")
+                refused = []
+                for row in records:
+                    if conn.execute(statement, (Json([row]),)).rowcount != 1:
+                        fields = ("id",) if "id" in row else (
+                            "key", "preset", "a_norm", "b_norm", "entity_id", "entry_id",
+                            "entity_norm", "attribute_norm", "source")
+                        refused.append({field: row[field] for field in fields if field in row})
+                if refused:
+                    raise ValueError(f"copied bank conflicts with public.{name} fixture rows: {refused}")
+            else:
+                conn.execute(statement, params)
+
+
+def run_native(harness, name, scenario, binary, root, owned, mutant=None):
+    """Exercise the queue's independent response, bank and request contracts."""
+    contract = load_contract()
+    reference = contract["scenarios"][name]
+    ops = [{"op": "init"}, *scenario["ops"]]
+    if len(ops) != len(reference):
+        raise ValueError(f"{name}: queue contract has a different operation count")
+    tol = json.loads(harness.TOLERANCE_FILE.read_text(encoding="utf-8"))
+
+    tag = name.replace("-", "_")
+    template = harness.pg.name(f"pl_cf_w2e_{tag}_t")
+    owned.append(template)
+    seed_queue(harness.pg.create(template), seed_shape(name),
+               copied=harness.pg.base_database() is not None)
+    bank = harness.pg.name(f"pl_cf_w2e_{tag}_rs")
+    owned.append(bank)
+    dsn = harness.pg.create(bank, template=template)
+    sides = {"rust": dsn}
+    before = {"rust": harness.dbstate.dump(dsn)}
+    stubs = harness.start_stubs(scenario, ("rust",))
+    daemon = None
+    try:
+        stub = stubs["rust"]
+        hashes = expected_hashes(contract, stub.origin)
+        home = harness.daemons.make_home(root, f"{tag}-rs", harness.scenario_config(scenario, stub))
+        extra = harness.extractor_env(scenario, stub, "rust")
+        env = harness.w1a.rust_env(harness.side_env(scenario, dsn, extra))
+        if mutant:
+            env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
+        daemon = harness.daemons.rust_daemon(
+            binary, home, harness.daemons.free_port(), harness.daemons.base_env(home, env))
+
+        def start():
+            daemon.start(300)
+            harness.w1a.wait_settled([daemon.port], token=harness.TOKEN)
+            client = harness.Mcp(daemon.port)
+            client.init()
+            return client
+
+        client = start()
+        first_start = daemon.started_at_unix
+        diffs = harness.wait_warmups(sides, before) if harness.warmup_expected(scenario) else []
+        steps = []
+        asked = set()
+        for index, (op, expected) in enumerate(zip(ops, reference, strict=True)):
+            result = None
+            begun = time.monotonic()
+            settle = op.get("settle")
+            reopen = op.get("candidate_binding_check") == "reopen"
+            if reopen:
+                with psycopg.connect(dsn) as conn:
+                    conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+                    conn.read_only = True
+                    generation, evidence, binding_diffs = candidate_bindings(conn)
+                prior_evidence = evidence.get(DISMISSED_PAIR)
+                if binding_diffs or prior_evidence is None:
+                    raise RuntimeError(f"cannot wait for candidate reopen without prior bindings: {binding_diffs}")
+                settle = {**settle, "until": candidate_reopen_wait(generation, prior_evidence)}
+            if op["op"] == "init":
+                settle = scenario.get("init_settle")
+            elif op["op"] == "restart":
+                probes = harness.warmup_expected({"config": op["config"]})
+                if probes:
+                    with psycopg.connect(dsn, autocommit=True) as conn:
+                        boots = conn.execute(harness.BOOT_PROBES).fetchone()[0] + 1
+                daemon.stop()
+                (home / "data/config.yaml").write_text(
+                    op["config"].replace("@STUB@", stub.origin), encoding="utf-8")
+                client = start()
+                if probes:
+                    # Preserve the old two-arm restart's single warmup row.
+                    # The closed sequence contract still checks allocation
+                    # of exactly one probe per boot.
+                    diffs.extend(harness.settle_boot_probes(dsn, boots))
+                result = {"isError": False, "value": None}
+            elif op["op"] == "sql" and op.get("external"):
+                result = write_between_ticks(harness, daemon.port, dsn, op["sql"])
+            else:
+                result = (harness.home_op(op, home) if op["op"] in harness.HOME_OPS
+                          else harness.run_op(op, daemon.port, client, dsn))
+            if settle:
+                harness.settle_sides(settle, sides, stubs, scenario)
+            diffs.extend(harness.expect_diffs(settle if op["op"] == "init" and settle else op, sides))
+            if op.get("candidate_binding_check"):
+                with psycopg.connect(dsn, autocommit=True) as conn:
+                    current_generation, current_evidence, binding_diffs = candidate_bindings(conn)
+                    if reopen and not conn.execute(archived_evidence_query(prior_evidence)).fetchone()[0]:
+                        binding_diffs.append("reopened dismissal did not preserve the old pair evidence")
+                diffs.extend(binding_diffs)
+                if reopen:
+                    if current_generation == generation:
+                        diffs.append("changed candidate inputs kept the old scan generation")
+                    if current_evidence.get(DISMISSED_PAIR) == prior_evidence:
+                        diffs.append("reopened dismissal kept the old pair evidence")
+            sent = stub.drain()
+            diffs.extend(harness.extractor_unanswered("rust", sent))
+            observed_requests = request_shape(sent, scenario)
+            diffs.extend(request_diffs(expected["requests"], observed_requests))
+            asked.update((kind, endpoint, key) for _, _, _, kind, endpoint, keys in observed_requests
+                         for key in keys)
+            for request in sent:
+                if request["method"] != "POST":
+                    continue
+                if request.get("authorization") != harness.side_auth("rust"):
+                    diffs.append("judge request did not carry the fixture's caller key")
+            raw = harness.dbstate.dump(dsn)
+            diffs.extend(harness.run_clock_diffs("rust", raw, result if op.get("name") == "memory_dream" else None))
+            windows = [(first_start, time.time())]
+            diffs.extend(step_diffs(harness, contract, expected, op, result, raw, before["rust"],
+                                    windows, stub.origin, tol, hashes))
+            steps.append({"step": index, "op": op, "diffs": diffs, "rust": result,
+                          "wall_s": time.monotonic() - begun,
+                          "extractor": {"rust": harness.extractor_summary(sent)}})
+            diffs = []
+        if missing := verdict_keys(scenario) - asked:
+            steps[-1]["diffs"].append(f"native daemon did not ask for pinned judge verdict keys: {sorted(missing)}")
+        return {"scenario": name, "steps": steps, "stats": {}}
+    finally:
+        if daemon is not None:
+            daemon.stop()
+        harness.close_stubs(stubs)
 
 
 def scenarios(w) -> dict:
@@ -325,9 +578,8 @@ def scenarios(w) -> dict:
         op["settle"] = {**w.JUDGE_SETTLE, "until": CANDIDATES_DONE}
         return op
 
-    def checked(op: dict, mode: str) -> dict:
-        """``op`` with Python's fingerprints checked over each bank."""
-        return {**op, "candidate_fingerprints": candidate_config(mode)}
+    def checked(op: dict) -> dict:
+        return {**op, "candidate_binding_check": True}
 
     def candidate_scenario(mode: str, verdicts: dict, ops: list) -> dict:
         return {"config": candidate_config(mode), "seed_config": w.deep_config(),
@@ -349,6 +601,8 @@ def scenarios(w) -> dict:
                           "'automatic_review_decision_v1:%' AND value->>'queue' = 'candidate' "
                           "AND value->>'action' = 'dismiss' AND value->>'state' = 'active' "
                           f"AND {own_pairs(DISMISSED_PAIR)})")
+    candidate_edge = (f"src_id = {w.eid('postgres')} AND dst_id = {w.eid('ocean')} "
+                      "AND relation = 'uses' AND superseded_at IS NULL")
     memo_count = ("SELECT (SELECT COUNT(*) FROM jsonb_object_keys("
                   "(SELECT value->'pairs' FROM meta WHERE key = 'deep_candidate_verdicts'))) "
                   "> 0")
@@ -442,13 +696,13 @@ def scenarios(w) -> dict:
                 w.review()],
             HOSTS_DISMISSED, HOSTS_MARKED),
         "candidate-shadow": candidate_scenario("shadow", candidate_verdicts, [
-            w.expect(checked(apply_then_judge(), "shadow"), memo_count,
+            w.expect(checked(apply_then_judge()), memo_count,
                      "SELECT NOT EXISTS (SELECT 1 FROM edge_proposals "
                      "WHERE source = 'deep-dream-judge')",
                      f"SELECT NOT ({candidate_pair('postgres', 'kafka-broker')[7:]})"),
             w.review()]),
         "candidate-auto": candidate_scenario("auto", candidate_verdicts, [
-            w.expect(checked(apply_then_judge(), "auto"), memo_count,
+            w.expect(checked(apply_then_judge()), memo_count,
                      proposed("warehouse", "tide-gauge"),
                      candidate_pair("postgres", "kafka-broker"), candidate_decision,
                      candidate_pair("warehouse", "kelp-farm"),
@@ -462,14 +716,22 @@ def scenarios(w) -> dict:
         # evidence moves, it reopens (the pair removed, the record retired)
         # and the judge dismisses it again.
         "candidate-auto-reopen": candidate_scenario("auto", candidate_verdicts, [
-            w.expect(checked(apply_then_judge(), "auto"),
+            w.expect(checked(apply_then_judge()),
                      candidate_pair("postgres", "kafka-broker"), candidate_decision),
             w.expect({**w.external(
                 "INSERT INTO edges (src_id, relation, dst_id, confidence, origin, "
                 f"asserted_at) VALUES ({w.eid('postgres')}, 'uses', {w.eid('ocean')}, "
                 "0.8, NULL, 1.0)"),
-                "settle": {**w.JUDGE_SETTLE, "until": CANDIDATE_REOPENED},
-                "candidate_fingerprints": candidate_config("auto")},
+                "settle": w.JUDGE_SETTLE,
+                "candidate_binding_check": "reopen"},
+                candidate_pair("postgres", "kafka-broker"), candidate_decision),
+            # Only change the edge clock. A loader that ignores asserted_at
+            # still notices the insertion above but misses this new binding.
+            w.expect({**w.external(
+                f"UPDATE edges SET asserted_at = asserted_at + 1 WHERE {candidate_edge}"),
+                "settle": w.JUDGE_SETTLE,
+                "candidate_binding_check": "reopen"},
+                f"SELECT EXISTS (SELECT 1 FROM edges WHERE {candidate_edge} AND asserted_at = 2.0)",
                 candidate_pair("postgres", "kafka-broker"), candidate_decision),
             w.review()]),
         "link-shadow": w.judge_scenario(
