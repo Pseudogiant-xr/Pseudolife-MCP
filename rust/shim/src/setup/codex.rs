@@ -64,6 +64,11 @@ impl SetupError {
         self.credential_check
     }
 
+    pub(crate) fn with_credential_check(mut self, failure: CredentialCheckFailure) -> Self {
+        self.credential_check = Some(failure);
+        self
+    }
+
     pub(crate) fn detail(message: String) -> Self {
         Self {
             message: std::borrow::Cow::Owned(message),
