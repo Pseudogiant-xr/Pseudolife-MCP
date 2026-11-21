@@ -3763,9 +3763,11 @@ SCENARIOS.update({
         "env": {"PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"},
         "seed": [],
         "ops": [
-            store("The counters note about the build cache.", source="pseudolife-mcp"),
+            store("The counters note about the build cache.", source="pseudolife-mcp",
+                  tags=["counter-cache"]),
             store("The counters note about the token rotation.", source="pseudolife-mcp"),
-            search("build cache"),
+            # Select the access-count witness independently of embedding rank.
+            tool("memory_search", query="build cache", top_k=1, tags=["counter-cache"]),
             {"op": "restart", "config": COUNTERS_CONFIG},
             dict(counters(), expect=[
                 "SELECT interaction_count = 2 AND tier_queries = 1 "
