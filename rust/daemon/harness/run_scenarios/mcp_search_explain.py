@@ -26,10 +26,13 @@ def register(harness):
 
         def prepare_template(self, dsn):
             import psycopg
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            PostgresStorage(dsn).close()
-            with psycopg.connect(dsn, autocommit=True) as conn:
+            from principal_fixtures import check_target
+            from rust.harness_support.bank_fixture import initialize_bank
+
+            check_target(dsn)
+            with psycopg.connect(dsn) as conn:
                 harness.assert_disposable(conn)
+                initialize_bank(conn)
                 for index, direction in enumerate(((0.8, 0.6), (1.0, 0.0), (0.8, -0.6))):
                     vector = json.dumps([*direction] + [0.0] * 1022)
                     conn.execute("INSERT INTO entries (band, text, embedding, ts, source, tags) "
