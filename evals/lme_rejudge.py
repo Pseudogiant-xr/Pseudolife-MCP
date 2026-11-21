@@ -9,20 +9,17 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from evals import lme_scoring, longmemeval_bench as lme
-from evals.retained_artifacts import fingerprint, read_json, record
+from evals.retained_artifacts import fingerprint, record
 from evals.retained_daemon import BenchError, add_endpoint_arguments, endpoint_args
 
 
 def run(source, output, judge):
-    context = read_json(source / "context-manifest.json")
-    primary = read_json(source / "answer-manifest.json")
-    rows = lme.scored_rows(source / "answers", context)
+    context, primary, rows = lme.validated_scores(source)
     instruments = judge.provenance()
     if primary.get("judge", {}).get("served_model") == instruments["served_model"]:
         raise BenchError("choose a different judge model from the primary LongMemEval run")
     if source.resolve() == output.resolve():
         raise BenchError("use a separate directory for the re-judged results")
-    lme.report(source)
     manifest = {**primary, "judge": instruments, "primary_score_set_sha256": fingerprint(rows)}
     record(output / "answer-manifest.json", manifest)
     checked_endpoint = False

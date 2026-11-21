@@ -62,6 +62,10 @@ try {
     . (Join-Path $PSScriptRoot 'qwen_server.ps1')
     try {
         if (-not (Start-Qwen -Owned)) { exit 2 }
+        if (-not (Test-QwenReproducibleListener)) {
+            Write-Host 'Port 1234 is serving a different Qwen launch profile. Free the port deliberately and retry with the stock profile.'
+            exit 2
+        }
         $measuredRegression = $false
         & $Python @arguments | ForEach-Object {
             if ($_ -ceq 'Rust retrieval gate regressed') { $measuredRegression = $true }

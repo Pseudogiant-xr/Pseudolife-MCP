@@ -2,10 +2,11 @@
 import ast
 import builtins
 from collections import deque
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from fnmatch import fnmatchcase
 import gzip
 import json
+from os.path import normpath
 from pathlib import Path
 import re
 import subprocess
@@ -162,7 +163,7 @@ class Instrument:
         return self.reply(user)
 
 
-def test_answer_resume_and_independent_judge_use_the_saved_rust_contexts(tmp_path):
+def test_answer_resume_and_independent_judge_use_the_saved_rust_contexts(tmp_path, monkeypatch):
     source, alternative = tmp_path / "primary", tmp_path / "alternative"
     q1, q2 = question(), {**question(), "question_id": "q2_abs", "answer": "I don't know"}
     manifest = {"daemon": {"engine": "rust"}, "question_ids": ["q1", "q2_abs"]}
@@ -191,6 +192,12 @@ def test_answer_resume_and_independent_judge_use_the_saved_rust_contexts(tmp_pat
 
     with pytest.raises(BenchError, match="different judge model"):
         lme_rejudge.run(source, alternative, judge)
+
+    def record_outside_archive(path, value):
+        assert not path.is_relative_to(source), "rejudge wrote into the archived primary run"
+        return record(path, value)
+
+    monkeypatch.setattr(lme, "record", record_outside_archive)
     second = Instrument("second", lambda _user: "no")
     assert lme_rejudge.run(source, alternative, second)["arms"]["cortex"]["accuracy"] == 0
     assert len(answerer.calls) == 8 and len(second.calls) == 8
@@ -240,7 +247,8 @@ def test_gate_instrument_digests_cover_acquisition_rendering_and_scoring(monkeyp
 
     source = gate.instrument_digests()
     assert set(source) == {"regression_gate.py", "longmemeval_bench.py", "context_format.py",
-                           "replicate.py", "lme_scoring.py", "rebuild_contexts.py", "retained_daemon.py"}
+                           "replicate.py", "lme_scoring.py", "rebuild_contexts.py", "retained_daemon.py",
+                           "regression_gate.ps1", "qwen_server.ps1"}
     original = Path.read_text
     monkeypatch.setattr(Path, "read_text", lambda path, **kw: original(path, **kw) + "# changed\n"
                         if path.name == "context_format.py" else original(path, **kw))
@@ -252,6 +260,7 @@ def test_gate_instrument_digests_cover_acquisition_rendering_and_scoring(monkeyp
     ("login", "pseudolife-mcp test-login create"),
     ("driver", "Install psycopg"),
     ("connection", "Start the test PostgreSQL"),
+    ("role", "cannot create a disposable database"),
     ("turn", "fixture turn is held"),
     ("stale", "settings changed after harness import"),
     ("unexpected", "LookupError"),
@@ -266,6 +275,12 @@ def test_gate_preflight_rejects_database_failures_as_incomplete(tmp_path, monkey
     def admin():
         if fault == "connection":
             raise ConnectionFailure("connection refused")
+        if fault == "role":
+            def query(sql):
+                assert "rolcreatedb OR rolsuper" in sql
+                return SimpleNamespace(fetchone=lambda: (False,))
+
+            return nullcontext(SimpleNamespace(execute=query))
         if fault == "turn":
             raise SystemExit("fixture turn is held")
         if fault == "unexpected":
@@ -348,6 +363,69 @@ def test_daemon_error_excerpts_and_saved_log_remove_credentials(tmp_path, capsys
     detail = saved.read_text(encoding="utf-8")
     assert "cursor failed" in detail and token not in detail and dsn not in detail
     assert str(saved) in capsys.readouterr().err
+
+
+def test_extractor_readback_distinguishes_request_alias_and_served_id(monkeypatch):
+    endpoint = retained_daemon.Endpoint("http://127.0.0.1:9/v1", "custom", "premapped", "fixture.gguf")
+    status = {"extractor_mode": "primary", "primary_url": endpoint.url, "primary_model": endpoint.model}
+    bank = retained_daemon.Bank(SimpleNamespace(port=9), "test-token")
+    monkeypatch.setattr(bank, "tool", lambda *args, **kwargs: status)
+    calls = []
+
+    def models(origin, method, path, **kwargs):
+        calls.append((origin.netloc, method, path))
+        return {"data": [{"id": endpoint.expected_model}]}
+
+    monkeypatch.setattr(retained_daemon, "request_json", models)
+    bank.verify_extractor(endpoint)
+    assert calls == [("127.0.0.1:9", "GET", "/v1/models")]
+    status["primary_model_served"] = endpoint.expected_model
+    bank.verify_extractor(endpoint)
+    assert len(calls) == 1
+    status["primary_model"] = "wrong-alias"
+    with pytest.raises(BenchError, match="pinned primary extractor identity"):
+        bank.verify_extractor(endpoint)
+    status.update(primary_model=endpoint.model, primary_model_served="wrong.gguf")
+    with pytest.raises(BenchError, match="pinned primary extractor identity"):
+        bank.verify_extractor(endpoint)
+
+
+@pytest.mark.parametrize("spawn_failed", [True, False])
+def test_daemon_startup_keeps_failure_detail_and_releases_log(tmp_path, monkeypatch, spawn_failed):
+    dsn = "postgresql://fixture:private-test-password@127.0.0.1:5434/fixture"
+    token = "private-test-token"
+    binary = tmp_path / "daemon"
+    setup = retained_daemon.DaemonSetup(binary, "0" * 40, tmp_path, binary,
+                                        tmp_path, tmp_path / "output" / "daemon-error")
+    daemon = SimpleNamespace(proc=None, log=tmp_path / "daemon.log")
+
+    def start():
+        daemon._out = daemon.log.open("w", encoding="utf-8")
+        daemon._out.write(f"fixture startup detail {dsn} {token}\n")
+        if spawn_failed:
+            raise PermissionError(f"spawn refused {dsn}")
+        daemon.proc = object()
+
+    def stop():
+        if daemon.proc is not None:
+            daemon._out.close()
+
+    daemon.start, daemon.stop = start, stop
+    session = SimpleNamespace(init={"status": 200, "headers": [], "body": '{"result": {}}'},
+                              sid="fixture-session",
+                              initialized={"status": 404, "body": f"unknown route {token}"}, close=lambda: None)
+    monkeypatch.setattr(retained_daemon.daemons, "free_port", lambda: 9)
+    monkeypatch.setattr(retained_daemon.daemons, "rust_daemon", lambda *args: daemon)
+    monkeypatch.setattr(retained_daemon, "token_urlsafe", lambda n: token)
+    monkeypatch.setattr(retained_daemon.mcp_wire, "Session", lambda *args: session)
+    expected = "PermissionError: spawn refused" if spawn_failed else "HTTP 404: unknown route"
+    with pytest.raises(BenchError, match=expected) as error:
+        list(setup._serve(tmp_path, dsn, None))
+    assert daemon._out.closed
+    [saved] = list(setup.failure_log.parent.glob("daemon-error-*.log"))
+    log = saved.read_text(encoding="utf-8")
+    assert "fixture startup detail" in log
+    assert all(secret not in str(error.value) + log for secret in (dsn, token, "private-test-password"))
 
 
 def test_gate_detects_row_level_replica_drift_even_when_averages_match():
@@ -467,7 +545,8 @@ def local_dependencies(root, path, tracked):
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             if re.fullmatch(r"(?:[\w.-]+[/\\])*[\w.-]+\.(?:py|ps1)", node.value):
                 relative = Path(node.value.replace("\\", "/"))
-                dependencies.update({relative, path.parent / relative} & tracked)
+                candidates = {Path(normpath(relative)), Path(normpath(path.parent / relative))}
+                dependencies.update(candidates & tracked)
     return dependencies - {None}
 
 
@@ -518,12 +597,16 @@ def test_frozen_import_check_follows_indirect_and_literal_dynamic_imports(tmp_pa
     ]
 
 
-def test_frozen_import_check_follows_python_script_path_literals(tmp_path):
+@pytest.mark.parametrize(("active", "literal"), [
+    (Path("evals/active.py"), "_python_old.py"),
+    (Path("evals/nested/active.py"), "../_python_old.py"),
+])
+def test_frozen_import_check_follows_python_script_path_literals(tmp_path, active, literal):
     evals = tmp_path / "evals"
-    evals.mkdir()
-    (evals / "active.py").write_text('Path(__file__).parent / "_python_old.py"', encoding="utf-8")
+    (tmp_path / active.parent).mkdir(parents=True)
+    (tmp_path / active).write_text(f'Path(__file__).parent / "{literal}"', encoding="utf-8")
     (evals / "_python_old.py").write_text("", encoding="utf-8")
-    tracked = {Path("evals/active.py"), Path("evals/_python_old.py")}
-    assert frozen_imports_from(tmp_path, [Path("evals/active.py")], tracked) == [
-        "evals/active.py -> evals/_python_old.py",
+    tracked = {active, Path("evals/_python_old.py")}
+    assert frozen_imports_from(tmp_path, [active], tracked) == [
+        f"{active.as_posix()} -> evals/_python_old.py",
     ]

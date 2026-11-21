@@ -196,11 +196,15 @@ class Bank:
 
     def verify_extractor(self, endpoint):
         status = self.tool("memory_dream", action="status")
-        model = status.get("primary_model_served") or status.get("primary_model")
+        served = status.get("primary_model_served")
         if (status.get("extractor_mode") != "primary" or status.get("fallback_url")
                 or (status.get("primary_url") or "").rstrip("/") != endpoint.url.rstrip("/")
-                or model != endpoint.expected_model):
+                or status.get("primary_model") != endpoint.model
+                or served is not None and served != endpoint.expected_model):
             raise BenchError("the daemon did not report the pinned primary extractor identity")
+        if served is None and endpoint.expected_model != endpoint.model:
+            # Rust only resolves a served ID for its recognized request aliases.
+            endpoint.verify()
 
 
 def drain_dream(tool, *, stored):
@@ -340,7 +344,11 @@ class DaemonSetup:
         pg = self._test_database()
         with database_errors(pg):
             with pg._admin() as conn:
-                conn.execute("SELECT 1")
+                role = conn.execute("SELECT rolcreatedb OR rolsuper FROM pg_roles "
+                                    "WHERE rolname = current_user").fetchone()
+                if not role or not role[0]:
+                    raise BenchError("the test PostgreSQL login cannot create a disposable database. "
+                                     "Run `pseudolife-mcp test-login create` for the test server.")
 
     @contextmanager
     def bank(self, config, extractor=None):
@@ -381,8 +389,12 @@ class DaemonSetup:
                 session = mcp_wire.Session(port, token)
                 try:
                     rpc_result(session.init, "initialize", secrets=secrets)
-                    if not session.sid or session.initialized["status"] != 202:
-                        raise BenchError("Rust daemon did not open an authenticated MCP session")
+                    if not session.sid:
+                        raise BenchError("Rust daemon initialize did not return an MCP session ID")
+                    if session.initialized["status"] != 202:
+                        status = session.initialized["status"]
+                        detail = excerpt(session.initialized["body"], secrets)
+                        raise BenchError(f"MCP initialized notification returned HTTP {status}: {detail}")
                     bank = Bank(session, token, secrets)
                     if extractor is not None:
                         bank.verify_extractor(extractor)
@@ -400,6 +412,8 @@ class DaemonSetup:
             finally:
                 # The production Rust daemon calls extractors over HTTP and
                 # does not spawn children here. The POSIX harness stops its PID.
+                if daemon.proc is None and (handle := getattr(daemon, "_out", None)) is not None:
+                    handle.close()  # Popen can fail after launch() opens the log.
                 daemon.stop()
         except Exception as exc:
             try:

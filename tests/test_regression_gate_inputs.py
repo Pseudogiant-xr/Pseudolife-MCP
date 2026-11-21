@@ -42,16 +42,17 @@ def test_rust_gate_refuses_unmeasured_inputs_before_loading_qwen(
     assert not (tmp_path / "loaded").exists()
 
 
-@pytest.mark.parametrize(("driver_exit", "signal_regression", "verdict", "expected"), [
-    (0, False, None, 0),
-    (1, True, {"regressions": ["rag accuracy regressed"]}, 1),
-    (1, True, {"regressions": []}, 2),
-    (1, True, None, 2),
-    (1, False, {"regressions": ["stale verdict"]}, 2),
-    (2, True, {"regressions": ["must not count"]}, 2),
+@pytest.mark.parametrize(("driver_exit", "signal_regression", "verdict", "verified", "expected"), [
+    (0, False, None, True, 0),
+    (1, True, {"regressions": ["rag accuracy regressed"]}, True, 1),
+    (1, True, {"regressions": []}, True, 2),
+    (1, True, None, True, 2),
+    (1, False, {"regressions": ["stale verdict"]}, True, 2),
+    (2, True, {"regressions": ["must not count"]}, True, 2),
+    (0, False, None, False, 2),
 ])
 def test_rust_gate_maps_post_preflight_exit_and_stops_owned_qwen(
-        tmp_path, driver_exit, signal_regression, verdict, expected):
+        tmp_path, driver_exit, signal_regression, verdict, verified, expected):
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("PowerShell 7 is not installed")
@@ -61,6 +62,7 @@ def test_rust_gate_maps_post_preflight_exit_and_stops_owned_qwen(
     (tmp_path / "qwen_server.ps1").write_text(
         "function Start-Qwen { param([switch]$Owned); if (-not $Owned) { throw 'not owned' }; "
         "Set-Content (Join-Path $PSScriptRoot 'started') 'yes'; return $true }\n"
+        f"function Test-QwenReproducibleListener {{ return ${str(verified).lower()} }}\n"
         "function Stop-Qwen { param([switch]$Owned); if (-not $Owned) { throw 'not owned' }; "
         "Set-Content (Join-Path $PSScriptRoot 'stopped') 'yes' }\n", encoding="utf-8")
     (tmp_path / "regression_gate.py").write_text(
@@ -83,6 +85,43 @@ def test_rust_gate_maps_post_preflight_exit_and_stops_owned_qwen(
     assert reply.returncode == expected, reply.stdout + reply.stderr
     assert (tmp_path / "started").is_file()
     assert (tmp_path / "stopped").is_file()
+    assert (tmp_path / "out").is_dir() == verified
+
+
+def test_qwen_gate_verifies_the_process_serving_the_stock_profile(tmp_path):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is not installed")
+    helper = Path(__file__).resolve().parents[1] / "evals/qwen_server.ps1"
+    harness = tmp_path / "listener.ps1"
+    harness.write_text(f"""
+$ErrorActionPreference = 'Stop'
+. '{helper.as_posix()}'
+function Get-NetTCPConnection {{
+    param($State, $LocalPort, $ErrorAction)
+    if ($State -ne 'Listen' -or $LocalPort -ne 1234) {{ throw 'wrong listener query' }}
+    [pscustomobject]@{{ LocalAddress = '127.0.0.1'; OwningProcess = 4242 }}
+}}
+function Get-CimInstance {{
+    param($ClassName, $Filter, $ErrorAction)
+    if ($ClassName -ne 'Win32_Process' -or $Filter -ne 'ProcessId = 4242') {{ throw 'wrong owner query' }}
+    $script:serving
+}}
+$stock = (Get-QwenReproducibleArguments) -join ' '
+$script:serving = [pscustomobject]@{{
+    ExecutablePath = "$script:QwenEngine\\llama-server.exe"
+    CommandLine = '"C:\\model engines\\llama-server.exe" ' + $stock
+}}
+if (-not (Test-QwenReproducibleListener)) {{ throw 'expected stock profile' }}
+$script:serving.CommandLine = 'llama-server.exe ' + $stock.Replace('--cache-type-k q8_0', '--cache-type-k f16')
+if (Test-QwenReproducibleListener) {{ throw 'accepted changed KV profile' }}
+$script:serving.CommandLine = 'llama-server.exe ' + $stock
+$script:serving.ExecutablePath = 'C:\\other-engine\\llama-server.exe'
+if (Test-QwenReproducibleListener) {{ throw 'accepted changed engine' }}
+""", encoding="utf-8")
+    reply = subprocess.run([pwsh, "-NoProfile", "-File", str(harness)],
+                           capture_output=True, text=True, timeout=30)
+    assert reply.returncode == 0, reply.stdout + reply.stderr
 
 
 def test_missing_bank_directory_preserves_prior_results_and_does_not_launch(tmp_path):

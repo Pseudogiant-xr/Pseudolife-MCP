@@ -24,7 +24,9 @@ BASELINE = Path(__file__).resolve().parent / "results/rust-quality/regression_ga
 
 
 def instrument_digests():
-    paths = [Path(__file__), *(Path(module.__file__) for module in (
+    launcher = Path(__file__).parent
+    paths = [Path(__file__), launcher / "regression_gate.ps1", launcher / "qwen_server.ps1",
+             *(Path(module.__file__) for module in (
         lme, context_format, replicate, lme_scoring, rebuild_contexts, retained_daemon,
     ))]
     # Normalize checkout newline conventions without hiding changes to source text.

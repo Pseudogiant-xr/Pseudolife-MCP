@@ -1172,6 +1172,8 @@ jobs:
           tests/test_subagent_board_guard.py
           tests/test_codex_hook_setup.py
           tests/test_codex_hook_setup_edges.py
+          tests/test_regression_gate_inputs.py
+          tests/test_regression_gate_defaults.py
           tests/test_update_cli.py
           tests/test_ops_update_wrappers.py
           tests/test_register_claude_desktop.py

@@ -207,7 +207,7 @@ def run_answer(root, answerer, judge):
     return report(root)
 
 
-def report(root, *, answers=None, instrument_path=None, output=None):
+def validated_scores(root, *, answers=None, instrument_path=None):
     manifest = read_json(root / "context-manifest.json")
     contexts = rows_in(root / "contexts", manifest)
     scoring = read_json(instrument_path or root / "answer-manifest.json")
@@ -217,6 +217,11 @@ def report(root, *, answers=None, instrument_path=None, output=None):
             or scoring.get("context_set_sha256") != fingerprint(contexts)
             or [replicate.strip_judged([row])[0] for row in rows] != contexts):
         raise BenchError("answered rows and scoring manifest do not match the Rust context set")
+    return manifest, scoring, rows
+
+
+def report(root, *, answers=None, instrument_path=None, output=None):
+    manifest, scoring, rows = validated_scores(root, answers=answers, instrument_path=instrument_path)
 
     def scores(subset):
         arms = {arm: {"accuracy": fmean(row[f"{arm}_correct"] for row in subset),
