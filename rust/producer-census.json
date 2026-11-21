@@ -269,8 +269,8 @@
     "ops/install-hook-native.sh": "0f23714f1457ac709b1035b9cc8c962b1ee5b992dba9df802b99e59dda66d5de",
     "ops/install-hook.ps1": "5e5fcf3bc35b2a3ed5d8d32016af472ef4a3ff203b94fb5dcb68d4809688b5ef",
     "ops/install-hook.sh": "c5942d45d9fff70b854ee2e97531fc7b594450df59b00f2a2bbcea33fadaea7c",
-    "ops/install-native.ps1": "9284130b79ac517004e566aac892d8ef7968e79018403a61bddc1e35052b7dda",
-    "ops/install-native.sh": "ed8c5adfd95b5f35cf32224ce00e79ea5a83587e1b4a9ab35eb95371e7e62380",
+    "ops/install-native.ps1": "e511e455fc4057bbe8af47b87651b46084ec6fd3cae57f87a31b9b4a79b8f53b",
+    "ops/install-native.sh": "ef8a72261518b4e0759cca3aa6a9c5bb1fe06071b6fe75b0fc7d415eb60642d8",
     "ops/install-shim-autostart.ps1": "d45596b4900346e4ad75a18ba4ff00b25b3977295e6aea244e16a57fc49d079b",
     "ops/install-shim-autostart.sh": "5f53566884de9d70b098748991fcc50a5d3131b670a8c050218b272ce1332b13",
     "ops/install-worktree-retention.ps1": "1ff8d9a77f2cca9a19e38c89d85959a2d4ce03400e73eda3b8c79f1dabf52d29",
@@ -407,8 +407,8 @@
     "rust/shim/src/cli/connect/codex.rs": "7401076157c28d2a81615c5c99a996df30c75c124cd180c5ebda2d801291269f",
     "rust/shim/src/cli/connect/discover.rs": "d17b53e8df78293a1465481035595df694f398c9010042f903f38dc1cbf5099c",
     "rust/shim/src/cli/connect/files.rs": "e984336698ef3850683d56d2570891ba9de66545bc8c24db45a795b9dc46bbd4",
-    "rust/shim/src/cli/connect/mod.rs": "800bb18abdd43d7224b8b4f560e8c7e9d84120747573d4f505d74f598cf4a7b5",
-    "rust/shim/src/cli/connect/net.rs": "1dc84813005e205d8cf2ee7e7e7f092b12185c68898bb290cb1b42bcc596d6c8",
+    "rust/shim/src/cli/connect/mod.rs": "1112fa5fe8e2fdf84eb2c8bae929d3262b7d9be5164fbe27461085b12dfc1930",
+    "rust/shim/src/cli/connect/net.rs": "2fc04cc746da28a3ba48126f030afb92bd70c8c4253467ecb446ca57e8d6485d",
     "rust/shim/src/cli/connect/paths.rs": "fb4b39382f48371813a13a925c53ae44e2a244b79b35a9aebb9bd57d585ca89d",
     "rust/shim/src/cli/connect/procs.rs": "a3fb96f2e74ca08458529758cc854fe52c6e706825e937940a99aaf16b2aeaf7",
     "rust/shim/src/cli/connect/pyjson.rs": "9e7f79e8558908c610a63d8e39c96ccb71806289d425ac860fb33907dedb7042",
@@ -419,7 +419,7 @@
     "rust/shim/src/cli/console/args.rs": "891129c41787d8eaf922f56f854eae244a14d9f4827f1fd75a5506421b876f9d",
     "rust/shim/src/cli/console/browser.rs": "f5452b308a80a00e665a06687bd0a0f033c3a16a80216ccea94b70d6b7b0327a",
     "rust/shim/src/cli/console/launch.rs": "33f6427538c4c4a631006507462439332e77e54a97a9fab3568676acbeb7ce08",
-    "rust/shim/src/cli/console/mod.rs": "e62c88b9655c0f6a9737a1d2a9f429209df20a1240984c558e86ae447cd756c7",
+    "rust/shim/src/cli/console/mod.rs": "b5a931f97e4548fa9ac3fbbd63e2b01f9459f55ed1c5f7c696cc39524077a810",
     "rust/shim/src/cli/console/pyint.rs": "fb57ceb0309532ecc933aec9caae8c5e8cc1cf9e0f9da3ad422fd513a019f321",
     "rust/shim/src/cli/console/pyint_cases.json": "421cbb50a3559aaeb3cb6aa5c2d5ebe77830b8dc8346706ebc40f0aca66d0d46",
     "rust/shim/src/cli/console/shlex_cases.json": "669c587054ee58fc1425e293e9fdaa08eb452827d9171c512a97ac147f319d8b",
@@ -447,11 +447,11 @@
     "rust/shim/src/cli/expose/mod.rs": "805c57d2d1042fad8b97411f1c9f4da7973ce1b5d8247554dff3cdae6d0df00d",
     "rust/shim/src/cli/expose/tailscale.rs": "6ccd6955e9b37c11c6f0ff90f3dab8f663e9b3e70f1e38745213b6dade357de4",
     "rust/shim/src/cli/expose/tests.rs": "c900763fe9ed7abfaeab57368c8555f8b18713a7f2bcfae27c9550beffd2aad5",
-    "rust/shim/src/cli/hook_http.rs": "b6041ceaf0a7a7cb976d843412acc94c4957988e96d004b3e875fabe82ad990c",
+    "rust/shim/src/cli/hook_http.rs": "1f510c2c37e10ec720d0f407fc29185259cef519e9b31aeb9dbec005abe8a998",
     "rust/shim/src/cli/hook_json.rs": "ec016389716157c2eed558af5dab9774fbbc98d256e6a8e9e7784e8b73cc7602",
     "rust/shim/src/cli/host_connection.rs": "7b3423379687a70960ea50bf0e8f2d47560633f7d1950997bc5aebd9a933278c",
     "rust/shim/src/cli/installer/claude_desktop.rs": "57e98c5729fa533b07b8ad4aef2b5ca345ae7c69d8ba39c396c41126c42f97f5",
-    "rust/shim/src/cli/installer/codex_config.rs": "3a02fe62ce9c3d829602dec6455bdf06441ae62affe4b990e2fddeea9fbb7f7b",
+    "rust/shim/src/cli/installer/codex_config.rs": "099c310a6d4d447b1a9e4e896ee4e13e01fbfd2fbcdcd1332be17fae16b91fa4",
     "rust/shim/src/cli/installer/codex_hooks/definitions.rs": "990567f0468940de26a0b551533c66854c7f8372665c87e0b649ce10472b7239",
     "rust/shim/src/cli/installer/codex_hooks/instructions.rs": "bd2c5d4fbf97df63d5b833177e894a8090736b13364b44c636bfcc42325c4d4a",
     "rust/shim/src/cli/installer/codex_hooks/manual.rs": "2637c2047a7e520f6ee661b40e05d1848c365f677d964f7896554ff48b08fbd8",
@@ -631,7 +631,7 @@
     "rust/shim/src/credentials.rs": "77bfdfe0182ee0096e6b8ea75c703bba164993faf1ad6a05bda4e37c48f21b5f",
     "rust/shim/src/credentials/unix_accounts.rs": "d30f56e73eb66cb4dad5989bab84e4ccb33692b0433262f50caca02dcf58a0be",
     "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
-    "rust/shim/src/errors.rs": "11dea9e987319a8ee6168df956f0bbb3563a062976058b01c65c0b8ea0fd1762",
+    "rust/shim/src/errors.rs": "931855f942c85f46d5748dead49ef4cb53ca244884702679b0ac70c42cfd8774",
     "rust/shim/src/extractor_shim/autostart.ps1": "b21d75ca333c6e747f0081ca738b30ac59d0102009c0e0e08aa04ae084754ec7",
     "rust/shim/src/extractor_shim/autostart.rs": "3cd52c3dba5d22012f3669e54273b8cab5f896b30593240793eb01c22e7a9ede",
     "rust/shim/src/extractor_shim/autostart.sh": "04e6dad715e202f908ffe7967ca2288fe86aed771abb40cb7b03845eda16d39f",
@@ -669,8 +669,8 @@
     "rust/shim/src/sent_json.rs": "6986f9f3fdabeb695c12a5b2e6d0e6e72a19288f4eaa284b8287f9d8709db5cc",
     "rust/shim/src/sent_jsonb.rs": "d9265b4adb2842160310fd5410bd8c9224933bf09acce6ff48143d21022cc46e",
     "rust/shim/src/sent_serve.rs": "335fd96af4c5eac802e5102f09154552e32705899bc81f990ae95ddba0dd0234",
-    "rust/shim/src/setup/codex.rs": "d4a40d8203e42dc5c186e46b8b95446eab0f2cbc7bb4f9a2d49b283982ca92f9",
-    "rust/shim/src/setup/codex/credentials.rs": "7e1fa0f5c83f0f2cd6028ea35657ac668837a8d7474eb2eef9e797be467de3a6",
+    "rust/shim/src/setup/codex.rs": "b403a39566e484178e316e5ca23cadb6f980d2cabd269fd0143fdc4a0bb59b0b",
+    "rust/shim/src/setup/codex/credentials.rs": "eea149bf594a09f626cd73187f1796ff5506047d7be906787224c98752b68231",
     "rust/shim/src/setup/codex/outcome.rs": "90e02f436771a9a98126c961794aa073a679e8f6761d0aeb97f7bbda7f9bce04",
     "rust/shim/src/setup/codex/rpc.rs": "f34b24cd56b219020fd6e33c7c5fe1e055055f3c11b86bbf4f9f05cb42775bbe",
     "rust/shim/src/setup/files.rs": "2fee5450911d8b26c973f3b46584789c66c8834da1d48306e056e0fe5addefff",
@@ -2398,7 +2398,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2561",
+          "location": "ops/install-native.ps1:2570",
           "shape": {
             "argv_source": "connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl where that Codex configuration sets it, or run pseudolife-mcp connect $DaemonUrl --client codex --token-file $TokenFile, then re-run.\"",
             "channel": "argv",
@@ -2418,7 +2418,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3330",
+          "location": "ops/install-native.ps1:3339",
           "shape": {
             "argv_source": "connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile in the entry it names, or run pseudolife-mcp connect $clientDaemonUrl --client claude-code --token-file $claudeTokenFile.\"",
             "channel": "argv",
@@ -2484,7 +2484,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3392",
+          "location": "ops/install-native.sh:3395",
           "shape": {
             "argv_source": "connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE in the entry it names, or run pseudolife-mcp connect $CLIENT_DAEMON_URL --client claude-code --token-file $CLAUDE_TOKEN_FILE.\" >&2",
             "channel": "argv",
@@ -5123,7 +5123,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3846",
+          "location": "ops/install-native.ps1:3855",
           "shape": {
             "argv_source": "invite <name> on the daemon's host and $updCmd connect $PairingHintUrl --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do.\"",
             "channel": "argv",
@@ -5235,7 +5235,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3978",
+          "location": "ops/install-native.sh:3981",
           "shape": {
             "argv_source": "invite <name> on the daemon's host and $upd_cmd connect $PAIRING_HINT_URL --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do.\"",
             "channel": "argv",
@@ -5498,12 +5498,12 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:101",
+          "location": "rust/shim/src/cli/connect/net.rs:135",
           "shape": {
-            "argv_source": "invite <machine>` on the daemon host\",",
+            "argv_source": "invite <name> --replace` on the daemon host, then `pseudolife-mcp connect <url> --read-code` here\",",
             "channel": "argv",
             "complete": false,
-            "expression": "<machine>` on the daemon host\",",
+            "expression": "<name> --replace` on the daemon host, then `pseudolife-mcp connect <url> --read-code` here\",",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -5511,12 +5511,12 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:97",
+          "location": "rust/shim/src/cli/connect/net.rs:139",
           "shape": {
-            "argv_source": "invite <name> --replace` on the daemon host, then `pseudolife-mcp connect <url> --read-code` here\",",
+            "argv_source": "invite <machine>` on the daemon host\",",
             "channel": "argv",
             "complete": false,
-            "expression": "<name> --replace` on the daemon host, then `pseudolife-mcp connect <url> --read-code` here\",",
+            "expression": "<machine>` on the daemon host\",",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -8340,7 +8340,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2912",
+          "location": "ops/install-native.ps1:2921",
           "shape": {
             "argv_source": "shim installation did not yield a usable executable - Claude Desktop not wired. Re-run once the native client installs.\"",
             "channel": "argv",
@@ -8353,7 +8353,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2942",
+          "location": "ops/install-native.ps1:2951",
           "shape": {
             "argv_source": "shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it.\"",
             "channel": "argv",
@@ -8366,7 +8366,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3076",
+          "location": "ops/install-native.ps1:3085",
           "shape": {
             "argv_source": "shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode).\"",
             "channel": "argv",
@@ -8379,7 +8379,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3207",
+          "location": "ops/install-native.ps1:3216",
           "shape": {
             "argv_source": "shim - per-session identity.\"",
             "channel": "argv",
@@ -8392,7 +8392,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3357",
+          "location": "ops/install-native.ps1:3366",
           "shape": {
             "argv_source": "shim - per-session identity (required for correct episodes with concurrent sessions).\"",
             "channel": "argv",
@@ -8405,7 +8405,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3363",
+          "location": "ops/install-native.ps1:3372",
           "shape": {
             "argv_source": "shim (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run.\"",
             "channel": "argv",
@@ -8418,7 +8418,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3596",
+          "location": "ops/install-native.ps1:3605",
           "shape": {
             "argv_source": "shim , which is unavailable (see above).\"",
             "channel": "argv",
@@ -8431,7 +8431,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3803",
+          "location": "ops/install-native.ps1:3812",
           "shape": {
             "argv_source": "shim , which is unavailable (see above). Run: pseudolife-mcp $($switchArgs -join ' ')\")",
             "channel": "argv",
@@ -8444,7 +8444,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3913",
+          "location": "ops/install-native.ps1:3922",
           "shape": {
             "argv_source": "shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $time --daemon-url $url once it is installed.\"",
             "channel": "argv",
@@ -8533,7 +8533,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2918",
+          "location": "ops/install-native.sh:2921",
           "shape": {
             "argv_source": "shim installation did not yield a usable executable — Claude Desktop not wired. Re-run once the native client installs.\" >&2",
             "channel": "argv",
@@ -8546,7 +8546,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2955",
+          "location": "ops/install-native.sh:2958",
           "shape": {
             "argv_source": "shim (claude_desktop_config.json) — fully quit and relaunch Desktop to load it.\"",
             "channel": "argv",
@@ -8559,7 +8559,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3107",
+          "location": "ops/install-native.sh:3110",
           "shape": {
             "argv_source": "shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode).\"",
             "channel": "argv",
@@ -8572,7 +8572,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3253",
+          "location": "ops/install-native.sh:3256",
           "shape": {
             "argv_source": "shim — per-session identity.\"",
             "channel": "argv",
@@ -8585,7 +8585,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3424",
+          "location": "ops/install-native.sh:3427",
           "shape": {
             "argv_source": "shim — per-session identity (required for correct episodes with concurrent sessions).\"",
             "channel": "argv",
@@ -8598,7 +8598,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3427",
+          "location": "ops/install-native.sh:3430",
           "shape": {
             "argv_source": "shim is unavailable (see the message above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run.\" >&2",
             "channel": "argv",
@@ -8611,7 +8611,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3753",
+          "location": "ops/install-native.sh:3756",
           "shape": {
             "argv_source": "shim , which is unavailable (see above).\" >&2",
             "channel": "argv",
@@ -8624,7 +8624,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3940",
+          "location": "ops/install-native.sh:3943",
           "shape": {
             "argv_source": "shim , which is unavailable (see above). Run: pseudolife-mcp ${switch_args[*]}\" >&2",
             "channel": "argv",
@@ -8637,7 +8637,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:4048",
+          "location": "ops/install-native.sh:4051",
           "shape": {
             "argv_source": "shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $sched_time --daemon-url $sched_url once it is installed.\" >&2",
             "channel": "argv",
@@ -9247,7 +9247,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/setup/codex.rs:448",
+          "location": "rust/shim/src/setup/codex.rs:474",
           "shape": {
             "argv": [
               {
@@ -9336,7 +9336,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3985",
+          "location": "ops/install-native.ps1:3994",
           "shape": {
             "argv_source": "tunnel setup when a person can complete it.\"",
             "channel": "argv",
@@ -9349,7 +9349,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3988",
+          "location": "ops/install-native.ps1:3997",
           "shape": {
             "argv_source": "tunnel setup.\"",
             "channel": "argv",
@@ -9362,7 +9362,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:4005",
+          "location": "ops/install-native.ps1:4014",
           "shape": {
             "argv_source": "tunnel setup (guided private key and app setup; docs/guide/tunnels.md).\"",
             "channel": "argv",
@@ -9375,7 +9375,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:4119",
+          "location": "ops/install-native.sh:4122",
           "shape": {
             "argv_source": "tunnel setup when a person can complete it.\"",
             "channel": "argv",
@@ -9388,7 +9388,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:4122",
+          "location": "ops/install-native.sh:4125",
           "shape": {
             "argv_source": "tunnel setup.\" >&2",
             "channel": "argv",
@@ -9401,7 +9401,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:4131",
+          "location": "ops/install-native.sh:4134",
           "shape": {
             "argv_source": "tunnel setup (guided private key and app setup; docs/guide/tunnels.md).\"",
             "channel": "argv",
@@ -10308,7 +10308,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3568",
+          "location": "ops/install-native.ps1:3577",
           "shape": {
             "argv_source": "update keeps it\" }",
             "channel": "argv",
@@ -10321,7 +10321,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3799",
+          "location": "ops/install-native.ps1:3808",
           "shape": {
             "argv_source": "update --engine $switchEngine --daemon-only --tag <the daemon's version>\")",
             "channel": "argv",
@@ -10344,7 +10344,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3919",
+          "location": "ops/install-native.ps1:3928",
           "shape": {
             "argv_source": "update --schedule installs the client job only from one; re-run the installer once the runtime installs to be offered them.\"",
             "channel": "argv",
@@ -10361,7 +10361,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3926",
+          "location": "ops/install-native.ps1:3935",
           "shape": {
             "argv_source": "update --schedule here would install the daemon host's job rather than the client's; once that container is removed (docker rm $ClientScheduleContainer keeps its volumes and bank), $command sets them up.\"",
             "channel": "argv",
@@ -10378,7 +10378,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3959",
+          "location": "ops/install-native.ps1:3968",
           "shape": {
             "argv_source": "update --unattended, which moves the shim and plugin to the release the daemon at $url runs, never past it. Set it up? [y/N]\"",
             "channel": "argv",
@@ -10441,7 +10441,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3723",
+          "location": "ops/install-native.sh:3726",
           "shape": {
             "argv_source": "update keeps it\"",
             "channel": "argv",
@@ -10454,7 +10454,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3935",
+          "location": "ops/install-native.sh:3938",
           "shape": {
             "argv_source": "update --engine $SWITCH_ENGINE --daemon-only --tag <the daemon's version>\" >&2",
             "channel": "argv",
@@ -10477,7 +10477,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:4054",
+          "location": "ops/install-native.sh:4057",
           "shape": {
             "argv_source": "update --schedule installs the client job only from one; re-run the installer once the runtime installs to be offered them.\"",
             "channel": "argv",
@@ -10494,7 +10494,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:4062",
+          "location": "ops/install-native.sh:4065",
           "shape": {
             "argv_source": "update --schedule here would install the daemon host's job rather than the client's; once that container is removed (docker rm $CLIENT_SCHEDULE_CONTAINER keeps its volumes and bank), $sched_cmd sets them up.\"",
             "channel": "argv",
@@ -10511,7 +10511,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:4096",
+          "location": "ops/install-native.sh:4099",
           "shape": {
             "argv_source": "update --unattended, which moves the shim and plugin to the release the daemon at $sched_url runs, never past it. Set it up? [y/N]: \" ||",
             "channel": "argv",
@@ -13979,13 +13979,13 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:101",
+          "location": "rust/shim/src/cli/connect/net.rs:127",
           "shape": {
             "channel": "config",
             "complete": false,
             "omitted_optional": null,
             "parameters": {
-              "allowed_principals": {
+              "enabled": {
                 "expression": "field reference"
               }
             }
@@ -13995,13 +13995,13 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:89",
+          "location": "rust/shim/src/cli/connect/net.rs:139",
           "shape": {
             "channel": "config",
             "complete": false,
             "omitted_optional": null,
             "parameters": {
-              "enabled": {
+              "allowed_principals": {
                 "expression": "field reference"
               }
             }
@@ -14511,7 +14511,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:101",
+          "location": "rust/shim/src/cli/connect/net.rs:139",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14861,7 +14861,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:89",
+          "location": "rust/shim/src/cli/connect/net.rs:127",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -28761,7 +28761,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:200",
+          "location": "rust/shim/src/cli/connect/net.rs:238",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29597,7 +29597,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3312",
+          "location": "ops/install-native.ps1:3321",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29612,7 +29612,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3353",
+          "location": "ops/install-native.ps1:3362",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29627,7 +29627,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3370",
+          "location": "ops/install-native.sh:3373",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29642,7 +29642,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3414",
+          "location": "ops/install-native.sh:3417",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34150,7 +34150,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2933",
+          "location": "ops/install-native.ps1:2942",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34163,7 +34163,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2934",
+          "location": "ops/install-native.ps1:2943",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34176,7 +34176,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2942",
+          "location": "ops/install-native.sh:2945",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34227,7 +34227,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2930",
+          "location": "ops/install-native.ps1:2939",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34242,7 +34242,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2941",
+          "location": "ops/install-native.ps1:2950",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34257,7 +34257,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2948",
+          "location": "ops/install-native.sh:2951",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34326,7 +34326,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2931",
+          "location": "ops/install-native.ps1:2940",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34339,7 +34339,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2932",
+          "location": "ops/install-native.ps1:2941",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34352,7 +34352,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2940",
+          "location": "ops/install-native.sh:2943",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34403,7 +34403,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2929",
+          "location": "ops/install-native.ps1:2938",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34418,7 +34418,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2940",
+          "location": "ops/install-native.ps1:2949",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34433,7 +34433,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2947",
+          "location": "ops/install-native.sh:2950",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38649,7 +38649,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2854",
+          "location": "ops/install-native.ps1:2863",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38664,7 +38664,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2859",
+          "location": "ops/install-native.ps1:2868",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38679,7 +38679,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3731",
+          "location": "ops/install-native.ps1:3740",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38694,7 +38694,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3739",
+          "location": "ops/install-native.ps1:3748",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38709,7 +38709,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2862",
+          "location": "ops/install-native.sh:2865",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38724,7 +38724,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3875",
+          "location": "ops/install-native.sh:3878",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38889,7 +38889,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2855",
+          "location": "ops/install-native.ps1:2864",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38904,7 +38904,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2860",
+          "location": "ops/install-native.ps1:2869",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38919,7 +38919,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2863",
+          "location": "ops/install-native.sh:2866",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -40221,7 +40221,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2567",
+          "location": "ops/install-native.ps1:2576",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40234,7 +40234,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2585",
+          "location": "ops/install-native.ps1:2594",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40247,7 +40247,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2843",
+          "location": "ops/install-native.ps1:2852",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40260,7 +40260,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2953",
+          "location": "ops/install-native.ps1:2962",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40273,7 +40273,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3990",
+          "location": "ops/install-native.ps1:3999",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40429,7 +40429,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2854",
+          "location": "ops/install-native.sh:2857",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40442,7 +40442,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2969",
+          "location": "ops/install-native.sh:2972",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41443,7 +41443,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/setup/codex.rs:20",
+          "location": "rust/shim/src/setup/codex.rs:21",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41485,7 +41485,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2537",
+          "location": "ops/install-native.ps1:2541",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41500,7 +41500,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2561",
+          "location": "ops/install-native.ps1:2570",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41515,7 +41515,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2563",
+          "location": "ops/install-native.ps1:2572",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41530,7 +41530,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2896",
+          "location": "ops/install-native.ps1:2905",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41545,7 +41545,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3070",
+          "location": "ops/install-native.ps1:3079",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41560,7 +41560,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3072",
+          "location": "ops/install-native.ps1:3081",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41575,7 +41575,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3203",
+          "location": "ops/install-native.ps1:3212",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41590,7 +41590,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3312",
+          "location": "ops/install-native.ps1:3321",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41605,7 +41605,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3330",
+          "location": "ops/install-native.ps1:3339",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41620,7 +41620,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3332",
+          "location": "ops/install-native.ps1:3341",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41635,7 +41635,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3353",
+          "location": "ops/install-native.ps1:3362",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41650,7 +41650,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3994",
+          "location": "ops/install-native.ps1:4003",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41665,7 +41665,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:4000",
+          "location": "ops/install-native.ps1:4009",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41710,22 +41710,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2584",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "expression": "\"$CODEX_CREDENTIAL_URL\""
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-native.sh:2586",
+          "location": "ops/install-native.sh:2587",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41755,7 +41740,22 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2902",
+          "location": "ops/install-native.sh:2592",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "\"$CODEX_CREDENTIAL_URL\""
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install-native.sh:2905",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41770,7 +41770,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3094",
+          "location": "ops/install-native.sh:3097",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41785,7 +41785,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3096",
+          "location": "ops/install-native.sh:3099",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41800,7 +41800,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3243",
+          "location": "ops/install-native.sh:3246",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41815,7 +41815,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3369",
+          "location": "ops/install-native.sh:3372",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41830,7 +41830,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3392",
+          "location": "ops/install-native.sh:3395",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41845,7 +41845,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3394",
+          "location": "ops/install-native.sh:3397",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41860,7 +41860,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3414",
+          "location": "ops/install-native.sh:3417",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41875,7 +41875,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:4126",
+          "location": "ops/install-native.sh:4129",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -45420,7 +45420,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3063",
+          "location": "ops/install-native.ps1:3072",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45433,7 +45433,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3199",
+          "location": "ops/install-native.ps1:3208",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45446,7 +45446,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3344",
+          "location": "ops/install-native.ps1:3353",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45472,7 +45472,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3087",
+          "location": "ops/install-native.sh:3090",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45485,7 +45485,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3239",
+          "location": "ops/install-native.sh:3242",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45498,7 +45498,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3407",
+          "location": "ops/install-native.sh:3410",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -45784,7 +45784,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/setup/codex.rs:23",
+          "location": "rust/shim/src/setup/codex.rs:24",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46201,51 +46201,6 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3070",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-native.ps1:3072",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/install-native.ps1:3074",
-          "shape": {
-            "channel": "environment",
-            "complete": true,
-            "omitted_optional": null,
-            "parameters": {
-              "value": {
-                "literal": "1"
-              }
-            }
-          },
-          "usage": "assignment"
-        },
-        {
-          "evidence": "static",
           "location": "ops/install-native.ps1:3079",
           "shape": {
             "channel": "environment",
@@ -46261,7 +46216,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3203",
+          "location": "ops/install-native.ps1:3081",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46276,7 +46231,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3205",
+          "location": "ops/install-native.ps1:3083",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46291,7 +46246,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3209",
+          "location": "ops/install-native.ps1:3088",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46306,7 +46261,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3353",
+          "location": "ops/install-native.ps1:3212",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46321,7 +46276,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3355",
+          "location": "ops/install-native.ps1:3214",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46336,7 +46291,52 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3359",
+          "location": "ops/install-native.ps1:3218",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install-native.ps1:3362",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install-native.ps1:3364",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/install-native.ps1:3368",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46381,7 +46381,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3094",
+          "location": "ops/install-native.sh:3097",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46396,7 +46396,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3096",
+          "location": "ops/install-native.sh:3099",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46411,7 +46411,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3098",
+          "location": "ops/install-native.sh:3101",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46426,7 +46426,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3103",
+          "location": "ops/install-native.sh:3106",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46441,7 +46441,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3243",
+          "location": "ops/install-native.sh:3246",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46456,7 +46456,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3245",
+          "location": "ops/install-native.sh:3248",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46471,7 +46471,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3249",
+          "location": "ops/install-native.sh:3252",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46486,7 +46486,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3414",
+          "location": "ops/install-native.sh:3417",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46501,7 +46501,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3416",
+          "location": "ops/install-native.sh:3419",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46516,7 +46516,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3420",
+          "location": "ops/install-native.sh:3423",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -48870,7 +48870,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2565",
+          "location": "ops/install-native.ps1:2574",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -48883,46 +48883,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2581",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install-native.ps1:2784",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install-native.ps1:2785",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install-native.ps1:2792",
+          "location": "ops/install-native.ps1:2590",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -48948,7 +48909,46 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3321",
+          "location": "ops/install-native.ps1:2794",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install-native.ps1:2801",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install-native.ps1:2802",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install-native.ps1:3330",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49091,20 +49091,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2584",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install-native.sh:2586",
+          "location": "ops/install-native.sh:2587",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49130,7 +49117,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2810",
+          "location": "ops/install-native.sh:2592",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install-native.sh:2813",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49143,7 +49143,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2811",
+          "location": "ops/install-native.sh:2814",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49156,7 +49156,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2819",
+          "location": "ops/install-native.sh:2822",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49165,19 +49165,6 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install-native.sh:2820",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
         },
         {
           "dynamic": "unresolved",
@@ -49195,7 +49182,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3379",
+          "location": "ops/install-native.sh:2826",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install-native.sh:3382",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50027,7 +50027,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:93",
+          "location": "rust/shim/src/cli/connect/net.rs:131",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50794,7 +50794,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/setup/codex.rs:22",
+          "location": "rust/shim/src/setup/codex.rs:23",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50836,7 +50836,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2538",
+          "location": "ops/install-native.ps1:2542",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -51560,7 +51560,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2784",
+          "location": "ops/install-native.ps1:2793",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51573,33 +51573,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2785",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install-native.ps1:2790",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install-native.ps1:2798",
+          "location": "ops/install-native.ps1:2794",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51625,7 +51599,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2836",
+          "location": "ops/install-native.ps1:2807",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51638,7 +51612,33 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2936",
+          "location": "ops/install-native.ps1:2808",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install-native.ps1:2845",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install-native.ps1:2945",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51729,7 +51729,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2810",
+          "location": "ops/install-native.sh:2813",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51742,7 +51742,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2811",
+          "location": "ops/install-native.sh:2814",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51755,7 +51755,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2817",
+          "location": "ops/install-native.sh:2820",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51768,7 +51768,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2826",
+          "location": "ops/install-native.sh:2829",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51777,19 +51777,6 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/install-native.sh:2827",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
         },
         {
           "dynamic": "unresolved",
@@ -51807,7 +51794,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2847",
+          "location": "ops/install-native.sh:2833",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51820,7 +51807,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2944",
+          "location": "ops/install-native.sh:2850",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/install-native.sh:2947",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -52236,7 +52236,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/net.rs:192",
+          "location": "rust/shim/src/cli/connect/net.rs:230",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53043,7 +53043,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2566",
+          "location": "ops/install-native.ps1:2575",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53056,7 +53056,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2583",
+          "location": "ops/install-native.ps1:2592",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53069,7 +53069,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2777",
+          "location": "ops/install-native.ps1:2786",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53082,7 +53082,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2783",
+          "location": "ops/install-native.ps1:2792",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53095,7 +53095,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2892",
+          "location": "ops/install-native.ps1:2901",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53108,7 +53108,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2922",
+          "location": "ops/install-native.ps1:2931",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53121,7 +53121,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:2954",
+          "location": "ops/install-native.ps1:2963",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53134,7 +53134,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3991",
+          "location": "ops/install-native.ps1:4000",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53238,7 +53238,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2586",
+          "location": "ops/install-native.sh:2589",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53251,7 +53251,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2800",
+          "location": "ops/install-native.sh:2803",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53264,7 +53264,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2806",
+          "location": "ops/install-native.sh:2809",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53277,7 +53277,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2807",
+          "location": "ops/install-native.sh:2810",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53290,7 +53290,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2899",
+          "location": "ops/install-native.sh:2902",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53303,7 +53303,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2930",
+          "location": "ops/install-native.sh:2933",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53316,7 +53316,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:2970",
+          "location": "ops/install-native.sh:2973",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -54616,7 +54616,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/setup/codex.rs:21",
+          "location": "rust/shim/src/setup/codex.rs:22",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -54628,7 +54628,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2539",
+          "location": "ops/install-native.ps1:2543",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54643,7 +54643,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2543",
+          "location": "ops/install-native.ps1:2547",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54658,7 +54658,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:2896",
+          "location": "ops/install-native.ps1:2905",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54673,7 +54673,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3070",
+          "location": "ops/install-native.ps1:3079",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54688,7 +54688,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3188",
+          "location": "ops/install-native.ps1:3197",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54703,7 +54703,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3203",
+          "location": "ops/install-native.ps1:3212",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54718,7 +54718,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3312",
+          "location": "ops/install-native.ps1:3321",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54733,7 +54733,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3322",
+          "location": "ops/install-native.ps1:3331",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54748,7 +54748,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3330",
+          "location": "ops/install-native.ps1:3339",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54763,7 +54763,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3332",
+          "location": "ops/install-native.ps1:3341",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54778,7 +54778,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3353",
+          "location": "ops/install-native.ps1:3362",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54793,7 +54793,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3995",
+          "location": "ops/install-native.ps1:4004",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54808,7 +54808,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:4001",
+          "location": "ops/install-native.ps1:4010",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54913,7 +54913,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2584",
+          "location": "ops/install-native.sh:2587",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54928,7 +54928,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2589",
+          "location": "ops/install-native.sh:2592",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54943,7 +54943,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:2902",
+          "location": "ops/install-native.sh:2905",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54958,7 +54958,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3094",
+          "location": "ops/install-native.sh:3097",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54973,7 +54973,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3224",
+          "location": "ops/install-native.sh:3227",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -54988,7 +54988,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3243",
+          "location": "ops/install-native.sh:3246",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -55003,7 +55003,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3368",
+          "location": "ops/install-native.sh:3371",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -55018,7 +55018,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3380",
+          "location": "ops/install-native.sh:3383",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -55033,7 +55033,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3392",
+          "location": "ops/install-native.sh:3395",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -55048,7 +55048,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3394",
+          "location": "ops/install-native.sh:3397",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -55063,7 +55063,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3414",
+          "location": "ops/install-native.sh:3417",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -55078,7 +55078,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:4126",
+          "location": "ops/install-native.sh:4129",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61171,7 +61171,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3070",
+          "location": "ops/install-native.ps1:3079",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61186,7 +61186,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3072",
+          "location": "ops/install-native.ps1:3081",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61201,7 +61201,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3074",
+          "location": "ops/install-native.ps1:3083",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61216,7 +61216,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3203",
+          "location": "ops/install-native.ps1:3212",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61231,7 +61231,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3205",
+          "location": "ops/install-native.ps1:3214",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61246,7 +61246,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3353",
+          "location": "ops/install-native.ps1:3362",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61261,7 +61261,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.ps1:3355",
+          "location": "ops/install-native.ps1:3364",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61306,7 +61306,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3094",
+          "location": "ops/install-native.sh:3097",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61321,7 +61321,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3096",
+          "location": "ops/install-native.sh:3099",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61336,7 +61336,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3098",
+          "location": "ops/install-native.sh:3101",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61351,7 +61351,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3243",
+          "location": "ops/install-native.sh:3246",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61366,7 +61366,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3245",
+          "location": "ops/install-native.sh:3248",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61381,7 +61381,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3414",
+          "location": "ops/install-native.sh:3417",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -61396,7 +61396,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/install-native.sh:3416",
+          "location": "ops/install-native.sh:3419",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -62796,7 +62796,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/setup/codex/credentials.rs:39",
+          "location": "rust/shim/src/setup/codex/credentials.rs:131",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -62842,7 +62842,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "rust/shim/src/cli/connect/net.rs:73",
+          "location": "rust/shim/src/cli/connect/net.rs:80",
           "method": null,
           "shape": {
             "channel": "body",
@@ -64648,7 +64648,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "rust/shim/src/cli/connect/net.rs:132",
+          "location": "rust/shim/src/cli/connect/net.rs:170",
           "method": null,
           "shape": {
             "channel": "body",
@@ -70347,7 +70347,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3755",
+          "location": "ops/install-native.ps1:3764",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70363,7 +70363,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3758",
+          "location": "ops/install-native.ps1:3767",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70379,7 +70379,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3761",
+          "location": "ops/install-native.ps1:3770",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70395,7 +70395,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3765",
+          "location": "ops/install-native.ps1:3774",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70411,7 +70411,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.ps1:3768",
+          "location": "ops/install-native.ps1:3777",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70427,7 +70427,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3896",
+          "location": "ops/install-native.sh:3899",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70443,7 +70443,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3898",
+          "location": "ops/install-native.sh:3901",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70459,7 +70459,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3900",
+          "location": "ops/install-native.sh:3903",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70475,7 +70475,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3903",
+          "location": "ops/install-native.sh:3906",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70491,7 +70491,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/install-native.sh:3905",
+          "location": "ops/install-native.sh:3908",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -80643,7 +80643,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install-native.ps1:3447",
+      "location": "ops/install-native.ps1:3456",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create\"",
@@ -80815,7 +80815,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "ops/install-native.sh:3634",
+      "location": "ops/install-native.sh:3637",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login create\" >&2",
@@ -81827,7 +81827,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/installer/codex_config.rs:27",
+      "location": "rust/shim/src/cli/installer/codex_config.rs:29",
       "name": "installer",
       "shape": {
         "argv_source": "installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]\";",
@@ -81845,7 +81845,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/installer/codex_config.rs:28",
+      "location": "rust/shim/src/cli/installer/codex_config.rs:30",
       "name": "installer",
       "shape": {
         "argv_source": "installer codex-runtime-defaults\";",
@@ -90737,7 +90737,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.ps1:3094",
+      "location": "ops/install-native.ps1:3103",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90751,7 +90751,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.ps1:3219",
+      "location": "ops/install-native.ps1:3228",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90765,7 +90765,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.ps1:3369",
+      "location": "ops/install-native.ps1:3378",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90779,7 +90779,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.ps1:3373",
+      "location": "ops/install-native.ps1:3382",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90793,7 +90793,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.ps1:3551",
+      "location": "ops/install-native.ps1:3560",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90807,7 +90807,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.ps1:3562",
+      "location": "ops/install-native.ps1:3571",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90821,7 +90821,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.ps1:3793",
+      "location": "ops/install-native.ps1:3802",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90835,7 +90835,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.ps1:3799",
+      "location": "ops/install-native.ps1:3808",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90891,7 +90891,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3116",
+      "location": "ops/install-native.sh:3119",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90905,7 +90905,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3128",
+      "location": "ops/install-native.sh:3131",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90919,7 +90919,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3260",
+      "location": "ops/install-native.sh:3263",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90933,7 +90933,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3265",
+      "location": "ops/install-native.sh:3268",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90947,7 +90947,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3433",
+      "location": "ops/install-native.sh:3436",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90961,7 +90961,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3438",
+      "location": "ops/install-native.sh:3441",
       "method": null,
       "name": "/mcp",
       "shape": {
@@ -90975,7 +90975,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3580",
+      "location": "ops/install-native.sh:3583",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90989,7 +90989,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3707",
+      "location": "ops/install-native.sh:3710",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91003,7 +91003,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3718",
+      "location": "ops/install-native.sh:3721",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91017,7 +91017,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3928",
+      "location": "ops/install-native.sh:3931",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91031,7 +91031,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/install-native.sh:3935",
+      "location": "ops/install-native.sh:3938",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91605,7 +91605,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/connect/net.rs:21",
+      "location": "rust/shim/src/cli/connect/net.rs:23",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91619,7 +91619,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/connect/net.rs:32",
+      "location": "rust/shim/src/cli/connect/net.rs:34",
       "method": null,
       "name": "/health",
       "shape": {
@@ -91633,7 +91633,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/connect/net.rs:40",
+      "location": "rust/shim/src/cli/connect/net.rs:42",
       "method": null,
       "name": "/health",
       "shape": {
@@ -96160,7 +96160,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/install-native.sh:2619",
+      "location": "ops/install-native.sh:2622",
       "name": "PSEUDOLIFE_NATIVE_CLI",
       "shape": {
         "channel": "environment",
@@ -96176,7 +96176,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/install-native.sh:3750",
+      "location": "ops/install-native.sh:3753",
       "name": "PSEUDOLIFE_NATIVE_CLI",
       "shape": {
         "channel": "environment",
@@ -115490,93 +115490,57 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2561",
+      "location": "ops/install-native.ps1:2570",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2565",
+      "location": "ops/install-native.ps1:2574",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2566",
+      "location": "ops/install-native.ps1:2575",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2567",
+      "location": "ops/install-native.ps1:2576",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2581",
+      "location": "ops/install-native.ps1:2590",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2583",
+      "location": "ops/install-native.ps1:2592",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2585",
+      "location": "ops/install-native.ps1:2594",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2777",
+      "location": "ops/install-native.ps1:2786",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2783",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2784",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2784",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2785",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2785",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2790",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/install-native.ps1:2792",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
@@ -115586,7 +115550,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2798",
+      "location": "ops/install-native.ps1:2793",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2794",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2794",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
@@ -115598,79 +115574,103 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2836",
+      "location": "ops/install-native.ps1:2801",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2802",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2807",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2843",
+      "location": "ops/install-native.ps1:2808",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2845",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2852",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2892",
+      "location": "ops/install-native.ps1:2901",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2912",
+      "location": "ops/install-native.ps1:2921",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2922",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/install-native.ps1:2931",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE"
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2932",
+      "location": "ops/install-native.ps1:2940",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2933",
+      "location": "ops/install-native.ps1:2941",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2934",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2936",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+      "surface": "environment:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/install-native.ps1:2942",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2943",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2945",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:2951",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2953",
+      "location": "ops/install-native.ps1:2962",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:2954",
+      "location": "ops/install-native.ps1:2963",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
@@ -115688,85 +115688,85 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3063",
+      "location": "ops/install-native.ps1:3072",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3076",
+      "location": "ops/install-native.ps1:3085",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3094",
+      "location": "ops/install-native.ps1:3103",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3199",
+      "location": "ops/install-native.ps1:3208",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3207",
+      "location": "ops/install-native.ps1:3216",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3219",
+      "location": "ops/install-native.ps1:3228",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3321",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/install-native.ps1:3330",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.ps1:3339",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3344",
+      "location": "ops/install-native.ps1:3353",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3357",
+      "location": "ops/install-native.ps1:3366",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3363",
+      "location": "ops/install-native.ps1:3372",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3369",
+      "location": "ops/install-native.ps1:3378",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3373",
+      "location": "ops/install-native.ps1:3382",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3412",
+      "location": "ops/install-native.ps1:3421",
       "reason": "request target supplied dynamically or external"
     },
     {
@@ -115777,36 +115777,36 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3447",
+      "location": "ops/install-native.ps1:3456",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3551",
+      "location": "ops/install-native.ps1:3560",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3551",
+      "location": "ops/install-native.ps1:3560",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3562",
+      "location": "ops/install-native.ps1:3571",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3568",
+      "location": "ops/install-native.ps1:3577",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3596",
+      "location": "ops/install-native.ps1:3605",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
@@ -115830,125 +115830,125 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3755",
+      "location": "ops/install-native.ps1:3764",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3758",
+      "location": "ops/install-native.ps1:3767",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3761",
+      "location": "ops/install-native.ps1:3770",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3765",
+      "location": "ops/install-native.ps1:3774",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3768",
+      "location": "ops/install-native.ps1:3777",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3793",
+      "location": "ops/install-native.ps1:3802",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3793",
+      "location": "ops/install-native.ps1:3802",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3799",
+      "location": "ops/install-native.ps1:3808",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3799",
+      "location": "ops/install-native.ps1:3808",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3803",
+      "location": "ops/install-native.ps1:3812",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3846",
+      "location": "ops/install-native.ps1:3855",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3899",
+      "location": "ops/install-native.ps1:3908",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3913",
+      "location": "ops/install-native.ps1:3922",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3919",
+      "location": "ops/install-native.ps1:3928",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3926",
+      "location": "ops/install-native.ps1:3935",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3959",
+      "location": "ops/install-native.ps1:3968",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3985",
+      "location": "ops/install-native.ps1:3994",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3988",
+      "location": "ops/install-native.ps1:3997",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3990",
+      "location": "ops/install-native.ps1:3999",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:3991",
+      "location": "ops/install-native.ps1:4000",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.ps1:4005",
+      "location": "ops/install-native.ps1:4014",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
@@ -116561,21 +116561,9 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2584",
+      "location": "ops/install-native.sh:2587",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2586",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2586",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
@@ -116585,19 +116573,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2800",
+      "location": "ops/install-native.sh:2589",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2806",
+      "location": "ops/install-native.sh:2592",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:2803",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2807",
+      "location": "ops/install-native.sh:2809",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
@@ -116605,41 +116599,41 @@
       "dynamic": "unresolved",
       "location": "ops/install-native.sh:2810",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2810",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2811",
+      "location": "ops/install-native.sh:2813",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2811",
+      "location": "ops/install-native.sh:2813",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2817",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2819",
+      "location": "ops/install-native.sh:2814",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:2814",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/install-native.sh:2820",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:2822",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
@@ -116653,11 +116647,11 @@
       "dynamic": "unresolved",
       "location": "ops/install-native.sh:2826",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2827",
+      "location": "ops/install-native.sh:2829",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
@@ -116669,13 +116663,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2847",
+      "location": "ops/install-native.sh:2833",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2854",
+      "location": "ops/install-native.sh:2850",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:2857",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
@@ -116687,149 +116687,143 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2899",
+      "location": "ops/install-native.sh:2902",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2918",
+      "location": "ops/install-native.sh:2921",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2925",
+      "location": "ops/install-native.sh:2928",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2930",
+      "location": "ops/install-native.sh:2933",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2940",
+      "location": "ops/install-native.sh:2943",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2942",
+      "location": "ops/install-native.sh:2945",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2944",
+      "location": "ops/install-native.sh:2947",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2955",
+      "location": "ops/install-native.sh:2958",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2969",
+      "location": "ops/install-native.sh:2972",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:2970",
+      "location": "ops/install-native.sh:2973",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3036",
+      "location": "ops/install-native.sh:3039",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3087",
+      "location": "ops/install-native.sh:3090",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3107",
+      "location": "ops/install-native.sh:3110",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3116",
+      "location": "ops/install-native.sh:3119",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3128",
+      "location": "ops/install-native.sh:3131",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3177",
+      "location": "ops/install-native.sh:3180",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3239",
+      "location": "ops/install-native.sh:3242",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3253",
+      "location": "ops/install-native.sh:3256",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3260",
+      "location": "ops/install-native.sh:3263",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3265",
+      "location": "ops/install-native.sh:3268",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3318",
+      "location": "ops/install-native.sh:3321",
       "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3379",
+      "location": "ops/install-native.sh:3382",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3392",
+      "location": "ops/install-native.sh:3395",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3407",
+      "location": "ops/install-native.sh:3410",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3424",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
@@ -116839,47 +116833,43 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3433",
+      "location": "ops/install-native.sh:3430",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:shim"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:3436",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3438",
+      "location": "ops/install-native.sh:3441",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/mcp"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3475",
+      "location": "ops/install-native.sh:3478",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3580",
+      "location": "ops/install-native.sh:3583",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3580",
+      "location": "ops/install-native.sh:3583",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3634",
+      "location": "ops/install-native.sh:3637",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3688",
-      "reason": "shell-built command"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3690",
-      "reason": "shell-built command"
     },
     {
       "dynamic": "unresolved",
@@ -116888,48 +116878,52 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3707",
+      "location": "ops/install-native.sh:3693",
+      "reason": "shell-built command"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:3694",
+      "reason": "shell-built command"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:3710",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3707",
+      "location": "ops/install-native.sh:3710",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3718",
+      "location": "ops/install-native.sh:3721",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3723",
+      "location": "ops/install-native.sh:3726",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3753",
+      "location": "ops/install-native.sh:3756",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3896",
+      "location": "ops/install-native.sh:3899",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3898",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_dream"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3900",
+      "location": "ops/install-native.sh:3901",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
@@ -116941,7 +116935,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3905",
+      "location": "ops/install-native.sh:3906",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_dream"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:3908",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_dream"
     },
@@ -116953,42 +116953,42 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3928",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3928",
-      "reason": "request target supplied dynamically or external"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/install-native.sh:393",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_TARGET"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3935",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:update"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3935",
+      "location": "ops/install-native.sh:3931",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3940",
+      "location": "ops/install-native.sh:3931",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:3938",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:3938",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:3943",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:3978",
+      "location": "ops/install-native.sh:3981",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
@@ -117000,19 +117000,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:4048",
+      "location": "ops/install-native.sh:4051",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:4054",
+      "location": "ops/install-native.sh:4057",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:4062",
+      "location": "ops/install-native.sh:4065",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
@@ -117024,20 +117024,14 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:4096",
+      "location": "ops/install-native.sh:4099",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:4107",
+      "location": "ops/install-native.sh:4110",
       "reason": "shell-built command"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/install-native.sh:4119",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:tunnel"
     },
     {
       "dynamic": "unresolved",
@@ -117047,7 +117041,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/install-native.sh:4131",
+      "location": "ops/install-native.sh:4125",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:tunnel"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/install-native.sh:4134",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
@@ -123254,87 +123254,87 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:101",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:invite"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:101",
+      "location": "rust/shim/src/cli/connect/net.rs:127",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:101",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CoordinationConfig.allowed_principals"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:132",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/hook/coordination-start"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:192",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:200",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:21",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:32",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:40",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:73",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "route:GET /api/episodes"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:89",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "config:CoordinationConfig"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:89",
+      "location": "rust/shim/src/cli/connect/net.rs:127",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:93",
+      "location": "rust/shim/src/cli/connect/net.rs:131",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/net.rs:97",
+      "location": "rust/shim/src/cli/connect/net.rs:135",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:139",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:invite"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:139",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:CoordinationConfig"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:139",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "config:CoordinationConfig.allowed_principals"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:170",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/hook/coordination-start"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:23",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:230",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:238",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:34",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:42",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/net.rs:80",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/episodes"
     },
     {
       "dynamic": "unresolved",
@@ -124646,13 +124646,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/codex_config.rs:27",
+      "location": "rust/shim/src/cli/installer/codex_config.rs:29",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:installer"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/codex_config.rs:28",
+      "location": "rust/shim/src/cli/installer/codex_config.rs:30",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:installer"
     },
@@ -128801,43 +128801,43 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/setup/codex.rs:20",
+      "location": "rust/shim/src/setup/codex.rs:21",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/setup/codex.rs:21",
+      "location": "rust/shim/src/setup/codex.rs:22",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/setup/codex.rs:22",
+      "location": "rust/shim/src/setup/codex.rs:23",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/setup/codex.rs:23",
+      "location": "rust/shim/src/setup/codex.rs:24",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/setup/codex.rs:448",
+      "location": "rust/shim/src/setup/codex.rs:474",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/setup/codex/credentials.rs:39",
+      "location": "rust/shim/src/setup/codex/credentials.rs:131",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/episodes"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/setup/codex/credentials.rs:39",
+      "location": "rust/shim/src/setup/codex/credentials.rs:131",
       "reason": "built URL"
     },
     {
