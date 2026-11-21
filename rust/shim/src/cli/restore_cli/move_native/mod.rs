@@ -805,8 +805,8 @@ pub(in crate::cli) fn run_rollback(arguments: &[OsString]) -> Option<u8> {
     })
 }
 
-/// `move` for the argv `move_cli` passed on: `None` keeps the deferral for
-/// shapes this module does not parse.
+/// Run the transaction for the arguments the preflight leaf passed on.
+/// Unsupported syntax returns `None` for the native usage refusal.
 pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
     let mut request = argv::parse(arguments)?;
     if let Some(why) = argv::refusal(&request) {

@@ -156,9 +156,13 @@ Each change waits for hosted CI once, on its batch:
 ## Docs-only pull requests
 
 A docs-only pull request may be merged straight onto master without a
-batch. "Docs-only" is the definition in `CLAUDE.md` ("Running tests"): the
-diff lists only `*.md`, `llms.txt` / `llms-full.txt` and non-code files
-under `docs/`. All of these hold first:
+batch. "Docs-only" here is what the command below enforces: every path in
+the diff passes `is_documentation_path` in `rust/ci/parity_scope.py`. That
+is not the `is_docs` test of `CLAUDE.md` ("Docs-only changes"), which
+decides the local suite: Markdown under `rust/` or `evals/` can merge
+directly although most of it is not docs-only there, and nothing under
+`tests/`, `ops/`, `plugin/` or `pseudolife_memory/` can. All of these hold
+first:
 
 - It is independent: nothing it says depends on a pull request that is
   still open. One that documents unmerged work joins the batch that carries
@@ -196,9 +200,11 @@ Do not start a direct merge shortly before a batch is built. Leave time
 for the local doc guards.
 
 Who merges: the maintainer, or a session the maintainer delegated merges to
-in their own words. A change to `CLAUDE.md` or another policy page is
-docs-only by this definition, and the maintainer still approves its text
-first.
+in their own words. A policy change (any change to a rule that governs how
+agents work on the project, in `CLAUDE.md` or any other file) is docs-only
+by this definition when it touches only docs; the maintainer approves the
+text it merges with first, and then only the maintainer merges it, or the
+conductor under the maintainer's standing delegation (19 November 2026).
 
 ## Joining a batch
 
@@ -313,7 +319,7 @@ changed file reaches snapshot rows, using the net merge-tree diff against
 that base just as CI does. Runtime edits already present on master do not
 turn a remaining docs-only or test-only diff into a replay requirement.
 Conflicting heads follow the existing merge/drop path rather than wait for
-replay evidence that GitHub cannot produce: budget-only conflicts retain
+replay evidence that GitHub cannot produce: compatible budget-only conflicts retain
 the existing normalization and use the batch's replay, census-only conflicts
 are regenerated on the batch head, and other conflicts
 are dropped. Documentation accompanied only by the generated
@@ -408,7 +414,8 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   refuse it (`#N, once ready: ...`, or "nothing else refuses it"): the
   freeze, a refused parent its head carries, every CI budget job missing an
   accept record, a release cut's unfolded fragments, and a conflict with
-  master (one only in the budget file is normalized, so it is not shown). A conflict with another member
+  master (a compatible one only in the budget file is normalized, so it is
+  not shown). A conflict with another member
   shows only once it merges. The report never refuses the build.
 - **`--dry-run`** does the same merges on a detached HEAD, prints the plan,
   the body and the comments `open` would post, then switches back; it
