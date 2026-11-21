@@ -1,11 +1,14 @@
 """Comparator controls, independent of model inference or artifact downloads."""
-import numpy as np
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import subprocess
-import embedding
 
+import numpy as np
+import pytest
+
+import embedding
 from embedding import compare, rankings
 from embedding_fixture import fixture_weights
 
@@ -69,25 +72,80 @@ def test_fp32_near_tie_is_not_hidden_by_float64_scoring():
     assert rankings(a, b)["identical_full"] == 0
 
 
-def test_timeout_keeps_completed_arm_and_writes_failure_artifact(monkeypatch, tmp_path):
+def test_fixture_requires_recorded_vectors_and_keeps_them_read_only(tmp_path, monkeypatch):
+    golden = tmp_path / "embedding-fixture.json"
+    golden.write_text("committed vectors", encoding="utf-8")
+    args = ["--fixture", "--golden", str(golden), "--rust-bin", str(tmp_path / "daemon")]
+    calls = []
+    monkeypatch.setattr(embedding, "fixture", lambda args: calls.append(args))
+    for invalid in (args + ["--record", "--out", str(tmp_path / "report.json")],
+                    args + ["--out", str(golden)]):
+        with pytest.raises(SystemExit) as error:
+            embedding.main(invalid)
+        assert error.value.code == 2
+    assert calls == []
+    assert golden.read_text(encoding="utf-8") == "committed vectors"
+
+
+def test_recorded_reference_checks_fresh_candidate_and_survives_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(embedding.os, "environ", {"CUDA_VISIBLE_DEVICES": "-1"})
     monkeypatch.setattr(embedding.subprocess, "check_output", lambda *a, **kw: "fixture-head")
     monkeypatch.setattr(embedding, "digest", lambda p: "0" * 64)
+    monkeypatch.setattr(embedding, "operations", lambda: [
+        {"texts": ["doc 1", "doc 2"]}, {"texts": ["query"], "query": True}])
+    reference = tmp_path / "reference.json"
+    config = {"model_name": "fixture-model", "onnx_file_name": "onnx/model.onnx",
+              "query_prefix": "query ", "max_seq_length": 32, "batch_size": 3,
+              "cache_size": 64, "cpu_dtype": "fp32"}
+    corpus = json.dumps({"config": config, "operations": embedding.operations()}, sort_keys=True)
+    recorded = observation([[1., 0.], [0., 1.]])
+    recorded["operations"].append(observation([[1., 0.]])["operations"][0])
+    recorded["identities"] = {"onnx/model.onnx": "recorded graph"}
+    arms = {"torch": recorded, "onnx": recorded}
+    orders = {"ranking": {"python_order": [[0, 1]]}, "replicated_slice": []}
+    artifact = {"corpus_sha256": hashlib.sha256(corpus.encode()).hexdigest(),
+                "ranking_pairs": [], "arms": arms, "torch_comparison": orders,
+                "onnx_comparison": orders}
+    reference.write_text(json.dumps(artifact), encoding="utf-8")
 
-    def run_arm(argv, **kwargs):
-        if "--oracle" in argv:
-            backend = argv[argv.index("--oracle") + 1]
-            if backend == "onnx":
-                raise subprocess.TimeoutExpired(argv, 600)
-            Path(argv[argv.index("--out") + 1]).write_text(json.dumps({"completed_marker": "retained", "dim": 2}))
-            return subprocess.CompletedProcess(argv, 0)
-        return subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"fixture refusal")
-
-    monkeypatch.setattr(embedding.subprocess, "run", run_arm)
     args = argparse.Namespace(model="fixture-model", onnx_file="onnx/model.onnx", prefix="query ",
         cap=32, ranking_banks=None, rust_bin=tmp_path / "candidate", mutant=None,
-        accepted_fp32=False, qwen_position_ids_deferred=False, out=tmp_path / "result.json")
+        accepted_fp32=False, qwen_position_ids_deferred=False, reference=reference,
+        model_root=tmp_path / "relocated", out=tmp_path / "result.json")
+
+    def run_arm(argv, *, env, **kwargs):
+        assert argv == [str(args.rust_bin)]
+        assert env["HF_HUB_OFFLINE"] == "1"
+        assert env["PSEUDOLIFE_DAEMON_ONNX_DIR"] == str(args.model_root)
+        config_path = Path(json.loads(kwargs["input"])["config_path"])
+        assert json.loads(config_path.read_text(encoding="utf-8"))["embedding"]["model_name"] == "fixture-model"
+        if args.mutant == "timeout":
+            raise subprocess.TimeoutExpired(argv, 600)
+        candidate = json.loads(json.dumps(recorded))
+        if args.mutant == "wrong-vectors":
+            candidate["operations"][0]["bits"].reverse()
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(candidate).encode())
+
+    monkeypatch.setattr(embedding.subprocess, "run", run_arm)
+    assert embedding.run(args) == 0
+    orders["ranking"]["python_order"] = [[1, 0]]
+    reference.write_text(json.dumps(artifact), encoding="utf-8")
+    assert embedding.run(args) == 1
+    archived = json.loads(args.out.read_text())["torch_comparison"]
+    assert archived["diffs"] == []
+    assert archived["ranking"]["matches_recorded_order"] is False
+    orders["ranking"]["python_order"] = [[0, 1]]
+    reference.write_text(json.dumps(artifact), encoding="utf-8")
+    args.mutant = "wrong-vectors"
+    assert embedding.run(args) == 1
+    assert json.loads(args.out.read_text())["torch_comparison"]["diffs"] == ["operation 0: vectors"]
+    args.mutant = "timeout"
     assert embedding.run(args) == 1
     report = json.loads(args.out.read_text())
-    assert report["arms"]["torch"]["completed_marker"] == "retained"
-    assert report["arms"]["onnx"]["error"].startswith("TimeoutExpired")
+    assert {name: report["arms"][name] for name in arms} == arms
+    assert report["arms"]["rust"]["error"].startswith("TimeoutExpired")
+    assert report["reference_sha256"] == hashlib.sha256(reference.read_bytes()).hexdigest()
+
+    args.cap = 16
+    with pytest.raises(ValueError, match="does not match the requested corpus"):
+        embedding.run(args)

@@ -1,6 +1,7 @@
 """A published body comparison must distinguish missing evidence from parity."""
 import json
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -328,3 +329,34 @@ def test_native_model_paths_reject_ambiguous_or_incomplete_provisioning(tmp_path
     (models / "qwen3-msmarco-two").mkdir()
     with pytest.raises(ValueError, match="exactly one"):
         native_paths(models, runtime)
+
+
+def test_native_model_binding_uses_only_local_artifacts(tmp_path, monkeypatch):
+    import body_oracle
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    models = tmp_path / "models"
+    version = models / "qwen3-msmarco-fixture"
+    for name in ("embedding/onnx/model.onnx", "embedding/tokenizer.json",
+                 "reranker/model.onnx", "reranker/tokenizer.json"):
+        artifact = version / name
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.touch()
+    runtime = tmp_path / "ort" / "capi"
+    runtime.mkdir(parents=True)
+    library = runtime / "libonnxruntime.so.1.27.0"
+    library.touch()
+    monkeypatch.setitem(sys.modules, "onnxruntime",
+                        SimpleNamespace(__file__=str(runtime.parent / "__init__.py")))
+    monkeypatch.setenv("PSEUDOLIFE_DAEMON_MODELS_DIR", str(models))
+    output = tmp_path / "github-env"
+    output.write_text("EXISTING=1\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["body_oracle", "--github-env", str(output)])
+    with cold_harness_imports():
+        body_oracle.main()
+    assert output.read_text(encoding="utf-8").splitlines() == [
+        "EXISTING=1",
+        f"PSEUDOLIFE_DAEMON_ONNX_DIR={version / 'embedding'}",
+        f"PSEUDOLIFE_DAEMON_RERANK_DIR={version / 'reranker'}",
+        f"ORT_DYLIB_PATH={library}",
+    ]
