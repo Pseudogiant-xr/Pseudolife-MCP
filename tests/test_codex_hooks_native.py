@@ -226,7 +226,7 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
         "from pseudolife_memory.credentials import _write_token_file\n"
         "args=sys.argv[1:]\n"
         "if os.environ['FIXTURE_CREDENTIAL_SUCCESS']!='1':\n"
-        " print(json.dumps({'status':'needs-configuration','recovery':'credential setup failed'}))\n"
+        " print(json.dumps({'status':'needs-configuration','recovery':'Fixture credential refusal. Correct the fixture and retry.'}))\n"
         " raise SystemExit(1)\n"
         "if args==['--runtime-defaults']:\n"
         " assert Path(os.environ['FIXTURE_CODEX_CALL']).exists()\n"
@@ -327,7 +327,7 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
         assert not managed.exists()
         assert not codex_call.exists()
         assert not runtime_marker.exists()
-        assert "Codex credential setup failed" in stdout
+        assert "Fixture credential refusal. Correct the fixture and retry." in stdout
         return
     assert CredentialProvider(path=managed).snapshot().token == "installer-file-token"
     connection = json.loads(managed.with_name("connection.json").read_text())
@@ -370,7 +370,7 @@ from pathlib import Path
 from pseudolife_memory.credentials import _write_token_file
 args=sys.argv[1:]
 if os.environ['FIXTURE_CREDENTIAL_SUCCESS']!='1':
-    print(json.dumps({'status':'needs-configuration','recovery':'credential setup failed'}))
+    print(json.dumps({'status':'needs-configuration','recovery':'Fixture credential refusal. Correct the fixture and retry.'}))
     raise SystemExit(1)
 if args==['--runtime-defaults']:
     assert Path(os.environ['FIXTURE_CODEX_CALL']).exists()
@@ -475,7 +475,7 @@ function codex {{
         assert not hook_marker.exists()
         assert not runtime_marker.exists()
         assert not codex_call.exists()
-        assert "Codex credential setup failed" in completed.stdout.decode()
+        assert "Fixture credential refusal. Correct the fixture and retry." in completed.stdout.decode()
         return
     assert all(json.loads(credential_marker.read_text()).values())
     assert all(json.loads(hook_marker.read_text()).values())
