@@ -10,7 +10,7 @@ from psycopg import sql
 from principal_fixtures import check_target
 from rust.harness_support.bank_fixture import assert_fixture_database
 from rust.harness_support.fixture_rows import checked_fixture_insert
-from rust.harness_support.schema import ensure_schema
+from rust.harness_support.schema import ensure_schema, load_plan
 
 
 def load_capture(name, digest):
@@ -24,6 +24,15 @@ def load_capture(name, digest):
 
 def replay(dsn, captured):
     check_target(dsn)
+    plan, _ = load_plan()
+    current = plan["schema_version"]
+    versions = [row["value"] for row in captured["tables"].get("meta", [])
+                if row["key"] == "schema_version"]
+    recorded = versions[0] if len(versions) == 1 and type(versions[0]) is int else None
+    if recorded != current:
+        version = recorded if recorded is not None else "missing or invalid"
+        raise ValueError(f"fixed seed capture schema version {version} disagrees with schema plan version {current}; "
+                         "re-make the capture")
     with psycopg.connect(dsn) as conn:
         assert_fixture_database(conn)
         if conn.execute("SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "

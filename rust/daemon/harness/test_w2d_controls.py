@@ -119,6 +119,35 @@ class Scenario:
 
 
 class MutantQualification(unittest.TestCase):
+    def test_cortex_capture_pins_modes_and_query_order(self):
+        from w2d_seed_rows import load_capture
+
+        capture = load_capture("cortex", cortex.CAPTURE_SHA256)
+        self.assertEqual(set(capture["modes"]), {"default", "bm25_demote", "quarantine"})
+        for mode, observation in capture["modes"].items():
+            with self.subTest(mode=mode):
+                self.assertEqual(len(observation["cases"]), 26)
+                self.assertEqual([case["query"] for case in observation["cases"]], cortex.QUERIES)
+
+    def test_fixed_seed_refuses_an_older_capture_before_connecting(self):
+        import w2d_seed_rows as seed_rows
+        from rust.harness_support.schema import load_plan
+
+        current = load_plan()[0]["schema_version"]
+        captured = {"tables": {"meta": [{"key": "schema_version", "value": current - 1}]}, "sequences": {}}
+        conn = unittest.mock.MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (False,)
+        with (patch.object(seed_rows, "check_target"),
+              patch.object(seed_rows.psycopg, "connect", return_value=conn) as connect,
+              patch.object(seed_rows, "assert_fixture_database"),
+              patch.object(seed_rows, "ensure_schema") as ensure,
+              patch.object(seed_rows, "checked_fixture_insert", return_value=(seed_rows.sql.SQL("INSERT"), ()))):
+            with self.assertRaisesRegex(ValueError, rf"capture schema version {current - 1}.*schema plan version {current}.*re-make"):
+                seed_rows.replay("dbname=pl_cf_w2d_fixture", captured)
+        connect.assert_not_called()
+        ensure.assert_not_called()
+
     def test_continuum_seed_retains_its_captured_clock(self):
         import seed_entries
 
@@ -131,6 +160,7 @@ class MutantQualification(unittest.TestCase):
 
     def test_fixed_seed_refuses_partial_schema_without_meta(self):
         import w2d_seed_rows as seed_rows
+        from rust.harness_support.schema import load_plan
 
         conn = unittest.mock.MagicMock()
         conn.__enter__.return_value = conn
@@ -142,12 +172,14 @@ class MutantQualification(unittest.TestCase):
             return result
 
         conn.execute.side_effect = query
+        version = load_plan()[0]["schema_version"]
+        captured = {"tables": {"meta": [{"key": "schema_version", "value": version}]}, "sequences": {}}
         with (patch.object(seed_rows, "check_target"),
               patch.object(seed_rows.psycopg, "connect", return_value=conn),
               patch.object(seed_rows, "assert_fixture_database"),
               patch.object(seed_rows, "ensure_schema") as ensure):
             with self.assertRaisesRegex(ValueError, "requires a fresh disposable bank"):
-                seed_rows.replay("dbname=pl_cf_w2d_fixture", {"tables": {}, "sequences": {}})
+                seed_rows.replay("dbname=pl_cf_w2d_fixture", captured)
         ensure.assert_not_called()
 
     def test_seeded_base_refusal_precedes_clone_and_is_only_for_seeded(self):
