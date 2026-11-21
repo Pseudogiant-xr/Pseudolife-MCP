@@ -1,14 +1,14 @@
 """Model-free pruning scenarios, added to the existing daemon harness."""
 from __future__ import annotations
 
-import subprocess
-import sys
-import time
 import copy
+import time
+
 import psycopg
 
-import daemons
 import dbstate
+from background_seed import seed_bank, seed_pruning_refusal
+from rust.harness_support.bank_fixture import assert_fixture_database
 
 
 def register(harness):
@@ -17,6 +17,7 @@ def register(harness):
         settle = False
         snapshot_settle = False  # model-free timeline observes pruning directly in storage
         start_stages = ("principals",)  # model-free: the sweep runs whether or not init finishes
+        native_validation = True
         golden_replay = True
         golden_db_state = True
         config_yaml = ("memory:\n  dream:\n    enabled: false\n    sweep_interval_seconds: 0.2\n"
@@ -25,27 +26,13 @@ def register(harness):
         env = {"PSEUDOLIFE_SESSION_REAP_SECONDS": "3600", "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "3600"}
 
         def prepare_template(self, dsn):
-            home = daemons.make_home(daemons.scratch_root(), self.name + "-seed", self.config_yaml)
-            code = '''
-import os
-from pseudolife_memory.storage.postgres import PostgresStorage
-s = PostgresStorage(os.environ["PSEUDOLIFE_MCP_DATABASE_URL"])
-for n in range(4):
-    run = s.start_dream_run(100.0 + n, 0.0, 0, extractor="fixture")
-    if n == 3: s.finish_dream_run(run, status="committed", finished_at=200.0, cursor_after=0.0, claims=0, tallies={})
-    s.add_dream_run_slot(run, dict(seq=1,entity="fixture",attribute="state",entity_norm="fixture",attribute_norm="state",kind="scalar",new_value="ready",action="noop",at=100.0))
-for stamp in [100.0, 9000000000000.0]:
-    event = s.add_retrieval_event("fixture", [], now=stamp)
-    s.add_lesson_search_event("fixture", [], now=stamp)
-s.close()
-'''
-            log = home / "seed.log"
-            env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
-            with log.open("wb") as out:
-                result = subprocess.run([sys.executable, "-c", code], cwd=daemons.REPO,
-                    env=dict(env, PYTHONPATH=str(daemons.REPO)), stdout=out, stderr=subprocess.STDOUT, timeout=60)
-            if result.returncode: raise RuntimeError(f"sweep seed exit {result.returncode}; log {log}")
+            seed_bank(dsn, "pruning")
             self.before = dbstate.dump(dsn)
+
+        def validate_snapshot(self, state, before):
+            # SweepRecovery replaces self.before after removing its injected
+            # trigger, so both scenarios compare the final catalog as seeded.
+            validate_pruning(state, self.before)
 
         def timeline(self, procs, holders):
             arms = {}
@@ -63,10 +50,12 @@ s.close()
                         if not any(r[event_columns.index("created_at")] == 100.0 for r in events) and not any(r[lesson_columns.index("created_at")] == 100.0 for r in lessons): break
                     if time.monotonic() > deadline: raise RuntimeError(f"{side} sweep milestone not reached; log {daemon.log}")
                     time.sleep(0.1)
-                normalized = self.normalize_db(harness.scrub_declared_rows(state, self.before)["state"], self.before, side)
+                clean = harness.scrub_declared_rows(state, self.before)["state"]
+                self.validate_snapshot(clean, self.before)
+                normalized = self.normalize_db(clean, self.before, side)
                 arms[side] = {"status": 200, "headers": {}, "json": normalized}
             c = harness.case("bank after dreams-off pruning and journal cascade", "OBSERVE", "/background/sweep-state")
-            c["_answers"] = (arms.get("python"), arms["rust"])
+            c["_answers"] = (None, arms["rust"])
             return [c]
 
         def normalize_db(self, state, before, side):
@@ -108,9 +97,7 @@ s.close()
 
         def prepare_template(self, dsn):
             super().prepare_template(dsn)
-            with psycopg.connect(dsn, autocommit=True) as conn:
-                conn.execute("CREATE FUNCTION pl_w3i_prune_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture pruning refusal'; END $$")
-                conn.execute("CREATE TRIGGER pl_w3i_prune_failure BEFORE DELETE ON dream_runs FOR EACH STATEMENT EXECUTE FUNCTION pl_w3i_prune_failure()")
+            seed_pruning_refusal(dsn)
             self.before = dbstate.dump(dsn)
 
         def timeline(self, procs, holders):
@@ -121,17 +108,17 @@ s.close()
                     if time.monotonic() > deadline: raise RuntimeError(f"{side} did not report the injected pruning refusal")
                     time.sleep(0.1)
                 state = dbstate.dump(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"])
-                for table in ("dream_runs", "dream_run_slots"):
-                    if state["rows"]["public." + table] != self.before["rows"]["public." + table]:
-                        raise RuntimeError("failed pruning transaction changed durable rows")
-                clean = self.normalize_db(harness.scrub_declared_rows(state, self.before)["state"], self.before, side)
+                state = harness.scrub_declared_rows(state, self.before)["state"]
+                validate_pruning(state, self.before, pruned=False)
+                clean = self.normalize_db(state, self.before, side)
                 arms[side] = {"status": 200, "headers": {}, "json": clean}
             c = harness.case("bank after refused pruning transaction", "OBSERVE", "/background/sweep-state")
-            c["_answers"] = (arms["python"], arms["rust"])
+            c["_answers"] = (None, arms["rust"])
             rows.append(c)
             for daemon in procs.values():
-                with psycopg.connect(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"], autocommit=True) as conn:
-                    conn.execute("DROP TRIGGER pl_w3i_prune_failure ON dream_runs")
+                with psycopg.connect(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"]) as conn:
+                    assert_fixture_database(conn)
+                    conn.execute("DROP TRIGGER pl_w3i_prune_failure ON public.dream_runs")
                     conn.execute("DROP FUNCTION pl_w3i_prune_failure()")
             self.before = copy.deepcopy(self.before)
             self.before["catalog"]["functions"] = [r for r in self.before["catalog"]["functions"] if r[1] != "pl_w3i_prune_failure"]
@@ -140,3 +127,20 @@ s.close()
             return rows
 
     return {s.name: s for s in (SweepPruning, SweepRecovery)}
+
+
+def validate_pruning(state, before, *, pruned=True):
+    """Expect only the known writer-open and pruning effects on the seeded bank."""
+    expected = copy.deepcopy(before)
+    rows = expected["rows"]
+    for key_value in rows["public.meta"]["rows"]:
+        if key_value[0] == "writer_lease_epoch":
+            key_value[1] += 1
+    if pruned:
+        for table, removed in (("dream_runs", 2), ("dream_run_slots", 2),
+                               ("retrieval_events", 1), ("lesson_search_events", 1)):
+            del rows["public." + table]["rows"][:removed]
+        runs = rows["public.dream_runs"]
+        runs["rows"][0][runs["columns"].index("status")] = "failed"
+    if differences := dbstate.diff(expected, state):
+        raise RuntimeError(f"pruning bank differs from the fixture contract: {differences[:8]}")

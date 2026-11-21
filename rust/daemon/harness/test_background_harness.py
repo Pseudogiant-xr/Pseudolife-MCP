@@ -334,6 +334,64 @@ def test_reaper_title_validation_still_rejects_missing_durable_effect(scenario, 
         harness.SCENARIOS[scenario]().validate_expected(snapshot)
 
 
+@pytest.mark.parametrize("effect, message", [
+    ("client", "unexpected durable client session"),
+    ("episode", "unexpected durable episode"),
+    ("entry", "changed the durable fixture entry"),
+    ("cursor", "wrong durable cursor"),
+    ("deferred", "did not defer the empty fixture"),
+    ("tombstone", "did not move the empty fixture"),
+])
+def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, message):
+    from background_seed_rows import ROWS
+    from background_sessions import validate_session_writes
+
+    monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
+    initial = ROWS["sessions"]
+    after = copy.deepcopy(initial)
+    episodes = {r["title"]: r for r in after["episodes"]}
+    empty = episodes["empty fixture"]["id"]
+    for row in after["episodes"]:
+        if row["ended_at"] is None:
+            row["ended_at"] = f"<close:{row['id']}>"
+    for row in after["client_sessions"]:
+        if row["ended_at"] is None:
+            row.update(ended_at=f"<close:{row['episode_ids'][0]}>", end_reason="idle")
+    entry = after["entries"][0]
+    entry["dream_state"] = "acknowledged"
+    cursor = next(row for row in after["meta"] if row["key"] == "cortex_dream_cursor")
+    cursor["value"] = entry["ts"]
+    sweep = effect == "tombstone"
+    if sweep:
+        after["episodes"].remove(episodes["empty fixture"])
+        metadata = {empty: {"session_key": "empty", "ended_at": f"<close:{empty}>", "title": "empty fixture"}}
+        after["meta"].append({"key": "episode_tombstones", "value": metadata})
+    else:
+        metadata = {empty: f"<close:{empty}>"}
+        after["meta"].append({"key": "deferred_empty_roots", "value": metadata})
+
+    def dump(tables):
+        return {"rows": {"public." + table: {"columns": list(rows[0]),
+                                            "rows": [list(row.values()) for row in rows]}
+                         for table, rows in tables.items()}}
+
+    validate_session_writes(dump(after), dump(initial), sweep, False, 1)
+    if effect == "client":
+        next(row for row in after["client_sessions"] if row["session_key"] == "work")["end_reason"] = "end"
+    elif effect == "episode":
+        episodes["child"]["parent_id"] = None
+    elif effect == "entry":
+        entry["dream_state"] = "pending"
+    elif effect == "cursor":
+        cursor["value"] = 0.0
+    elif sweep:
+        metadata[empty]["title"] = "another title"
+    else:
+        del metadata[empty]
+    with pytest.raises(RuntimeError, match=message):
+        validate_session_writes(dump(after), dump(initial), sweep, False, 1)
+
+
 # A copy of a real bank (the forced mirror run's PL_HARNESS_BASE_DATABASE)
 # already holds deferred_empty_roots and episode_tombstones entries with
 # close clocks from long before either daemon started. Every reaper and

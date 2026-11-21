@@ -1,8 +1,7 @@
 """Background lifecycle scenarios for the existing daemon harness.
 
-All seeds use Python service methods. Each milestone observes real daemon
-subprocesses and dumps the whole disposable bank; close clocks are checked
-against that arm's own invocation window before normalization.
+Each milestone observes the native daemon and dumps the disposable bank.
+Close clocks are checked against the daemon's invocation window.
 """
 from __future__ import annotations
 
@@ -11,14 +10,11 @@ import json
 import math
 import os
 import signal
-import subprocess
-import sys
 import time
-from pathlib import Path
 
-import daemons
 import dbstate
 import pgdisposable as pg
+from background_seed import seed_bank
 
 
 def register(harness):
@@ -32,67 +28,10 @@ def register(harness):
         expected_triggers = 1
         resume_refusal = False
         auto_title = False
-
-        def configure_daemons(self, procs):
-            if "python" not in procs: return
-            # Both daemons run the session-end dream; the trigger is counted
-            # from a log line each side writes when it fires (Python's
-            # through this wrapper, Rust's natively), and the capture waits
-            # for the dream's acknowledgements on both.
-            code = '''
-import logging, signal
-from pseudolife_memory import mcp_server
-_real_dream = mcp_server.service._fire_and_forget_dream
-def _counted_dream():
-    logging.getLogger("pseudolife-mcp").warning("session-end dream trigger: fired")
-    _real_dream()
-mcp_server.service._fire_and_forget_dream = _counted_dream
-# Controlled normal-return exit: uvicorn rethrows captured signals to the
-# previous handler; the fixture supplies a returning handler so atexit runs.
-# Ordinary CLI signal exit statuses are separate, uninstrumented behavior.
-for sig in (signal.SIGTERM, getattr(signal, "SIGBREAK", signal.SIGTERM)):
-    signal.signal(sig, lambda *_: None)
-from pseudolife_memory.daemon import run_daemon
-run_daemon()
-'''
-            procs["python"].argv = [sys.executable, "-c", code]
+        native_validation = True
 
         def prepare_template(self, dsn):
-            root = daemons.scratch_root()
-            home = daemons.make_home(root, self.name + "-seed", self.config_yaml)
-            fixture_env = self.prepare_home(home) if self.ci_fixture else {}
-            code = '''
-import os
-from unittest.mock import patch
-from pseudolife_memory.service import MemoryService
-svc = MemoryService(data_dir=os.environ["PSEUDOLIFE_MCP_DATA_DIR"])
-svc._ensure_init()
-with patch("time.time", return_value=1700000000.0):
-    svc.episode_start_session("empty", "empty fixture")
-    svc.episode_start_session("work", "work fixture")
-    svc.episode_start("child", episode=svc._cms.episodes.open_leaf_for("work").id)
-    svc.store("The background lifecycle fixture retains a nested session entry.", source="fixture",
-              episode=svc._cms.episodes.open_leaf_for("work").parent_id)
-    svc.episode_start_session("history", "closed history fixture")
-    svc.store("An explicitly closed session remains history after its entries are deleted.", source="fixture",
-              episode=svc._cms.episodes.open_leaf_for("history").id)
-    svc.episode_end_session("history", run_dream=False)
-    svc.delete(episode=next(e.id for e in svc._cms.episodes.episodes.values() if e.session_key == "history"),
-               confirm_bulk=True)
-svc.flush()
-svc._storage.close()
-'''
-            if self.auto_title:
-                code = code.replace('"work fixture"', '"session - 2023-11-14 22:13"')
-            env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
-            env.update(fixture_env)
-            log = home / "seed.log"
-            with log.open("wb") as out:
-                result = subprocess.run([sys.executable, "-c", code], cwd=daemons.REPO,
-                                        env=dict(env, PYTHONPATH=str(daemons.REPO)), stdout=out,
-                                        stderr=subprocess.STDOUT, timeout=600)
-            if result.returncode:
-                raise RuntimeError(f"session seed exit {result.returncode}; log {log}")
+            seed_bank(dsn, "sessions", auto_title=self.auto_title)
             self.before = dbstate.dump(dsn)
 
         def timeline(self, procs, holders):
@@ -142,12 +81,14 @@ svc._storage.close()
                 self.validate_expected(state)
                 self.closed_states[side] = state
                 normalized = normalize_closes(state, self.before, daemon.started_at_unix, captured)
+                validate_session_writes(normalized, self.before, self.sweep, self.auto_title,
+                                        self.expected_triggers)
                 scrubbed = keyed_meta(normalize_refresh_clocks(
                     harness.scrub_declared_rows(normalized, self.before)["state"],
                     self.before, [(daemon.started_at_unix, captured)]))
                 arms[side] = {"status": 200, "headers": {}, "json": {"db": scrubbed, "events": {"session_end_dream_triggers": triggers}}}
             c = harness.case("bank after idle close" if not self.sweep else "bank after empty sweep", "OBSERVE", "/background/session-state")
-            c["_answers"] = (arms["python"], arms["rust"])
+            c["_answers"] = (None, arms["rust"])
             rows.append(c)
             if self.restart:
                 for daemon in procs.values():
@@ -162,13 +103,17 @@ svc._storage.close()
                     validate_restart_clocks(state, self.closed_states[side])
                     now = time.time()
                     normalized = normalize_closes(state, self.before, self.starts[side], now)
+                    validate_session_writes(normalized, self.before, self.sweep, self.auto_title,
+                                            self.expected_triggers)
                     triggers = daemon.log.read_text(errors="replace").count("session-end dream trigger:")
+                    if triggers:
+                        raise RuntimeError("restart triggered a second session-end dream")
                     db = keyed_meta(normalize_refresh_clocks(
                         harness.scrub_declared_rows(normalized, self.before)["state"],
                         self.before, [(self.starts[side], now)]))
                     arms[side] = {"status": 200, "headers": {}, "json": {"db": db, "events": {"session_end_dream_triggers": triggers}}}
                 c = harness.case("bank after owned clean stop and restart", "OBSERVE", "/background/session-state")
-                c["_answers"] = (arms["python"], arms["rust"])
+                c["_answers"] = (None, arms["rust"])
                 rows.append(c)
             return rows
 
@@ -177,6 +122,14 @@ svc._storage.close()
                                       harness.DB_NONDETERMINISTIC, before,
                                       windows=self.clock_window(side))
             return normalize_refresh_clocks(state, before, self.clock_window(side))
+
+        def validate_snapshot(self, state, before):
+            if differences := dbstate.diff(before["catalog"], state["catalog"]):
+                raise RuntimeError(f"session lifecycle changed the seeded catalog: {differences[:8]}")
+            normalized = normalize_closes(state, before, self.starts["rust"], time.time())
+            self.validate_expected(state)
+            validate_session_writes(normalized, before, self.sweep, self.auto_title,
+                                    self.expected_triggers)
 
         def validate_expected(self, state):
             table = state["rows"]["public.episodes"]
@@ -231,6 +184,71 @@ svc._storage.close()
         restart = True
 
     return {s.name: s for s in (SessionReap, SessionSweep, SessionRestart, TombstoneRestart, ResumeRefusal)}
+
+
+def validate_session_writes(state, before, sweep, auto_title, expected_triggers):
+    """Check the fixture's durable row delta after checking the raw close clocks."""
+    def rows(snapshot, table, key):
+        data = snapshot["rows"]["public." + table]
+        records = (dict(zip(data["columns"], row)) for row in data["rows"])
+        return {row[key]: row for row in records}
+
+    initial_clients = rows(before, "client_sessions", "session_key")
+    clients = rows(state, "client_sessions", "session_key")
+    roots = {key: initial_clients[key]["episode_ids"][0] for key in ("empty", "work", "history")}
+    for key, root in roots.items():
+        want = dict(initial_clients[key])
+        if key != "history":
+            want.update(ended_at=f"<close:{root}>", end_reason="idle")
+        if clients.get(key) != want:
+            raise RuntimeError(f"unexpected durable client session: {key}")
+
+    episodes = rows(state, "episodes", "id")
+    for id, initial in rows(before, "episodes", "id").items():
+        key = initial["session_key"]
+        if key not in roots or (id != roots[key] and initial["parent_id"] != roots[key]):
+            continue
+        want = dict(initial)
+        if key == "empty" and sweep:
+            want = None
+        elif key != "history":
+            want["ended_at"] = f"<close:{id}>"
+            if auto_title and id == roots["work"] and id in episodes:
+                want["title"] = episodes[id]["title"]  # validated before the row comparison
+        if episodes.get(id) != want:
+            raise RuntimeError(f"unexpected durable episode: {key}")
+
+    entries = rows(state, "entries", "id")
+    fixture_timestamps = []
+    for id, initial in rows(before, "entries", "id").items():
+        if initial["episode_id"] == roots["work"]:
+            want = dict(initial, episode_title=episodes[roots["work"]]["title"])
+            if expected_triggers:
+                want["dream_state"] = "acknowledged"
+                fixture_timestamps.append(want["ts"])
+            if entries.get(id) != want:
+                raise RuntimeError("reaper changed the durable fixture entry unexpectedly")
+
+    meta = rows(state, "meta", "key")
+    current_meta_rows = state["rows"]["public.meta"]["rows"]
+    prior_meta = dict(dbstate.prior_rows(before, "public.meta", current_meta_rows))
+    prior_cursor = prior_meta["cortex_dream_cursor"]
+    cursor = meta.get("cortex_dream_cursor", {}).get("value", prior_cursor)
+    minimum = max([prior_cursor, *fixture_timestamps])
+    if cursor < minimum or (not (expected_triggers and pg.base_database()) and cursor != minimum):
+        raise RuntimeError("session-end dream left the wrong durable cursor")
+
+    empty = roots["empty"]
+    close = f"<close:{empty}>"
+    deferred = meta.get("deferred_empty_roots", {}).get("value", {})
+    tombs = meta.get("episode_tombstones", {}).get("value", {})
+    if sweep:
+        if empty in deferred or tombs.get(empty) != {
+            "session_key": "empty", "ended_at": close, "title": "empty fixture",
+        }:
+            raise RuntimeError("sweep did not move the empty fixture's close to its tombstone")
+    elif deferred.get(empty) != close or empty in tombs:
+        raise RuntimeError("idle close did not defer the empty fixture for resume")
 
 
 def validate_restart_clocks(state, closed):

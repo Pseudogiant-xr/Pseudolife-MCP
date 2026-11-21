@@ -80,8 +80,7 @@ def test_early_requests_then_settle_then_snapshot_and_record(snapshot_harness, t
 
 @pytest.mark.parametrize("scenario", [run.DbDown, run.BodyLimits, run.StaticBuild,
                                       run.SecurityOpen, run.DimMismatch, run.StampedBank,
-                                      run.NullEmbedding, run.UnconstrainedDims,
-                                      run.SCENARIOS["sweep-pruning"], run.SCENARIOS["sweep-recovery"]])
+                                      run.NullEmbedding, run.UnconstrainedDims])
 def test_uninitializable_scenarios_keep_bank_comparisons_without_wait(snapshot_harness, tmp_path, scenario):
     events, _ = snapshot_harness
     scn = scenario()
@@ -109,8 +108,7 @@ def test_snapshot_timeout_is_a_failure_and_stops_both_arms(snapshot_harness, tmp
 
 
 @pytest.mark.parametrize("scenario", [run.DimMismatch, run.StampedBank, run.NullEmbedding,
-                                      run.UnconstrainedDims, run.BodyLimits, run.SecurityOpen,
-                                      run.SCENARIOS["sweep-pruning"], run.SCENARIOS["sweep-recovery"]])
+                                      run.UnconstrainedDims, run.BodyLimits, run.SecurityOpen])
 def test_no_wait_policy_still_detects_bank_changes(snapshot_harness, tmp_path, monkeypatch, scenario):
     scn = scenario()
     scn.prepare_template = lambda dsn: None
@@ -128,6 +126,57 @@ def test_no_wait_policy_still_detects_bank_changes(snapshot_harness, tmp_path, m
     monkeypatch.setattr(run.dbstate, "dump", changed)
     result = run._run_scenario(scn, tmp_path / "daemon", tmp_path, "live", False)
     assert result["db_diffs"]
+
+
+@pytest.mark.parametrize("name", ["sweep-pruning", "sweep-recovery"])
+@pytest.mark.parametrize("mutate_catalog", [False, True])
+def test_sweep_compares_the_rust_snapshot_without_waiting(
+        snapshot_harness, tmp_path, monkeypatch, name, mutate_catalog):
+    events, _ = snapshot_harness
+    seed = {"catalog": {"sequences": []}, "rows": {
+        "public.meta": {"columns": ["key", "value"], "rows": [["writer_lease_epoch", 1]]},
+        "public.dream_runs": {"columns": ["id", "status"],
+                              "rows": [[1, "running"], [2, "running"], [3, "running"], [4, "committed"]]},
+        "public.dream_run_slots": {"columns": ["id"], "rows": [[1], [2], [3], [4]]},
+        "public.retrieval_events": {"columns": ["id"], "rows": [[1], [2]]},
+        "public.lesson_search_events": {"columns": ["id"], "rows": [[1], [2]]},
+    }}
+    pruned = copy.deepcopy(seed)
+    pruned["rows"]["public.meta"]["rows"] = [["writer_lease_epoch", 2]]
+    pruned["rows"]["public.dream_runs"]["rows"] = [[3, "failed"], [4, "committed"]]
+    pruned["rows"]["public.dream_run_slots"]["rows"] = [[3], [4]]
+    pruned["rows"]["public.retrieval_events"]["rows"] = [[2]]
+    pruned["rows"]["public.lesson_search_events"]["rows"] = [[2]]
+
+    def dump(dsn):
+        events.append(("dump", dsn))
+        state = copy.deepcopy(pruned if dsn == "rust" else seed)
+        if mutate_catalog and dsn == "rust":
+            state["catalog"]["unexpected_table"] = ["mutation"]
+        return state
+
+    def refuse_python(*args):
+        pytest.fail("the native pruning scenario started a Python daemon")
+
+    scn = run.SCENARIOS[name]()
+    scn.prepare_template = lambda dsn: setattr(scn, "before", copy.deepcopy(seed))
+    witness = run.case("pruning milestone", "OBSERVE", "/background/sweep-state")
+    witness["_answers"] = (None, {"status": 200})
+    scn.timeline = lambda procs, holders: [witness]
+    scn.normalize_db = lambda state, before, side: state
+    monkeypatch.setattr(run.dbstate, "dump", dump)
+    monkeypatch.setattr(run.daemons, "python_daemon", refuse_python)
+    if mutate_catalog:
+        with pytest.raises(RuntimeError, match="unexpected_table"):
+            run._run_scenario(scn, tmp_path / "daemon", tmp_path, "live", False)
+    else:
+        result = run._run_scenario(scn, tmp_path / "daemon", tmp_path, "live", False)
+        assert not result["db_diffs"]
+    assert [event[1] for event in events if event[0] == "dump"] == [
+        f"pl_cf_{run.pg.SLICE}_{name.replace('-', '_')}_t", "rust",
+    ]
+    assert [event[1] for event in events if event[0] == "start"] == ["rust"]
+    assert not any(event[0] == "wait" for event in events)
 
 
 def test_dim_mismatch_waits_for_rust_to_refuse_before_its_first_case(snapshot_harness, tmp_path, monkeypatch):

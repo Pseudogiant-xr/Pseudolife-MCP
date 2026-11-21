@@ -256,35 +256,44 @@ def test_inventory_rejects_empty_exception_reason(monkeypatch):
 @pytest.mark.parametrize('name', ['session-reap', 'session-restart', 'session-resume-refusal',
                                  'session-sweep', 'session-tombstone-restart'])
 def test_background_seed_uses_fixture_with_empty_model_cache(tmp_path, monkeypatch, name):
+    import subprocess
+
+    import background_seed
     import run
     import background_sessions
+    from psycopg import sql
+
     cache = tmp_path / 'empty-cache'
     cache.mkdir()
     monkeypatch.setenv('HF_HOME', str(cache))
-    monkeypatch.setattr(background_sessions.daemons, 'scratch_root', lambda: tmp_path)
     monkeypatch.setattr(background_sessions.dbstate, 'dump', lambda dsn: {})
 
-    def prepare(scenario, home):
-        path = home / 'data/config.yaml'
-        config = yaml.safe_load(path.read_text(encoding='utf-8'))
-        config['embedding'] = {'model_name': str(home / 'model'), 'backend': 'onnx', 'device': 'cpu'}
-        path.write_text(yaml.safe_dump(config), encoding='utf-8')
-        return {'TOKENIZERS_PARALLELISM': 'false'}
+    class Bank:
+        def __enter__(self):
+            return self
 
-    monkeypatch.setattr(run.Scenario, 'prepare_home', prepare)
+        def __exit__(self, *exc):
+            return False
 
-    def seed(argv, **kwargs):
-        home = Path(kwargs['env']['PSEUDOLIFE_MCP_DATA_DIR']).parent
-        config = yaml.safe_load((home / 'data/config.yaml').read_text(encoding='utf-8'))
-        assert config.get('embedding', {}).get('model_name') == str(home / 'model')
-        assert kwargs['env']['TOKENIZERS_PARALLELISM'] == 'false'
-        assert kwargs['env']['HF_HUB_OFFLINE'] == '1' and list(cache.iterdir()) == []
-        return SimpleNamespace(returncode=0)
+        def execute(self, statement, params):
+            if isinstance(statement, str) and statement.startswith('SELECT nextval'):
+                return [(n,) for n in range(1, params[1] + 1)]
+            inserted.append(params)
 
-    monkeypatch.setattr(background_sessions.subprocess, 'run', seed)
+    def refuse_spawn(*args, **kwargs):
+        pytest.fail('background bank seed launched a subprocess')
+
+    inserted = []
+    monkeypatch.setattr(subprocess, 'Popen', refuse_spawn)
+    monkeypatch.setattr(background_seed.psycopg, 'connect', lambda dsn: Bank())
+    monkeypatch.setattr(background_seed, 'initialize_bank', lambda conn: None)
+    monkeypatch.setattr(background_seed, 'checked_fixture_insert',
+                        lambda conn, table, rows: (sql.SQL('INSERT'), table))
     scenario = run.SCENARIOS[name]()
     scenario.ci_fixture = True
-    scenario.prepare_template('fixture-dsn')
+    scenario.prepare_template('postgresql://fixture@127.0.0.1:1/pl_cf_w3i_fixture')
+    assert inserted == ['episodes', 'client_sessions', 'entries', 'cms_counters', 'meta']
+    assert list(cache.iterdir()) == []
 
 
 def test_episode_daemon_uses_fixture_with_empty_model_cache(tmp_path, monkeypatch):
