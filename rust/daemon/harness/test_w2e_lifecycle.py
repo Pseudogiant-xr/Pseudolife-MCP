@@ -1,5 +1,6 @@
 """Numeric comparison and run ownership without starting real daemons."""
 import argparse
+import copy
 import importlib
 import json
 import sys
@@ -596,6 +597,102 @@ def test_curation_judge_scenarios_settle_before_their_first_comparison(harness):
             "mcp-dream-curation-fold-unaudited"} <= set(qj.MUTANTS)
 
 
+def test_recording_without_only_keeps_nonqueue_rows(harness, monkeypatch, tmp_path):
+    selected = {"store-defaults": {}, "link-auto": {}, "counters-restore": {}}
+    monkeypatch.setattr(harness, "SCENARIOS", selected)
+    monkeypatch.setattr(harness, "run_root", lambda: tmp_path)
+    monkeypatch.setattr(sys, "argv", ["w2e.py", "live", "--record", "--rust-bin", "candidate"])
+    seen = []
+
+    def scenario(name, binary, root, mode, record, tol, **kwargs):
+        assert record
+        seen.append(name)
+        return {"scenario": name, "steps": [], "stats": {}}
+
+    monkeypatch.setattr(harness, "run_scenario", scenario)
+    assert harness.main() == 0
+    assert seen == ["store-defaults", "counters-restore"]
+
+
+def test_explicit_queue_recording_refuses_before_any_writes(harness, monkeypatch, capsys):
+    monkeypatch.setattr(harness, "run_root", lambda: pytest.fail("recording made a scratch root"))
+    monkeypatch.setattr(sys, "argv", [
+        "w2e.py", "live", "--record", "--rust-bin", "candidate", "--only", "store-defaults", "link-auto",
+    ])
+    with pytest.raises(SystemExit, match="2"):
+        harness.main()
+    assert "omit --record for link-auto" in capsys.readouterr().err
+
+
+def queue_fixture_observation(harness, monkeypatch, name):
+    from w2e_queue_contract import (
+        expected_hashes, load_contract, pinned_bank, resolve_hashes, step_diffs, unpack_vectors,
+    )
+
+    contract = load_contract()
+    reference = contract["scenarios"][name][-1]
+    origin = "http://127.0.0.1:1"
+    hashes = expected_hashes(contract, origin)
+    state = pinned_bank(contract, reference, {}, hashes)
+    answer = resolve_hashes(reference["answer"], hashes)
+    numeric = unpack_vectors(contract["numeric"][reference["numeric"]], contract["vectors"])
+    monkeypatch.setattr(harness, "normalize_state", lambda *a: (state, numeric, {}))
+    monkeypatch.setattr(harness, "ts_tokens", lambda *a: {})
+
+    def check():
+        return step_diffs(harness, contract, reference, {"op": "tool"}, answer, state,
+                          {"catalog": state["catalog"]}, [], origin, {}, hashes)
+
+    assert check() == []
+    return state, answer, check
+
+
+@pytest.mark.parametrize("name,table", [
+    ("link-auto", "public.dismissed_pairs"),
+    ("candidate-auto", "public.edge_proposals"),
+    ("candidate-auto", "public.meta"),
+    ("junk-auto", "public.dismissed_pairs"),
+])
+def test_queue_contract_rejects_an_extra_durable_row(harness, monkeypatch, name, table):
+    state, _, check = queue_fixture_observation(harness, monkeypatch, name)
+    rows = state["rows"][table]["rows"]
+    extra = copy.deepcopy(rows[0])
+    extra[0] = 9999 if isinstance(extra[0], int) else "unexpected fixture row"
+    rows.append(extra)
+    assert any(table in diff for diff in check())
+
+
+def test_queue_contract_rejects_a_self_consistent_empty_review(harness, monkeypatch):
+    _, answer, check = queue_fixture_observation(harness, monkeypatch, "link-auto")
+    answer["value"].update(findings=[], counts={"total": 0})
+    assert any("queue answer" in diff and "findings" in diff for diff in check())
+
+
+def test_queue_contract_rejects_a_plausible_but_wrong_policy(harness, monkeypatch):
+    state, _, check = queue_fixture_observation(harness, monkeypatch, "link-auto")
+    identity = dict(state["rows"]["public.meta"]["rows"])["review_response_identity_v1_link"]
+    identity["policy"] = "0" * 64
+    assert any("review_response_identity_v1_link" in diff for diff in check())
+
+
+def test_queue_request_contract_pins_every_verdict_key_and_tick(harness):
+    from w2e_queue_contract import load_contract, request_diffs, verdict_keys
+
+    pinned = load_contract()["scenarios"]
+    assert pinned.keys() == harness._QUEUE_JUDGES.keys()
+    for name, scenario in harness._QUEUE_JUDGES.items():
+        assert len(pinned[name]) == len(scenario["ops"]) + 1
+        asked = {(kind, endpoint, key) for step in pinned[name]
+                 for _, _, _, kind, endpoint, keys in step["requests"] for key in keys}
+        assert verdict_keys(scenario) == asked, name
+    first, deferred = pinned["link-auto"][1]["requests"]
+    assert deferred[5] == ["Beta Store|Hub"]
+    assert request_diffs([first, deferred], [deferred, first])
+    assert request_diffs([first, deferred], [first])
+    requests = pinned["link-shadow"][1]["requests"]
+    assert [row[4] for row in requests] == ["primary", "second"]
+
+
 def test_sweep_scenarios_settle_without_timing_on_their_mutants(harness):
     """Each sweep scenario's ``until`` must hold under its mutant too (a
     settle that times out crashes the mutants run instead of counting a
@@ -699,19 +796,30 @@ def test_dream_stage_scenarios_key_their_replies_and_register_their_mutants(harn
     assert all(f'"{m}"' in text for m in stage_mutants)
 
 
-def test_dream_stage_helpers_match_python(harness):
-    """The digest map step's split and the signal formatting agree with
-    Python's. Importing the dream module loads the memory package, which needs
-    torch; the Rust CI lane installs no model stack, so there it is skipped."""
-    pytest.importorskip("torch", reason="the Python dream module needs torch")
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from pseudolife_memory.memory.dream import _format_signals, split_session_context
-    for text, cap in ((harness.DIGEST_B_CONTEXT, harness.DIGEST_CHARS), ("ab\ncd", 1),
-                      ("x" * 9 + "\ny", 4)):
-        assert harness.split_context(text, cap) == split_session_context(text, cap)
-    for sigs in (harness.RULE_SIGNALS, harness.LESSON_SIGNALS, [harness.INFERRED_SIGNAL],
-                 harness.LESSON_SIGNALS_3 + harness.LESSON_SIGNALS_4 + harness.LESSON_SIGNALS_5):
-        assert harness.fmt_signals(sigs) == _format_signals(sigs)
+def test_dream_stage_stub_input_keeps_splits_and_signal_fields(harness):
+    import hashlib
+
+    # The native format and split also have direct tests in dream/stage_calls.rs.
+    assert harness.split_context("ab\ncd", 1) == ["a", "b", "c", "d"]
+    assert harness.split_context("xxxxxxxxx\ny", 4) == ["xxxx", "xxxx", "x\ny"]
+    assert len(harness.DIGEST_B_PARTS) > 1
+    assert "\n".join(harness.DIGEST_B_PARTS) == harness.DIGEST_B_CONTEXT
+    assert all(len(part) <= harness.DIGEST_CHARS for part in harness.DIGEST_B_PARTS)
+    signal = {"task": "write a note", "outcome": "success", "about": "a 'quoted' topic",
+              "detail": "two\nlines", "polarity": "+", "origin": "inferred"}
+    assert harness.fmt_signals([signal]) == (
+        "[machine-inferred] [success] task='write a note' about=\"a 'quoted' topic\" "
+        "detail='two\\nlines' polarity=+"
+    )
+    signals = (harness.RULE_SIGNALS, harness.LESSON_SIGNALS, [harness.INFERRED_SIGNAL],
+               harness.LESSON_SIGNALS_3 + harness.LESSON_SIGNALS_4 + harness.LESSON_SIGNALS_5)
+    # Frozen _format_signals at 88787b0e2, on the original four inputs.
+    assert [hashlib.sha256(harness.fmt_signals(part).encode()).hexdigest() for part in signals] == [
+        "d3a7134489dbadafdb6e7c278f6c4981d44e3f37f20dac21b575940e140146b2",
+        "4c185d24fe9bdd522ff1baa3b43f6d2cd1a0228d9a016e997f5e507995935080",
+        "a1862d216edf576e2e808781a0ddb4017302a8ea8ce95c0f272178468e630c38",
+        "f2e37c63e284663f15369e3490dd4a3063a8b4060f787aac454818e392d85b98",
+    ]
 
 
 def test_lesson_write_clocks_and_episode_tokens_normalize(harness):
