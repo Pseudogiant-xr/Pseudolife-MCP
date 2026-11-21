@@ -103,6 +103,10 @@ class Case:
     programs: tuple[str, ...] = ()
     real_programs: tuple[str, ...] = ()
     note: str = ""
+    # A live case can build its expected observation from the case inputs
+    # and fixed rules. It runs before the candidate and receives no output
+    # from it. Recording and golden replay run their arms directly.
+    reference: Callable[[Path], dict] | None = None
 
     def runs_here(self) -> bool:
         return PLATFORM in self.platforms and not (self.skip_if and self.skip_if())
@@ -500,7 +504,7 @@ def run_case(case: Case, oracle: Target, candidate: Target) -> tuple[dict, dict]
     home = root / "h"
     finished = False
     try:
-        python = run_arm(case, oracle, home)
+        expected = case.reference(home) if case.reference is not None else run_arm(case, oracle, home)
         rust = run_arm(case, candidate, home)
         finished = True
     finally:
@@ -511,7 +515,7 @@ def run_case(case: Case, oracle: Target, candidate: Target) -> tuple[dict, dict]
                 # Never let teardown replace the case's own failure.
                 if finished:
                     raise
-    return python, rust
+    return expected, rust
 
 
 def describe(observation: dict) -> dict:

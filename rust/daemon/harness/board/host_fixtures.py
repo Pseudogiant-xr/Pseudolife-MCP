@@ -70,29 +70,37 @@ def operator_role(rows, project, agent, *, coordinator=False):
     """Place a captured role hold, including the prior holder's expiry event."""
     role = "coordinator" if coordinator else "conductor"
     name = f"{role}:{project}"
-    names = [f"{prefix}:{project}" for prefix in ("conductor", "coordinator", "delegate")]
+    coordinator_name = f"coordinator:{project}"
+    legacy = f"delegate:{project}"
+    names = [f"conductor:{project}", coordinator_name, legacy]
     present = {r[0] for r in rows.conn.execute(
         "SELECT name FROM coordination_leases WHERE name=ANY(%s) ORDER BY name FOR UPDATE", (names,))}
+    person = rows.one(
+        "SELECT principal,project,task,credential_hash FROM coordination_agents WHERE agent_id=%s", (agent,))
+    if person["credential_hash"] is None:
+        raise AssertionError(f"the {name} fixture cannot grant a role to revoked agent {agent}")
+    if rows.conn.execute(
+            "SELECT 1 FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s",
+            (coordinator_name, agent)).fetchone():
+        raise AssertionError(f"the {name} fixture cannot grant a role to agent {agent} queued on {coordinator_name}")
     missing = [rows.row("empty_role", name=slot) for slot in names if slot not in present]
     if missing:
         rows.insert("coordination_leases", missing)
     # These scenarios write one role. A preexisting unrelated coordinator
     # on a copy of a bank is outside that write.
-    legacy = f"delegate:{project}"
-    queues = [name] if coordinator else [name, legacy]
+    queues = [] if coordinator else [name, legacy]
     if rows.conn.execute(
-        "SELECT 1 FROM coordination_lease_waiters WHERE name=ANY(%s) AND (NOT %s OR agent_id=%s) "
+        "SELECT 1 FROM coordination_lease_waiters WHERE name=ANY(%s) "
         "UNION ALL SELECT 1 FROM coordination_leases WHERE "
         "(name=ANY(%s) AND name<>%s AND holder_agent_id=%s AND expires_at>%s) "
         "OR (name=%s AND NOT %s AND holder_agent_id IS NOT NULL)",
-        (queues, coordinator, agent, names, name, agent, rows.now, legacy, coordinator)).fetchone():
+        (queues, names, name, agent, rows.now, legacy, coordinator)).fetchone():
         raise AssertionError(f"the {project} role fixture needs the other role transitions settled")
     held = rows.one("SELECT holder_agent_id,fence,expires_at FROM coordination_leases WHERE name=%s", (name,))
     replaced = held["holder_agent_id"]
     if replaced is not None and held["expires_at"] <= rows.now:
         _end_role(rows, name, held, expired=True)
         replaced = None
-    person = rows.one("SELECT principal,project,task FROM coordination_agents WHERE agent_id=%s", (agent,))
     rows.conn.execute("DELETE FROM coordination_leases WHERE name=%s", (name,))
     fence = rows.next("coordination_lease_fence")
     rows.insert("coordination_leases", [rows.row(

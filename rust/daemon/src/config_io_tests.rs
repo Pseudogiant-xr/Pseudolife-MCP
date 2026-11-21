@@ -407,6 +407,204 @@ fn write_config_matches_python() {
     }
 }
 
+fn recorded_result(case: &mut Value, observed: Value) {
+    let case = case.as_object_mut().unwrap();
+    for key in ["ok", "error", "text"] {
+        case.shift_remove(key);
+    }
+    case.extend(observed.as_object().unwrap().clone());
+}
+
+#[test]
+fn record_config_knobs() {
+    use sha2::{Digest, Sha256};
+
+    let request = std::env::var("PL_CONFIG_KNOBS_WRITE").ok();
+    let mutant =
+        cfg!(feature = "mutants") || std::env::var_os("PSEUDOLIFE_DAEMON_MUTANT").is_some();
+    let automated = std::env::var_os("NEXTEST").is_some()
+        || std::env::var_os("GITHUB_ACTIONS").is_some()
+        || std::env::var("CI").as_deref() == Ok("true");
+    let write = config_knob_write_mode(request.as_deref(), mutant, automated)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let root = scratch("record-config-knobs");
+    let observed = observe_config_knobs(&root);
+    std::fs::remove_dir_all(&root).unwrap();
+    let expected = KNOBS_JSON.replace("\r\n", "\n");
+    if observed == expected {
+        println!(
+            "config-knobs.sha256 {:x}",
+            Sha256::digest(expected.as_bytes())
+        );
+        return;
+    }
+    if write {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("harness/goldens/config-knobs.json");
+        std::fs::write(path, observed).unwrap();
+        return;
+    }
+    let first = expected
+        .lines()
+        .zip(observed.lines())
+        .take_while(|(a, b)| a == b)
+        .count();
+    panic!(
+        "config-knobs.json differs at line {}\n- {}\n+ {}",
+        first + 1,
+        expected.lines().nth(first).unwrap_or("<end of file>"),
+        observed.lines().nth(first).unwrap_or("<end of file>"),
+    );
+}
+
+fn config_knob_write_mode(
+    request: Option<&str>,
+    mutant: bool,
+    automated: bool,
+) -> Result<bool, &'static str> {
+    if request != Some("1") {
+        return Ok(false);
+    }
+    if automated {
+        return Err("recorder refuses to write during automation");
+    }
+    if mutant {
+        return Err("recorder refuses to write observations from a mutant build or selection");
+    }
+    Ok(true)
+}
+
+#[test]
+fn config_knob_write_is_exact_manual_and_unmutated() {
+    assert_eq!(config_knob_write_mode(None, false, false), Ok(false));
+    assert_eq!(config_knob_write_mode(Some("01"), false, true), Ok(false));
+    assert_eq!(config_knob_write_mode(Some("1"), false, false), Ok(true));
+    assert!(config_knob_write_mode(Some("1"), true, false).is_err());
+    assert!(config_knob_write_mode(Some("1"), false, true).is_err());
+}
+
+fn observe_config_knobs(root: &Path) -> String {
+    let mut snapshot = golden();
+    let defaults = snapshot["defaults"].as_object_mut().unwrap();
+    let cfg = Config::default();
+    for knob in knobs() {
+        *defaults.get_mut(knob.path()).expect("known default") = running(&cfg, knob);
+    }
+    for case in snapshot["coerce"].as_array_mut().unwrap() {
+        let knob = knob(case["path"].as_str().unwrap()).unwrap();
+        let observed = match coerce(knob, &input(&case["input"])) {
+            Ok(value) => json!({"ok": value}),
+            Err(Refused::Value(text)) => json!({"error": "ValueError", "text": text}),
+            Err(Refused::Type(text)) => json!({"error": "TypeError", "text": text}),
+            Err(Refused::Overflow(text)) => json!({"error": "OverflowError", "text": text}),
+        };
+        recorded_result(case, observed);
+    }
+
+    let boot = root.join("boot.yaml");
+    std::fs::write(&boot, snapshot["boot"].as_str().unwrap()).unwrap();
+    let cfg = crate::config::load(&boot).expect("boot config loads");
+    for (index, case) in snapshot["read"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        let dir = root.join(format!("read-{index}"));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("config.yaml"), case["saved"].as_str().unwrap()).unwrap();
+        let observed = match read_config_with(&cfg, &no_env, &dir, &HashSet::new()) {
+            Ok(mut value) => {
+                let path = value.as_object_mut().unwrap().shift_remove("config_path");
+                assert_eq!(path, Some(json!(config_path_for(&no_env, &dir))));
+                json!({"ok": value})
+            }
+            Err(text) => json!({"error": "OverflowError", "text": text}),
+        };
+        recorded_result(case, observed);
+    }
+
+    for (index, case) in snapshot["write"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        let dir = root.join(format!("write-{index}"));
+        std::fs::create_dir(&dir).unwrap();
+        let cfg = dir.join("config.yaml");
+        let before = case["before"].as_str();
+        if let Some(text) = before {
+            std::fs::write(&cfg, text).unwrap();
+        }
+        let name = case["name"].as_str().unwrap();
+        let got = write_config_with(&no_env, &dir, &case["patch"], &Mutex::new(HashSet::new()));
+        if let Some(reason) = refused_here(name) {
+            assert_eq!(got, Err(WriteError::Failed(reason.into())), "{name}");
+            assert_eq!(std::fs::read_to_string(&cfg).ok().as_deref(), before);
+            continue;
+        }
+        let quoted = quoted_here(name);
+        if quoted.is_some() {
+            got.as_ref()
+                .expect("the declared quoting case must succeed");
+        }
+        let observed = match got {
+            Ok(answer) => {
+                let mut file = std::fs::read_to_string(&cfg).unwrap().replace("\r\n", "\n");
+                crate::config::load(&cfg).unwrap();
+                if let Some(quoted) = quoted {
+                    assert_eq!(file, quoted, "{name}");
+                    file = case["ok"]["file"].as_str().unwrap().to_owned();
+                }
+                assert_eq!(answer["applied"], json!([]));
+                let paths = answer["restart_required"].as_array().unwrap();
+                let patch_order: Vec<_> = case["patch"].as_object().unwrap().keys().collect();
+                assert_eq!(json!(paths), json!(patch_order), "{name}: patch order");
+                // The legacy vectors list live knobs before restart knobs.
+                let mut paths = paths.clone();
+                paths.sort_by_key(|path| knob(path.as_str().unwrap()).unwrap().restart());
+                json!({"ok": {"file": file, "backup": !answer["backup"].is_null(), "paths": paths}})
+            }
+            Err(error) => {
+                assert_eq!(std::fs::read_to_string(&cfg).ok().as_deref(), before);
+                match error {
+                    WriteError::Invalid(text) => json!({"error": "ValueError", "text": text}),
+                    // The native 500 combines the historical exception classes.
+                    WriteError::Failed(text) => {
+                        let kind = case["error"]
+                            .as_str()
+                            .filter(|kind| *kind != "ValueError")
+                            .unwrap_or("WriteError");
+                        json!({"error": kind, "text": text})
+                    }
+                }
+            }
+        };
+        recorded_result(case, observed);
+    }
+
+    // Match the frozen JSON capture's number spellings and one-space indent.
+    fn normalize_numbers(value: &mut Value) {
+        match value {
+            Value::Number(n) => *n = serde_json::Number::from_string_unchecked(number_text(n)),
+            Value::Object(map) => map.values_mut().for_each(normalize_numbers),
+            Value::Array(items) => items.iter_mut().for_each(normalize_numbers),
+            _ => {}
+        }
+    }
+
+    normalize_numbers(&mut snapshot);
+    let mut body = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b" ");
+    serde::Serialize::serialize(
+        &snapshot,
+        &mut serde_json::Serializer::with_formatter(&mut body, formatter),
+    )
+    .unwrap();
+    body.push(b'\n');
+    String::from_utf8(body).unwrap()
+}
+
 /// v59: `coordination.not_owner_principals` is refused as protected, like
 /// `coordination.maintainer*` (tests/test_maintainer_web.py pins Python's).
 #[test]
