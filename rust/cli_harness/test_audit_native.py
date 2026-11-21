@@ -8,11 +8,14 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from . import normalize
 from .rows import _bank
+from rust.harness_support.database_guard import ProductionDatabaseError
 from rust.harness_support.import_blocker import cold_harness_imports
 
 
@@ -274,6 +277,65 @@ def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     expected = event(payload='{"safe":"雪","$serde_json::private::Number":"1"}')
     assert edited["payload"] == json.loads(expected["payload"])
     assert edited["hash"] == expected["hash"]
+
+
+def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):
+    from .rows import audit
+
+    with cold_harness_imports():
+        fixture = json.loads(audit._FIXTURE.read_text(encoding="utf-8"))
+        variant = fixture["variants"]["rich"]
+        rows = variant["rows"]
+        events = rows["coordination_events"]
+        events.sort(key=lambda row: row["seq"])
+        anchor = fixture["clock_anchor"]
+        fixed = [dict(row) for row in events if row["created_at"] < anchor]
+        now = anchor + 123.125
+        monkeypatch.setattr(audit, "time", SimpleNamespace(time=lambda: now))
+        audit._shift_rich_clock(rows, anchor)
+        assert events[:len(fixed)] == fixed
+        assert audit.verify_audit_chain(events)["ok"]
+        message_id = variant["ids"]["future"]
+        [message] = [row for row in rows["coordination_messages"] if row["message_id"] == message_id]
+        [send] = [row for row in events if row["message_id"] == message_id]
+        assert message["created_at"] == send["created_at"] == now
+        assert message["expires_at"] == json.loads(send["payload"])["expires_at"] == now + audit.DAY
+
+
+def test_audit_fixture_checks_the_database_before_inserts(monkeypatch):
+    from .rows import audit
+
+    name = audit._name("fixture_guard")
+    other = audit._name("other_guard")
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = (other,)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
+    with pytest.raises(ValueError, match="audit fixture connection did not reach"):
+        audit._seed_captured(conn, name, "legacy")
+    conn.execute.assert_called_once_with("SELECT current_database()")
+
+
+@pytest.mark.parametrize("target_type,error,message", [
+    ("unowned", ValueError, "not owned by this harness run"),
+    ("non_audit", ValueError, "expected a disposable audit database"),
+    ("production", ProductionDatabaseError, "it is a production bank"),
+])
+def test_audit_copy_checks_the_target_before_opening_a_connection(
+        monkeypatch, target_type, error, message):
+    from .rows import audit
+
+    target = {
+        "unowned": "pl_cf_w1c_audit_from_another_run",
+        "non_audit": _bank.name("pl_cf_w1c_non_audit"),
+        "production": audit._name("protected"),
+    }[target_type]
+    monkeypatch.setenv("_PSEUDOLIFE_PRODUCTION_DB", audit._name("protected"))
+    connect = MagicMock()
+    monkeypatch.setattr(_bank, "connect", connect)
+    with pytest.raises(error, match=message):
+        audit._copy(audit._name("legacy"), target)
+    connect.assert_not_called()
 
 
 def assert_refused(result, parameter):

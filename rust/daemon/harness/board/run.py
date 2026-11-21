@@ -417,7 +417,7 @@ class Arm:
             self.windows.shifts.append((len(self.windows.steps) - 1, step.seconds))
             resp = {"status": 0}
         elif step.kind == "seed":
-            S.seed_bank(self.dsn, step.fn, self.ctx)
+            step.fn(self.dsn, self.ctx)
             resp = {"status": 0}
         elif step.kind == "mcp":
             _, _, headers, _ = step.request(self.ctx)

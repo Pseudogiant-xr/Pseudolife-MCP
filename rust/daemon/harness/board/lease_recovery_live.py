@@ -46,6 +46,7 @@ def _startup_recovery(run, scenario, binary, root):
     import time
     import psycopg
     from board.scenarios import Ctx, seed_bank
+    from board.seed_rows import startup_grant
 
     for kind in ("python", "rust"):
         with ExitStack() as cleanup:
@@ -58,14 +59,7 @@ def _startup_recovery(run, scenario, binary, root):
             finally:
                 initial.stop()
             ctx = Ctx()
-            def committed(store, ctx):
-                for who in ("A", "B"):
-                    ctx.agents[who] = store.register("default")
-                    store.acquire_lease("default", ctx.id(who), ctx.agents[who]["credential"],
-                                        name="startup-resource", ttl=600)
-                store.release_lease("default", ctx.id("A"), ctx.agents["A"]["credential"],
-                                    name="startup-resource")
-            seed_bank(dsn, committed, ctx)
+            seed_bank(dsn, startup_grant, ctx)
             restarted = run.start(kind, scenario, binary, root, dsn, f"grant-restart-{kind}")
             cleanup.callback(restarted.stop)
             run.wait_ready(restarted.port)
