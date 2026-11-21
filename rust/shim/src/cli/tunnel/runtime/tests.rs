@@ -1,4 +1,6 @@
 use super::*;
+#[path = "restart_tests.rs"]
+pub(super) mod restart_cases;
 use std::{io::BufRead, net::TcpListener, thread, time::Instant};
 
 struct Home(PathBuf);
@@ -112,6 +114,11 @@ fn vendor_fixture() {
         assert!(legacy_lock(&file));
         return;
     }
+    if mode == "ack-only" {
+        let _ack = readiness::hold(Path::new(&path)).unwrap();
+        std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
+        return;
+    }
     let config: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     let reference = config["control_plane"]["api_key"].as_str().unwrap();
     let mut bytes = Vec::new();
@@ -151,9 +158,13 @@ fn vendor_fixture() {
         _ => None,
     };
     if mode == "ready" || poll.is_some() {
+        let expression = config["mcp"]["commands"][0]["command"].as_str().unwrap();
+        let attempt = expression.rsplit_once(" --bridge-attempt ").unwrap().1;
+        let health = config["health"]["url_file"].as_str().unwrap();
+        let directory = Path::new(health).parent().unwrap();
+        let _ack = readiness::hold(&readiness::lock_path(directory, attempt)).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
-        let health = config["health"]["url_file"].as_str().unwrap();
         fs::write(health, format!("http://{}", listener.local_addr().unwrap())).unwrap();
         let watchdog = Instant::now() + FIXTURE_WATCHDOG;
         while Instant::now() < watchdog {
@@ -207,6 +218,43 @@ fn vendor_fixture() {
     }
     // Bounds a fixture even if a mutation causes the supervisor to lose it.
     thread::sleep(Duration::from_secs(20));
+}
+
+#[tokio::test]
+async fn exiting_bridge_releases_readiness_while_its_file_remains() {
+    let home = Home::new();
+    identity::ensure_signing_key(&home.0).unwrap();
+    let attempt = readiness::Attempt::new(
+        &home.0,
+        &Uuid::new_v4().simple().to_string(),
+        &"a".repeat(64),
+    )
+    .unwrap();
+    let path = attempt.path(&home.0);
+    let executable = std::env::current_exe().unwrap();
+    let mut child = fixture_command(&executable, &path, "ack-only")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !attempt.held(&home.0) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("bridge fixture should acquire readiness");
+    drop(child.stdin.take());
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+    assert!(path.is_file());
+    assert!(!attempt.held(&home.0));
 }
 
 #[test]
@@ -296,7 +344,7 @@ fn update_reports_only_an_attested_current_launch_as_current() {
 
     let launch = Uuid::new_v4();
     let mut stage = Stage::new(&home.0, name, launch).unwrap();
-    let record = LaunchRecord {
+    let mut record = LaunchRecord {
         native_launch: launch.simple().to_string(),
         launch_identity: Some(
             identity::compute(&home.0, &prepared.profile, &prepared.key, &image).unwrap(),
@@ -311,6 +359,9 @@ fn update_reports_only_an_attested_current_launch_as_current() {
             exe: executable,
         }),
         ready: true,
+        refresh: None,
+        refresh_outcome: None,
+        bridge_attempt: None,
     };
     stage.announce(&record).unwrap();
     let record_path = super::record::path(&home.0, name);
@@ -340,6 +391,11 @@ fn update_reports_only_an_attested_current_launch_as_current() {
         &format!(
             "Run `pseudolife-mcp tunnel stop --profile dot --profile-dir {directory}`, then `pseudolife-mcp tunnel run --profile dot --profile-dir {directory}` to reconnect the tunnel"
         ),
+    );
+    check(
+        &installed,
+        "stale",
+        "its supervisor predates native refresh",
     );
     let pending = home.0.join(format!("{name}.reload.json"));
     state::atomic_create(&pending, br#"{"id":"00000000000000000000000000000000"}"#).unwrap();
@@ -378,6 +434,31 @@ fn update_reports_only_an_attested_current_launch_as_current() {
     check_stale("differs from the current runtime or saved settings");
     state::atomic_write(token, b"fixture-daemon-token", None).unwrap();
     check_current("current");
+    let changed_vendor = refresh::Image {
+        path: image.clone(),
+        digest: crate::runtime::hash_file(&image).unwrap(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        vendor_version: "99.0.0".to_owned(),
+    };
+    record.launch_identity = Some(
+        identity::sign_image(&home.0, &prepared.profile, &prepared.key, &changed_vendor).unwrap(),
+    );
+    record.refresh = Some(refresh::Capability {
+        epoch: Uuid::new_v4().simple().to_string(),
+        image: changed_vendor,
+    });
+    stage.announce(&record).unwrap();
+    let (text, _) = super::super::update_with_runtime(&home.0, Some(&image)).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["state"], "stale");
+    let advice = report["detail"].as_str().unwrap();
+    assert!(
+        advice.contains("pins a different vendor version")
+            && advice.contains("tunnel stop")
+            && advice.contains("tunnel run"),
+        "{advice}"
+    );
+    state::atomic_write(&record_path, &original, None).unwrap();
     drop(stage.owner.take());
     check_stale("could not be verified against the current runtime");
 }
@@ -567,6 +648,9 @@ fn a_legacy_or_unlocked_record_cannot_authorize_stop() {
         },
         target: None,
         ready: true,
+        refresh: None,
+        refresh_outcome: None,
+        bridge_attempt: None,
     };
     state::atomic_write(&path, &serde_json::to_vec(&owner).unwrap(), None).unwrap();
     let _lock = open_lock(&home.0, "dot", &lock_path(&home.0, "dot")).unwrap();
@@ -602,7 +686,16 @@ fn killed_supervisor_is_recovered_but_live_launch_files_are_preserved() {
             && stage.join("key").is_file() == cfg!(target_os = "linux");
         #[cfg(target_os = "linux")]
         let bound = store::load(&stage, "dot").is_ok_and(|profile| {
-            identity::Bound::capture(&stage, &record.native_launch, &profile).is_ok()
+            identity::Bound::capture(
+                &stage,
+                &record.native_launch,
+                &profile,
+                record
+                    .bridge_attempt
+                    .as_ref()
+                    .map(|attempt| attempt.id.as_str()),
+            )
+            .is_ok()
         });
         #[cfg(windows)]
         let bound = state::open_with_write(&stage.join(OWNER_LOCK), true).is_ok_and(|owner| {
@@ -664,6 +757,9 @@ fn recovery_preserves_unknown_ownership_before_target_publication() {
         },
         target: None,
         ready: false,
+        refresh: None,
+        refresh_outcome: None,
+        bridge_attempt: None,
     };
     let path = record::path(&home.0, "dot");
     state::atomic_create(&path, &serde_json::to_vec(&launch).unwrap()).unwrap();

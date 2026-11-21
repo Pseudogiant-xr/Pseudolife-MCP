@@ -13,12 +13,14 @@ import hmac
 import json
 
 from board import scenarios as S
+from board.maintainer_proofs import canonical, challenge_bytes, payload_fields, verify_challenge, verify_proof
 from board.norm import HEX64, Normalizer
 
 RP_ID = "console.example.com"
 ORIGIN = "https://console.example.com:8443"
 SECRET = "42" * 32
 TABLES = ("maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces")
+ROLE_PROJECT = "w2f-maintainer-role-fixture"
 CONFIG = S.BASE_CONFIG.replace("  wake:\n", f"  maintainer:\n    rp_id: {RP_ID}\n"
                                f"    origin: {ORIGIN}\n  wake:\n")
 
@@ -39,10 +41,6 @@ def auth(ctx, name="primary"):
 
 class SignedNormalizer(Normalizer):
     def value(self, value, key=None):
-        from pseudolife_memory.maintainer_webauthn import (
-            b64url_decode, b64url_encode, verify_assertion)
-        from pseudolife_memory.storage.maintainer import canonical, challenge_bytes
-
         if isinstance(value, (bytes, memoryview)):
             return bytes(value).hex()
         if key in ("active_from", "last_used_at", "revoked_at", "flagged_at", "used_at",
@@ -52,42 +50,35 @@ class SignedNormalizer(Normalizer):
         if key == "code_hash" and isinstance(value, str):
             return "<code hash>" if HEX64.fullmatch(value) else "<bad code hash>"
         if key == "payload" and isinstance(value, str):
-            fields = json.loads(value)
-            if canonical(fields) != value:
-                self.problems.append("maintainer payload is not canonical")
-            return self.value(fields)
-        if isinstance(value, dict) and "payload" in value and "mac" in value:
+            try:
+                return self.value(payload_fields(value))
+            except ValueError as exc:
+                self.problems.append(str(exc))
+                return value
+        if isinstance(value, dict) and ("mac" in value or {"payload", "publicKey"} <= value.keys()):
+            try:
+                verify_challenge(value, bytes.fromhex(SECRET))
+            except ValueError as exc:
+                self.problems.append(str(exc))
+                return value
             value = dict(value)
-            payload = value["payload"]
-            expected = hmac.new(bytes.fromhex(SECRET), payload.encode(), hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(expected, value["mac"]):
-                self.problems.append("maintainer response MAC does not authenticate its payload")
             value["mac"] = "<verified MAC>"
             if "publicKey" in value:
-                options = dict(value["publicKey"])
-                if options.get("challenge") != b64url_encode(challenge_bytes(payload)):
-                    self.problems.append("WebAuthn options do not challenge the signed payload")
-                options["challenge"] = "<verified challenge>"
-                value["publicKey"] = options
-        if isinstance(value, dict) and {"signature", "client_data_json", "payload"} <= value.keys():
-            value = dict(value)
+                value["publicKey"] = dict(value["publicKey"], challenge="<verified challenge>")
+        if isinstance(value, dict) and (key == "maintainer_proof"
+                                        or {"client_data_json", "payload"} <= value.keys()):
             fixtures = S.Ctx()
             signer = next((auth(fixtures, name) for name in ("primary", "spare", "third")
                            if auth(fixtures, name).id == value.get("credential_id")), None)
             try:
                 if signer is None:
                     raise ValueError("unknown proof credential")
-                verify_assertion(public_key=signer.cose_key(), alg=signer.alg,
-                                 client_data_json=b64url_decode(value["client_data_json"]),
-                                 authenticator_data=b64url_decode(value["authenticator_data"]),
-                                 signature=b64url_decode(value["signature"]),
-                                 challenge=challenge_bytes(value["payload"]), origin=ORIGIN, rp_id=RP_ID)
-                client = json.loads(b64url_decode(value["client_data_json"]))
-                client["challenge"] = "<verified challenge>"
-                value["client_data_json"] = client
-                value["signature"] = "<verified signature>"
+                client = verify_proof(value, signer.private.public_key(), origin=ORIGIN, rp_id=RP_ID)
             except ValueError as exc:
                 self.problems.append(f"invalid stored maintainer proof: {exc}")
+                return value
+            client["challenge"] = "<verified challenge>"
+            value = dict(value, client_data_json=client, signature="<verified signature>")
         return super().value(value, key)
 
 
@@ -146,8 +137,6 @@ def challenge(name, purpose, fields=None, **kwargs):
 def complete(name, route, *, source=None, signer="primary", edit=None, reuse=False,
              save=None, **kwargs):
     def body(ctx):
-        from pseudolife_memory.storage.maintainer import challenge_bytes
-
         if reuse:
             out = copy.deepcopy(ctx.vals["body:" + name])
         else:
@@ -162,23 +151,20 @@ def complete(name, route, *, source=None, signer="primary", edit=None, reuse=Fal
 
 
 def host(title, fn):
-    from pseudolife_memory.storage.maintainer import MaintainerStore
-
-    def seed(board, ctx):
-        fn(MaintainerStore(board.storage, rp_id=RP_ID, origin=ORIGIN, clock=board.clock), ctx)
-    return S.seed(title, seed)
+    return S.fixture_seed(title, fn)
 
 
 def bootstrap(*, confirm=True, wrong_code=False):
-    def prepare(store, ctx):
+    from board.host_fixtures import confirm_key, issue_bootstrap
+
+    def prepare(rows, ctx):
         from psycopg.types.json import Jsonb
-        store.storage.conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s) "
-                                   "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
-                                   ("maintainer_secret_v1", Jsonb(SECRET)))
-        ctx.vals["code"] = store.bootstrap_code()
+        rows.conn.execute("INSERT INTO meta(key,value) VALUES (%s,%s) "
+                          "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+                          ("maintainer_secret_v1", Jsonb(SECRET)))
+        issue_bootstrap(rows, ctx)
 
     def registration(ctx):
-        from pseudolife_memory.storage.maintainer import challenge_bytes
         issued = ctx.vals["bootstrap"]
         return {"payload": issued["payload"], "mac": issued["mac"], "code": ctx.vals["code"],
                 "attestation": auth(ctx).register(challenge_bytes(issued["payload"]))}
@@ -191,13 +177,12 @@ def bootstrap(*, confirm=True, wrong_code=False):
                           expected=403, error="bootstrap_code_invalid"))
     steps.append(post("bootstrap enrolment", "enrol", registration))
     if confirm:
-        steps.append(host("host confirms primary key", lambda store, ctx: store.confirm(auth(ctx).id)))
+        steps.append(host("host confirms primary key", lambda rows, ctx: confirm_key(rows, auth(ctx).id)))
     return steps
 
 
 def add_key(name):
     def registration(ctx, *, origin=None):
-        from pseudolife_memory.storage.maintainer import challenge_bytes
         issued = ctx.vals["approved:" + name]
         return {"payload": issued["payload"], "mac": issued["mac"],
                 "attestation": auth(ctx, name).register(challenge_bytes(issued["payload"]), origin=origin)}
@@ -224,10 +209,12 @@ class Enrol(MaintainerScenario):
     name = "maintainer-enrol"
 
     def steps(self):
+        from board.host_fixtures import confirm_key
+
         return [*bootstrap(confirm=False, wrong_code=True),
                 challenge("closed bootstrap", "enrol-bootstrap", {"label": "Too late"},
                           expected=409, error="enrolment_closed", rollback=True),
-                host("host confirms primary key", lambda store, ctx: store.confirm(auth(ctx).id)),
+                host("host confirms primary key", lambda rows, ctx: confirm_key(rows, auth(ctx).id)),
                 *add_key("spare"),
                 challenge("quarantined", "revoke-self", lambda ctx: {"credential_id": auth(ctx, "spare").id}),
                 complete("quarantined", "revoke", signer="spare", expected=403,
@@ -246,25 +233,27 @@ class Roles(MaintainerScenario):
     name = "maintainer-roles"
 
     def steps(self):
-        fields = lambda ctx: {"project": "p", "agent_id": ctx.id("A"), "hold": 3600}
-        return [*bootstrap(), S.reg("register role recipient", "A", project="p", label="Role fixture"),
+        from board.host_fixtures import break_coordinator, operator_role
+
+        fields = lambda ctx: {"project": ROLE_PROJECT, "agent_id": ctx.id("A"), "hold": 3600}
+        return [*bootstrap(), S.reg("register role recipient", "A", project=ROLE_PROJECT, label="Role fixture"),
                 challenge("grant", "grant-conductor", fields), complete("grant", "role"),
                 challenge("assign", "assign-coordinator", fields), complete("assign", "role"),
                 challenge("stale", "grant-conductor", fields),
-                S.seed("operator replaces coordinator after preview",
-                       lambda store, ctx: store.break_lease("coordinator:p")),
+                host("operator replaces coordinator after preview",
+                     lambda rows, _ctx: break_coordinator(rows, ROLE_PROJECT)),
                 complete("stale", "role", expected=409, error="role_changed", rollback=True),
-                S.seed("operator restores the approved other holder",
-                       lambda store, ctx: store.assign_coordinator("p", ctx.id("A"), hold=3600)),
+                host("operator restores the approved other holder",
+                     lambda rows, ctx: operator_role(rows, ROLE_PROJECT, ctx.id("A"), coordinator=True)),
                 complete("stale", "role", reuse=True),
                 complete("spent role nonce", "role", source="stale", expected=410,
                          error="challenge_spent", rollback=True),
-                challenge("revoke conductor", "revoke-conductor", {"project": "p"}),
+                challenge("revoke conductor", "revoke-conductor", {"project": ROLE_PROJECT}),
                 complete("revoke conductor", "role"),
                 challenge("legacy", "grant-delegate", fields), complete("legacy", "role"),
-                challenge("legacy revoke", "revoke-delegate", {"project": "p"}),
+                challenge("legacy revoke", "revoke-delegate", {"project": ROLE_PROJECT}),
                 complete("legacy revoke", "role"),
-                challenge("revoke coordinator", "revoke-coordinator", {"project": "p"}),
+                challenge("revoke coordinator", "revoke-coordinator", {"project": ROLE_PROJECT}),
                 complete("revoke coordinator", "role"), status()]
 
 
@@ -300,13 +289,11 @@ class Refusals(MaintainerScenario):
     def steps(self):
         fields = lambda ctx: {"project": "p", "agent_id": ctx.id("A"), "hold": 3600}
         def bad_signature(ctx, body):
-            from pseudolife_memory.maintainer_webauthn import b64url_encode
+            from tests.maintainer_authenticator import b64url_encode
             body["assertion"]["response"]["signature"] = b64url_encode(b"\0" * 64)
         def stale_count(ctx, body):
-            from pseudolife_memory.storage.maintainer import challenge_bytes
             body["assertion"] = auth(ctx).assertion(challenge_bytes(body["payload"]), sign_count=1)
         def expired(ctx, body):
-            from pseudolife_memory.storage.maintainer import canonical, challenge_bytes
             fields = json.loads(body["payload"])
             fields["expires_at"] = ctx.now - 1
             body["payload"] = canonical(fields)

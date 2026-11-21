@@ -204,11 +204,9 @@ fn update_tunnels(shim: Option<&Value>, runner: &impl Runner) -> Option<Value> {
 
 /// The tunnel step over the store at `root`: `None` when it holds no process
 /// record. `launcher` finds the installed native launcher, if any. The
-/// launcher's `tunnel update` reports each saved tunnel without stopping or
-/// starting one. A running launch that needs a restart reports `stale` with
-/// instructions, which this step accepts. The step fails only when that command refuses (an
-/// invalid store or profile, whose cause it carries), cannot run, or answers
-/// in a form this step does not know, or when the store cannot be read here.
+/// launcher's `tunnel update` asks a compatible supervisor to reconnect on
+/// the verified installed runtime. Older launches report `stale` with the
+/// steps to reconnect. A failure carries the command's diagnosis.
 fn tunnel_step(
     root: &Path,
     shim: Option<&Value>,
@@ -264,7 +262,7 @@ fn tunnel_step(
                 root.display()
             )
         })?;
-        let timeout = Duration::from_secs(60 + 90 * count);
+        let timeout = Duration::from_secs(60 + 120 * count);
         let output = runner.run(
             &launcher,
             &["tunnel", "update", "--profile-dir", directory],
@@ -272,12 +270,14 @@ fn tunnel_step(
             timeout,
             &[],
         );
-        // `stale` leaves the running tunnel in place and carries the
-        // tunnel command's restart or inspection instructions.
-        let answered = |state: &str| matches!(state, "current" | "stale");
+        // A refused request or successful rollback can leave the tunnel
+        // available on the previous runtime. The report carries its cause.
+        let answered = |state: &str| matches!(state, "current" | "stale" | "refreshed");
         if let Some(mut report) = output.json().filter(|r| {
-            matches!(r["state"].as_str(), Some("current" | "stale" | "failed"))
-                && r["detail"].is_string()
+            matches!(
+                r["state"].as_str(),
+                Some("current" | "stale" | "refreshed" | "failed")
+            ) && r["detail"].is_string()
         }) && (output.code == 0) == answered(report["state"].as_str().unwrap_or(""))
         {
             report["detail"] = json!(format!(
@@ -292,12 +292,16 @@ fn tunnel_step(
         let last = text.lines().map(str::trim).rfind(|line| !line.is_empty());
         let said = last.filter(|line| line.len() <= 1024);
         let left = format!("tunnels in {} were left as they are", root.display());
+        let inspect = format!(
+            "a supervisor may still finish a refresh it accepted. Run `pseudolife-mcp tunnel status --profile-dir {}` with `--profile` for each affected profile",
+            super::seams::quote(directory)
+        );
         let launcher = launcher.display();
         let answer = output.json();
         let detail = match said {
             // A JSON answer whose exit code disagrees with its state.
             _ if answer.is_some() => format!(
-                "installed tunnel update answered {} with exit {}, a pairing this step does not accept; {left}; run pseudolife-mcp tunnel update to see it",
+                "installed tunnel update answered {} with exit {}, a pairing this step does not accept. {inspect}",
                 answer
                     .as_ref()
                     .and_then(|a| a["state"].as_str())
@@ -313,32 +317,36 @@ fn tunnel_step(
                 "installed tunnel update refused (exit {}): {said} with pseudolife-mcp tunnel update; {left}",
                 output.code
             ),
-            Some(said) => format!(
+            Some(said) if output.code == 2 => format!(
                 "installed tunnel update ended with exit {}: {said}; {left}; after fixing that, run pseudolife-mcp tunnel update",
                 output.code
             ),
+            Some(said) => format!(
+                "installed tunnel update ended with exit {}: {said}. {inspect}",
+                output.code
+            ),
             None if last.is_some() => format!(
-                "installed tunnel update ended with exit {} and printed a line too long to show here; {left}; run pseudolife-mcp tunnel update to read it",
+                "installed tunnel update ended with exit {} and printed a line too long to show here. {inspect}",
                 output.code
             ),
             // The runner's own codes: no output at all.
             None if output.code == 124 => format!(
-                "the installed launcher {launcher} did not answer tunnel update within {} s; {left}; run pseudolife-mcp tunnel update to see where it stops",
+                "the installed launcher {launcher} did not answer tunnel update within {} s. {inspect}",
                 timeout.as_secs()
             ),
             // The runner reports 128+n when this update itself took signal
             // n while the tunnel step ran (a child's own signal reads as 1).
             None if cfg!(unix) && output.code > 128 => format!(
-                "this update was interrupted by signal {} while the tunnel step ran; {left}; run pseudolife-mcp tunnel update again",
+                "this update was interrupted by signal {} while the tunnel step ran. {inspect}",
                 output.code - 128
             ),
             // The runner gives 1 for a spawn failure and for a child a
             // signal ended (no exit code); any other code is the child's.
             None if output.code == 1 => format!(
-                "the installed launcher {launcher} could not be started, was stopped by a signal, or ended with exit 1 and printed nothing; {left}; run pseudolife-mcp tunnel update to see why"
+                "the installed launcher {launcher} could not be started, was stopped by a signal, or ended with exit 1 and printed nothing. {inspect}"
             ),
             None => format!(
-                "the installed launcher {launcher} ended with exit {} and printed nothing; {left}; run pseudolife-mcp tunnel update to see why",
+                "the installed launcher {launcher} ended with exit {} and printed nothing. {inspect}",
                 output.code
             ),
         };

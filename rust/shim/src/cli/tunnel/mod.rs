@@ -380,13 +380,24 @@ fn status(options: &Options, root: &Path) -> Output {
     // verification_status is constant: nothing verified, no current challenge.
     shallow_challenge(root, &profile.name)?;
     let refresh = refresh_status(root, &profile.name)?;
+    let native_refresh = runtime::restart::status(root, &profile.name);
     let cloud = match &record {
         Some(record) if record.native => Some(bridge::cloud_status(root, &profile.name)),
         Some(record) if record.liveness != Liveness::Gone => None,
         _ => Some(bridge::Cloud::default()),
     };
     Ok((
-        report(&profile, key, record.as_ref(), &refresh, cloud, options),
+        report(
+            &profile,
+            key,
+            record.as_ref(),
+            &refresh,
+            native_refresh
+                .as_ref()
+                .map(|(state, detail)| (*state, detail.as_str())),
+            cloud,
+            options,
+        ),
         0,
     ))
 }
@@ -477,6 +488,7 @@ fn report(
     key: KeyStatus,
     record: Option<&record::Record>,
     refresh: &Refresh,
+    native_refresh: Option<(&str, &str)>,
     cloud: Option<bridge::Cloud>,
     options: &Options,
 ) -> String {
@@ -521,6 +533,9 @@ fn report(
     };
     let name = &profile.name;
     let command = setup_command(name, options.profile_dir.as_deref());
+    let verification_due = ready
+        && native_refresh.is_some_and(|(state, _)| state == "refreshed")
+        && !cloud.as_ref().is_some_and(|cloud| cloud.current);
     let previous = key.retained.then(|| previous_key_hint(&command));
     if options.json {
         let record_json = record.map_or(String::new(), |record| {
@@ -547,8 +562,11 @@ fn report(
                 quoted(hint)
             )
         });
+        let native = native_refresh.map_or_else(String::new, |(state, detail)| {
+            format!(", \"native_refresh\": {}", serde_json::json!({ "state": state, "detail": detail, "new_verification_required": verification_due }))
+        });
         return format!(
-            "{{\"profile\": {name_q}, \"state\": {}, \"catalog\": {}, \"private_key_present\": {key_json}, \"key_expiry\": {expiry}, \"runtime\": {{\"running\": {running_json}, \"profile\": {name_q}, \"ready\": {}, \"key_expiry\": {}{record_json}}}, \"cloud\": {cloud}, \"update\": {}{previous}}}\n",
+            "{{\"profile\": {name_q}, \"state\": {}, \"catalog\": {}, \"private_key_present\": {key_json}, \"key_expiry\": {expiry}, \"runtime\": {{\"running\": {running_json}, \"profile\": {name_q}, \"ready\": {}, \"key_expiry\": {}{record_json}}}, \"cloud\": {cloud}, \"update\": {}{previous}{native}}}\n",
             quoted(&profile.state),
             quoted(&profile.catalog),
             bool_text(ready),
@@ -596,11 +614,20 @@ fn report(
         .as_ref()
         .map_or("unknown; check Platform key settings", |(text, _)| text);
     text.push_str(&format!("API key expiry: {shown}.\n"));
-    if refresh.needs_attention() {
+    if refresh.needs_attention() && native_refresh.is_none() {
         text.push_str(&format!(
             "Last tunnel refresh: {}; needs attention. Inspect tunnel doctor before retrying the update.\n",
             refresh.state()
         ));
+    }
+    if let Some((_, detail)) = native_refresh {
+        text.push_str(&format!("Native refresh: {detail}.\n"));
+        if verification_due {
+            let verify = tunnel_command("verify", name, options.profile_dir.as_deref());
+            text.push_str(&format!(
+                "The refreshed launch needs a new challenge. Run `{verify}`.\n"
+            ));
+        }
     }
     if expired {
         if profile.state == "ready" && key.saved {
@@ -677,9 +704,9 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
             .iter()
             .any(|name| occupied(&record::path(root, name)).unwrap_or(true));
     let rows = if any_record { record::table() } else { None };
-    let mut entries = Vec::new();
-    let mut notes = Vec::new();
-    let mut stale = false;
+    let mut profiles = Vec::with_capacity(names.len());
+    // Check every profile for a store refusal before asking any supervisor
+    // to restart. A later invalid profile cannot hide an earlier result.
     for name in &names {
         // A profile in a form this client does not read is named with the
         // reason and still reported by its record; only a refused one stops
@@ -699,6 +726,14 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
                 ));
             }
         };
+        profiles.push((name, unread));
+    }
+    let mut entries = Vec::new();
+    let mut notes = Vec::new();
+    let mut stale = false;
+    let mut refreshed = false;
+    let mut failed = false;
+    for (name, unread) in profiles {
         let record = record::read(record::path(root, name), rows.as_deref());
         let name_q = quoted(name);
         let (state, running, sentence) = match (&record, unread) {
@@ -720,16 +755,18 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
             (Some(record), Err(true))
                 if record.native && record.ready && record.liveness == Liveness::Running =>
             {
-                let (state, detail) = match check_running_launch(root, name, executable) {
-                    Ok(()) => (
+                let (state, running, detail) = match check_running_launch(root, name, executable) {
+                    Ok(None) => (
                         "current",
+                        "true",
                         "already running on the current runtime".to_owned(),
                     ),
-                    Err(cause) => ("stale", cause),
+                    Ok(Some(outcome)) => (outcome.state, outcome.running, outcome.detail),
+                    Err(cause) => ("stale", "true", cause),
                 };
                 (
                     state,
-                    "true",
+                    running,
                     format!(
                         "tunnel {name} (process record {}): {detail}",
                         record.path.display()
@@ -760,6 +797,8 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
             }
         };
         stale |= state == "stale";
+        refreshed |= state == "refreshed";
+        failed |= state == "failed";
         entries.push(format!(
             "{{\"profile\": {name_q}, \"state\": \"{state}\", \"running\": {running}, \"detail\": {}}}",
             quoted(&sentence)
@@ -815,16 +854,28 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
     }
     Ok((
         format!(
-            "{{\"state\": \"{}\", \"needs_attention\": false, \"detail\": {}, \"profiles\": [{}]}}\n",
-            if stale { "stale" } else { "current" },
+            "{{\"state\": \"{}\", \"needs_attention\": {failed}, \"detail\": {}, \"profiles\": [{}]}}\n",
+            if failed {
+                "failed"
+            } else if stale {
+                "stale"
+            } else if refreshed {
+                "refreshed"
+            } else {
+                "current"
+            },
             quoted(&detail),
             entries.join(", ")
         ),
-        0,
+        if failed { 2 } else { 0 },
     ))
 }
 
-fn check_running_launch(root: &Path, name: &str, executable: Option<&Path>) -> Result<(), String> {
+fn check_running_launch(
+    root: &Path,
+    name: &str,
+    executable: Option<&Path>,
+) -> Result<Option<runtime::restart::Report>, String> {
     let directory = root.to_str();
     let status = || bridge::status_command(name, directory);
     let explain = |failure| match failure {
@@ -845,22 +896,35 @@ fn check_running_launch(root: &Path, name: &str, executable: Option<&Path>) -> R
     let executable = executable.ok_or_else(|| {
         "the installed client executable could not be identified. Run update through the installed launcher".to_owned()
     })?;
-    runtime::identity::active(root, name, executable, None)
-        .map(|_| ())
-        .map_err(|cause| {
-            if cause == runtime::identity::CHANGED {
-                let stop = tunnel_command("stop", name, directory);
-                let run = tunnel_command("run", name, directory);
-                format!(
-                    "the running launch differs from the current runtime or saved settings. Run `{stop}`, then `{run}` to reconnect the tunnel"
-                )
-            } else {
-                format!(
-                    "the running launch could not be verified against the current runtime and saved settings. Check with `{}`",
-                    status()
-                )
+    if runtime::restart::vendor_changed(root, name) {
+        let stop = tunnel_command("stop", name, directory);
+        let run = tunnel_command("run", name, directory);
+        return Err(format!(
+            "the installed client pins a different vendor version. Run `{stop}`, then `{run}` to reconnect the tunnel"
+        ));
+    }
+    match runtime::identity::active(root, name, executable, None) {
+        Ok(_) => Ok(None),
+        Err(runtime::identity::CHANGED) => {
+            if let Some(outcome) = runtime::restart::attempt(root, name, executable) {
+                return Ok(Some(outcome));
             }
-        })
+            let stop = tunnel_command("stop", name, directory);
+            let run = tunnel_command("run", name, directory);
+            if runtime::restart::predates_refresh(root, name) {
+                return Err(format!(
+                    "the running launch differs from the current runtime or saved settings, and its supervisor predates native refresh. Run `{stop}`, then `{run}` to reconnect the tunnel if it runs in the foreground. If a service or scheduled task started it, restart that registration through its service manager"
+                ));
+            }
+            Err(format!(
+                "the running launch differs from the current runtime or saved settings. Run `{stop}`, then `{run}` to reconnect the tunnel"
+            ))
+        }
+        Err(_) => Err(format!(
+            "the running launch could not be verified against the current runtime and saved settings. Check with `{}`",
+            status()
+        )),
+    }
 }
 
 fn verify(options: &Options, root: &Path) -> Output {
@@ -874,7 +938,7 @@ fn verify(options: &Options, root: &Path) -> Output {
     if occupied(&root.join(format!("{}.process.json", profile.name)))? {
         if record::read(record::path(root, &profile.name), None).is_some_and(|record| record.native)
         {
-            return bridge::begin(root, &profile.name);
+            return runtime::restart::verify(root, &profile.name);
         }
         return Err(Fail::Defer);
     }

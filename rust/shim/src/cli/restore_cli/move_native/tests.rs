@@ -1638,7 +1638,7 @@ fn target_urls_are_origins() {
 }
 
 #[test]
-fn shapes_this_parser_does_not_take_keep_the_deferral() {
+fn shapes_this_parser_does_not_take_go_to_the_usage_refusal() {
     for items in [
         &["--to=u@box", "--dry-run"][..],
         &["--dry", "--to", "u@box"],

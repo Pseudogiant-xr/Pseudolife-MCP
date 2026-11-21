@@ -105,35 +105,27 @@ def age(seconds):
     return Step(f"age {seconds}", kind="age", seconds=seconds)
 
 
-def seed(title, fn):
-    """Setup no daemon route can do (rows an older release wrote), through
-    Python's own store on the arm's bank so the audit chain stays valid:
-    ``fn(store, ctx)`` inside one transaction. Not compared."""
+def fixture_seed(title, fn):
+    """Replay fixture rows against the arm's already initialized schema."""
     step = Step(title, kind="seed", write=False)
-    step.fn = fn
+    step.fn = lambda dsn, ctx: seed_bank(dsn, fn, ctx)
     return step
 
 
 def seed_bank(dsn: str, fn, ctx) -> None:
     import time
-    from contextlib import contextmanager
 
     import psycopg
-    from pseudolife_memory.storage.coordination import CoordinationStore
+    from board.seed_rows import BoardRows
+    from rust.harness_support.database_guard import assert_disposable_database, fixture_database_pattern
 
-    class _Storage:
-        def __init__(self, conn):
-            self.conn = conn
-
-        @contextmanager
-        def _txn(self):
-            with self.conn.transaction():
-                yield
-
-    with psycopg.connect(dsn, autocommit=True) as conn:
-        store = CoordinationStore(_Storage(conn), clock=time.time)
-        with store.storage._txn():
-            fn(store, ctx)
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.transaction():
+        bank = assert_disposable_database(conn)
+        if not fixture_database_pattern("w2f").fullmatch(bank):
+            raise ValueError(f"refusing board seed outside a w2f disposable bank: {bank!r}")
+        rows = BoardRows(conn, time.time())
+        fn(rows, ctx)
+        rows.append_events()
 
 
 def age_bank(dsn: str, seconds: float) -> None:
@@ -565,28 +557,6 @@ class Leases(Scenario):
         ]
 
 
-def _conductor_grant(lease, who, record=None):
-    """A conductor hold ``lease`` for agent ``who`` with the operator's
-    grant record for its fence, as a grant before the role's rename wrote
-    it (``delegate:<project>`` and ``lease_delegate``). ``record`` names the
-    lease the record claims, by default the hold's own."""
-    def fn(store, ctx):
-        agent_id = ctx.id(who)
-        principal = store._one("SELECT principal FROM coordination_agents WHERE agent_id=%s",
-                               (agent_id,))["principal"]
-        now = store.clock()
-        fence = store._one(
-            "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,purpose,fence,"
-            "acquired_at,expires_at) VALUES (%s,%s,%s,'granted by the operator',"
-            "nextval('coordination_lease_fence'),%s,%s) RETURNING fence",
-            (lease, agent_id, principal, now, now + 3600))["fence"]
-        store._append([store._event("lease_delegate",
-                                    {"name": record or lease, "fence": fence, "hold": 3600,
-                                     "replaced": None},
-                                    actor="operator", agent_id=agent_id)], now)
-    return fn
-
-
 class ConductorLegacy(Scenario):
     """The conductor's role across its rename (2026-10-31): a hold under
     the old lease name with its old-named record keeps its authority and
@@ -594,6 +564,8 @@ class ConductorLegacy(Scenario):
     name = "conductor-legacy"
 
     def steps(self):
+        from board.seed_rows import conductor_legacy
+
         return [
             reg("register A", "A", label="codex", project="p1"),
             reg("register B", "B", token="alice", label="claude-code", project="p1",
@@ -601,9 +573,9 @@ class ConductorLegacy(Scenario):
             reg("register C", "C", label="codex", project="p2"),
             reg("register D", "D", token="alice", label="claude-code", project="p2",
                 capabilities={"ring": True}),
-            seed("A granted under the old name", _conductor_grant("delegate:p1", "A")),
-            seed("C holds the new name, record names the old",
-                 _conductor_grant("conductor:p2", "C", record="delegate:p2")),
+            fixture_seed("A granted under the old name", conductor_legacy("delegate:p1", "A")),
+            fixture_seed("C holds the new name, record names the old",
+                         conductor_legacy("conductor:p2", "C", record="delegate:p2")),
             act("attach B listening", "attach", token="alice", agent="B",
                 body=lambda c: {"attachment_id": "att-b", "wake_enabled": False, "ring": True,
                                 "ring_armed_until": c.now + 60}),

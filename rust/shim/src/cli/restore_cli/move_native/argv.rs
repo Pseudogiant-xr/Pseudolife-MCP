@@ -3,8 +3,8 @@
 //! `move_cli.rs` decides the oracle's refusals first; every argv it passes
 //! on comes here. This parser takes only the canonical spellings (each
 //! option by its full name, a value as the next argument not starting with
-//! `-`, a flag at most once); any other shape returns `None` and keeps the
-//! dispatcher's deferral (the edge-shape sweep is separate work).
+//! `-`, a flag at most once); any other shape returns `None` for the
+//! dispatcher's native usage refusal.
 use super::carry::TargetFiles;
 use std::ffi::OsString;
 
@@ -33,7 +33,7 @@ pub(super) struct Request {
     pub resume_expose_port: Option<u16>,
 }
 
-/// The canonical argv, or `None` (the dispatcher defers it).
+/// The canonical argv, or `None` for the native usage refusal.
 pub(super) fn parse(arguments: &[OsString]) -> Option<Request> {
     let words: Vec<&str> = arguments
         .iter()
@@ -169,7 +169,13 @@ pub(super) fn parse_rollback(arguments: &[OsString]) -> Option<Rollback> {
             flag @ ("--rollback" | "--release-target") if id.is_none() => {
                 rollback.release = flag == "--release-target";
                 index += 1;
-                id = Some((*words.get(index)?).to_owned());
+                // A move id never starts with `-`: `--rollback --help` is
+                // help, not the rollback of a move named `--help`.
+                let word = *words.get(index)?;
+                if word.starts_with('-') {
+                    return None;
+                }
+                id = Some(word.to_owned());
             }
             "--yes" if !rollback.yes => rollback.yes = true,
             "--target-gone" if !rollback.target_gone => rollback.target_gone = true,
