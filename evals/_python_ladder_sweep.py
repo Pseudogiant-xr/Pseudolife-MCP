@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-"""Extractor-ladder benchmark sweep (dev-only).
+"""Frozen Python extractor-ladder benchmark sweep (dev-only).
+
+Historical entry point: ``python evals/_python_ladder_sweep.py``.
 
 Finds the *minimum viable extraction model* — the lowest rung that beats
 naive-RAG on knowledge-update + efficiency — by running the same corpus through

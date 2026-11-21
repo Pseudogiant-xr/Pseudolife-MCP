@@ -38,7 +38,7 @@ bit-reproducible, and its own flip rate is the control floor that bounds
 what any judge-to-judge delta can claim.
 
 Usage:
-    PYTHONPATH=. python evals/lme_rejudge.py \
+    PYTHONPATH=. python evals/_python_lme_rejudge.py \
         --in evals/results/longmemeval-all-oracle-qwen-27b-raglite-all-fresh.jsonl \
         --tag opus5 --arms rag,hybrid,cortex,rag1 --workers 4 \
         --stability-sample 60 \

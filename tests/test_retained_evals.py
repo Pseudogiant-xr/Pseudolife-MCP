@@ -1,5 +1,6 @@
 """Model-free contracts of the retained Rust quality drivers."""
 import ast
+import builtins
 from collections import deque
 from contextlib import contextmanager
 from fnmatch import fnmatchcase
@@ -9,10 +10,11 @@ from pathlib import Path
 import re
 import subprocess
 import tomllib
+from types import SimpleNamespace
 
 import pytest
 
-from evals import lme_rejudge, longmemeval_bench as lme
+from evals import lme_rejudge, lme_scoring, longmemeval_bench as lme, retained_daemon
 from evals.retained_artifacts import read_json, record
 from evals.retained_daemon import BenchError, drain_dream
 
@@ -77,27 +79,33 @@ def test_longmemeval_uses_isolated_no_dream_control_and_drains_each_session():
     assert "live raw" in row["contexts"]["hybrid"]
 
 
-def test_set_history_labels_only_removed_members_as_former():
+@pytest.mark.parametrize("removed_again", [False, True])
+def test_set_history_labels_only_removed_members_as_former(removed_again):
     class SetHistory:
         def tool(self, name, **args):
             assert name == "memory_history"
-            return {"kind": "set", "versions": [
+            versions = [
                 {"value": "lint", "event": "added"},
                 {"value": "format", "event": "added"},
                 {"value": "scan", "event": "added"},
                 {"value": "format", "event": "removed"},
                 {"value": "scan", "event": "removed"},
                 {"value": "FORMAT", "event": "added"},
-            ]}
+            ]
+            if removed_again:
+                versions.append({"value": "FORMAT", "event": "removed"})
+            return {"kind": "set", "versions": versions}
 
-    hits = {"cortex": [{"entity": "build", "attribute": "checks", "value": "lint; FORMAT (2 members)"}]}
-    assert lme.fact_lines(SetHistory(), hits) == ["build / checks: lint; FORMAT (2 members) (former members: scan)"]
+    current = "lint" if removed_again else "lint; FORMAT (2 members)"
+    former = "scan; FORMAT" if removed_again else "scan"
+    hits = {"cortex": [{"entity": "build", "attribute": "checks", "value": current}]}
+    assert lme.fact_lines(SetHistory(), hits) == [f"build / checks: {current} (former members: {former})"]
 
 
 def test_dream_retries_a_held_batch_and_counts_only_acknowledged_work():
     replies = iter([
         {"pulled": 2, "extractor_failed": True, "hold_phase": "extract", "extractor": "primary"},
-        {"pulled": 2, "claims": 1, "cursor": 3.0, "extractor": "primary"},
+        {"pulled": 2, "claims": 1, "quarantined": 1, "cursor": 3.0, "extractor": "primary"},
         {"pulled": 0, "extractor": "primary"},
     ])
 
@@ -105,20 +113,36 @@ def test_dream_retries_a_held_batch_and_counts_only_acknowledged_work():
         assert name == "memory_dream" and args == {"action": "run", "limit": 100}
         return next(replies)
 
-    assert drain_dream(tool, stored=2)["claims"] == 1
+    tally = drain_dream(tool, stored=2)
+    assert tally["claims"] == tally["quarantined"] == 1
     with pytest.raises(StopIteration):
         next(replies)
 
 
-@pytest.mark.parametrize("reply", [
-    {"pulled": 0, "error": "offline"},
-    {"pulled": 0, "extractor": "fallback"},
-    {"pulled": 0, "extractor": "primary"},
-    {"pulled": 1, "cursor": 1, "extractor": "primary", "quarantined": 1},
+@pytest.mark.parametrize(("reply", "cause"), [
+    ({"pulled": 0, "error": "offline"}, "offline"),
+    ({"pulled": 0, "skipped": "turn closed"}, "skipped: turn closed"),
+    ({"pulled": 0, "acknowledgement_failed": True}, "acknowledgement_failed"),
+    ({"pulled": 0, "events_pass_failed": True}, "events_pass_failed"),
+    ({"pulled": 0, "extractor": "fallback"}, "received fallback"),
+    ({"pulled": 0, "extractor": "primary"}, "before acknowledging"),
 ])
-def test_dream_does_not_treat_an_incomplete_cell_as_measured(reply):
-    with pytest.raises(BenchError):
+def test_dream_does_not_treat_an_incomplete_cell_as_measured(reply, cause):
+    with pytest.raises(BenchError, match=cause):
         drain_dream(lambda name, **args: reply, stored=1)
+
+
+@pytest.mark.parametrize(("verdict", "expected"), [
+    ("  (YES), because...", True), ("'No!'\n", False), (" _YES_ followed by detail", True),
+])
+def test_judge_uses_the_first_casefolded_word(verdict, expected):
+    assert lme_scoring.judge_answer(question(), "answer", lambda *a, **kw: verdict) is expected
+
+
+@pytest.mark.parametrize("verdict", ["unsettled: yes", "yesplease", " ... "])
+def test_unparseable_judge_verdict_reports_the_raw_reply(verdict):
+    with pytest.raises(BenchError, match=re.escape(repr(verdict))):
+        lme_scoring.judge_answer(question(), "answer", lambda *a, **kw: verdict)
 
 
 class Instrument:
@@ -202,9 +226,128 @@ def test_gate_refuses_missing_or_mismatched_baseline_before_answering(tmp_path):
     path = tmp_path / "baseline.json"
     with pytest.raises(BenchError, match="missing"):
         gate.baseline_for(path, manifest)
-    record(path, {"manifest": {**manifest, "engine": "python"}, "revision": "0" * 40, "arms": {}})
-    with pytest.raises(BenchError, match="baseline"):
-        gate.baseline_for(path, manifest)
+    baseline = {"manifest": manifest, "revision": "0" * 40, "control_score_sha256": "1" * 64,
+                "binary_sha256": "2" * 64, "replicates": 2,
+                "arms": {arm: {"mean": 0.5, "margin": 0.03} for arm in gate.MEASURED_ARMS}}
+    record(path, baseline)
+    assert gate.baseline_for(path, manifest) == baseline
+    with pytest.raises(BenchError, match="does not match"):
+        gate.baseline_for(path, {**manifest, "engine": "python"})
+
+
+def test_gate_instrument_digests_cover_acquisition_rendering_and_scoring(monkeypatch):
+    from evals import regression_gate as gate
+
+    source = gate.instrument_digests()
+    assert set(source) == {"regression_gate.py", "longmemeval_bench.py", "context_format.py",
+                           "replicate.py", "lme_scoring.py", "rebuild_contexts.py", "retained_daemon.py"}
+    original = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda path, **kw: original(path, **kw) + "# changed\n"
+                        if path.name == "context_format.py" else original(path, **kw))
+    changed = gate.instrument_digests()
+    assert {name for name in source if source[name] != changed[name]} == {"context_format.py"}
+
+
+@pytest.mark.parametrize(("fault", "expected"), [
+    ("login", "pseudolife-mcp test-login create"),
+    ("driver", "Install psycopg"),
+    ("connection", "Start the test PostgreSQL"),
+    ("turn", "fixture turn is held"),
+    ("stale", "settings changed after harness import"),
+    ("unexpected", "LookupError"),
+])
+def test_gate_preflight_rejects_database_failures_as_incomplete(tmp_path, monkeypatch, capsys, fault, expected):
+    from evals import regression_gate as gate
+    from rust.daemon import harness
+
+    class ConnectionFailure(Exception):
+        pass
+
+    def admin():
+        if fault == "connection":
+            raise ConnectionFailure("connection refused")
+        if fault == "turn":
+            raise SystemExit("fixture turn is held")
+        if fault == "unexpected":
+            raise LookupError("fixture connection state unavailable")
+        pytest.fail("a refused environment must not connect")
+
+    login = tmp_path / "test-login.env"
+    if fault != "login":
+        login.touch()
+    fake = SimpleNamespace(HOST_PORT="127.0.0.1:5434", LOGIN_FILE=login,
+                           BASE_ENV="PL_HARNESS_BASE_DATABASE", _admin=admin,
+                           psycopg=SimpleNamespace(OperationalError=ConnectionFailure))
+    fake.Slice = lambda name: fake
+    monkeypatch.setattr(harness, "pgdisposable", fake, raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", fake.HOST_PORT)
+    if fault == "stale":
+        monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5435")
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_LOGIN_FILE", str(login))
+    for name in (fake.BASE_ENV, "PGHOSTADDR", "PGSERVICE", "PGOPTIONS"):
+        monkeypatch.delenv(name, raising=False)
+    if fault == "driver":
+        importer = builtins.__import__
+
+        def missing_driver(name, *args, **kwargs):
+            if name == "rust.daemon.harness":
+                raise ImportError("no psycopg")
+            return importer(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", missing_driver)
+
+    q = {**question(), "contexts": {"rag": "fixture control"}}
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text("{}", encoding="utf-8")
+    binary = tmp_path / "binary"
+    binary.touch()
+    monkeypatch.setattr(gate.rebuild_contexts, "pinned_rows", lambda: [q])
+    monkeypatch.setattr(gate.rebuild_contexts, "fixture_cells", lambda fixture, rows: {"q1": []})
+    monkeypatch.setattr(lme, "load_questions", lambda *args: ("synthetic", [q]))
+    monkeypatch.setattr(retained_daemon.DaemonSetup, "provenance",
+                        lambda self: {"embedding_files": {}, "ort_sha256": "fixture"})
+    monkeypatch.setattr(gate, "run", lambda *a, **kw: pytest.fail("preflight must not judge"))
+    args = ["--preflight", "--establish", "--fixture", str(fixture), "--data", str(fixture),
+            "--out", str(tmp_path / "out"), "--daemon", str(binary), "--daemon-revision", "0" * 40,
+            "--onnx-dir", str(tmp_path), "--ort-library", str(binary), "--scratch", str(tmp_path)]
+    for role in ("answerer", "judge"):
+        args += [f"--{role}-url", "http://127.0.0.1:9/v1", f"--{role}-model", "unused",
+                 f"--{role}-profile", "fixture"]
+    assert gate.main(args) == 2
+    assert expected in capsys.readouterr().err
+
+
+def test_daemon_error_excerpts_and_saved_log_remove_credentials(tmp_path, capsys, monkeypatch):
+    token = "fixture-bearer-secret"
+    dsn = "postgresql://fixture:fixture-db-password@127.0.0.1:5434/fixture"
+    errors = {"status": 200, "headers": [], "body": json.dumps({"error": {"message": f"bad slot {dsn} {token}"}})}
+    with pytest.raises(BenchError) as raised:
+        retained_daemon.rpc_result(errors, "memory_search", secrets=(token,))
+    message = str(raised.value)
+    assert "bad slot" in message and token not in message and dsn not in message
+    tool_error = {"status": 200, "headers": [], "body": json.dumps({"result": {
+        "isError": True, "content": [{"text": f"slot rejected {token} {dsn}"}],
+    }})}
+    bank = retained_daemon.Bank(SimpleNamespace(port=9, tool=lambda *args: tool_error), token)
+    with pytest.raises(BenchError) as raised:
+        bank.tool("memory_fact_set")
+    assert "slot rejected" in str(raised.value) and token not in str(raised.value) and dsn not in str(raised.value)
+
+    response = SimpleNamespace(status=503, read=lambda size: f"bank unavailable {token} {dsn}".encode())
+    connection = SimpleNamespace(request=lambda *args, **kw: None, getresponse=lambda: response,
+                                 close=lambda: None)
+    monkeypatch.setattr(retained_daemon.http.client, "HTTPConnection", lambda *a, **kw: connection)
+    with pytest.raises(BenchError) as raised:
+        bank.get("/api/search")
+    assert "HTTP 503: bank unavailable" in str(raised.value)
+    assert token not in str(raised.value) and dsn not in str(raised.value)
+    source, output = tmp_path / "daemon.log", tmp_path / "output" / "daemon-error"
+    source.write_text(f"cursor failed for {token} and {dsn}\n", encoding="utf-8")
+    retained_daemon.save_failure_log(source, output, (token,))
+    [saved] = list(output.parent.glob("daemon-error-*.log"))
+    detail = saved.read_text(encoding="utf-8")
+    assert "cursor failed" in detail and token not in detail and dsn not in detail
+    assert str(saved) in capsys.readouterr().err
 
 
 def test_gate_detects_row_level_replica_drift_even_when_averages_match():
@@ -241,6 +384,12 @@ def test_gate_scores_regression_and_rejects_control_drift(tmp_path):
     baseline = gate.baseline_for(establish / "baseline-candidate.json", manifest)
     assert gate.run(tmp_path / "pass", manifest, identity, [question()], fixed, slots, open_bank,
                     all_correct, judge, repetitions=2, baseline=baseline) == 0
+    assert gate.run(tmp_path / "quarantine-warning", manifest, identity, [question()], fixed,
+                    slots, open_bank, all_correct, judge, repetitions=2,
+                    baseline={**baseline, "quarantined": 2}) == 0
+    assert read_json(tmp_path / "quarantine-warning" / "verdict.json")["warnings"] == [
+        "quarantined entries changed from 2 to 0",
+    ]
 
     regression = Instrument("answerer", lambda prompt: "new" if "frozen raw" in prompt else "old")
     assert gate.run(tmp_path / "regression", manifest, identity, [question()], fixed, slots, open_bank,
@@ -263,6 +412,23 @@ def test_ladder_keeps_the_naive_control_fixed_across_rungs():
     assert ladder.check_control(control, {"engine": "rust"}) == naive
     with pytest.raises(BenchError, match="control"):
         ladder.check_control(control, {"engine": "python"})
+
+
+def test_ladder_abstention_has_the_historical_grid_rates_and_per_cell_tallies(monkeypatch):
+    from evals import ladder_sweep as ladder
+
+    @contextmanager
+    def open_bank(config, extractor):
+        yield Bank(extractor)
+
+    monkeypatch.setattr(ladder, "drain_dream", lambda *a, **kw: {"claims": 2, "quarantined": 1})
+    rows = ladder.abstention(open_bank, "stub", {})
+    assert {(row["guard"], row["floor"]) for row in rows} == {
+        (guard, floor) for guard in (0.3, 0.5, 0.65, 0.75, 0.85)
+        for floor in (0.0, 0.5, 0.65, 0.70, 0.75, 0.80)
+    }
+    assert all(row["abstain_recall_unanswerable"] == row["false_abstain_answerable"] == 0 for row in rows)
+    assert all(row["consolidation"] == {"claims": 2, "quarantined": 1} for row in rows)
 
 
 def local_dependencies(root, path, tracked):
@@ -298,6 +464,10 @@ def local_dependencies(root, path, tracked):
             if (name in {"__import__", "import_module", "run_module"}
                     and isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
                 dependencies.add(resolve(arg.value))
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if re.fullmatch(r"(?:[\w.-]+[/\\])*[\w.-]+\.(?:py|ps1)", node.value):
+                relative = Path(node.value.replace("\\", "/"))
+                dependencies.update({relative, path.parent / relative} & tracked)
     return dependencies - {None}
 
 
@@ -345,4 +515,15 @@ def test_frozen_import_check_follows_indirect_and_literal_dynamic_imports(tmp_pa
         (tmp_path / name).write_text(source, encoding="utf-8")
     assert frozen_imports_from(tmp_path, [Path("evals/active.py")], tracked) == [
         "evals/active.py -> evals/helper.py -> evals/_python_old.py",
+    ]
+
+
+def test_frozen_import_check_follows_python_script_path_literals(tmp_path):
+    evals = tmp_path / "evals"
+    evals.mkdir()
+    (evals / "active.py").write_text('Path(__file__).parent / "_python_old.py"', encoding="utf-8")
+    (evals / "_python_old.py").write_text("", encoding="utf-8")
+    tracked = {Path("evals/active.py"), Path("evals/_python_old.py")}
+    assert frozen_imports_from(tmp_path, [Path("evals/active.py")], tracked) == [
+        "evals/active.py -> evals/_python_old.py",
     ]

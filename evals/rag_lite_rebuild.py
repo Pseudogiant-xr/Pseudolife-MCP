@@ -6,7 +6,7 @@ both look like they should:
   * ``--phase answer`` only answers the context keys a row already
     persisted, and only for rows that are not yet judged. It cannot mint
     an arm that was never served.
-  * ``rebuild_contexts.py`` rebuilds the cortex and hybrid arms from the
+  * ``_python_rebuild_contexts.py`` rebuilds the cortex and hybrid arms from the
     dumped fact banks, but copies the rag context VERBATIM — and the
     dumps hold facts only, so the rag arm's ranked turn list is not in
     them. Splitting the persisted rag block back into turns does not
@@ -31,7 +31,7 @@ scored, or the run does not happen.
 
 Then answer the rebuilt tag (this is the only GPU step):
 
-    PYTHONPATH=. python evals/longmemeval_bench.py --dataset oracle \\
+    PYTHONPATH=. python evals/_python_longmemeval_bench.py --dataset oracle \\
         --extractor qwen-27b --tag raglite-v38 --phase answer
 
 Every arm's verdict is stripped, so that answer phase re-judges the whole

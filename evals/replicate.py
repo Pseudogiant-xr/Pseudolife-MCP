@@ -44,6 +44,8 @@ _JUDGE_SUFFIXES = ("response", "correct", "context_tokens",
                    # a rebuilt/replicated row must not carry a stale one.
                    "answerable_judge")
 _REPLICA_SUFFIX = re.compile(r"-r\d+$")
+# The Python q8_0 run on 27 July 2026 (n=7) had zero spread across server
+# restarts, leaving the 0.03 floor as its margin. No Rust baseline exists yet.
 BASELINE_FLOOR = 0.03
 DEFAULT_BASELINE = RESULTS_DIR / "regression_gate.baseline.json"
 
@@ -428,14 +430,14 @@ def cmd_gate_check(args) -> int:
     if not args.baseline.exists():
         print(f"no baseline at {args.baseline}\n"
               "establish one on a known-good tree with:\n"
-              "  evals\\regression_gate.ps1 -Establish")
+              "  evals\\_python_regression_gate.ps1 -Establish")
         sys.exit(2)
     try:
         baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
         baseline["arms"]
     except (ValueError, KeyError):
         print(f"invalid baseline file: {args.baseline}\n"
-              "re-establish with: evals\\regression_gate.ps1 -Establish")
+              "re-establish with: evals\\_python_regression_gate.ps1 -Establish")
         sys.exit(2)
     found = discover(args.dataset, args.extractor, args.tag,
                      args.results_dir)

@@ -10,10 +10,11 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from evals import context_format, lme_scoring, longmemeval_bench as lme, rebuild_contexts, replicate
+from evals import retained_daemon
 from evals.retained_artifacts import fingerprint, read_json, record
 from evals.retained_daemon import (
     BenchError, add_daemon_arguments, add_endpoint_arguments, bench_config, daemon_setup,
-    digest_file, endpoint_args,
+    endpoint_args, report_incomplete,
 )
 
 
@@ -22,15 +23,28 @@ MEASURED_ARMS = ("rag", "cortex", "hybrid", "cascade")
 BASELINE = Path(__file__).resolve().parent / "results/rust-quality/regression_gate.baseline.json"
 
 
+def instrument_digests():
+    paths = [Path(__file__), *(Path(module.__file__) for module in (
+        lme, context_format, replicate, lme_scoring, rebuild_contexts, retained_daemon,
+    ))]
+    # Normalize checkout newline conventions without hiding changes to source text.
+    return {path.name: fingerprint(path.read_text(encoding="utf-8")) for path in paths}
+
+
 def baseline_for(path, manifest):
-    baseline = read_json(path)
+    try:
+        baseline = read_json(path)
+    except BenchError as exc:
+        raise BenchError(f"{exc}. Supply the measured Rust baseline or use an authorised "
+                         "--establish run to create a candidate.") from None
     if (baseline.get("manifest") != manifest
             or not re.fullmatch(r"[0-9a-f]{40}", baseline.get("revision", ""))
             or not re.fullmatch(r"[0-9a-f]{64}", baseline.get("control_score_sha256", ""))
             or not re.fullmatch(r"[0-9a-f]{64}", baseline.get("binary_sha256", ""))
             or type(baseline.get("replicates")) is not int or baseline["replicates"] < 2
             or set(baseline.get("arms", {})) != set(MEASURED_ARMS)):
-        raise BenchError("Rust baseline is incomplete or does not match this gate's inputs")
+        raise BenchError("Rust baseline is incomplete or does not match this gate's inputs. "
+                         "Use matching inputs or an authorised --establish run.")
     for arm in baseline["arms"].values():
         mean = arm.get("mean")
         if type(mean) not in (int, float) or not 0 <= mean <= 1 or arm.get("margin") != replicate.BASELINE_FLOOR:
@@ -69,6 +83,7 @@ def contexts_for(question, frozen_context, slots, open_bank):
         raw = lme.raw_texts(hits)
         facts = lme.fact_lines(bank, hits)
     row = {key: question[key] for key in (*rebuild_contexts.QUESTION_FIELDS, "question_type")}
+    row["quarantined"] = 0  # the gate replays projected slots without running extraction
     row["contexts"] = {"rag": "\n\n".join(raw), "cortex": "\n".join(facts),
                        "hybrid": context_format.hybrid_context(facts, raw), "rag_control": frozen_context}
     return row
@@ -129,16 +144,25 @@ def run(root, manifest, setup_id, questions, controls, slots, open_bank, answere
     arms = aggregate(answers)
     measured = {"manifest": manifest, "revision": setup_id["revision"], "arms": arms,
                 "replicates": repetitions, "binary_sha256": setup_id["binary_sha256"],
+                "quarantined": sum(row.get("quarantined", 0) for row in contexts),
                 "control_score_sha256": score_control(answers[0])}
     if baseline is None:
-        record(root / "baseline-candidate.json", measured)
-        print("Rust baseline candidate recorded")
+        candidate = root / "baseline-candidate.json"
+        record(candidate, measured)
+        print(f"Rust baseline candidate recorded at {candidate}. The maintainer reviews it and "
+              "commits it as evals/results/rust-quality/regression_gate.baseline.json.")
         return 0
     if measured["control_score_sha256"] != baseline["control_score_sha256"]:
         raise BenchError("answerer or judge drifted on the pinned raw control")
     failures = replicate.gate_verdict(measured, baseline)
+    warnings = []
+    if measured["quarantined"] != baseline.get("quarantined", 0):
+        warnings.append(f"quarantined entries changed from {baseline.get('quarantined', 0)} "
+                        f"to {measured['quarantined']}")
     record(root / "verdict.json", {"measured": measured, "baseline_sha256": fingerprint(baseline),
-                                   "regressions": failures})
+                                   "regressions": failures, "warnings": warnings})
+    for warning in warnings:
+        print(f"WARNING: {warning}")
     for failure in failures:
         print(failure)
     print("Rust retrieval gate regressed" if failures else "Rust retrieval gate passed")
@@ -184,15 +208,15 @@ def main(argv=None):
                     "control_sha256": fingerprint(controls), "control_origin": "pinned-frozen-python-rag",
                     "embedding_files": setup_id["embedding_files"], "ort_sha256": setup_id["ort_sha256"],
                     "answerer": answerer.provenance(), "judge": judge.provenance(),
-                    "scoring_sha256": digest_file(Path(lme_scoring.__file__))}
+                    "instrument_sha256": instrument_digests()}
         baseline = None if args.establish else baseline_for(args.baseline, manifest)
         if args.preflight:
+            setup.preflight_database()
             return 0
         return run(args.out, manifest, setup_id, questions, controls, slots, lambda: setup.bank(config),
                    answerer, judge, repetitions=args.replicates, baseline=baseline)
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
-        print(f"Rust regression gate incomplete: {exc}", file=sys.stderr)
-        return 2
+    except (Exception, SystemExit) as exc:
+        return report_incomplete("Rust regression gate", exc)
 
 
 if __name__ == "__main__":

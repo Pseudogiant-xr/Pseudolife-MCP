@@ -1,7 +1,9 @@
 """LongMemEval answer and judge protocol, shared by the Rust quality drivers."""
 from __future__ import annotations
 
-from evals.retained_daemon import BenchError
+import re
+
+from evals.retained_daemon import BenchError, excerpt
 
 _ANSWER_SYSTEM = (
     "You answer questions about a user from their memory context. Use ONLY the "
@@ -48,10 +50,12 @@ def judge_answer(row, answer, chat):
     system = (_JUDGE_SYSTEM if row.get("question_type", "knowledge-update") == "knowledge-update"
               else _JUDGE_SYSTEM_GENERIC)
     verdict = chat(system, f"Question: {row['question']}\nCorrect answer: {row['answer']}\n"
-                          f"Model response: {answer}", max_tokens=8).strip().lower()
-    if verdict.rstrip(".") not in {"yes", "no"}:
-        raise BenchError("the judge returned neither yes nor no")
-    return verdict.rstrip(".") == "yes"
+                          f"Model response: {answer}", max_tokens=8)
+    word = re.search(r"[^\W_]+", verdict)
+    token = word.group().casefold() if word else ""
+    if token not in {"yes", "no"}:
+        raise BenchError(f"unparseable judge verdict: {excerpt(repr(verdict))}")
+    return token == "yes"
 
 
 def score_row(row, answerer, judge):

@@ -35,6 +35,8 @@ def pinned_rows(path=PINNED_ROWS):
 def slot_writes(facts):
     slots = {}
     for fact in facts:
+        # The public writes assign Rust provenance. A dump's Python origin
+        # is neither a Rust writer identity nor an input to slot replay.
         entity, attribute, value = (fact[key] for key in ("entity", "attribute", "value"))
         if any(not isinstance(text, str) or not text.strip() for text in (entity, attribute, value)):
             raise BenchError("the fixture contains a blank or invalid fact")

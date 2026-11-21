@@ -27,7 +27,7 @@ class = "active dependency"
 reason = "Before package deletion, move prompt ownership off the frozen Python constants and switch or retire these generators."
 
 [[rules]]
-globs = ["evals/README.md"]
+globs = ["evals/README.md", "evals/RUST-DRIVERS.md"]
 kinds = ["documentation"]
 class = "historical evidence"
 reason = "The historical benchmark sections preserve their original Python commands and evidence."
@@ -85,6 +85,7 @@ globs = [
   "evals/graph_ablation.py",
   "evals/judge_ladder.py",
   "evals/label_heuristic_audit.py",
+  "evals/ladder_replicate.py",
   "evals/lesson_synthesis_bench.py",
   "evals/live_replay_flat_ab.py",
   "evals/live_replay_judge.py",

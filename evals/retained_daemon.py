@@ -10,19 +10,43 @@ import os
 from pathlib import Path
 import re
 from secrets import token_hex, token_urlsafe
+import sys
 import tempfile
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 
 from rust.daemon.harness import daemons, mcp_wire
 
 
 SOURCE = "bench"
 PULL_LIMIT = 100
-DREAM_TALLIES = ("claims", "inserted", "superseded", "literal_flagged", "literal_dropped")
+CHAT_TIMEOUT_SECONDS = 600
+DREAM_TIMEOUT_SECONDS = 90
+DREAM_MAX_TOKENS = 2048
+DREAM_TALLIES = ("claims", "inserted", "superseded", "literal_flagged", "literal_dropped", "quarantined")
 
 
 class BenchError(RuntimeError):
     """An incomplete or invalid measurement."""
+
+
+def redact(text, secrets=()):
+    text = str(text)
+    for secret in sorted(filter(None, secrets), key=len, reverse=True):
+        text = text.replace(secret, "[redacted]")
+    text = re.sub(r"(?i)\bpostgres(?:ql)?://[^\s\"'<>]+", "[redacted DSN]", text)
+    return re.sub(r"(?i)\b(?:bearer\s+|password\s*=\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+                  "[redacted]", text)
+
+
+def excerpt(value, secrets=()):
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return " ".join(redact(value, secrets)[:320].split()) or "no error detail returned"
+
+
+def report_incomplete(operation, error):
+    print(f"{operation} incomplete ({type(error).__name__}): {excerpt(error)}", file=sys.stderr)
+    return 2
 
 
 def digest_file(path: Path) -> str:
@@ -33,7 +57,7 @@ def digest_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def request_json(origin, method, path, *, token=None, body=None, timeout=120):
+def request_json(origin, method, path, *, token=None, body=None, timeout=120, secrets=()):
     cls = http.client.HTTPSConnection if origin.scheme == "https" else http.client.HTTPConnection
     headers = {"Accept": "application/json"}
     if token is not None:
@@ -46,10 +70,12 @@ def request_json(origin, method, path, *, token=None, body=None, timeout=120):
         conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
         if response.status != 200:
-            raise BenchError(f"{method} {path.split('?')[0]} returned HTTP {response.status}")
+            detail = excerpt(response.read(4096), (token, *secrets))
+            raise BenchError(f"{method} {path.split('?')[0]} returned HTTP {response.status}: {detail}")
         result = json.loads(response.read())
     except (OSError, ValueError, http.client.HTTPException) as exc:
-        raise BenchError(f"{method} {path.split('?')[0]} failed ({type(exc).__name__})") from None
+        detail = excerpt(exc, (token, *secrets))
+        raise BenchError(f"{method} {path.split('?')[0]} failed ({type(exc).__name__}): {detail}") from None
     finally:
         conn.close()
     if not isinstance(result, dict):
@@ -82,7 +108,7 @@ class Endpoint:
 
     def provenance(self):
         return {"request_model": self.model, "served_model": self.expected_model,
-                "profile": self.profile}
+                "profile": self.profile, "chat_timeout_seconds": CHAT_TIMEOUT_SECONDS}
 
     def verify(self):
         origin = urlsplit(self.url)
@@ -95,6 +121,7 @@ class Endpoint:
     def chat(self, system, user, *, max_tokens):
         origin = urlsplit(self.url)
         result = request_json(origin, "POST", origin.path.rstrip("/") + "/chat/completions",
+                              timeout=CHAT_TIMEOUT_SECONDS,
                               body={"model": self.model, "temperature": 0, "max_tokens": max_tokens,
                                     "chat_template_kwargs": {"enable_thinking": False},
                                     "messages": [{"role": "system", "content": system},
@@ -110,17 +137,18 @@ class Endpoint:
         return text.strip()
 
 
-def rpc_result(response, operation):
+def rpc_result(response, operation, *, secrets=()):
     try:
         if response["status"] != 200:
-            raise BenchError(f"{operation} returned HTTP {response['status']}")
+            detail = excerpt(response["body"], secrets)
+            raise BenchError(f"{operation} returned HTTP {response['status']}: {detail}")
         if (mcp_wire.header(response, "content-type") or "").startswith("text/event-stream"):
             (data,) = mcp_wire.sse_data(response)
         else:
             data = response["body"]
         frame = json.loads(data)
         if "error" in frame:
-            raise BenchError(f"{operation} returned an MCP request error")
+            raise BenchError(f"{operation} returned an MCP request error: {excerpt(frame['error'], secrets)}")
         result = frame["result"]
         if not isinstance(result, dict):
             raise TypeError
@@ -130,19 +158,21 @@ def rpc_result(response, operation):
 
 
 class Bank:
-    def __init__(self, session, token):
+    def __init__(self, session, token, secrets=()):
         self.session = session
         self.token = token
+        self.secrets = (token, *secrets)
         self.origin = urlsplit(f"http://127.0.0.1:{session.port}")
 
     def get(self, path, **query):
         return request_json(self.origin, "GET", f"{path}?{urlencode(query)}" if query else path,
-                            token=self.token)
+                            token=self.token, secrets=self.secrets)
 
     def tool(self, name, **args):
-        result = rpc_result(self.session.tool(name, args), name)
+        result = rpc_result(self.session.tool(name, args), name, secrets=self.secrets)
         if result.get("isError"):
-            raise BenchError(f"{name} returned an MCP tool error")
+            detail = result.get("structuredContent") or result.get("content", [])
+            raise BenchError(f"{name} returned an MCP tool error: {excerpt(detail, self.secrets)}")
         try:
             value = result.get("structuredContent")
             if value is None:
@@ -180,14 +210,17 @@ def drain_dream(tool, *, stored):
     cursor = float("-inf")
     while True:
         result = tool("memory_dream", action="run", limit=PULL_LIMIT)
-        if (result.get("error") or result.get("skipped") or result.get("acknowledgement_failed")
-                or result.get("extractor") != "primary" or result.get("quarantined")
-                or result.get("events_pass_failed")):
-            raise BenchError("Rust dream did not finish on the pinned primary extractor")
+        for key in ("error", "skipped", "acknowledgement_failed", "events_pass_failed"):
+            if result.get(key):
+                raise BenchError(f"Rust dream reported {key}: {excerpt(result[key])}")
+        if result.get("extractor") != "primary":
+            raise BenchError(f"Rust dream expected the primary extractor, received {excerpt(result.get('extractor'))}")
         if result.get("extractor_failed"):
             holds += 1
             if result.get("hold_phase") != "extract" or holds >= 8:
-                raise BenchError("Rust dream did not recover its held extraction batch")
+                phase = excerpt(result.get("hold_phase"))
+                error = excerpt(result.get("extractor_error") or result.get("last_error") or "")
+                raise BenchError(f"Rust dream held at {phase} after {holds} attempts: {error}")
             continue
         holds = 0
         pulled = result.get("pulled")
@@ -224,8 +257,41 @@ def bench_config(*, contiguity=0, timeline=False, floor=0.2, cortex_bm25=False,
                                                            "auto_tick": False},
         "dream": {"enabled": False, "stall_notice": False, "extract_relations": False,
                   "chronicle": False, "eligible_sources": [SOURCE],
-                  "known_facts_window": known_facts_window},
+                  "known_facts_window": known_facts_window,
+                  "extractor_timeout_seconds": DREAM_TIMEOUT_SECONDS,
+                  "extractor_max_tokens": DREAM_MAX_TOKENS},
     }}
+
+
+@contextmanager
+def database_errors(pg):
+    try:
+        yield
+    except SystemExit as exc:
+        detail = excerpt(exc)
+        if "test-login create" in detail:
+            raise BenchError(f"test PostgreSQL login invalid: {detail}") from None
+        raise BenchError(f"test PostgreSQL database turn refused: {detail}. Wait for the turn holder.") from None
+    except pg.psycopg.OperationalError as exc:
+        raise BenchError(f"test PostgreSQL connection failed: {excerpt(exc)}. Start the test PostgreSQL "
+                         "server at the declared loopback address and check the test login.") from None
+
+
+def save_failure_log(source, destination, secrets):
+    if destination is None or not source.is_file():
+        return
+    with source.open("rb") as handle:
+        size = handle.seek(0, 2)
+        start = max(0, size - 16384)
+        handle.seek(start)
+        if start:
+            handle.readline(16384)  # discard a partial line before redacting secrets
+        tail = redact(handle.read().decode("utf-8", errors="replace"), secrets)[-8192:]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent,
+                                     prefix=destination.name + "-", suffix=".log", delete=False) as log:
+        log.write(tail)
+    print(f"Rust daemon log tail saved to {log.name}", file=sys.stderr)
 
 
 @dataclass(frozen=True)
@@ -235,6 +301,7 @@ class DaemonSetup:
     onnx_dir: Path
     ort_library: Path
     scratch: Path
+    failure_log: Path | None = None
 
     def provenance(self):
         if not re.fullmatch(r"[0-9a-f]{40}", self.revision):
@@ -246,32 +313,49 @@ class DaemonSetup:
         return {"engine": "rust", "revision": self.revision, "binary_sha256": digest_file(self.binary),
                 "embedding_files": files, "ort_sha256": digest_file(self.ort_library)}
 
-    @contextmanager
-    def bank(self, config, extractor=None):
-        from rust.daemon.harness import pgdisposable
-
+    def _test_database(self):
         host = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT")
         login = os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
         if (not host or not re.fullmatch(r"127\.0\.0\.1:[0-9]{1,5}", host)
-                or not 0 < int(host.split(":")[1]) < 65536
-                or host != pgdisposable.HOST_PORT or not login
-                or Path(login).resolve() != pgdisposable.LOGIN_FILE.resolve()):
-            raise BenchError("set an explicit loopback test PostgreSQL address and test login file")
+                or not 0 < int(host.split(":")[1]) < 65536):
+            raise BenchError("set PSEUDOLIFE_TEST_PG_HOST_PORT to the loopback test PostgreSQL address")
+        if not login or not Path(login).is_file():
+            raise BenchError("test PostgreSQL login missing. Run `pseudolife-mcp test-login create`, "
+                             "then set PSEUDOLIFE_TEST_PG_LOGIN_FILE to the generated file.")
+        try:
+            from rust.daemon.harness import pgdisposable
+        except ImportError:
+            raise BenchError("test PostgreSQL driver unavailable. Install psycopg in the eval environment.") from None
+        if host != pgdisposable.HOST_PORT or Path(login).resolve() != pgdisposable.LOGIN_FILE.resolve():
+            raise BenchError("test PostgreSQL settings changed after harness import. Restart the driver "
+                             "with the intended test address and login already set.")
         if (os.environ.get(pgdisposable.BASE_ENV)
                 or any(os.environ.get(key) for key in ("PGHOSTADDR", "PGSERVICE", "PGOPTIONS"))):
             raise BenchError("clear PostgreSQL routing overrides and the harness base-bank setting")
         if not self.binary.is_file() or not self.ort_library.is_file() or not self.onnx_dir.is_dir():
             raise BenchError("provide an existing Rust daemon binary, ONNX export and ORT library")
-        pg = pgdisposable.Slice("w0e")
+        return pgdisposable.Slice("w0e")
+
+    def preflight_database(self):
+        pg = self._test_database()
+        with database_errors(pg):
+            with pg._admin() as conn:
+                conn.execute("SELECT 1")
+
+    @contextmanager
+    def bank(self, config, extractor=None):
+        pg = self._test_database()
         name = pg.name(f"{pg.PREFIX}quality_{token_hex(6)}")
         self.scratch.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="rust-quality-", dir=self.scratch) as scratch:
             home = daemons.make_home(Path(scratch), "daemon", json.dumps(config, allow_nan=False))
-            dsn = pg.create(name)
+            with database_errors(pg):
+                dsn = pg.create(name)
             try:
                 yield from self._serve(home, dsn, extractor)
             finally:
-                pg.drop(name)
+                with database_errors(pg):
+                    pg.drop(name)
 
     def _serve(self, home, dsn, extractor):
         port, token = daemons.free_port(), token_urlsafe(32)
@@ -287,25 +371,43 @@ class DaemonSetup:
         if extractor is not None:
             env.update({"PSEUDOLIFE_DREAM_EXTRACTOR_MODE": "primary",
                         "PSEUDOLIFE_DREAM_BASE_URL": extractor.url,
-                        "PSEUDOLIFE_DREAM_MODEL": extractor.model,
-                        "PSEUDOLIFE_DREAM_TIMEOUT_SECONDS": "90"})
+                        "PSEUDOLIFE_DREAM_MODEL": extractor.model})
         daemon = daemons.rust_daemon(self.binary.resolve(), home, port, env)
+        password = urlsplit(dsn).password or ""
+        secrets = (dsn, password, unquote(password), token)
         try:
-            daemon.start()
-            session = mcp_wire.Session(port, token)
             try:
-                rpc_result(session.init, "initialize")
-                if not session.sid or session.initialized["status"] != 202:
-                    raise BenchError("Rust daemon did not open an authenticated MCP session")
-                bank = Bank(session, token)
-                if extractor is not None:
-                    bank.verify_extractor(extractor)
-                yield bank
+                daemon.start()
+                session = mcp_wire.Session(port, token)
+                try:
+                    rpc_result(session.init, "initialize", secrets=secrets)
+                    if not session.sid or session.initialized["status"] != 202:
+                        raise BenchError("Rust daemon did not open an authenticated MCP session")
+                    bank = Bank(session, token, secrets)
+                    if extractor is not None:
+                        bank.verify_extractor(extractor)
+                    yield bank
+                finally:
+                    if session.sid:
+                        failing = sys.exc_info()[0] is not None
+                        try:
+                            session.close()
+                        except Exception as close_error:
+                            if not failing:
+                                raise
+                            print(f"Could not close the failed MCP session: {excerpt(close_error, secrets)}",
+                                  file=sys.stderr)
             finally:
-                if session.sid:
-                    session.close()
-        finally:
-            daemon.stop()
+                # The production Rust daemon calls extractors over HTTP and
+                # does not spawn children here. The POSIX harness stops its PID.
+                daemon.stop()
+        except Exception as exc:
+            try:
+                save_failure_log(daemon.log, self.failure_log, secrets)
+            except OSError as log_error:
+                print(f"Could not save the Rust daemon log tail: {excerpt(log_error, secrets)}",
+                      file=sys.stderr)
+            raise BenchError(f"{type(exc).__name__}: {excerpt(exc, secrets)}") from None
 
 
 def add_daemon_arguments(parser):
@@ -316,10 +418,12 @@ def add_daemon_arguments(parser):
     parser.add_argument("--scratch", type=Path)
 
 
-def daemon_setup(args):
+def daemon_setup(args, *, output_is_file=False):
     if not all((args.daemon, args.daemon_revision, args.onnx_dir, args.ort_library, args.scratch)):
         raise BenchError("provide --daemon, --daemon-revision, --onnx-dir, --ort-library and --scratch")
-    return DaemonSetup(args.daemon, args.daemon_revision, args.onnx_dir, args.ort_library, args.scratch)
+    log = args.out.with_name(args.out.name + ".daemon-error") if output_is_file else args.out / "daemon-error"
+    return DaemonSetup(args.daemon, args.daemon_revision, args.onnx_dir, args.ort_library,
+                       args.scratch, log)
 
 
 def add_endpoint_arguments(parser, role):

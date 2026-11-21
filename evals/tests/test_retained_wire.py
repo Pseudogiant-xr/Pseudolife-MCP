@@ -13,6 +13,11 @@ from rust.daemon.harness.stub_extractor import StubExtractor
 
 @pytest.fixture
 def setup(tmp_path):
+    required = ("PL_RETAINED_TEST_DAEMON", "PL_RETAINED_TEST_REVISION", "ORT_DYLIB_PATH")
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        pytest.fail("Set these dev-box fixture variables before running the wire test: "
+                    + ", ".join(missing), pytrace=False)
     binary = Path(os.environ["PL_RETAINED_TEST_DAEMON"])
     library = Path(os.environ["ORT_DYLIB_PATH"])
     model_dir = tmp_path / "embedding"

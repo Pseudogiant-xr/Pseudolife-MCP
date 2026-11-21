@@ -18,7 +18,7 @@ from evals import context_format, leak_check, lme_scoring, replicate
 from evals.retained_artifacts import fingerprint, read_json, record, rows_in
 from evals.retained_daemon import (
     BenchError, DREAM_TALLIES, add_daemon_arguments, add_endpoint_arguments, bench_config,
-    daemon_setup, drain_dream, endpoint_args,
+    daemon_setup, drain_dream, endpoint_args, report_incomplete,
 )
 
 
@@ -57,7 +57,11 @@ def fact_lines(bank, result):
         if not isinstance(history.get("versions"), list):
             raise BenchError("Rust history returned no versions list")
         if history.get("kind") == "set":
-            last_events = {event["value"].strip().casefold(): event for event in history["versions"]}
+            last_events = {}
+            for event in history["versions"]:
+                member = event["value"].strip().casefold()
+                last_events.pop(member, None)
+                last_events[member] = event
             earlier = [event["value"] for event in last_events.values() if event["event"] == "removed"]
             label = "former members"
         else:
@@ -224,7 +228,10 @@ def report(root, *, answers=None, instrument_path=None, output=None):
 
     from evals import answerability_probe
 
+    quarantined = {row["question_id"]: row.get("consolidation", {}).get("quarantined", 0) for row in rows}
     summary = {"n": len(rows), "context_manifest": manifest, "scoring": scoring,
+               "quarantined": sum(quarantined.values()),
+               "quarantined_by_question": {qid: count for qid, count in quarantined.items() if count},
                "arms": scores(rows), "by_question_type": {},
                "leaks": leak_check.check_rows(rows), "answerability": answerability_probe.probe_rows(rows)}
     for kind in ALL_TYPES:
@@ -287,9 +294,8 @@ def main(argv=None):
             run_answer(args.out, endpoint_args(args, "answerer"), endpoint_args(args, "judge"))
         if args.phase == "report":
             report(args.out)
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
-        print(f"LongMemEval incomplete: {exc}", file=sys.stderr)
-        return 2
+    except (Exception, SystemExit) as exc:
+        return report_incomplete("LongMemEval", exc)
     return 0
 
 

@@ -15,9 +15,9 @@
 # absent banks invalidate the run); 2 judge
 # N replicates; 3 verdict vs baseline.
 #
-#   evals\regression_gate.ps1                # 2 replicates, gate verdict
-#   evals\regression_gate.ps1 -Replicates 1  # single pass, no drift canary
-#   evals\regression_gate.ps1 -Establish     # (re)write the baseline
+#   evals\_python_regression_gate.ps1                # 2 replicates, gate verdict
+#   evals\_python_regression_gate.ps1 -Replicates 1  # single pass, no drift canary
+#   evals\_python_regression_gate.ps1 -Establish     # (re)write the baseline
 #
 # Replicates: 2, and NOT because the judge is noisy — because it must not be.
 # Replicates re-judge byte-identical persisted contexts, so on the

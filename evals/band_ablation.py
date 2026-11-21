@@ -903,7 +903,7 @@ def cmd_rebuild(args) -> int:
     print(f"""
 ── GPU window (answer phase; needs the Qwen endpoint at :1234) ──────────
 for each TAG in {' '.join(tags)}:
-  python evals/longmemeval_bench.py --dataset {args.dataset} --extractor {ex} --tag TAG --phase answer
+  python evals/_python_longmemeval_bench.py --dataset {args.dataset} --extractor {ex} --tag TAG --phase answer
   python evals/replicate.py spawn --dataset {args.dataset} --extractor {ex} --tag TAG -n 4
   python evals/_python_replicate.py run   --dataset {args.dataset} --extractor {ex} --tag TAG
   python evals/replicate.py agg   --dataset {args.dataset} --extractor {ex} --tag TAG

@@ -37,11 +37,11 @@ live bank is never touched. Results append per-question to a resumable JSONL
 
 Usage (repo root):
 
-  PYTHONPATH=. python evals/longmemeval_bench.py --dataset oracle --limit 3
-  PYTHONPATH=. python evals/longmemeval_bench.py --dataset s --extractor qwen-27b
-  PYTHONPATH=. python evals/longmemeval_bench.py --dataset s --extractor gemma-e2b --phase extract
-  PYTHONPATH=. python evals/longmemeval_bench.py --dataset s --extractor gemma-e2b --phase answer
-  PYTHONPATH=. python evals/longmemeval_bench.py --dataset s --extractor gemma-e2b --report
+  PYTHONPATH=. python evals/_python_longmemeval_bench.py --dataset oracle --limit 3
+  PYTHONPATH=. python evals/_python_longmemeval_bench.py --dataset s --extractor qwen-27b
+  PYTHONPATH=. python evals/_python_longmemeval_bench.py --dataset s --extractor gemma-e2b --phase extract
+  PYTHONPATH=. python evals/_python_longmemeval_bench.py --dataset s --extractor gemma-e2b --phase answer
+  PYTHONPATH=. python evals/_python_longmemeval_bench.py --dataset s --extractor gemma-e2b --report
 """
 from __future__ import annotations
 

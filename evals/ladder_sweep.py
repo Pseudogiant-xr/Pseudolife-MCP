@@ -15,7 +15,7 @@ from evals.ladder_pair_compare import clears_ladder
 from evals.retained_artifacts import fingerprint, read_json, record
 from evals.retained_daemon import (
     BenchError, add_daemon_arguments, add_endpoint_arguments, bench_config, daemon_setup,
-    drain_dream, endpoint_args,
+    drain_dream, endpoint_args, report_incomplete,
 )
 
 
@@ -79,21 +79,21 @@ def run_rung(open_bank, config, extractor):
 
 def abstention(open_bank, extractor, options):
     rows = []
-    for guard in (0.0, 0.3, 0.5):
+    for guard in (0.3, 0.5, 0.65, 0.75, 0.85):
         for floor in (0.0, 0.5, 0.65, 0.70, 0.75, 0.80):
             config = bench_config(**{**options, "floor": guard})
             config["memory"]["search_confidence_floor"] = floor
             with open_bank(config, extractor) as bank:
                 ingest(bank, CORPUS)
-                drain_dream(bank.tool, stored=len(CORPUS))
+                tally = drain_dream(bank.tool, stored=len(CORPUS))
 
                 def refuses(question):
                     hit = bank.search(question, TOP_K)
                     return hit.get("low_confidence") is True and not hit.get("cortex")
 
-                rows.append({"guard": guard, "floor": floor, "config": config,
-                             "unanswerable_abstained": sum(refuses(q) for _, _, q in UNANSWERABLE),
-                             "answerable_abstained": sum(refuses(p["question"]) for p in PAIRS)})
+                rows.append({"guard": guard, "floor": floor, "config": config, "consolidation": tally,
+                             "abstain_recall_unanswerable": round(fmean(refuses(q) for _, _, q in UNANSWERABLE), 3),
+                             "false_abstain_answerable": round(fmean(refuses(p["question"]) for p in PAIRS), 3)})
     return rows
 
 
@@ -138,7 +138,10 @@ def report(paths):
         if name in failures or name == CONTROL_NAME:
             raise BenchError("record each compared rung with a distinct name")
         failures[name] = clears_ladder(row, metrics)
-        results.append({"rung": name, **{key: row[key] for key in metrics}, "failed": failures[name]})
+        cells = row.get("replicates", [row])
+        results.append({"rung": name, **{key: row[key] for key in metrics}, "failed": failures[name],
+                        "quarantined_per_cell": [cell.get("consolidation", {}).get("quarantined", 0)
+                                                 for cell in cells]})
     return {"instrument": instrument, "control_sha256": control["control_sha256"],
             "control": metrics, "results": results,
             "first_viable_rung": next((item["rung"] for item in results if not item["failed"]), None)}
@@ -171,14 +174,14 @@ def main(argv=None):
             print(f"First viable rung: {summary['first_viable_rung'] or 'none'}")
             return 0
         name = args.rung or args.abstain or args.supersede
-        if name in {"regex", "regex-floor"} or args.system_prompt_file or args.literal_gate:
+        if name in {"floor", "regex", "regex-floor"} or args.system_prompt_file or args.literal_gate:
             raise BenchError("use an explicit Rust extractor endpoint and the daemon's supported prompt policy; "
                              "the Python regex and local prompt or literal-gate overrides are unavailable")
         if args.replicates < 1 or args.window < 0:
             raise BenchError("provide a positive replicate count and a nonnegative facts window")
         if args.replicates > 1 and (not args.rung or args.rung == CONTROL_NAME):
             raise BenchError("replicates apply only to model rungs")
-        setup = daemon_setup(args)
+        setup = daemon_setup(args, output_is_file=True)
         control_config = bench_config(floor=0.3)
         instrument = {"policy": POLICY, "daemon": setup.provenance(),
                       "corpus_sha256": fingerprint(PAIRS + DISTRACTORS), "control_config": control_config}
@@ -209,9 +212,8 @@ def main(argv=None):
             output.update({**cells[0], "config": config, "replicates": cells,
                            "failed_ladder_checks": clears_ladder(cells[0], metrics)})
         record(args.out, output)
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
-        print(f"Rust extractor ladder incomplete: {exc}", file=sys.stderr)
-        return 2
+    except (Exception, SystemExit) as exc:
+        return report_incomplete("Rust extractor ladder", exc)
     return 0
 
 

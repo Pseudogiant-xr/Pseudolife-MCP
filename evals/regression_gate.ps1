@@ -18,12 +18,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
 if (-not (Test-Path -LiteralPath $Fixture -PathType Leaf)) {
-    Write-Host 'Local Rust gate fixture missing. Project the pinned dumps with evals/rebuild_contexts.py.'
+    Write-Host 'Local Rust gate fixture missing. From the checkout run:'
+    Write-Host "  python evals/rebuild_contexts.py --dump-dir <local-bank-dumps> --out `"$Fixture`""
+    Write-Host 'The default fixture path is git-ignored by design.'
     exit 2
 }
 if (-not $Establish -and -not (Test-Path -LiteralPath $Baseline -PathType Leaf)) {
-    Write-Host 'Rust baseline missing. The judged gate cannot pass until a measured Rust baseline exists.'
+    Write-Host 'Rust baseline missing. Once authorised by the maintainer, run evals/regression_gate.ps1 -Establish -Out <dir> with the same instrument inputs.'
+    Write-Host 'The maintainer reviews <dir>/baseline-candidate.json and commits it as evals/results/rust-quality/regression_gate.baseline.json.'
     exit 2
 }
 if (-not ($Out -and $Daemon -and $DaemonRevision -and $OnnxDir -and $OrtLibrary -and $Scratch)) {
@@ -58,8 +62,27 @@ try {
     . (Join-Path $PSScriptRoot 'qwen_server.ps1')
     try {
         if (-not (Start-Qwen -Owned)) { exit 2 }
-        & $Python @arguments
-        if ($LASTEXITCODE -in @(0, 1)) { exit $LASTEXITCODE }
+        $measuredRegression = $false
+        & $Python @arguments | ForEach-Object {
+            if ($_ -ceq 'Rust retrieval gate regressed') { $measuredRegression = $true }
+            Write-Host $_
+        }
+        $driverExit = $LASTEXITCODE
+        if ($driverExit -eq 0) { exit 0 }
+        if ($driverExit -eq 1 -and $measuredRegression) {
+            $verdictPath = Join-Path $Out 'verdict.json'
+            if (Test-Path -LiteralPath $verdictPath -PathType Leaf) {
+                $verdict = Get-Content -Raw -LiteralPath $verdictPath | ConvertFrom-Json -AsHashtable
+                $regressions = $verdict['regressions']
+                if ($regressions -is [array] -and $regressions.Count -gt 0 -and
+                    @($regressions | Where-Object { $_ -isnot [string] -or -not $_.Trim() }).Count -eq 0) {
+                    exit 1
+                }
+            }
+            Write-Host 'Driver reported a regression without a valid verdict.json. Inspect the run output and retry.'
+        } elseif ($driverExit -eq 1) {
+            Write-Host 'Driver exited without confirming a measured regression. Inspect the run output and retry.'
+        }
         exit 2
     } finally {
         Stop-Qwen -Owned

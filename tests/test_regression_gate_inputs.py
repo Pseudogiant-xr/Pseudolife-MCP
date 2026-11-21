@@ -42,6 +42,49 @@ def test_rust_gate_refuses_unmeasured_inputs_before_loading_qwen(
     assert not (tmp_path / "loaded").exists()
 
 
+@pytest.mark.parametrize(("driver_exit", "signal_regression", "verdict", "expected"), [
+    (0, False, None, 0),
+    (1, True, {"regressions": ["rag accuracy regressed"]}, 1),
+    (1, True, {"regressions": []}, 2),
+    (1, True, None, 2),
+    (1, False, {"regressions": ["stale verdict"]}, 2),
+    (2, True, {"regressions": ["must not count"]}, 2),
+])
+def test_rust_gate_maps_post_preflight_exit_and_stops_owned_qwen(
+        tmp_path, driver_exit, signal_regression, verdict, expected):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is not installed")
+    repo = Path(__file__).resolve().parents[1]
+    gate = tmp_path / "regression_gate.ps1"
+    shutil.copyfile(repo / "evals" / gate.name, gate)
+    (tmp_path / "qwen_server.ps1").write_text(
+        "function Start-Qwen { param([switch]$Owned); if (-not $Owned) { throw 'not owned' }; "
+        "Set-Content (Join-Path $PSScriptRoot 'started') 'yes'; return $true }\n"
+        "function Stop-Qwen { param([switch]$Owned); if (-not $Owned) { throw 'not owned' }; "
+        "Set-Content (Join-Path $PSScriptRoot 'stopped') 'yes' }\n", encoding="utf-8")
+    (tmp_path / "regression_gate.py").write_text(
+        "import json, sys\nfrom pathlib import Path\n"
+        "if sys.argv[-1] == '--preflight':\n    sys.exit(0)\n"
+        "out = Path(sys.argv[sys.argv.index('--out') + 1])\nout.mkdir()\n"
+        f"result = {verdict!r}\n"
+        "if result is not None:\n    (out / 'verdict.json').write_text(json.dumps(result), encoding='utf-8')\n"
+        f"if {signal_regression!r}:\n    print('Rust retrieval gate regressed')\n"
+        f"sys.exit({driver_exit})\n", encoding="utf-8")
+    fixture, baseline = tmp_path / "fixture.json", tmp_path / "baseline.json"
+    for path in (fixture, baseline):
+        path.write_text("{}", encoding="utf-8")
+    reply = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(gate), "-Fixture", str(fixture), "-Baseline", str(baseline),
+         "-Out", str(tmp_path / "out"), "-Daemon", "mock", "-DaemonRevision", "mock",
+         "-OnnxDir", "mock", "-OrtLibrary", "mock", "-Scratch", "mock", "-Python", sys.executable],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert reply.returncode == expected, reply.stdout + reply.stderr
+    assert (tmp_path / "started").is_file()
+    assert (tmp_path / "stopped").is_file()
+
+
 def test_missing_bank_directory_preserves_prior_results_and_does_not_launch(tmp_path):
     pwsh = shutil.which("pwsh")
     if not pwsh:

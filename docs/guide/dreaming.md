@@ -587,7 +587,7 @@ layout is off PATH and rotates on auto-update — the shim re-resolves the
 newest at every start).
 
 Extraction quality: the `terra` and `luna` ladder rungs
-(`evals/ladder_sweep.py --rung terra` / `--rung luna`, first measured
+(`evals/_python_ladder_sweep.py --rung terra` / `--rung luna`, first measured
 2026-09-01) score GPT-5.6 Terra and Luna at parity with the Claude
 ceiling rungs on the extraction bench — see the ceiling-probe table in
 `evals/README.md` for the numbers and the single-run caveats. (The shim
