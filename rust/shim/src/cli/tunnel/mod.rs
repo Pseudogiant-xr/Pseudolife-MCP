@@ -398,7 +398,11 @@ struct KeyStatus {
 }
 
 fn setup_command(name: &str, directory: Option<&str>) -> String {
-    let mut command = format!("pseudolife-mcp tunnel setup --profile {name}");
+    tunnel_command("setup", name, directory)
+}
+
+fn tunnel_command(action: &str, name: &str, directory: Option<&str>) -> String {
+    let mut command = format!("pseudolife-mcp tunnel {action} --profile {name}");
     if let Some(directory) = directory {
         command.push_str(&format!(
             " --profile-dir {}",
@@ -425,16 +429,16 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
     };
     match record.liveness {
         Liveness::Running if record.native && updating => format!(
-            "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh it yet"
-        ),
-        Liveness::Running if updating => format!(
-            "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh or stop it yet, so it was left as it is"
+            "tunnel {name} keeps running (process record {file}). Check tunnel status before restarting it"
         ),
         Liveness::Running if record.native => format!(
             "tunnel {name} is running (process record {file}); use tunnel stop to stop its native supervisor"
         ),
+        Liveness::Running if updating => format!(
+            "the Python client started tunnel {name} (process record {file}). The native client cannot verify or restart that launch and left it running. Use the Python client that started it to stop it"
+        ),
         Liveness::Running => format!(
-            "tunnel {name} is running (process record {file}); this client cannot refresh or stop it yet"
+            "tunnel {name} is running (process record {file}). Use the client that started it to stop it"
         ),
         Liveness::Gone => format!(
             "tunnel {name} is not running; its process record {file} is left from a tunnel that stopped and can be deleted"
@@ -621,13 +625,13 @@ fn report(
     text
 }
 
-/// `tunnel update`: report each saved profile's tunnel as it is. This client
-/// cannot refresh a running tunnel yet, so it starts, stops and signals
-/// nothing: a running tunnel is reported `stale` and left running, a record
-/// whose process is gone is named as a file to delete, and neither a record
-/// nor a key ever stops the command. Refused only for a store or profile it
-/// cannot trust (exit 2), and exit 3 when nothing is saved at all.
+/// `tunnel update`: check the running launch against this runtime and report
+/// how to restart a stale tunnel. The release updater consumes this report.
 fn update(root: &Path) -> Answer {
+    update_with_runtime(root, std::env::current_exe().ok().as_deref())
+}
+
+fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
     // A store this client cannot list is a refusal with its cause, never a
     // deferral: the update step shows the cause to the user.
     let unreadable = |fail: Fail| match fail {
@@ -713,6 +717,25 @@ fn update(root: &Path) -> Answer {
                 "false",
                 format!("{unread}; it has no tunnel process record, so no tunnel of it runs"),
             ),
+            (Some(record), Err(true))
+                if record.native && record.ready && record.liveness == Liveness::Running =>
+            {
+                let (state, detail) = match check_running_launch(root, name, executable) {
+                    Ok(()) => (
+                        "current",
+                        "already running on the current runtime".to_owned(),
+                    ),
+                    Err(cause) => ("stale", cause),
+                };
+                (
+                    state,
+                    "true",
+                    format!(
+                        "tunnel {name} (process record {}): {detail}",
+                        record.path.display()
+                    ),
+                )
+            }
             (Some(record), unread) => {
                 // A stopped tunnel needs nothing and leaves the update
                 // `current`; an unread profile is named so the user can fix it.
@@ -799,6 +822,45 @@ fn update(root: &Path) -> Answer {
         ),
         0,
     ))
+}
+
+fn check_running_launch(root: &Path, name: &str, executable: Option<&Path>) -> Result<(), String> {
+    let directory = root.to_str();
+    let status = || bridge::status_command(name, directory);
+    let explain = |failure| match failure {
+        Fail::Detail(detail) => detail,
+        Fail::Tunnel(message) => format!("{message}. Check with `{}`", status()),
+        Fail::Defer => format!(
+            "the private key state could not be read. Check with `{}`",
+            status()
+        ),
+    };
+    setup::check_pending(root, name).map_err(explain)?;
+    if setup::validate_previous_key(root, name).map_err(explain)? {
+        return Err(format!(
+            "the previous key is still retained. Check with `{}`",
+            status()
+        ));
+    }
+    let executable = executable.ok_or_else(|| {
+        "the installed client executable could not be identified. Run update through the installed launcher".to_owned()
+    })?;
+    runtime::identity::active(root, name, executable, None)
+        .map(|_| ())
+        .map_err(|cause| {
+            if cause == runtime::identity::CHANGED {
+                let stop = tunnel_command("stop", name, directory);
+                let run = tunnel_command("run", name, directory);
+                format!(
+                    "the running launch differs from the current runtime or saved settings. Run `{stop}`, then `{run}` to reconnect the tunnel"
+                )
+            } else {
+                format!(
+                    "the running launch could not be verified against the current runtime and saved settings. Check with `{}`",
+                    status()
+                )
+            }
+        })
 }
 
 fn verify(options: &Options, root: &Path) -> Output {
@@ -1083,9 +1145,9 @@ mod tests {
         assert_eq!(entry["running"], true);
         let detail = report["detail"].as_str().unwrap();
         assert!(
-            detail.contains("tunnel dot keeps running on its current runtime")
-                && detail
-                    .contains("this client cannot refresh or stop it yet, so it was left as it is"),
+            detail.contains("the Python client started tunnel dot")
+                && detail.contains("cannot verify or restart that launch and left it running")
+                && detail.contains("Use the Python client that started it to stop it"),
             "{detail}"
         );
         // Still running afterwards: the record and this process are untouched.

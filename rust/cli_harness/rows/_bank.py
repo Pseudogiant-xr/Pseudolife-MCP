@@ -6,8 +6,8 @@ test login (``~/.pseudolife-mcp/test-pg.env``), a role that creates its own
 databases and cannot connect to the bank. Every name must start with
 ``pl_cf_``; the production guard is asked again on every connection.
 
-The schema comes from the Rust daemon's committed schema plan; rows come from the
-oracle's writers or the oracle test suite's seeders, never from this module.
+The schema comes from the Rust daemon's committed schema plan. The callers
+supply their captured fixtures, harness data or remaining oracle seeds.
 ``dump`` reads back every public table, sequence and catalog shape so two
 arms' post-states can be compared exactly.
 """
