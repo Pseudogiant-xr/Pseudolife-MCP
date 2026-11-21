@@ -18,6 +18,7 @@
 //! exit 1 means failed.
 use crate::cli::connect::files::{self, Fail, Read as JsonRead, TokenFail};
 use crate::cli::connect::pyjson::{self, Dict, J};
+use crate::runtime::registrations;
 use crate::setup::codex::{self, SetupError};
 use serde_json::{Value, json};
 use std::{
@@ -566,22 +567,21 @@ fn gemini_guard(path: &Path) -> Value {
         if !files::is_file(path).ok()? {
             return None;
         }
-        let Ok(JsonRead::Ok(config)) = files::read_json(path) else {
-            return None;
-        };
-        let servers = pyjson::get(&config, "mcpServers")?.as_dict()?;
-        let registration = pyjson::get(servers, SERVER)?.as_dict()?;
-        let Some(env) = pyjson::get(registration, "env") else {
+        let bytes = registrations::read_optional(path).ok()??;
+        let config = registrations::json_bytes(&bytes).ok()?;
+        let registration = config.get("mcpServers")?.get(SERVER)?.as_object()?;
+        let Some(env) = registration.get("env") else {
             return Some("absent");
         };
-        let Some(guard) = pyjson::get(env.as_dict()?, codex::NO_SPAWN_KEY) else {
+        let Some(guard) = env.as_object()?.get(codex::NO_SPAWN_KEY) else {
             return Some("absent");
         };
-        let guard = guard.py_str().ok()?;
-        match pyjson::py_strip(&guard).to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Some("enabled"),
-            _ => Some("absent"),
-        }
+        let guard = guard.as_str()?;
+        Some(if crate::lifecycle::spawn_disabled(Some(guard)) {
+            "enabled"
+        } else {
+            "absent"
+        })
     };
     json!({"status": inspect().unwrap_or("not-verified")})
 }
@@ -616,7 +616,13 @@ async fn verify_token(
     };
     match probe(&url, &token).await {
         Ok(()) => json!({"status": "ready"}),
-        Err(error) => failed(error.to_string()),
+        Err(error) => {
+            let mut report = failed(error.to_string());
+            if let Some(failure) = error.credential_check() {
+                report["credential_check"] = json!(failure.label());
+            }
+            report
+        }
     }
 }
 
@@ -677,15 +683,36 @@ mod tests {
         assert_eq!(absent["status"], "absent");
     }
 
+    #[test]
+    fn gemini_guard_uses_the_registration_parser_and_shim_predicate() {
+        let path =
+            std::env::temp_dir().join(format!("installer-guard-{}.json", uuid::Uuid::new_v4()));
+        let json = r#"{"mcpServers":{"pseudolife-memory":{"env":{"PSEUDOLIFE_MCP_NO_SPAWN":"1"}}},"extra":NaN}"#;
+        std::fs::write(&path, json).unwrap();
+        let malformed = gemini_guard(&path);
+        std::fs::write(
+            &path,
+            json.replace("NaN", "null")
+                .replace(r#""1""#, r#""\u001c1""#),
+        )
+        .unwrap();
+        let disabled = gemini_guard(&path);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(malformed["status"], "not-verified");
+        assert_eq!(disabled["status"], "absent");
+    }
+
     #[tokio::test]
     async fn installer_verification_reports_the_rejected_current_credential_without_exposing_it() {
         let token = "fixture-bearer";
         let report = verify_token("https://daemon.example.com/", Ok(Some(token.to_owned())), async |url, sent| {
             assert_eq!(url, "https://daemon.example.com");
             assert!(sent == token);
-            Err(crate::setup::codex::SetupError("The installer credential was not accepted by the configured daemon. Supply a token accepted by that daemon, then rerun the installer."))
+            Err(crate::setup::codex::SetupError("The installer credential was not accepted by the configured daemon. Supply a token accepted by that daemon, then rerun the installer.")
+                .with_credential_check(codex::CredentialCheckFailure::Refused))
         }).await;
         assert_eq!(report["status"], "failed");
+        assert_eq!(report["credential_check"], "refused");
         assert!(
             report["recovery"]
                 .as_str()
