@@ -417,18 +417,25 @@ fn recorded_result(case: &mut Value, observed: Value) {
 
 #[test]
 fn record_config_knobs() {
-    let write = std::env::var("PL_CONFIG_KNOBS_WRITE").as_deref() == Ok("1");
+    use sha2::{Digest, Sha256};
+
+    let request = std::env::var("PL_CONFIG_KNOBS_WRITE").ok();
     let mutant =
         cfg!(feature = "mutants") || std::env::var_os("PSEUDOLIFE_DAEMON_MUTANT").is_some();
-    assert!(
-        !(write && mutant),
-        "recorder refuses to write observations from a mutant build or selection"
-    );
+    let automated = std::env::var_os("NEXTEST").is_some()
+        || std::env::var_os("GITHUB_ACTIONS").is_some()
+        || std::env::var("CI").as_deref() == Ok("true");
+    let write = config_knob_write_mode(request.as_deref(), mutant, automated)
+        .unwrap_or_else(|error| panic!("{error}"));
     let root = scratch("record-config-knobs");
     let observed = observe_config_knobs(&root);
     std::fs::remove_dir_all(&root).unwrap();
     let expected = KNOBS_JSON.replace("\r\n", "\n");
     if observed == expected {
+        println!(
+            "config-knobs.sha256 {:x}",
+            Sha256::digest(expected.as_bytes())
+        );
         return;
     }
     if write {
@@ -447,6 +454,32 @@ fn record_config_knobs() {
         expected.lines().nth(first).unwrap_or("<end of file>"),
         observed.lines().nth(first).unwrap_or("<end of file>"),
     );
+}
+
+fn config_knob_write_mode(
+    request: Option<&str>,
+    mutant: bool,
+    automated: bool,
+) -> Result<bool, &'static str> {
+    if request != Some("1") {
+        return Ok(false);
+    }
+    if automated {
+        return Err("recorder refuses to write during automation");
+    }
+    if mutant {
+        return Err("recorder refuses to write observations from a mutant build or selection");
+    }
+    Ok(true)
+}
+
+#[test]
+fn config_knob_write_is_exact_manual_and_unmutated() {
+    assert_eq!(config_knob_write_mode(None, false, false), Ok(false));
+    assert_eq!(config_knob_write_mode(Some("01"), false, true), Ok(false));
+    assert_eq!(config_knob_write_mode(Some("1"), false, false), Ok(true));
+    assert!(config_knob_write_mode(Some("1"), true, false).is_err());
+    assert!(config_knob_write_mode(Some("1"), false, true).is_err());
 }
 
 fn observe_config_knobs(root: &Path) -> String {
@@ -510,11 +543,16 @@ fn observe_config_knobs(root: &Path) -> String {
             assert_eq!(std::fs::read_to_string(&cfg).ok().as_deref(), before);
             continue;
         }
+        let quoted = quoted_here(name);
+        if quoted.is_some() {
+            got.as_ref()
+                .expect("the declared quoting case must succeed");
+        }
         let observed = match got {
             Ok(answer) => {
                 let mut file = std::fs::read_to_string(&cfg).unwrap().replace("\r\n", "\n");
                 crate::config::load(&cfg).unwrap();
-                if let Some(quoted) = quoted_here(name) {
+                if let Some(quoted) = quoted {
                     assert_eq!(file, quoted, "{name}");
                     file = case["ok"]["file"].as_str().unwrap().to_owned();
                 }

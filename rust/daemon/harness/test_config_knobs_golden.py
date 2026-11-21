@@ -32,20 +32,23 @@ def test_recorder_cold_import_without_product_package():
         assert recorder.TARGET.is_file()
 
 
-@pytest.mark.parametrize("status, stdout, expected", [
-    (0, "test config_io::tests::record_config_knobs ... ok\n", 0),
-    (0, "running 0 tests\n", 1),
-    (101, "config-knobs.json differs at line 1\n", 101),
+@pytest.mark.parametrize("status, stdout, stamp, expected", [
+    (0, "test config_io::tests::record_config_knobs ... ok\n", True, 0),
+    (0, "test config_io::tests::record_config_knobs ... ok\n", False, 1),
+    (0, "running 0 tests\n", False, 1),
+    (101, "config-knobs.json differs at line 1\n", False, 101),
 ])
-def test_comparison_launcher_requires_a_real_result(monkeypatch, status, stdout, expected):
+def test_comparison_launcher_requires_a_current_result(monkeypatch, status, stdout, stamp, expected):
     monkeypatch.setenv("PSEUDOLIFE_DAEMON_MUTANT", "config-read-no-saved")
     monkeypatch.setenv("PL_CONFIG_KNOBS_RESERVED", "1")
 
     def run(argv, *, env, **kwargs):
-        assert argv[1:] == ["--exact", "config_io::tests::record_config_knobs"]
+        assert argv[1:] == ["--exact", "config_io::tests::record_config_knobs", "--nocapture"]
         assert "PSEUDOLIFE_DAEMON_MUTANT" not in env
         assert "PL_CONFIG_KNOBS_RESERVED" not in env
-        return subprocess.CompletedProcess(argv, status, stdout=stdout, stderr="")
+        golden = gen_config_knobs.TARGET.read_text(encoding="utf-8").encode("utf-8")
+        digest = hashlib.sha256(golden).hexdigest() if stamp else "stale"
+        return subprocess.CompletedProcess(argv, status, stdout=f"config-knobs.sha256 {digest}\n{stdout}", stderr="")
 
     monkeypatch.setattr(gen_config_knobs.subprocess, "run", run)
     assert gen_config_knobs.main(["--rust-test-bin", "fixture"]) == expected

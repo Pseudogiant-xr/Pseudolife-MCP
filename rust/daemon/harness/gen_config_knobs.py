@@ -6,6 +6,7 @@ from rust/. The native test owns observation and deliberate recording.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -22,12 +23,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("PSEUDOLIFE_", "PL_CONFIG_KNOBS_"))}
-    result = subprocess.run([str(args.rust_test_bin.resolve()), "--exact", RECORD_TEST],
+    current = TARGET.read_text(encoding="utf-8").encode("utf-8")
+    stamp = f"config-knobs.sha256 {hashlib.sha256(current).hexdigest()}"
+    result = subprocess.run([str(args.rust_test_bin.resolve()), "--exact", RECORD_TEST, "--nocapture"],
                             env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(result.stdout, end="")
     print(result.stderr, file=sys.stderr, end="")
-    if result.returncode == 0 and f"test {RECORD_TEST} ... ok" not in result.stdout:
-        print(f"candidate did not run {RECORD_TEST}", file=sys.stderr)
+    if result.returncode == 0 and stamp not in result.stdout:
+        print("candidate did not verify the checkout's config-knobs.json; rebuild the test binary", file=sys.stderr)
         return 1
     return result.returncode
 

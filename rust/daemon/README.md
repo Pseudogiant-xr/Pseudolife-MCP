@@ -202,7 +202,8 @@ all other response fields and the structural comparator remain unchanged.
 with the report's recorded torch and ONNX observations. Use the model and
 corpus settings that produced the report, including `--ranking-banks <dir>`
 if the capture included the 78 replicated-eval bank dumps. Vectors compare
-exactly by default. `--accepted-fp32` uses the artifact-specific bounds in
+exactly by default. Use `--model-root <dir>` when the recorded model files
+are now at a different local path. `--accepted-fp32` uses the artifact-specific bounds in
 `spec-embedding.md` and keeps exact token, cache and rank comparisons.
 An unavailable arm still fails unless the declared Qwen ONNX
 `position_ids` exception applies. `--fixture --golden
@@ -216,7 +217,7 @@ Run `cargo test -p pseudolife-daemon --bin pseudolife-daemon
 config_io::tests::record_config_knobs -- --exact` from `rust/` to compare
 native defaults, coercion and YAML reads and writes with the Console knob
 golden. Review the diff first. For a deliberate update, run the same test
-with `PL_CONFIG_KNOBS_WRITE=1` in its environment, then review the golden
+with `PL_CONFIG_KNOBS_WRITE=1` in its environment outside CI and Nextest, then review the golden
 diff and update the fixture hash in `harness/test_config_knobs_golden.py`.
 `harness/gen_config_knobs.py --rust-test-bin <test executable>` runs the
 comparison with a prebuilt test binary.

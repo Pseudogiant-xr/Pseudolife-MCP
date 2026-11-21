@@ -121,7 +121,7 @@ def compare(oracle_data, candidate, max_abs=0., cosine_floor=1.):
     return diffs, metrics
 
 
-def rankings(py, rs, document_op=0, query_op=1):
+def rankings(py, rs, document_op=0, query_op=1, *, recorded_order=None):
     import numpy as np
     import torch
     torch.set_num_threads(3)
@@ -137,9 +137,12 @@ def rankings(py, rs, document_op=0, query_op=1):
         return [sorted(range(len(docs)), key=lambda i: scores[i], reverse=True)
                 for scores in [(docs @ q).tolist() for q in queries]]
     a, b = arrays(py), arrays(rs)
-    return {"queries": len(a), "identical_full": sum(x == y for x, y in zip(a, b)),
-            "identical_top8": sum(x[:8] == y[:8] for x, y in zip(a, b)),
-            "python_order": a, "rust_order": b}
+    result = {"queries": len(a), "identical_full": sum(x == y for x, y in zip(a, b)),
+              "identical_top8": sum(x[:8] == y[:8] for x, y in zip(a, b)),
+              "python_order": a, "rust_order": b}
+    if recorded_order is not None:
+        result["matches_recorded_order"] = b == recorded_order
+    return result
 
 
 def run(args):
@@ -187,11 +190,21 @@ def run(args):
         raise ValueError("recorded embedding reference does not match the requested corpus and config")
     report["reference_sha256"] = hashlib.sha256(reference_bytes).hexdigest()
     report["arms"] = {backend: reference["arms"][backend] for backend in ("torch", "onnx")}
+    report["reference_rankings"] = {}
+    for backend, arm in report["arms"].items():
+        if "error" not in arm:
+            recorded = reference[backend + "_comparison"]
+            report["reference_rankings"][backend] = {
+                "canonical": recorded["ranking"]["python_order"],
+                "replicated": [row["python_order"] for row in recorded["replicated_slice"]],
+            }
     with tempfile.TemporaryDirectory(prefix="pl_cf_emb_") as tmp:
         tmp = Path(tmp)
         cfg_path = tmp / "config.yaml"
         cfg_path.write_text(json.dumps({"embedding": dict(config, backend="onnx", device="cpu")}), encoding="utf-8")
         rs_env = dict(env, PSEUDOLIFE_DAEMON_EMBED_PROBE="1")
+        if args.model_root is not None:
+            rs_env["PSEUDOLIFE_DAEMON_ONNX_DIR"] = str(args.model_root.resolve())
         if args.mutant:
             rs_env["PSEUDOLIFE_DAEMON_MUTANT"] = args.mutant
         try:
@@ -236,13 +249,20 @@ def finish_report(report, args):
         diffs, metrics = compare(py, rs,
             FP32_MAX_ABS if args.accepted_fp32 else 0.,
             FP32_MIN_COSINE if args.accepted_fp32 else 1.)
-        rank = rankings(py, rs)
+        recorded = report.get("reference_rankings")
+        reference = recorded[backend] if recorded is not None else None
+        expected = reference["canonical"] if reference is not None else None
+        rank = rankings(py, rs, recorded_order=expected)
         report[backend + "_comparison"] = {"diffs": diffs, "metrics": metrics, "ranking": rank}
-        slice_ranks = [rankings(py, rs, pair["documents"], pair["query"]) for pair in report["ranking_pairs"]]
+        pairs = report["ranking_pairs"]
+        expected_slices = reference["replicated"] if reference is not None else [None] * len(pairs)
+        slice_ranks = [rankings(py, rs, pair["documents"], pair["query"], recorded_order=order)
+                       for pair, order in zip(pairs, expected_slices, strict=True)]
         report[backend + "_comparison"]["replicated_slice"] = slice_ranks
-        if diffs or rank["identical_full"] != rank["queries"]:
+        if diffs or rank["identical_full"] != rank["queries"] or not rank.get("matches_recorded_order", True):
             errors.append(f"{backend}: differs")
-        if any(r["identical_full"] != r["queries"] for r in slice_ranks):
+        if any(r["identical_full"] != r["queries"] or not r.get("matches_recorded_order", True)
+               for r in slice_ranks):
             errors.append(f"{backend}: replicated slice rank differs")
     report["errors"] = errors
     report["rank_consumer"] = {"name": "cortex/rebuild_contexts dense cosine",
@@ -262,6 +282,8 @@ def main(argv=None):
     mode.add_argument("--recompare", type=Path, help="recheck the observations in an existing report")
     ap.add_argument("--rust-bin", type=Path)
     ap.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2")
+    ap.add_argument("--model-root", type=Path,
+                    help="use relocated local artifacts without changing the recorded --model setting")
     ap.add_argument("--onnx-file", default="onnx/model.onnx")
     ap.add_argument("--prefix", default=PREFIX)
     ap.add_argument("--cap", type=int, default=512)
@@ -278,6 +300,8 @@ def main(argv=None):
         ap.error("--rust-bin is required to run the native embedder")
     if args.fixture != (args.golden is not None):
         ap.error("--fixture and --golden must be used together")
+    if args.model_root is not None and args.reference is None:
+        ap.error("--model-root requires --reference")
     source = args.golden or args.recompare or args.reference
     if (args.out.resolve() == source.resolve()
             or (args.out.exists() and source.exists() and args.out.samefile(source))):

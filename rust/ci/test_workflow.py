@@ -22,7 +22,7 @@ SYSTEMS = ["ubuntu-latest", "windows-latest"]
 
 def test_config_knob_golden_write_opt_in_is_manual():
     result = subprocess.run(
-        ["git", "grep", "-I", "-l", "-F", "PL_CONFIG_KNOBS_WRITE", "--", ".",
+        ["git", "grep", "-I", "-i", "-l", "-F", "PL_CONFIG_KNOBS_WRITE", "--", ".",
          ":(exclude)rust/daemon/src/config_io_tests.rs",
          ":(exclude)rust/ci/test_workflow.py", ":(exclude,glob)**/*.md"],
         cwd=ROOT, capture_output=True, text=True,

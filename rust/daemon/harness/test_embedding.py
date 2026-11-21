@@ -102,17 +102,23 @@ def test_recorded_reference_checks_fresh_candidate_and_survives_timeout(monkeypa
     recorded["operations"].append(observation([[1., 0.]])["operations"][0])
     recorded["identities"] = {"onnx/model.onnx": "recorded graph"}
     arms = {"torch": recorded, "onnx": recorded}
-    reference.write_text(json.dumps({"corpus_sha256": hashlib.sha256(corpus.encode()).hexdigest(),
-                                     "ranking_pairs": [], "arms": arms}), encoding="utf-8")
+    orders = {"ranking": {"python_order": [[0, 1]]}, "replicated_slice": []}
+    artifact = {"corpus_sha256": hashlib.sha256(corpus.encode()).hexdigest(),
+                "ranking_pairs": [], "arms": arms, "torch_comparison": orders,
+                "onnx_comparison": orders}
+    reference.write_text(json.dumps(artifact), encoding="utf-8")
 
     args = argparse.Namespace(model="fixture-model", onnx_file="onnx/model.onnx", prefix="query ",
         cap=32, ranking_banks=None, rust_bin=tmp_path / "candidate", mutant=None,
         accepted_fp32=False, qwen_position_ids_deferred=False, reference=reference,
-        out=tmp_path / "result.json")
+        model_root=tmp_path / "relocated", out=tmp_path / "result.json")
 
     def run_arm(argv, *, env, **kwargs):
         assert argv == [str(args.rust_bin)]
         assert env["HF_HUB_OFFLINE"] == "1"
+        assert env["PSEUDOLIFE_DAEMON_ONNX_DIR"] == str(args.model_root)
+        config_path = Path(json.loads(kwargs["input"])["config_path"])
+        assert json.loads(config_path.read_text(encoding="utf-8"))["embedding"]["model_name"] == "fixture-model"
         if args.mutant == "timeout":
             raise subprocess.TimeoutExpired(argv, 600)
         candidate = json.loads(json.dumps(recorded))
@@ -122,6 +128,14 @@ def test_recorded_reference_checks_fresh_candidate_and_survives_timeout(monkeypa
 
     monkeypatch.setattr(embedding.subprocess, "run", run_arm)
     assert embedding.run(args) == 0
+    orders["ranking"]["python_order"] = [[1, 0]]
+    reference.write_text(json.dumps(artifact), encoding="utf-8")
+    assert embedding.run(args) == 1
+    archived = json.loads(args.out.read_text())["torch_comparison"]
+    assert archived["diffs"] == []
+    assert archived["ranking"]["matches_recorded_order"] is False
+    orders["ranking"]["python_order"] = [[0, 1]]
+    reference.write_text(json.dumps(artifact), encoding="utf-8")
     args.mutant = "wrong-vectors"
     assert embedding.run(args) == 1
     assert json.loads(args.out.read_text())["torch_comparison"]["diffs"] == ["operation 0: vectors"]
