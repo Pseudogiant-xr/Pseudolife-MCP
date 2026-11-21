@@ -9,12 +9,21 @@ import copy
 import json
 import math
 import os
+import re
 import signal
 import time
+from collections import Counter, defaultdict
 
 import dbstate
 import pgdisposable as pg
+import psycopg
+from psycopg import sql
 from background_seed import seed_bank
+from rust.harness_support.bank_fixture import assert_fixture_database
+
+
+SESSION_TABLES = ("client_sessions", "episodes", "entries", "meta")
+DREAM_EXCLUDED = {"consolidation", "reflection", "status", "log", "digest"}
 
 
 def register(harness):
@@ -32,8 +41,14 @@ def register(harness):
 
         def prepare_template(self, dsn):
             seed_bank(dsn, "sessions", auto_title=self.auto_title)
-            self.before = dbstate.dump(dsn)
+            self.before = self.snapshot_db(dsn)
             self.refreshes_graph = bool(self.expected_triggers and pg.base_database() and live_edges(dsn))
+
+        def snapshot_db(self, dsn):
+            state = dbstate.dump(dsn)
+            if pg.base_database():
+                read_session_rows(dsn, state)
+            return state
 
         def timeline(self, procs, holders):
             rows = []
@@ -79,12 +94,15 @@ def register(harness):
                                            f"{waiting}); log {daemon.log}")
                     time.sleep(0.1)
                 captured = time.time()
+                if pg.base_database():
+                    read_session_rows(dsn, state)
+                    captured = time.time()
                 self.validate_expected(state)
                 self.closed_states[side] = state
                 normalized = normalize_closes(state, self.before, daemon.started_at_unix, captured)
                 validate_session_writes(normalized, self.before, self.sweep, self.auto_title,
                                         self.expected_triggers, raw=state,
-                                        graph_refresh=self.refreshes_graph)
+                                        graph_refresh=self.refreshes_graph, reap_at=captured)
                 scrubbed = keyed_meta(normalize_refresh_clocks(
                     harness.scrub_declared_rows(normalized, self.before)["state"],
                     self.before, [(daemon.started_at_unix, captured)]))
@@ -99,7 +117,7 @@ def register(harness):
                 harness.wait_settled([d.port for d in procs.values()])
                 arms = {}
                 for side, daemon in procs.items():
-                    state = dbstate.dump(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"])
+                    state = self.snapshot_db(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"])
                     self.validate_expected(state)
                     # Restart must preserve the original close times exactly.
                     validate_restart_clocks(state, self.closed_states[side])
@@ -107,7 +125,7 @@ def register(harness):
                     normalized = normalize_closes(state, self.before, self.starts[side], now)
                     validate_session_writes(normalized, self.before, self.sweep, self.auto_title,
                                             self.expected_triggers, boots=2, raw=state,
-                                            graph_refresh=self.refreshes_graph)
+                                            graph_refresh=self.refreshes_graph, reap_at=now)
                     triggers = daemon.log.read_text(errors="replace").count("session-end dream trigger:")
                     if triggers:
                         raise RuntimeError("restart triggered a second session-end dream")
@@ -127,11 +145,12 @@ def register(harness):
             return normalize_refresh_clocks(state, before, self.clock_window(side))
 
         def validate_snapshot(self, state, before):
-            normalized = normalize_closes(state, before, self.starts["rust"], time.time())
+            now = time.time()
+            normalized = normalize_closes(state, before, self.starts["rust"], now)
             self.validate_expected(state)
             validate_session_writes(normalized, before, self.sweep, self.auto_title,
                                     self.expected_triggers, boots=1 + self.restart, raw=state,
-                                    graph_refresh=self.refreshes_graph)
+                                    graph_refresh=self.refreshes_graph, reap_at=now)
 
         def validate_expected(self, state):
             table = state["rows"]["public.episodes"]
@@ -188,13 +207,131 @@ def register(harness):
     return {s.name: s for s in (SessionReap, SessionSweep, SessionRestart, TombstoneRestart, ResumeRefusal)}
 
 
+def read_session_rows(dsn, snapshot):
+    """Materialize session rows that an ordinary copied-bank dump omits."""
+    with psycopg.connect(dsn) as conn:
+        conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        conn.read_only = True
+        assert_fixture_database(conn)
+        for name in SESSION_TABLES:
+            table = snapshot["rows"]["public." + name]
+            select, first = dbstate._select_list(conn, "public", name)
+            order = dbstate._order_columns(conn, "public", name)
+            ordering = sql.SQL(", ").join(sql.SQL("{}::text").format(sql.Identifier(col))
+                                           for col in (order or [first]))
+            query = sql.SQL("SELECT {} FROM {} ORDER BY {}").format(
+                sql.SQL(select), sql.Identifier("public", name), ordering)
+            table["rows"] = [dbstate._plain(list(row)) for row in conn.execute(query)]
+            table.pop("base_missing", None)
+
+
 def session_rows(snapshot, table):
     data = snapshot["rows"]["public." + table]
     return [dict(zip(data["columns"], row)) for row in data["rows"]]
 
 
+def expected_base_title(started, entries):
+    """Derive the title of a generic inherited root from its seeded entries."""
+    entries = sorted(entries, key=lambda row: row["id"])
+    counts = Counter(row["source"].strip() or "session" for row in entries)
+    signal = {source: count for source, count in counts.items()
+              if source not in {"status", "log", "claude", "agent", "conversation"}}
+    sources = signal or counts
+    source = max(sources, key=sources.get)
+    first = min(entries, key=lambda row: row["ts"])
+    snippet = " ".join(first["text"].split())
+    if len(snippet) > 60:
+        space = snippet.rfind(" ", 0, 60)
+        snippet = snippet[:space if space > 20 else 60].rstrip() + "…"
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(started))
+    return f"{source} - {stamp}" + (f": {snippet}" if snippet else "")
+
+
+def apply_base_reap(episodes, clients, entries, deferred, tombs, fixture_roots, now, sweep, dreams):
+    """Apply the inherited idle closes and deferred expiry to pre-run rows."""
+    by_id = {row["id"]: row for row in episodes}
+    by_key = {row["session_key"]: row for row in clients}
+    children, held = defaultdict(list), defaultdict(list)
+    for row in episodes:
+        children[row["parent_id"]].append(row["id"])
+    for row in entries:
+        held[row["episode_id"]].append(row)
+        if dreams and row["source"] not in DREAM_EXCLUDED and row["dream_state"] == "pending":
+            row["dream_state"] = "acknowledged"
+
+    def subtree(root_id):
+        pending, seen = [root_id], set()
+        while pending:
+            identifier = pending.pop()
+            if identifier in seen:
+                continue
+            seen.add(identifier)
+            pending.extend(children[identifier])
+        return seen
+
+    for root in sorted(episodes, key=lambda row: row["started_at"]):
+        identifier, key = root["id"], root["session_key"]
+        if (identifier in fixture_roots or root["parent_id"] is not None
+                or root["ended_at"] is not None or not key):
+            continue
+        ids = subtree(identifier)
+        content = [row for i in ids for row in held[i]]
+        own = [row["ts"] for row in held[identifier] if row["ts"] > 0]
+        activity = max(max(own, default=root["started_at"]),
+                       max((row["ts"] for row in content if row["ts"] > 0), default=0))
+        if activity > now:
+            continue
+        for i in ids:
+            if by_id[i]["ended_at"] is None:
+                by_id[i]["ended_at"] = f"<close:{i}>"
+        if key in by_key:
+            client = by_key[key]
+            history = client["episode_ids"]
+            client.update(ended_at=f"<close:{identifier}>", end_reason="idle",
+                          episode_ids=history if identifier in history else [*history, identifier])
+        if not any(row["source"] != "digest" for row in content):
+            deferred[identifier] = f"<close:{identifier}>"
+        if content and re.match(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$", root["title"]):
+            root["title"] = expected_base_title(root["started_at"], content)
+            for row in held[identifier]:
+                row["episode_title"] = root["title"]
+
+    # A malformed resume setting stops after the idle closes.
+    if not dreams:
+        return episodes, False
+    deleted = set()
+    for identifier in list(deferred):
+        root = by_id.get(identifier)
+        if root is None or root["ended_at"] is None:
+            del deferred[identifier]
+            continue
+        ended = root["ended_at"]
+        if (isinstance(ended, str) and not sweep
+                or not isinstance(ended, str) and now - ended <= (0 if sweep else 3600)):
+            continue
+        del deferred[identifier]
+        ids = subtree(identifier)
+        if any(row["source"] != "digest" for i in ids for row in held[i]):
+            continue
+        deleted.update(ids)
+        if root["session_key"]:
+            tombs[identifier] = {"session_key": root["session_key"], "ended_at": ended,
+                                 "title": root["title"]}
+    if deleted or sweep:
+        # Handle tombstones outlive the session resume window by default.
+        def ended_at(tomb):
+            ended = tombs[tomb]["ended_at"]
+            return now if isinstance(ended, str) else ended
+
+        live = [key for key in sorted(tombs) if now - ended_at(key) <= 2592000]
+        keep = set(sorted(live, key=ended_at, reverse=True)[:200 - int(sweep)])
+        for key in set(tombs) - keep:
+            del tombs[key]
+    return [row for row in episodes if row["id"] not in deleted], bool(deleted)
+
+
 def validate_session_writes(state, before, sweep, auto_title, expected_triggers, *,
-                            boots=1, raw=None, graph_refresh=False):
+                            boots=1, raw=None, graph_refresh=False, reap_at=None):
     """Compare the entire expected bank after closing the captured fixture."""
     if differences := dbstate.diff(before.get("catalog", {}), state.get("catalog", {})):
         raise RuntimeError(f"session lifecycle changed the seeded catalog: {differences[:8]}")
@@ -225,8 +362,6 @@ def validate_session_writes(state, before, sweep, auto_title, expected_triggers,
     for row in episodes:
         if row["id"] in (empty, work) or row["parent_id"] == work:
             row["ended_at"] = f"<close:{row['id']}>"
-    if sweep:
-        episodes = [row for row in episodes if row["id"] != empty]
     entries = session_rows(before, "entries")
     fixture_timestamps = []
     for row in entries:
@@ -235,10 +370,6 @@ def validate_session_writes(state, before, sweep, auto_title, expected_triggers,
             if expected_triggers:
                 row["dream_state"] = "acknowledged"
                 fixture_timestamps.append(row["ts"])
-
-    for name, rows in (("client_sessions", clients), ("episodes", episodes), ("entries", entries)):
-        table = expected["public." + name]
-        table["rows"] = [[row[column] for column in table["columns"]] for row in rows]
 
     has_base = pg.base_database() is not None
     meta = dict(expected["public.meta"]["rows"])
@@ -256,13 +387,23 @@ def validate_session_writes(state, before, sweep, auto_title, expected_triggers,
         meta["cortex_dream_cursor"] = cursor if expected_triggers and has_base else minimum
     deferred = dict(prior.get("deferred_empty_roots") or {})
     tombs = dict(prior.get("episode_tombstones") or {})
+    swept_base = False
+    if has_base and reap_at is not None:
+        episodes, swept_base = apply_base_reap(
+            episodes, clients, entries, deferred, tombs, {empty, work}, reap_at, sweep, expected_triggers)
     close = f"<close:{empty}>"
     if sweep:
+        episodes = [row for row in episodes if row["id"] != empty]
         tombs[empty] = {"session_key": "empty", "ended_at": close, "title": "empty fixture"}
-        meta["episode_tombstones"] = tombs
     else:
         deferred[empty] = close
+    if sweep or swept_base:
+        meta["episode_tombstones"] = tombs
     meta["deferred_empty_roots"] = deferred
+
+    for name, rows in (("client_sessions", clients), ("episodes", episodes), ("entries", entries)):
+        table = expected["public." + name]
+        table["rows"] = [[row[column] for column in table["columns"]] for row in rows]
 
     if graph_refresh:
         digest = current.get("graph_digest")

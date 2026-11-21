@@ -255,7 +255,8 @@ def test_inventory_rejects_empty_exception_reason(monkeypatch):
 
 @pytest.mark.parametrize('name', ['session-reap', 'session-restart', 'session-resume-refusal',
                                  'session-sweep', 'session-tombstone-restart'])
-def test_background_seed_uses_fixture_with_empty_model_cache(tmp_path, monkeypatch, name):
+@pytest.mark.parametrize('inherited_base', [False, True])
+def test_background_seed_uses_fixture_with_empty_model_cache(tmp_path, monkeypatch, name, inherited_base):
     import os
     import subprocess
 
@@ -267,6 +268,9 @@ def test_background_seed_uses_fixture_with_empty_model_cache(tmp_path, monkeypat
     cache = tmp_path / 'empty-cache'
     cache.mkdir()
     monkeypatch.setenv('HF_HOME', str(cache))
+    if inherited_base:
+        monkeypatch.setenv('PL_HARNESS_BASE_DATABASE', 'pl_cf_mir_inherited')
+    monkeypatch.delenv('PL_HARNESS_BASE_DATABASE', raising=False)
     monkeypatch.setattr(background_sessions.dbstate, 'dump', lambda dsn: {})
 
     class Bank:
