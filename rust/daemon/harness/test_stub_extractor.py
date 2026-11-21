@@ -18,6 +18,16 @@ EVENTS_SYSTEM = "You extract EVENTS from the notes."
 
 NL = chr(10) * 2
 
+
+def prompt_start(name: str) -> str:
+    """The native system prompt's first literal, which selects the stub table."""
+    source = Path(__file__).resolve().parents[1] / "src/dream/prompts.rs"
+    declaration = rf'pub const {name}: &str = concat!\(\s*("(?:[^"\\]|\\.)*")'
+    match = re.search(declaration, source.read_text(encoding="utf-8"))
+    assert match is not None, name
+    return json.loads(match[1])
+
+
 def chat_body(system: str, user: str, model: str = "stub-model") -> bytes:
     return json.dumps({"model": model, "messages": [
         {"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -124,14 +134,11 @@ def test_kind_user_keyed_reply_envelope(stub_factory):
 def test_stage_prompts_have_their_own_kinds():
     """The dream stages' real prompts key their own reply tables."""
     import stub_extractor
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from pseudolife_memory.memory import dream as d
-    assert stub_extractor.request_kind(d._OUTCOME_INFER_SYSTEM_PROMPT) == "outcomes"
-    assert stub_extractor.request_kind(d._LESSON_SYSTEM_PROMPT) == "lessons"
-    assert stub_extractor.request_kind(d._RULE_LESSON_SYSTEM_PROMPT) == "rules"
-    assert stub_extractor.request_kind(
-        d._DIGEST_SYSTEM_PROMPT.format(target_chars=10)) == "digest"
-    assert stub_extractor.request_kind(d._SYSTEM_PROMPT) == "claims"
+    assert stub_extractor.request_kind(prompt_start("OUTCOME_INFER_SYSTEM_PROMPT")) == "outcomes"
+    assert stub_extractor.request_kind(prompt_start("LESSON_SYSTEM_PROMPT")) == "lessons"
+    assert stub_extractor.request_kind(prompt_start("RULE_LESSON_SYSTEM_PROMPT")) == "rules"
+    assert stub_extractor.request_kind(prompt_start("DIGEST_SYSTEM_PROMPT_HEAD")) == "digest"
+    assert stub_extractor.request_kind(prompt_start("SYSTEM_PROMPT")) == "claims"
 
 
 def test_default_reply_model_and_raw_error_entry(stub_factory):
@@ -295,25 +302,21 @@ def judge_user(*pairs):
 
 def test_judge_prompt_has_its_own_kind():
     import stub_extractor
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from pseudolife_memory.memory import dream as d
-    assert stub_extractor.request_kind(d._JUDGE_SYSTEM_PROMPT) == "judge_merges"
-    assert stub_extractor.request_kind(d._LINK_JUDGE_SYSTEM_PROMPT) == "judge_links"
-    assert stub_extractor.request_kind(d._JUNK_JUDGE_SYSTEM_PROMPT) == "judge_junk"
-    assert stub_extractor.request_kind(d._CANDIDATE_JUDGE_SYSTEM_PROMPT) == "judge_candidates"
-    assert stub_extractor.request_kind(d._SLOT_JUDGE_SYSTEM_PROMPT) == "judge_slot_pairs"
+    assert stub_extractor.request_kind(prompt_start("JUDGE_SYSTEM_PROMPT")) == "judge_merges"
+    assert stub_extractor.request_kind(prompt_start("LINK_JUDGE_SYSTEM_PROMPT")) == "judge_links"
+    assert stub_extractor.request_kind(prompt_start("JUNK_JUDGE_SYSTEM_PROMPT")) == "judge_junk"
+    assert stub_extractor.request_kind(prompt_start("CANDIDATE_JUDGE_SYSTEM_PROMPT")) == "judge_candidates"
+    assert stub_extractor.request_kind(prompt_start("SLOT_JUDGE_SYSTEM_PROMPT")) == "judge_slot_pairs"
 
 
 def test_junk_verdicts_answer_by_display():
     import stub_extractor
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from pseudolife_memory.memory import dream as d
-    rows = [{"n": 1, "display": "a, b, c", "reason": "list-artifact"},
-            {"n": 2, "display": "origin/master", "reason": "compound"},
-            {"n": 3, "display": "x' \u2014 detector: y", "reason": "slot-key"}]
-    body = json.dumps({"messages": [
-        {"role": "system", "content": d._JUNK_JUDGE_SYSTEM_PROMPT},
-        {"role": "user", "content": "\n\n".join(d.format_junk_proposal(r) for r in rows)}]}).encode()
+    prompts = [
+        "[1] 'a, b, c' — detector: list-artifact; degree 0; facts 0",
+        "[2] 'origin/master' — detector: compound; degree 0; facts 0",
+        "[3] 'x' — detector: y' — detector: slot-key; degree 0; facts 0",
+    ]
+    body = chat_body(prompt_start("JUNK_JUDGE_SYSTEM_PROMPT"), NL.join(prompts))
     reply = json.loads(stub_extractor.judge_reply(
         {"a, b, c": {"verdict": "delete", "confidence": 0.95},
          "origin/master": [{"verdict": "keep", "confidence": 0.9},
@@ -325,15 +328,12 @@ def test_junk_verdicts_answer_by_display():
 
 def test_link_verdicts_answer_by_src_and_dst():
     import stub_extractor
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from pseudolife_memory.memory import dream as d
-    rows = [{"n": 1, "src": "Bob", "relation": "uses", "dst": "Alpha Node",
-             "src_scopes": ["a", "b"]},
-            {"n": 2, "src": "Hub", "relation": "related-to", "dst": "Beta Store"},
-            {"n": 3, "src": "Nobody", "relation": "uses", "dst": "Nothing"}]
-    body = json.dumps({"messages": [
-        {"role": "system", "content": d._LINK_JUDGE_SYSTEM_PROMPT},
-        {"role": "user", "content": "\n\n".join(d.format_link_proposal(r) for r in rows)}]}).encode()
+    prompts = [
+        "[1] SRC 'Bob' (scopes ['a', 'b']) --uses--> DST 'Alpha Node' (scopes [])",
+        "[2] SRC 'Hub' (scopes []) --related-to--> DST 'Beta Store' (scopes [])",
+        "[3] SRC 'Nobody' (scopes []) --uses--> DST 'Nothing' (scopes [])",
+    ]
+    body = chat_body(prompt_start("LINK_JUDGE_SYSTEM_PROMPT"), NL.join(prompts))
     reply = json.loads(stub_extractor.judge_reply(
         {"Alpha Node|Bob": {"verdict": "accept", "confidence": 0.9},
          "Hub|Beta Store": [{"verdict": "retype", "relation": "uses"},
@@ -362,15 +362,12 @@ def test_link_head_reads_hostile_lines_in_linear_time():
 
 def test_candidate_verdicts_answer_by_their_two_names():
     import stub_extractor
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from pseudolife_memory.memory import dream as d
-    rows = [{"n": 1, "src": "Warehouse", "dst": "Tide Gauge", "similarity": 0.8339},
-            {"n": 2, "src": "postgres", "dst": "Kafka Broker", "similarity": 0.5647,
-             "src_snippets": ["a"]},
-            {"n": 3, "src": "Nobody", "dst": "Nothing", "similarity": 0.5}]
-    body = json.dumps({"messages": [
-        {"role": "system", "content": d._CANDIDATE_JUDGE_SYSTEM_PROMPT},
-        {"role": "user", "content": NL.join(d.format_candidate(r) for r in rows)}]}).encode()
+    prompts = [
+        "[1] 'Warehouse' vs 'Tide Gauge' (cosine 0.8339)\n    src notes: none",
+        "[2] 'postgres' vs 'Kafka Broker' (cosine 0.5647)\n    src notes: a",
+        "[3] 'Nobody' vs 'Nothing' (cosine 0.5)\n    src notes: none",
+    ]
+    body = chat_body(prompt_start("CANDIDATE_JUDGE_SYSTEM_PROMPT"), NL.join(prompts))
     reply = json.loads(stub_extractor.judge_reply(
         {"Tide Gauge|Warehouse": {"verdict": "propose", "relation": "uses"},
          "postgres|Kafka Broker": {"verdict": "dismiss", "confidence": 0.9}}, body))
@@ -392,25 +389,18 @@ def test_candidate_head_reads_hostile_lines_in_linear_time():
 def test_slot_pair_verdicts_answer_by_their_two_slots():
     import time
     import stub_extractor
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from pseudolife_memory.memory import dream as d
-    rows = [{"n": 1, "store": "world", "similarity": 0.9,
-             "a": {"entity": "Host A", "attribute": "os", "value": "Debian 12"},
-             "b": {"entity": "Host B", "attribute": "os", "value": "Debian 12"}},
-            {"n": 2, "store": "lesson", "similarity": 0.8,
-             "a": {"entity": "Rotate Keys", "attribute": "Cadence", "value": "x"},
-             "b": {"entity": "Nobody", "attribute": "None", "value": "y"}}]
-    body = json.dumps({"messages": [
-        {"role": "system", "content": d._SLOT_JUDGE_SYSTEM_PROMPT},
-        {"role": "user", "content": NL.join(d.format_slot_pair(r) for r in rows)}]}).encode()
+    prompts = [
+        "[1] store=world cosine 0.9\n    A 'Host A' | 'os': Debian 12\n    B 'Host B' | 'os': Debian 12",
+        "[2] store=lesson cosine 0.8\n    A 'Rotate Keys' | 'Cadence' [polarity None, outcome None, about None]: x\n"
+        "    B 'Nobody' | 'None' [polarity None, outcome None, about None]: y",
+    ]
+    body = chat_body(prompt_start("SLOT_JUDGE_SYSTEM_PROMPT"), NL.join(prompts))
     reply = json.loads(stub_extractor.judge_reply(
         {"Host B.os|Host A.os": {"verdict": "distinct", "confidence": 0.9}}, body))
     assert reply == {"verdicts": [{"id": 1, "verdict": "distinct", "confidence": 0.9}]}
     hostile = "[0] store=x cosine 1" + chr(10) + "    A '" + "'| '" * 20000
     start = time.perf_counter()
-    stub_extractor.judge_reply({}, json.dumps({"messages": [
-        {"role": "system", "content": d._SLOT_JUDGE_SYSTEM_PROMPT},
-        {"role": "user", "content": hostile}]}).encode())
+    stub_extractor.judge_reply({}, chat_body(prompt_start("SLOT_JUDGE_SYSTEM_PROMPT"), hostile))
     assert time.perf_counter() - start < 2.0
 
 

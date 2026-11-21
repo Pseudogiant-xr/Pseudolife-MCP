@@ -6068,8 +6068,7 @@ def settle_sides(spec: dict, dsns: dict, stubs: dict, scn: dict) -> None:
     import psycopg
     quiet = float(spec.get("quiet_s", 3.0))
     deadline = time.monotonic() + float(spec.get("timeout_s", 180.0))
-    for side in ("python", "rust"):
-        dsn = dsns[side]
+    for side, dsn in dsns.items():
         if spec.get("until"):
             while True:
                 with psycopg.connect(dsn, autocommit=True) as conn:
@@ -6348,18 +6347,16 @@ def restart_sides(op: dict, scn: dict, procs: dict, homes: dict, envs: dict,
 
 def expect_diffs(op: dict, dsns: dict) -> list[str]:
     """``op["expect"]``: queries whose first column must answer true on
-    both banks once the operation (and its settle) is done, so a scenario
+    each bank once the operation (and its settle) is done, so a scenario
     whose sides both miss the path it is written for still fails."""
     import psycopg
     out = []
     for query in op.get("expect", ()):
-        for side in ("python", "rust"):
-            with psycopg.connect(dsns[side], autocommit=True) as conn:
+        for side, dsn in dsns.items():
+            with psycopg.connect(dsn, autocommit=True) as conn:
                 row = conn.execute(query).fetchone()
             if not (row and row[0]):
                 out.append(f"expect {side}: {query}")
-    if op.get("candidate_fingerprints"):
-        out += w2e_queue_judges.fingerprint_diffs(dsns, op["candidate_fingerprints"])
     return out
 
 
@@ -6507,6 +6504,11 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
     tag = name.replace("-", "_")
     if mode == "golden":
         return run_golden(name, binary, root, tol, owned, candidate, mutant)
+    if name in _QUEUE_JUDGES:
+        if record:
+            raise ValueError("queue judge scenarios use native contract checks; omit --record")
+        return w2e_queue_judges.run_native(
+            sys.modules[__name__], name, scn, binary, root, owned, mutant)
     stubs = start_stubs(scn, ("seed", "python", "rust"))
     try:
         return _run_live(name, scn, tag, binary, root, record, tol, mutant, owned, stubs)
@@ -7058,9 +7060,14 @@ def main() -> int:
         ap.error("--write needs --record-candidate")
     if args.record_candidate and args.mutant:
         ap.error("never record a golden from a mutant")
+    names = args.only or list(SCENARIOS)
+    if args.record and args.mode in {"live", "calibrate"}:
+        native_only = sorted(set(names) & _QUEUE_JUDGES.keys())
+        if args.only and native_only:
+            ap.error(f"queue judges use native contract checks: omit --record for {', '.join(native_only)}")
+        names = [name for name in names if name not in _QUEUE_JUDGES]
     args.rust_bin = args.rust_bin.resolve()
     root = run_root()
-    names = args.only or list(SCENARIOS)
     tol = {} if args.mode == "calibrate" else json.loads(TOLERANCE_FILE.read_text(encoding="utf-8"))
     results = []
     if args.mode == "mutants":
