@@ -8,7 +8,7 @@
 //!   claude-settings-env --settings S --token-file T --daemon-url U [--replace]
 //!   check-token-file --path F          the shim's own check of a token file
 //!   write-token-file --path F          create an owner-only token file from stdin
-//!   gemini-guard --config C            inspect only the Pseudolife stdio guard
+//!   gemini-guard --config C            inspect the Pseudolife stdio guard and whether it configures a credential
 //!   verify-token-file --daemon-url U --token-file T  verify a current install's token without writes
 //!   board --daemon-url U [--token-file T]  one line: whether the board is on
 //!
@@ -573,19 +573,33 @@ fn gemini_guard(path: &Path) -> Value {
         let config = registrations::json_bytes(&bytes).ok()?;
         let registration = config.get("mcpServers")?.get(SERVER)?.as_object()?;
         let Some(env) = registration.get("env") else {
-            return Some("absent");
+            return Some(("absent", "missing"));
         };
-        let Some(guard) = env.as_object()?.get(codex::NO_SPAWN_KEY) else {
-            return Some("absent");
+        let env = env.as_object()?;
+        let guard = match env.get(codex::NO_SPAWN_KEY) {
+            Some(value) => Some(value.as_str()?),
+            None => None,
         };
-        let guard = guard.as_str()?;
-        Some(if crate::lifecycle::spawn_disabled(Some(guard)) {
+        let status = if crate::lifecycle::spawn_disabled(guard) {
             "enabled"
         } else {
             "absent"
-        })
+        };
+        let credential = if [TOKEN_KEY, TOKEN_FILE_KEY].iter().any(|key| {
+            env.get(*key)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        }) {
+            "configured"
+        } else {
+            "missing"
+        };
+        Some((status, credential))
     };
-    json!({"status": inspect().unwrap_or("not-verified")})
+    match inspect() {
+        Some((status, credential)) => json!({"status": status, "credential": credential}),
+        None => json!({"status": "not-verified"}),
+    }
 }
 
 async fn verify_token(
@@ -664,7 +678,7 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         let path = root.join("settings.json");
         let body = json!({"mcpServers": {
-            "other": {"env": {"PSEUDOLIFE_MCP_NO_SPAWN": "0"}},
+            "other": {"env": {"PSEUDOLIFE_MCP_NO_SPAWN": "0", "PSEUDOLIFE_MCP_TOKEN": "synthetic-other"}},
             "pseudolife-memory": {"command":"pseudolife-mcp","env": {"PSEUDOLIFE_MCP_NO_SPAWN": "1"}}
         }});
         let bytes = serde_json::to_vec(&body).unwrap();
@@ -679,12 +693,21 @@ mod tests {
         }});
         std::fs::write(&path, serde_json::to_vec(&other_only).unwrap()).unwrap();
         let absent = gemini_guard(&path);
+        let mut configured = body;
+        configured["mcpServers"]["pseudolife-memory"]["env"][TOKEN_KEY] = json!("synthetic-bearer");
+        std::fs::write(&path, serde_json::to_vec(&configured).unwrap()).unwrap();
+        let credential = gemini_guard(&path);
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(enabled["status"], "enabled");
+        assert_eq!(enabled["credential"], "missing");
         assert!(unchanged);
         assert_eq!(missing["status"], "not-verified");
         assert_eq!(unreadable["status"], "not-verified");
         assert_eq!(absent["status"], "absent");
+        assert_eq!(
+            credential,
+            json!({"status": "enabled", "credential": "configured"})
+        );
     }
 
     #[test]

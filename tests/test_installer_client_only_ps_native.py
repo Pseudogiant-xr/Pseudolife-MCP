@@ -1020,6 +1020,27 @@ def test_a_tunnel_failure_cannot_hide_incomplete_requested_clients(tmp_path):
     assert proc.stderr.splitlines()[-1].startswith("Requested client setup incomplete (Codex).")
 
 
+@pytest.mark.parametrize("deferred", [False, True], ids=["full", "client-only"])
+@pytest.mark.parametrize("failure", ['throw "fixture hook write failure"', "exit 19"])
+def test_a_claude_hook_write_failure_stays_a_warning(tmp_path, deferred, failure):
+    ps = _PowerShell(tmp_path)
+    (tmp_path / "install-hook.ps1").write_text(failure + "\n", encoding="utf-8")
+    block = _block("client-only claude hook") if deferred else _between(
+        INSTALL, '    Step "Installing $selectedClient session hook..."', "\n}")
+    proc = ps.run(
+        "$clients = @('claude'); $requestedClients = $clients; $tunnelExit = 0\n"
+        "$hookState = @{claude = 'deferred'}; $instrState = @{}\n"
+        "$selectedClient = 'claude'; $briefingCommand = 'fixture'\n"
+        "$script:shimInstallPath = '/fixture/shim.exe'\n"
+        "function Install-ShimOnce { return $true }\n"
+        + _block("client registration state") + block
+        + "\nWrite-Output 'CLIENT_SETUP_CONTINUED'\n" + _block("client setup result")
+    )
+    assert proc.returncode == 0, _output(proc)
+    assert "CLIENT_SETUP_CONTINUED" in proc.stdout
+    assert "Warnings\nClaude Code hooks were not installed." in proc.stderr
+
+
 @pytest.mark.parametrize("accepted", [True, False], ids=["accepted", "rejected"])
 def test_current_credential_probe_in_native_powershell(tmp_path, accepted):
     ps = _PowerShell(tmp_path)

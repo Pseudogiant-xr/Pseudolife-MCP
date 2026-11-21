@@ -332,7 +332,7 @@ function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
     return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
 }
 # The installer-protocol level the staged release must answer (Initialize-NativeClient).
-$NativeInstallerProtocol = 3
+$NativeInstallerProtocol = 4
 # The client side (the stdio MCP shim every agent registers, and the
 # pseudolife-mcp CLI) is the native binary published with this checkout's
 # release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
@@ -2329,6 +2329,7 @@ $script:connectCheckedClients = @()
 $script:currentClientTokenChecked = $false
 $script:currentClientTokenFailure = $null
 $script:clientSetupFailures = @{}
+$script:httpCredentialWarnings = @()
 function Set-ClientSetupFailure([string]$Provider, [string]$Reason) {
     $script:clientSetupFailures[$Provider] = $Reason
     if ($null -ne $mcpState) { $mcpState[$Provider] = "failed" }
@@ -2693,8 +2694,15 @@ foreach ($selectedClient in $clients) {
         continue
     }
     Step "Installing $selectedClient session hook..."
-    & (Join-Path $PSScriptRoot "install-hook.ps1") -Client $selectedClient -Command $briefingCommand
-    $hookState[$selectedClient] = "hook"
+    try {
+        $global:LASTEXITCODE = 0
+        & (Join-Path $PSScriptRoot "install-hook.ps1") -Client $selectedClient -Command $briefingCommand
+        if ($LASTEXITCODE -ne 0) { throw "Hook script exited $LASTEXITCODE." }
+        $hookState["claude"] = "hook"
+    } catch {
+        $hookState["claude"] = "failed"
+        Write-Warning "The Claude Code session hook could not be written. $($_.Exception.Message) Check the hook error above and rerun the installer."
+    }
 }
 
 # -- 10. standing memory instructions (consent; never edited without it) ----------
@@ -2919,16 +2927,18 @@ function Set-CodexRuntimeDefaults {
     }
 }
 # >>> client registration helpers >>>
-function Write-ClientHttpRefusal([string]$Provider, [switch]$Existing) {
+function Write-ClientHttpAuthResult([string]$Provider, [switch]$Existing) {
     if ($Existing) {
-        Write-ClientSetupFailure $Provider "The daemon requires a bearer token, and the existing pseudolife-memory HTTP registration cannot carry it. Edit that entry to use the pseudolife-mcp stdio shim and a token file, then rerun."
+        $warning = "The $Provider HTTP registration was preserved. The daemon requires a bearer token. Verify the registration's bearer credential in the client."
+        $script:httpCredentialWarnings += $warning
+        Write-Warning $warning
     } else {
-        Write-ClientSetupFailure $Provider "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with -Transport shim."
+        Write-ClientSetupFailure $Provider "The installer cannot add the daemon's required bearer token to an HTTP registration. Rerun the installer with -Transport shim."
     }
 }
 function Test-ClientTransport([string]$Provider, [string]$State) {
     if ($tokenState -notin "minted", "present", "remote") { return $true }
-    if ($State -eq "http") { Write-ClientHttpRefusal $Provider; return $false }
+    if ($State -eq "http") { Write-ClientHttpAuthResult $Provider; return $false }
     $credentialFile = switch ($Provider) {
         "claude" { $claudeTokenFile }
         "codex" { $codexCredentialFile }
@@ -3166,7 +3176,7 @@ function Install-SelectedClient([string]$selectedClient) {
                 $mcpState["codex"] = "present"
             }
             if ($tokenState -in "minted", "present", "remote" -and ((Test-McpHttpRegistration $existingCodex) -or (Test-McpHttpRegistration $existingCodexGuard))) {
-                Write-ClientHttpRefusal "codex" -Existing
+                Write-ClientHttpAuthResult "codex" -Existing
             }
             $script:codexRuntimeDefaults = "preserved"
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
@@ -3218,13 +3228,15 @@ function Install-SelectedClient([string]$selectedClient) {
         if ("$geminiList" -match "pseudolife-memory") {
             $geminiRegistration = ("$geminiList" -split "`r?`n" | Where-Object { $_ -match 'pseudolife-memory:' } | Select-Object -First 1)
             $geminiGuardUnverified = $false
+            $geminiCredential = $null
             if (($Transport -eq "shim") -and -not (Test-McpHttpRegistration "$geminiRegistration")) {
                 # The CLI list omits env. Inspect only the named registration
                 # and distinguish "missing guard" from "cannot read settings".
                 $geminiSettings = Join-Path $env:USERPROFILE ".gemini\settings.json"
                 $guardOutput = Invoke-NativeHelper credentials gemini-guard --config $geminiSettings 2>$null
-                $guardStatus = try { ($guardOutput -join "`n" | ConvertFrom-Json).status } catch { $null }
-                switch ($guardStatus) {
+                $guardReport = try { $guardOutput -join "`n" | ConvertFrom-Json } catch { $null }
+                $geminiCredential = $guardReport.credential
+                switch ($guardReport.status) {
                     "enabled" { }
                     "absent" {
                         Write-UnverifiedNoSpawnGuard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
@@ -3307,14 +3319,17 @@ function Install-SelectedClient([string]$selectedClient) {
                 $mcpState["gemini"] = "present"
             }
             if ($tokenState -in "minted", "present", "remote" -and (Test-McpHttpRegistration "$geminiRegistration")) {
-                Write-ClientHttpRefusal "gemini" -Existing
+                Write-ClientHttpAuthResult "gemini" -Existing
                 return
             }
-            # `gemini mcp list` shows no env, so the installer cannot tell
-            # whether this registration carries a token; say how to add one,
-            # unless pseudolife-mcp connect just wrote or confirmed it.
-            if ($geminiTokenFile -and (@($script:connectedClients) -notcontains "gemini")) {
-                Write-Warning "The daemon requires a bearer token; unless the existing Gemini CLI registration already carries one, its memory calls will be refused. Edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$geminiTokenFile (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with -NoToken."
+            if ($tokenState -in "minted", "present", "remote" -and
+                $script:connectedClients -notcontains "gemini" -and -not $script:clientSetupFailures["gemini"]) {
+                if ($geminiCredential -eq "missing" -and -not ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKEN_FILE)) {
+                    Write-ClientSetupFailure "gemini" "The daemon requires a bearer token, and the existing Gemini CLI stdio entry has no credential in its settings or this launch environment. Set PSEUDOLIFE_MCP_TOKEN_FILE in ~/.gemini/settings.json to a valid token file, then rerun."
+                } elseif (-not $geminiCredential -and $geminiTokenFile) {
+                    $script:geminiCredentialWarning = "The daemon requires a bearer token. Verify the existing Gemini CLI registration, or edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$geminiTokenFile."
+                    Write-Warning $script:geminiCredentialWarning
+                }
             }
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
             # Probe gemini's own spelling (`-e, --env`): the command below
@@ -3430,7 +3445,7 @@ function Install-SelectedClient([string]$selectedClient) {
                 $mcpState["claude"] = "present"
             }
             if ($tokenState -in "minted", "present", "remote" -and (Test-McpHttpRegistration $existingClaude)) {
-                Write-ClientHttpRefusal "claude" -Existing
+                Write-ClientHttpAuthResult "claude" -Existing
                 return
             }
             # An install from before the board token: the upgraded shim reads
@@ -3741,8 +3756,15 @@ if ($hookState["claude"] -eq "deferred") {
             $shimCommand = "pseudolife-mcp"
         }
         Step "Installing claude session hook..."
-        & (Join-Path $PSScriptRoot "install-hook.ps1") -Client claude -Command "$shimCommand briefing --hook-json"
-        $hookState["claude"] = "hook"
+        try {
+            $global:LASTEXITCODE = 0
+            & (Join-Path $PSScriptRoot "install-hook.ps1") -Client claude -Command "$shimCommand briefing --hook-json"
+            if ($LASTEXITCODE -ne 0) { throw "Hook script exited $LASTEXITCODE." }
+            $hookState["claude"] = "hook"
+        } catch {
+            $hookState["claude"] = "failed"
+            Write-Warning "The Claude Code session hook could not be written. $($_.Exception.Message) Check the hook error above and rerun the installer."
+        }
     } else {
         Write-Warning "The Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)."
         $hookState["claude"] = "failed"
@@ -4164,15 +4186,17 @@ if ($Tunnel -and -not $interactive) {
 Remove-NativeStage
 # >>> client setup result >>>
 function Get-ClientSetupWarnings {
+    $script:httpCredentialWarnings
     if ($script:pluginClaude -in "failed", "no-cli") { "Claude Code plugin: $($script:pluginClaudeRecovery)" }
     if ($script:legacyClaude -eq "error") { "Claude Code legacy hook cleanup failed. See the repair above." }
-    if ($hookState["claude"] -eq "failed") { "Claude Code hooks were not installed. Fix the shim setup and rerun." }
+    if ($hookState["claude"] -eq "failed") { "Claude Code hooks were not installed. See the hook error above and rerun the installer." }
     if (-not $script:clientSetupFailures.ContainsKey("codex") -and $hookState["codex"] -in "pending", "unavailable") {
         "Codex hooks: $($hookState['codex']). $($codexSetup.recovery)"
     }
     if ($script:codexRuntimeDefaults -eq "failed") { "Codex runtime defaults were not confirmed. $script:codexRuntimeRecovery" }
     if ($script:clientHookSettingsWarning) { "Claude Code hook credential settings were not written. See the repair above." }
     if ($script:geminiGuardWarning) { "Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json." }
+    if ($script:geminiCredentialWarning) { $script:geminiCredentialWarning }
     if ($script:codexInstructionWarning) { "Codex standing instructions could not be written. Check the Codex home and file permissions." }
     foreach ($state in $instrState.Values) {
         if ($state -like "failed:*") { "Standing instructions could not be written to $($state.Substring(7)). Check permissions and rerun." }

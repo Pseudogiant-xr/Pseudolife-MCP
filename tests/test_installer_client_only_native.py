@@ -1081,6 +1081,29 @@ def test_a_tunnel_failure_cannot_hide_incomplete_requested_clients(bash, tmp_pat
     assert proc.stderr.splitlines()[-1].startswith("Requested client setup incomplete (Codex).")
 
 
+@pytest.mark.parametrize("deferred", [False, True], ids=["full", "client-only"])
+@BASH
+def test_a_claude_hook_write_failure_stays_a_warning(bash, tmp_path, deferred):
+    shell = _Shell(bash, tmp_path)
+    ops = tmp_path / "ops"
+    ops.mkdir()
+    _stub(ops / "install-hook-native.sh", "exit 19\n")
+    block = _block("client-only claude hook") if deferred else _between(
+        "ops/install-native.sh", '    step "Installing $selected_client session hook..."', "\ndone")
+    proc = shell.run(
+        f"repo='{shell.path(tmp_path)}'\n"
+        "CLIENTS='claude' REQUESTED_CLIENTS='claude' HOOK_CLAUDE=deferred\n"
+        "selected_client=claude briefing_command=fixture SHIM_OK=1 SHIM_PATH=/fixture/shim\n"
+        "ensure_shim() { :; }\n"
+        + _block("client registration state") + block
+        + "\nprintf 'CLIENT_SETUP_CONTINUED\\n'\n" + _block("client setup result"),
+        strict="set -eu",
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "CLIENT_SETUP_CONTINUED" in proc.stdout
+    assert "Warnings\nClaude Code hooks were not installed." in proc.stderr
+
+
 @pytest.mark.parametrize("outcome,recovery", [
     ("refused", "The installer credential was not accepted by the configured daemon. "
      "Supply a token accepted by that daemon, then rerun the installer."),

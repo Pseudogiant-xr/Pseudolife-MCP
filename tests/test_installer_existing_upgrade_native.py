@@ -155,7 +155,8 @@ def _bash_variants() -> list[str]:
 def _run_bash_existing(
     bash: str, tmp_path: Path, *, client: str, config: str, manager_exit: int,
     shadowed_path: bool = False, existing: bool = True, migrate_exit: int = 3,
-    gemini_guard: str = "absent", complete: bool = False,
+    gemini_guard: str = "absent", complete: bool = False, gemini_credential: str = "",
+    inherited_credential: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     """``manager_exit``: the native client install's result (0 installs);
     ``migrate_exit``: 0 makes the launcher's registration move report a
@@ -169,7 +170,7 @@ def _run_bash_existing(
 native_helper() {{
     if [ "$1 $2" = "credentials gemini-guard" ]; then
         [ "$3" = --config ] && [ "$4" = "$HOME/.gemini/settings.json" ] || return 1
-        printf '%s\\n' '{{"status":"{gemini_guard}"}}'
+        printf '%s\\n' '{{"status":"{gemini_guard}","credential":"{gemini_credential}"}}'
         return 0
     fi
     fixture_native_helper "$@"
@@ -205,6 +206,8 @@ native_helper() {{
         path.chmod(0o755)
     repo = str(ROOT).replace("'", "'\\''")
     fixture_env = _fixture_env(tmp_path / "bash-env")
+    if inherited_credential:
+        fixture_env["PSEUDOLIFE_MCP_TOKEN"] = "synthetic-inherited"
     fake_bin_shell = _bash_fixture_path(bash, fake_bin, fixture_env).replace("'", "'\\''")
     installed_bin_shell = _bash_fixture_path(bash, installed_bin, fixture_env).replace("'", "'\\''")
     installed_shim_shell = _bash_fixture_path(bash, installed_shim, fixture_env).replace("'", "'\\''")
@@ -224,6 +227,7 @@ repo='{repo}'
 CLIENTS='{client}'
 REQUESTED_CLIENTS='{client}'
 TRANSPORT=shim
+TOKEN_STATE='{"present" if gemini_credential else "opted-out"}'
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED=''
 CODEX_CONNECTION_CONFIGURED=''
 CODEX_CREDENTIAL_FILE=''
@@ -450,7 +454,8 @@ def test_install_sh_flagless_fresh_cli_fails_before_registration(
 def _run_powershell_existing(
     tmp_path: Path, *, client: str, config: str, manager_exit: int,
     shadowed_path: bool = False, existing: bool = True, migrate_exit: int = 3,
-    gemini_guard: str = "absent", complete: bool = False,
+    gemini_guard: str = "absent", complete: bool = False, gemini_credential: str = "",
+    inherited_credential: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     """``manager_exit`` and ``migrate_exit`` as for ``_run_bash_existing``."""
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
@@ -469,7 +474,7 @@ function Invoke-NativeHelper {{
     if ($args[0] -eq 'credentials' -and $args[1] -eq 'gemini-guard') {{
         $global:LASTEXITCODE = 0
         if ($args[2] -eq '--config' -and $args[3] -eq (Join-Path $env:USERPROFILE ".gemini\\settings.json")) {{
-            return '{{"status":"{gemini_guard}"}}'
+            return '{{"status":"{gemini_guard}","credential":"{gemini_credential}"}}'
         }}
         return
     }}
@@ -524,6 +529,7 @@ $hookState = @{{}}
 $instrState = @{{}}
 $tunnelExit = 0
 $Transport = 'shim'
+$tokenState = '{"present" if gemini_credential else "opted-out"}'
 $codexCredentialBootstrapFailed = $false
 $codexConnectionConfigured = $false
 $codexCredentialFile = $null
@@ -559,22 +565,33 @@ Write-Output ("STATUS=" + (Get-McpMarker $state) + " " + (Describe-Mcp $state))
 """
     runner = tmp_path / "run-existing.ps1"
     runner.write_text(script, encoding="utf-8")
+    fixture_env = _fixture_env(tmp_path / "powershell-env")
+    if inherited_credential:
+        fixture_env["PSEUDOLIFE_MCP_TOKEN"] = "synthetic-inherited"
     return subprocess.run(
         [pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner)],
         capture_output=True, check=False, timeout=15,
-        env=_fixture_env(tmp_path / "powershell-env"),
+        env=fixture_env,
     )
 
 
-@pytest.mark.parametrize("guard_status, exit_code", [("enabled", 0), ("not-verified", 0), ("absent", 5)])
+@pytest.mark.parametrize("guard_status, credential, inherited, exit_code", [
+    ("enabled", "", False, 0),
+    ("not-verified", "", False, 0),
+    ("absent", "", False, 5),
+    ("enabled", "missing", False, 5),
+    ("enabled", "missing", True, 0),
+    ("enabled", "configured", False, 0),
+])
 @pytest.mark.parametrize("shell", [*_bash_variants(), "powershell"], ids=lambda name: Path(name).name)
 def test_requested_gemini_rerun_checks_settings_when_listing_hides_guard(
-    tmp_path: Path, shell: str, guard_status: str, exit_code: int,
+    tmp_path: Path, shell: str, guard_status: str, credential: str, inherited: bool, exit_code: int,
 ) -> None:
     config = _managed_config("gemini")
     assert "PSEUDOLIFE_MCP_NO_SPAWN" not in config
     args = dict(client="gemini", config=config, manager_exit=0, migrate_exit=4,
-                gemini_guard=guard_status, complete=True)
+                gemini_guard=guard_status, complete=True, gemini_credential=credential,
+                inherited_credential=inherited)
     if shell == "powershell":
         proc = _run_powershell_existing(tmp_path, **args)
     else:
@@ -588,9 +605,14 @@ def test_requested_gemini_rerun_checks_settings_when_listing_hides_guard(
         assert "Check the pseudolife-memory entry in ~/.gemini/settings.json." in output
     assert ("Requested client setup incomplete (Gemini CLI)" in output) == (exit_code == 5)
     if exit_code == 5:
-        assert output.splitlines()[-1].endswith("Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun.")
+        failure = output.splitlines()[-1]
+        if credential == "missing":
+            assert "no credential in its settings or this launch environment" in failure
+        else:
+            assert failure.endswith("Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun.")
     else:
         assert "STATE=present-current" in output
+    assert "synthetic-inherited" not in output
     calls = (tmp_path / "calls.txt").read_text(encoding="utf-8")
     assert "mcp add" not in calls
     assert "mcp remove" not in calls

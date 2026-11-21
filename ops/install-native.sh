@@ -414,7 +414,7 @@ if [ -n "$native_probe_setting" ]; then
         *) echo "PSEUDOLIFE_NATIVE_PROBE_SECONDS='$native_probe_setting' is not a whole number of seconds from 1 to 99999; the probe waits 30 s." >&2 ;;
     esac
 fi
-NATIVE_INSTALLER_PROTOCOL=3
+NATIVE_INSTALLER_PROTOCOL=4
 NATIVE_VERSION=""
 NATIVE_TARGET=""
 NATIVE_ARCHIVE=""
@@ -2407,6 +2407,7 @@ CONNECT_CHECKED_CLIENTS=""
 CONNECT_CURRENT_CHECKED=""
 CONNECT_CURRENT_FAILURE=""
 # >>> client registration state >>>
+HTTP_CREDENTIAL_WARNINGS=""
 set_client_state() {
     case "$1" in
         claude) MCP_CLAUDE="$2" ;;
@@ -2732,8 +2733,12 @@ for selected_client in $CLIENTS; do
         continue
     fi
     step "Installing $selected_client session hook..."
-    PSEUDOLIFE_NATIVE_CLI="${NATIVE_STAGED:-}" "$repo/ops/install-hook-native.sh" --client "$selected_client" "" "$briefing_command"
-    if [ "$selected_client" = claude ]; then HOOK_CLAUDE=hook; else HOOK_CODEX=hook; fi
+    if PSEUDOLIFE_NATIVE_CLI="${NATIVE_STAGED:-}" "$repo/ops/install-hook-native.sh" --client "$selected_client" "" "$briefing_command"; then
+        HOOK_CLAUDE=hook
+    else
+        HOOK_CLAUDE=failed
+        echo "WARNING: The Claude Code session hook could not be written. Check the hook error above and rerun the installer." >&2
+    fi
 done
 
 # ── 10. standing memory instructions (consent; never edited without it) ────
@@ -2967,18 +2972,20 @@ client_requires_bearer() {
     case "${TOKEN_STATE:-}" in minted|present|remote) return 0 ;; esac
     return 1
 }
-client_http_refusal() {
+check_client_http_auth() {
     if [ "${2:-}" = existing ]; then
-        warn_client_failure "$1" "The daemon requires a bearer token, and the existing pseudolife-memory HTTP registration cannot carry it. Edit that entry to use the pseudolife-mcp stdio shim and a token file, then rerun."
+        local warning="The $1 HTTP registration was preserved. The daemon requires a bearer token. Verify the registration's bearer credential in the client."
+        HTTP_CREDENTIAL_WARNINGS="${HTTP_CREDENTIAL_WARNINGS:+$HTTP_CREDENTIAL_WARNINGS"$'\n'"}$warning"
+        printf 'WARNING: %s\n' "$warning" >&2
     else
-        warn_client_failure "$1" "An HTTP registration cannot carry the daemon's required bearer token. Rerun the installer with --transport shim."
+        warn_client_failure "$1" "The installer cannot add the daemon's required bearer token to an HTTP registration. Rerun the installer with --transport shim."
     fi
 }
 register_client() {
     local provider="$1" state="$2" result credential_file
     shift 2
     if client_requires_bearer; then
-        if [ "$state" = http ]; then client_http_refusal "$provider"; return 0; fi
+        if [ "$state" = http ]; then check_client_http_auth "$provider"; return 0; fi
         case "$provider" in
             claude) credential_file="${CLAUDE_TOKEN_FILE:-}" ;;
             codex) credential_file="${CODEX_CREDENTIAL_FILE:-}" ;;
@@ -3234,7 +3241,7 @@ for selected_client in $CLIENTS; do
                 MCP_CODEX=present
             fi
             if client_requires_bearer && { registration_is_http "$existing_codex_guard" || registration_is_http "$existing_codex"; }; then
-                client_http_refusal codex existing
+                check_client_http_auth codex existing
             fi
             CODEX_RUNTIME_DEFAULTS=preserved
         elif [ "$TRANSPORT" = "shim" ]; then
@@ -3291,11 +3298,13 @@ for selected_client in $CLIENTS; do
         if existing_gemini=$(gemini mcp list 2>/dev/null) && printf '%s' "$existing_gemini" | grep -q pseudolife-memory; then
             gemini_registration=$(printf '%s\n' "$existing_gemini" | grep -E 'pseudolife-memory:' | sed -n '1p')
             gemini_guard_unverified=""
+            gemini_credential=""
             if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$gemini_registration"; then
                 # The CLI list omits env. Inspect only the named registration
                 # and distinguish "missing guard" from "cannot read settings".
                 gemini_settings_check=$(native_helper credentials gemini-guard --config "$HOME/.gemini/settings.json" 2>/dev/null) || gemini_settings_check=""
                 gemini_guard_status=$(native_helper json-field status <<< "$gemini_settings_check" 2>/dev/null) || gemini_guard_status=""
+                gemini_credential=$(native_helper json-field credential <<< "$gemini_settings_check" 2>/dev/null) || gemini_credential=""
                 case "$gemini_guard_status" in
                     enabled) ;;
                     absent)
@@ -3381,15 +3390,17 @@ for selected_client in $CLIENTS; do
                 MCP_GEMINI=present
             fi
             if client_requires_bearer && registration_is_http "$gemini_registration"; then
-                client_http_refusal gemini existing
+                check_client_http_auth gemini existing
                 continue
             fi
-            # `gemini mcp list` shows no env, so the installer cannot tell
-            # whether this registration carries a token; say how to add one,
-            # unless pseudolife-mcp connect just wrote or confirmed it.
             case " ${CONNECTED_CLIENTS:-} " in *" gemini "*) gemini_connected=1 ;; *) gemini_connected="" ;; esac
-            if [ -n "${GEMINI_TOKEN_FILE:-}" ] && [ -z "$gemini_connected" ]; then
-                echo "WARNING: the daemon requires a bearer token; unless the existing Gemini CLI registration already carries one, its memory calls will be refused. Edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with --no-token." >&2
+            if client_requires_bearer && [ -z "$gemini_connected" ] && [ -z "$(client_setup_failure gemini)" ]; then
+                if [ "$gemini_credential" = missing ] && [ -z "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
+                    warn_client_failure gemini "The daemon requires a bearer token, and the existing Gemini CLI stdio entry has no credential in its settings or this launch environment. Set PSEUDOLIFE_MCP_TOKEN_FILE in ~/.gemini/settings.json to a valid token file, then rerun."
+                elif [ -z "$gemini_credential" ] && [ -n "${GEMINI_TOKEN_FILE:-}" ]; then
+                    GEMINI_CREDENTIAL_WARNING="The daemon requires a bearer token. Verify the existing Gemini CLI registration, or edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE."
+                    printf 'WARNING: %s\n' "$GEMINI_CREDENTIAL_WARNING" >&2
+                fi
             fi
         elif [ "$TRANSPORT" = "shim" ]; then
             ensure_shim
@@ -3519,7 +3530,7 @@ for selected_client in $CLIENTS; do
             MCP_CLAUDE=present
         fi
         if client_requires_bearer && registration_is_http "$existing_claude"; then
-            client_http_refusal claude existing
+            check_client_http_auth claude existing
             continue
         fi
         # An install from before the board token: the upgraded shim reads a
@@ -3910,8 +3921,12 @@ if [ "${HOOK_CLAUDE:-}" = deferred ]; then
             shim_command=pseudolife-mcp ;;
         esac
         step "Installing claude session hook..."
-        PSEUDOLIFE_NATIVE_CLI="${NATIVE_STAGED:-}" "$repo/ops/install-hook-native.sh" --client claude "" "$shim_command briefing --hook-json"
-        HOOK_CLAUDE=hook
+        if PSEUDOLIFE_NATIVE_CLI="${NATIVE_STAGED:-}" "$repo/ops/install-hook-native.sh" --client claude "" "$shim_command briefing --hook-json"; then
+            HOOK_CLAUDE=hook
+        else
+            HOOK_CLAUDE=failed
+            echo "WARNING: The Claude Code session hook could not be written. Check the hook error above and rerun the installer." >&2
+        fi
     else
         echo "WARNING: the Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)." >&2
         HOOK_CLAUDE=failed
@@ -4297,15 +4312,17 @@ fi
 # >>> client setup result >>>
 client_setup_warnings() {
     local state
+    if [ -n "${HTTP_CREDENTIAL_WARNINGS:-}" ]; then printf '%s\n' "$HTTP_CREDENTIAL_WARNINGS"; fi
     case "${PLUGIN_CLAUDE:-}" in failed|no-cli) printf 'Claude Code plugin: %s\n' "$PLUGIN_CLAUDE_RECOVERY" ;; esac
     if [ "${LEGACY_CLAUDE:-}" = error ]; then echo "Claude Code legacy hook cleanup failed. See the repair above."; fi
-    if [ "${HOOK_CLAUDE:-}" = failed ]; then echo "Claude Code hooks were not installed. Fix the shim setup and rerun."; fi
+    if [ "${HOOK_CLAUDE:-}" = failed ]; then echo "Claude Code hooks were not installed. See the hook error above and rerun the installer."; fi
     if [ -z "${CODEX_CLIENT_FAILURE:-}" ]; then
         case "${HOOK_CODEX:-}" in pending|unavailable) printf 'Codex hooks: %s. %s\n' "$HOOK_CODEX" "${CODEX_HOOK_RECOVERY:-}" ;; esac
     fi
     if [ "${CODEX_RUNTIME_DEFAULTS:-}" = failed ]; then printf 'Codex runtime defaults were not confirmed. %s\n' "$CODEX_RUNTIME_RECOVERY"; fi
     if [ -n "${CLIENT_HOOK_SETTINGS_WARNING:-}" ]; then echo "Claude Code hook credential settings were not written. See the repair above."; fi
     if [ -n "${GEMINI_GUARD_WARNING:-}" ]; then echo "Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json."; fi
+    if [ -n "${GEMINI_CREDENTIAL_WARNING:-}" ]; then printf '%s\n' "$GEMINI_CREDENTIAL_WARNING"; fi
     for state in "${INSTR_CLAUDE:-}" "${INSTR_CODEX:-}" "${INSTR_GEMINI:-}" "${INSTR_GENERIC:-}"; do
         case "$state" in failed:*) printf 'Standing instructions could not be written to %s. Check permissions and rerun.\n' "${state#*:}" ;; esac
     done

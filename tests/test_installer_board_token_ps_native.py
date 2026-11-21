@@ -430,18 +430,18 @@ def test_tokenless_existing_gemini_registration_gets_no_token_warning(tmp_path):
     assert "Edit it in place in ~/.gemini/settings.json" not in _output(proc)
 
 
-def test_existing_http_registration_is_reported_with_the_transport_repair(tmp_path):
+def test_existing_http_registration_is_preserved_with_a_credential_warning(tmp_path):
     proc, calls = _wire(
         _PowerShell(tmp_path), "claude", token_file=r"C:\fixture\claude-code.token",
-        existing="Type: http\nURL: http://127.0.0.1:8765/mcp",
+        existing="Type: http\nURL: http://127.0.0.1:8765/mcp\nHeaders: Authorization",
     )
     output = _output(proc)
     assert proc.returncode == 0, output
     assert _adds(calls) == []
     [warning] = [line for line in output.splitlines() if "WARNING:" in line]
-    assert "requires a bearer token" in warning and "HTTP registration cannot carry it" in warning
-    assert "use the pseudolife-mcp stdio shim and a token file" in warning
-    assert "STATE=failed" in proc.stdout
+    assert "HTTP registration was preserved" in warning
+    assert "Verify the registration's bearer credential in the client." in warning
+    assert "STATE=present" in proc.stdout
 
 
 def _board(ps: _PowerShell, *, token_state: str, mcp_state: str = "@{}"):
