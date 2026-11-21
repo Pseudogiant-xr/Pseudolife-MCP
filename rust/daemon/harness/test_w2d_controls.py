@@ -3,6 +3,7 @@ import contextlib
 import copy
 import io
 import sys
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -203,10 +204,12 @@ class MutantQualification(unittest.TestCase):
             "cases": cases, "delta": {},
             "terminal": {"public.slot_reads": None, "public.retrieval_events": None},
         }}}
+        marker = Path(self.enterContext(tempfile.TemporaryDirectory())) / "test-postgres.turn-enabled"
         for count in (1, 2, 3):
             with (self.subTest(results=count),
                   patch.object(sys, "argv", ["w2d_cortex_check.py", "--mode", "default"]),
                   patch.dict(cortex.os.environ, {"CARGO_TARGET_DIR": "unused"}, clear=True),
+                  patch.object(cortex, "_DATABASE_TURN_MARKER", marker),
                   patch.object(cortex.tempfile, "mkdtemp", return_value="unused"),
                   patch.object(cortex, "QUERIES", ["first", "second"]),
                   patch.object(cortex, "load_capture", return_value=reference),
