@@ -1,2 +1,0 @@
-### Fixed (2026-11-15 — a release cut stacked on a pull request that only waits is still batched alone)
-- `python ops/integrate.py build` (and `--dry-run`) could merge a release cut beside other pull requests: a cut whose head carried a pull request that only waits on a labelled parent was skipped by the cut search, and the merge then took it with the rest. The cut search now uses the merge's own rule, so such a cut is batched alone. A build that would still merge a release cut beside anything else is refused, and nothing is built.

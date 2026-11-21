@@ -1,7 +1,7 @@
 """CLI-AUDIT: ``pseudolife-mcp board-audit`` verify, export, redact and stats.
 
 Read actions share one captured bank checked after each arm. Redactions
-receive separate template copies. Archive cases use exports of those banks,
+receive separate template copies. Archive cases project JSON lines from those banks,
 with deliberate edits for malformed or invalid histories.
 """
 
@@ -12,8 +12,12 @@ import base64
 import json
 import os
 import re
-import tempfile
+import stat
+import subprocess
+import sys
 import time
+from datetime import datetime
+from functools import cache, partial
 from pathlib import Path
 
 from .. import core, normalize
@@ -26,6 +30,8 @@ from rust.harness_support.database_guard import (
 DAY = 86400
 T0 = 1_700_000_000.0
 _FIXTURE = Path(__file__).with_suffix(".fixtures.json")
+_STATS_REFERENCES = Path(__file__).with_name("audit.stats.references.json")
+_STATS_CORPUS = Path(__file__).resolve().parents[2] / "shim/src/cli/board_audit/testdata/stats.json"
 
 
 def _shift_rich_clock(rows, anchor):
@@ -151,6 +157,7 @@ def _copy(source: str, target: str) -> None:
 def ensure(kind: str) -> str:
     """The seeded bank of this kind (created once per harness process)."""
     name = _name(kind)
+    _require_audit_name(name)
     if name in _BASELINE:
         return name
     _CREATED.add(name)
@@ -188,25 +195,34 @@ def ids(kind: str) -> dict:
     return _IDS[kind]
 
 
+_EXPORT_FIELDS = (
+    "seq", "event", "actor", "principal", "agent_id", "recipient_agent_id", "project",
+    "task", "message_id", "payload", "created_at", "hlc", "prev_hash", "hash",
+)
+_BODY_FIELDS = ("body", "body_salt")
+
+
+def _export_line(values) -> bytes:
+    row = dict(zip(_EXPORT_FIELDS + _BODY_FIELDS, values, strict=True))
+    row["payload"] = json.loads(row["payload"])
+    return (json.dumps(row, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
+
+
 def export_bytes(kind: str) -> bytes:
-    """The oracle's own ``board-audit export --out`` of a seeded bank."""
+    """Project a seeded bank into the archive format independently of the CLI."""
     _bank.NAMES.require_process()
     if kind not in _ARCHIVES:
-        from pseudolife_memory.board_audit_cli import main  # noqa: PLC0415
-        name = ensure(kind)
-        with tempfile.TemporaryDirectory() as scratch:
-            target = Path(scratch) / "export.jsonl"
-            previous = os.environ.get("PSEUDOLIFE_MCP_DATABASE_URL")
-            os.environ["PSEUDOLIFE_MCP_DATABASE_URL"] = _bank.url(name)
-            try:
-                if main(["export", "--out", str(target)]) != 0:
-                    raise RuntimeError(f"oracle export of {name} failed")
-            finally:
-                if previous is None:
-                    os.environ.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
-                else:
-                    os.environ["PSEUDOLIFE_MCP_DATABASE_URL"] = previous
-            _ARCHIVES[kind] = target.read_bytes()
+        with _bank.connect(ensure(kind)) as conn:
+            conn.execute("SET LOCAL extra_float_digits = 3")
+            has_body, = conn.execute(
+                "SELECT EXISTS (SELECT FROM pg_attribute "
+                "WHERE attrelid = 'coordination_events'::regclass "
+                "AND attname = 'body' AND NOT attisdropped)"
+            ).fetchone()
+            body = "body,body_salt" if has_body else "NULL::text,NULL::text"
+            columns = ",".join(_EXPORT_FIELDS)
+            rows = conn.execute(f"SELECT {columns},{body} FROM coordination_events ORDER BY seq")
+            _ARCHIVES[kind] = b"".join(_export_line(row) for row in rows)
     return _ARCHIVES[kind]
 
 
@@ -418,6 +434,9 @@ def stats_clock(obs):
     Every metric, source, key order, numeric spelling and file byte remains
     compared. Fixed time windows are never replaced.
     """
+    if obs.get("arm") == "reference":
+        # The expected observation already contains these exact clock tokens.
+        return
     import tomllib
     native_version = tomllib.loads((Path(__file__).resolve().parents[2] / "shim" / "Cargo.toml").read_text())["package"]["version"]
     defaults = obs.get("stats_defaults", (False, False))
@@ -717,6 +736,105 @@ def stats_durations():
     ])
 
 
+@cache
+def _recorded_cases(platform):
+    path = Path(__file__).resolve().parents[1] / "goldens" / f"audit.{platform}.json"
+    return json.loads(path.read_text(encoding="utf-8"))["cases"]
+
+
+def _recorded_reference(case_id, home):
+    want = _recorded_cases(core.PLATFORM)[case_id]
+    if core.WINDOWS:
+        return want
+    # Goldens use a fixed umask. Live ordinary files and directories follow
+    # the caller's umask, while the private export stays owner-only.
+    core._reset(home)
+    (home / "cwd").mkdir()
+    (home / "file").touch()
+    modes = core.modes(home)
+    ordinary = {"0o755": modes["cwd"], "0o644": modes["file"]}
+    return dict(want, modes={name: ordinary.get(mode, mode) for name, mode in want["modes"].items()})
+
+
+@cache
+def _stats_references():
+    # The captured fields extend the report shapes in the committed Rust
+    # corpus. They use the frozen inputs and oracle at 0c5de1488.
+    fixture = json.loads(_STATS_REFERENCES.read_text(encoding="utf-8"))
+    corpus = json.loads(_STATS_CORPUS.read_text(encoding="utf-8"))
+    return fixture, {case["name"]: case["report"] for case in corpus}
+
+
+def _encoded(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def _stats_report(case, report_id):
+    reference, corpus = _stats_references()
+    shape = reference["reports"][report_id]
+    report = dict(corpus[shape["corpus"]], version="<version>", generated_at="<generated_at>")
+    report.update(shape["fields"])
+    if case.id == "stats-local-system-zone":
+        dates = [
+            case.argv[case.argv.index(flag) + 1]
+            for flag in ("--since", "--until")
+        ]
+        if sys.platform == "linux" and "TZDIR" in os.environ:
+            # The CLI arm inherits TZ but drops TZDIR. Resolve under the
+            # same inputs without changing the harness process's timezone.
+            env = {"TZ": os.environ["TZ"]} if "TZ" in os.environ else {}
+            code = (
+                "import sys\n"
+                "from datetime import datetime\n"
+                "print(*(datetime.fromisoformat(date).timestamp() for date in sys.argv[1:]))"
+            )
+            timestamps = subprocess.check_output(
+                [sys.executable, "-I", "-c", code, *dates], env=env, text=True, timeout=5)
+            since, until = map(float, timestamps.split())
+        else:
+            since, until = (datetime.fromisoformat(date).timestamp() for date in dates)
+        report["window"] = {"since": since, "until": until, "hours": round((until - since) / 3600, 3)}
+    return (json.dumps(report, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
+
+
+def _stats_reference(case, home):
+    """Build the expected observation from setup inputs and reference bytes."""
+    core._reset(home)
+    arm = core.Arm("reference", home, home / "cwd")
+    arm.cwd.mkdir()
+    case.setup(arm)
+    want = {
+        "arm": arm.name, "home": str(home), "exit": 0,
+        "stdout": "", "stderr": "", "files": core.snapshot(home), "modes": core.modes(home),
+    }
+    if case.id.startswith("stats-bank-"):
+        want["db"] = "unchanged"
+    fixture, _ = _stats_references()
+    if case.id in fixture["fixed"]:
+        fixed = fixture["fixed"][case.id]
+        want["exit"] = fixed["exit"]
+        stream = "stderr" if want["exit"] else "stdout"
+        want[stream] = _encoded(fixed[core.PLATFORM].encode("utf-8"))
+    elif case.id == "stats-out-and-append":
+        line = _stats_report(case, "stats-export-metrics")
+        old_log = base64.b64decode(want["files"]["log.jsonl"][5:])
+        want["files"].update({"out.jsonl": "file:" + _encoded(line),
+                              "log.jsonl": "file:" + _encoded(old_log + line)})
+        if not core.WINDOWS:
+            # Both the seeded log and the new output use the caller's umask.
+            want["modes"]["out.jsonl"] = want["modes"]["log.jsonl"]
+    else:
+        line = _stats_report(case, case.id)
+        want["stdout"] = _encoded(line.replace(b"\n", b"\r\n") if core.WINDOWS else line)
+    return want
+
+
+def _fixed_stats_case(case_id, argv):
+    case = file_case(case_id, argv)
+    case.reference = partial(_stats_reference, case)
+    return case
+
+
 def stats_cases():
     common = ["stats", "--since", "1000", "--until", "5000", "--input", _home("stats.jsonl"),
               "--durations", _home("durations.jsonl")]
@@ -771,6 +889,8 @@ def stats_cases():
             assert obs["exit"] == (0 if successful else 2), "stats case did not reach its intended result"
             obs["stats_defaults"] = defaults
         case.after = after
+        case.reference = (partial(_recorded_reference, case.id) if case.golden else
+                          partial(_stats_reference, case))
     return out
 
 
@@ -792,7 +912,6 @@ raise SystemExit(int(os.environ['FIXTURE_EXIT']))
 
 def transport_cases():
     import shlex
-    import sys
     out = []
     for engine in ("python", "rust", "<no value>"):
         for action in ("verify", "redact", "export", "stats"):
@@ -837,6 +956,9 @@ def transport_cases():
                             assert destination.read_bytes() == b'{"container":"fixture"}\n'
                             if action == "stats":
                                 assert (arm.home/"log.jsonl").read_bytes() == destination.read_bytes()
+                            elif not core.WINDOWS:
+                                assert stat.S_IMODE(destination.stat().st_mode) == 0o600, (
+                                    "transport export must be owner-only (mode 0600)")
                     # Wrapper paths include the interpreter, so remove only the
                     # fixture files after asserting their original bytes.
                     for name,data in arm.state["inputs"].items():
@@ -847,8 +969,9 @@ def transport_cases():
                 env = {**GUARDS,"PSEUDOLIFE_DAEMON_EXEC":None,
                        "PSEUDOLIFE_DOCKER":"{HOME}/docker_fixture."+suffix,
                        "FIXTURE_ENGINE":engine,"FIXTURE_EXIT":str(exit_code)}
-                case = core.Case(f"transport-{engine.replace('<no value>', 'unlabelled')}-{action}-{exit_code}",
-                                 argv,env=env,setup=setup,after=after,programs=PROGRAMS)
+                case_id = f"transport-{engine.replace('<no value>', 'unlabelled')}-{action}-{exit_code}"
+                case = core.Case(case_id, argv, env=env, setup=setup, after=after, programs=PROGRAMS,
+                                 reference=partial(_recorded_reference, case_id))
                 out.append(case)
     return out
 
@@ -979,8 +1102,8 @@ def cases() -> list[core.Case]:
         file_case("audit-root-help", ["--help"]),
         file_case("export-help", ["export", "--he"]),
         file_case("redact-help", ["redact", "-hello"]),
-        file_case("stats-help", ["stats", "--help"]),
-        file_case("stats-invalid-option", ["stats", "--unknown"]),
+        _fixed_stats_case("stats-help", ["stats", "--help"]),
+        _fixed_stats_case("stats-invalid-option", ["stats", "--unknown"]),
         file_case("help-explicit-value", ["verify", "--help=x"]),
         read_case("export-repeated-abbreviated", "rich", ["export", "--ta=t2", "--task", "t1"]),
         read_case("export-negative-time", "rich", ["export", "--since", "-5"]),

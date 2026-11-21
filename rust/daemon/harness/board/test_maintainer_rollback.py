@@ -129,11 +129,16 @@ def test_operator_role_replaces_the_expired_fence_and_preserves_an_unrelated_coo
         from board.scenarios import Ctx, seed_bank
 
         conn.execute(
-            "INSERT INTO coordination_agents (agent_id,principal,project,task,created_at,last_activity) "
-            "VALUES ('a','default','p','first task',1,1),('c','alice','p','next task',1,1)")
+            "INSERT INTO coordination_agents (agent_id,principal,project,task,credential_hash,created_at,last_activity) "
+            "VALUES ('a','default','p','first task',repeat('a',64),1,1),"
+            "('c','alice','p','next task',repeat('c',64),1,1),"
+            "('waiting','alice','p','waiting task',repeat('b',64),1,1)")
         conn.execute(
             "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,acquired_at,expires_at) "
             "VALUES ('coordinator:p','other','default',nextval('coordination_lease_fence'),1,2)")
+        conn.execute(
+            "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
+            "VALUES ('coordinator:p','waiting','alice',120,1)")
         seed_bank(board_db, lambda rows, _: operator_role(rows, "p", "a"), Ctx())
         conn.execute("UPDATE coordination_leases SET expires_at=1 WHERE name='conductor:p'")
         seed_bank(board_db, lambda rows, _: operator_role(rows, "p", "c"), Ctx())
@@ -150,6 +155,8 @@ def test_operator_role_replaces_the_expired_fence_and_preserves_an_unrelated_coo
         assert conn.execute(
             "SELECT name,holder_agent_id,fence FROM coordination_leases ORDER BY name"
         ).fetchall() == [("conductor:p", "c", 3), ("coordinator:p", "other", 1), ("delegate:p", None, 0)]
+        assert conn.execute("SELECT name,agent_id FROM coordination_lease_waiters").fetchall() == [
+            ("coordinator:p", "waiting")]
 
 
 def test_role_scenarios_leave_copied_legacy_holds_and_coordinator_queues_alone(board_db):
@@ -161,8 +168,8 @@ def test_role_scenarios_leave_copied_legacy_holds_and_coordinator_queues_alone(b
 
     with psycopg.connect(board_db, autocommit=True) as conn:
         conn.execute(
-            "INSERT INTO coordination_agents (agent_id,principal,project,created_at,last_activity) "
-            "VALUES ('wake','default',%s,1,1),('role','default',%s,1,1)",
+            "INSERT INTO coordination_agents (agent_id,principal,project,credential_hash,created_at,last_activity) "
+            "VALUES ('wake','default',%s,repeat('a',64),1,1),('role','default',%s,repeat('b',64),1,1)",
             (conductor_wake.PROJECT, maintainer.ROLE_PROJECT))
         conn.execute(
             "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,acquired_at,expires_at) "
@@ -188,6 +195,48 @@ def test_role_scenarios_leave_copied_legacy_holds_and_coordinator_queues_alone(b
             ("coordinator:p", "waiting")]
         assert conn.execute("SELECT holder_agent_id FROM coordination_leases WHERE name=%s",
                             (f"coordinator:{maintainer.ROLE_PROJECT}",)).fetchone() == (None,)
+
+
+@pytest.mark.parametrize("coordinator", [False, True], ids=["conductor", "coordinator"])
+@pytest.mark.parametrize("credential_hash,queued,reason", [
+    pytest.param("a" * 64, True, "queued on coordinator:p", id="queued-coordinator"),
+    pytest.param(None, False, "revoked agent", id="revoked-agent"),
+])
+def test_operator_role_refuses_unsupported_grantees(board_db, credential_hash, queued, reason, coordinator):
+    import psycopg
+    from board.host_fixtures import operator_role
+    from board.scenarios import Ctx, seed_bank
+
+    with psycopg.connect(board_db, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO coordination_agents (agent_id,principal,project,credential_hash,created_at,last_activity) "
+            "VALUES ('a','default','p',%s,1,1)", (credential_hash,))
+        if queued:
+            conn.execute(
+                "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,acquired_at,expires_at) "
+                "VALUES ('coordinator:p','other','default',nextval('coordination_lease_fence'),1,4102444800)")
+            conn.execute(
+                "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
+                "VALUES ('coordinator:p','a','default',120,1)")
+        before = maintainer.snapshot(board_db, None)
+        with pytest.raises(AssertionError, match=reason):
+            seed_bank(board_db, lambda rows, _: operator_role(rows, "p", "a", coordinator=coordinator), Ctx())
+        assert maintainer.snapshot(board_db, None) == before
+
+
+def test_mail_refusal_clone_counts_follow_the_rust_backed_limits(monkeypatch):
+    from board import maintainer_refusals, seed_rows
+
+    clones = []
+    monkeypatch.setattr(seed_rows, "MAIL_PER_SENDER", 7)
+    monkeypatch.setattr(seed_rows, "PENDING_MAIL", 19)
+    monkeypatch.setattr(maintainer_refusals, "clone_mail",
+                        lambda _rows, _ctx, *, count, old=False: clones.append((count, old)))
+    monkeypatch.setattr(maintainer_refusals.S, "seed_bank", lambda _dsn, seed, ctx: seed(None, ctx))
+    steps = {step.name: step for step in maintainer_refusals.MailRefusals().steps()}
+    steps["fill sender minute rate"].fn("unused", None)
+    steps["fill recipient queue with old unacknowledged mail"].fn("unused", None)
+    assert clones == [(7, False), (19, True)]
 
 
 def test_host_revoke_ends_only_live_passkey_sessions_issued_by_that_key(board_db):

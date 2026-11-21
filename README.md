@@ -574,8 +574,8 @@ the in-memory store is a write-through cache hydrated at startup
 (the CMS counters live in the bank too, in `cms_counters` since schema
 v57; there are no MLP weights).
 
-The daemon runs **either** containerized (recommended — portable, no host
-Python) **or** as a host process. Claude Code attaches through a thin
+The daemon runs **either** containerized (recommended) **or** as a host
+process. Claude Code attaches through a thin
 torch-free stdio **shim** (the installer default — per-session identity,
 needed for concurrent sessions) **or** directly over **HTTP** (simpler for
 a single session):
@@ -613,8 +613,12 @@ flattening YAML loses that context. For a stack manager, use the
 [supported external-stack path](docs/guide/install-and-move.md#running-under-portainer-or-another-stack-manager).
 
 The whole stack — Postgres **and** the memory daemon — runs in Docker.
-No host Python, no torch install, no version skew. A new install runs the
-Rust daemon: a small image (about 0.3 GB, measured 2026-11-10) that
+The daemon needs no host Python or torch installation. The installer selects
+the Python client by default. Set `PSEUDOLIFE_SHIM_ENGINE=native` to install
+the [native client](docs/guide/install-and-move.md#native-client) without
+host Python. This choice is independent of the daemon engine.
+A new install normally runs the Rust daemon, a small image (about 0.3 GB,
+measured 2026-11-10) that
 downloads its pinned models once (about 2.4 GB) into their own volume;
 `--engine python` (Windows: `-Engine python`) installs the Python daemon
 instead, and the installer says why when it takes Python by itself
@@ -769,11 +773,14 @@ the running daemon's bearer settings: restore the original env file, or
 use the explicit [auth handover recipe](docs/guide/configuration.md#changing-daemon-bearer-settings)
 when the change is intentional.
 
-You are told when it is time: the daemon checks GitHub for the latest stable
-release with complete native assets in the background (`updates.check_releases`,
-on by default) and
-every session's briefing then opens with `release X is available — run
-pseudolife-mcp update`. With `updates.unattended_clients: true` in
+With `updates.check_releases` enabled (the default), the Rust daemon checks
+GitHub for a stable release with the complete native asset set and
+`RELEASE-READY.json`. An eligible update appears in the session briefing as
+`release X is available — run pseudolife-mcp update`. The native updater
+uses the same readiness requirement when it discovers the latest release.
+The Python daemon and updater discover releases through PyPI.
+See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update)
+for client-only and explicit-tag selection. With `updates.unattended_clients: true` in
 `config.yaml` (off by default) a Docker-tier shim on the daemon's host
 installs the daemon's release as its own new runtime and refreshes the
 plugin cache by itself whenever the daemon is newer than it; the daemon
@@ -1422,14 +1429,15 @@ everything else; a larger body gets HTTP 413 `{"error":
 "request_too_large"}`. No CDN, fully offline: a Svelte
 build committed under `frontend/dist/` with vendored OFL fonts
 and a vendored 3D engine, served straight from the daemon, so neither the
-daemon image nor a pip install needs Node. The source is in
-[`frontend/`](frontend/README.md); CI rebuilds it and fails if the committed
-build differs. For UI development, the [Vite fixture-server workflow](frontend/README.md#develop)
+daemon image nor an install from the Python wheel needs Node. The released
+daemon images and wheel ship the build. The Python daemon run directly from
+a checkout or a normal editable install answers `/ui/` with 404. For UI
+development, the [Vite fixture-server workflow](frontend/README.md#develop)
 serves the Console at `http://localhost:5173/ui/` against canned data
 without Postgres or torch. Its payloads self-announce
 (`"fixtures": true` on `/health`), and the
-topbar shows a "Demo data, not a real bank" chip, so a fixture run is never
-mistaken for a real bank.
+topbar shows a "Demo data, not a real bank" chip. CI rebuilds the frontend
+and checks it against the committed build.
 
 ## Capabilities at a glance
 
