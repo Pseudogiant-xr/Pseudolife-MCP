@@ -5,7 +5,7 @@ Use the [installer](../../README.md#durable-tier--docker-recommended-for-a-long-
 bank without Docker, install `pip install 'pseudolife-mcp[lite]'` and follow
 the [lite quickstart](../../README.md#quickstart). To relocate an
 existing Docker bank, use [`pseudolife-mcp move`](remote-bank.md#moving-a-bank)
-from its current host; install the destination first and review `--dry-run`.
+from its current host. Install the destination first and review `--dry-run`.
 Never hand-write or flatten a compose file to install or move a bank.
 
 ## Daemon engine
@@ -41,13 +41,16 @@ again. `--engine python` keeps Python for good, and `--engine rust` refuses
 an unsupported configuration before the backup instead of falling back.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
-on the Python daemon; the next attended `pseudolife-mcp update` moves the host. A
-bank with a legacy schema or pending import takes one extra step inside
-the release update: it runs the pinned Python 0.23.1 daemon to complete
-the import, then switches to the selected Rust release. The archived
-image is available only for Linux amd64. On another platform, restore a
-verified backup on a Linux amd64 Docker host and complete the update
-there before moving the migrated bank back.
+on the Python daemon. The next attended `pseudolife-mcp update` can move
+the host. When the native updater deploys a Rust daemon over a legacy
+bank, it first runs the archived Python 0.23.1 daemon to finish the
+import. This applies to banks below schema 57, with counters still in
+`weights.pt`, or with an unfinished Chroma import. The archived image is
+available only for Linux amd64, including x64 Docker Desktop running
+Linux containers. On a host using Linux arm64 images, the native updater
+refuses before taking a backup. Restore a verified backup on a Linux
+amd64 Docker host, complete the update there, then move the migrated
+bank back. The Python updater uses its own import path.
 
 Scheduled (`--unattended`) updates always keep the installed engine. On
 a Python host, if the newest release has no Python image or the update
@@ -73,19 +76,40 @@ install refuses it.
 
 ## Native client
 
-The installers install the Python client, and `pseudolife-mcp update`
-keeps it: in 0.24.0 the native client (one program, no Python) is opt-in,
-because it does not run everything the Python client does yet. An update
-from 0.23.x, where a native client is built for the platform, says so in
-one line with the command that moves the machine. To move, set
-`PSEUDOLIFE_SHIM_ENGINE=native` for the update (from a machine already on
-this release's Python client: `PSEUDOLIFE_SHIM_ENGINE=native
-pseudolife-mcp update --clients-only`); it moves when the release's archive
-for its platform downloads, matches `SHA256SUMS` and runs, and otherwise
-keeps the Python client and says why. A pip or lite install is upgraded in
-place and is not moved. The native client refuses a lite-tier bank, `serve` and
-`embedded`, each naming the way forward, and some commands are not in it
-yet; see [The native client](configuration.md#the-native-client).
+The installers select the Python client by default. To install the native
+client, check out a release tag that carries the native installer and set
+`PSEUDOLIFE_SHIM_ENGINE=native` before running the same installer. The native
+installer runs its setup and client-registration steps without host Python.
+It checks the platform archive against `SHA256SUMS` and confirms that the
+client supports the installer's setup commands before making changes. The
+client choice is independent of `--engine`, which selects the Docker daemon.
+
+On an installer-managed Python client from 0.23.0 or later, opt in with
+`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (set
+`$env:PSEUDOLIFE_SHIM_ENGINE = 'native'` first in PowerShell). If your client
+predates 0.23.0, update it on Python first, then run the opt-in command.
+The updater checks the release archive and keeps the Python client if it
+cannot move this installation. Running sessions keep their runtime. New
+sessions use the selected client through the existing launcher. Pip, pipx
+and lite installs update in place. See [The native client](configuration.md#the-native-client)
+for the supported platforms, tunnel limits and the route back to Python.
+
+If the Python client registered a tunnel to start automatically, opting in
+stops in preflight and prints the command to remove that registration. Keep
+the Python client to retain autostart. On the native client, tunnels run in
+the foreground. See [the tunnel guide](tunnels.md#autostart-and-private-storage)
+before moving a host that serves a tunnel.
+
+When the native installer sets up Codex with a daemon token (the local
+install's own or a supplied file), it waits up to three minutes for an
+authenticated daemon read. It retries a connection failure or server error
+while the daemon starts. A rejected token (HTTP 401 or 403) stops the check
+immediately. If the check fails, the installer completes the rest of the
+setup and skips Codex registration. It prints a warning with the reason
+and tells you how to retry the installer. Release update can refresh existing
+Codex hook scripts when their approved definitions stay the same. If a
+definition changes, open `/hooks` in Codex to review and approve the changed
+Pseudolife handlers.
 
 ## Installer refusals
 

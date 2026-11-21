@@ -533,6 +533,7 @@ class Scenario:
     files: dict[str, str] = {}  # extra files in each data dir
     golden_replay = False
     golden_db_state = False
+    native_validation = False  # the timeline validates Rust against an independent contract
     ci_fixture = False
     settle_with_search = False
     # Per side, the arm's captured clock windows for dbstate.normalize: set
@@ -581,6 +582,12 @@ class Scenario:
 
     def normalize_db(self, state: dict, before: dict, side: str) -> dict:
         return dbstate.normalize(state, DB_NONDETERMINISTIC, before, windows=self.clock_window(side))
+
+    def snapshot_db(self, dsn: str) -> dict:
+        return dbstate.dump(dsn)
+
+    def validate_snapshot(self, state: dict, before: dict) -> None:
+        """Check a native scenario's final bank against its seed and contract."""
 
     def configure_daemons(self, procs: dict) -> None:
         """Optional explicit dependency seams, declared by the scenario."""
@@ -2103,21 +2110,25 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
 
 def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool,
                   candidate: dict | None = None) -> dict:
+    if scn.native_validation and record:
+        raise ValueError(f"{scn.name} uses native validation; use golden replay or live without --record")
     tag = scn.name.replace("-", "_")
     template = pg.name(f"{pg.PREFIX}{tag}_t")
     dsn_t = pg.create(template)
     scn.prepare_template(dsn_t)
     # The banks' state before either daemon touched them: declared writes and
     # clock values are judged against it, so changes to existing rows show.
-    before = dbstate.dump(dsn_t)
+    before = scn.snapshot_db(dsn_t)
     dbs = {"python": pg.name(f"{pg.PREFIX}{tag}_py"), "rust": pg.name(f"{pg.PREFIX}{tag}_rs")}
+    if scn.native_validation:
+        del dbs["python"]
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
     if scn.unreachable_database:
         dsns = {k: f"postgresql://nobody:nothing@127.0.0.1:{daemons.free_port()}/{pg.PREFIX}down" for k in dsns}
     procs = {}
     holders = take_leases(list(dsns.values())) if scn.hold_lease else []
     try:
-        if mode in ("live", "record"):
+        if mode in ("live", "record") and not scn.native_validation:
             home = daemons.make_home(root, f"{tag}-py", scn.config_yaml)
             for name, text in scn.files.items():
                 (home / "data" / name).write_text(text, encoding="utf-8")
@@ -2191,6 +2202,12 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
                 rows.append({"case": c["name"], "method": c["method"], "path": c["path"][:120],
                              "python_status": None, "rust_status": rs_r["status"],
                              "diffs": missing, "declared": c["declared"]})
+            elif py_r is None and scn.native_validation:
+                if not c.get("_answers"):
+                    raise RuntimeError("native validation requires a checked timeline observation")
+                rows.append({"case": c["name"], "method": c["method"], "path": c["path"],
+                             "python_status": None, "rust_status": rs_r["status"], "diffs": [],
+                             "declared": c["declared"]})
             else:
                 rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if candidate is not None:
@@ -2218,11 +2235,13 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
     if scn.name != "db-down":
         sides = dbs if mode != "golden" else {"rust": dbs["rust"]}
         for side, name in sides.items():
-            raw = dbstate.dump(pg.dsn(name))
+            raw = scn.snapshot_db(pg.dsn(name))
             scn.clock_windows = {**(scn.clock_windows or {}),
                                  side: ([(first_start[side], time.time())]
                                         if first_start.get(side) is not None else None)}
             out = scrub_declared_rows(raw, before)
+            if scn.native_validation:
+                scn.validate_snapshot(out["state"], before)
             states[side] = scn.normalize_db(out["state"], before, side)
             scrubbed[side] = out["declared"]
             if scn.read_only_bank:
