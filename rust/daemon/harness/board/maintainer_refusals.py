@@ -183,15 +183,18 @@ class MailRefusals(RefusalScenario):
     name = "maintainer-mail-refusals"
 
     def steps(self):
+        from board import seed_rows
+
         return [*bootstrap(), S.reg("register mailbox recipient", "A", project="p"),
                 challenge("initial", "send", mail_fields), complete("initial", "send", save=save_id("mail-id")),
                 challenge("capacity", "send", mail_fields),
-                host("fill sender minute rate", lambda rows, ctx: clone_mail(rows, ctx, count=60)),
+                host("fill sender minute rate",
+                     lambda rows, ctx: clone_mail(rows, ctx, count=seed_rows.MAIL_PER_SENDER)),
                 complete("sender cap", "send", source="capacity", expected=429, error="rate_capped", rollback=True),
                 host("clear synthetic rate rows", lambda rows, _ctx: rows.conn.execute(
                     "DELETE FROM coordination_messages WHERE request_id LIKE 'boundary-fixture-%'")),
                 host("fill recipient queue with old unacknowledged mail",
-                     lambda rows, ctx: clone_mail(rows, ctx, count=256, old=True)),
+                     lambda rows, ctx: clone_mail(rows, ctx, count=seed_rows.PENDING_MAIL, old=True)),
                 complete("mailbox cap", "send", source="capacity", expected=429, error="rate_capped", rollback=True),
                 host("free recipient queue", lambda rows, _ctx: rows.conn.execute(
                     "DELETE FROM coordination_messages WHERE request_id LIKE 'boundary-fixture-%'")),

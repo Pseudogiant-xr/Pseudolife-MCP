@@ -12,7 +12,10 @@
         "test_audit_verifier_requires_matching_operator_redaction",
         "test_audit_verifier_anchors_a_pruned_chain",
         "test_audit_verifier_rejects_invalid_prune_record",
-        "test_audit_archive_edit_rehashes_without_the_frozen_package"
+        "test_audit_archive_edit_rehashes_without_the_frozen_package",
+        "test_audit_export_preserves_field_order_and_legacy_payload",
+        "test_audit_ensure_refuses_before_database_setup",
+        "test_audit_captured_seed_runs_without_the_frozen_package"
       ]
     },
     "rust/cli_harness/test_audit_stats.py": {
