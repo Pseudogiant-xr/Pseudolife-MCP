@@ -490,7 +490,8 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
             legacy_handoff(name, record)
         ),
         Liveness::Running => format!(
-            "tunnel {name} is running (process record {file}). Use the client that started it to stop it"
+            "tunnel {name} is running (process record {file}). {}",
+            legacy_handoff(name, record)
         ),
         Liveness::Gone => format!(
             "tunnel {name} is not running; its process record {file} is left from a tunnel that stopped and can be deleted"
@@ -1269,6 +1270,44 @@ mod tests {
         );
         // Still running afterwards: the record and this process are untouched.
         assert!(store.0.join("dot.process.json").is_file());
+    }
+
+    #[test]
+    fn legacy_status_and_handoff_render_literal_commands() {
+        let mut record = record::Record {
+            path: "tunnels/dot.process.json".into(),
+            liveness: Liveness::Running,
+            native: false,
+            legacy_console: None,
+            ready: true,
+            why: None,
+        };
+        assert_eq!(
+            record_sentence("dot", &record, false),
+            "tunnel dot is running (process record tunnels/dot.process.json). It keeps serving until its process ends, for example when this machine restarts. If `pseudolife-mcp tunnel status --profile dot --profile-dir 'tunnels'` then reports a leftover process record, move that file aside. Start it natively with `pseudolife-mcp tunnel run --profile dot --profile-dir 'tunnels'` in a terminal you keep open"
+        );
+        let (console, command) = if cfg!(windows) {
+            (
+                r"old‘a’b‚c‛d\Scripts\pseudolife-mcp.exe",
+                r"`& 'old‘‘a’’b‚‚c‛‛d\Scripts\pseudolife-mcp.exe' tunnel stop --profile dot --profile-dir 'tunnels'`",
+            )
+        } else {
+            (
+                "old‘a’b‚c‛d/bin/pseudolife-mcp",
+                "`'old‘a’b‚c‛d/bin/pseudolife-mcp' tunnel stop --profile dot --profile-dir 'tunnels'`",
+            )
+        };
+        record.legacy_console = Some(console.into());
+        assert_eq!(
+            legacy_handoff("dot", &record),
+            format!("Stop it with {command}")
+        );
+        assert_eq!(
+            record_sentence("dot", &record, true),
+            format!(
+                "the Python client started tunnel dot (process record tunnels/dot.process.json). The native client cannot verify or restart that launch and left it running. Stop it with {command}"
+            )
+        );
     }
 
     #[test]

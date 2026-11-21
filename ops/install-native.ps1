@@ -564,7 +564,7 @@ function Initialize-NativeClient {
         $says = "$($check.Err)$($check.Out)".Trim()
         if ($check.Code -eq 3) {
             if ($says) { [Console]::Error.WriteLine($says) }
-            Stop-NativeInstall "a tunnel is registered to start by itself through this machine's Python client. The native client can run it in the foreground with pseudolife-mcp tunnel run and has no automatic or background start" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first) to keep the Python client. To move to the native client, run the autostart removal command above, then rerun. Removing autostart means the tunnel will no longer start on its own."
+            Stop-NativeInstall "a tunnel is registered to start by itself through this machine's Python client. The native client has no tunnel service command to manage that registration after the move. It can run the tunnel in the foreground with pseudolife-mcp tunnel run" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first) to keep the Python client. To move to the native client, run the autostart removal command above, then rerun. Removing autostart means the tunnel will no longer start on its own."
         } elseif (($check.Code -eq 0) -and $says) {
             [Console]::Error.WriteLine($says)
         }

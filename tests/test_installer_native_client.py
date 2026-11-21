@@ -358,7 +358,10 @@ def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "STAGED" not in result.stdout
     assert "runtime install refused: this machine stays on the Python client" in result.stderr
-    assert "a tunnel is registered to start by itself through this machine's Python client" in result.stderr
+    assert (
+        "a tunnel is registered to start by itself through this machine's Python client. "
+        "The native client has no tunnel service command to manage that registration after the move."
+    ) in result.stderr
     assert "pseudolife-mcp tunnel run" in result.stderr
     assert ("cannot run " "a tunnel yet") not in result.stderr
     assert "the tunnel will no longer start on its own" in result.stderr

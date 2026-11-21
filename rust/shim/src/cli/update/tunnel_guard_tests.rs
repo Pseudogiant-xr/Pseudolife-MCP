@@ -303,6 +303,12 @@ fn a_registered_user_unit_refuses_the_move_and_changes_nothing() {
     );
     assert!(line.contains("Nothing was changed"), "{line}");
     assert!(
+        line.starts_with(
+            "this machine stays on the Python client: a tunnel is registered to start by itself. The native client has no tunnel service command to manage that registration after the move."
+        ),
+        "{line}"
+    );
+    assert!(
         line.contains(
             "The native client can run it in the foreground with pseudolife-mcp tunnel run"
         ) && line.contains("has no automatic or background start")
@@ -1065,8 +1071,9 @@ fn a_service_made_by_hand_is_warned_about_never_refused() {
         "{lines:?}"
     );
     assert!(
-        lines[0]
-            .contains("Stop it with: systemctl --user disable --now my-chatgpt-tunnel.service ; "),
+        lines[0].contains(
+            "Disable it with: systemctl --user disable --now my-chatgpt-tunnel.service ; "
+        ),
         "{lines:?}"
     );
     // This run moves the client: no rerun hint, which would be false here.
@@ -1168,7 +1175,7 @@ fn a_hand_made_task_of_that_name_is_warned_about() {
     );
     assert!(
         lines[0].contains(
-            "Stop it with: schtasks /Change /TN \\pseudolife-tunnel-dot /Disable ; the task can then be deleted too."
+            "Disable it with: schtasks /Change /TN \\pseudolife-tunnel-dot /Disable ; the task can then be deleted too."
         ),
         "{lines:?}"
     );
@@ -1328,7 +1335,7 @@ fn a_system_unit_made_by_hand_is_warned_about_without_root() {
     );
     assert!(
         lines.iter().any(|l| l.contains(
-            "It is a system unit, so only root can change it. Stop it with: systemctl disable --now dot-tunnel.service ;"
+            "It is a system unit, so only root can change it. Disable it with: systemctl disable --now dot-tunnel.service ;"
         )),
         "{lines:?}"
     );
@@ -1465,7 +1472,7 @@ fn every_task_is_read_for_hand_made_services_in_one_query() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(
         lines[0].contains(
-            "Stop it with: (PowerShell) schtasks /Change /TN '\\My Tasks\\ChatGPT tunnel' /Disable ;"
+            "Disable it with: (PowerShell) schtasks /Change /TN '\\My Tasks\\ChatGPT tunnel' /Disable ;"
         ),
         "{lines:?}"
     );
@@ -1486,7 +1493,7 @@ fn names_in_printed_commands_are_quoted() {
         panic!()
     };
     assert!(
-        lines[0].contains("Stop it with: systemctl --user disable --now 'a;b.service' ;"),
+        lines[0].contains("Disable it with: systemctl --user disable --now 'a;b.service' ;"),
         "{lines:?}"
     );
 }

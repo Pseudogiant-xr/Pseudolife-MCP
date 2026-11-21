@@ -1019,7 +1019,7 @@ fn made_by_hand(service: &Registered, native: bool, mover: Mover) -> String {
         )
     };
     format!(
-        "{} looks like a tunnel service made by hand. It starts this machine's launcher with tunnel run. The native client can run a tunnel in the foreground and has no tunnel service command. To disable this service, use the service manager. {}Stop it with: {} {delete}.{after}",
+        "{} looks like a tunnel service made by hand. It starts this machine's launcher with tunnel run. The native client can run a tunnel in the foreground and has no tunnel service command. {}Disable it with: {} {delete}.{after}",
         service.place,
         service.root_note(),
         service.disable_native()
@@ -1066,7 +1066,7 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
         ),
     };
     format!(
-        "this machine stays on the Python client: a tunnel is registered to start by itself. {stay}. To move to the native client, first remove the autostart with the Python client ({removes}), then {again}. Registered: {places}. Removing autostart means the tunnel will no longer start on its own. The native client can run it in the foreground with pseudolife-mcp tunnel run and has no automatic or background start"
+        "this machine stays on the Python client: a tunnel is registered to start by itself. The native client has no tunnel service command to manage that registration after the move. To move to the native client, first remove the autostart with the Python client ({removes}), then {again}. Registered: {places}. {stay}. Removing autostart means the tunnel will no longer start on its own. The native client can run it in the foreground with pseudolife-mcp tunnel run and has no automatic or background start"
     )
 }
 

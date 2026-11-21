@@ -3601,6 +3601,7 @@ def test_a_registered_tunnel_service_keeps_the_python_client_and_changes_nothing
         out = result.stdout + result.stderr
         assert "this machine stays on the Python client" in out, out
         assert "pseudolife-mcp tunnel run" in out, out
+        assert "The native client has no tunnel service command to manage that registration after the move." in out, out
         assert ("cannot run " "a tunnel yet") not in out, out
         assert f"systemd user unit {unit}" in out, out
         assert "Nothing was changed" in out, out
@@ -3703,6 +3704,10 @@ def test_runtime_install_refuses_the_move_before_reading_its_archive(tmp_path):
         launcher, _unit = _python_client_with_tunnel_service(env)
         (Path(env["HOME"]) / ".claude.json").unlink()   # the installer moves with no registration
         before = launcher.read_bytes()
+        probe = subprocess.run([binary, "runtime", "install", "--check"], env=env, cwd=tmp_path,
+                               capture_output=True, text=True, timeout=60)
+        assert probe.returncode == 3, probe.stdout + probe.stderr
+        assert "The native client has no tunnel service command to manage that registration after the move." in probe.stderr
         missing = tmp_path / "never-read"
         result = subprocess.run([binary, "runtime", "install", "--archive", str(missing / "a.tar.gz"),
                                  "--sha256sums", str(missing / "SHA256SUMS"), "--version", "0.21.1"],
