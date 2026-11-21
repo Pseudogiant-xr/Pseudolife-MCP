@@ -121,79 +121,6 @@ async fn verify_credential_with(
     Err(reason)
 }
 
-#[cfg(test)]
-mod credential_tests {
-    use super::*;
-    use tokio::time::Instant;
-
-    const URL: &str = "https://daemon.example.com";
-
-    #[tokio::test(start_paused = true)]
-    async fn credential_verification_reports_exhausted_http_retry_and_says_to_retry() {
-        let started = Instant::now();
-        let error = verify_credential_with(URL, "test credential file", async |_| {
-            Ok(StatusCode::SERVICE_UNAVAILABLE)
-        })
-        .await
-        .unwrap_err();
-        assert_eq!(started.elapsed(), Duration::from_secs(180));
-        assert_eq!(
-            error,
-            "The authenticated check at https://daemon.example.com did not succeed within 180 seconds. The last attempt returned HTTP 503. Check that the daemon is reachable, then retry"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn credential_verification_returns_redirect_and_404_without_retry() {
-        for status in [StatusCode::FOUND, StatusCode::NOT_FOUND] {
-            let mut attempts = 0;
-            let started = Instant::now();
-            let error = verify_credential_with(URL, "test credential file", async |_| {
-                attempts += 1;
-                Ok(status)
-            })
-            .await
-            .unwrap_err();
-            assert_eq!(attempts, 1);
-            assert_eq!(started.elapsed(), Duration::ZERO);
-            assert!(error.contains(&format!("returned HTTP {}", status.as_u16())));
-            assert!(error.contains("Check that the address serves the Pseudolife daemon"));
-        }
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn credential_verification_names_an_unreadable_response() {
-        use std::io::ErrorKind;
-
-        for (body_io_error, message) in [
-            (
-                None,
-                "The last attempt received an unreadable HTTP response.",
-            ),
-            (Some(ErrorKind::TimedOut), "The last attempt timed out."),
-            (
-                Some(ErrorKind::ConnectionReset),
-                "The last connection was refused or reset.",
-            ),
-        ] {
-            let error = verify_credential_with(URL, "test credential file", async |_| {
-                credential_status(hook_http::Reply {
-                    status: 200,
-                    body: vec![],
-                    headers: http::HeaderMap::new(),
-                    body_failed: true,
-                    body_io_error,
-                    unsupported: false,
-                })
-            })
-            .await
-            .unwrap_err();
-            assert!(error.contains(message), "{error}");
-            assert!(!error.contains("could not establish a connection"));
-        }
-    }
-}
-
 const REASONS: [(&str, &str); 6] = [
     (
         "disabled",
@@ -358,5 +285,78 @@ pub(super) async fn handshake(url: &str, credential: &Cred) -> Result<usize, Str
         Ok(Some((true, count))) if count > 0 => Ok(count),
         Ok(Some(_)) => Err("the daemon listed no tools".to_owned()),
         _ => Err(exited()),
+    }
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::*;
+    use tokio::time::Instant;
+
+    const URL: &str = "https://daemon.example.com";
+
+    #[tokio::test(start_paused = true)]
+    async fn credential_verification_reports_exhausted_http_retry_and_says_to_retry() {
+        let started = Instant::now();
+        let error = verify_credential_with(URL, "test credential file", async |_| {
+            Ok(StatusCode::SERVICE_UNAVAILABLE)
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(started.elapsed(), Duration::from_secs(180));
+        assert_eq!(
+            error,
+            "The authenticated check at https://daemon.example.com did not succeed within 180 seconds. The last attempt returned HTTP 503. Check that the daemon is reachable, then retry"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn credential_verification_returns_redirect_and_404_without_retry() {
+        for status in [StatusCode::FOUND, StatusCode::NOT_FOUND] {
+            let mut attempts = 0;
+            let started = Instant::now();
+            let error = verify_credential_with(URL, "test credential file", async |_| {
+                attempts += 1;
+                Ok(status)
+            })
+            .await
+            .unwrap_err();
+            assert_eq!(attempts, 1);
+            assert_eq!(started.elapsed(), Duration::ZERO);
+            assert!(error.contains(&format!("returned HTTP {}", status.as_u16())));
+            assert!(error.contains("Check that the address serves the Pseudolife daemon"));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn credential_verification_names_an_unreadable_response() {
+        use std::io::ErrorKind;
+
+        for (body_io_error, message) in [
+            (
+                None,
+                "The last attempt received an unreadable HTTP response.",
+            ),
+            (Some(ErrorKind::TimedOut), "The last attempt timed out."),
+            (
+                Some(ErrorKind::ConnectionReset),
+                "The last connection was refused or reset.",
+            ),
+        ] {
+            let error = verify_credential_with(URL, "test credential file", async |_| {
+                credential_status(hook_http::Reply {
+                    status: 200,
+                    body: vec![],
+                    headers: http::HeaderMap::new(),
+                    body_failed: true,
+                    body_io_error,
+                    unsupported: false,
+                })
+            })
+            .await
+            .unwrap_err();
+            assert!(error.contains(message), "{error}");
+            assert!(!error.contains("could not establish a connection"));
+        }
     }
 }
