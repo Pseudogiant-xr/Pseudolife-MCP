@@ -12,6 +12,8 @@ import base64
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 from datetime import datetime
 from functools import cache, partial
@@ -772,11 +774,24 @@ def _stats_report(case, report_id):
     report = dict(corpus[shape["corpus"]], version="<version>", generated_at="<generated_at>")
     report.update(shape["fields"])
     if case.id == "stats-local-system-zone":
-        # This case tests the host timezone with no fixture TZ override.
-        since, until = (
-            datetime.fromisoformat(case.argv[case.argv.index(flag) + 1]).timestamp()
+        dates = [
+            case.argv[case.argv.index(flag) + 1]
             for flag in ("--since", "--until")
-        )
+        ]
+        if sys.platform == "linux" and "TZDIR" in os.environ:
+            # The CLI arm inherits TZ but drops TZDIR. Resolve under the
+            # same inputs without changing the harness process's timezone.
+            env = {"TZ": os.environ["TZ"]} if "TZ" in os.environ else {}
+            code = (
+                "import sys\n"
+                "from datetime import datetime\n"
+                "print(*(datetime.fromisoformat(date).timestamp() for date in sys.argv[1:]))"
+            )
+            timestamps = subprocess.check_output(
+                [sys.executable, "-I", "-c", code, *dates], env=env, text=True, timeout=5)
+            since, until = map(float, timestamps.split())
+        else:
+            since, until = (datetime.fromisoformat(date).timestamp() for date in dates)
         report["window"] = {"since": since, "until": until, "hours": round((until - since) / 3600, 3)}
     return (json.dumps(report, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
 
@@ -896,7 +911,6 @@ raise SystemExit(int(os.environ['FIXTURE_EXIT']))
 
 def transport_cases():
     import shlex
-    import sys
     out = []
     for engine in ("python", "rust", "<no value>"):
         for action in ("verify", "redact", "export", "stats"):

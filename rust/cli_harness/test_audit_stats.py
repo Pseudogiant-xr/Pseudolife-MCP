@@ -4,6 +4,8 @@ import copy
 import json
 import os
 from pathlib import Path
+import sys
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -58,6 +60,31 @@ def test_live_recorded_reference_retains_permission_checks(tmp_path, mask, direc
     assert want["modes"] == {
         "cwd": directory, "docker.jsonl": file_mode, "docker.stdin": file_mode, "out.jsonl": "0o600",
     }
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not Path("/usr/share/zoneinfo/Etc/GMT+8").is_file(),
+    reason="requires Linux zoneinfo data for a conflicting TZDIR",
+)
+def test_system_zone_reference_uses_the_cli_timezone_inputs(monkeypatch, tmp_path):
+    alternate = tmp_path / "Etc" / "UTC"
+    alternate.parent.mkdir()
+    alternate.write_bytes(Path("/usr/share/zoneinfo/Etc/GMT+8").read_bytes())
+    case = core.Case("stats-local-system-zone", [
+        "board-audit", "stats", "--since", "2026-10-11T12:00:00", "--until", "2026-10-13T00:00:00Z",
+    ])
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setenv("TZ", "Etc/UTC")
+            patch.setenv("TZDIR", str(tmp_path))
+            time.tzset()
+            assert time.strftime("%z") == "-0800"
+            report = json.loads(audit._stats_report(case, case.id))
+    finally:
+        time.tzset()
+
+    assert report["window"] == {"since": 1791720000.0, "until": 1791849600.0, "hours": 36.0}
 
 
 def test_committed_stats_fixture_matches_its_synthetic_inputs_and_report_bytes():
