@@ -42,8 +42,8 @@ gate below.
 | Published packages | The PyPI wheel, the Python daemon image, the PostgreSQL image, the Rust daemon image, the native archives on the GitHub release, and an MCP registry entry (`server.json`) that points at PyPI. | PyPI, the Python image and the registry entry |
 
 The generic dispatcher deferral prints `pseudolife-stdio: mode '<mode>' is
-deferred in this candidate` on stderr and exits 1. The only entries in
-`DEFERRED_MODES` in `rust/shim/src/cli.rs` are `tunnel` and `move`.
+deferred in this candidate` on stderr and exits 1. The only entry in
+`DEFERRED_MODES` in `rust/shim/src/cli.rs` is `tunnel`.
 The command exits at that point without starting the Python client.
 
 ## What is left
@@ -78,11 +78,11 @@ The command exits at that point without starting the Python client.
 | `expose` | Status, consent, Tailscale serve changes and read-back run natively. Malformed arguments get an actionable usage error before host access. (#1636, #1725) | — |
 | `test-login` | Help, argument checks, admin-URL and container setup, and private credential staging run natively. Preflight refusals name the failed condition. (#1727) | — |
 | `maintainer` | Guided setup and administration (`enrol-code`, `confirm`, `revoke`, `reset`, `list`) run natively. Invalid arguments and database settings receive named refusals. (#1730) | — |
-| `move` | On Linux Docker targets, preflight checks both bearer modes. Carried moves can use explicit original files. `--expose-target` can reuse a target tailnet forward or create one with a recovery receipt. Rollback and target release run natively. Checkout handover receives an early refusal with the installed release route. | Final recovery proofs and dispatcher cutover. |
+| `move` | The native dispatcher owns help, argument refusals, dry runs, moves, resume, rollback and target release. On Linux Docker targets, preflight checks both bearer modes. Carried moves can use explicit original files. `--expose-target` can reuse a target tailnet forward or create one with a recovery receipt. Checkout handover receives an early refusal with the installed release route. A command line the native parsers cannot take is refused with its cause named. | The installed acceptance matrix's move interruption and rollback, and a real-process kill after the commit marker reaches the source and before the move record says committed (engine model tests only). |
 | `tunnel` | Native setup creates and resumes prepared profiles and imports or renews private keys. A renewal retains the previous pair until the replacement completes a control-plane poll. Setup can recover interrupted writes and explicitly restore or discard a retained pair. `tunnel run` supervises a foreground launch, `tunnel stop` requests shutdown, and verification binds receipts to the current native launch identity. Update recognizes a matching running launch and reports when an explicit stop followed by run is needed to reconnect. | Background start, service registration, native refresh with recovery, and installed lifecycle proofs. |
 | `embedded` | A plain refusal: retired with file mode. | Nothing. |
 | `backup`, `restore`, `export`, `import`, `invite`, `maintainer`, `lease`, `board-audit` on a lite bank | One refusal that names the Docker install and the 0.23.x pip release that still opens the bank (`cli/retired.rs`). | Nothing. |
-| Edge shapes in `tunnel` and `move` | The named deferral is still reachable. `tunnel` can defer on unsupported arguments, a profile directory it cannot open outside `update`, or work its `status`, `verify` and `setup` paths cannot complete. `move` can defer when its rollback, target-release, preflight and transaction parsers cannot handle the invocation. | Give supported operations a native result and other calls a refusal with the cause and remedy. |
+| Edge shapes in `tunnel` and `move` | The named deferral is still reachable. `tunnel` can defer on unsupported arguments, a profile directory it cannot open outside `update`, or work its `status`, `verify` and `setup` paths cannot complete. `move` no longer defers for any argv. | Give supported operations a native result and other calls a refusal with the cause and remedy. |
 
 The sweeps also completed native answers for `invite` and `pair` (#1679),
 `board-audit` (#1699), and `export` and `import` (#1676).
