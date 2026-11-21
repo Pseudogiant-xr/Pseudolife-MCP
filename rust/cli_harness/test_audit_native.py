@@ -279,6 +279,22 @@ def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     assert edited["hash"] == expected["hash"]
 
 
+def test_audit_export_preserves_field_order_and_legacy_payload():
+    from .rows import audit
+
+    with cold_harness_imports():
+        line = audit._export_line((
+            7, "send", "agent", "alice", "a", "b", "p", "t", "m",
+            r'{"odd":NaN,"text":"\ud800"}', 1500.0, "", "prev", "hash", None, None,
+        ))
+    assert line == (
+        b'{"seq":7,"event":"send","actor":"agent","principal":"alice","agent_id":"a",'
+        b'"recipient_agent_id":"b","project":"p","task":"t","message_id":"m",'
+        b'"payload":{"odd":NaN,"text":"\\ud800"},"created_at":1500.0,"hlc":"",'
+        b'"prev_hash":"prev","hash":"hash","body":null,"body_salt":null}\n'
+    )
+
+
 def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):
     from .rows import audit
 

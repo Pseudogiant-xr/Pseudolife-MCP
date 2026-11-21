@@ -2,6 +2,7 @@
 import base64
 import copy
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -10,6 +11,7 @@ import pytest
 from rust.harness_support.database_guard import ProductionDatabaseError
 from rust.harness_support.import_blocker import cold_harness_imports
 
+from . import core
 from .rows import audit
 
 
@@ -18,6 +20,44 @@ STATS_FIXTURE = Path(__file__).resolve().parents[1] / "shim/src/cli/board_audit/
 
 def stats_corpus():
     return json.loads(STATS_FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_live_reference_runs_only_the_candidate(monkeypatch, tmp_path):
+    calls = []
+
+    def reference(home):
+        calls.append(("reference", home))
+        return {"exit": 0, "stdout": "", "stderr": ""}
+
+    def run_arm(case, target, home):
+        assert target.name == "rust", "the live reference launched the Python arm"
+        calls.append(("rust", home))
+        return {"exit": 1, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(core, "_home_root", lambda: tmp_path / "case")
+    monkeypatch.setattr(core, "run_arm", run_arm)
+    case = core.Case("reference", [])
+    case.reference = reference
+    expected, actual = core.run_case(case, core.Target("python", []), core.Target("rust", []))
+
+    assert calls == [("reference", tmp_path / "case/h"), ("rust", tmp_path / "case/h")]
+    assert expected["exit"] == 0 and actual["exit"] == 1
+
+
+@pytest.mark.skipif(core.WINDOWS, reason="POSIX permission bits")
+@pytest.mark.parametrize(("mask", "directory", "file_mode"), [
+    (0o002, "0o775", "0o664"),
+    (0o077, "0o700", "0o600"),
+])
+def test_live_recorded_reference_retains_permission_checks(tmp_path, mask, directory, file_mode):
+    previous = os.umask(mask)
+    try:
+        want = audit._recorded_reference("transport-rust-export-0", tmp_path / "h")
+    finally:
+        os.umask(previous)
+    assert want["modes"] == {
+        "cwd": directory, "docker.jsonl": file_mode, "docker.stdin": file_mode, "out.jsonl": "0o600",
+    }
 
 
 def test_committed_stats_fixture_matches_its_synthetic_inputs_and_report_bytes():
