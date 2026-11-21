@@ -114,7 +114,7 @@ def proof(binary, out, container, triage=()):
         raise ValueError("proof requires the dedicated loopback test PostgreSQL on port 5434")
     user = os.environ["PSEUDOLIFE_TEST_PG_USER"]
     admin = dict(host="127.0.0.1", port=5434, user=user, password=os.environ["PSEUDOLIFE_TEST_PG_PASSWORD"])
-    name = "s3_shadow_" + uuid.uuid4().hex[:12]
+    name = "pl_cf_w2d_shadow_" + uuid.uuid4().hex[:12]
     dsn = make_conninfo(dbname=name, **admin)
     root = out.parent / name
     root.mkdir(parents=True)
@@ -149,9 +149,16 @@ coordination:
             "PSEUDOLIFE_BUILD_DIRTY": os.environ.get("S3_DIRTY", "true"),
             "PSEUDOLIFE_BUILD_SOURCE": "checkout",
         })
+        seed_env = daemons.base_env(writer_home, {
+            "PL_HARNESS_SEED_DSN": dsn,
+            "PL_HARNESS_SEED_RUST": str(binary.resolve()),
+            "OMP_NUM_THREADS": "2", "MKL_NUM_THREADS": "2",
+            **{key: os.environ[key] for key in ("PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_ORT_THREADS")
+               if key in os.environ},
+        })
         with (root / "seed.log").open("wb") as log:
             seeded = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), "0"],
-                                    cwd=HERE.parents[2], env=dict(env, PYTHONPATH=str(HERE.parents[2])),
+                                    cwd=HERE.parents[2], env=dict(seed_env, PYTHONPATH=str(HERE.parents[2])),
                                     stdout=log, stderr=subprocess.STDOUT)
         if seeded.returncode:
             raise RuntimeError(f"w2d_seed exit {seeded.returncode}; see seed.log")

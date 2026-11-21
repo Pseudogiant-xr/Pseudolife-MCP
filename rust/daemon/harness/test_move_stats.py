@@ -365,7 +365,7 @@ def main():
         args.out.write_text(json.dumps({"complete": False, "results": []}), encoding="utf-8")
         try:
             template = banks.name("pl_cf_w2d_template")
-            harness.seed_template(template, args.paragraphs)
+            harness.seed_template(template, args.paragraphs, args.rust_bin)
             for name in args.only:
                 scenario = scenarios[name]()
                 groups = sum("mcp" in case and case.get("tool") == "memory_stats"

@@ -1,37 +1,35 @@
-"""Seed a disposable bank for the W2-D search harness, through Python's own
-write paths only (``MemoryService.store`` / ``supersede`` / ``cortex_write``
-/ ``set_add`` and ``PostgresStorage.add_chronicle_event``).
+"""Seed the W2-D test bank with the candidate writer and guarded SQL inputs.
 
-usage: python w2d_seed.py [paragraphs]   (bank DSN in PSEUDOLIFE_MCP_DATABASE_URL,
-never on the command line, so it stays out of process listings)
-       python w2d_seed.py --mcp-extra  (adds the memory_search scenario's facts
-       to an already seeded bank: an aged volatile fact, a contender and an
-       entry that restates a fact)
-       python w2d_seed.py --mcp-extra --fact-extra  (also memory_fact_get's:
-       an aliased entity with a shadowed alias, a set with a removed member,
-       an emptied set, a stale fact and trace rows)
-       python w2d_seed.py --mcp-extra --fact-extra --stats-extra  (also
-       memory_stats's: retrieval events from 8 sessions for graduation
-       candidates, a community row and a graph digest)
-
-The corpus is paragraphs of this repository's public docs, plus crafted
-entries for every search channel: an assistant-sourced note, tagged notes,
-slot-bearing statements, a superseded entry and its correction, chronicle
-events (dated and undated) and cortex facts (scalar, set, assistant-origin,
-constraint). Run with ``PSEUDOLIFE_MCP_DATA_DIR`` pointing at a disposable
-directory.
+usage: python w2d_seed.py [paragraphs | --mcp-extra [--fact-extra] [--stats-extra]]
+The caller supplies PL_HARNESS_SEED_DSN, PL_HARNESS_SEED_RUST and a disposable home.
 """
 from __future__ import annotations
 
+import http.client
+import json
 import os
 import re
 import sys
+import tempfile
+import time
+from contextlib import closing
 from pathlib import Path
 
 _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
+
+import psycopg
+from psycopg.types.json import Json
+
+import daemons
+from mcp_wire import Session, sse_data
+from principal_fixtures import check_target
+from rust.harness_support.bank_fixture import assert_fixture_database
+
+SEED_TOKEN = "synthetic-w2d-fixture-token"
+CHILD_TEXT = "Episode filter probe: the child step reran the deploy health check."
 
 DOCS = ["docs/guide/configuration.md", "docs/guide/dreaming.md", "README.md",
         "docs/guide/agent-isolation.md", "CONTRIBUTING.md"]
@@ -89,152 +87,244 @@ def paragraphs(limit: int) -> list[str]:
     return out[:limit]
 
 
-def mcp_extra(svc) -> None:
-    """What memory_search's projection needs beyond the shared seed."""
-    import time
-    # Volatile and 30 days old: past TTL/3 (7 days), short of stale (42).
-    svc.cortex_write("deploy window", "weekday", "thursday afternoon", confidence=0.8,
-                     freshness_class="volatile", now=time.time() - 30 * 86400)
-    svc.cortex_write("homelab box", "os", "Ubuntu 24.04", confidence=0.7, force_contend=True)
-    # Restates the "Debian 13" fact: dropped when the fact is served.
-    svc.store("OS: Debian 13", source="notes")
-    # A child episode under the seeded session, holding an entry only an
-    # episode filter that expands to the subtree reaches.
-    root = next(e.id for e in svc._cms.episodes.episodes.values() if e.title == "W2-D seed session")
-    svc.episode_start("W2-D child step", episode=root)
-    svc.store("Episode filter probe: the child step reran the deploy health check.",
-              source="session-notes")
+def require_fixture(condition, detail):
+    if not condition:
+        raise RuntimeError(f"seed precondition not met: {detail}")
 
 
-def fact_extra(svc) -> None:
-    """What memory_fact_get needs beyond mcp_extra: an aliased entity whose
-    second alias is another entity's canonical (shadowed), a set slot with a
-    removed member, a fully emptied set, a stale fact, and trace rows for
-    source_entries and the re_verify warnings."""
-    import time
+def tool(session, name, **args):
+    reply = session.tool(f"memory_{name}", args)
+    frames = sse_data(reply)
+    message = json.loads(frames[0] if frames else reply["body"])
+    result = message.get("result") or {}
+    payload = result.get("structuredContent")
+    require_fixture(reply["status"] == 200 and not result.get("isError") and isinstance(payload, dict),
+                    f"memory_{name} did not return a structured result")
+    return payload
 
-    import psycopg
+
+def root_episode(port):
+    with closing(http.client.HTTPConnection("127.0.0.1", port, timeout=120)) as conn:
+        conn.request("POST", "/api/episode/start",
+                     json.dumps({"session_key": EPISODE_KEY, "title": "W2-D seed session"}),
+                     {"Content-Type": "application/json", "Authorization": f"Bearer {SEED_TOKEN}"})
+        reply = conn.getresponse()
+        payload = json.loads(reply.read())
+        handle = payload.get("id") or payload.get("episode_id")
+        require_fixture(reply.status == 200 and handle, "candidate did not register the seed episode")
+        return handle
+
+
+def open_bank(dsn):
+    check_target(dsn)
+    conn = psycopg.connect(dsn)
+    try:
+        assert_fixture_database(conn)
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+def write_base(session, port, docs):
+    for text in docs:
+        tool(session, "store", text=text, source="docs")
+    for text, source, tags in CRAFTED:
+        tool(session, "store", text=text, source=source, **({"tags": tags} if tags else {}))
+    handle = root_episode(port)
+    for text in EPISODE_TEXTS:
+        tool(session, "store", text=text, source="session-notes", episode=handle)
+    tool(session, "store", text=SUPERSEDED[0], source="conversation")
+    tool(session, "supersede", old_text=SUPERSEDED[0], new_text=SUPERSEDED[1])
+    for entity, attribute, value, conf, tol in FACTS:
+        tool(session, "fact_set", entity=entity, attribute=attribute, value=value,
+             confidence=conf, distortion_tolerance=tol)
+    for entity, attribute, member in SET_MEMBERS:
+        tool(session, "set_add", entity=entity, attribute=attribute, member=member)
+    tool(session, "fact_set", entity="homelab box", attribute="gpu", value="RTX 4090", confidence=0.6)
+
+
+def write_extras(session, dsn, fact):
+    with open_bank(dsn) as conn:
+        roots = conn.execute("SELECT id FROM episodes WHERE title = 'W2-D seed session' "
+                             "AND session_key = %s AND ended_at IS NULL", (EPISODE_KEY,)).fetchall()
+    require_fixture(len(roots) == 1, "extras need the open W2-D seed root")
+    tool(session, "fact_set", entity="deploy window", attribute="weekday", value="thursday afternoon",
+         confidence=0.8, freshness_class="volatile")
+    out = tool(session, "fact_set", entity="homelab box", attribute="os", value="Ubuntu 24.04", confidence=0.7)
+    require_fixture(out.get("action") == "contested", "the competing OS was not parked")
+    tool(session, "store", text="OS: Debian 13", source="notes")
+    child = tool(session, "episode_start", title="W2-D child step", episode=roots[0][0])
+    tool(session, "store", text=CHILD_TEXT, source="session-notes", episode=child["id"])
+    if fact:
+        tool(session, "fact_set", entity="dev box", attribute="cpu", value="Ryzen 9 7950X", confidence=0.8)
+        tool(session, "fact_set", entity="printer", attribute="firmware", value="2.1.0", confidence=0.7)
+        for entity, alias in (("printer", "laser"), ("dev box", "builder"), ("dev box", "printer")):
+            tool(session, "alias", entity=entity, alias=alias)
+        for attribute, member in (("users", "alice"), ("users", "bob"), ("groups", "admins")):
+            tool(session, "set_add", entity="dev box", attribute=attribute, member=member)
+        for attribute, member in (("users", "bob"), ("groups", "admins")):
+            tool(session, "set_remove", entity="dev box", attribute=attribute, member=member)
+        tool(session, "fact_set", entity="build cache", attribute="state", value="warm",
+             confidence=0.6, freshness_class="volatile")
+
+
+def check_base(conn, docs, cutoff):
+    saved = [text for text, in conn.execute("SELECT text FROM entries WHERE source='docs' AND id > %s ORDER BY id",
+                                            (cutoff,))]
+    require_fixture(saved == docs, f"expected {len(docs)} document paragraphs after the base")
+    notes = conn.execute("SELECT text,source,tags FROM entries WHERE id > %s AND source <> 'docs' "
+                         "AND text = ANY(%s) ORDER BY id",
+                         (cutoff, [text for text, _, _ in CRAFTED])).fetchall()
+    require_fixture(notes == [(text, source, tags or []) for text, source, tags in CRAFTED],
+                    "crafted notes or tags are missing")
+    root = conn.execute("SELECT id FROM episodes WHERE session_key=%s AND title='W2-D seed session' "
+                        "AND ended_at IS NULL", (EPISODE_KEY,)).fetchone()
+    require_fixture(root is not None, "missing open seed episode")
+    steps = [text for text, in conn.execute("SELECT text FROM entries WHERE episode_id = %s "
+                                           "AND source = 'session-notes' ORDER BY id", root)]
+    require_fixture(steps == EPISODE_TEXTS, "session episode is missing seeded steps")
+    pair = conn.execute("SELECT text, superseded_by_text FROM entries WHERE id > %s "
+                        "AND text = ANY(%s) ORDER BY id", (cutoff, list(SUPERSEDED))).fetchall()
+    require_fixture(pair == [(SUPERSEDED[0], SUPERSEDED[1]), (SUPERSEDED[1], None)],
+                    "missing superseded entry or replacement")
+
+
+def finish_base(conn, docs, cutoff):
+    check_base(conn, docs, cutoff)
     now = time.time()
-    svc.cortex_write("dev box", "cpu", "Ryzen 9 7950X", confidence=0.8)
-    svc.cortex_write("printer", "firmware", "2.1.0", confidence=0.7)
-    svc.graph_alias("printer", "laser")
-    svc.graph_alias("dev box", "builder")
-    svc.graph_alias("dev box", "printer")
-    for member in ("alice", "bob"):
-        svc.set_add("dev box", "users", member)
-    svc.set_remove("dev box", "users", "bob")
-    svc.set_add("dev box", "groups", "admins")
-    svc.set_remove("dev box", "groups", "admins")
-    # Volatile and 60 days old: past twice the 21-day TTL, so stale.
-    svc.cortex_write("build cache", "state", "warm", confidence=0.6,
-                     freshness_class="volatile", now=now - 60 * 86400)
-    svc.flush()
-    with psycopg.connect(os.environ["PSEUDOLIFE_MCP_DATABASE_URL"], autocommit=True) as conn:
-        entry = conn.execute("SELECT min(id) FROM entries").fetchone()[0]
-        conn.execute("INSERT INTO memory_traces VALUES ('dev-box', 'cpu', %s, %s)", (entry, now))
+    conn.execute("INSERT INTO meta (key,value) VALUES ('active_session_pointer',%s) "
+                 "ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+                 (Json({"session_id": EPISODE_KEY, "ts": now}),))
+    for date, phrase, actor, desc in EVENTS:
+        # These literals use ASCII words, digits and punctuation.
+        desc_norm = re.sub(r"[\s._\-/]+", "-", desc.casefold()).strip("-")
+        conn.execute("INSERT INTO chronicle_events (occurred_at,occurred_phrase,recorded_at,actor,actor_norm,"
+                     "description,description_norm) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                     (f"{date}T00:00:00+00:00" if date else None, phrase, now, actor, actor, desc, desc_norm))
+
+
+def finish_extras(conn, fact, stats):
+    now = time.time()
+    child = conn.execute("SELECT e.parent_id FROM episodes e JOIN entries t ON t.episode_id=e.id "
+                         "JOIN episodes parent ON parent.id=e.parent_id "
+                         "WHERE e.title='W2-D child step' AND t.text=%s AND parent.session_key=%s",
+                         (CHILD_TEXT, EPISODE_KEY)).fetchone()
+    require_fixture(child is not None, "child-episode search input is missing")
+    updates = [("deploy-window", "weekday", 30)]
+    if fact:
+        updates.append(("build-cache", "state", 60))
+    for entity, attribute, days in updates:
+        age = now - days * 86400
+        row = conn.execute("UPDATE facts SET asserted_at=%s,last_confirmed=%s WHERE entity_norm=%s "
+                           "AND attribute_norm=%s AND status='current' AND freshness_class='volatile' RETURNING id",
+                           (age, age, entity, attribute)).fetchall()
+        require_fixture(len(row) == 1, f"expected one volatile {entity}/{attribute} fact")
+    if fact:
+        entry, = conn.execute("SELECT min(id) FROM entries").fetchone()
+        require_fixture(entry is not None, "trace source entry is missing")
+        conn.execute("INSERT INTO memory_traces VALUES ('dev-box','cpu',%s,%s)", (entry, now))
         for attribute in ("cpu", "users"):
-            # Corrected after the slot was last confirmed.
             conn.execute("INSERT INTO memory_trace_invalidations VALUES "
-                         "('dev-box', %s, %s, %s, 'source_superseded')",
-                         (attribute, entry, now + 3600))
+                         "('dev-box',%s,%s,%s,'source_superseded')", (attribute, entry, now + 3600))
+        trace = conn.execute("SELECT entry_id FROM memory_traces WHERE entity_norm='dev-box' "
+                             "AND attribute_norm='cpu' AND entry_id=%s", (entry,)).fetchall()
+        reverify = conn.execute("SELECT attribute_norm FROM memory_trace_invalidations WHERE entity_norm='dev-box' "
+                               "AND source_entry_id=%s AND cause='source_superseded' ORDER BY attribute_norm",
+                               (entry,)).fetchall()
+        require_fixture(trace == [(entry,)] and reverify == [("cpu",), ("users",)],
+                        "source trace and corrected-source warnings are missing")
+    if stats:
+        require_fixture(conn.execute("SELECT count(*) FROM (SELECT id FROM entries WHERE source='docs' "
+                                     "ORDER BY id LIMIT %s) AS docs",
+                                     (len(STATS_SERVED),)).fetchone()[0] == len(STATS_SERVED),
+                        "statistics need the three graduation candidates")
+        stats_extra(conn)
 
 
-# Graduation candidates (storage/postgres.py:2325): how many of the 8 seeded
-# sessions serve each of three entries. 8/8 passes the 0.6 share throughout;
-# 5/8 passes only while no other session has searched (the scenario's own
-# searches add one); 4/8 never does.
+# The three entries are served by 8, 5 and 4 of the eight seeded sessions.
+# 5/8 falls below the 0.6 share when another session searches.
 STATS_SESSIONS = 8
 STATS_SERVED = (8, 5, 4)
 
 
-def stats_extra() -> None:
-    """What memory_stats needs beyond the other extras, where no write path
-    exists without a dream sweep: retrieval events from eight distinct
-    sessions (an hour old, inside the 30-day window), one community and a
-    graph digest."""
-    import json
-    import time
-
-    import psycopg
+def stats_extra(conn):
+    assert_fixture_database(conn)
     now = time.time()
-    with psycopg.connect(os.environ["PSEUDOLIFE_MCP_DATABASE_URL"], autocommit=True) as conn:
-        ids = [r[0] for r in conn.execute(
-            "SELECT id FROM entries WHERE source = 'docs' ORDER BY id LIMIT %s",
-            (len(STATS_SERVED),)).fetchall()]
-        for s in range(STATS_SESSIONS):
-            served = [{"entry_id": e, "rank": i, "score": 0.9}
-                      for i, (e, n) in enumerate(zip(ids, STATS_SERVED)) if s < n]
-            conn.execute(
-                "INSERT INTO retrieval_events (query_text, origin, session_id, served, created_at) "
-                "VALUES (%s, 'search', %s, %s, %s)",
-                (f"graduation probe {s}", f"grad-session-{s}", json.dumps(served), now - 3600))
-        # The next free community id and a replaced digest: on a copy of a
-        # real bank both already exist (UniqueViolation on the forced run of
-        # 2026-11-07); on an empty bank this is community 1, as before.
-        conn.execute("INSERT INTO communities (id, label, size, cohesion, computed_at) "
-                     "SELECT coalesce(max(id), 0) + 1, 'deploy tooling', 3, 0.5, %s "
-                     "FROM communities", (now - 7200,))
-        conn.execute("INSERT INTO meta (key, value) VALUES ('graph_digest', %s) "
-                     "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-                     (json.dumps({"computed_at": 1791000000.25, "communities": 1}),))
+    ids = [i for i, in conn.execute("SELECT id FROM entries WHERE source='docs' ORDER BY id LIMIT %s",
+                                    (len(STATS_SERVED),))]
+    last, = conn.execute("SELECT coalesce(max(id),0) FROM retrieval_events").fetchone()
+    expected = []
+    for s in range(STATS_SESSIONS):
+        served = [{"entry_id": e, "rank": i, "score": 0.9}
+                  for i, (e, n) in enumerate(zip(ids, STATS_SERVED)) if s < n]
+        conn.execute("INSERT INTO retrieval_events (query_text,origin,session_id,served,created_at) "
+                     "VALUES (%s,'search',%s,%s,%s)",
+                     (f"graduation probe {s}", f"grad-session-{s}", Json(served), now - 3600))
+        expected.append((f"grad-session-{s}", served))
+    got = conn.execute("SELECT session_id,served FROM retrieval_events WHERE id > %s ORDER BY id", (last,)).fetchall()
+    require_fixture(got == expected, "graduation probes lack their expected session and served-entry pattern")
+    conn.execute("INSERT INTO communities (id,label,size,cohesion,computed_at) "
+                 "SELECT coalesce(max(id),0)+1,'deploy tooling',3,0.5,%s FROM communities", (now - 7200,))
+    conn.execute("INSERT INTO meta (key,value) VALUES ('graph_digest',%s) "
+                 "ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+                 (Json({"computed_at": 1791000000.25, "communities": 1}),))
+
+
+def seed(binary, dsn, home, docs, *, extra, fact, stats):
+    with open_bank(dsn) as conn:
+        existing = conn.execute("SELECT to_regclass('public.entries') IS NOT NULL").fetchone()[0]
+        cutoff = conn.execute("SELECT coalesce(max(id),0) FROM entries").fetchone()[0] if existing else 0
+    env = daemons.base_env(home, {
+        "PSEUDOLIFE_MCP_DATABASE_URL": dsn,
+        "PSEUDOLIFE_MCP_TOKEN": SEED_TOKEN,
+        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
+        "PSEUDOLIFE_RELEASE_CHECK": "0",
+        "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "86400",
+        "PSEUDOLIFE_SESSION_REAP_SECONDS": "86400",
+        **{key: os.environ[key] for key in ("PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_ORT_THREADS")
+           if key in os.environ},
+    })
+    env.pop("PL_HARNESS_SEED_DSN", None)
+    env.pop("PL_HARNESS_SEED_RUST", None)
+    port = daemons.free_port()
+    candidate = daemons.rust_daemon(binary, home, port, env)
+    try:
+        candidate.start(wait_s=180)
+        session = Session(port, SEED_TOKEN)
+        try:
+            if extra:
+                write_extras(session, dsn, fact)
+            else:
+                write_base(session, port, docs)
+        finally:
+            session.close()
+    finally:
+        candidate.stop()
+    with open_bank(dsn) as conn:
+        if extra:
+            finish_extras(conn, fact, stats)
+        else:
+            finish_base(conn, docs, cutoff)
 
 
 def main() -> int:
     if _DATABASE_TURN_MARKER.exists():
-        _turn_sys = __import__("sys")
-        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
-        _turn_sys.path.insert(0, _turn_root)
-        try:
-            from rust.harness_support.database_turn import require_turn
+        from rust.harness_support.database_turn import require_turn
 
-            require_turn(holder="standalone database harness", contain=True)
-        finally:
-            _turn_sys.path.remove(_turn_root)
-    dsn = os.environ["PSEUDOLIFE_MCP_DATABASE_URL"]
+        require_turn(holder="standalone database harness", contain=True)
+    dsn = os.environ["PL_HARNESS_SEED_DSN"]
+    binary = Path(os.environ["PL_HARNESS_SEED_RUST"]).resolve(strict=True)
     limit = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 150
+    extra = "--mcp-extra" in sys.argv
     data = Path(os.environ["PSEUDOLIFE_MCP_DATA_DIR"])
     data.mkdir(parents=True, exist_ok=True)
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=str(data), database_url=dsn)
-    if "--mcp-extra" in sys.argv:
-        mcp_extra(svc)
-        if "--fact-extra" in sys.argv:
-            fact_extra(svc)
-        if "--stats-extra" in sys.argv:
-            stats_extra()
-        print("mcp extra seeded")
-        return 0
-    stored = 0
-    for text in paragraphs(limit):
-        stored += bool(svc.store(text, source="docs").get("stored"))
-    for text, source, tags in CRAFTED:
-        stored += bool(svc.store(text, source=source, tags=tags).get("stored"))
-    ep = svc.episode_start_session(EPISODE_KEY, "W2-D seed session")
-    handle = ep.get("id") or ep.get("episode_id")
-    for text in EPISODE_TEXTS:
-        stored += bool(svc.store(text, source="session-notes", episode=handle).get("stored"))
-    # Identity tier 3: searches without an X-PL-Session header attribute their
-    # event to this pointer (and its open episode) while it is fresh.
-    svc.set_active_session(EPISODE_KEY)
-    svc.store(SUPERSEDED[0], source="conversation")
-    svc.supersede(old_text=SUPERSEDED[0], new_text=SUPERSEDED[1])
-    for entity, attribute, value, conf, tol in FACTS:
-        svc.cortex_write(entity, attribute, value, confidence=conf, distortion_tolerance=tol)
-    for entity, attribute, member in SET_MEMBERS:
-        svc.set_add(entity, attribute, member)
-    svc.cortex_write("homelab box", "gpu", "RTX 4090", confidence=0.6)
-    import time
-    from pseudolife_memory.memory.cortex import _norm_key
-    for date, phrase, actor, desc in EVENTS:
-        svc._storage.add_chronicle_event({
-            "occurred_at": f"{date}T00:00:00+00:00" if date else None,
-            "occurred_phrase": phrase, "recorded_at": time.time(),
-            "actor": actor, "actor_norm": _norm_key(actor),
-            "description": desc, "description_norm": _norm_key(desc)})
-    svc.flush()
-    svc._storage.close()
-    print(f"stored {stored} entries")
+    with tempfile.TemporaryDirectory(dir=data, prefix="native-seed-") as temp:
+        home = daemons.make_home(Path(temp), "candidate", "memory:\n  dream:\n    enabled: false\n")
+        docs = [] if extra else paragraphs(limit)
+        seed(binary, dsn, home, docs, extra=extra, fact="--fact-extra" in sys.argv,
+             stats="--stats-extra" in sys.argv)
+    print("mcp extra seeded" if extra else f"stored {len(docs) + len(CRAFTED) + len(EPISODE_TEXTS)} entries")
     return 0
 
 

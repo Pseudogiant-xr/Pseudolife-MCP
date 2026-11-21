@@ -173,8 +173,25 @@ class MutantQualification(unittest.TestCase):
               patch.object(search.time, "sleep") as sleep):
             run.return_value.returncode = 0
             run.return_value.stdout = "stored fixture"
-            search.seed_template("fixture", 0)
+            search.seed_template("fixture", 0, Path("candidate"))
         sleep.assert_called_once_with(70)
+
+    def test_seed_child_never_receives_daemon_dsn_or_mutant(self):
+        with (patch.object(search.pg, "create", return_value="dbname=pl_cf_w2d_synthetic"),
+              patch.object(search.daemons, "scratch_root", return_value=Path("unused")),
+              patch.object(search.daemons, "make_home", return_value=Path("unused-seed-home")),
+              patch.object(search.subprocess, "run") as run,
+              patch.object(search.time, "sleep"),
+              patch.dict(search.os.environ, {"PSEUDOLIFE_MCP_DATABASE_URL": "dbname=synthetic_production",
+                                             "PSEUDOLIFE_DAEMON_MUTANT": "inherited"})):
+            run.return_value.returncode = 0
+            run.return_value.stdout = "stored fixture"
+            search.seed_template("fixture", 0, Path("candidate"))
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["PL_HARNESS_SEED_DSN"], "dbname=pl_cf_w2d_synthetic")
+        self.assertEqual(Path(env["PL_HARNESS_SEED_RUST"]), Path("candidate").resolve())
+        self.assertNotIn("PSEUDOLIFE_MCP_DATABASE_URL", env)
+        self.assertNotIn("PSEUDOLIFE_DAEMON_MUTANT", env)
 
     def run_control(self, results):
         with (patch.object(sys, "argv", ["w2d_search.py", "mutants", "--rust-bin", "unused"]),
