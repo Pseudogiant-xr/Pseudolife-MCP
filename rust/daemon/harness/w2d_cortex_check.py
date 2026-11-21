@@ -1,33 +1,21 @@
-"""Differential check of the cortex-first search block (slice W2-D cortex).
+"""Regression check of the cortex-first search block (slice W2-D cortex).
 
 usage: python w2d_cortex_check.py [--mode NAME ...] [--mutant NAME] [--keep]
 
-Seeds one disposable bank through the Python daemon's own write path
-(``MemoryService.cortex_write`` / ``set_add`` / ``store`` / ``supersede``,
-and ``PostgresStorage.add_trace``, the call the dream makes for a trace),
-logs one retrieval event per query with ``MemoryService.search``, then for
-each mode clones the seed twice (``CREATE DATABASE ... TEMPLATE``): a
-Python copy and a Rust copy. On the Python copy it runs, per query, what
-``web/routes.py:_search`` runs for the cortex block:
-``cortex_search(q, top_k=5, min_score=guard_min_score)`` and, for a
-non-empty block, ``attach_served_facts(event_id, facts)``; it records the
-query vector Python used (``_embedder.encode_query``). The Rust copy gets
-the same cases through the ignored Rust test
-``read::cortex_search::tests::differential_cases_from_harness``, with that
-same vector.
+Replays a pinned seed and per-mode query observations captured from the
+frozen Python harness. The ignored Rust test receives the captured query
+vectors, event ids, clock and ranking parameters.
 
 Comparison rules:
 
 * entries are compared by value, exactly (scores are rounded to 4 dp on
   both sides and the query vector is shared);
-* time is frozen: Python runs with ``time.time`` patched to ``FROZEN`` and
-  Rust gets ``now = FROZEN``, so ``age``, ``effective_confidence``,
+* time is frozen: the candidate receives the observation's clock, so
+  ``age``, ``effective_confidence``,
   ``stale`` and ``slot_reads.last_read_at`` are deterministic;
-* bank state: every table of both copies is dumped (``dbstate``) before
-  and after the queries. Each side's change set (rows added and removed per
-  table) must be equal, and the final ``slot_reads`` and
-  ``retrieval_events`` tables must be equal row for row. Python's service
-  init runs (and writes what it writes) before the "before" dump.
+* bank state: every table is dumped (``dbstate``) before and after the
+  queries. The change set must match the captured one, and the final
+  ``slot_reads`` and ``retrieval_events`` tables must match row for row.
 
 Exit status: 0 only when every mode has zero entry diffs and zero state
 diffs. ``--mutant NAME`` builds Rust with ``--features mutants`` and sets
@@ -47,12 +35,9 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
-
-import psycopg
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -61,23 +46,22 @@ sys.path.insert(0, str(REPO))
 import dbstate  # noqa: E402
 
 import pgdisposable  # noqa: E402
+from w2d_seed_rows import load_capture, replay  # noqa: E402
 
 pg = pgdisposable.Slice("w2d")
 
 SEED = pg.name("pl_cf_w2d_cortex_seed")
 RUST_TEST = "read::cortex_search::tests::differential_cases_from_harness"
+CAPTURE_SHA256 = "582830a372b398cc67abac0ca2c176f090410035bc638b4f5a7acefe29621db4"
 
 BM25 = {"k1": 1.5, "b": 0.75, "weight": 0.3, "top_n": 20, "min_score": 0.1}
 MODES = {
     # The shipped defaults: annotate, cortex BM25 off, pins on.
-    "default": {"yaml": "", "stale_policy": "annotate", "bm25": None},
+    "default": {"stale_policy": "annotate", "bm25": None},
     # Cortex BM25 on (memory.bm25.cortex_enabled) and stale facts demoted.
-    "bm25_demote": {"yaml": "memory:\n  bm25:\n    cortex_enabled: true\n"
-                            "  search:\n    stale_policy: demote\n",
-                    "stale_policy": "demote", "bm25": BM25},
+    "bm25_demote": {"stale_policy": "demote", "bm25": BM25},
     # Stale values quarantined behind the wrapper.
-    "quarantine": {"yaml": "memory:\n  search:\n    stale_policy: quarantine\n",
-                   "stale_policy": "quarantine", "bm25": None},
+    "quarantine": {"stale_policy": "quarantine", "bm25": None},
 }
 
 QUERIES = [
@@ -120,156 +104,7 @@ dsn = pg.dsn
 existing = pg.existing
 
 
-# ---- seeding through Python's own write path ------------------------------------------
-
-def _close(svc) -> None:
-    try:
-        svc.flush()
-    finally:
-        svc._storage.close()
-
-
-def _entry_id(conn, text: str) -> int:
-    row = conn.execute("SELECT id FROM entries WHERE text = %s ORDER BY id DESC LIMIT 1",
-                       (text,)).fetchone()
-    assert row is not None, f"entry not stored: {text!r}"
-    return int(row[0])
-
-
-def seed(work: Path) -> tuple[float, list[int | None]]:
-    """Seed ``SEED`` and log one retrieval event per query. Returns the seed
-    wall-clock origin and the event ids."""
-    from pseudolife_memory.memory.cortex import _norm_key
-    from pseudolife_memory.service import MemoryService
-
-    data = work / "seed"
-    data.mkdir(parents=True, exist_ok=True)
-    (data / "config.yaml").write_text("", encoding="utf-8")
-    seed_dsn = create(SEED)
-    svc = MemoryService(data_dir=str(data), config_path=str(data / "config.yaml"),
-                        database_url=seed_dsn)
-    t0 = time.time()
-    day = 86400.0
-    log = []
-
-    def fact(e, a, v, *, days_ago=1.0, **kw):
-        out = svc.cortex_write(e, a, v, now=t0 - days_ago * day, **kw)
-        log.append((e, a, v, out["action"]))
-        return out
-
-    fact("payments-db", "host", "db01.internal.example", support="user", days_ago=5)
-    fact("payments-db", "port", "5432", support="user")
-    fact("Payments DB", "owner", "platform team", support="agent")
-    fact("payments-db", "write rule", "never run migrations during business hours",
-         support="user", distortion_tolerance="constraint")
-    fact("payments-db", "access rule", "read replicas only for analytics",
-         support="user", distortion_tolerance="constraint")
-    fact("payments-db", "backup rule", "nightly full backup before any schema change",
-         support="user", distortion_tolerance="constraint")
-    fact("bench server", "launch rule",
-         "always launch through the helper script, never by hand",
-         support="user", distortion_tolerance="constraint")
-    fact("bench server", "gpu", "one 24GB card", support="user")
-    fact("deploy", "procedure", "backup, rollback tag, recreate, health check, clients",
-         support="user", days_ago=3)
-    fact("daemon", "deployment status", "healthy on release 0.9", support="agent",
-         freshness_class="volatile", days_ago=60)
-    fact("library", "pinned version", "2.1", support="user", freshness_class="slow",
-         days_ago=300)
-    fact("release", "latest version", "0.9.0", support="assistant")
-    fact("editor", "theme", "solarized dark", support="user", days_ago=10)
-    fact("editor", "theme", "gruvbox", support="user", confidence=0.95, days_ago=2)
-    fact("CI", "runner", "self-hosted linux box", support="user", days_ago=4)
-    fact("CI", "runner", "github hosted", support="agent", days_ago=1)
-    fact("project", "license", "Apache-2.0", support="user")
-    fact("team", "standup time", "10:00 UTC", support="user")
-    fact("Don", "role", "maintainer", support="user")
-    fact("cache", "eviction", "least recently used", support="agent", stance="probably")
-    fact("zeta_identifier_9", "meaning", "an opaque lookup key", support="user")
-    for m, origin in (("Python", "user"), ("Rust", "user"), ("TypeScript", "assistant")):
-        out = svc.set_add("project", "languages", m, origin=origin)
-        log.append(("project", "languages", m, out["action"]))
-    for e, a, m, origin in (("payments-db", "replicas", "replica-a", "user"),
-                            ("payments-db", "replicas", "standby replica in eu-west", "user"),
-                            ("release", "platforms", "linux", "assistant"),
-                            ("release", "platforms", "windows and macos", "assistant")):
-        out = svc.set_add(e, a, m, origin=origin)
-        log.append((e, a, m, out["action"]))
-
-    # Source entries and traces: the dream's own storage call links a slot
-    # to the entry it came from; correcting that entry afterwards records a
-    # durable invalidation, which the served fact must flag.
-    texts = {
-        "host": "The payments database host is db01 in the internal network.",
-        "langs": "The project is written in Python and Rust, with a TypeScript console.",
-        "deploy": "Deploy with a backup, a rollback tag, a recreate, a health check, then clients.",
-    }
-    for text in texts.values():
-        svc.store(text, source="w2d-seed")
-    with psycopg.connect(seed_dsn, autocommit=True) as conn:
-        ids = {k: _entry_id(conn, t) for k, t in texts.items()}
-    now = time.time()
-    st = svc._storage
-    st.add_trace(_norm_key("payments-db"), _norm_key("host"), ids["host"], now)
-    st.add_trace(_norm_key("project"), _norm_key("languages"), ids["langs"], now)
-    st.add_trace(_norm_key("deploy"), _norm_key("procedure"), ids["deploy"], now)
-    st.add_trace(_norm_key("payments-db"), _norm_key("port"), ids["host"], now)
-    r1 = svc.supersede(entry_id=ids["host"],
-                       new_text="The payments database host moved to db02 in the internal network.")
-    r2 = svc.supersede(entry_id=ids["langs"],
-                       new_text="The project is written in Python and Rust only.")
-    log.append(("supersede", str(r1.get("action") or r1.get("ok") or r1)[:60], "", ""))
-    log.append(("supersede", str(r2.get("action") or r2.get("ok") or r2)[:60], "", ""))
-
-    events: list[int | None] = []
-    for q in QUERIES:
-        res = svc.search(q, top_k=5, rerank=False, return_event_id=True)
-        events.append(res.get("retrieval_event_id"))
-    _close(svc)
-    print("seeded:", json.dumps(log, ensure_ascii=False))
-    return t0, events
-
-
-# ---- the two sides --------------------------------------------------------------------
-
-def run_python(mode: str, py_dsn: str, work: Path, frozen: float,
-               events: list[int | None]) -> tuple[list[dict], dict, dict]:
-    from pseudolife_memory.service import MemoryService
-
-    data = work / f"py_{mode}"
-    data.mkdir(parents=True, exist_ok=True)
-    (data / "config.yaml").write_text(MODES[mode]["yaml"], encoding="utf-8")
-    svc = MemoryService(data_dir=str(data), config_path=str(data / "config.yaml"),
-                        database_url=py_dsn)
-    svc.cortex_stats()  # finish the service init before the "before" dump
-    assert svc.config.memory.search.stale_policy == MODES[mode]["stale_policy"]
-    assert bool(svc.config.memory.bm25.cortex_enabled) == (MODES[mode]["bm25"] is not None)
-    cc = svc.config.memory.cortex
-    assert cc.enabled and cc.search_first and cc.pin_constraints and cc.read_tracking
-    before = dbstate.dump(py_dsn)
-    cases = []
-    real_time = time.time
-    time.time = lambda: frozen
-    try:
-        for q, evt in zip(QUERIES, events):
-            emb = svc._embedder.encode_query(q)
-            vec = emb.detach().cpu().float().reshape(-1).tolist()
-            # The dense ranking before pinning, so coverage can tell a pin
-            # that rescued an unranked constraint from one already ranked.
-            ranked_slots = sorted({(r.entity, r.attribute) for r, _ in
-                                   svc._cortex.search(emb, top_k=5, min_score=cc.guard_min_score)})
-            facts = svc.cortex_search(q, top_k=5, min_score=cc.guard_min_score)["entries"]
-            if facts and evt is not None:
-                svc.attach_served_facts(evt, facts)
-            cases.append({"query": q, "vec": vec, "event_id": evt, "top_k": 5,
-                          "min_score": cc.guard_min_score, "ranked_slots": ranked_slots,
-                          "entries": json.loads(json.dumps(facts))})
-    finally:
-        time.time = real_time
-    svc._storage.close()  # no flush: only what the queries wrote may differ
-    after = dbstate.dump(py_dsn)
-    return cases, before, after
-
+# ---- candidate execution -------------------------------------------------------------
 
 def run_rust(mode: str, rs_dsn: str, work: Path, frozen: float, cases: list[dict],
              mutant: str | None) -> tuple[list[dict], dict, dict]:
@@ -342,9 +177,9 @@ def state_delta(before: dict, after: dict) -> dict:
     return out
 
 
-def state_diffs(py_before, py_after, rs_before, rs_after) -> tuple[list[str], dict]:
+def state_diffs(reference, rs_before, rs_after) -> list[str]:
     diffs = []
-    dp, dr = state_delta(py_before, py_after), state_delta(rs_before, rs_after)
+    dp, dr = reference["delta"], state_delta(rs_before, rs_after)
     for table in sorted(set(dp) | set(dr)):
         p = dp.get(table, {"added": [], "removed": []})
         r = dr.get(table, {"added": [], "removed": []})
@@ -354,13 +189,13 @@ def state_diffs(py_before, py_after, rs_before, rs_after) -> tuple[list[str], di
             for row in sorted(set(r[kind]) - set(p[kind]))[:5]:
                 diffs.append(f"{table}: row {kind} only by rust: {row[:300]}")
     for table in ("public.slot_reads", "public.retrieval_events"):
-        if py_after["rows"].get(table) != rs_after["rows"].get(table):
+        if reference["terminal"][table] != rs_after["rows"].get(table):
             diffs.append(f"{table}: final rows differ")
-    return diffs, dp
+    return diffs
 
 
 def coverage(cases: list[dict]) -> dict[str, int]:
-    """How many served Python entries exercised each contract branch, so a
+    """How many captured entries exercised each contract branch, so a
     green run cannot hide a seed that stopped reaching one."""
     out = {k: 0 for k in ("set", "pinned", "pinned_unranked", "re_verify", "contested",
                           "assistant", "stale", "warning", "quarantined", "stance",
@@ -403,20 +238,25 @@ def main() -> int:
             _turn_sys.path.remove(_turn_root)
     if not os.environ.get("CARGO_TARGET_DIR"):
         raise SystemExit("set CARGO_TARGET_DIR")
+    if pg.base_database() is not None:
+        ap.error("the fixed cortex capture requires an empty bank; unset PL_HARNESS_BASE_DATABASE")
+    fixture = load_capture("cortex", CAPTURE_SHA256)
     modes = args.mode or list(MODES)
     work = Path(tempfile.mkdtemp(prefix="w2d_cortex_",
                                  dir=os.environ.get("PSEUDOLIFE_MCP_DATA_DIR")))
     created = [SEED]
     total_cases = total_diffs = total_state = 0
     try:
-        t0, events = seed(work)
-        frozen = t0 + 7200.0
+        replay(create(SEED), fixture["bank"])
+        frozen = fixture["at"]
         for mode in modes:
-            py_name = pg.name(f"pl_cf_w2d_cortex_py_{mode}")
             rs_name = pg.name(f"pl_cf_w2d_cortex_rs_{mode}")
-            created += [py_name, rs_name]
-            py_dsn, rs_dsn = create(py_name, SEED), create(rs_name, SEED)
-            cases, py_before, py_after = run_python(mode, py_dsn, work, frozen, events)
+            created.append(rs_name)
+            rs_dsn = create(rs_name, SEED)
+            reference = fixture["modes"][mode]
+            cases = reference["cases"]
+            if [case["query"] for case in cases] != QUERIES:
+                raise ValueError(f"{mode}: captured cortex queries differ from the harness corpus")
             results, rs_before, rs_after = run_rust(mode, rs_dsn, work, frozen, cases,
                                                     args.mutant)
             diffs = []
@@ -427,16 +267,16 @@ def main() -> int:
                 served += len(c["entries"])
                 for d in value_diff(c["entries"], r["entries"], f"[{c['query']}]"):
                     diffs.append(d)
-            sdiffs, delta = state_diffs(py_before, py_after, rs_before, rs_after)
+            sdiffs = state_diffs(reference, rs_before, rs_after)
             compared = min(len(cases), len(results))
             total_cases += compared
             total_diffs += len(diffs)
             total_state += len(sdiffs)
-            written = {t: len(v["added"]) + len(v["removed"]) for t, v in delta.items()}
+            written = {t: len(v["added"]) + len(v["removed"]) for t, v in reference["delta"].items()}
             print(f"mode {mode}: coverage {json.dumps(coverage(cases))}")
             print(f"mode {mode}: {compared}/{len(cases)} cases compared, {served} served facts, "
                   f"{len(diffs)} entry diffs, {len(sdiffs)} state diffs; "
-                  f"python wrote {written}")
+                  f"captured writes {written}")
             for d in (diffs + sdiffs)[:40]:
                 print("  DIFF", d)
     finally:
