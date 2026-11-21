@@ -1,4 +1,0 @@
-### Changed (2026-11-21 — Native move command dispatch)
-- The native client now answers every `pseudolife-mcp move` command line itself; none ends in "mode 'move' is deferred". A command line it cannot take is refused before anything is read or changed, with the cause named: a joined `--opt=value`, an abbreviation (with the full option name), an unknown or repeated option, a stray argument, a missing value, or a malformed `--rollback` / `--release-target` form.
-- A missing `--to` gets the usage error at every terminal width and on a terminal, where it used to end in the deferral line. `--help` works anywhere on the command line, including after `--rollback`.
-- `move --help` describes the installed release target, says `--target-checkout` is refused and `--target-release` changes nothing, and lists the recovery commands.

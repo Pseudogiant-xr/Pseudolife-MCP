@@ -6,6 +6,605 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-22 — The opt-in native client installs without host Python, moves Docker banks, and reconnects compatible foreground tunnels
+
+The Python client remains the installer default. The native client reads
+GitHub release readiness, runs `move` and its recovery commands, and checks
+Codex credentials while a new daemon starts. Both daemon images and the
+Python wheel ship the Cortex Console at its existing runtime path.
+
+### Known limits of the opt-in native client in 0.25.0
+
+- If the Python client registered tunnel autostart, opting in stops in preflight and prints the command to remove the service. Keep the Python client to retain autostart. Native tunnels run in the foreground.
+- A tunnel already started by the Python client keeps serving after an opt-in update. The update reports that it left the launch running. Stop it with the Python client before switching. If you already switched, end the earlier process before starting `pseudolife-mcp tunnel run` in a terminal that stays open.
+- A legacy bank that needs the archived Python 0.23.1 import hop can use it on Linux amd64 containers. On Apple-silicon Macs and other hosts using Linux arm64 containers, native update stops before its backup and asks you to restore a verified backup on a Linux amd64 Docker host, finish the update there, and move the bank back.
+- When a fresh native install explicitly requests Codex and the credential check fails, the installer warns with the cause and skips Codex registration. The remaining installation can complete with exit 0. Resolve the cause and rerun the installer.
+- On an attended native install, `--tunnel` or `-Tunnel` calls bare `tunnel setup`. It reports deferred setup or asks for the daemon URL and token file. The installer exits nonzero and keeps the host changes already made. Complete the [explicit native `pseudolife-mcp tunnel setup` steps](docs/guide/tunnels.md) afterwards.
+- When the native updater reports `needs-approval` for Codex hooks, it still suggests `python ops/setup-codex-hooks.py --source plugin --trust ask`. Open `/hooks` in Codex to review and approve the changed Pseudolife handlers.
+
+### Added (2026-11-21 — Python package retirement checks)
+- The batch harness checks that dependencies on the frozen Python package are classified. A manual probe reports how selected tools behave in a disposable copy with the package absent.
+
+### Added (2026-11-21 — Supervised native tunnel refresh)
+- Native updates can reconnect running tunnels on the installed shim when the supervisor supports refresh. The supervisor checks the saved daemon first, then confirms its old child exited. It tries the previous shim if the replacement fails readiness. Status reports the outcome and whether the active launch needs a new verification challenge.
+- Native tunnel launches require a live bridge acknowledgment as well as vendor readiness. Refresh keeps the previous launch active when the installed shim cannot confirm a compatible protocol, and skips a build this supervisor already rolled back.
+
+### Changed (2026-11-21 — Native tunnel restart guidance)
+- Native tunnel update recognizes a verified current launch. When the running launch differs and cannot refresh in place, update leaves it running and prints the commands to stop and run the same profile to reconnect.
+- Native tunnel status tells you to use the client that started a Python-supervised tunnel to stop it. Native update explains why it leaves that launch running.
+
+### Changed (2026-11-21 — Native move command dispatch)
+- The native client now answers every `pseudolife-mcp move` command line itself; none ends in "mode 'move' is deferred". A command line it cannot take is refused before anything is read or changed, with the cause named: a joined `--opt=value`, an abbreviation (with the full option name), an unknown or repeated option, a stray argument, a missing value, or a malformed `--rollback` / `--release-target` form.
+- A missing `--to` gets the usage error at every terminal width and on a terminal, where it used to end in the deferral line. `--help` works anywhere on the command line, including after `--rollback`.
+- `move --help` describes the installed release target, says `--target-checkout` is refused and `--target-release` changes nothing, and lists the recovery commands.
+
+### Added (2026-11-21 — Installed client acceptance ledger)
+- Added a release acceptance ledger and a stand-in runner for checking archive integrity, disposable client homes, Python-free PATH selection, and cleanup before real installed tests.
+
+### Fixed (2026-11-21 — Codex setup on a slow daemon start)
+- Native installers retry the authenticated Codex credential check while the daemon starts and show the last failure if setup cannot finish. A rejected credential still fails immediately. Native `connect` uses the same startup budget. Both checks report unexpected responses, such as HTTP redirects or 404, by status.
+
+### Added (2026-11-20 — Native foreground tunnel)
+- Run a prepared Secure MCP Tunnel with `pseudolife-mcp tunnel run`. Use `tunnel stop` to stop a tunnel started by this native client. The supervisor checks local readiness and owns the runtime and its launch files. Use the Python client for background start or to refresh a Python-managed launch. A compatible native supervisor can reconnect a foreground launch in place.
+- Native verification binds receipts to the saved credential, runtime and active launch. A later run removes private launch files only when it can confirm the old runtime has stopped. Recognized vendor startup errors appear in a bounded diagnostic summary.
+
+### Changed (2026-11-20 — Retained tunnel keys)
+- A renewal retains the previous private key and expiry until a successful control-plane poll. Use the restore or discard command shown by status to resolve the retained pair explicitly.
+- Expired profiles without a first key show setup and import steps. Setup names the stop requirement and interrupted renewal recovery steps.
+
+### Added (2026-11-20 — Native tunnel key renewal)
+- The native client renews a stopped tunnel's private runtime key and its expiry. Rerun setup to finish an interrupted renewal. Launch failures report recognized authentication, missing-tunnel and network causes in the private runtime diagnostics.
+
+### Added (2026-11-20 — Select the original target files in a native move)
+- A carried native move to an installed Linux Docker target accepts `--target-env-file` and repeatable `--target-compose-file` paths on the target. The helper checks that the files render the installed deployment before writing settings. Resume uses the original file selection.
+
+### Added (2026-11-20 — Explicit tailnet exposure during a native move)
+- Native `move --expose-target` can reuse or create the target's Tailscale forward, then verifies that the URL serves the moved bank before committing. Rollback uses the target's ownership receipt to identify a forward created by the move.
+- When target environment rollback needs manual repair, native move points to the target's carry-journal recovery command.
+- Target release settles the exposure record before returning the target's own bank. Resume keeps the recorded exposure ownership.
+- `move-target settle-exposure` records operator-confirmed settlement. Release can close a detached move after checking its exposure receipt.
+
+### Fixed (2026-11-20 — Clarify the native move checkout refusal)
+- Native move explains the checkout rebuild and stopped handover selected by `--target-checkout` and gives the installed release deployment route.
+
+### Fixed (2026-11-20 — Native checkout schema version)
+- Checkout updates read the target schema version from the Rust daemon's schema plan, so they can validate a checkout after the frozen Python schema file is removed.
+
+### Changed (2026-11-20 — Native release assets can attach after a wheel build failure)
+
+- GitHub releases can carry the verified native archives and Compose bundle even when the Python wheel build fails. Automatic native discovery still waits for the readiness marker after approved publication and successful image builds.
+
+### Fixed (2026-11-20 — Restore the target environment after giving up a move)
+- Manual recovery instructions for a carried move include restoring the target's original environment while the daemon is stopped and gated, before starting it again.
+
+### Fixed (2026-11-20 — Give the operator the target recovery commands)
+- Manual recovery for a carried move now names how to print the original environment checksum check and stopped Compose recreation command from the target's journal.
+- Move names a missing or nonregular explicit Compose file and shows the original target file selection when resume flags differ.
+
+### Fixed (2026-11-20 — Upgrade legacy Docker banks after Python releases end)
+- Release-mode `pseudolife-mcp update` uses the archived Python 0.23.1 daemon to import legacy banks before deploying the selected Rust release. It checks the import before moving clients and keeps the original bank and image available for recovery.
+- This bridge runs in the native updater and requires Linux amd64 containers. For a legacy bank on a host using Linux arm64 containers, restore a verified backup on a Linux amd64 Docker host and complete the upgrade there before moving the bank back. The Python updater uses its own import path.
+
+### Changed (2026-11-20 — Keep the Console independent of the Python daemon)
+- The daemon images use the committed Console build from `frontend/dist/`. Both images and the Python wheel continue to ship the Console at their existing runtime paths.
+- For contributors running the frozen Python daemon from a checkout or an ordinary editable install, `/ui/` now returns 404. Use the Console's Vite dev server during development.
+
+### Added (2026-11-19 — Native tunnel profile setup)
+- The native `tunnel setup` command saves a new profile after explicit consent and an MCP handshake with the supplied daemon URL and owner-only credential file. Rerunning with equivalent settings reuses a profile saved by either client. Changes to a saved profile still follow the existing deferral.
+
+### Added (2026-11-19 — Native tunnel profile continuation)
+- Native `tunnel setup` can resume a prepared profile and import its first runtime key through a private file or a terminal without echo. Windows stores the key with DPAPI. For key renewal on a stopped native tunnel, use native `tunnel setup`. It retains the previous key during the replacement trial. Setup requires a saved tunnel ID before importing the first key and both connection flags to repoint a profile. Edits to profiles with a key, process record or autostart settings still defer at preflight. If a key or process record appears during setup, the refusal names the file. Setup and status name unpublished staging files left in the store.
+
+### Changed (2026-11-19 — Native client release discovery)
+
+- The native updater and daemon discover releases on GitHub. They wait for the complete native asset set and the readiness marker published after approval and both image jobs succeed.
+
+### Fixed (2026-11-19 — Verify the selected Docker target throughout a native move)
+- Native move supplies the selected target container IDs to the remote helper and checks that Docker still returns those containers before operating. Recovery instructions identify the selected target and explain how to verify a replacement source PostgreSQL container before removing its fence.
+
+### Added (2026-11-19 — Prepare installed targets for carried move settings)
+- The native move target helper checks the selected containers, applies carried settings through the installed Compose deployment, and records the verified replacement daemon ID for verification and recovery.
+
+### Fixed (2026-11-19 — Keep native move tied to its selected source containers)
+- Native `move` refuses a source whose daemon or PostgreSQL lacks an immutable Docker container ID or whose containers belong to different Compose projects.
+- Stops, starts, restart policy changes, and moved-marker writes and removal use the selected daemon. PostgreSQL sessions, dumps and database fences use the selected PostgreSQL container.
+- JSON dry-run plans include an `executable` flag. For a move carrying bearer settings, it is `true` when the target can execute the handover and `false` when the target can only preflight it.
+
+### Added (2026-11-19 — Carry daemon bearer settings during a native move)
+- Native `move` can carry the source daemon's bearer settings to an installed Linux Docker target. The target verifies its Compose configuration and local bearer authentication before the move commits.
+
+### Added (2026-11-19 — Check bearer settings before a native bank move)
+- Native `move --dry-run` checks whether the source's bearer settings can be carried into an installed Linux Docker target. The check sends only which settings are present to the target. A compatible installed target can carry the bearer settings during execution. A target that supports only carried-identity preflight must be updated or run with `--no-keep-tokens` to keep its existing settings.
+
+### Fixed (2026-11-19 — macOS integration test timeout)
+- Give the macOS lite CI job 37 minutes so the test selection can finish on slower hosted runners.
+
+### Added (2026-11-19 — Direct merges for independent documentation)
+- `ops/integrate.py merge-docs <pr>` checks CI and runs documentation guards on GitHub's proposed merge tree before merging an independent documentation pull request between integration batches.
+
+### Fixed (2026-11-19 — Retry transient Windows autostart task reads)
+
+- Autostart setup and removal retry the Task Scheduler provider's temporary file-not-found error when reading an existing task's run-as account. A persistent error or an unverified task still stops the operation.
+
+### Fixed (2026-11-18 — Windows integration test timeout)
+- Give the Windows lite CI job 40 minutes after both attempts on batch #1742 hit the 30-minute limit with tests still to run (1,732 and 1,664 passed, 23 skipped each). The restored cache lacked the aws-lc-sys build for the new AWS_LC_SYS_NO_JITTER_ENTROPY setting, adding up to about two minutes over a warm build.
+
+### Fixed (2026-11-18 — test login always answers natively)
+- Native `test-login` prints bare usage, accepts equals-form value options and gives actionable refusals for unsupported arguments, connection settings and credential-file paths without exposing credentials or deferring to Python.
+
+### Added (2026-11-18 — Stacked local batch gates)
+- Build and gate the next integration batch locally while the current batch runs hosted CI. Carry successful local results to the rebuilt batch only when the complete Git trees match.
+
+### Fixed (2026-11-18 — native maintainer commands finish or explain their refusal)
+- Native `maintainer` commands now report malformed arguments, unsupported database settings and internal failures directly without exposing connection values or credentials.
+- `maintainer list` writes long reports, reports read and output failures, and replaces local time with UTC timestamps in `YYYY-MM-DDTHH:MM:SSZ` form at whole seconds.
+- Waiting `maintainer enrol-code` rejects invalid polling intervals before opening the bank or storing a code. Ordinary `application_name` and `connect_timeout` database options are admitted natively.
+
+### Fixed (2026-11-18 — actionable native expose argument errors)
+- Native `expose` now refuses malformed arguments with a usage error and a repair instead of reporting the mode as deferred. Decoded Unicode arguments are parsed directly, and undecodable OS arguments receive a fixed refusal; valid status, consent, apply and off flows retain their behavior.
+
+### Changed (2026-11-18 — Fast CI for documentation pushes)
+
+- Documentation-only pull requests and direct master pushes run the doc guards and tests that name affected documents. Required checks report the scoped skips. Rust Scope reports producer census drift on a docs push, and the nightly runs the skipped suites.
+
+### Fixed (2026-11-18 — Console help and failures work in the native client)
+- `pseudolife-mcp console` now shows help at any terminal width and reports invalid arguments, credential setup, daemon connection and reply failures directly. When a configured browser cannot be launched, the command provides the sign-in link and the cause.
+
+### Fixed (2026-11-18 — Native watcher answers every invocation)
+- `conductor-watch` and its deprecated `delegate-watch` alias no longer report a Python deferral. Help has a fixed layout; supported dash-leading values and long finite durations work natively. Unsupported arguments, paths and pid records, unreadable owner files and failed output receive native errors with a remedy before a watcher is started.
+- An explicit-state stop works even when the session owner cannot be read. Option-like values, including abbreviated options, require `--option=VALUE`, so a mistyped stop cannot become a start. Invalid pid-record errors name the record that needs repair.
+
+### Fixed (2026-11-18 — native client and daemon no longer abort on their first secure random draw on machines whose CPU cycle counters disagree) [#1688]
+- The native client and the Rust daemon draw secure random numbers through aws-lc, which by default seeds from a CPU-jitter collector that times itself with the raw cycle counter. Where the counters of different cores disagree (seen on a virtual machine), a busy process moved between cores saw time run backwards, the collector's start-up self-test failed, and aws-lc ended the process with no message (Windows exception `0xc0000409`). Commands that draw random numbers (`pair`, `invite`, `test-login`, `maintainer`, TLS connections) could die this way when the machine was busy.
+- Builds now set `AWS_LC_SYS_NO_JITTER_ENTROPY=1` through the repository's `.cargo/config.toml` (also copied into the daemon image build), so aws-lc seeds from the operating system's generator. A unit test in both crates fails if a build loses the setting. Install and release-mode update need no change: released binaries built from this source carry the setting. Checkout-mode `update -All` / `--all` now runs its cargo build from inside the checkout, so it reads the setting whatever directory it was started from.
+
+### Removed (2026-11-17 — retire costly CLI source-mutant CI)
+- Retired the weekly CLI source-mutant job, its Parity dependency and the source declarations and lists that CLI edits had to maintain. Rust unit and contract tests and committed golden replay remain; automatic proof that each planted source-line bug is detected is no longer run. Manual stress dispatches are unchanged.
+
+### Fixed (2026-11-17 — Catch Rust harness drift before batching)
+- Every pull request now runs both Rust workflow and batch harness agreement checks in the existing tree-wide guards step, including pull requests that also edit workflows.
+
+### Fixed (2026-11-17 — Native invite and pair always answer)
+- `invite` and `pair` handle supported argument spellings natively and explain unsupported inputs without falling back to Python or exposing pairing secrets. Existing code validation, grants and owner-only token protection remain intact.
+- When a refused pairing cannot remove its new token file, `pair` keeps the file and reports its path, the original refusal state and the recovery step.
+- Database connection failures return exit 1. A lost invite COMMIT reply reports an unknown outcome with exit 1, warns that a code may exist, and names the check and revocation commands.
+
+### Fixed (2026-11-17 — Native transfers without deferrals)
+- Native `export` and `import` now handle supported inputs directly and
+  refuse unsupported archives, database settings and values with the cause
+  and a repair step. Help works at any terminal width; repeated options,
+  `--option=value` and ordinary filesystem path spellings are accepted.
+- Export normalizes timestamp rendering to UTC and supports PostgreSQL's
+  infinite timestamps and years outside 1–9999.
+- Export limits database lock waits to five seconds and names competing
+  database work when that limit is reached.
+- Import validates archive structure before connecting and commits schema
+  initialization and imported data together. A refused import rolls back
+  schema repairs too. With `--force`, connected clients now wait, including
+  readers, until the import finishes; previously only writes waited during
+  the data import. Stop the daemon before importing unless those connections
+  are known to be inert.
+- Schema initialization's timeout limits are restored before import checks
+  or loads data. Database failures name their SQLSTATE without blaming
+  archive values for timeouts or deadlocks; malformed database settings
+  never echo parsed option names that could contain password fragments.
+
+### Fixed (2026-11-17 — Keep database harness runs from stopping each other's server)
+- Database harness entry points share an exclusive turn on machines explicitly configured to manage their test PostgreSQL service. Contention names the live holder; other machines keep their existing behavior.
+- Batch harness environments are fresh for each run and are removed only after checking the run's ownership, links, and active processes.
+- Batch harness commands come from the batch head's workflow coverage and candidate-dependency classifications, including candidate-free parity unit tests.
+- Workflow coverage audits every job and action step, permits a readable batch head to repair an unreadable base, and reports process-query or containment failures as actionable database-turn refusals.
+- Linux gate and suite dispatchers keep temporary artifacts on disk under home and refuse a memory-backed `/tmp` holding more than 4 GiB.
+
+### Fixed (2026-11-17 — Doctor always reports native diagnostics)
+- `doctor` now answers help, option assignment and repeated options natively,
+  accepts finite timeouts beyond the former limit, and names malformed arguments
+  with a repair instruction.
+- Unreadable registration files, unusual paths, client settings and daemon
+  responses produce findings while independent checks continue. Private-file
+  protections remain enforced, and diagnostic errors omit credential values.
+- Client registration and wake readers consistently accept a UTF-8 byte-order
+  mark. Bad client files retain independent diagnostic results; HTTP error
+  pages name the daemon status and repair instead of suggesting a client edit.
+- Console's existing registration lookup now continues past a malformed Claude
+  file to a usable Codex credential. Per-file findings are reported by doctor;
+  Console keeps its existing credential-selection interface.
+
+### Changed (2026-11-17 — Daemon release notices without PyPI)
+
+- The daemon now contacts `api.github.com` instead of `pypi.org` for release
+  checks, accepting stable releases only after all native release assets are
+  uploaded. Checks remain unauthenticated and in the background; failures keep
+  the last good answer and rate-limit responses delay the next attempt.
+- The settings that turn the check off are unchanged:
+  `updates.check_releases: false` or `PSEUDOLIFE_RELEASE_CHECK=0`.
+
+### Fixed (2026-11-17 — Console browser launches explain failures without deferring)
+- The native Console accepts ordinary Windows `.exe` paths in `BROWSER`, including backslashes and quoted paths with spaces. Refused values and failed launches print the sign-in link with the cause and recovery in text or JSON.
+- Over SSH on macOS, the Console prints the link for local use unless `BROWSER` is explicitly set. Under WSL, Explorer's exit code 1 counts as a hand-off; other launcher failures still report their cause.
+- `PYTHONINTMAXSTRDIGITS` no longer disables the native Console. Every Console harness case isolates browser lookup, including cases that should not sign in.
+- On Windows, the chosen browser receives null standard streams, so capturing the Console's output does not wait for the browser to close.
+
+### Fixed (2026-11-17 — Connect answers supported inputs without Python)
+- `connect` handles help, options before the URL, equals-form values, repeated flags and ordinary absolute directory spellings natively.
+- Unsupported arguments, environment values, paths, client JSON and health responses now name their cause and remedy instead of reporting a deferral.
+- DEL-bearing tokens are refused without disclosure; stdin tokens are checked before creating a directory or file. Existing registration, backup, permission and rollback protections remain in place.
+- Redirected Windows home and AppData directories on UNC shares are accepted, including ordinary drive and UNC verbatim spellings; device namespaces remain refused. Relative XDG directory settings are ignored with a notice and use their defaults.
+- The installer's `write-token-file` helper also refuses DEL-bearing tokens before creating a directory or file, since those tokens cannot be sent in an HTTP header.
+
+### Fixed (2026-11-17 — Complete native audit operations)
+- A failed audit export to a file no longer leaves an empty or partial archive behind.
+- Published audit archives, including container-forwarded exports, are now owner-only (0600 on Unix, subject to the caller's umask, and an owner-only ACL on Windows); group and service-account read access is no longer inherited.
+- Native `board-audit` reports unsupported inputs and operational failures with their cause and next step instead of deferring to the retired Python client; supported database connection options work natively.
+
+### Changed (2026-11-17 — a batch rebuilt after a drop skips the suite and carries the closed batch's passes)
+- `python ops/integrate.py build --after-drop <closed batch PR>` builds a batch that went red in hosted CI again without its dropped culprit, when the dropped pull request shares no file with any remaining member and touches no code every test or job shares (`docs/dev/merge-batches.md`, "After a drop"). The tool checks every condition itself and refuses, naming the failed one, otherwise. The conditions are: the closed batch's plan and head, the same master commit, the same members at the same heads minus the dropped, the file lists, and heads that differ only in the dropped files and the generated metadata. `open` then needs no local suite or harness result, though the compile check still runs. `merge` waits for `test` to pass on the new head and carries only jobs that succeeded on the closed head. It refuses any check that finished red, posts what it carried and what passed as a comment on the batch pull request, and merges with the head pinned. On a Rust-only rebuilt batch, a `test` skipped because `scope` succeeded on the new head is accepted, so only the compile check and the quick lanes run fresh there.
+
+### Fixed (2026-11-17 — Record every batch gate before opening)
+- The batch tool runs the Rust harness on the Windows dev VM and shim unit tests on the second Linux dev box, requiring successful results for the built head before opening. After-drop builds waive absent results, retaining the compile check; supplied results must still pass on that head.
+- A shared VM database lock prevents the harness and wrapped worker commands from disrupting one another's test PostgreSQL; bounded waits identify the holder.
+- Batch status reports own-head Rust jobs and snapshot admission reasons before a build.
+- Remote member code receives no ambient credentials or test-selection overrides. The harness refuses reparse points before resetting or cleaning its reusable worktree.
+
+### Fixed (2026-11-17 — Keep batch members with generated census conflicts)
+- Integration batches retain members whose only conflict is the generated producer census, regenerate it on the batch head, and report the member; failed regeneration rebuilds without the census-input members.
+
+### Fixed (2026-11-17 — Autostart registration hardening)
+- Native Windows autostart registration uses the operating system's Windows PowerShell path, verifies the script and registration data before using them, protects registration scratch files, and builds its path-resolution interop helper in memory to keep registration inputs consistent.
+
+### Fixed (2026-11-16 — Windows autostart and the daily update task no longer ask for an elevated PowerShell)
+- The Windows extractor shim autostart (`ops\install-shim-autostart.ps1`, `ops\install-codex-shim-autostart.ps1`, the native `pseudolife-mcp extractor-shim install-autostart`) and the daemon autostart (`ops\install-autostart.ps1`) now register a task for the installing user only: a logon trigger for that user, run as that user with a limited token (`-LogonType Interactive -RunLevel Limited`). Windows lets an unelevated user register, replace and remove that kind of task, so the installers, `install-autostart --help`, `update --schedule`, `docs/guide/dreaming.md` and `docs/guide/configuration.md` no longer tell you to open an elevated PowerShell. The Python-era scripts used to register a trigger for any user's logon, and that is what needed elevation. Checked unelevated on a real desktop for the logon task, and with a UAC-style filtered token on the Windows dev VM for the logon and daily tasks.
+- A task registered earlier from an elevated PowerShell is owned by Administrators, and a normal window can neither replace nor remove it. Every rerun now reads the task's owner first and changes nothing it cannot finish:
+  - The Python-era scripts (`ops\install-shim-autostart.ps1`, `ops\install-codex-shim-autostart.ps1`) refuse such a task, and the legacy `Pseudolife Sonnet Shim`, before they pick an interpreter, create the log directory, write `ops\.env`, or stop or unregister anything. A Python-era task registered elevated therefore needs the one elevated line once; after that a normal window is enough. Both scripts also stop only the shim the runner recorded in its PID file (checked by start time and command line), never one found by a command-line pattern, refuse before they change anything when any other process holds the port (the line names it and ends with the command that stops it), and wait for their own shim to listen before they report success. So a rerun of `ops\install-codex-shim-autostart.ps1` with new flags now restarts the running Codex shim on them; before, the new task instance could not bind beside it and the old shim kept serving the old settings. A task owner that cannot be read is a one-line refusal too. A rerun over your own task that already runs the same settings, with its recorded shim serving the port, changes nothing and says so in one line, instead of re-registering the task and restarting the shim.
+  - The native client (`pseudolife-mcp extractor-shim install-autostart`) follows such a task when it is enabled, starts at this user's logon and already runs the same launcher (whatever release registered it): it writes the new settings to the native shim's settings file, which the task reads at every start, leaves the task registered and restarts the shim through Task Scheduler, which lets an unelevated user stop and start such a task (measured on the Windows dev VM), then checks that it serves. If Task Scheduler refuses the start, it says so. If the restart fails, the shim it started is stopped, the old settings are put back, the original is restarted on them if it was running, and one line says what each step did, including when the shim is left stopped and how to start it.
+  - In every other case the rerun refuses before writing or stopping anything. That covers an older task that carries its model and port on its own command line, a native task that runs an older numbered runtime, the other mode's shim task (the installer leaves it, says so, and finishes), a new `--schedule` time, and `--unschedule`. The refusal is one line that says why (for example "is disabled" or "runs an older numbered runtime"), that the new settings were not applied, and ends with the one command to run once in a PowerShell opened with Run as administrator: `Stop-ScheduledTask` and `Unregister-ScheduledTask` for that task, after which a normal window is enough. The installers print only that line, and the native client exits 3 for it. A task owner that cannot be read is a refusal too, never a reason to go ahead.
+  - The installers offer "start it manually" only when nothing listens on the shim's port, and `update --schedule` reports a scheduler script that changed after it was written as such, and any other failure with its last line and "nothing was changed".
+- A task of the same name that belongs to another account is never touched, not even from an elevated shell: one another user owns, or one Administrators own that runs as another account. The refusal asks that account or an administrator to remove it. A task whose account name does not resolve to an account on this machine is refused the same way, and the line says it could not resolve that name rather than calling the task another account's.
+- The frozen Python client's own `pseudolife-mcp update --schedule` (`pseudolife_memory/unattended_update.py`) is unchanged, and its refusal text still names elevation, until that client is retired.
+
+### Removed (2026-11-16 — CI's last comparison against the live frozen Python)
+- The cli-store parity shard no longer runs "Daemon security live checks without a Rust test", which started the frozen Python daemon beside the Rust one for 69 security cases: the 4 startup refusals (`security-refusals`) and the 65 request cases configured on 0.0.0.0 (`security-remote-open`, `security-remote-auth`). Rust tests the Rust job runs on Linux and Windows for every pull request now hold all 69: `rust/daemon/tests/security_startup.rs`, `rust/daemon/src/http_security_tests.rs` (in process, both OSes) and `rust/daemon/tests/security_admission.rs` (Linux only, over a socket). The loopback security goldens still replay in the same shard.
+- The Fixtures job no longer builds the debug bind fixture, whose only consumer was that step, and `rust/ci/inventory.py` drops its `LIVE_SECURITY_EXCEPTIONS`: a live security comparison is now refused in every job. The three scenarios stay runnable by hand (`rust/daemon/harness/run.py live --only security-refusals`; the two remote ones need a debug `--features mutants` daemon build).
+
+### Added (2026-11-16 — the retention sweep frees build trees of finished work, judged by exact markers)
+- `ops/prune_worktrees.py --target-root <dir>` judges each cargo target dir by the checkouts its dep-info files name. It deletes the target once every owner is gone or merged and nothing in it was written for 24 hours (`--target-grace-hours`). A target with no owner found waits 14 days idle (`--unowned-target-days`). A build holding cargo's lock keeps it, and anything cargo's layout does not explain (copied binaries, mutation-test sources, and `tmp`, `doc` and `package`, which carry no sign of who wrote them) stays and is named.
+- A target needs cargo's own `.rustc_info.json` beside its `CACHEDIR.TAG`, because a uv virtual environment carries the same tag.
+- `--clone-root <dir>` lists, and never removes, standalone git clones, with or without `--apply`. Each row names the first thing that keeps the clone (a commit object not on `origin/master` in the main repository, a stash, a dirty tree, another checkout borrowing its objects, a file in its `rust/target` that cargo does not write, a config that runs a program), or says nothing does, for a person removing it by hand. A clone's remote may be a bundle, so "pushed" is never the test. No other class deletes anything at, inside or around a clone.
+- `--scratch-root <dir>` lists, and never removes, the dirs of a root that holds a `.pseudolife-scratch-root` file its user created (an unmarked root refuses the run). Each row shows the dir's size, last write and the keep rule that would hold it. Scratch removal is not part of this change.
+- The same roots and periods can be set in `~/.pseudolife-mcp/retention.toml` (`target_roots`, `clone_roots`, `scratch_roots`, `target_grace_hours`, `unowned_target_days`, `scratch_grace_days`).
+- Every deletion is still a dry run without `--apply`, and each one adds a ledger line.
+- Every git call the script makes now runs with `core.fsmonitor` off, and git's read-only object files no longer leave a deletion half done on Windows.
+- Nothing is registered or scheduled by this change.
+- One retention run at a time per OS home (a lock beside the ledger); every root must be an absolute path; the caller's `GIT_DIR`-family and config variables no longer reach git; just before a target is deleted the process list is taken again, and after its rename aside it is scanned again (the mount list too) and put back if anything was written, mounted or started there; if putting it back fails, the row says where the folder is and how to put it back, and no ledger line is written.
+- The existing worktree and cache classes get the same tightenings: a modified submodule or an untracked file hidden by config now keeps a worktree, a bind mount inside a candidate keeps it, and a negative or non-finite grace period is refused.
+
+### Security (2026-11-16 — a home or data folder behind a symlink or junction works, while links other accounts can change stay refused) [#1639]
+- **What users saw:** the native client refused to keep its token file, board state and other private files under any symlink or junction. A user whose home is reached through one (a `/home` linked to another volume, macOS `/var`, a Windows profile behind a junction, a data folder moved to another disk with a link) could not use it at all, and the board said only `invalid_state`.
+- **Accepted now:** a link that no other account could have made or can change. On Linux and macOS, the link is owned by the user or root, and so is the folder holding it, which is not group- or world-writable unless it is sticky (as `/tmp` is). On Windows, a symlink or junction owned by the user, SYSTEM or Administrators, which no other account may delete or rewrite, in a folder where no other account may delete entries, delete the folder, or change its access list or owner.
+- **Following a link:** any further link on the way to where a link leads is checked the same way, so a trusted link cannot lead through an untrusted link. The plain folders there get the checks a path naming them directly would. More than 40 links on one path are refused as a loop. A Windows link whose stored target is a device path (`\??\GLOBALROOT\Device\...`), or whose reparse data is malformed, is refused, because where it leads cannot be checked.
+- **Cloud placeholders:** a Windows cloud-files placeholder (OneDrive Files On-Demand, `IO_REPARSE_TAG_CLOUD` to `_CLOUD_F`) counts as a plain folder, because it redirects nothing (what is in a synced folder can still be changed from the cloud, as the user).
+- **Still refused:**
+  - a link another account owns;
+  - a link in a folder others can write without the sticky bit, the group included;
+  - another user's link in `/tmp`;
+  - on Windows, a junction another account may delete or rewrite (for example one made directly in `C:\`, which inherits Authenticated Users' Modify there), or one in a folder where another account may delete entries;
+  - any other kind of Windows reparse point;
+  - a private file that is itself a link (unchanged).
+- **The message:** a refusal names the link, the cause and one fix (`chmod go-w '<folder>'` for a folder the user owns that others may write, otherwise replacing the link with a folder the user owns and moving what it led to there). The board, the shim's startup warning, the MCP error for an unusable token file and the native `doctor` all show it, in place of a bare `invalid_state`.
+- **The bash plugin hooks** (the Stop gate, session start and end, coordination start, the subagent board; Linux, macOS and Git Bash) apply the same rule. They ask the installed native client through a hidden `pseudolife-mcp private-path-check` only when a folder above the token file is a link. Without a native client, or when it gives no verdict, they keep refusing. The session-start, session-end and coordination-start hooks say why on stderr; the Stop gate records the refusal in its `ledger.log` and the subagent-board hook stays silent, as both did before. The native-Windows PowerShell hooks (`lifecycle.ps1`) are unchanged and check only the token file itself. `plugin/hooks/hooks.json` is unchanged, so Codex users re-approve nothing.
+- **Doorbell:** the Codex doorbell folder follows the same rule.
+- **Python client:** the frozen Python client still refuses every link.
+- **Install and update:** neither changes anything on the host.
+
+### Security (2026-11-16 — the native client checks that the daemon account can use its volumes, and repairs old root-owned files once, after a backup)
+- `pseudolife-mcp update` (release mode, checkout mode and a checkout's engine selection), `backup`, `restore`, `move` (through the target's restore) and the native installers' reruns now first run a short check in a helper container as the daemon account (uid 10001), with no capabilities, no network and a read-only root filesystem. It reads metadata only and writes nothing, and confirms that this account can read every file and enter every directory of the daemon's state and model mounts, and write every directory and every root-owned state file it does not own. A directory the account owns but cannot use is reported, never refused. A healthy host runs only this check: no root container is started for it.
+- Where an older release left files that root owns, the client repairs them once:
+  - a uid-0 helper that cannot change owners first lists them, and that list is written to a private log under `~/.pseudolife-mcp/ownership-repair/` (the undo list) before anything changes;
+  - then a helper running as uid 0 with only the CHOWN and DAC_OVERRIDE capabilities (a subset of what the running daemon already holds; DAC_READ_SEARCH is avoided because it unlocks `open_by_handle_at`), no network and a read-only root filesystem gives each uid-0 entry to 10001:10001;
+  - it walks only the top-level state or model mount, follows no link and enters no mount below it, and changes owners only (chown also clears setuid and setgid bits and file capabilities);
+  - the check then runs again, and an entry it still cannot use (another owner's, or on a filesystem that cannot change owners) is refused with its path and the one fix, with nothing else changed;
+  - the user sees one line naming the log.
+- **Mounts the user added below `/data` or the model directory** are checked but never repaired: an unusable one is refused, naming the mount, its host directory or volume, and the fix. So is a bind-mounted state directory on a rootless or user-remapped Docker engine, where uid 0 in a container is not root on the host.
+- **The order protects the backed-up state:**
+  - the model cache, which backups do not include, is repaired first;
+  - the state volume is repaired after a verified archive of it, which `update` takes through the old container (or, for a stopped one, a read-only uid-0 helper), `backup` with its own pair and `restore` with its safety pair;
+  - the one exception: when the only running container already is the daemon account and cannot read root's files, it is repaired first and then archived, and the update goes on only with that archive.
+  - `update --no-backup` on such a host refuses and asks for a run with the backup.
+- **The image entrypoint's own start-time transfer** of root-owned state no longer walks into another volume mounted below `/data` or `/models`: two named volumes on one host filesystem share a device number, so `find -xdev` alone entered them.
+
+### Changed (2026-11-16 — the product no longer tells users to run things as root)
+- A Tailscale serve refused for this user (`expose tailscale`, `expose off` and `maintainer setup`, which now share one wording) names only the least-privilege fix: on Linux, make the user Tailscale's operator once (`sudo tailscale set --operator=$USER`); on Windows, run it as the account that owns the device's Tailscale configuration. It no longer suggests running as root or from an elevated shell, which forwarding a port never needs.
+- The Docker-group advice in the README and the preflight (`ops/preflight.sh`, `ops/preflight-native.sh`) now says plainly that membership of the `docker` group is equivalent to root on that machine, that this is how Docker works rather than something Pseudolife adds, and that running the installer from an account that already uses Docker avoids granting it. Rootless Docker and Podman are not supported yet (#1642).
+- A client config file another account owns (often one a `sudo` run created) is refused with the narrowest fix: a copy this user owns (`mktemp`, `cp`, then `mv -f`) when it can write the folder, `chmod u+wx` on the folder first when it owns but cannot write it, and only otherwise a `sudo chown` for an administrator to run, which names this account rather than `$USER` (of the file alone in a shared sticky folder, of the folder and the file in a folder inside this user's home). A folder outside the home that this user cannot write, such as `/etc`, gets no ownership command, since taking it over would hand over every other file in it. A run as root is told to run again as the file's owner, without sudo.
+- The Windows access-list repairs for private state folders say when an elevated prompt is needed and why: only for a folder owned by Administrators (as one an elevated process created is); a folder SYSTEM owns must first be taken over by an administrator.
+- The `move --to` example target is `user@box` instead of `root@box`, in the help, the usage refusal and the guide.
+
+### Fixed (2026-11-16 — native `update` no longer fails on a machine that ever ran a tunnel)
+- With the native client, every `pseudolife-mcp update` on a machine whose tunnel store held a process record (`~/.pseudolife-mcp/tunnel/*.process.json`) ended with exit 5. A record left by a tunnel that had crashed failed every later update too. The native `tunnel update` now checks whether each record's process still runs, by pid and image through the process table, and never stops on a record or a key. A tunnel that is gone is reported as not running, and its record is named as a file you can delete. A running tunnel is reported `stale` and left running, since this client cannot refresh tunnels yet; nothing is stopped, signalled or started. A record it cannot judge (unreadable, or naming no process id) is reported as unknown and never called deletable. A record with no profile beside it is named by file, as a `leftover` when its process is gone. `update` accepts the `stale` answer and exits 0, and its tunnel line says the running tunnel was left as it is. The step still fails for a store or profile the client cannot trust (a directory that is not owner-only, an invalid profile, or an entry it does not read; each named by its file or directory). It also still fails when the installed tunnel command does not run or answer in time. It now shows the refusal's own sentence instead of only an exit code and a pointer to `tunnel doctor`, a command the native client does not run. The step also passes the directory it checked to the command, so the two can no longer read different homes. A profile in a form the client does not read is named as `unread` with the reason (the field at fault, where there is one) and no longer stops the update.
+- `pseudolife-mcp tunnel status` now reads the process record instead of deferring when one exists. It reports `running` as true, false or unknown and names the record file. On Windows, a process that exists but cannot be opened is reported as unknown, never as stopped, and a saved DPAPI key is reported as present but not verified, instead of deferring.
+
+### Added (2026-11-16 — the native client has its own tunnel bridge)
+- `pseudolife-mcp tunnel shim`, a hidden command, is the MCP server OpenAI's `tunnel-client` starts for a tunnel. It runs this runtime's own stdio shim as a child, pointed at the profile's daemon and token file, and relays the messages between them. The child gets only a fixed list of environment settings: its folders, locale, certificates, an https proxy and its call timeout. It also gets the profile's daemon address and token-file path, `PSEUDOLIFE_MCP_NO_SPAWN=1` and `PSEUDOLIFE_WRITER_ID=tunnel`. No token, other daemon address, `OPENAI_API_KEY`, board identity or session handle from the caller's environment reaches it. It starts no daemon and opens no window on Windows. No native command starts the bridge yet. The native `tunnel run` comes in a later change. The frozen Python client's `tunnel doctor` and key replacement do hand this command to the vendor's own `doctor`, and whether that runs it has not been checked.
+- A successful `memory_search` call whose query carries the profile's pending verification nonce, or a `memory_agents` `list` call whose project does, writes a payload-free receipt beside the challenge (`<profile>-verification/<nonce>-<tool>.json`, owner-only). The receipt is written after the answer reaches the client, so the session never waits for it. Nothing is written for:
+  - a failed call;
+  - a call without the nonce, with a wrong nonce, or with another profile's nonce;
+  - a call made before the challenge was saved;
+  - an answer the client never received;
+  - a call sent while another under its id is still unanswered;
+  - a profile whose daemon address, token file, tunnel or organization changed since the bridge started, or that is no longer ready.
+
+  If a receipt cannot be saved, the bridge says so once on stderr and the session continues. The bridge writes no more receipts in a session, and says so once, in two cases: more than 1024 requests are left unanswered at once, or the client sends a line the bridge cannot read. A new session can verify.
+- With `minimum_catalog: full`, each `tools/list` waits until `memory_toolset` reports the full tier, expanding it at most twice. The listing then reaches the shim after the gate's own check, and the gate's calls and answers never reach the client. A tier that stays short, or no answer within 15 seconds, refuses that listing with one error. With the default catalog every line crosses unchanged and in order.
+- Each direction has its own bounded queue of 64 lines, so neither side can stall the other. A line longer than 4 MiB from the client, measured raw with its newline, ends the session, and so does one longer than 32 MiB from the shim. One stderr line names the side and the limit in bytes. The daemon takes a request body of at most 4 MiB once the shim has compacted it, so a compact request it accepts always fits. A heavily padded or escaped one can be cut off even though the daemon would have taken it, and the caller then loses the session rather than getting an error for that call. Counted by line length, the bridge holds at most about 264 MiB from the client and 2.1 GiB from the shim, plus up to 64 held listings of 4 MiB each. A client whose output can no longer be written ends the session. One that stops reading but keeps its input open holds the session without growing it.
+- After the client's input ends, the shim's input closes once held listings are settled, and the shim has five seconds to finish. The relay ends within 30 seconds of the client leaving. The process waits up to five more seconds for its output and five for the child, then stops it: about 40 seconds at most. A shim that takes none of its waiting input for a minute is treated as hung, and the session ends.
+- Started by hand, or without `--profile`, `tunnel shim` refuses with one line naming what it needs, before it reads anything or starts the shim. It also refuses a profile that is not ready, or whose daemon address is not an origin the shim accepts, naming the `pseudolife-mcp tunnel status --profile <name>` command for the store it was given. If the shim exits with an error, or the bridge has to stop it, before it has answered anything, the bridge says which in one line, naming `pseudolife-mcp doctor`.
+
+### Fixed (2026-11-16 — a machine whose tunnel starts by itself is no longer moved to the native client) [#1632]
+- A native `pseudolife-mcp update` that would move this machine's client to
+  the native runtime now refuses, before it changes anything (exit 2), while
+  a tunnel autostart service installed by `tunnel service install` is
+  registered and runs the launcher the move replaces. Such a service is a
+  systemd unit (a root `--system-service` unit included) or a launchd job
+  carrying the Pseudolife tunnel owner marker, or a scheduled task whose
+  source is that marker; disabled ones count. The native client cannot start
+  a tunnel in the background or register one as a service. On a disposable
+  systemd user unit the service then restarted every 5 seconds without end.
+  This covers the update bridge from a Python
+  client, `--clients-only`, a client machine, a release deploy (after its
+  "nothing to do" check), a checkout `--all` deploy and unattended client
+  updates. An unattended update on the daemon's host updates the daemon
+  alone instead of refusing, and says why on each run that installs a
+  release, its board notice included, until the autostart is gone.
+- Both native installers ask the staged client first (`runtime install
+  --check`, exit 3 to refuse) and stop in their preflight, before the host
+  changes. `runtime install` itself refuses the same move with exit 3, and
+  an installer that meets that keeps the Python client and says so.
+- The refusal names the service, how to stay on the Python client (rerun
+  without `PSEUDOLIFE_SHIM_ENGINE=native`) and how to move anyway (the exact
+  `pseudolife-mcp tunnel service remove` command, then rerun).
+- On a machine already on the native client, an update with such a service
+  goes on and warns, naming the service manager's commands that remove it.
+- A service made by hand (no owner marker, but its command is the launcher
+  followed by `tunnel run`) gets a warning with the command that disables it,
+  never a refusal: every user and system systemd unit (with `%h` expanded,
+  following a symbolic link), every LaunchAgent, and every scheduled task,
+  read in one `schtasks /Query /XML` (about a second for 550 tasks). The
+  forms still not recognised are listed in the tunnels guide.
+- Detection only reads. On Linux and macOS it reads the unit and plist
+  files, and on Windows it runs one `schtasks /Query /XML`. A saved tunnel profile
+  without a service, or a service that runs another program, still moves.
+  When the files or the task list cannot be read, the run goes ahead and says
+  what it could not check.
+
+### Changed (2026-11-16 — the native `expose tailscale` and `expose off` make their own change)
+- With the native client, `pseudolife-mcp expose tailscale` and `pseudolife-mcp expose off` no longer stop with "mode 'expose' is deferred in this candidate" once their checks pass. After `--yes`, or one `[y/N]` question at a terminal (any other answer, the end of input or Ctrl-C changes nothing and says so), they run the Tailscale serve change themselves, read the serve status back and report what is there: exposed at the tailnet address, removed, or the failure with the state the host is left in and the one next step.
+- A serve that failed although its forward appeared is removed again and checked. Anything else on the port, before or after the change, is named and left alone, never removed. Forwards on other ports are never touched. A `tailscale` call that does not finish within 30 seconds is stopped, and a serve waiting for Serve to be enabled on the tailnet has the link it printed named in the report.
+- Help and usage are answered at any terminal width, `PYTHONINTMAXSTRDIGITS` no longer matters, and a write to a closed stream exits 1. Only argument spellings outside the canonical form still defer.
+
+### Fixed (2026-11-16 — native `doctor` no longer sends tunnel users to the Python client)
+- With the native client, `pseudolife-mcp doctor` on a machine with a saved tunnel told the user that three situations needed the Python client. It now names only steps this client runs. A tunnel refresh that needs attention points at `pseudolife-mcp tunnel status --profile <name> --json`, which now answers beside a process record and shows the refresh outcome and the key's state. Where that command cannot read a file, doctor names the file instead: a key file or verification challenge that is a pipe or a link (make it a plain owner-only file), or a challenge nested too deeply to be one this client wrote (move it aside). A profile the client cannot read says to move it aside if it is left from an abandoned setup, and that this client cannot set a tunnel up yet. An expired key names the date it expired and where to create a new restricted key (`https://platform.openai.com/settings/organization/api-keys`), and says this client cannot save it yet.
+- On Windows the saved tunnel key is now unsealed with the account's DPAPI protection, as the Python client sealed it, so `tunnel status` and `doctor` report a protected key as present only after checking it. A damaged key file is reported as no usable key. A key that cannot be unsealed in this session (sealed by another account, or read over a logon without the account's credentials, such as a key-based SSH logon) is reported as `not_verified`, and `doctor` says to check from a logon signed in with that account's password. The unsealed key is wiped from memory after the check and never printed or logged. `tunnel verify` with a key that unseals no longer defers: without a process record it refuses, as on other platforms.
+
+### Fixed (2026-11-16 — the native `doctor` reports everything it can instead of giving up on the whole run)
+- With the native client, `pseudolife-mcp doctor` no longer hands the entire run to the Python client because of one unrelated condition. With no Python installed, that left no diagnosis at all.
+- A saved-tunnel directory no longer stops the run. An absent or empty `~/.pseudolife-mcp/tunnel` adds nothing. Saved profiles appear in a read-only `tunnels` section with state, catalog, key presence, key expiry and last refresh. A profile or store the client cannot read is one named `unavailable` entry with its reason and recovery.
+- A proxy variable no longer stops the run. It is named in a `proxy` line (variable names only, never values). Only when the shim's own proxy rules (scheme and `NO_PROXY` applied) send this daemon's traffic through a proxy does a handshake failure name `NO_PROXY` as the fix.
+- `PYTHONINTMAXSTRDIGITS` is a Python-only setting and is now ignored.
+- A token outside printable ASCII is now the named error `BearerUnsendable` (exit 1). The native shim sends such a token as UTF-8 and the daemon reads it as Latin-1, so it can never authenticate.
+- A token source that cannot be used is now `CredentialUnavailable` (exit 1). Its reason and fix are chosen by source: a token file, an inline token, or a client registration.
+- In both cases the checks that need no credential still run, the token is never sent, and it is never printed.
+- An invalid `PSEUDOLIFE_MCP_DAEMON_URL` is now the named error `DaemonUrlInvalid` (exit 1), with no request made.
+- A `/health` answer that is not a daemon health report is now `DaemonUnrecognized` (exit 1).
+- A dream stall, any Codex hook-copy state, a maintainer answer that never completes, and client files the native reader does not parse are each named in their own field. With no `PATH`, the platform's default search path is used.
+- Only argument shapes (`--help`, non-canonical options, a timeout past the cap) and an `--agent-state` path the native resolver does not decide still defer.
+
+### Fixed (2026-11-16 — the native `console` opens the browser on macOS and Linux desktops)
+- `pseudolife-mcp console` with the native client now opens the Console sign-in in the default browser on macOS (`/usr/bin/open`) and on an ordinary Linux desktop (the first of `xdg-open`, `gio open`, `x-www-browser`, `firefox`, `google-chrome`, `chromium`, `chromium-browser` on `PATH`) instead of reporting the command as deferred; a desktop whose default browser is Firefox or Chrome no longer needs `BROWSER` set to an absolute path.
+- On macOS and Linux any `BROWSER` value is a command line started in the background (`firefox`, `open -a Safari`, `firefox %s`, `firefox %s &`), with the URL as one argument, also without a display (so the opener a VS Code remote terminal or `wslview` puts in `BROWSER` works); a terminal browser such as `lynx` prints the link instead. The started browser gets `/dev/null` for its standard streams, so a caller capturing the command's output no longer waits for the browser to exit.
+- When no browser opens (no display, no launcher found, a launcher that fails or exits non-zero, an unusable `BROWSER`), the link and code are still printed and the cause with its fix goes to stderr, or to `browser_error` in `--json` output. Windows behaviour is unchanged.
+
+### Fixed (2026-11-16 — the weekly Docker cache-retention task says when it cannot run, and also removes dangling images)
+- `ops/install-cache-retention.ps1` now registers the MSI install of PowerShell 7 (`%ProgramFiles%\PowerShell\7\pwsh.exe`) when it exists, ahead of the per-user Store alias. The alias disappears with the Store package, so a task registered with it failed every run with 0x80070002 once a host moved to the MSI install, while still showing Ready.
+- The installer refuses, and registers nothing, when the pwsh it would register does not exist.
+- Each run writes its output and result to `~/.pseudolife-mcp/cache-retention-last.log`: exit 0, or the error the retention script threw and exit 1. A nonfatal step the script only warns about (fstrim) no longer decides the run's result. When the retention script it was registered with is gone, the run writes that, with the fix, and exits 2 instead of failing with nothing written.
+- New read-only `ops/install-cache-retention.ps1 -Check` names each reason a registered task cannot run (its pwsh missing, its script missing, a last run that could not start) and exits 1, or says it can run. Re-running the installer from the permanent checkout repairs a broken registration in place.
+- `ops/prune-build-cache.ps1 -PruneDanglingImages` / `ops/prune-build-cache.sh --prune-dangling-images` also run `docker image prune --force` with no `-a` and no filter, which removes only untagged images that no container, running or stopped, uses. The weekly task passes it; the deploy path does not, so a deploy still touches no image.
+- A registration made before this change keeps its old executable: re-run `ops\install-cache-retention.ps1` from the permanent checkout once, then `-Check`.
+
+### Changed (2026-11-16 — an integration batch's local full suite runs the real native client, as the hosted test lane does)
+- The local suite launchers (`ops/wsl-suite.ps1`, `ops/wsl-suite.sh`, `ops/remote-suite.ps1`) take `PSEUDOLIFE_SUITE_NATIVE_CLIENT=1`. With it, the run builds `pseudolife-stdio` on the machine the suite runs on, the way the hosted `test` lane does (`cargo build --locked`, the dev profile), and runs the tests that need a real client (`PSEUDOLIFE_NATIVE_TEST_BINARY`, with `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1`). Before, those tests used their stand-in or skipped, so a batch passed locally and then failed 18 of them hosted (#1634).
+- The build cache is one per machine and written only by these runs. A build that follows another checkout's build first cleans the workspace's own packages, because cargo would otherwise reuse that checkout's units. A build refuses to start under 8 GB free there, holds the machine's full-suite lock while it compiles, and fails the run with cargo's error when it fails, never falling back to the stand-in. Every run says `wsl-suite: real client: yes|no` before pytest starts, and the suite result JSON records `real_client`, `real_client_commit` and `real_client_path`.
+- With a remote machine configured, `ops/remote-suite.ps1` runs a full suite there, and in local WSL only while `~/.pseudolife-mcp/locks/pc-available` says this PC is available (an empty file, or one `until=<time with offset>` line; anything else, or an expired time, reads as not available). `PSEUDOLIFE_SUITE_WHERE=local` overrides that and says so. A direct full `ops/wsl-suite.ps1` run is refused there, naming the remote command. With no remote configured, nothing changes.
+- `ops/remote-suite.ps1` carries a commit that is not on origin to the remote machine as a git bundle of what `origin/master` lacks, so a remote run no longer needs a push. `python ops/integrate.py suite` uses it to run a built batch's full suite on the remote machine, with nothing pushed before `open`.
+- `ops/remote-suite.ps1` turns the native client on by itself on an `integrate/*` branch, and `ops/integrate.py build` says so. `open` refuses a suite result without the real client built from the batch head, and a `--suite-note` that does not say `real client: yes`. Ordinary local runs are unchanged unless asked. It is Linux only: the macOS and Windows lanes' runs have no local equivalent.
+
+### Changed (2026-11-16 — a batch's compile check runs on a dev machine)
+- `python ops/integrate.py build` runs its Rust compile check (`cargo check --workspace --all-targets --locked`) on the dev machine that a private `~/.pseudolife-mcp/locks/rust-check.remote` names, instead of on the host that runs `build`. `build` sends the batch to that machine as a git bundle over ssh, so nothing is pushed before the operator's publication check. The far half, `ops/rust-check-remote.ps1`, refuses a bundle whose head is not the batch head, runs one locked gate worktree with its own target directory, and removes its private ref and bundle; it sweeps any that a killed run left. It refuses, as not run, while a full suite holds the machine or the filesystem beside its clone has under 8 GB free. A machine that cannot be reached, is busy or has no cargo is recorded as a check that did not run, and `open` refuses it. `python ops/integrate.py suite` refuses to start on a head whose compile check failed or did not run, and `open` judges the compile check before any suite result. Nothing falls back to the local host: only `PSEUDOLIFE_RUST_CHECK_WHERE=local` runs the check there. The batch body names the machine by its role. Without the file, the check runs locally as before.
+
+### Fixed (2026-11-15 — a release cut stacked on a pull request that only waits is still batched alone)
+- `python ops/integrate.py build` (and `--dry-run`) could merge a release cut beside other pull requests: a cut whose head carried a pull request that only waits on a labelled parent was skipped by the cut search, and the merge then took it with the rest. The cut search now uses the merge's own rule, so such a cut is batched alone. A build that would still merge a release cut beside anything else is refused, and nothing is built.
+
+### Fixed (2026-11-15 — the parity scope no longer reads ignored build output)
+- `rust/ci/parity_scope.py` found the modules the parity harnesses import by reading every `*.py` under `rust/`, including the ignored cargo output `rust/target/`. A leftover mutant-source copy of the tree there made every eval module look imported, so a local or long-lived worktree selected every parity suite and failed `rust/ci/test_parity_scope.py`'s floor cases. The scan now lists files as the other scans do (`git ls-files --exclude-standard`: tracked, or new and not yet added). Without git it leaves out `rust/target/` by name.
+
+### Fixed (2026-11-15 — the Codex setup step names every backup in a path you can use)
+- On Windows, `pseudolife-mcp installer codex-hooks` reported the backup of
+  an existing instruction file (AGENTS.md) in the `\\?\C:\...` verbatim
+  spelling, and the backups of the Codex configuration and credential files
+  could keep the ordinary spelling where it is too long to open. Every
+  reported backup now uses the ordinary spelling, and the verbatim one only
+  where Windows needs it (a path of 260 characters or more).
+
+### Changed (2026-11-14 — a release cut is batched alone for its notes, every stacked pull request needs its own freeze label, and CI runs the installer tests against a native client)
+- `python ops/integrate.py build` no longer cites the Python oracle for batching a release cut alone: it does so because the release is tagged at the batch's merge, so anything beside the cut would ship without being in the release notes. It now also leaves out a cut that would leave a changelog fragment unfolded on the batch head, naming the fragments and the fix.
+- Batch admission judges each member's own change against master, so a stacked parent that changes `pseudolife_memory/` needs the `freeze-exception` label even when its child's merge carries the change; a member whose head carries an unlabelled one is left out.
+- A release cut may change only the packaged compose copy inside `pseudolife_memory/`; `build` refuses a cut that changes any other package path, labelled or not, naming it. The parents looked for are every open pull request whose head is in a member's history, whatever its base. A member whose change git cannot read, or a failed or possibly cut-off listing of open pull requests, refuses the build instead of dropping a member and its label. A saved batch plan leaves out an empty `carried` list, so the tool before this change can still open it.
+- The check for a master that lost the freeze guard uses full history (a guard dropped in a merge resolution still refuses) and refuses on a shallow clone.
+- CI's Python lanes that run installer tests (`test`, `test-lite-windows`, `test-lite-macos` and the Windows nightly) build the native client from the same commit, smoke-run it (the native client's first CI execution on macOS) and export `PSEUDOLIFE_NATIVE_TEST_BINARY` with `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1`, ready for the installer tests that will run the real client.
+
+### Changed (2026-11-14 — the tests kept live for two freeze exceptions are frozen again)
+- The freeze exceptions #1539 (the expose security fix) and #1537 (the update bridge) have landed, so the twenty test files kept live for them are frozen again (`tests/suite_classes.txt` rule 3). An ordinary run no longer collects them, and the Windows and macOS lite lanes and the Windows nightly stop running them. The `test` job still collects them in its weekly frozen run and whenever a change touches the package. `tests/test_codex_hook_runtime_trust.py` and `tests/test_update_bridge.py` stay live.
+
+### Added (2026-11-14 — the native client moves a bank, and rolls back a move that failed)
+
+- `pseudolife-mcp move --to <ssh-target> --target-url <url> --no-keep-tokens`
+  in the native (Rust) client now moves a Docker bank to another host's
+  installed bank, after asking (or `--yes`). In order, it:
+  - claims the target and pauses both hosts' unattended updates and restart
+    policies;
+  - stops the source, makes its database read-only for new sessions, and
+    takes its final backup;
+  - fences the source database;
+  - copies the backup over ssh with its SHA-256;
+  - gates and restores the target, and checks its identity and row counts;
+  - starts it once and waits for `--target-url` to serve the moved bank;
+  - writes `/data/moved.json` into the stopped source (the commit point);
+  - points this machine's clients at the target.
+- Before the commit point a failure or an interrupt rolls back. The source
+  serves again only after the target has been proved stopped and gated. A
+  target that cannot be proved so (a lost ssh link) leaves the source stopped
+  and fenced, with exit 6 and four facts: which daemon runs, whether the bank
+  is served, where the data is, and the next command. Writes the target took
+  while it served (rows added or removed, and rows changed in place, from its
+  write counters) are named and kept in its gated bank (also exit 6), and a
+  later `--resume` never replaces them.
+- `pseudolife-mcp move --rollback <move id>` runs the same rollback from a
+  move's record (`~/.pseudolife-mcp/moves/<move id>/`) after the move process
+  died without it. Every later `move` on that host refuses, naming that
+  command, until it has run. If the move died past its commit point, it lists
+  what the move still had to do (exit 5).
+- `--resume` retries a rolled-back move whose restore ran on the target. It
+  does so only while that bank is still gated, with the row counts and write
+  counters the rollback read. Otherwise it refuses before any change, naming
+  `--release-target`.
+- `pseudolife-mcp move --release-target <move id>` gives such a target back
+  its own bank, from the safety backup the move's first restore took of it,
+  and frees it for a new move. The moved bank, with any writes it took there,
+  is kept in that restore's own safety backup, which the output and `--json`
+  name. It refuses while this host's daemon is not serving, and each of its
+  steps is safe to repeat.
+  While such a target holds a copy of this host's bank, no other move starts
+  from this host; the refusal names the commands that work for that move. A
+  target read as holding neither this move's claim nor its bank closes the
+  record and is left unchanged; one whose Docker does not answer, or that has
+  no bank identity behind an unclaimed gate, keeps it. `--json` gives the
+  `ending`.
+  `--release-target <move id> --target-gone` gives up, on this host only and
+  for good, a target that gives no answer in three attempts, while this host
+  serves its own bank. Nothing is sent to it for that move again; the output
+  says how to clear it there by hand, as of the give-up, after a check of
+  what it holds now.
+- A gated bank with no reading taken right after the move's restore by the
+  same run (or whose restore may or may not have run) is kept and never resumed
+  over (exit 6, naming `--release-target`); no writes are claimed for it.
+- The target's half runs in its native client (move protocol 2): each
+  operation is safe to repeat and is journalled on the target. Each change is
+  refused unless the target's claim names the move, so a second move into the
+  same target is refused, whatever `--target-work-dir` each names. A target
+  serving without authentication, or a daemon whose data directory is not
+  `/data` (where the move's gate files work), is refused before any change.
+  Both hosts keep the move's files until a person removes them.
+
+### Changed (2026-11-14 — `connect` asks on a terminal and re-creates a stale unattended-update schedule)
+- `pseudolife-mcp connect` without `--yes` on a terminal now asks "Apply these changes? [y/N]" natively, after the plan and before any authenticated request; anything but `y` or `yes` changes nothing. `--read-code` and `--read-token` read the pairing code and the token on a terminal without echo, as the Python client does. A run with no terminal and no `--yes` still refuses without changing anything, so unattended runs never wait.
+- An unattended-update schedule that `pseudolife-mcp update --schedule` installed on this machine names its daemon URL, so moving the machine used to leave it running against the old daemon. With every client selected, `connect` now re-creates it for the new URL through `update --schedule` itself, keeping its daily time and kind, as a change row under the same confirmation. This covers the client machine's schedule ("Pseudolife Client Update" / `pseudolife-client-update`), which `connect` did not report before, as well as the daemon's.
+- `connect` never creates a schedule and never removes one. A schedule whose command is not what `--schedule` writes, whose time cannot be read, or of a kind `--schedule` would not write on this machine is a manual row naming the command to run. So is the daemon's own schedule once the daemon has moved to another machine. If the re-creation fails after the registrations were re-pointed, the run says what changed and prints the one command that finishes it. `connect` reads each schedule again immediately before it writes, and one removed, changed or no longer readable since the plan was shown is left as it now is, with that cause.
+- A scheduled task with an end date, a repetition, a random or start delay, an execution time limit on its trigger, or highest privileges is a manual row that names the setting, since `update --schedule` would drop it: the row gives both ways on, keeping it by editing the task's `--daemon-url` argument, or dropping it by re-scheduling.
+- A systemd drop-in for the unit or its timer blocks unless every key it sets is on a short list of keys that cannot change what runs, which daemon it targets or when (for now only `TimeoutStopFailureMode=`, which a distribution ships), so a `[Unit]` key such as `OnSuccess=`, a namespace key such as `RootDirectory=`, or anything unknown blocks too. Such a schedule is a manual row naming the drop-in and the first key not on the list, and is never reported current; so is one with a drop-in connect cannot read or that systemd cannot parse, and, on Linux, one whose unit or timer exists but cannot be read, whose row says how to repair or replace that file. Each drop-in file is read as systemd reads it (its line endings, continuation and comment rules, byte-order mark), and every drop-in in every directory is read, so a blocking one blocks even where systemd may be ignoring it in favour of a same-named file; and `connect` also asks systemd's user manager (`systemctl --user show`) which unit file and drop-ins it applies: a unit loaded from another file or missing, a drop-in its own search did not read for that unit, or files changed on disk since the manager loaded them (`NeedDaemonReload`) leave the schedule alone, as does a user manager it cannot ask. A schedule is reported current only when it is exactly what `update --schedule` writes for the new daemon, and after re-creating one `connect` reads it back and asks systemd again: if systemd now loads the unit from another file, or what was written does not read back as written, the run says so (exit 5) instead of reporting the move. The daemon's own schedule after the daemon moved to another machine is a row naming the command that removes that schedule alone (not `update --unschedule`, which removes the client schedule too), with what else was found. A row saying what differs names a line by its key or a task's action by its part, and a drop-in row names a key only when it is a plain name, never a value, which can hold a token. The commands rows name quote each path as one shell word. A systemd schedule with dependency links (`.wants/`, `.requires/`, `.upholds/`), a unit file of the same name in another directory systemd searches, or a unit file that is a symbolic link, and a scheduled task with more than one action, are left alone with a row naming what was found: `connect` vouches only for the schedule exactly as `update --schedule` writes it from this shell.
+
+### Changed (2026-11-14 — a native install needs no Python on the host at all)
+- With `PSEUDOLIFE_SHIM_ENGINE=native`, the installer's preflight and
+  Claude Code session-hook steps need no Python either:
+  `ops/preflight-native.sh` and `ops/preflight-native.ps1` no longer refuse
+  without Python 3.10 or check for Python, venv or pipx. Their Docker
+  ownership check (a foreign stack, an unrecorded bank or state volume, a
+  changed Postgres password, a different checkout's daemon or its bearer, a
+  lite bank, a busy port) is the native client's `pseudolife-mcp installer
+  preflight-check`, with the same refusals as before. Like the other
+  installer steps, it runs `docker` only from an absolute `PATH` directory.
+- `ops/install-hook-native.sh` edits settings.json and hooks.json through
+  the native client's `pseudolife-mcp installer hook-settings`, with the
+  same hooks, backups and exit codes as `ops/install-hook.sh`, which the
+  default installer keeps using with python3.
+- Both native scripts run the client the installer just verified, else
+  `PSEUDOLIFE_NATIVE_CLI`, `PSEUDOLIFE_SHIM_LAUNCHER` or the installed
+  launcher, as `ops/update.sh` does, and name how to get it when none is
+  there. `pseudolife-mcp installer --capability` now answers
+  `installer-protocol 3`, which the native installer requires.
+
+### Added (2026-11-14 — the installers install the native client when asked)
+- `ops/install.sh` and `ops/install.ps1` still install the Python client by
+  default, exactly as before. With `PSEUDOLIFE_SHIM_ENGINE=native` they
+  install the native `pseudolife-mcp` client instead (the stdio shim every
+  agent registers and the CLI), through `ops/install-native.sh` /
+  `ops/install-native.ps1` with the same arguments.
+  `PSEUDOLIFE_SHIM_ENGINE=python` is the default spelled out, and brings a
+  machine on the native client back to the Python client; any other value
+  is refused before anything changes, naming the two it accepts.
+- Asked for native, the installer downloads the release archive for the host
+  (Linux x86_64 and aarch64, macOS Intel and Apple silicon, Windows x86_64)
+  and `SHA256SUMS` from the release the checkout names, verifies the
+  archive, runs it once from a private staging directory, and checks that
+  it answers `installer --capability` with this installer's
+  `installer-protocol` level, before anything changes. A host with no
+  published archive, a release without the native assets, a checksum
+  mismatch, a binary that will not run on the host (for example an older
+  glibc), or a release older than the installer (0.24.0 is one) refuses
+  with its cause and fix. Only then is it installed with
+  `pseudolife-mcp runtime install`.
+- The native install moves Claude Code, Codex, Gemini CLI and Claude
+  Desktop registrations made by pipx, `pip --user` or the Python runtime to
+  the native launcher, each changed file backed up first, and says where
+  the old Python client stays on disk; it is never deleted. Editable
+  checkout installs and self-spawning registrations are left as they are. A
+  rerun on a native host says nothing changed.
+- On Windows the native launcher's directory is put first on the user PATH.
+  `PSEUDOLIFE_NATIVE_ARCHIVE_URL` (a mirror or a local directory) and
+  `PSEUDOLIFE_NATIVE_TARGET` (one of the five release targets) override the
+  download and the detected target.
+- The native installers and `pseudolife-mcp runtime install` take a
+  `SHA256SUMS` record in either standard form: two spaces, or the
+  binary-mode space and asterisk that `sha256sum` writes under Git Bash.
+- `pseudolife-mcp installer --capability` prints
+  `pseudolife-mcp installer-protocol <N>`, the level of installer steps the
+  binary carries.
+
+### Changed (2026-11-14 — the native installer runs its own steps through the native client, not Python)
+- Asked for the native client (`PSEUDOLIFE_SHIM_ENGINE=native`),
+  `ops/install.sh` and `ops/install.ps1` no longer look for or start Python
+  for their own steps. The recorded installer choices and the deployment
+  fingerprints, the bearer token and the per-client token files, the
+  Claude Code settings and registration environment, the Docker volume
+  names, the Docker daemon engine (detect, prepare, accept, choose), the
+  Codex credential, hooks and runtime-default setup, the Claude Desktop
+  registration, the Claude Code plugin marketplace move and the small JSON
+  and pairing-code reads are then steps of the verified native client
+  (`pseudolife-mcp installer ...`), with the same answers, files and
+  refusals as the Python helpers they replace. The default installer, which
+  installs the Python client, keeps its Python helpers.
+- These steps run `docker` and `git` only from an absolute `PATH`
+  directory, never from the current directory, a relative `PATH` entry or
+  the folders Windows also searches by itself (its system directory among
+  them), so a `docker.exe` left in a checkout is never started.
+- An unattended first native install checks its flags before the native
+  client is downloaded, so a mistyped flag is refused at once. At a
+  terminal the client is downloaded and checked before the first question,
+  so a release that cannot be used is refused before anything is asked; a
+  flag checked after the questions (`--engine`, the client-only flags) is
+  then refused after the download. Unknown flags are refused at once either
+  way. A rerun downloads it first, because it reads its recorded choices
+  through it.
+- The native installer runs these steps only from a staged release that
+  carries them: one whose `installer --capability` answers the installer's
+  protocol level.
+
+### Changed (2026-11-14 — a batch build says everything that would still refuse a waiting pull request)
+- `python ops/integrate.py build`, and its `--dry-run`, now also judge each labelled pull request that sits the batch out as not ready (a pending replay, a failing head) as if it were ready, against master alone. For each one it prints `#N, once ready:` with what would still refuse it: the Python freeze, a refused parent its head carries, the CI budget check, changelog fragments a release cut would leave unfolded, or a conflict with master (except one only in `rust/ci/ci_budget.json`, which the merge normalizes). A pull request whose listed head moved is said to be unjudged, and the report never refuses the build. If nothing would, it says so. A pending replay no longer hides those refusals until it finishes.
+- The CI budget check names every job missing a reviewed cost reason at once, not only the first.
+
+### Fixed (2026-11-14 — the CI budget check names a removed job that has no reason, as batch admission does)
+- `python rust/ci/ci_budget.py check` now reports a job that the generated baseline records and the workflow no longer has, when no accepted reason covers its removal. `ops/integrate.py`'s member check already refused such a pull request, while `check` passed it, which kept #1550 out of a batch. The docs say which check is the gate and when the two agree.
+
 ## [0.24.0] - 2026-11-14 — Every release now carries the native client archives and reaches PyPI only once they are attached, and `pseudolife-mcp update` can move a machine from the Python client to the native client when you ask for it with `PSEUDOLIFE_SHIM_ENGINE=native`; the native client backs up and restores a Docker bank, plans a bank move, pairs with `connect`, opens the Console and runs conductor-watch with no Python, and refuses what it no longer does (a lite-tier bank, `serve`, `embedded`) in plain words; programs are never found in the current directory; and Python is frozen, so fixes land in Rust
 
 ### Changed (2026-11-14 — an update can move a Python client to the native client, when you ask for it)
