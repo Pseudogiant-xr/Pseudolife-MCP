@@ -150,6 +150,20 @@ class MutantQualification(unittest.TestCase):
                 seed_rows.replay("dbname=pl_cf_w2d_fixture", {"tables": {}, "sequences": {}})
         ensure.assert_not_called()
 
+    def test_seeded_base_refusal_precedes_clone_and_is_only_for_seeded(self):
+        import run
+
+        with (patch.dict(run.os.environ, {"PL_HARNESS_BASE_DATABASE": "pl_cf_mir_fixture"}, clear=True),
+              patch.object(run.pg, "name", return_value="pl_cf_w1a_fixture"),
+              patch.object(run.pg, "create", side_effect=RuntimeError("clone attempted")) as create):
+            with self.assertRaisesRegex(ValueError, "unset PL_HARNESS_BASE_DATABASE"):
+                run._run_scenario(run.SeededBank(), Path("candidate"), Path("unused"), "golden", False)
+            create.assert_not_called()
+            with self.assertRaisesRegex(RuntimeError, "clone attempted"):
+                run._run_scenario(run.SCENARIOS["mcp-search-explain"](), Path("candidate"),
+                                  Path("unused"), "golden", False)
+            create.assert_called_once_with("pl_cf_w1a_fixture")
+
     def test_cortex_requires_one_result_per_oracle_case(self):
         cases = [{"query": "first", "entries": []}, {"query": "second", "entries": []}]
         state = {"rows": {}}

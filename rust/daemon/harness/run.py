@@ -1172,22 +1172,20 @@ class StampedBank(Scenario):
 
 
 class SeededBank(Scenario):
-    """Entries stored by Python under the continuum preset, served flat:
+    """Captured continuum entries served under the flat preset:
     hydration rewrites the stale band stamps, and search answers by value."""
     name = "seeded"
 
     def __init__(self):
+        if pg.base_database() is not None:
+            raise ValueError("seeded uses fixed continuum rows and requires an empty template; "
+                             "unset PL_HARNESS_BASE_DATABASE for this scenario")
         self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
 
     def prepare_template(self, dsn: str) -> None:
-        seed = HERE / "seed_entries.py"
-        import subprocess
-        env = daemons.base_env(daemons.scratch_root() / "seed-home", {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
-        (daemons.scratch_root() / "seed-home" / "data").mkdir(parents=True, exist_ok=True)
-        r = subprocess.run([sys.executable, str(seed), dsn], env=dict(env, PYTHONPATH=str(REPO)),
-                           capture_output=True, text=True, timeout=900)
-        if r.returncode != 0:
-            raise RuntimeError(f"seeding failed: {r.stderr[-2000:]}")
+        from seed_entries import seed
+
+        seed(dsn)
         # Number spellings Python never writes but a bank can hold (another
         # writer, a migration): jsonb keeps 1.10's scale and 1E2 as 100.
         import psycopg
