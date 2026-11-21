@@ -5,7 +5,7 @@ Use the [installer](../../README.md#durable-tier--docker-recommended-for-a-long-
 bank without Docker, install `pip install 'pseudolife-mcp[lite]'` and follow
 the [lite quickstart](../../README.md#quickstart). To relocate an
 existing Docker bank, use [`pseudolife-mcp move`](remote-bank.md#moving-a-bank)
-from its current host; install the destination first and review `--dry-run`.
+from its current host. Install the destination first and review `--dry-run`.
 Never hand-write or flatten a compose file to install or move a bank.
 
 ## Daemon engine
@@ -73,19 +73,29 @@ install refuses it.
 
 ## Native client
 
-The installers install the Python client, and `pseudolife-mcp update`
-keeps it: in 0.24.0 the native client (one program, no Python) is opt-in,
-because it does not run everything the Python client does yet. An update
-from 0.23.x, where a native client is built for the platform, says so in
-one line with the command that moves the machine. To move, set
-`PSEUDOLIFE_SHIM_ENGINE=native` for the update (from a machine already on
-this release's Python client: `PSEUDOLIFE_SHIM_ENGINE=native
-pseudolife-mcp update --clients-only`); it moves when the release's archive
-for its platform downloads, matches `SHA256SUMS` and runs, and otherwise
-keeps the Python client and says why. A pip or lite install is upgraded in
-place and is not moved. The native client refuses a lite-tier bank, `serve` and
-`embedded`, each naming the way forward, and some commands are not in it
-yet; see [The native client](configuration.md#the-native-client).
+The installers select the Python client by default. To install the native
+client, check out a release tag that carries the native installer and set
+`PSEUDOLIFE_SHIM_ENGINE=native` before running the same installer. The native
+installer runs its setup and client-registration steps without host Python.
+It checks the platform archive against `SHA256SUMS` and confirms that the
+client supports the installer's setup commands before making changes. The
+client choice is independent of `--engine`, which selects the Docker daemon.
+
+On an existing installer-managed Python client, opt in with
+`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (set
+`$env:PSEUDOLIFE_SHIM_ENGINE = 'native'` first in PowerShell). The updater
+checks the release archive and keeps the Python client if it cannot move
+this installation. Running sessions keep their runtime. New sessions use
+the selected client through the existing launcher. Pip, pipx and lite
+installs update in place. See [The native client](configuration.md#the-native-client)
+for the supported platforms, tunnel limits and the route back to Python.
+
+When the native installer sets up Codex with a supplied token, it waits up
+to three minutes for an authenticated daemon read. It retries a connection
+failure or server error while the daemon starts. A rejected token (HTTP 401
+or 403) stops the check immediately. The installer shows the cause and the
+recovery step if it cannot finish Codex setup. Release update refreshes an
+existing registration and its hooks after checking daemon health.
 
 ## Installer refusals
 

@@ -10,7 +10,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 |----------|---------|--------|
 | `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v59). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself (its superuser password is a random per-bank secret in the owner-only `<data_dir>/embedded_pg.secret`, with SCRAM authentication; a bank from before 2026-10-25 moves off the old fixed `postgres` password at its next start); otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
-| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
+| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to. Docker installs wait for the container. Native host-process autostart requires `PSEUDOLIFE_MCP_SERVE_COMMAND`. Use an HTTP(S) origin with a scheme, host and optional port. Leave out the path, user information, query and fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host (a `PSEUDOLIFE_MCP_TOKENS` map also satisfies this). Maps to the reserved principal `default`, which keeps the `X-PL-Writer`/`PSEUDOLIFE_WRITER_ID` writer path. |
@@ -1833,8 +1833,10 @@ pseudolife-mcp board-audit verify
 ```
 
 `export` writes one JSON object per line, oldest first, to stdout or to a new
-`--out` file, which it never overwrites. Each line carries the row's columns,
-the payload parsed, and `body` and `body_salt` (`null` except on a v46
+`--out` file, which it never overwrites. The native client writes an
+owner-only archive and creates the output file only after the export
+succeeds. Each line carries the row's columns, the parsed payload, and
+`body` and `body_salt` (`null` except on a v46
 `send` that has not been redacted). A `send` whose mail rang (a `rung`
 decision, a Codex `attention` grant, or `no_path` with the ring queued for a
 listener) carries
@@ -3683,11 +3685,10 @@ program with no Python. Its runtime is a numbered directory holding that
 binary (`runtime.json` says `"kind": "native"`) behind the same launcher,
 so the registrations and the `PATH` entry above stay as they are.
 
-**The move is opt-in in 0.24.0.** The native client does not yet run
-everything the Python client does (the lists below), and no ordinary
-`update` moves a machine back (an installer run does, below), so an update
-keeps the Python client unless you ask. Read "What the native client refuses" and "Not in the
-native client yet" before you opt in.
+**The native client is opt-in.** A Python client update keeps that client
+unless you select `PSEUDOLIFE_SHIM_ENGINE=native`. A native client update
+keeps the native client. The installer can switch a machine back to Python
+as described below.
 
 **Moving a machine.** Set `PSEUDOLIFE_SHIM_ENGINE=native` for the update:
 
@@ -3779,17 +3780,15 @@ picks the release as an update would.
   one. With neither, the shim waits for a daemon and its note names the
   Docker command.
 
-**Not in the native client yet:** a shape it does not handle stops with
-`pseudolife-stdio: mode '<mode>' is deferred in this candidate` and exit 1,
-having changed nothing. Among them:
-most of `tunnel` ([tunnels](tunnels.md)), `doctor` when a tunnel
-directory (`~/.pseudolife-mcp/tunnel`) exists or `http_proxy` /
-`https_proxy` is set, and `console` opening a browser on macOS and for some
-Linux desktop defaults (`--no-open` works;
-[Signing in to the Console](#signing-in-to-the-console)). `move` is no
-longer among them: it moves a bank to an installed release target natively,
-and refuses with the cause any command line it cannot take
-([Moving a bank](remote-bank.md#moving-a-bank)).
+The native `doctor` continues checking the installation when an individual
+probe fails and reports what it could determine. `console` can open the
+browser on Windows, macOS and Linux desktops. If the browser cannot open,
+the client prints the validated sign-in link and the cause. See
+[Signing in to the Console](#signing-in-to-the-console) and
+[Moving a bank](remote-bank.md#moving-a-bank) for native `move` requirements.
+Unsupported `tunnel` operations still exit 1 with the deferral message.
+See [Tunnels](tunnels.md) for the supported foreground lifecycle and the
+commands that still need the Python client.
 
 The native tunnel step reports a verified matching launch as `current`. A compatible supervisor can reconnect on the verified installed shim. It reports `refreshed` after the live vendor answers its local readiness probe and the bridge acknowledges the signed launch. It verifies the pinned tunnel client, the candidate's readiness protocol and the saved daemon connection before interrupting the old process. A failed check leaves the running child alone. A candidate that fails readiness triggers a rollback to the previous shim when the supervisor confirms the candidate exited. Reports of a refusal, successful rollback or a reply deadline with the launch still owned are `stale` and exit 0. Older foreground supervisors and vendor version changes need the stop and run commands in the report. Restart an older service-managed launch through its manager. See [Tunnels](tunnels.md) for Python-supervised launches and cloud verification. The tunnel step exits 2 if it cannot safely read the store or a profile, if the tunnel stops during refresh, if rollback fails, or if the supervisor cannot confirm the child exited. A supervisor that disappears before reporting also yields exit 2. The outer update reports that failure with exit 5.
 
@@ -4875,16 +4874,18 @@ updates:
   unattended_clients: false     # the shim may take the client half of an update by itself
 ```
 
-With `check_releases` on (the default) the daemon reads GitHub's latest
+With `check_releases` on (the default) the Rust daemon reads GitHub's latest
 stable release from `api.github.com` once per interval in the background,
-never on a request. Once its native assets are complete, it keeps that answer
-and serves it on `/health` as
+never on a request. Once its native assets and readiness marker are present,
+it keeps that answer and serves it on `/health` as
 `updates.latest_release` (with `checked_at`). When that release is newer
 than the daemon, the session-start briefing opens with one line naming
 the command: `release X is available (daemon Y[, plugin Z]) — run
 pseudolife-mcp update`, and no second line about the plugin, since that
 command moves both. The GitHub release must carry all five native archives,
-the compose bundle and `SHA256SUMS` before it is offered. The check sends no
+the compose bundle, `SHA256SUMS` and `RELEASE-READY.json` before the Rust
+daemon or native updater offers it. GitHub attaches that marker after the
+approved package and image jobs succeed. The check sends no
 credentials or memory content. A daemon with no route to GitHub and no cached
 answer offers nothing; failures retain an earlier successful answer.
 The first check runs at startup, without delaying startup; subsequent checks
