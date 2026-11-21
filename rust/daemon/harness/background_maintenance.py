@@ -5,10 +5,15 @@ import copy
 import time
 
 import psycopg
+from psycopg import sql
 
 import dbstate
+import pgdisposable as pg
 from background_seed import seed_bank, seed_pruning_refusal
 from rust.harness_support.bank_fixture import assert_fixture_database
+
+
+PRUNED_TABLES = ("dream_runs", "dream_run_slots", "retrieval_events", "lesson_search_events")
 
 
 def register(harness):
@@ -27,7 +32,13 @@ def register(harness):
 
         def prepare_template(self, dsn):
             seed_bank(dsn, "pruning")
-            self.before = dbstate.dump(dsn)
+            self.before = self.snapshot_db(dsn)
+
+        def snapshot_db(self, dsn):
+            state = super().snapshot_db(dsn)
+            if pg.base_database():
+                read_prunable_rows(dsn, state)
+            return state
 
         def validate_snapshot(self, state, before):
             # SweepRecovery replaces self.before after removing its injected
@@ -39,7 +50,7 @@ def register(harness):
             for side, daemon in procs.items():
                 deadline = time.monotonic() + 120
                 while True:
-                    state = dbstate.dump(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"])
+                    state = self.snapshot_db(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"])
                     runs = state["rows"].get("public.dream_runs", {}).get("rows", [])
                     events = state["rows"].get("public.retrieval_events", {}).get("rows", [])
                     lessons = state["rows"].get("public.lesson_search_events", {}).get("rows", [])
@@ -98,7 +109,7 @@ def register(harness):
         def prepare_template(self, dsn):
             super().prepare_template(dsn)
             seed_pruning_refusal(dsn)
-            self.before = dbstate.dump(dsn)
+            self.before = self.snapshot_db(dsn)
 
         def timeline(self, procs, holders):
             rows, arms = [], {}
@@ -107,7 +118,7 @@ def register(harness):
                 while "dream sweep error:" not in daemon.log.read_text(errors="replace"):
                     if time.monotonic() > deadline: raise RuntimeError(f"{side} did not report the injected pruning refusal")
                     time.sleep(0.1)
-                state = dbstate.dump(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"])
+                state = self.snapshot_db(daemon.env["PSEUDOLIFE_MCP_DATABASE_URL"])
                 state = harness.scrub_declared_rows(state, self.before)["state"]
                 validate_pruning(state, self.before, pruned=False)
                 clean = self.normalize_db(state, self.before, side)
@@ -129,6 +140,21 @@ def register(harness):
     return {s.name: s for s in (SweepPruning, SweepRecovery)}
 
 
+def read_prunable_rows(dsn, state):
+    """Read the copied rows the sweep may remove, including unchanged base rows."""
+    with psycopg.connect(dsn) as conn:
+        conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        conn.read_only = True
+        assert_fixture_database(conn)
+        for name in PRUNED_TABLES:
+            table = state["rows"]["public." + name]
+            ident = sql.Identifier("public", name)
+            columns = sql.SQL(", ").join(map(sql.Identifier, table["columns"]))
+            table["rows"] = [list(row) for row in conn.execute(
+                sql.SQL("SELECT {} FROM {} ORDER BY id::text").format(columns, ident))]
+            table.pop("base_missing", None)
+
+
 def validate_pruning(state, before, *, pruned=True):
     """Expect only the known writer-open and pruning effects on the seeded bank."""
     expected = copy.deepcopy(before)
@@ -137,10 +163,20 @@ def validate_pruning(state, before, *, pruned=True):
         if key_value[0] == "writer_lease_epoch":
             key_value[1] += 1
     if pruned:
-        for table, removed in (("dream_runs", 2), ("dream_run_slots", 2),
-                               ("retrieval_events", 1), ("lesson_search_events", 1)):
-            del rows["public." + table]["rows"][:removed]
+        cutoff = time.time() - 86400.0
         runs = rows["public.dream_runs"]
-        runs["rows"][0][runs["columns"].index("status")] = "failed"
+        rid, status, started = map(runs["columns"].index, ("id", "status", "started_at"))
+        retained = set(sorted(row[rid] for row in runs["rows"])[-2:])
+        runs["rows"] = [row for row in runs["rows"] if row[rid] in retained]
+        for row in runs["rows"]:
+            if row[status] == "running" and row[started] < cutoff:
+                row[status] = "failed"
+        slots = rows["public.dream_run_slots"]
+        parent = slots["columns"].index("run_id")
+        slots["rows"] = [row for row in slots["rows"] if row[parent] in retained]
+        for name in ("retrieval_events", "lesson_search_events"):
+            events = rows["public." + name]
+            stamp = events["columns"].index("created_at")
+            events["rows"] = [row for row in events["rows"] if row[stamp] >= cutoff]
     if differences := dbstate.diff(expected, state):
         raise RuntimeError(f"pruning bank differs from the fixture contract: {differences[:8]}")

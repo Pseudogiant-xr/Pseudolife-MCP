@@ -341,6 +341,7 @@ def test_reaper_title_validation_still_rejects_missing_durable_effect(scenario, 
     ("cursor", "wrong durable cursor"),
     ("deferred", "did not defer the empty fixture"),
     ("tombstone", "did not move the empty fixture"),
+    ("unrelated", "changed unrelated durable rows"),
 ])
 def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, message):
     from background_seed_rows import ROWS
@@ -384,6 +385,8 @@ def test_session_lifecycle_requires_exact_fixture_effects(monkeypatch, effect, m
         entry["dream_state"] = "pending"
     elif effect == "cursor":
         cursor["value"] = 0.0
+    elif effect == "unrelated":
+        after["facts"] = [{"id": 12}]
     elif sweep:
         metadata[empty]["title"] = "another title"
     else:

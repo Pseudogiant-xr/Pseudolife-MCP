@@ -188,6 +188,18 @@ def register(harness):
 
 def validate_session_writes(state, before, sweep, auto_title, expected_triggers):
     """Check the fixture's durable row delta after checking the raw close clocks."""
+    has_base = pg.base_database() is not None
+    written = {"public.client_sessions", "public.episodes", "public.entries", "public.meta"}
+    if has_base and expected_triggers:
+        # A session-end dream on a populated base also refreshes its graph.
+        # normalize_refresh_clocks checks the observed refresh windows.
+        written.update(f"public.{table}" for table in
+                       ("communities", "entity_communities", "entity_sources", "edges"))
+    unchanged = [{name: table for name, table in snap["rows"].items() if name not in written}
+                 for snap in (before, state)]
+    if differences := dbstate.diff(*unchanged):
+        raise RuntimeError(f"session lifecycle changed unrelated durable rows: {differences[:8]}")
+
     def rows(snapshot, table, key):
         data = snapshot["rows"]["public." + table]
         records = (dict(zip(data["columns"], row)) for row in data["rows"])
@@ -230,12 +242,13 @@ def validate_session_writes(state, before, sweep, auto_title, expected_triggers)
                 raise RuntimeError("reaper changed the durable fixture entry unexpectedly")
 
     meta = rows(state, "meta", "key")
-    current_meta_rows = state["rows"]["public.meta"]["rows"]
-    prior_meta = dict(dbstate.prior_rows(before, "public.meta", current_meta_rows))
+    # A base-relative dump omits an unchanged cursor from both snapshots.
+    prior_meta = dict(dbstate.prior_rows(before, "public.meta", [["cortex_dream_cursor"]]))
     prior_cursor = prior_meta["cortex_dream_cursor"]
-    cursor = meta.get("cortex_dream_cursor", {}).get("value", prior_cursor)
+    cursor = (meta.get("cortex_dream_cursor", {"value": prior_cursor}) if has_base
+              else meta["cortex_dream_cursor"])["value"]
     minimum = max([prior_cursor, *fixture_timestamps])
-    if cursor < minimum or (not (expected_triggers and pg.base_database()) and cursor != minimum):
+    if cursor < minimum or (not (expected_triggers and has_base) and cursor != minimum):
         raise RuntimeError("session-end dream left the wrong durable cursor")
 
     empty = roots["empty"]

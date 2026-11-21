@@ -583,6 +583,9 @@ class Scenario:
     def normalize_db(self, state: dict, before: dict, side: str) -> dict:
         return dbstate.normalize(state, DB_NONDETERMINISTIC, before, windows=self.clock_window(side))
 
+    def snapshot_db(self, dsn: str) -> dict:
+        return dbstate.dump(dsn)
+
     def validate_snapshot(self, state: dict, before: dict) -> None:
         """Check a native scenario's final bank against its seed and contract."""
 
@@ -2115,7 +2118,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
     scn.prepare_template(dsn_t)
     # The banks' state before either daemon touched them: declared writes and
     # clock values are judged against it, so changes to existing rows show.
-    before = dbstate.dump(dsn_t)
+    before = scn.snapshot_db(dsn_t)
     dbs = {"python": pg.name(f"{pg.PREFIX}{tag}_py"), "rust": pg.name(f"{pg.PREFIX}{tag}_rs")}
     if scn.native_validation:
         del dbs["python"]
@@ -2232,7 +2235,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
     if scn.name != "db-down":
         sides = dbs if mode != "golden" else {"rust": dbs["rust"]}
         for side, name in sides.items():
-            raw = dbstate.dump(pg.dsn(name))
+            raw = scn.snapshot_db(pg.dsn(name))
             scn.clock_windows = {**(scn.clock_windows or {}),
                                  side: ([(first_start[side], time.time())]
                                         if first_start.get(side) is not None else None)}

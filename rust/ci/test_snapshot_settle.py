@@ -135,18 +135,22 @@ def test_sweep_compares_the_rust_snapshot_without_waiting(
     events, _ = snapshot_harness
     seed = {"catalog": {"sequences": []}, "rows": {
         "public.meta": {"columns": ["key", "value"], "rows": [["writer_lease_epoch", 1]]},
-        "public.dream_runs": {"columns": ["id", "status"],
-                              "rows": [[1, "running"], [2, "running"], [3, "running"], [4, "committed"]]},
-        "public.dream_run_slots": {"columns": ["id"], "rows": [[1], [2], [3], [4]]},
-        "public.retrieval_events": {"columns": ["id"], "rows": [[1], [2]]},
-        "public.lesson_search_events": {"columns": ["id"], "rows": [[1], [2]]},
+        "public.dream_runs": {"columns": ["id", "status", "started_at"],
+                              "rows": [[10, "running", 101.0], [11, "running", 102.0],
+                                       [12, "committed", 103.0], [9, "running", 100.0]]},
+        "public.dream_run_slots": {"columns": ["id", "run_id"],
+                                   "rows": [[10, 10], [11, 11], [12, 12], [9, 9]]},
+        "public.retrieval_events": {"columns": ["id", "created_at"],
+                                    "rows": [[1, 100.0], [2, 9000000000000.0]]},
+        "public.lesson_search_events": {"columns": ["id", "created_at"],
+                                        "rows": [[1, 100.0], [2, 9000000000000.0]]},
     }}
     pruned = copy.deepcopy(seed)
     pruned["rows"]["public.meta"]["rows"] = [["writer_lease_epoch", 2]]
-    pruned["rows"]["public.dream_runs"]["rows"] = [[3, "failed"], [4, "committed"]]
-    pruned["rows"]["public.dream_run_slots"]["rows"] = [[3], [4]]
-    pruned["rows"]["public.retrieval_events"]["rows"] = [[2]]
-    pruned["rows"]["public.lesson_search_events"]["rows"] = [[2]]
+    pruned["rows"]["public.dream_runs"]["rows"] = [[11, "failed", 102.0], [12, "committed", 103.0]]
+    pruned["rows"]["public.dream_run_slots"]["rows"] = [[11, 11], [12, 12]]
+    pruned["rows"]["public.retrieval_events"]["rows"] = [[2, 9000000000000.0]]
+    pruned["rows"]["public.lesson_search_events"]["rows"] = [[2, 9000000000000.0]]
 
     def dump(dsn):
         events.append(("dump", dsn))
