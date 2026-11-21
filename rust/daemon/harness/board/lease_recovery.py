@@ -1,5 +1,5 @@
 """Queue liveness, one missed-grant retry and durable grant notices."""
-from board.scenarios import BASE_CONFIG, Scenario, act, age, msg, reg, seed
+from board.scenarios import BASE_CONFIG, Scenario, act, age, fixture_seed, msg, reg
 
 
 LEASE = "resource"  # the one lease these scenarios take (setup below)
@@ -104,17 +104,16 @@ class LeaseNoticeRecovery(Scenario):
     needs_bank = True
 
     def steps(self):
-        def commit_grant(store, ctx):
-            # Crash boundary: commit the lease without running dispatch's
-            # drain. The next ordinary request must recover the outbox.
-            store.release_lease("default", ctx.id("A"), ctx.agents["A"]["credential"], name="resource")
+        from board.seed_rows import queued_grant
+
         return setup() + [
-            seed("committed grant without drain", commit_grant),
+            # Crash boundary: the lease is committed and the outbox undrained.
+            fixture_seed("committed grant without drain", queued_grant),
             notice(act("history leaves grant outbox alone", "history", agent="B"), 0),
             notice(act("ordinary receive recovers grant", "receive", agent="B")),
             notice(act("repeat receive does not duplicate", "receive", agent="B")),
-            seed("pruned live notice", lambda store, _ctx:
-                 store.storage.conn.execute("DELETE FROM coordination_messages")),
+            fixture_seed("pruned live notice", lambda rows, _ctx:
+                         rows.conn.execute("DELETE FROM coordination_messages")),
             notice(act("audit dedupe survives message pruning", "receive", agent="B"), 0),
             act("release B", "release", agent="B", body={"name": "resource"}),
             notice(act("next grant has one notice", "receive", agent="C")),
@@ -206,23 +205,10 @@ class LeaseNoticePages(Scenario):
     needs_bank = True
 
     def steps(self):
-        def commit_grants(store, ctx):
-            from pseudolife_memory.storage.coordination import MAX_PENDING, SEND_RATE
-            for n in range(MAX_PENDING):
-                who = f"filler-{n // SEND_RATE}"
-                if who not in ctx.agents:
-                    ctx.agents[who] = store.register("default")
-                store.send("default", ctx.id(who), ctx.agents[who]["credential"],
-                           to=ctx.id("B"), text="pending", request_id=f"pending-{n}")
-            for n in range(51):
-                name = f"resource-{n:02}"
-                recipient = "B" if n < 50 else "C"
-                for who in ("A", recipient):
-                    store.acquire_lease("default", ctx.id(who), ctx.agents[who]["credential"],
-                                        name=name, ttl=600)
-                store.release_lease("default", ctx.id("A"), ctx.agents["A"]["credential"], name=name)
+        from board.seed_rows import grant_pages
+
         return [reg(f"register {who}", who) for who in "ABC"] + [
-            seed("full first page of grant recipients", commit_grants),
+            fixture_seed("full first page of grant recipients", grant_pages),
             notice(act("later page still delivered", "receive", agent="C")),
             notice(act("later page never duplicated", "receive", agent="C")),
         ]
@@ -235,19 +221,15 @@ class PrivilegedPeerBudgets(Scenario):
 
     def steps(self):
         from board.conductor_wake import expect
+        from board.seed_rows import prior_wake
+
         steps = [reg("sender", "A"), reg("recipient", "B", capabilities={"ring": True}),
                  act("recipient listening", "attach", agent="B", body=lambda c: {
                      "attachment_id": "listener", "ring": True, "ring_armed_until": c.now + 60}),
                  act("recipient needs peer result", "update", agent="B", body={
                      "park_reason": "needs_info", "park_needs": "result", "park_clear_by": "anyone"})]
         for reason in ("maintainer_message", "conductor", "lease_grant"):
-            def prior_wake(store, ctx, reason=reason):
-                store.storage.conn.execute("DELETE FROM coordination_wakes")
-                sent = store.send("default", ctx.id("A"), ctx.agents["A"]["credential"],
-                                  to=ctx.id("B"), text="prior", request_id=f"prior-{reason}")
-                store.storage.conn.execute("UPDATE coordination_wakes SET reason=%s WHERE message_id=%s",
-                                           (reason, sent["message_id"]))
-            steps += [seed(f"prior {reason} wake", prior_wake),
+            steps += [fixture_seed(f"prior {reason} wake", prior_wake(reason)),
                       expect(msg(f"{reason} leaves peer budget", "A", "B", "first"), "rung", "anyone"),
                       expect(msg(f"{reason} peer cap still binds", "A", "B", "second"),
                              "capped", self.cap_reason)]

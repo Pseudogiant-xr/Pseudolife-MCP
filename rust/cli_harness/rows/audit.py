@@ -1,16 +1,8 @@
-"""CLI-AUDIT: ``pseudolife-mcp board-audit`` (board_audit_cli.py).
+"""CLI-AUDIT: ``pseudolife-mcp board-audit`` verify, export, redact and stats.
 
-Banks are seeded through the oracle's own writers: every audit row comes from
-``CoordinationStore`` (the board's write path) on a fixed test clock, or from
-the oracle test suite's helpers (``tests.test_coordination_audit._legacy_send``
-/ ``_sent_by_v45``). Nothing here inserts an audit row by hand; the one
-tampered bank changes a row's ``task`` exactly as
-``test_board_audit_cli.test_verify_prints_the_head_and_fails_on_tampering``
-does. Agent ids, credentials, message ids and body salts stay random, so the
-two arms of a case read one seeded bank (read actions, checked unchanged after
-each arm) or each get a ``CREATE DATABASE ... TEMPLATE`` copy of it (redact).
-Archives are the oracle's own ``board-audit export --out`` of those banks,
-edited the way the oracle tests edit them.
+Read actions share one captured bank checked after each arm. Redactions
+receive separate template copies. Archive cases use exports of those banks,
+with deliberate edits for malformed or invalid histories.
 """
 
 from __future__ import annotations
@@ -22,260 +14,81 @@ import os
 import re
 import tempfile
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 from .. import core, normalize
 from . import _bank
 from rust.harness_support.audit_oracle import GENESIS_HASH, audit_hash, canonical_payload, verify_audit_chain
-from rust.harness_support.database_guard import assert_disposable_database, fixture_database_pattern
+from rust.harness_support.database_guard import (
+    assert_disposable_database, fixture_database_pattern, refuse_production_database,
+)
 
 DAY = 86400
-# Fixed seed clock: far enough in the past that a redaction's
-# ``expires_at=LEAST(expires_at, now)`` never moves a seeded row.
 T0 = 1_700_000_000.0
+_FIXTURE = Path(__file__).with_suffix(".fixtures.json")
 
 
-class _Storage:
-    """The same minimal storage the oracle tests hand ``CoordinationStore``."""
-
-    def __init__(self, conn):
-        self.conn = conn
-
-    @contextmanager
-    def _txn(self):
-        with self.conn.transaction():
-            yield
-
-
-def _store(conn):
-    from pseudolife_memory.storage.coordination import CoordinationStore  # noqa: PLC0415
-    now = [T0]
-    store = CoordinationStore(_Storage(conn), clock=lambda: now[0])
-    store.test_time = now
-    return store
-
-
-def _creds(agent, principal="alice"):
-    return principal, agent["agent_id"], agent["credential"]
-
-
-def seed_rich(conn) -> dict:
-    """Many event families on one chain; returns ids the cases address."""
-    import pytest  # noqa: PLC0415  (oracle test helpers take a monkeypatch)
-    from tests.test_coordination_audit import _legacy_send, _sent_by_v45  # noqa: PLC0415
-    store = _store(conn)
-    tick = store.test_time
-
-    def later(seconds=7.25):
-        tick[0] += seconds
-
-    a = store.register("alice", label="claude-code", project="p", task="t1",
-                       status="starting ✓", wake_enabled=True)
-    later()
-    b = store.register("alice", label="codex", project="p", task="t2", wake_enabled=True)
-    later()
-    c = store.register("bob", project="q", task="t3", name="third")
-    later()
-    store.update(*_creds(a), status="suite=queued #3", expect=600)
-    later()
-    store.update(*_creds(b), park_reason="needs_resource", park_needs="the gpu",
-                 status="waiting for the gpu")
-    later()
-    attached = store.attach(*_creds(b), attachment_id="live", wake_enabled=True)
-    # Attached too, so the fan-out to "all" below lands as two copies.
-    attached_a = store.attach(*_creds(a), attachment_id="live-a")
-    later()
-    direct = store.send(*_creds(a), to=b["agent_id"], text="from t1 naïve ✓ \"quoted\"",
-                        request_id="r1")
-    later(0.5)
-    store.send(*_creds(a), to=b["agent_id"], text="the gpu is free", request_id="r2",
-               clears="the gpu")
-    later()
-    burst = store.send(*_creds(a), to="project:p", text="to the whole project",
-                       request_id="burst")
-    later()
-    hello = store.send(*_creds(c, "bob"), to="all", text="hello everyone",
-                       request_id="hello", urgent=True)
-    later()
-    page = store.receive(*_creds(b))
-    later()
-    for message in page["messages"]:
-        store.ack(*_creds(b), message_id=message["message_id"])
-    store.detach(*_creds(b), attachment_id="live", generation=attached["generation"])
-    store.detach(*_creds(a), attachment_id="live-a", generation=attached_a["generation"])
-    later()
-    store.acquire_lease(*_creds(a), name="gpu", ttl=300, purpose="bench")
-    later()
-    store.acquire_lease(*_creds(b), name="gpu", ttl=120, expect=900)
-    later()
-    store.release_lease(*_creds(a), name="gpu")
-    later()
-    store.acquire_lease(*_creds(c, "bob"), name="suite", ttl=600)
-    store.break_lease("suite")
-    later()
-    store.grant_conductor("p", a["agent_id"], hold=3600)
-    later()
-    store.woke(b["agent_id"], "alice")
-    later()
-    store.update(*_creds(a), park_reason=None, status="done for now")
-    later()
-    redacted = store.send(*_creds(c, "bob"), to=a["agent_id"], text="pasted by mistake",
-                          request_id="oops")["message_id"]
-    later()
-    store.redact(redacted, "wrong paste")
-    later()
-    # A day on: live bodies expire (``expire``), leases lapse (``lease_expire``).
-    tick[0] += DAY + 1
-    store.prune()
-    later()
-    legacy = _legacy_send(store, a, c)
-    later()
-    with pytest.MonkeyPatch.context() as patch:
-        v45 = _sent_by_v45(patch, store, a, c, "sent by a v45 daemon")["message_id"]
-    later()
-    to_redact = store.send(*_creds(a), to=c["agent_id"], text="redact me later",
-                           request_id="later")["message_id"]
-    later()
-    # Sent at seeding's wall clock, so it expires a day after any run and a
-    # redaction's LEAST(expires_at, now) moves it to the arm's own clock.
-    # (The store caps expiry at a day after its clock.) Later rows keep it.
-    tick[0] = max(tick[0], time.time())
-    future = store.send(*_creds(a), to=c["agent_id"], text="lives past the run",
-                        request_id="future")["message_id"]
-    later()
-    # Ids sharing a prefix, so prefix resolution is ambiguous. uuid4 is the
-    # writers' only source of ids; the rows are still the store's own.
-    with _chosen_uuids(AGENT_TWINS):
-        twins = [store.register("carol", label="twin")["agent_id"] for _ in AGENT_TWINS]
-    with _chosen_uuids(MESSAGE_TWINS):
-        twin_mail = [store.send(*_creds(a), to=c["agent_id"], text=f"twin {n}",
-                                request_id=f"twin-{n}")["message_id"]
-                     for n in range(len(MESSAGE_TWINS))]
-    if twins != AGENT_TWINS or twin_mail != MESSAGE_TWINS:
-        raise RuntimeError(f"chosen ids not used: {twins} {twin_mail}")
-    later()
-    store.update(*_creds(c, "bob"), status="after the prune")
-    return {"a": a["agent_id"], "b": b["agent_id"], "c": c["agent_id"],
-            "direct": direct["message_id"], "legacy": legacy, "v45": v45,
-            "redacted": redacted, "to_redact": to_redact, "future": future,
-            "burst": [r["message_id"] for r in burst["receipts"]],
-            "hello": [r["message_id"] for r in hello["receipts"]]}
+def _shift_rich_clock(rows, anchor):
+    """Move the last three sends and their agent activity to the run's clock."""
+    events = rows["coordination_events"]
+    # The frozen seeder advanced its clock by 7.25 s after the last fixed
+    # send, then took the later of that tick and the wall clock.
+    last_fixed = max(row["created_at"] for row in events if row["created_at"] < anchor)
+    shift = max(last_fixed + 7.25, time.time()) - anchor
+    for table, columns in (
+        ("coordination_agents", ("created_at", "last_activity")),
+        ("coordination_messages", ("created_at", "expires_at")),
+    ):
+        for row in rows[table]:
+            for column in columns:
+                if row[column] >= anchor:
+                    row[column] += shift
+    previous = GENESIS_HASH
+    for row in events:
+        if row["created_at"] < anchor:
+            previous = row["hash"]
+            continue
+        row["created_at"] += shift
+        if row["event"] == "send":
+            payload = json.loads(row["payload"])
+            payload["expires_at"] += shift
+            row["payload"] = canonical_payload(payload)
+        row["prev_hash"] = previous
+        row["hash"] = previous = audit_hash(previous, row)
 
 
-AGENT_TWINS = ["ab12cd34ef56000000000000000000a1", "ab12cd34ef57000000000000000000a2"]
-MESSAGE_TWINS = ["cd34ef56ab1200000000000000000001", "cd34ef56ab1300000000000000000002"]
+def _seed_captured(conn, name, kind):
+    from rust.harness_support.fixture_rows import checked_fixture_insert  # noqa: PLC0415
 
+    # Captured at 88787b0e2 on the committed schema, with deterministic
+    # synthetic UUIDs, credentials and salts. Only rows and sequences changed
+    # by the old seeders are stored. The schema plan supplies the rest.
+    fixture = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    variant = fixture["variants"][kind]
+    rows = variant["rows"]
+    events = rows["coordination_events"]
+    events.sort(key=lambda row: row["seq"])
+    # Check stored payload text, links, prune anchor and body commitments
+    # before changing any timestamps or rebuilding the linked hashes.
+    report = verify_audit_chain(events)
+    if not report["ok"]:
+        raise ValueError(f"{kind} audit fixture has an invalid chain: {report}")
+    if kind == "rich":
+        _shift_rich_clock(rows, fixture["clock_anchor"])
 
-@contextmanager
-def _chosen_uuids(hexes):
-    """``uuid.uuid4`` returns these, in order, then the real thing again."""
-    import uuid  # noqa: PLC0415
-    queue = [uuid.UUID(value) for value in hexes]
-    real = uuid.uuid4
-    uuid.uuid4 = lambda: queue.pop(0) if queue else real()
-    try:
-        yield
-    finally:
-        uuid.uuid4 = real
-
-
-def seed_pruned(conn) -> dict:
-    """A chain whose oldest rows audit retention removed (an ``audit_prune``
-    cut the log now starts after)."""
-    store = _store(conn)
-    tick = store.test_time
-    a = store.register("alice", project="p")
-    b = store.register("alice", project="p")
-    old = store.send(*_creds(a), to=b["agent_id"], text="old mail", request_id="old")
-    tick[0] += 3 * DAY
-    store.update(*_creds(a), status="still here")
-    store.prune(audit_retention_days=1)
-    tick[0] += 60
-    store.update(*_creds(b), status="after the cut")
-    return {"a": a["agent_id"], "b": b["agent_id"], "old": old["message_id"]}
-
-
-def seed_legacy(conn) -> dict:
-    """Only sends from before v46 (bodies inside the hashed payload), so an
-    export without ``body`` fields still verifies."""
-    from tests.test_coordination_audit import _legacy_send  # noqa: PLC0415
-    store = _store(conn)
-    a = store.register("alice")
-    b = store.register("alice")
-    message = _legacy_send(store, a, b, text="an old body ✓")
-    store.test_time[0] += 30
-    store.update(*_creds(a), status="later")
-    return {"legacy": message}
-
-
-def seed_payload_domain(conn) -> dict:
-    """Historical payload shapes, appended and hashed by the oracle writer."""
-    store = _store(conn)
-    with store.storage._txn():
-        event = store._event("register", {
-            "nan": float("nan"), "positive": float("inf"), "negative": -float("inf"),
-            "integer": 10 ** 200, "deep": json.loads("[" * 150 + "0" + "]" * 150),
-            "ordered": {"雪": 1, "😀": 2, "a": 3},
-        })
-        legacy = store._event("send", {"text": "old body", "odd": float("nan")},
-                              message_id="ef12ab34cd5600000000000000000001")
-        surrogate = store._event("register", {})
-        surrogate["payload"] = r'{"odd":"\ud800","text":"ascii 雪"}'
-        store._append([event, legacy, surrogate], T0)
-    return {"legacy": legacy["message_id"]}
-
-
-def seed_payload_send(conn, *, surrogate=False) -> dict:
-    """A real send whose stored payload uses Python's historical JSON domain."""
-    store = _store(conn)
-    a = store.register("alice", project="p")
-    b = store.register("alice", project="p")
-    store.attach(*_creds(b), attachment_id="historical")
-    event = store._event
-
-    def historical_event(kind, payload, **kwargs):
-        result = event(kind, payload, **kwargs)
-        if kind == "send":
-            payload = dict(payload, odd="\ud800" if surrogate else float("nan"))
-            result["payload"] = json.dumps(payload, ensure_ascii=True, sort_keys=True,
-                                           separators=(",", ":"))
-        return result
-
-    store._event = historical_event
-    sent = store.send(*_creds(a), to=b["agent_id"] if surrogate else "project:p",
-                      text="old send", request_id="historical")
-    message = sent["message_id"] if surrogate else sent["receipts"][0]["message_id"]
-    return {"message": message}
-
-
-def seed_invalid_payload(conn) -> dict:
-    """An old stored payload which export cannot decode."""
-    store = _store(conn)
-    with store.storage._txn():
-        event = store._event("register", {})
-        event["payload"] = "{"
-        store._append([store._event("register", {}), event], T0)
-    return {}
-
-
-def seed_fraction_boundary(conn) -> dict:
-    """One oracle-written event between two differently rounded ISO limits."""
-    store = _store(conn)
-    store.test_time[0] = -1.0000000000287557e-6
-    store.register("alice", project="p")
-    return {}
+    with conn.transaction():
+        _assert_audit_database(conn, name)
+        for table, records in rows.items():
+            statement, params = checked_fixture_insert(conn, table, records)
+            conn.execute(statement, params)
+        for sequence, (value, called) in variant["sequences"].items():
+            conn.execute("SELECT setval(%s::regclass, %s, %s)", ("public." + sequence, value, called))
+    return variant["ids"]
 
 
 # --- disposable banks --------------------------------------------------------
 
 PREFIX = "pl_cf_w1c_audit_"
-SEEDERS = {"rich": seed_rich, "pruned": seed_pruned, "legacy": seed_legacy,
-           "fraction": seed_fraction_boundary, "payload": seed_payload_domain,
-           "payload_send": seed_payload_send,
-           "invalid_payload": seed_invalid_payload,
-           "surrogate_send": lambda conn: seed_payload_send(conn, surrogate=True),
-           "stats": lambda conn: seed_stats(conn)}
 _IDS: dict[str, dict] = {}
 _BASELINE: dict[str, dict] = {}
 _ARCHIVES: dict[str, bytes] = {}
@@ -312,8 +125,23 @@ def _drop(name: str) -> None:
             time.sleep(0.5)
 
 
+def _require_audit_name(name: str) -> None:
+    _bank.NAMES.require_owned(name)
+    if not name.startswith(PREFIX):
+        raise ValueError(f"expected a disposable audit database, got {name!r}")
+    refuse_production_database(name)
+
+
+def _assert_audit_database(conn, name: str) -> None:
+    _require_audit_name(name)
+    if assert_disposable_database(conn) != name:
+        raise ValueError(f"audit fixture connection did not reach {name!r}")
+
+
 def _copy(source: str, target: str) -> None:
-    _bank.url(target)  # validates the name
+    _require_audit_name(target)
+    with _bank.connect(source, autocommit=True) as conn:
+        _assert_audit_database(conn, source)
     _drop(target)
     _CREATED.add(target)
     with _bank._admin() as conn:
@@ -333,21 +161,24 @@ def ensure(kind: str) -> str:
     elif kind == "tampered":
         _copy(ensure("rich"), name)
         with _bank.connect(name, autocommit=True) as conn:
+            _assert_audit_database(conn, name)
             conn.execute("UPDATE coordination_events SET task='elsewhere' WHERE seq=2")
     elif kind == "prev49":
         _copy(ensure("rich"), name)
         with _bank.connect(name, autocommit=True) as conn:
+            _assert_audit_database(conn, name)
             conn.execute("DROP TABLE coordination_wakes")
     elif kind == "prev46":
         # A restored v42-v45 bank read before any v46 daemon started, made
         # as test_board_audit_cli.test_a_bank_before_v46_... makes it.
         _copy(ensure("legacy"), name)
         with _bank.connect(name, autocommit=True) as conn:
+            _assert_audit_database(conn, name)
             conn.execute("ALTER TABLE coordination_events DROP COLUMN body")
     else:
         _bank.create(name)
         with _bank.connect(name, autocommit=True) as conn:
-            _IDS[kind] = SEEDERS[kind](conn)
+            _IDS[kind] = seed_stats(conn) if kind == "stats" else _seed_captured(conn, name, kind)
     _BASELINE[name] = _bank.dump(name)
     return name
 
@@ -739,6 +570,7 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
         _copy(ensure(source), REDACT_DB)
         if prepare:
             with _bank.connect(REDACT_DB, autocommit=True) as conn:
+                _assert_audit_database(conn, REDACT_DB)
                 for statement in prepare:
                     conn.execute(statement.replace("{DB}", REDACT_DB))
         _resolve_argv(case, original)
