@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.25.0] - 2026-11-21 — The opt-in native client installs without host Python, moves Docker banks, and reconnects compatible foreground tunnels
+## [0.25.0] - 2026-11-22 — The opt-in native client installs without host Python, moves Docker banks, and reconnects compatible foreground tunnels
 
 The Python client remains the installer default. The native client reads
 GitHub release readiness, runs `move` and its recovery commands, and checks
