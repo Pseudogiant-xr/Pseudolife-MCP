@@ -82,14 +82,17 @@ store is unreadable, the tunnel stops during refresh, or the supervisor cannot
 confirm a child's exit or disappears before reporting the result. The outer
 `pseudolife-mcp update` reports this failure with exit 5.
 
-An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
+An older native foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
 followed by `pseudolife-mcp tunnel run` for the same profile and directory.
 Use the same commands when the updated client pins a different vendor version.
 If a service or scheduled task started that supervisor, restart the existing
-registration through its manager. A Python-supervised tunnel stays running
-until stopped with the Python client that started it. Then use native
-`tunnel run` for a foreground launch. The client switch continues to require
-removal of Python tunnel autostart before changing engines.
+registration through its manager. A Python-supervised tunnel keeps serving
+after an opted-in client move, and native `tunnel stop` refuses to stop it.
+For a planned switch, stop the old tunnel with the Python client before
+changing clients. If you already switched, end the old process before
+reusing its profile. Then run `pseudolife-mcp tunnel run` in a terminal you
+can keep open. Removing a Python autostart registration also removes
+automatic starts for that profile. Keep the Python client if you need them.
 
 An interrupted key renewal or a retained previous key reports `stale` with
 guidance for that state. A pending refresh request written by the Python

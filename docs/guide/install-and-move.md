@@ -41,13 +41,16 @@ again. `--engine python` keeps Python for good, and `--engine rust` refuses
 an unsupported configuration before the backup instead of falling back.
 The updater that deploys the daemon is the one already installed, so an
 update started from a release older than 0.23.0 installs the new release
-on the Python daemon; the next attended `pseudolife-mcp update` moves the host. A
-bank with a legacy schema or pending import takes one extra step inside
-the release update: it runs the pinned Python 0.23.1 daemon to complete
-the import, then switches to the selected Rust release. The archived
-image is available only for Linux amd64. On another platform, restore a
-verified backup on a Linux amd64 Docker host and complete the update
-there before moving the migrated bank back.
+on the Python daemon. The next attended `pseudolife-mcp update` can move
+the host. When the native updater deploys a Rust daemon over a legacy
+bank, it first runs the archived Python 0.23.1 daemon to finish the
+import. This applies to banks below schema 57, with counters still in
+`weights.pt`, or with an unfinished Chroma import. The archived image is
+available only for Linux amd64, including x64 Docker Desktop running
+Linux containers. On a host using Linux arm64 images, the native updater
+refuses before taking a backup. Restore a verified backup on a Linux
+amd64 Docker host, complete the update there, then move the migrated
+bank back. The Python updater uses its own import path.
 
 Scheduled (`--unattended`) updates always keep the installed engine. On
 a Python host, if the newest release has no Python image or the update
@@ -89,6 +92,12 @@ this installation. Running sessions keep their runtime. New sessions use
 the selected client through the existing launcher. Pip, pipx and lite
 installs update in place. See [The native client](configuration.md#the-native-client)
 for the supported platforms, tunnel limits and the route back to Python.
+
+If the Python client registered a tunnel to start automatically, opting in
+stops in preflight and prints the command to remove that registration. Keep
+the Python client to retain autostart. On the native client, tunnels run in
+the foreground. See [the tunnel guide](tunnels.md#autostart-and-private-storage)
+before moving a host that serves a tunnel.
 
 When the native installer sets up Codex with a supplied token, it waits up
 to three minutes for an authenticated daemon read. It retries a connection
