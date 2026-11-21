@@ -10,7 +10,9 @@
 //! "tokenless" without one, "needs-configuration" on refusal),
 //! `credential_file_configured`, `connection_configured`,
 //! `credential_file_path`, `daemon_url`, `migrated_literal`, `backup`,
-//! `connection_backup`, and `recovery` on refusal. Exit 0, or 1 on refusal.
+//! `connection_backup`, and `recovery` on failure. When checked, the
+//! installer credential's outcome is in `credential_check`. Exit 0, or 1 on
+//! failure.
 //!
 //! `codex-runtime-defaults` adds `startup_timeout_sec = 240`,
 //! `tool_timeout_sec = 240` and `required = true` to the Pseudolife server
@@ -215,7 +217,13 @@ fn credentials_report(result: Result<Value, SetupError>) -> Value {
             report["status"] = json!(if ready { "ready" } else { "tokenless" });
             report
         }
-        Err(error) => json!({"status":"needs-configuration","recovery":error.to_string()}),
+        Err(error) => {
+            let mut report = json!({"status":"needs-configuration","recovery":error.to_string()});
+            if let Some(failure) = error.credential_check() {
+                report["credential_check"] = json!(failure.label());
+            }
+            report
+        }
     }
 }
 

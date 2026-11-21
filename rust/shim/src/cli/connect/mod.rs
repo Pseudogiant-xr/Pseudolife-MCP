@@ -498,13 +498,33 @@ async fn verify(ctx: &Ctx, rows: &[Row], auth: bool) -> Result<(Vec<J>, Vec<Stri
             }
             Cred::None => None,
         };
-        if let Some(token) = &token
-            && !net::credential_valid(&ctx.url, token).await
-        {
-            return Err(format!(
-                "the daemon at {} refused {shown} (an authenticated request that follows no redirects did not succeed)",
-                ctx.url
-            ));
+        if let Some(token) = &token {
+            use crate::setup::codex::CredentialCheck;
+            let header = net::bearer(token).ok_or_else(|| {
+                format!("{shown} cannot be sent as a bearer credential. Replace it and retry")
+            })?;
+            match net::check_credential(&ctx.url, &header).await {
+                CredentialCheck::Accepted => {}
+                CredentialCheck::Refused => {
+                    return Err(format!(
+                        "the daemon at {} refused {shown} (an authenticated request that follows no redirects did not succeed)",
+                        ctx.url
+                    ));
+                }
+                CredentialCheck::NotReady => {
+                    return Err(format!(
+                        "{} When it is ready, rerun pseudolife-mcp connect",
+                        CredentialCheck::not_ready_reason(&ctx.url)
+                    ));
+                }
+                CredentialCheck::UnexpectedStatus(status) => {
+                    return Err(format!(
+                        "the daemon at {} returned HTTP {} to the authenticated check with {shown}. Check that the address serves the Pseudolife daemon and retry",
+                        ctx.url,
+                        status.as_u16()
+                    ));
+                }
+            }
         }
         let tools = net::handshake(&ctx.url, &credential).await.map_err(|error| {
             format!(

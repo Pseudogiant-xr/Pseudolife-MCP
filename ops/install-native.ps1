@@ -2516,10 +2516,14 @@ foreach ($selectedClient in $clients) {
                 $credentialArgs += "--installer-token-stdin"
             }
             $credentialArgs += @("--installer-daemon-url", $installerUrl)
-            $credentialOutput = if ($installerToken) {
-                $installerToken | Invoke-NativeHelper @credentialArgs
-            } else {
-                Invoke-NativeHelper @credentialArgs
+            $credentialOutput = & {
+                # An installer helper can return a JSON report with exit 1.
+                $PSNativeCommandUseErrorActionPreference = $false
+                if ($installerToken) {
+                    $installerToken | Invoke-NativeHelper @credentialArgs
+                } else {
+                    Invoke-NativeHelper @credentialArgs
+                }
             }
             $credentialExit = $LASTEXITCODE
             $credentialResult = ($credentialOutput -join "`n") | ConvertFrom-Json
@@ -2543,12 +2547,17 @@ foreach ($selectedClient in $clients) {
                     $env:PSEUDOLIFE_MCP_TOKEN_FILE = $codexCredentialFile
                     Step "Codex credential file ready; future rotations are picked up by new requests."
                 }
+            } elseif (($credentialExit -ne 0) -and
+                      ($credentialResult.status -eq "needs-configuration") -and
+                      ($credentialResult.recovery -is [string]) -and $credentialResult.recovery) {
+                $codexCredentialBootstrapFailed = $true
+                $codexSetup.recovery = $credentialResult.recovery
             } else {
                 throw "Invalid credential setup result"
             }
         } catch {
             $codexCredentialBootstrapFailed = $true
-            $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+            $codexSetup.recovery = "Codex credential setup did not return a usable report. Rerun the installer to retry."
         }
         # pseudolife-mcp connect (the client-only connect block)
         # re-pointed an existing registration already; one still naming
@@ -2960,7 +2969,7 @@ foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "codex") {
         if ($codexCredentialBootstrapFailed) {
             $mcpState["codex"] = "failed"
-            Write-Warning "Codex MCP registration was skipped because credential setup failed. Rerun the installer after repairing the reported credential problem."
+            Write-Warning "Codex MCP registration was skipped because credential setup failed."
             continue
         }
         if ($ClientOnly -and -not $codexCredentialFile) {

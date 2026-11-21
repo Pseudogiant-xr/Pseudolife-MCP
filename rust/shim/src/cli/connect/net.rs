@@ -8,6 +8,8 @@
 use super::pyjson::{self, J};
 use super::{Cred, Refusal};
 use crate::cli::hook_http;
+use crate::setup::codex::{CredentialCheck, wait_for_credential};
+use reqwest::StatusCode;
 use std::time::Duration;
 
 /// `shim.probe_health(url, 2.0)`: `urlopen(url + "/health")`, any HTTP
@@ -62,25 +64,25 @@ pub(super) fn bearer(token: &str) -> Option<Vec<u8>> {
     Some(value)
 }
 
-/// `codex_connection.installer_credential_valid`: a no-redirect opener's
-/// GET (a 3xx is an `HTTPError`), `read(1)`, and status exactly 200.
-pub(super) async fn credential_valid(url: &str, token: &str) -> bool {
-    let Some(header) = bearer(token) else {
-        return false;
-    };
-    let Some(reply) = hook_http::get_bounded(
-        url,
-        "/api/episodes?limit=1",
-        Some(&header),
-        Duration::from_secs(3),
-        false,
-        (Some(1), Some(0)),
-    )
+/// The authenticated read uses the installer's startup budget. Preserve
+/// connect's request headers and the one-byte read on a successful response.
+pub(super) async fn check_credential(url: &str, header: &[u8]) -> CredentialCheck {
+    wait_for_credential(async |timeout| {
+        let reply = hook_http::get_bounded(
+            url,
+            "/api/episodes?limit=1",
+            Some(header),
+            timeout,
+            false,
+            (Some(1), Some(0)),
+        )
+        .await?;
+        if reply.body_failed {
+            return None;
+        }
+        StatusCode::from_u16(reply.status).ok()
+    })
     .await
-    else {
-        return false;
-    };
-    !reply.body_failed && reply.status == 200
 }
 
 const REASONS: [(&str, &str); 6] = [

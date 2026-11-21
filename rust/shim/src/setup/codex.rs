@@ -3,6 +3,7 @@
 mod credentials;
 mod outcome;
 mod rpc;
+pub(crate) use credentials::{CredentialCheck, wait_for_credential};
 pub use credentials::{configure_credential_file, daemon_url, effective_value};
 pub use outcome::{SetupFailure, apply_replace_detailed};
 use outcome::{WriteDisposition, WriteFailure};
@@ -28,6 +29,24 @@ pub const NO_SPAWN_KEY: &str = "PSEUDOLIFE_MCP_NO_SPAWN";
 pub struct SetupError {
     message: std::borrow::Cow<'static, str>,
     definite_rejection: bool,
+    credential_check: Option<CredentialCheckFailure>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CredentialCheckFailure {
+    Refused,
+    NotReady,
+    UnexpectedStatus,
+}
+
+impl CredentialCheckFailure {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Refused => "refused",
+            Self::NotReady => "not-ready",
+            Self::UnexpectedStatus => "unexpected-status",
+        }
+    }
 }
 /// Preserve the static constructor used by callers of the shared setup seam.
 #[allow(non_snake_case)]
@@ -35,13 +54,19 @@ pub const fn SetupError(message: &'static str) -> SetupError {
     SetupError {
         message: std::borrow::Cow::Borrowed(message),
         definite_rejection: false,
+        credential_check: None,
     }
 }
 impl SetupError {
+    pub(crate) fn credential_check(&self) -> Option<CredentialCheckFailure> {
+        self.credential_check
+    }
+
     pub(crate) fn detail(message: String) -> Self {
         Self {
             message: std::borrow::Cow::Owned(message),
             definite_rejection: false,
+            credential_check: None,
         }
     }
 
@@ -51,6 +76,7 @@ impl SetupError {
         Self {
             message: message.into(),
             definite_rejection: true,
+            credential_check: None,
         }
     }
 }

@@ -2572,7 +2572,10 @@ for selected_client in $CLIENTS; do
                 fi
             else
                 CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
-                CODEX_HOOK_RECOVERY="Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+                if [ "$credential_exit" -ne 0 ]; then
+                    CODEX_HOOK_RECOVERY=$(native_helper json-field recovery <<< "$credential_output" 2>/dev/null) || CODEX_HOOK_RECOVERY=""
+                fi
+                CODEX_HOOK_RECOVERY="${CODEX_HOOK_RECOVERY:-Codex credential setup did not return a usable report. Rerun the installer to retry.}"
             fi
             if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
                 setup_args=(codex-hooks --checkout "$repo" --source "$CODEX_HOOKS"
@@ -2976,7 +2979,7 @@ for selected_client in $CLIENTS; do
     if [ "$selected_client" = codex ]; then
         if [ -n "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
             MCP_CODEX=failed
-            echo "WARNING: Codex MCP registration was skipped because credential setup failed. Rerun the installer after repairing the reported credential problem." >&2
+            echo "WARNING: Codex MCP registration was skipped because credential setup failed." >&2
             continue
         elif [ -n "${CLIENT_ONLY:-}" ] && [ -z "$CODEX_CREDENTIAL_FILE" ]; then
             # Without it Codex would reach whatever daemon its defaults name.
