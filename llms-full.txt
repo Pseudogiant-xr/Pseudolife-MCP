@@ -13965,13 +13965,18 @@ registration through its manager.
 
 A Python-supervised tunnel keeps serving after the client switch.
 For a planned switch, stop it with the Python client before changing clients.
-After switching, run the stop command that `tunnel update` or `tunnel stop`
-prints if it found the retained Python client. If no path is available, wait
-until the process ends, for example after a restart.
+After switching, run `pseudolife-mcp tunnel stop --profile <name>`. It prints
+a copyable stop command when it can read the saved profile and locate the
+retained Python client. The `tunnel update` JSON report puts the same guidance
+in its `detail` field. If you cannot stop the Python tunnel, wait until its
+process ends, for example after a restart.
 Once `tunnel status` reports the tunnel has stopped, move aside any leftover
-process record it names. Then run `pseudolife-mcp tunnel run --profile <name>`
-in a terminal you keep open. Include the same `--profile-dir` if you use a
-custom directory.
+process record it names. If the saved profile is missing, use `tunnel
+update` to check for an orphaned process record and move it aside only when
+the report marks it `leftover`. Restore or recreate the profile before
+starting the tunnel. Run `pseudolife-mcp tunnel run --profile <name>` in a
+terminal you keep open. Include the same `--profile-dir` if you use a custom
+directory.
 
 An interrupted key renewal or a retained previous key reports `stale` with
 guidance for that state. A pending refresh request written by the Python

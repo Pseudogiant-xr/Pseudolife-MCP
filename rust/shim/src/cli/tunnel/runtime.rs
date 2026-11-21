@@ -1113,13 +1113,10 @@ pub(super) fn stop(root: &Path, name: &str) -> Output {
         if let Some(observed) =
             observed.filter(|seen| !seen.native && seen.liveness == record::Liveness::Running)
         {
-            let next = if store::exists(&profile_path) == Ok(false) {
-                format!(
-                    "Restore the saved tunnel profile at {} before stopping it",
-                    profile_path.display()
-                )
-            } else {
+            let next = if store::load(root, name).is_ok() {
                 super::legacy_handoff(name, &observed)
+            } else {
+                super::legacy_profile_recovery(&profile_path)
             };
             Fail::Detail(format!(
                 "cannot prove native ownership of {}. {next}",

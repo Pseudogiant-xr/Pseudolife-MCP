@@ -983,7 +983,7 @@ fn quote(path: &str, powershell: bool) -> String {
 
 fn unchecked(what: &str, kind: Kind) -> String {
     format!(
-        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you need to remove an old service, stop it with {}, or go back to the Python client ({NATIVE_CLIENT_DOCS}) and remove it there with pseudolife-mcp tunnel service remove --profile <name>",
+        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you find a service, disable it with {}. To remove the registration, switch back to the Python client ({NATIVE_CLIENT_DOCS}) and run pseudolife-mcp tunnel service remove --profile <name>",
         Registered::stop_hint(kind)
     )
 }

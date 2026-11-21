@@ -838,7 +838,10 @@ fn a_native_launcher_whose_runtime_is_gone_is_still_native() {
     let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
         panic!("an ELF launcher is the native client: nothing to refuse");
     };
-    assert!(lines[0].contains("uses this machine's native launcher"), "{lines:?}");
+    assert!(
+        lines[0].contains("uses this machine's native launcher"),
+        "{lines:?}"
+    );
 }
 
 #[test]
@@ -992,9 +995,10 @@ fn schtasks_failures_are_said_as_what_happened() {
 fn the_could_not_check_note_names_a_stop_command_and_a_public_page() {
     let note = unchecked("x could not be read", Kind::UserUnit);
     assert!(
-        note.contains("stop it with systemctl --user disable --now <unit>"),
+        note.contains("disable it with systemctl --user disable --now <unit>"),
         "{note}"
     );
+    assert!(note.contains("To remove the registration"), "{note}");
     assert!(note.contains(NATIVE_CLIENT_DOCS), "{note}");
     assert!(
         !note.contains("docs/guide/configuration.md describes"),

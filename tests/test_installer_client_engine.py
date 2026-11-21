@@ -184,6 +184,8 @@ def test_tunnel_switch_is_only_for_the_python_installer(tmp_path, engine, tunnel
     entry = repo / "ops" / name
     entry.write_text(python.split(early, 1)[0] + setup + python[python.index(tail):], encoding="utf-8", newline="\n")
     env = _env(tmp_path, engine)
+    # PowerShell writes its own startup cache before entering the script.
+    env["XDG_CACHE_HOME"] = str(tmp_path / "shell-cache")
     command = ([program, _bash_path(entry)] if shell == "bash" else
                [program, "-NoProfile", "-NonInteractive", "-File", str(entry)])
     with user_path_unchanged(tmp_path):

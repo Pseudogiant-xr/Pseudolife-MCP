@@ -456,6 +456,13 @@ fn legacy_handoff(name: &str, record: &record::Record) -> String {
     )
 }
 
+fn legacy_profile_recovery(path: &Path) -> String {
+    format!(
+        "Restore the saved tunnel profile at {} from a readable, owner-only backup before stopping it, or let its process end",
+        path.display()
+    )
+}
+
 fn previous_key_hint(command: &str) -> String {
     format!(
         "Previous key retained until the replacement completes a control-plane poll. Stop the tunnel before restoring or discarding. Restore with `{command} --restore-key` if the replacement fails. Use `{command} --discard-previous-key` only after the replacement has worked."
@@ -817,10 +824,13 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
                     (Ok(_), Liveness::Gone) => "unread",
                     _ => "stale",
                 };
-                let sentence = record_sentence(name, record, true);
                 let sentence = match unread {
-                    Ok(unread) => format!("{unread}; {sentence}"),
-                    Err(_) => sentence,
+                    Ok(unread) if !record.native && record.liveness == Liveness::Running => {
+                        let recovery = legacy_profile_recovery(&store::profile_file(root, name));
+                        format!("{unread}. The running Python tunnel was left in place. {recovery}")
+                    }
+                    Ok(unread) => format!("{unread}; {}", record_sentence(name, record, true)),
+                    Err(_) => record_sentence(name, record, true),
                 };
                 let running = match record.liveness {
                     Liveness::Running => "true",
@@ -1325,6 +1335,28 @@ mod tests {
                     && message.contains(profile.to_str().unwrap())
                     && !message.contains("tunnel run")),
             "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn unreadable_profile_gets_repair_guidance_before_stopping_python_tunnel() {
+        let store = Store::new();
+        // A BOM reaches the unread-report path. Malformed JSON refuses earlier.
+        store.put("dot.profile.json", b"\xef\xbb\xbf{}");
+        assert!(matches!(store::load(&store.0, "dot"), Err(Fail::Defer)));
+        store.record("dot", u64::from(std::process::id()), &own_exe());
+        let stop = runtime::stop(&store.0, "dot");
+        let update = report_of(update(&store.0));
+        let detail = update["detail"].as_str().unwrap();
+        let helps = |message: &str| {
+            message.contains("Restore the saved tunnel profile")
+                && message.contains("dot.profile.json")
+                && !message.contains("tunnel status")
+                && !message.contains("tunnel run")
+        };
+        assert!(
+            matches!(&stop, Err(Fail::Detail(message)) if helps(message)) && helps(detail),
+            "{stop:?}: {detail}"
         );
     }
 
