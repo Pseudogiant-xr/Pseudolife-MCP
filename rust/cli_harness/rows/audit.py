@@ -32,6 +32,8 @@ T0 = 1_700_000_000.0
 _FIXTURE = Path(__file__).with_suffix(".fixtures.json")
 _STATS_REFERENCES = Path(__file__).with_name("audit.stats.references.json")
 _STATS_CORPUS = Path(__file__).resolve().parents[2] / "shim/src/cli/board_audit/testdata/stats.json"
+_ARCHIVE_HASH_TOKEN = "<archive-head-hash>"
+_ARCHIVE_CLOCK_TOKEN = "<archive-head-created-at>"
 
 
 def _shift_rich_clock(rows, anchor):
@@ -552,6 +554,33 @@ def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
     return case
 
 
+@cache
+def _file_references(platform):
+    path = Path(__file__).with_name(f"audit.file.{platform}.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _file_reference(case, reference, home):
+    """Recreate the frozen observation from the case's own inputs."""
+    core._reset(home)
+    arm = core.Arm("reference", home, home / "cwd")
+    arm.cwd.mkdir()
+    case.setup(arm)
+    code, stdout, stderr = reference
+    if _ARCHIVE_HASH_TOKEN in stdout:
+        # The fixture archive carries the run's head, including hashes
+        # recomputed at seed time. Resolve it before launching the CLI.
+        lines = (home / "archive.jsonl").read_text(encoding="utf-8").splitlines()
+        tail = json.loads(next(line for line in reversed(lines) if line.strip()))
+        stdout = stdout.replace(_ARCHIVE_HASH_TOKEN, tail["hash"]).replace(
+            _ARCHIVE_CLOCK_TOKEN, json.dumps(float(tail["created_at"])))
+    return {
+        "home": str(home), "exit": code,
+        "stdout": _encoded(stdout.encode("utf-8")), "stderr": _encoded(stderr.encode("utf-8")),
+        "files": arm.state["before"], "modes": core.modes(home),
+    }
+
+
 def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False, env=None,
               platforms=("windows", "linux"), note="", timeout=30.0):
     """A file-only action (no bank in the environment)."""
@@ -565,6 +594,8 @@ def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False, env=N
     case = core.Case(case_id, list(original), env={**GUARDS, **(env or {})}, setup=setup, after=_record,
                      rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note,
                      programs=PROGRAMS, timeout=timeout)
+    if (reference := _file_references(core.PLATFORM).get(case_id)) is not None:
+        case.reference = partial(_file_reference, case, reference)
     return case
 
 
