@@ -15,6 +15,8 @@ pub(in crate::cli::tunnel::runtime) const FIXTURE: &str =
 const FIXTURE_PATH: &str = "PSEUDOLIFE_TEST_SUPERVISED_FIXTURE_PATH";
 const FIXTURE_IMAGE: &str = "PSEUDOLIFE_TEST_SUPERVISED_IMAGE";
 const FIXTURE_ACK: &str = "PSEUDOLIFE_TEST_SUPERVISED_ACK";
+const FIXTURE_VENDOR: &str = "PSEUDOLIFE_TEST_SUPERVISED_VENDOR";
+const VENDOR_BYTES: &[u8] = b"installed vendor fixture";
 
 fn command(executable: &Path, mode: &str, path: &Path) -> std::process::Command {
     let mut child = std::process::Command::new(executable);
@@ -43,9 +45,11 @@ fn supervised_fixture() {
                 prepare(&path, "dot").unwrap()
             };
             let image = PathBuf::from(std::env::var_os(FIXTURE_IMAGE).unwrap());
-            let output = launch(prepared, &image, STARTUP, |config| {
-                Command::from(command(&executable, "vendor", config))
-            });
+            let vendor = std::env::var_os(FIXTURE_VENDOR).map(PathBuf::from);
+            let output =
+                launch_with_vendor(prepared, &image, STARTUP, vendor.as_deref(), |config| {
+                    Command::from(command(&executable, "vendor", config))
+                });
             assert!(
                 output.is_ok()
                     || matches!(output, Err(Fail::Detail(ref message)) if message.contains("The tunnel is stopped")),
@@ -61,7 +65,8 @@ fn supervised_fixture() {
             std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
         }
         "vendor" => eager_vendor(&path),
-        "updater" | "invalid-updater" | "failing-updater" => {
+        "updater" | "invalid-updater" | "failing-updater" | "stopped-updater"
+        | "exited-updater" => {
             let candidate =
                 crate::runtime::current_runtime(&crate::runtime::default_layout().unwrap())
                     .unwrap();
@@ -75,11 +80,26 @@ fn supervised_fixture() {
                 return;
             }
             let (text, code) = result.unwrap();
-            if mode == "failing-updater" {
+            if matches!(
+                mode.as_str(),
+                "failing-updater" | "stopped-updater" | "exited-updater"
+            ) {
                 let report: serde_json::Value = serde_json::from_str(&text).unwrap();
                 assert_eq!(code, 2, "{text}");
                 assert_eq!(report["state"], "failed", "{text}");
                 assert_eq!(report["profiles"][0]["running"], false, "{text}");
+                if mode == "stopped-updater" {
+                    assert!(
+                        text.contains("a stop was requested during refresh"),
+                        "{text}"
+                    );
+                }
+                if mode == "exited-updater" {
+                    assert!(
+                        text.contains("the previous tunnel exited during refresh preparation"),
+                        "{text}"
+                    );
+                }
                 return;
             }
             assert_eq!(code, 0, "{text}");
@@ -141,7 +161,7 @@ fn eager_vendor(config: &Path) {
     assert!(key == b"fixture-runtime-key");
     let expression = config["mcp"]["commands"][0]["command"].as_str().unwrap();
     let mode = || fs::read_to_string(root.join("scenario")).unwrap_or_default();
-    let (mut bridge, candidate, rejected) = if expression.contains(" --selected-image ") {
+    let (mut bridge, candidate, mut rejected) = if expression.contains(" --selected-image ") {
         mock_bridge(root, stage, expression)
     } else {
         production_bridge(root, stage, expression, &mode())
@@ -161,6 +181,11 @@ fn eager_vendor(config: &Path) {
     .unwrap();
     let deadline = Instant::now() + FIXTURE_WATCHDOG;
     while Instant::now() < deadline {
+        if !candidate && mode() == "exit-old" {
+            drop(bridge.stdin.take());
+            assert!(bridge.wait().unwrap().success());
+            return;
+        }
         if !rejected && bridge.try_wait().unwrap().is_some() {
             return;
         }
@@ -193,6 +218,13 @@ fn eager_vendor(config: &Path) {
                 drop(bridge.stdin.take());
                 assert!(bridge.wait().unwrap().success());
                 return;
+            }
+            if candidate && !rejected && mode() == "lose-bridge" && status == "200 OK" {
+                let (_, attempt) = expression.rsplit_once(" --bridge-attempt ").unwrap();
+                wait_until(|| root.join(format!("settling-{attempt}")).is_file());
+                drop(bridge.stdin.take());
+                assert!(bridge.wait().unwrap().success());
+                rejected = true;
             }
         }
         thread::sleep(Duration::from_millis(10));
@@ -307,24 +339,61 @@ fn production_bridge(
 
 pub(in crate::cli::tunnel::runtime) async fn before_settling_readiness(
     root: &Path,
+    directory: &Path,
     record: &LaunchRecord,
     child: &mut process::Child,
 ) {
-    if record
+    let mode = fs::read_to_string(root.join("scenario")).unwrap_or_default();
+    if !record
         .refresh
         .as_ref()
         .is_some_and(|capability| capability.image.path.starts_with(root.join("runtimes")))
-        && fs::read_to_string(root.join("scenario")).is_ok_and(|mode| mode == "rollback")
+        || !matches!(mode.as_str(), "rollback" | "lose-bridge")
     {
-        let attempt = &record.bridge_attempt.as_ref().unwrap().id;
-        state::atomic_create(&root.join(format!("settling-{attempt}")), b"").unwrap();
-        tokio::time::timeout(Duration::from_secs(10), async {
+        return;
+    }
+    let attempt = record.bridge_attempt.as_ref().unwrap();
+    state::atomic_create(&root.join(format!("settling-{}", attempt.id)), b"").unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        if mode == "rollback" {
             while child.exit_code().unwrap().is_none() {
+                tokio::time::sleep(POLL).await;
+            }
+        } else {
+            while attempt.held(directory) {
+                tokio::time::sleep(POLL).await;
+            }
+            assert!(child.exit_code().unwrap().is_none());
+        }
+    })
+    .await
+    .expect("fixture should release its bridge after sending readiness");
+}
+
+pub(in crate::cli::tunnel::runtime) async fn after_failure_before_drop(root: &Path) {
+    let hold = root.join("hold-terminal");
+    if hold.is_file() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.is_file() {
                 tokio::time::sleep(POLL).await;
             }
         })
         .await
-        .expect("fixture should exit after sending readiness");
+        .expect("fixture must release the terminal record after checking the caller");
+    }
+}
+
+pub(in crate::cli::tunnel::runtime) async fn before_candidate_start(root: &Path) {
+    let hold = root.join("hold-candidate-spawn");
+    if hold.is_file() {
+        state::atomic_create(&root.join("candidate-stopped"), b"").unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hold.is_file() {
+                tokio::time::sleep(POLL).await;
+            }
+        })
+        .await
+        .expect("fixture must release the candidate spawn");
     }
 }
 
@@ -541,6 +610,7 @@ struct Scenario {
     candidate: refresh::Image,
     daemon: Daemon,
     sealed_key: bool,
+    vendor: Option<PathBuf>,
 }
 
 impl Scenario {
@@ -553,6 +623,14 @@ impl Scenario {
     }
 
     fn start_with_images(production: Option<&Path>, candidate_source: Option<&Path>) -> Self {
+        Self::start_configured(production, candidate_source, false)
+    }
+
+    fn start_configured(
+        production: Option<&Path>,
+        candidate_source: Option<&Path>,
+        verify_vendor: bool,
+    ) -> Self {
         let home = Home::new();
         let root = &home.0;
         let executable = std::env::current_exe().unwrap();
@@ -597,16 +675,20 @@ impl Scenario {
         } else {
             "supervisor"
         };
-        let supervisor = Self::child(&executable, root, mode)
-            .env(FIXTURE_IMAGE, production.unwrap_or(&mock_image))
-            .spawn()
-            .unwrap();
+        let mut child = Self::child(&executable, root, mode);
+        child.env(FIXTURE_IMAGE, production.unwrap_or(&mock_image));
+        let vendor = verify_vendor.then(|| vendor::installed_fixture(root, VENDOR_BYTES));
+        if let Some(vendor) = &vendor {
+            child.env(FIXTURE_VENDOR, vendor);
+        }
+        let supervisor = child.spawn().unwrap();
         let mut scenario = Self {
             supervisor,
             home,
             candidate,
             daemon,
             sealed_key,
+            vendor,
         };
         assert!(
             wait_for_ready(&record::path(&scenario.home.0, "dot"), || scenario
@@ -738,6 +820,21 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
     );
     drop(ticket);
     assert_eq!(scenario.record().target.unwrap().pid, old_pid);
+    // Replace the first result so this checks consumed-ID history, not the
+    // last result's replay guard or the first result read by outcome().
+    let another = scenario.submit(&wrong);
+    assert_eq!(
+        scenario.outcome(&another, Phase::Refused).cause,
+        Some(Cause::CandidateChanged)
+    );
+    drop(another);
+    let replay =
+        refresh::submit_request(scenario.root(), "dot", &scenario.record(), first_request).unwrap();
+    assert_eq!(
+        scenario.outcome(&replay, Phase::Refused).cause,
+        Some(Cause::Reply(refresh::Refusal::Replay))
+    );
+    drop(replay);
     if !scenario.sealed_key {
         let ticket = scenario.submit(&scenario.candidate);
         assert_eq!(
@@ -755,13 +852,6 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
     );
     drop(ticket);
     assert_eq!(scenario.record().target.unwrap().pid, old_pid);
-    let replay =
-        refresh::submit_request(scenario.root(), "dot", &scenario.record(), first_request).unwrap();
-    assert_eq!(
-        scenario.outcome(&replay, Phase::Refused).cause,
-        Some(Cause::Reply(refresh::Refusal::Replay))
-    );
-    drop(replay);
     scenario.daemon.mode.store(0, Ordering::SeqCst);
     let fence = identity::verification_fence(scenario.root(), "dot").unwrap();
     let ticket = scenario.submit(&scenario.candidate);
@@ -822,6 +912,12 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
         ))
     );
     assert_eq!(scenario.record().target.unwrap().pid, restored_pid);
+    let (state, detail) = restart::status(scenario.root(), "dot").unwrap();
+    assert_eq!(state, "refused");
+    assert!(detail.contains("tunnel stop --profile dot"));
+    assert!(detail.contains("tunnel run --profile dot"));
+    assert!(detail.contains("to reconnect"));
+    assert!(!detail.contains("Install a corrected runtime"));
     drop(again);
     assert!(
         restart::verify(scenario.root(), "dot")
@@ -852,22 +948,172 @@ fn supervised_restart_fences_preflight_and_keeps_old_proof_on_rollback() {
 
 #[test]
 fn stopping_during_preflight_reports_a_terminal_stopped_result() {
-    use refresh::{Cause, Phase};
+    before_switch_failure("stopped-updater", refresh::Cause::Stopped);
+}
+
+#[test]
+fn old_child_exit_during_preflight_reports_failure_through_update() {
+    before_switch_failure("exited-updater", refresh::Cause::OldChildExited);
+}
+
+fn before_switch_failure(mode: &str, cause: refresh::Cause) {
     let scenario = Scenario::start();
     if !scenario.sealed_key {
         return;
     }
+    let hold = scenario.root().join("hold-terminal");
+    state::atomic_create(&hold, b"").unwrap();
     scenario.daemon.mode.store(2, Ordering::SeqCst);
-    let ticket = scenario.submit(&scenario.candidate);
-    wait_until(|| scenario.daemon.observed.load(Ordering::SeqCst) != 0);
+    let executable = std::env::current_exe().unwrap();
     thread::scope(|scope| {
-        let stop = scope.spawn(|| stop(scenario.root(), "dot"));
-        let outcome = scenario.outcome(&ticket, Phase::Failed);
-        assert_eq!(outcome.cause, Some(Cause::Stopped));
-        drop(ticket);
-        assert!(stop.join().unwrap().is_ok());
+        let caller = scope.spawn(|| {
+            Scenario::child(&executable, scenario.root(), mode)
+                .status()
+                .unwrap()
+        });
+        wait_until(|| scenario.daemon.observed.load(Ordering::SeqCst) != 0);
+        let stop = if cause == refresh::Cause::Stopped {
+            Some(scope.spawn(|| super::stop(scenario.root(), "dot")))
+        } else {
+            scenario.mode("exit-old");
+            None
+        };
+        assert!(caller.join().unwrap().success());
+        let outcome = refresh::read_outcome(scenario.root(), "dot").unwrap();
+        assert_eq!(outcome.phase, refresh::Phase::Failed);
+        assert_eq!(outcome.cause, Some(cause));
+        assert!(!scenario.record().ready);
+        fs::remove_file(hold).unwrap();
+        if let Some(stop) = stop {
+            assert!(stop.join().unwrap().is_ok());
+        }
     });
     assert!(!scenario.root().join("overlap").exists());
+}
+
+#[test]
+fn new_launch_retires_pending_and_failed_outcomes_after_it_stops() {
+    for phase in [refresh::Phase::Pending, refresh::Phase::Failed] {
+        let mut scenario = Scenario::start();
+        let root = &scenario.home.0;
+        let old = scenario.record();
+        let capability = old.refresh.as_ref().unwrap();
+        let request = refresh::Request::for_launch(&old, &scenario.candidate).unwrap();
+        let mut outcome = refresh::Outcome::new(&request, phase, None, None);
+        if phase == refresh::Phase::Failed {
+            outcome = refresh::Outcome::new(&request, phase, None, Some(refresh::Cause::Stopped))
+                .bind(&old);
+        }
+        refresh::write_outcome(root, "dot", &outcome).unwrap();
+        assert!(stop(root, "dot").is_ok());
+        assert!(scenario.supervisor.wait().unwrap().success());
+        assert_eq!(restart::status(root, "dot").unwrap().0, "failed");
+
+        scenario.supervisor =
+            Scenario::child(&std::env::current_exe().unwrap(), root, "supervisor")
+                .env(FIXTURE_IMAGE, &capability.image.path)
+                .spawn()
+                .unwrap();
+        let new = wait_for_ready(&record::path(root, "dot"), || {
+            scenario.supervisor.try_wait().unwrap().is_some()
+        })
+        .unwrap();
+        assert_ne!(old.native_launch, new.native_launch);
+        assert!(stop(root, "dot").is_ok());
+        assert!(scenario.supervisor.wait().unwrap().success());
+        assert!(
+            restart::status(root, "dot").is_none(),
+            "old {phase:?} leaked"
+        );
+    }
+}
+
+#[test]
+fn healed_claim_failure_clears_its_issue_and_can_recur() {
+    let scenario = Scenario::start();
+    let record = scenario.record();
+    let stage = stage_path(scenario.root(), launch_id(&record.native_launch).unwrap());
+    let claim = stage.join(refresh::CLAIM);
+    let issue = stage.join(refresh::ISSUE);
+    for _ in 0..2 {
+        state::private_dir(&claim).unwrap();
+        wait_until(|| {
+            store::private_read(&issue, 256).is_ok_and(|bytes| bytes == b"\"claim-blocked\"")
+        });
+        fs::remove_dir(&claim).unwrap();
+        wait_until(|| !issue.exists());
+    }
+    let ticket = scenario.submit(&scenario.candidate);
+    let expected = if scenario.sealed_key {
+        refresh::Phase::Refreshed
+    } else {
+        refresh::Phase::Refused
+    };
+    assert_eq!(scenario.outcome(&ticket, expected).phase, expected);
+}
+
+#[test]
+fn vendor_integrity_is_checked_in_preflight_and_again_before_spawn() {
+    use refresh::{Cause, Phase};
+    let scenario = Scenario::start_configured(None, None, true);
+    if !scenario.sealed_key {
+        return;
+    }
+    let vendor = scenario.vendor.as_ref().unwrap();
+    let old = scenario.record();
+    let old_pid = old.target.unwrap().pid;
+    let before = scenario.daemon.observed.load(Ordering::SeqCst);
+    setup::replace_private(vendor, b"tampered vendor fixture").unwrap();
+    let ticket = scenario.submit(&scenario.candidate);
+    assert_eq!(
+        scenario.outcome(&ticket, Phase::Refused).cause,
+        Some(Cause::VendorUnavailable)
+    );
+    assert_eq!(scenario.record().target.unwrap().pid, old_pid);
+    assert!(scenario.daemon.observed.load(Ordering::SeqCst) > before);
+    let poller =
+        state::open_with_write(&scenario.root().join("fixture-poller.lock"), true).unwrap();
+    assert!(matches!(
+        poller.file.try_lock_shared(),
+        Err(fs::TryLockError::WouldBlock)
+    ));
+    drop(ticket);
+
+    setup::replace_private(vendor, VENDOR_BYTES).unwrap();
+    let hold = scenario.root().join("hold-candidate-spawn");
+    state::atomic_create(&hold, b"").unwrap();
+    let ticket = scenario.submit(&scenario.candidate);
+    wait_until(|| scenario.root().join("candidate-stopped").is_file());
+    setup::replace_private(vendor, b"tampered after preflight").unwrap();
+    fs::remove_file(hold).unwrap();
+    assert_eq!(
+        scenario.outcome(&ticket, Phase::Failed).cause,
+        Some(Cause::RollbackStartup)
+    );
+    assert!(
+        poller.file.try_lock_shared().is_ok(),
+        "no replacement or rollback vendor should have started"
+    );
+}
+
+#[test]
+fn readiness_requires_the_acknowledgment_to_still_be_held_after_the_probe() {
+    let scenario = Scenario::start();
+    if !scenario.sealed_key {
+        return;
+    }
+    let original = scenario.record().launch_identity;
+    scenario.mode("lose-bridge");
+    let ticket = scenario.submit(&scenario.candidate);
+    scenario.outcome(&ticket, refresh::Phase::Pending);
+    let result = scenario.outcome(&ticket, refresh::Phase::RolledBack);
+    assert_eq!(result.active_identity, original);
+    assert_eq!(
+        result.cause,
+        Some(refresh::Cause::CandidateStartup(
+            refresh::CandidateFailure::ReadinessDeadline
+        ))
+    );
 }
 
 #[test]
@@ -1025,7 +1271,7 @@ fn vendor_ready_without_production_bridge_ack_rolls_back() {
     let terminal = || {
         refresh::read_outcome(scenario.root(), "dot").filter(|outcome| outcome.for_ticket(&ticket))
     };
-    wait_until_for(Duration::from_secs(60), || {
+    wait_until_for(Duration::from_secs(75), || {
         terminal().is_some_and(|outcome| outcome.phase == refresh::Phase::RolledBack)
     });
     let result = terminal().unwrap();

@@ -119,7 +119,9 @@ pub(super) enum Cause {
     ProfileChanged,
     DaemonHandshake,
     CandidateChanged,
+    VendorUnavailable,
     BridgeProtocol,
+    BridgeProtocolTimeout,
     StateUnavailable,
     VerificationBusy,
     CandidateStartup(CandidateFailure),
@@ -220,7 +222,20 @@ impl Outcome {
             return false;
         }
         match self.phase {
-            Phase::Failed => !record.ready && self.active_identity.is_none(),
+            Phase::Failed => {
+                self.active_identity.is_none()
+                    && (!record.ready
+                        // The old child can stop before the epoch changes. The
+                        // result still binds to that exact launch if rewriting
+                        // its process record was blocked.
+                        || (self.request_epoch == capability.epoch
+                            && record.launch_identity.as_deref()
+                                == Some(self.previous_identity.as_str())
+                            && matches!(
+                                self.cause,
+                                Some(Cause::Stopped | Cause::OldChildExited | Cause::OldChildUnproven)
+                            )))
+            }
             Phase::Refreshed => {
                 record.ready
                     && self.active_identity.is_some()
@@ -270,6 +285,23 @@ impl Outcome {
 
 fn result_path(root: &Path, name: &str) -> PathBuf {
     root.join(format!("{name}.native-refresh.json"))
+}
+
+/// Called under both launch locks before the new generation starts a child.
+pub(super) fn retire_outcome(root: &Path, name: &str) -> Result<(), Fail> {
+    let path = result_path(root, name);
+    let unavailable = || {
+        Fail::Detail(format!(
+            "cannot retire the previous tunnel refresh result at {}. Check that file before running the tunnel again",
+            path.display()
+        ))
+    };
+    if store::occupied(&path).map_err(|_| unavailable())? {
+        state::open(&path).map_err(|_| unavailable())?;
+        store::sharing_retry(|| fs::remove_file(&path)).map_err(|_| unavailable())?;
+        setup::sync_directory(root)?;
+    }
+    Ok(())
 }
 
 pub(super) fn saved_outcome(root: &Path, name: &str) -> Option<Outcome> {
@@ -471,21 +503,30 @@ pub(super) fn submit(
     record: &LaunchRecord,
     candidate: &Image,
 ) -> Result<Ticket, &'static str> {
-    let capability = record
-        .refresh
-        .as_ref()
-        .ok_or("the supervisor does not support refresh")?;
-    let request = Request {
-        id: Uuid::new_v4().simple().to_string(),
-        generation: record.native_launch.clone(),
-        epoch: capability.epoch.clone(),
-        identity: record
-            .launch_identity
-            .clone()
-            .ok_or("the launch identity is unavailable")?,
-        candidate: candidate.digest.clone(),
-    };
+    let request = Request::for_launch(record, candidate)?;
     submit_request(root, name, record, request)
+}
+
+impl Request {
+    pub(super) fn for_launch(
+        record: &LaunchRecord,
+        candidate: &Image,
+    ) -> Result<Self, &'static str> {
+        let capability = record
+            .refresh
+            .as_ref()
+            .ok_or("the supervisor does not support refresh")?;
+        Ok(Self {
+            id: Uuid::new_v4().simple().to_string(),
+            generation: record.native_launch.clone(),
+            epoch: capability.epoch.clone(),
+            identity: record
+                .launch_identity
+                .clone()
+                .ok_or("the launch identity is unavailable")?,
+            candidate: candidate.digest.clone(),
+        })
+    }
 }
 
 pub(super) fn submit_request(
@@ -855,6 +896,19 @@ mod tests {
             saved_outcome(&home.0, "dot").unwrap().phase,
             Phase::Refreshed
         );
+    }
+
+    #[test]
+    fn preswitch_failure_requires_the_exact_previous_identity_if_the_record_is_still_ready() {
+        let (_home, mut record) = setup();
+        let request = fixture_request(&record);
+        let failure =
+            Outcome::new(&request, Phase::Failed, None, Some(Cause::OldChildExited)).bind(&record);
+        assert!(failure.for_record(&record));
+        record.launch_identity = Some("d".repeat(64));
+        assert!(!failure.for_record(&record));
+        record.ready = false;
+        assert!(failure.for_record(&record));
     }
 
     #[test]

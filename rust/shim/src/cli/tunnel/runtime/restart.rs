@@ -94,6 +94,7 @@ fn saved_key(session: &Session<'_>) -> Result<key::Key, Cause> {
 
 async fn preflight(
     session: &Session<'_>,
+    directory: &Path,
     previous: &Image,
     request: &Request,
 ) -> Result<Preflight, Cause> {
@@ -108,8 +109,13 @@ async fn preflight(
         .is_ok_and(|mode| mode == "supervisor");
     #[cfg(not(test))]
     let mock_bridge = false;
-    if !mock_bridge && !readiness::query(&candidate.image.path).await {
-        return Err(Cause::BridgeProtocol);
+    if !mock_bridge {
+        readiness::query(&candidate.image.path, directory)
+            .await
+            .map_err(|error| match error {
+                readiness::QueryFailure::Incompatible => Cause::BridgeProtocol,
+                readiness::QueryFailure::Deadline => Cause::BridgeProtocolTimeout,
+            })?;
     }
     verify_image(previous)?;
     let key = saved_key(session)?;
@@ -152,6 +158,9 @@ async fn preflight(
     if selected.image != candidate.image {
         return Err(Cause::CandidateChanged);
     }
+    session
+        .verify_vendor()
+        .map_err(|_| Cause::VendorUnavailable)?;
     provider
         .require_current(&snapshot)
         .map_err(|_| Cause::DaemonHandshake)?;
@@ -178,8 +187,14 @@ fn report(
     let active = (phase != Phase::Failed)
         .then(|| record.launch_identity.clone())
         .flatten();
-    if phase == Phase::Failed {
+    if phase == Phase::Failed && record.ready {
         record.ready = false;
+        // A pre-switch stop or exit must retire the ready record before
+        // publishing its terminal result. The result also binds to the old
+        // epoch if a sharing failure prevents this rewrite.
+        if let Err(Fail::Detail(message)) = stage.announce(record) {
+            crate::stderrln!("{message}");
+        }
     }
     let outcome = Outcome::new(request, phase, active, cause).bind(record);
     if publish(session, &outcome).is_err() {
@@ -222,7 +237,12 @@ pub(super) async fn handle(
         .and_then(|()| refresh::Claim::take(&stage.directory));
     let mut claim = match claim {
         Ok(Some(claim)) => claim,
-        Ok(None) => return Ok(Some(running)),
+        Ok(None) => {
+            if driver.channel_issue.is_some() {
+                driver.clear_issue(stage);
+            }
+            return Ok(Some(running));
+        }
         Err(issue) => {
             driver.issue(stage, issue);
             return Ok(Some(running));
@@ -276,20 +296,39 @@ pub(super) async fn handle(
     }
     let prepared = tokio::select! {
         biased;
-        _ = async {
-            tokio::select! {
-                _ = signals.wait() => {},
-                _ = async {
-                    while !stop_marker(&stage.directory, session.id).unwrap_or(true) {
-                        tokio::time::sleep(POLL).await;
-                    }
-                } => {},
-            }
-        } => {
+        _ = signals.wait() => {
             return finish_before_switch(session, stage, record, &request, running, Cause::Stopped).await;
         }
-        prepared = preflight(session, &current.image, &request) => prepared,
+        cause = async {
+            loop {
+                if stop_marker(&stage.directory, session.id).unwrap_or(true) {
+                    break Cause::Stopped;
+                }
+                if !matches!(running.child.exit_code(), Ok(None)) {
+                    break Cause::OldChildExited;
+                }
+                tokio::time::sleep(POLL).await;
+            }
+        } => {
+            return finish_before_switch(session, stage, record, &request, running, cause).await;
+        }
+        prepared = preflight(session, &stage.directory, &current.image, &request) => prepared,
     };
+    if stop_marker(&stage.directory, session.id).unwrap_or(true) {
+        return finish_before_switch(session, stage, record, &request, running, Cause::Stopped)
+            .await;
+    }
+    if !matches!(running.child.exit_code(), Ok(None)) {
+        return finish_before_switch(
+            session,
+            stage,
+            record,
+            &request,
+            running,
+            Cause::OldChildExited,
+        )
+        .await;
+    }
     let prepared = match prepared {
         Ok(prepared) => prepared,
         Err(cause) => {
@@ -304,28 +343,6 @@ pub(super) async fn handle(
             return Ok(Some(running));
         }
     };
-    if stop_marker(&stage.directory, session.id).unwrap_or(true) {
-        report(
-            session,
-            stage,
-            record,
-            &request,
-            Phase::Refused,
-            Some(Cause::Stopped),
-        );
-        return Ok(Some(running));
-    }
-    if !matches!(running.child.exit_code(), Ok(None)) {
-        return finish_before_switch(
-            session,
-            stage,
-            record,
-            &request,
-            running,
-            Cause::OldChildExited,
-        )
-        .await;
-    }
     let verification = match identity::verification_fence(session.root, name) {
         Ok(fence) => fence,
         Err(_) => {
@@ -402,6 +419,8 @@ pub(super) async fn handle(
         prepared.identity.clone(),
         &epoch,
     );
+    #[cfg(test)]
+    super::tests::restart_cases::before_candidate_start(session.root).await;
     let attempted = match verify_image(&prepared.candidate.image) {
         Ok(()) => {
             session
@@ -516,6 +535,8 @@ async fn finish_before_switch(
         return unproven(session, stage, record, request, Cause::OldChildUnproven);
     }
     report(session, stage, record, request, Phase::Failed, Some(cause));
+    #[cfg(test)]
+    super::tests::restart_cases::after_failure_before_drop(session.root).await;
     Ok(None)
 }
 
@@ -559,49 +580,108 @@ fn unproven(
 fn detail(root: &Path, name: &str, phase: Phase, cause: Option<Cause>) -> String {
     let run = || super::super::tunnel_command("run", name, root.to_str());
     let stop = || super::super::tunnel_command("stop", name, root.to_str());
+    let reconnect = || format!("Run `{}`, then `{}` to reconnect", stop(), run());
     match (phase, cause) {
-        (Phase::Pending, _) => "tunnel refresh is pending. The supervisor has not reported its final outcome".to_owned(),
+        (Phase::Pending, _) => {
+            "tunnel refresh is pending. The supervisor has not reported its final outcome"
+                .to_owned()
+        }
         (Phase::Refreshed, _) => "the tunnel reconnected on the installed runtime".to_owned(),
         (Phase::RolledBack, Some(Cause::CandidateStartup(failure))) => format!(
-            "{} The tunnel reconnected on its previous runtime and saved verification for that identity still applies. Install a corrected runtime before retrying update",
-            failure_detail(root, name, failure)
+            "{} The tunnel reconnected on its previous runtime and saved verification for that identity still applies. {}",
+            failure_detail(root, name, failure),
+            reconnect()
         ),
-        (Phase::RolledBack, _) => "the tunnel reconnected on its previous runtime. Install a corrected runtime before retrying update".to_owned(),
-        (Phase::Failed, Some(Cause::OldChildUnproven | Cause::CandidateChildUnproven | Cause::RollbackChildUnproven)) => {
+        (Phase::RolledBack, _) => format!(
+            "the tunnel reconnected on its previous runtime. {}",
+            reconnect()
+        ),
+        (
+            Phase::Failed,
+            Some(
+                Cause::OldChildUnproven
+                | Cause::CandidateChildUnproven
+                | Cause::RollbackChildUnproven,
+            ),
+        ) => {
             let child = match cause {
                 Some(Cause::OldChildUnproven) => "previous",
                 Some(Cause::CandidateChildUnproven) => "replacement",
                 _ => "rollback",
             };
-            format!("could not confirm the {child} tunnel process exited. Recovery is blocked until its exit can be confirmed")
+            format!(
+                "could not confirm the {child} tunnel process exited. Recovery is blocked until its exit can be confirmed"
+            )
         }
-        (Phase::Failed, Some(Cause::Stopped)) => "a stop was requested during refresh and the tunnel stopped".to_owned(),
-        (Phase::Failed, Some(Cause::OldChildExited)) => format!("the previous tunnel exited during refresh preparation. Run `{}` to start it again", run()),
-        (Phase::Failed, _) => format!("the installed and previous runtimes failed to become ready. The tunnel is stopped. Run `{}` to start it again", run()),
+        (Phase::Failed, Some(Cause::Stopped)) => {
+            "a stop was requested during refresh and the tunnel stopped".to_owned()
+        }
+        (Phase::Failed, Some(Cause::OldChildExited)) => format!(
+            "the previous tunnel exited during refresh preparation. Run `{}` to start it again",
+            run()
+        ),
+        (Phase::Failed, _) => format!(
+            "the installed and previous runtimes failed to become ready. The tunnel is stopped. Run `{}` to start it again",
+            run()
+        ),
         (Phase::Refused, _) => {
             if cause == Some(Cause::Stopped) {
                 return "a stop was requested before refresh acceptance".to_owned();
             }
             let reason = match cause {
-                Some(Cause::ProfileChanged) => "its saved profile or credential no longer matches the launch",
+                Some(Cause::ProfileChanged) => {
+                    "its saved profile or credential no longer matches the launch"
+                }
                 Some(Cause::DaemonHandshake) => "the authenticated daemon handshake failed",
-                Some(Cause::CandidateChanged) => "the installed runtime could not be verified or changed during preflight",
-                Some(Cause::BridgeProtocol) => "the installed runtime did not confirm readiness protocol v1",
+                Some(Cause::CandidateChanged) => {
+                    "the installed runtime could not be verified or changed during preflight"
+                }
+                Some(Cause::VendorUnavailable) => "the pinned tunnel client could not be verified",
+                Some(Cause::BridgeProtocol) => {
+                    "the installed runtime did not confirm readiness protocol v1"
+                }
+                Some(Cause::BridgeProtocolTimeout) => {
+                    "the installed runtime's readiness protocol check timed out"
+                }
                 Some(Cause::Stopped) => "a stop was requested",
                 Some(Cause::VerificationBusy) => "verification holds the profile",
                 Some(Cause::Reply(reason)) => reason.message(),
-                Some(Cause::CandidateAlreadyRolledBack(failure)) => return format!(
-                    "this exact installed runtime already failed and rolled back. {} The previous tunnel is still running. Install a corrected runtime before retrying update",
-                    failure_detail(root, name, failure)
-                ),
+                Some(Cause::CandidateAlreadyRolledBack(failure)) => {
+                    return format!(
+                        "this exact installed runtime already failed and rolled back. {} The previous tunnel is still running. {}",
+                        failure_detail(root, name, failure),
+                        reconnect()
+                    );
+                }
                 _ => "the launch state could not be saved",
             };
-            if matches!(cause, Some(Cause::ProfileChanged | Cause::DaemonHandshake | Cause::CandidateChanged)) {
-                format!("refresh was refused because {reason}. The old tunnel is still running. After addressing that cause, run `{}`, then `{}` to reconnect", stop(), run())
+            if matches!(
+                cause,
+                Some(Cause::ProfileChanged | Cause::DaemonHandshake | Cause::CandidateChanged)
+            ) {
+                format!(
+                    "refresh was refused because {reason}. The old tunnel is still running. After addressing that cause, run `{}`, then `{}` to reconnect",
+                    stop(),
+                    run()
+                )
             } else if cause == Some(Cause::BridgeProtocol) {
-                format!("refresh was refused because {reason}. The old tunnel is still running. Install a runtime that supports readiness protocol v1 and retry update")
+                format!(
+                    "refresh was refused because {reason}. The old tunnel is still running. Install a runtime that supports readiness protocol v1 and retry update"
+                )
+            } else if cause == Some(Cause::BridgeProtocolTimeout) {
+                format!(
+                    "refresh was refused because {reason}. The old tunnel is still running. {}",
+                    reconnect()
+                )
+            } else if cause == Some(Cause::VendorUnavailable) {
+                format!(
+                    "refresh was refused because {reason}. The old tunnel is still running. Check the vendor installation in {} before retrying update",
+                    root.display()
+                )
             } else {
-                format!("refresh was refused because {reason}. The previous tunnel was left running")
+                format!(
+                    "refresh was refused because {reason}. The previous tunnel was left running"
+                )
             }
         }
     }
@@ -751,9 +831,7 @@ pub(in crate::cli::tunnel) fn attempt(
         }
         lost_generation = !still_owned;
         let queued = ticket.queued();
-        if still_owned
-            && (lost_request && !queued || ticket.issue() == Some(ChannelIssue::ClaimBlocked))
-        {
+        if still_owned && lost_request && !queued {
             let reason = ticket.issue().map_or(
                 "the supervisor cleared the request without a readable outcome",
                 ChannelIssue::message,
@@ -784,7 +862,11 @@ pub(in crate::cli::tunnel) fn attempt(
                 state: "stale",
                 running: "\"unknown\"",
                 detail: format!(
-                    "the supervisor did not report a final refresh outcome in time. Check with `{}`",
+                    "{}. Check with `{}`",
+                    ticket.issue().map_or(
+                        "the supervisor did not report a final refresh outcome in time",
+                        ChannelIssue::message,
+                    ),
                     super::super::bridge::status_command(name, root.to_str())
                 ),
             });
@@ -821,7 +903,13 @@ pub(in crate::cli::tunnel) fn status(root: &Path, name: &str) -> Option<(&'stati
                     .is_some_and(|id| identity::owns_generation(root, name, &stage_path(root, id)))
         });
         if !live {
-            return Some(("failed", "the supervisor exited before reporting the refresh outcome. Confirm the old runtime is stopped before restarting".to_owned()));
+            return Some((
+                "failed",
+                format!(
+                    "the supervisor exited before reporting the refresh outcome. Confirm the old runtime stopped with `{}` before running the tunnel again",
+                    super::super::tunnel_command("stop", name, root.to_str()),
+                ),
+            ));
         }
         if let Some(id) = record
             .as_ref()

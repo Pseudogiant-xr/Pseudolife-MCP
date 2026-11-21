@@ -367,8 +367,12 @@ async fn serve(start: Start) -> ExitCode {
         crate::stderrln!("{NO_SHIM}");
         return ExitCode::FAILURE;
     };
+    serve_with_image(start, &executable).await
+}
+
+async fn serve_with_image(start: Start, executable: &Path) -> ExitCode {
     let mut command = tokio::process::Command::from(child_command(
-        &executable,
+        executable,
         &start.profile,
         std::env::vars_os(),
     ));

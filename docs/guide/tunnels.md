@@ -30,7 +30,7 @@ supervisor to stop its runtime. Pass the same `--profile` and
 `--profile-dir` in both commands if you selected a different profile or
 store. Use the same client to manage a running tunnel. The Python client's
 status can report a native launch as stopped, and Python stop leaves that
-launch running. Background start and refresh still require the Python client.
+launch running. Background start still requires the Python client.
 
 To renew a key with the native client, stop the tunnel, then run
 `pseudolife-mcp tunnel setup --profile dot --read-key --key-expires-at <ISO timestamp>`
@@ -65,11 +65,18 @@ previous tunnel serving.
 If the candidate fails readiness, the supervisor tries the previous shim
 after confirming the replacement exited. A successful rollback can mean a
 second reconnect and preserves verification for the previous identity.
-Further updates skip that failed build for the same launch. If rollback
-fails, status says the tunnel stopped and gives the run command. If the
+Further updates skip that failed build for the same launch and give the stop
+and run commands that reconnect it. If rollback fails, status says the tunnel
+stopped and gives the run command. If the
 supervisor cannot confirm a child's exit, it blocks recovery until exit
 can be established. Status also shows when a refreshed launch needs a new
 verification challenge.
+
+`tunnel update` exits 0 for a current or refreshed launch and for a refusal
+or rollback that leaves the previous tunnel serving. It exits 2 if the
+store is unreadable, the tunnel stops during refresh, or the supervisor cannot
+confirm a child's exit or disappears before reporting the result. The outer
+`pseudolife-mcp update` reports this failure with exit 5.
 
 An older foreground supervisor needs a one-time `pseudolife-mcp tunnel stop`
 followed by `pseudolife-mcp tunnel run` for the same profile and directory.

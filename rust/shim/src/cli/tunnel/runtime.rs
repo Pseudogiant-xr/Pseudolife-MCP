@@ -648,6 +648,7 @@ async fn supervise(
     };
     // Publish ownership before staging the private runtime key.
     stage.announce(&record)?;
+    refresh::retire_outcome(root, name)?;
     state::atomic_create(&stage.directory.join(&stage.profile), &profile_bytes)
         .map_err(|_| UNSAFE_STORE)?;
     let client = reqwest::Client::builder()
@@ -740,6 +741,17 @@ struct Session<'a> {
 }
 
 impl Session<'_> {
+    fn verify_vendor(&self) -> Result<(), Fail> {
+        if let Some(vendor_path) = self.vendor_path {
+            #[cfg(unix)]
+            if rustix::process::geteuid().is_root() {
+                trusted_root_paths([self.root, vendor_path, Path::new(&self.profile.token_file)])?;
+            }
+            vendor::reverify(self.root, vendor_path).map_err(Fail::Detail)?;
+        }
+        Ok(())
+    }
+
     fn configure(
         &self,
         stage: &Stage,
@@ -785,13 +797,7 @@ impl Session<'_> {
         if stop_marker(&stage.directory, self.id)? {
             return Ok(None);
         }
-        if let Some(vendor_path) = self.vendor_path {
-            #[cfg(unix)]
-            if rustix::process::geteuid().is_root() {
-                trusted_root_paths([self.root, vendor_path, Path::new(&self.profile.token_file)])?;
-            }
-            vendor::reverify(self.root, vendor_path).map_err(Fail::Detail)?;
-        }
+        self.verify_vendor()?;
         let health = stage.directory.join("health.url");
         store::checked_path(&health)?;
         if let Err(error) = store::sharing_retry(|| fs::remove_file(&health))
@@ -855,7 +861,7 @@ impl Session<'_> {
                     }
                     if ready && !awaiting_poll && attempt.held(&stage.directory) {
                         #[cfg(test)]
-                        tests::restart_cases::before_settling_readiness(self.root, record, &mut running.child).await;
+                        tests::restart_cases::before_settling_readiness(self.root, &stage.directory, record, &mut running.child).await;
                         if stop_marker(&stage.directory, self.id)? {
                             return Ok(false);
                         }

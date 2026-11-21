@@ -324,6 +324,23 @@ pub(super) fn reverify(root: &Path, executable: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+pub(super) fn installed_fixture(root: &Path, contents: &[u8]) -> PathBuf {
+    use crate::board::state;
+    let pin = pin_for(std::env::consts::OS, std::env::consts::ARCH).unwrap();
+    let target = root.join(folder_name(&pin));
+    let binary = binary_name(&pin);
+    state::private_dir(&target).unwrap();
+    state::atomic_create(&target.join(binary), contents).unwrap();
+    let manifest = BTreeMap::from([(binary, format!("{:x}", Sha256::digest(contents)))]);
+    state::atomic_create(
+        &target.join(MANIFEST),
+        &serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    target.join(binary)
+}
+
 /// `ensure` with its effects injected: the pin, the `--help` probe and the
 /// download (`fetch(url, exact size)`).
 fn ensure_with(
