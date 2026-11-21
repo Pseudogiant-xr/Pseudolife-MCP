@@ -1,12 +1,10 @@
-"""The review-queue judges' differential scenarios (task P3b), merged into
+"""The review-queue judges' native scenarios (task P3b), merged into
 ``w2e.py``'s ``SCENARIOS`` by ``scenarios(w2e_module)``.
 
-Each judge runs from the sweep, as the merge judge does, so these follow the
-``judge-merge-*`` pattern: the merge judge's seed (twelve entities on a
-hub, notes mentioning them), one shared stub answering by display, the
-pending proposals inserted out of band on both banks at once, then the
-judges' settle, and the banks, answers and request sequences compared. The
-judge under test is on; every other judge and sweep step is off.
+Each judge runs from the sweep. The harness loads a captured seed, serves
+the judge's prompts from a local stub, inserts pending proposals and waits
+for durable witnesses. Each scenario enables its own judge and keeps other
+judges and sweep steps out of the way.
 
 The link judge (``link-*``): shadow records first opinions and asks a
 second opinion on a below-gate accept or reject; auto promotes an accept at
@@ -28,8 +26,9 @@ link proposal (the slice's later rows sharing an endpoint wait for the next
 tick), dismisses a pair and records the automatic dismissal, leaves a
 propose naming another pair or under its gate, and stamps a skipped row.
 ``candidate-auto-reopen`` moves a dismissed pair's evidence, so the
-dismissal reopens and the pair is judged again. The memo, the watermark and
-the decision records carry Python's fingerprints, compared as they are.
+dismissal reopens and the pair is judged again. The scan and pair bindings
+must move with the evidence, and Rust's queue corpus pins their exact
+fingerprint format.
 
 The curation judge (``curation-*``) judges the deep dream seed's lesson and
 world duplicate listings from the daemons' start, so each scenario settles
@@ -52,6 +51,18 @@ model skipped as a zero-confidence leave. ``junk-auto-reopen`` moves a kept
 entity's evidence, so the automatic keep is reopened and judged again.
 """
 from __future__ import annotations
+
+import json
+import re
+import time
+from pathlib import Path
+
+import psycopg
+from psycopg import sql
+
+from rust.harness_support.bank_fixture import initialize_bank, require_fixture_database
+from rust.harness_support.database_guard import dsn_database_name
+from rust.harness_support.fixture_rows import checked_fixture_insert
 
 JUNK_ALL_JUDGED = ("SELECT NOT EXISTS (SELECT 1 FROM entity_proposals "
                    "WHERE kind = 'junk' AND status = 'pending' AND judge_verdict IS NULL)")
@@ -81,16 +92,14 @@ LINK_KEYS = {"P1": "Alpha Node|Beta Store", "P7": "Beta Store|Hub",
              "P4": "Epsilon Box|Llama 26B", "P5": "Beta Node|Delta Node",
              "P6": "Epsilon Node|Alpha Service"}
 
-# The judge mutants (src/dream/queue_judges.rs, src/dream/candidates.rs),
-# caught by the scenario beside each.
+# The live judge mutants caught by the scenario beside each. The float4
+# decoding mutant runs against db_candidate_edges_preserve_decimal_confidence.
 MUTANTS = ["mcp-dream-junk-no-evidence-bar",          # junk-auto
            "mcp-dream-junk-keep-unrecorded",          # junk-auto
            "mcp-dream-link-retype-applied",           # link-auto
            "mcp-dream-link-two-vote-same-model",      # link-two-vote-same-model
            "mcp-dream-candidate-dismiss-unrecorded",  # candidate-auto
            "mcp-dream-candidate-endpoint-stale",      # candidate-auto
-           # candidate-auto, by Python's fingerprints over the bank
-           "mcp-dream-candidate-real-binary",
            "mcp-dream-curation-distinct-unmarked",    # curation-auto-distinct
            "mcp-dream-curation-shadow-dismisses",     # curation-shadow
            "mcp-dream-curation-fold-unaudited"]       # curation-auto-fold
@@ -147,56 +156,202 @@ CANDIDATE_REOPENED = (
     f"AND {own_pairs(DISMISSED_PAIR)})")
 
 
-def fingerprint_diffs(dsns: dict, config_text: str,
-                      pairs: tuple = CANDIDATE_PAIRS) -> list[str]:
-    """Python's own candidate fingerprints over each side's bank: the scan
-    generation against the bank's watermark, and each active automatic
-    dismissal's evidence against its record. The bank is the same on both
-    sides of each comparison, so each side's clocks cancel out, and a read
-    that renders a column unlike ``storage/postgres.py`` shows here even
-    though the cross-side comparison only sees the hashes' presence."""
-    import tempfile
-    from types import SimpleNamespace
-
-    import psycopg
-    from pseudolife_memory.memory.review_decisions import candidate_evidence_fingerprints
-    from pseudolife_memory.memory.review_judgments import candidate_generation
-    from pseudolife_memory.storage import postgres
-    from pseudolife_memory.utils.config import load_config
-
-    class ReadStorage:
-        """The storage reads the candidate inputs make, on one plain
-        connection: no schema work, no writer lease."""
-        def __init__(self, conn):
-            self.conn = conn
-
-    for name in ("load_graph", "load_entries", "entity_sources_map", "traces_by_entity_norm",
-                 "entity_fact_counts", "current_fact_counts_by_entity_text",
-                 "pending_entity_proposals", "lesson_entity_ids", "pending_proposals",
-                 "dismissed_pairs"):
-        setattr(ReadStorage, name, getattr(postgres.PostgresStorage, name))
-    with tempfile.TemporaryDirectory() as tmp:
-        path = f"{tmp}/config.yaml"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(config_text)
-        cfg = load_config(path)
+def candidate_bindings(conn):
+    """Read the scan generation and the fixture pairs' active evidence."""
     out = []
-    for side in ("python", "rust"):
-        with psycopg.connect(dsns[side], autocommit=True) as conn:
-            postgres.register_vector(conn)
-            svc = SimpleNamespace(_storage=ReadStorage(conn), config=cfg)
-            mark = conn.execute(
-                "SELECT value FROM meta WHERE key = 'deep_candidates_judged'").fetchone()
-            want = candidate_generation(svc)
-            if not mark or mark[0].get("generation") != want:
-                out.append(f"candidate generation {side}: bank {want}, watermark "
-                           f"{mark[0].get('generation') if mark else None}")
-            for (rec,) in conn.execute(candidate_records_sql(pairs)):
-                got = candidate_evidence_fingerprints(svc, [rec.get("candidate") or {}])[0]
-                if got != rec.get("evidence_fingerprint"):
-                    out.append(f"candidate evidence {side} {rec.get('target')}: bank {got}, "
-                               f"record {rec.get('evidence_fingerprint')}")
-    return out
+    digest = re.compile(r"[0-9a-f]{64}")
+    mark = conn.execute("SELECT value FROM meta WHERE key = 'deep_candidates_judged'").fetchone()
+    generation = mark[0].get("generation") if mark else None
+    if not isinstance(generation, str) or not digest.fullmatch(generation):
+        out.append("candidate watermark has no generation digest")
+    evidence = {}
+    for (record,) in conn.execute(candidate_records_sql()):
+        value = record.get("evidence_fingerprint")
+        if not isinstance(value, str) or not digest.fullmatch(value):
+            out.append(f"candidate {record.get('target')} has no evidence digest")
+        evidence[tuple(record["pair"])] = value
+    return generation, evidence, out
+
+
+def seed_shape(name):
+    if name == "curation-auto-fold":
+        return "fold"
+    if name == "junk-auto":
+        return "junk"
+    return "deep" if name.startswith(("candidate-", "curation-")) else "judge"
+
+
+def seed_queue(dsn, shape, *, copied=False):
+    require_fixture_database(dsn_database_name(dsn) or "")
+    fixture = json.loads(Path(__file__).with_name("w2e_queue_seed_rows.json").read_text(encoding="utf-8"))
+    selected = fixture[shape]
+    base = fixture[selected["base"]] if selected["base"] else selected
+    rows = {**base["rows"], **selected["rows"]}
+    positions = {**base["positions"], **selected["positions"]}
+    with psycopg.connect(dsn) as conn:
+        initialize_bank(conn)
+        for records in rows.values():
+            for row in records:
+                if row.get("embedding") is not None:
+                    row["embedding"] = fixture["vectors"][row["embedding"]]
+        inserts = {name: checked_fixture_insert(conn, name, records) for name, records in rows.items()}
+        ids = {}
+        for name, count in positions.items():
+            ids[name] = dict(enumerate(
+                (i for (i,) in conn.execute("SELECT nextval(%s::regclass) FROM generate_series(1,%s)",
+                                            (f"public.{name}_id_seq", count))), start=1))
+        if copied:
+            # A cloned graph may already contain one of the fixture's named
+            # entities. Attach new references to its identity in this bank.
+            for row in rows["entities"]:
+                previous = conn.execute("SELECT id FROM entities WHERE canonical=%s",
+                                        (row["canonical"],)).fetchone()
+                if previous:
+                    ids["entities"][row["id"]] = previous[0]
+
+        references = {"src_id": "entities", "dst_id": "entities", "entity_id": "entities",
+                      "object_entity_id": "entities", "into_id": "entities",
+                      "entry_id": "entries", "proposal_id": "entity_proposals"}
+        for name, records in rows.items():
+            for row in records:
+                for column, source in references.items():
+                    if row.get(column):
+                        row[column] = ids[source][row[column]]
+                if name in ids:
+                    row["id"] = ids[name][row["id"]]
+            statement, params = inserts[name]
+            if copied:
+                statement += sql.SQL(" ON CONFLICT DO NOTHING")
+            conn.execute(statement, params)
+
+
+def answer_diffs(op, answer, dsn):
+    if not isinstance(answer, dict) or answer.get("isError") is not False:
+        return [f"{op['op']} did not succeed"]
+    value = answer.get("value")
+    if op["op"] == "snapshot_file":
+        entities = (value or {}).get("tables", {}).get("entities", {})
+        if not value or not all(value.get(key) for key in ("files", "name_shape", "ascii")):
+            return ["junk removal did not leave a valid graph snapshot"]
+        columns = entities.get("columns", [])
+        if "canonical" not in columns or not any(
+                row[columns.index("canonical")] == "alpha-node" for row in entities["rows"]):
+            return ["junk snapshot did not retain the deleted fixture entity"]
+    elif op.get("name") == "memory_dream":
+        if not isinstance(value, dict) or value.get("applied") is not True:
+            return ["deep dream did not report applying the candidate scan"]
+    elif op.get("name") == "memory_graph_review":
+        if not isinstance(value, dict) or not isinstance(value.get("findings"), list):
+            return ["graph review did not return its findings"]
+        out = []
+        if value.get("counts") != {"total": len(value["findings"])}:
+            out.append("graph review count differs from its findings")
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            records = conn.execute(
+                "SELECT record.value FROM meta i CROSS JOIN LATERAL "
+                "jsonb_array_elements_text(i.value->'recent_ids') WITH ORDINALITY AS ids(id, position) "
+                "JOIN meta record ON record.key = 'automatic_review_decision_v1:' || ids.id "
+                "WHERE i.key = 'automatic_review_decisions_v1' AND i.value->>'version' = '1' "
+                "AND record.value <> '{}'::jsonb "
+                "ORDER BY ids.position DESC LIMIT 20"
+            ).fetchall()
+        fields = ("queue", "action", "state", "proposal_id", "pair", "recorded_at", "ended_at", "end_reason")
+        if value.get("automatic_decisions") != [{key: record.get(key) for key in fields}
+                                                  for (record,) in records]:
+            out.append("graph review automatic decisions differ from the durable decision index")
+        return out
+    return []
+
+
+def run_native(harness, name, scenario, binary, root, owned, mutant=None):
+    """Exercise the queue's durable witnesses with the native daemon alone."""
+    from stub_extractor import parse_chat
+
+    tag = name.replace("-", "_")
+    template = harness.pg.name(f"pl_cf_w2e_{tag}_t")
+    owned.append(template)
+    seed_queue(harness.pg.create(template), seed_shape(name),
+               copied=harness.pg.base_database() is not None)
+    bank = harness.pg.name(f"pl_cf_w2e_{tag}_rs")
+    owned.append(bank)
+    dsn = harness.pg.create(bank, template=template)
+    sides = {"rust": dsn}
+    before = {"rust": harness.dbstate.dump(dsn)}
+    stubs = harness.start_stubs(scenario, ("rust",))
+    daemon = None
+    try:
+        stub = stubs["rust"]
+        home = harness.daemons.make_home(root, f"{tag}-rs", harness.scenario_config(scenario, stub))
+        extra = harness.extractor_env(scenario, stub, "rust")
+        env = harness.w1a.rust_env(harness.side_env(scenario, dsn, extra))
+        if mutant:
+            env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
+        daemon = harness.daemons.rust_daemon(
+            binary, home, harness.daemons.free_port(), harness.daemons.base_env(home, env))
+
+        def start():
+            daemon.start(300)
+            harness.w1a.wait_settled([daemon.port], token=harness.TOKEN)
+            client = harness.Mcp(daemon.port)
+            client.init()
+            return client
+
+        client = start()
+        diffs = harness.wait_warmups(sides, before) if harness.warmup_expected(scenario) else []
+        steps = []
+        expected_kind = scenario["extractor"]["replies"][0]["kind"]
+        requested_judge = False
+        generation, evidence = None, {}
+        for index, op in enumerate([{"op": "init"}, *scenario["ops"]]):
+            result = None
+            begun = time.monotonic()
+            settle = op.get("settle")
+            if op["op"] == "init":
+                settle = scenario.get("init_settle")
+            elif op["op"] == "restart":
+                daemon.stop()
+                (home / "data/config.yaml").write_text(
+                    op["config"].replace("@STUB@", stub.origin), encoding="utf-8")
+                client = start()
+            else:
+                result = (harness.home_op(op, home) if op["op"] in harness.HOME_OPS
+                          else harness.run_op(op, daemon.port, client, dsn))
+                diffs.extend(answer_diffs(op, result, dsn))
+            if settle:
+                harness.settle_sides(settle, sides, stubs, scenario)
+            diffs.extend(harness.expect_diffs(settle if op["op"] == "init" and settle else op, sides))
+            if op.get("candidate_binding_check"):
+                with psycopg.connect(dsn, autocommit=True) as conn:
+                    current_generation, current_evidence, binding_diffs = candidate_bindings(conn)
+                diffs.extend(binding_diffs)
+                if op["candidate_binding_check"] == "reopen":
+                    if current_generation == generation:
+                        diffs.append("changed candidate inputs kept the old scan generation")
+                    if current_evidence.get(DISMISSED_PAIR) == evidence.get(DISMISSED_PAIR):
+                        diffs.append("reopened dismissal kept the old pair evidence")
+                generation, evidence = current_generation, current_evidence
+            sent = stub.drain()
+            diffs.extend(harness.extractor_unanswered("rust", sent))
+            for request in sent:
+                if request["method"] != "POST":
+                    continue
+                parsed = parse_chat((request.get("body") or "").encode("utf-8"))
+                requested_judge |= bool(parsed and parsed[0] == expected_kind)
+                if request.get("authorization") != harness.side_auth("rust"):
+                    diffs.append("judge request did not carry the fixture's caller key")
+            raw = harness.dbstate.dump(dsn)
+            diffs.extend(harness.run_clock_diffs("rust", raw, result if op.get("name") == "memory_dream" else None))
+            steps.append({"step": index, "op": op, "diffs": diffs, "rust": result,
+                          "wall_s": time.monotonic() - begun,
+                          "extractor": {"rust": harness.extractor_summary(sent)}})
+            diffs = []
+        if not requested_judge:
+            steps[-1]["diffs"].append(f"native daemon did not request {expected_kind}")
+        return {"scenario": name, "steps": steps, "stats": {}}
+    finally:
+        if daemon is not None:
+            daemon.stop()
+        harness.close_stubs(stubs)
 
 
 def scenarios(w) -> dict:
@@ -325,9 +480,8 @@ def scenarios(w) -> dict:
         op["settle"] = {**w.JUDGE_SETTLE, "until": CANDIDATES_DONE}
         return op
 
-    def checked(op: dict, mode: str) -> dict:
-        """``op`` with Python's fingerprints checked over each bank."""
-        return {**op, "candidate_fingerprints": candidate_config(mode)}
+    def checked(op: dict) -> dict:
+        return {**op, "candidate_binding_check": True}
 
     def candidate_scenario(mode: str, verdicts: dict, ops: list) -> dict:
         return {"config": candidate_config(mode), "seed_config": w.deep_config(),
@@ -442,13 +596,13 @@ def scenarios(w) -> dict:
                 w.review()],
             HOSTS_DISMISSED, HOSTS_MARKED),
         "candidate-shadow": candidate_scenario("shadow", candidate_verdicts, [
-            w.expect(checked(apply_then_judge(), "shadow"), memo_count,
+            w.expect(checked(apply_then_judge()), memo_count,
                      "SELECT NOT EXISTS (SELECT 1 FROM edge_proposals "
                      "WHERE source = 'deep-dream-judge')",
                      f"SELECT NOT ({candidate_pair('postgres', 'kafka-broker')[7:]})"),
             w.review()]),
         "candidate-auto": candidate_scenario("auto", candidate_verdicts, [
-            w.expect(checked(apply_then_judge(), "auto"), memo_count,
+            w.expect(checked(apply_then_judge()), memo_count,
                      proposed("warehouse", "tide-gauge"),
                      candidate_pair("postgres", "kafka-broker"), candidate_decision,
                      candidate_pair("warehouse", "kelp-farm"),
@@ -462,14 +616,14 @@ def scenarios(w) -> dict:
         # evidence moves, it reopens (the pair removed, the record retired)
         # and the judge dismisses it again.
         "candidate-auto-reopen": candidate_scenario("auto", candidate_verdicts, [
-            w.expect(checked(apply_then_judge(), "auto"),
+            w.expect(checked(apply_then_judge()),
                      candidate_pair("postgres", "kafka-broker"), candidate_decision),
             w.expect({**w.external(
                 "INSERT INTO edges (src_id, relation, dst_id, confidence, origin, "
                 f"asserted_at) VALUES ({w.eid('postgres')}, 'uses', {w.eid('ocean')}, "
                 "0.8, NULL, 1.0)"),
                 "settle": {**w.JUDGE_SETTLE, "until": CANDIDATE_REOPENED},
-                "candidate_fingerprints": candidate_config("auto")},
+                "candidate_binding_check": "reopen"},
                 candidate_pair("postgres", "kafka-broker"), candidate_decision),
             w.review()]),
         "link-shadow": w.judge_scenario(

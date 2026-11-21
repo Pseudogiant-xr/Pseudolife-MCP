@@ -699,19 +699,19 @@ def test_dream_stage_scenarios_key_their_replies_and_register_their_mutants(harn
     assert all(f'"{m}"' in text for m in stage_mutants)
 
 
-def test_dream_stage_helpers_match_python(harness):
-    """The digest map step's split and the signal formatting agree with
-    Python's. Importing the dream module loads the memory package, which needs
-    torch; the Rust CI lane installs no model stack, so there it is skipped."""
-    pytest.importorskip("torch", reason="the Python dream module needs torch")
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from pseudolife_memory.memory.dream import _format_signals, split_session_context
-    for text, cap in ((harness.DIGEST_B_CONTEXT, harness.DIGEST_CHARS), ("ab\ncd", 1),
-                      ("x" * 9 + "\ny", 4)):
-        assert harness.split_context(text, cap) == split_session_context(text, cap)
-    for sigs in (harness.RULE_SIGNALS, harness.LESSON_SIGNALS, [harness.INFERRED_SIGNAL],
-                 harness.LESSON_SIGNALS_3 + harness.LESSON_SIGNALS_4 + harness.LESSON_SIGNALS_5):
-        assert harness.fmt_signals(sigs) == _format_signals(sigs)
+def test_dream_stage_stub_input_keeps_splits_and_signal_fields(harness):
+    # The native format and split also have direct tests in dream/stage_calls.rs.
+    assert harness.split_context("ab\ncd", 1) == ["a", "b", "c", "d"]
+    assert harness.split_context("xxxxxxxxx\ny", 4) == ["xxxx", "xxxx", "x\ny"]
+    assert len(harness.DIGEST_B_PARTS) > 1
+    assert "\n".join(harness.DIGEST_B_PARTS) == harness.DIGEST_B_CONTEXT
+    assert all(len(part) <= harness.DIGEST_CHARS for part in harness.DIGEST_B_PARTS)
+    signal = {"task": "write a note", "outcome": "success", "about": "a 'quoted' topic",
+              "detail": "two\nlines", "polarity": "+", "origin": "inferred"}
+    assert harness.fmt_signals([signal]) == (
+        "[machine-inferred] [success] task='write a note' about=\"a 'quoted' topic\" "
+        "detail='two\\nlines' polarity=+"
+    )
 
 
 def test_lesson_write_clocks_and_episode_tokens_normalize(harness):

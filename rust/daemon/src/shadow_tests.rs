@@ -153,6 +153,52 @@ pub(crate) fn test_dsn() -> Option<String> {
     dsn
 }
 
+#[tokio::test]
+async fn db_candidate_edges_preserve_decimal_confidence() {
+    // Exercises dream::candidates::load_inputs here because the hosted
+    // PostgreSQL lane selects this module's db_ tests.
+    let Some(dsn) = test_dsn() else { return };
+    let _serial = DB.lock().await;
+    let fixture = Fixture::open(&dsn, MemoryConfig::default()).await;
+    fixture
+        .exec(
+            "INSERT INTO entities (canonical, display, created_at) \
+             VALUES ('candidate-real-src', 'Candidate src', 1), \
+                    ('candidate-real-dst', 'Candidate dst', 1)",
+        )
+        .await;
+    let edge_id: i64 = fixture
+        .writer
+        .client()
+        .query_one(
+            "INSERT INTO edges (src_id, relation, dst_id, confidence, asserted_at) \
+             SELECT src.id, 'uses', dst.id, 0.7, 1 FROM entities src, entities dst \
+             WHERE src.canonical = 'candidate-real-src' AND dst.canonical = 'candidate-real-dst' \
+             RETURNING id",
+            &[],
+        )
+        .await
+        .expect("insert candidate edge")
+        .get(0);
+    let inputs = crate::dream::candidates::load_inputs(&fixture.reader)
+        .await
+        .expect("read candidate inputs");
+    fixture
+        .exec(
+            "DELETE FROM entities WHERE canonical IN ('candidate-real-src', 'candidate-real-dst')",
+        )
+        .await;
+    fixture.close().await;
+    assert_eq!(
+        inputs
+            .edges
+            .iter()
+            .find(|row| row["id"].as_i64() == Some(edge_id))
+            .map(|row| &row["confidence"]),
+        Some(&serde_json::json!(0.7))
+    );
+}
+
 pub(crate) fn vector(k: usize) -> String {
     let mut v = vec!["0"; DIM];
     v[k] = "1";
