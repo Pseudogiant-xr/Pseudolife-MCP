@@ -6,9 +6,23 @@ points here; each rule exists because it was broken at least once.
 ## Running a bench
 
 - **Eval- or retrieval-affecting changes run `evals/regression_gate.ps1`
-  before commit** (a pinned replicated slice against the committed
-  baseline; exit 1 = regression). Extraction and dream-path changes re-run
-  the ladder instead; the gate deliberately does not cover them.
+  before commit** when the maintainer authorizes the judged run. It measures
+  Rust daemon retrieval and answer quality on the pinned slice against the
+  committed Rust baseline. Exit 0 records a pass, exit 1 records a measured
+  regression, and exit 2 records an incomplete or invalid run. Until the Rust
+  baseline is committed, report the judged gate as pending. Extraction and
+  dream-path changes re-run `evals/ladder_sweep.py` under the same authorization.
+  In the pull request's Verification section, record the judged result or the
+  applicable pending status (`judged gate: pending (not authorised)` or
+  `judged ladder: pending (not authorised)`). State the scope and result of
+  any model-free verification separately.
+- **The regression gate, extractor ladder and LongMemEval run against an
+  isolated Rust daemon.** Use a checkout-built binary, a disposable test
+  PostgreSQL bank and explicit model and data inputs. Record the daemon
+  revision, corpus and fixture digests, serving configuration, extractor,
+  answerer and judge identities, and the control arm. Keep stand-in results
+  outside the quality baseline. Every GPU or hosted-model run needs the
+  maintainer's explicit approval for that run.
 - **Never hand-roll the GPU bench server launch.** Dot-source
   `evals/qwen_server.ps1` and call `Start-Qwen`, or `Start-Qwen -Fast` for
   throughput work whose output is never judged. The helper owns the eval
@@ -26,13 +40,15 @@ points here; each rule exists because it was broken at least once.
   baseline existed and a memory said "v1 deployed", while
   `ops/install-shim-autostart.ps1` had defaulted to v2 since 07-21.
 - **Every model-vs-model comparison carries a control arm whose input is
-  identical across the runs.** The LongMemEval `rag` arm is built from raw
-  turns and never touches the extractor, so any disagreement there is pure
-  measurement noise and bounds what the other arms can claim. Report it
-  next to the effect: a delta smaller than the control's spread is not a
-  finding. `evals/judge_determinism_check.py` measures the floor directly;
-  `evals/analyze_extractor_comparison.py` reports it beside each paired
-  test.
+  identical across the runs.** Build the LongMemEval raw-only `rag` control
+  through Rust search on turns in an independent bank with dreams off, and
+  freeze its input bytes across extractor comparisons. Judge disagreements
+  on identical control inputs bound the measurement noise. If the control
+  inputs change, report a changed instrument and attach the input provenance
+  before interpreting any effect. Report the control spread next to the
+  effect. Treat deltas smaller than that spread as inconclusive.
+  `evals/judge_determinism_check.py` measures the floor directly.
+  `evals/analyze_extractor_comparison.py` reports it beside each paired test.
 
 ## Publishing a benchmark number
 
@@ -46,6 +62,10 @@ add a row there in the same change that adds the claim to the docs.
   surface it. Both audits (2026-07-17, 2026-07-21) found this failure; the
   band-ablation significance table shipped with all five replicates
   untracked and no comparison artifact at all.
+- **Name the measured engine at the claim and in the artifact.** Existing
+  frozen-Python evidence keeps its original measurement and stays separate
+  from Rust evidence. Publish Rust numbers only from runs against the Rust
+  daemon, in a fresh artifact path tied to its revision and inputs.
 - **Every bench writes a file.** `replicate.py compare` and
   `lesson_synthesis_bench.py` both took `--out` retroactively because they
   printed and forgot. New harnesses persist by default.
