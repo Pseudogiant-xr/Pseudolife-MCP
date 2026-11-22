@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
 from threading import Event, Thread
@@ -45,6 +46,9 @@ BASELINE_MESSAGES = (
     (b"Permission denied", "Permission denied. <details redacted>"),
     (b"No space left on device", "No space left on device."),
     (b"address already in use", "Address already in use."),
+    (b"Port 8765 is already in use", "Port 8765 is already in use by another service."),
+    (b"Port 5433 is already in use", "Port 5433 is already in use by another service."),
+    (b"Cannot read installer ownership records", "Cannot read installer ownership records."),
     (b"already exists", "A resource already exists. <details redacted>"),
     (b"foreign container", "The installer detected a foreign container."),
     (b"owner-only", "The installer reported an owner-only path requirement. <details redacted>"),
@@ -149,6 +153,24 @@ class DockerFixture:
 def free_space(path):
     if shutil.disk_usage(path).free < 8 * 1024**3:
         raise Unavailable("The runner had less than 8 GiB of free space.")
+
+
+def wait_stock_ports(row):
+    start = monotonic()
+    while monotonic() - start < 90:
+        try:
+            # The v0.24.0 preflight uses this exact bind test. TCP state
+            # from our previous daemon can survive Docker object cleanup.
+            for port in (8765, 5433):
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+                    listener.bind(("127.0.0.1", port))
+            row.steps.append({"command": "bind both stock Docker loopback ports", "exit_code": 0,
+                              "seconds": round(monotonic() - start, 3),
+                              "assertion": "The v0.24.0 stock ports were available."})
+            return
+        except OSError:
+            sleep(1)
+    raise Unavailable("The stock ports did not become available after cleaning the earlier fixture.")
 
 
 def readiness(url):
@@ -540,9 +562,13 @@ def stock_upgrade(receipt, release, repo, profile, peer, scratch):
 
 def ordinary(receipt, release, repo, profile, peer, scratch):
     if receipt.platform == "linux-arm64":
+        start = monotonic()
         with session(peer.owner_executable, [], peer.owner_env, repo) as mcp:
             mcp.tool("memory_agents", action="update", project="hosted-acceptance", status="fixture")
             mcp.tool("memory_search", query=SENTINEL, top_k=1)
+        observed = Result(mcp.process.returncode, b"", round(monotonic() - start, 3))
+        receipt.observe("MCP initialize, board update and bank read", observed, observed.code == 0,
+                        "The published shim completed a board write and a memory read.")
         env, launcher = peer.owner_env, peer.owner_executable
     else:
         paired_install(receipt, repo, profile, peer, try_schedule=True)
@@ -552,7 +578,7 @@ def ordinary(receipt, release, repo, profile, peer, scratch):
     for name, args, allowed, description in (
         ("connect", [peer.url, "--client", "codex", "--token-file", env[TOKEN_FILE], "--yes", "--json"],
          {0}, "Native connect accepted the disposable daemon and token."),
-        ("doctor", ["--json"], {0}, "Native doctor accepted the installed client configuration."),
+        ("doctor", ["--host", "codex"], {0}, "Native doctor accepted the installed client configuration."),
         ("console", ["--no-open", "--json"], {0}, "Native Console sign-in created a local session link."),
         ("update", ["--clients-only", "--tag", release.version, "--json"], {0, 3},
          "The native release updater accepted the installed release."),
@@ -620,6 +646,19 @@ def cancel_download(release, repo, profile, flags):
     return Result(process.returncode, b"", round(monotonic() - start, 3)), observed
 
 
+@contextmanager
+def displaced_archive(release, profile, scratch):
+    cached = profile.folder / ".pseudolife-mcp" / "downloads" / release.version / release.archive.name
+    backup = scratch / "verified-archive-before-fault"
+    if cached.is_file():
+        cached.rename(backup)
+    try:
+        yield
+    finally:
+        if backup.is_file():
+            backup.replace(cached)
+
+
 def failure(receipt, release, repo, profile, peer, scratch):
     local = receipt.platform == "linux-arm64"
     if local:
@@ -635,18 +674,19 @@ def failure(receipt, release, repo, profile, peer, scratch):
                 and readiness(peer.url))
 
     before = profile.fingerprint()
-    for defect, diagnostic in (("corrupt", b"does not match the release"),
-                               ("missing", b"although its SHA256SUMS lists it")):
-        assets = scratch / defect
-        assets.mkdir()
-        shutil.copyfile(release.folder / "SHA256SUMS", assets / "SHA256SUMS")
-        if defect == "corrupt":
-            (assets / release.archive.name).write_bytes(b"not a release archive\n")
-        result = install(repo, profile, flags, overrides={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(assets)}, timeout=600)
-        receipt.observe(f"{INSTALL} <{defect}-archive>", result,
-                        result.code not in (0, 124) and diagnostic in result.output and unchanged(),
-                        "The installer rejected the fault before changing the working runtime.")
-    result, observed = cancel_download(release, repo, profile, flags)
+    with displaced_archive(release, profile, scratch):
+        for defect, diagnostic in (("corrupt", b"does not match the release"),
+                                   ("missing", b"although its SHA256SUMS lists it")):
+            assets = scratch / defect
+            assets.mkdir()
+            shutil.copyfile(release.folder / "SHA256SUMS", assets / "SHA256SUMS")
+            if defect == "corrupt":
+                (assets / release.archive.name).write_bytes(b"not a release archive\n")
+            result = install(repo, profile, flags, overrides={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(assets)}, timeout=600)
+            receipt.observe(f"{INSTALL} <{defect}-archive>", result,
+                            result.code not in (0, 124) and diagnostic in result.output and unchanged(),
+                            "The installer rejected the fault before changing the working runtime.")
+        result, observed = cancel_download(release, repo, profile, flags)
     receipt.observe(f"{INSTALL} <cancelled-install>", result,
                     observed and result.code != 0 and unchanged(),
                     "Interrupting the archive download preserved the working runtime.")
@@ -679,7 +719,7 @@ def bank_recovery(receipt, release, repo, profile, peer, scratch):
     result = command([peer.owner_executable, "backup", "--out", backup],
                      cwd=peer.checkout, env=peer.owner_env, timeout=180)
     dumps = list(backup.glob("*.sql.gz"))
-    archives = list(backup.glob("*.tar.gz"))
+    archives = list(backup.glob("*.tgz"))
     receipt.observe(f"{CLIENT} backup <fixture-options>", result,
                     result.code == 0 and len(dumps) == len(archives) == 1,
                     "Native backup produced one database dump and one state archive.")
@@ -766,6 +806,7 @@ def run(tag, platform, output):
                 scope.mkdir()
                 old = published_release("v0.24.0", platform, scope / "earlier-release")
                 row = by_name["upgrade-and-rollback"]
+                wait_stock_ports(row)
                 with stock_peer(row, old, path, scope) as (peer, profile):
                     stock_upgrade(row, release, peer.checkout, profile, peer, scope)
 

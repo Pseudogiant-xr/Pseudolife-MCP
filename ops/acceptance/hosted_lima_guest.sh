@@ -76,6 +76,19 @@ cat > "$root/owner" <<'EOF'
 set -euo pipefail
 root="$HOME/.acceptance"
 cd "$root/release"
+case "${1:-}" in
+    acceptance-backup)
+        mkdir "$root/bank-recovery"
+        set -- backup --out "$root/bank-recovery"
+        ;;
+    acceptance-restore)
+        shopt -s nullglob
+        dumps=("$root/bank-recovery/"*.sql.gz)
+        archives=("$root/bank-recovery/"*.tgz)
+        [[ ${#dumps[@]} -eq 1 && ${#archives[@]} -eq 1 ]]
+        set -- restore --backup-file "${dumps[0]}" --state-archive "${archives[0]}" --yes
+        ;;
+esac
 exec env -i HOME="$root/home" CODEX_HOME="$root/home/.codex" PATH="$root/bin" LC_ALL=C \
     PSEUDOLIFE_MCP_TOKEN_FILE="$root/owner.token" PSEUDOLIFE_MCP_DAEMON_URL=http://127.0.0.1:8765 \
     PSEUDOLIFE_MCP_NO_SPAWN=1 "$root/home/.local/share/pseudolife-mcp/bin/pseudolife-mcp" "$@"

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import shlex
+import shutil
 import socket
 import subprocess
 import tarfile
@@ -16,10 +17,13 @@ import zipfile
 
 from . import matrix
 from .hosted import (
-    DAEMON_URL, DAEMONS, INSTALL, TOKEN_FILE, Failed, Peer, Profile, Receipt, Unavailable,
-    command, download, native_path, prepare_codex, published_release, require, write_json,
+    CLIENT, DAEMON_URL, DAEMONS, INSTALL, TOKEN_FILE, Failed, Peer, Profile, Receipt, Unavailable,
+    command, download, native_path, prepare_codex, published_release, registered_session, require, write_json,
 )
-from .hosted_linux import clean_install, diagnostic_note, free_space, install, live_install, ordinary, readiness
+from .hosted_linux import (
+    CLIENT_FLAGS, SENTINEL, clean_install, diagnostic_note, failure, free_space, install,
+    live_install, ordinary, paired_install, readiness, upgrade,
+)
 
 
 LIMA_VERSION = "2.3.0"
@@ -263,9 +267,64 @@ def offline(receipt, release, repo, profile, scratch):
                     "The published installer refused the closed endpoint without registering a client.")
 
 
+def offline_faults(receipt, release, repo, profile, scratch):
+    token = private_file(scratch / "offline.token", secrets.token_hex(32) + "\n")
+    url = f"http://127.0.0.1:{loopback_port()}"
+    flags = CLIENT_FLAGS + ["--daemon-url", url, "--token-file", str(token)]
+    for defect, diagnostic in (("corrupt", b"does not match the release"),
+                               ("missing", b"although its SHA256SUMS lists it")):
+        assets = scratch / defect
+        assets.mkdir()
+        shutil.copyfile(release.folder / "SHA256SUMS", assets / "SHA256SUMS")
+        if defect == "corrupt":
+            (assets / release.archive.name).write_bytes(b"not a release archive\n")
+        result = install(repo, profile, flags, overrides={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(assets)}, timeout=120)
+        receipt.observe(f"{INSTALL} <{defect}-archive>", result,
+                        result.code not in (0, 124) and diagnostic in result.output
+                        and not (profile.codex / "config.toml").is_file(),
+                        "The installer identified the archive fault before it registered a client.")
+
+
+def mac_upgrade(row, release, repo, profile, peer, scratch):
+    upgrade(row, release, repo, profile.path, peer, scratch)
+
+
+def mac_recovery(row, release, repo, profile, peer, scratch):
+    if peer.kind != DAEMONS[2]:
+        row.daemon = "none"
+        raise Unavailable("No published Docker bank was available on hosted Apple silicon.")
+    paired_install(row, repo, profile, peer)
+    with registered_session(profile, repo) as mcp:
+        mcp.tool("memory_store", text=SENTINEL, source="hosted-acceptance")
+    backup = command([peer.owner_executable, "acceptance-backup"], env=peer.owner_env, timeout=180)
+    row.observe(f"{CLIENT} backup <guest fixture>", backup, backup.code == 0,
+                "The published native admin client backed up the guest Docker bank.")
+    after_backup = "Hosted acceptance guest change after backup"
+    with registered_session(profile, repo) as mcp:
+        mcp.tool("memory_store", text=after_backup, source="hosted-acceptance")
+        values = mcp.tool("memory_search", query=after_backup, top_k=5)
+        require(after_backup in json.dumps(values.get("entries", [])), "The guest's post-backup change was observable.")
+    restored = command([peer.owner_executable, "acceptance-restore"], env=peer.owner_env, timeout=240)
+    row.observe(f"{CLIENT} restore <guest fixture>", restored, restored.code == 0 and readiness(peer.url),
+                "The published native admin client restored the guest Docker bank.")
+    with registered_session(profile, repo) as mcp:
+        values = mcp.tool("memory_search", query=SENTINEL, top_k=5)
+        require(SENTINEL in json.dumps(values.get("entries", [])), "The Mac client read the recovered marker.")
+        values = mcp.tool("memory_search", query=after_backup, top_k=5)
+        require(after_backup not in json.dumps(values.get("entries", [])), "The restore reversed the post-backup change.")
+    raise Unavailable("The guest performed Docker recovery and the Mac read it. Mac-driven Docker recovery was unobserved.")
+
+
 def run(tag, platform, output):
     rows = [Receipt(scenario, platform) for scenario in matrix.SCENARIOS]
-    probes = {"clean-install": clean_install, "ordinary-native-use": ordinary}
+    probes = {
+        "clean-install": clean_install,
+        "ordinary-native-use": ordinary,
+        "upgrade-and-rollback": mac_upgrade,
+        "failure-and-retry": failure,
+        "bank-recovery": mac_recovery,
+    }
+    fallbacks = {"clean-install": offline, "ordinary-native-use": offline, "failure-and-retry": offline_faults}
     release = None
     cleaned = False
     attempts = []
@@ -303,8 +362,11 @@ def run(tag, platform, output):
                     observation["assertion"] = str(error)
                     if index == 2:
                         for row in rows:
-                            if row.scenario in probes:
-                                observe(row, release, repo, path, None, scratch, (launchd, gui), offline, str(error))
+                            fallback = fallbacks.get(row.scenario)
+                            if fallback is not None:
+                                observe(row, release, repo, path, None, scratch, (launchd, gui), fallback, str(error))
+                            else:
+                                row.note = str(error)
             cleaned = True
     except (Failed, OSError, ValueError, KeyError, IndexError, StopIteration) as error:
         for row in rows:

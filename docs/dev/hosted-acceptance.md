@@ -32,8 +32,8 @@ specifications](https://docs.github.com/en/actions/reference/runners/github-host
 The ordinary-use scenario leaves the live tunnel pending in every hosted
 column. Each Mac runner probes the GUI launchd domain before recording any
 login-dependent evidence. The published native update scheduler in v0.25.0
-supports Linux and Windows. Browser sign-in and provider authentication
-require separate evidence.
+supports Linux and Windows. The signed-out run leaves provider wake and
+browser sign-in pending.
 
 For releases affected by the fresh-bank pairing bug, the harness makes an
 MCP board update through the installed shim and waits for the bank fingerprint

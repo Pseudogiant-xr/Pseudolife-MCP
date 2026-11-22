@@ -99,3 +99,42 @@ def test_binfmt_gate_does_not_parse_listing_output(tmp_path, monkeypatch):
         "command": "ls /proc/sys/fs/binfmt_misc", "exit_code": 0,
         "handlers": 1, "amd64_handler_registered": True,
     }
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The staged executable path is POSIX-only")
+def test_native_path_skips_a_protected_system_entry(tmp_path, monkeypatch):
+    folder = tmp_path / "system"
+    folder.mkdir()
+    protected = folder / "protected"
+    protected.touch()
+    tool = folder / "fixture-tool"
+    tool.touch(mode=0o755)
+    original = Path.is_file
+
+    def is_file(path):
+        if path == protected:
+            raise PermissionError
+        return original(path)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    monkeypatch.setattr(os, "defpath", str(folder))
+    hosted.native_path(tmp_path, tmp_path)
+    assert (tmp_path / "native-bin" / tool.name).is_symlink()
+    assert not (tmp_path / "native-bin" / protected.name).is_symlink()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The installer fixture is POSIX-only")
+def test_fault_fixture_restores_the_previously_verified_archive(tmp_path):
+    from types import SimpleNamespace
+
+    from ops.acceptance.hosted_linux import displaced_archive
+
+    release = SimpleNamespace(version="0.25.0", archive=Path("fixture.tar.gz"))
+    profile = SimpleNamespace(folder=tmp_path / "home")
+    archive = profile.folder / ".pseudolife-mcp" / "downloads" / release.version / release.archive.name
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"verified archive fixture")
+    with displaced_archive(release, profile, tmp_path):
+        assert not archive.exists()
+        archive.write_bytes(b"disposable replacement")
+    assert archive.read_bytes() == b"verified archive fixture"
