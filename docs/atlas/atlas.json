@@ -1,9 +1,9 @@
 {
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "schema": 59,
-  "verified": "2026-11-21"
+  "verified": "2026-11-23"
  },
  "groups": {
   "clients": {
