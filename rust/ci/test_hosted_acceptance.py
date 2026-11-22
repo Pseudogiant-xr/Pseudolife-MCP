@@ -85,3 +85,17 @@ def test_install_tail_redacts_fixture_details():
         "<unrecognized line redacted>",
         "WARNING: Codex MCP registration was skipped because credential setup failed.",
     ]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_binfmt_gate_does_not_parse_listing_output(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux
+
+    (tmp_path / "status").write_text("enabled\n")
+    (tmp_path / "register").touch()
+    (tmp_path / "emulator").write_text("enabled\ninterpreter /usr/bin/qemu-x86_64\n")
+    monkeypatch.setattr(hosted_linux, "command", lambda *_: hosted.Result(0, "ls output —\n".encode(), 0))
+    assert hosted_linux.binfmt_status(tmp_path) == {
+        "command": "ls /proc/sys/fs/binfmt_misc", "exit_code": 0,
+        "handlers": 1, "amd64_handler_registered": True,
+    }

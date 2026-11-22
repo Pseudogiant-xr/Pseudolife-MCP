@@ -160,12 +160,12 @@ def installer_tail(output):
     ]
 
 
-def binfmt_status():
-    folder = Path("/proc/sys/fs/binfmt_misc")
+def binfmt_status(folder=Path("/proc/sys/fs/binfmt_misc")):
     listed = command(["ls", "-1", folder])
     require(listed.code == 0, "The runner could not list binfmt registrations.")
-    entries = listed.output.decode("ascii").splitlines()
-    handlers = [folder / name for name in entries if name not in ("status", "register")]
+    # Shell output can contain non-ASCII diagnostics. Inspect the kernel
+    # entries directly so those bytes cannot hide a registered interpreter.
+    handlers = [entry for entry in folder.iterdir() if entry.name not in ("status", "register")]
     amd64 = any(
         re.search(r"x86[-_]?64|amd64", handler.name, re.IGNORECASE)
         or re.search(rb"^interpreter .*?(x86[-_]?64|amd64)", handler.read_bytes(), re.IGNORECASE | re.MULTILINE)
