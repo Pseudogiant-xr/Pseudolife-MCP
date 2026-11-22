@@ -1,10 +1,13 @@
-"""Native pairing refusals against an isolated test PostgreSQL and HTTP fixture."""
+"""Native pairing against an isolated test PostgreSQL and loopback daemons."""
 from __future__ import annotations
 
 import hashlib
+import http.client
+import json
 import os
 from pathlib import Path
 import subprocess
+import time
 
 import pytest
 
@@ -187,6 +190,224 @@ def test_valid_schema_still_creates_code_with_requested_grants(candidate, tmp_pa
         assert matches, "invite grants or code hash changed"
     finally:
         daemon.close()
+
+
+@pytest.mark.parametrize(("fields", "message"), [
+    ({"read_only": True},
+     "the local daemon serves a read-only bank: run invite on the writable daemon host"),
+    ({"version": "0.25.0", "db": None, "pending": ["init"]},
+     "the daemon is still starting its storage: wait a few seconds, then re-run invite"),
+    ({"version": "0.26.0"},
+     "this daemon version does not give a fresh bank its identity at startup: update the daemon, then re-run invite"),
+    ({"version": "0.25.0", "bank_identity_failed": False},
+     "the daemon has no usable bank identity: check its startup logs before re-running invite"),
+    ({"version": "0.25.0", "bank_identity_failed": False, "pending": ["bank_identity"]},
+     "the daemon is still initializing its bank identity: wait a few seconds, then re-run invite"),
+], ids=["read-only", "starting", "older-daemon", "missing-identity", "identity-pending"])
+def test_invite_without_bank_identity_names_next_step(candidate, tmp_path, bank, fields, message):
+    health = {"status": "ok", "auth": True, "schema": 59, "bank": None, "db": "ok", **fields}
+    daemon = FixtureDaemon({"/health": json_body(health)})
+    try:
+        result = invoke(candidate, tmp_path, bank, ["laptop"], port=daemon.server.server_address[1])
+        assert result.returncode == 4, "expected a native refusal"
+        matches = json.loads(result.stdout).get("error") == message
+        assert matches, "invite gave the wrong recovery step"
+    finally:
+        daemon.close()
+
+
+@pytest.fixture
+def native_daemon(candidate):
+    suffix = ".exe" if os.name == "nt" else ""
+    for name in ("pseudolife-daemon-static", "pseudolife-daemon"):
+        binary = Path(candidate).with_name(name + suffix)
+        if binary.is_file():
+            return binary
+    pytest.fail("build the native daemon beside the native client")
+
+
+@pytest.fixture
+def fresh_bank():
+    name = _bank.name("pl_cf_pairing_fresh")
+    _bank.create(name, schema=False)
+    try:
+        yield name
+    finally:
+        _bank.teardown(name)
+
+
+def new_daemon(binary, home, bank, **overrides):
+    from rust.daemon.harness import daemons
+
+    data = home / "data"
+    data.mkdir()
+    # Storage opens before the embedder. This is an offline storage test.
+    (data / "config.yaml").write_text(json.dumps({
+        "embedding": {"model_name": str(data / "no-model")}, **overrides,
+    }), encoding="utf-8")
+    env = daemons.base_env(home, {
+        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
+        "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(bank),
+        "PSEUDOLIFE_MCP_TOKEN": "synthetic-pairing-startup-test",
+        "PSEUDOLIFE_RELEASE_CHECK": "0",
+    })
+    return daemons.rust_daemon(binary, home, daemons.free_port(), env)
+
+
+def wait_for_daemon_health(daemon, predicate):
+    from rust.harness_support.readiness import read_health
+
+    if daemon.proc is None:
+        daemon.start(stages=())
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and daemon.proc.poll() is None:
+        try:
+            status, body = read_health(f"http://127.0.0.1:{daemon.port}", timeout=3)
+        except (OSError, http.client.HTTPException):
+            pass
+        else:
+            if isinstance(body, dict) and predicate(status, body):
+                return body
+        time.sleep(0.1)
+    pytest.fail("native daemon never reported the expected storage state", pytrace=False)
+
+
+def health_after_storage_opens(daemon):
+    return wait_for_daemon_health(daemon, lambda status, body: status == 200 and body.get("db") == "ok")
+
+
+def health_after_bank_identity(daemon):
+    return wait_for_daemon_health(daemon, lambda status, body:
+                                  status == 200 and body.get("db") == "ok" and body.get("bank"))
+
+
+def audit_identity(bank):
+    with _bank.connect(bank) as conn:
+        rows = conn.execute("SELECT value FROM meta WHERE key = 'coordination_bank_id'").fetchall()
+        assert len(rows) == 1, "daemon startup left the bank without an identity"
+        bank_id = rows[0][0]
+        events = conn.execute("SELECT payload::jsonb FROM coordination_events WHERE event = 'bank_identity'").fetchall()
+    assert events == [({"bank_id": bank_id},)]
+    return bank_id
+
+
+def test_move_counts_user_audit_rows_in_preflight_and_after_start(bank):
+    # The move helpers include this same literal. `bank` owns a new database
+    # per test, and the audit rows only exist in this session's temp table.
+    predicate = (Path(__file__).resolve().parents[1] / "shim/src/cli/restore_cli/move_native"
+                 / "coordination_events_filter.sql").read_text(encoding="utf-8")
+    identity = '{"bank_id":"pairing-native-fixture"}'
+    daemon_event = (1, "bank_identity", "daemon", "daemon", "", identity)
+    context_event = (1, "bank_identity", "agent", "default", "", identity)
+    cases = (
+        ([daemon_event], 0),
+        ([context_event], 0),
+        ([context_event, (2, "register", "agent", "default", "agent-id", "{}")], 1),
+        ([(1, "register", "daemon", "daemon", "", identity)], 1),
+        ([(1, "bank_identity", "daemon", "daemon", "", '{"bank_id":"other"}')], 1),
+        ([(1, "bank_identity", "daemon", "daemon", "", "{}")], 1),
+    )
+    with _bank.connect(bank) as conn:
+        conn.execute("CREATE TEMP TABLE coordination_events "
+                     "(seq bigint, event text, actor text, principal text, agent_id text, payload text)")
+        for rows, expected in cases:
+            with conn.transaction(force_rollback=True):
+                with conn.cursor() as cursor:
+                    cursor.executemany("INSERT INTO pg_temp.coordination_events VALUES (%s,%s,%s,%s,%s,%s)", rows)
+                count = conn.execute(f"SELECT count(*) FROM pg_temp.coordination_events {predicate}").fetchone()[0]
+                assert count == expected, rows
+
+
+def test_fresh_daemon_reports_bank_identity_across_restart(native_daemon, tmp_path, fresh_bank):
+    daemon = new_daemon(native_daemon, tmp_path, fresh_bank)
+    try:
+        health = health_after_bank_identity(daemon)
+        identity = audit_identity(fresh_bank)
+        assert health["bank"] == hashlib.sha256(identity.encode()).hexdigest()[:16]
+        daemon.stop()
+        restarted = health_after_bank_identity(daemon)
+        assert restarted["bank"] == health["bank"]
+        assert audit_identity(fresh_bank) == identity
+    finally:
+        daemon.stop()
+
+
+@pytest.mark.parametrize("mode", ["config", "environment"])
+def test_read_only_start_preserves_bank(candidate, native_daemon, tmp_path, fresh_bank, mode):
+    _bank.create(fresh_bank)
+    before = _bank.dump(fresh_bank)
+    daemon = new_daemon(native_daemon, tmp_path, fresh_bank,
+                        **({"read_only": True} if mode == "config" else {}))
+    if mode == "environment":
+        daemon.env["PSEUDOLIFE_READ_ONLY"] = "1"
+    try:
+        # The test login owns the fixture bank. A shadow must refuse these
+        # credentials without opening writable storage or seeding the bank.
+        health = wait_for_daemon_health(daemon, lambda status, body: status == 503 and
+                                        body.get("init_refusal", "").startswith(
+                                            "read-only shadow requires SELECT-only bank credentials"))
+        assert health["read_only"] is True and health["bank"] is None
+        result = invoke(candidate, tmp_path, fresh_bank, ["laptop"], port=daemon.port)
+        assert result.returncode == 4
+        matches = json.loads(result.stdout)["error"] == (
+            "the local daemon serves a read-only bank: run invite on the writable daemon host")
+        assert matches, "an unhealthy shadow gave the wrong invite remedy"
+    finally:
+        daemon.stop()
+    assert _bank.dump(fresh_bank) == before
+
+
+def test_first_invite_uses_fresh_daemon_bank(candidate, native_daemon, tmp_path, fresh_bank):
+    daemon = new_daemon(native_daemon, tmp_path, fresh_bank)
+    try:
+        health_after_bank_identity(daemon)
+        result = invoke(candidate, tmp_path, fresh_bank,
+                        ["laptop", "--url", f"http://127.0.0.1:{daemon.port}"], port=daemon.port)
+        # An assertion failure must not print a freshly minted code.
+        succeeded = result.returncode == 0
+        assert succeeded, "invite as the first command failed on a fresh daemon"
+        report = json.loads(result.stdout)
+        code = report["code"].replace("-", "")
+        with _bank.connect(fresh_bank) as conn:
+            row = conn.execute("SELECT code_hash FROM principals WHERE principal='laptop'").fetchone()
+        matches = row == (hashlib.sha256(code.encode()).hexdigest(),)
+        assert matches, "invite did not store the code in the daemon's bank"
+    finally:
+        daemon.stop()
+
+
+def test_transient_bank_identity_failure_retries_startup(candidate, native_daemon, tmp_path, fresh_bank):
+    _bank.create(fresh_bank)
+    with _bank.connect(fresh_bank) as conn:
+        conn.execute("""CREATE FUNCTION block_bank_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NEW.key = 'coordination_bank_id' THEN
+                    RAISE EXCEPTION 'fixture identity lock unavailable' USING ERRCODE = '55P03';
+                END IF;
+                RETURN NEW;
+            END $$;
+            CREATE TRIGGER block_bank_identity BEFORE INSERT ON meta
+                FOR EACH ROW EXECUTE FUNCTION block_bank_identity()""")
+    daemon = new_daemon(native_daemon, tmp_path, fresh_bank)
+    try:
+        health = wait_for_daemon_health(daemon, lambda status, body:
+                                        status == 200 and body.get("bank_identity_failed") is True)
+        assert health["db"] == "ok"
+        assert health["bank_identity_error"] == "coordination_unavailable"
+        assert health["bank"] is None
+        result = invoke(candidate, tmp_path, fresh_bank, ["laptop"], port=daemon.port)
+        assert result.returncode == 4
+        matches = json.loads(result.stdout)["error"] == (
+            "the daemon could not initialize its bank identity: check its startup logs before re-running invite")
+        assert matches, "identity initialization failure gave the wrong invite remedy"
+        with _bank.connect(fresh_bank) as conn:
+            conn.execute("DROP TRIGGER block_bank_identity ON meta")
+        health = health_after_bank_identity(daemon)
+        assert "bank_identity_failed" not in health
+        assert health["bank"] == hashlib.sha256(audit_identity(fresh_bank).encode()).hexdigest()[:16]
+        assert "bank identity initialization failed: PostgreSQL SQLSTATE 55P03" in daemon.log.read_text(encoding="utf-8")
+    finally:
+        daemon.stop()
 
 
 @pytest.fixture

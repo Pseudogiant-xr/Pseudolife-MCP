@@ -198,10 +198,10 @@ pub(super) fn answer<P: Place>(place: &mut P, ask: &Ask) -> Reply {
                     ask.source_schema
                 )),
             }
-            // A fresh bank has no identity until a client's first session
-            // writes one: no fingerprint in /health or in meta is a fresh
-            // target, as Python's move accepts it. One without the other is
-            // a daemon that has not read its bank yet, or another database.
+            // A current daemon gives even a fresh bank an identity. A
+            // legacy fresh target can still have neither fingerprint. One
+            // without the other is a daemon that has not read its bank
+            // yet, or another database.
             match (&facts.bank, &facts.meta_fingerprint) {
                 (Some(bank), _) if *bank == ask.source_bank => refuse.push(
                     "the target is this same bank (its fingerprint equals the source's); name another host with --to".to_owned(),

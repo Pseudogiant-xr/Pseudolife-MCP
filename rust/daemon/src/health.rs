@@ -482,6 +482,7 @@ pub async fn payload(
     if let Some(e) = &snap.embedder {
         p.insert("embedder".into(), e.clone());
     }
+    let mut identity_pending = false;
     if let Some(storage) = snap
         .storage
         .as_ref()
@@ -495,6 +496,18 @@ pub async fn payload(
                     .await
                     .filter(|id| !id.is_empty())
                     .map(|id| hex::encode(Sha256::digest(id.as_bytes()))[..16].to_string());
+                if bank.is_none() && !storage.read_only() {
+                    // False also tells invite this daemon supports bootstrap.
+                    p.insert(
+                        "bank_identity_failed".into(),
+                        json!(snap.bank_identity_error.is_some()),
+                    );
+                    if let Some(code) = &snap.bank_identity_error {
+                        p.insert("bank_identity_error".into(), json!(code));
+                    } else {
+                        identity_pending = true;
+                    }
+                }
                 p.insert("bank".into(), json!(bank));
             }
             Err(e) => {
@@ -507,7 +520,10 @@ pub async fn payload(
         p.insert("last_backup".into(), b);
     }
     // `readiness`: never changes `status`; last, once `status` is final.
-    let pending = pending(snap.startup.as_deref(), principals.loaded());
+    let mut pending = pending(snap.startup.as_deref(), principals.loaded());
+    if identity_pending {
+        pending.push("bank_identity");
+    }
     let ready = p["status"] == "ok" && pending.is_empty();
     p.insert("ready".into(), json!(ready));
     p.insert("pending".into(), json!(pending));

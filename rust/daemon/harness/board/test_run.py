@@ -98,6 +98,7 @@ def test_scenario_clock_errors_reach_the_harness_result(
         monkeypatch, tmp_path, retained_days, snapshot_at, has_problem):
     monkeypatch.setattr(run.pg, "create", lambda name: name)
     monkeypatch.setattr(run.pg, "drop", lambda name: None)
+    monkeypatch.setattr(run, "seed_live_bank_identity", lambda dsn: None)
     monkeypatch.setattr(run, "start", lambda side, *args: SimpleNamespace(port=side, stop=lambda: None))
     monkeypatch.setattr(run, "wait_ready", lambda *args, **kw: None)
     monkeypatch.setattr(run, "dump", lambda dsn: {})
@@ -124,9 +125,16 @@ def test_scenario_clock_errors_reach_the_harness_result(
 @pytest.mark.parametrize("mode", ["live", "golden"])
 def test_every_arm_waits_for_storage_before_board_reads(monkeypatch, tmp_path, mode):
     ready = set()
+    seeded = set()
     monkeypatch.setattr(run.pg, "create", lambda name: name)
     monkeypatch.setattr(run.pg, "drop", lambda name: None)
-    monkeypatch.setattr(run, "start", lambda side, *args: SimpleNamespace(port=side, stop=lambda: None))
+    monkeypatch.setattr(run, "seed_live_bank_identity", seeded.add)
+
+    def start(side, scenario, binary, root, dsn, tag):
+        assert (dsn in seeded) == (mode == "live")
+        return SimpleNamespace(port=side, stop=lambda: None)
+
+    monkeypatch.setattr(run, "start", start)
     monkeypatch.setattr(run, "wait_ready", lambda port, **kw: ready.add(port))
     monkeypatch.setattr(run, "load_golden", lambda name: {})
     monkeypatch.setattr(run, "dump", lambda dsn: {})
@@ -169,6 +177,7 @@ def test_failed_scenarios_clean_up_every_owned_bank(monkeypatch, tmp_path, failu
     created, dropped, stopped = [], [], []
     monkeypatch.setattr(run.pg, "create", lambda name: created.append(name) or name)
     monkeypatch.setattr(run.pg, "drop", dropped.append)
+    monkeypatch.setattr(run, "seed_live_bank_identity", lambda dsn: None)
     monkeypatch.setattr(run, "dump", lambda _: {})
     monkeypatch.setattr(run, "credential_check", lambda *args: [])
     monkeypatch.setattr(run, "chain_check", lambda _: [])

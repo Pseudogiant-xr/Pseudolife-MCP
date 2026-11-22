@@ -48,6 +48,8 @@ struct Host {
     /// The bank holds one `retrieval_events` table, with its daemon's
     /// warm-up row in it.
     warmup_row: bool,
+    /// One daemon startup identity row in coordination_events.
+    startup_identity_row: bool,
 }
 
 fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
@@ -101,6 +103,7 @@ impl Host {
             token_hashes: None,
             engine: None,
             warmup_row: false,
+            startup_identity_row: false,
         }
     }
 }
@@ -160,7 +163,11 @@ impl Docker for Host {
                     // A daemon's own warm-up row counts only when the query
                     // does not skip it.
                     let skips = sql.contains("\"retrieval_events\" WHERE NOT (query_text = 'warmup probe' AND session_id IS NULL AND episode_id IS NULL AND served = '[]'::jsonb)");
-                    if self.warmup_row && !skips {
+                    if self.startup_identity_row {
+                        let skips_identity = sql.contains("\"coordination_events\" WHERE")
+                            && sql.contains("event = 'bank_identity'");
+                        ok(&format!("{}|{}", self.counts, u8::from(!skips_identity)))
+                    } else if self.warmup_row && !skips {
                         ok(&format!("{}|1", self.counts))
                     } else if self.warmup_row {
                         ok(&format!("{}|0", self.counts))
@@ -886,6 +893,22 @@ fn a_fresh_targets_own_warmup_search_is_not_user_data() {
         why.contains("the target bank is not empty (retrieval_events 2)"),
         "{why}"
     );
+}
+
+#[test]
+fn a_fresh_targets_own_bank_identity_keeps_it_empty() {
+    let mut fresh = world();
+    fresh.wire.far.docker.tables = r#"["entries","facts","meta","coordination_events"]"#.into();
+    fresh.wire.far.docker.startup_identity_row = true;
+    preflight(&mut fresh, &request()).expect("the startup identity alone is a fresh bank");
+    assert_read_only(&fresh);
+}
+
+#[test]
+fn move_uses_the_postgres_tested_audit_filter_before_and_after_start() {
+    let tested = include_str!("coordination_events_filter.sql").trim();
+    assert_eq!(probe::user_filter("coordination_events").trim(), tested);
+    assert_eq!(probe::served_filter("coordination_events").trim(), tested);
 }
 
 #[test]
@@ -2146,6 +2169,35 @@ fn a_resume_is_refused_before_any_change_when_the_gated_bank_took_writes() {
     let mut both = world();
     both.wire.state = Some(reading(3, true));
     assert!(resume_check(&mut both, &request, None).is_err());
+}
+
+#[test]
+fn a_resume_with_an_older_audit_count_names_release() {
+    let mut request = request();
+    request.resume_move = MOVE.into();
+    request.resume_baseline = Some(super::record::Baseline {
+        user_counts: [("public.coordination_events".to_owned(), 1)].into(),
+        mutations: [("coordination_events".to_owned(), 1)].into(),
+    });
+    let mut both = world();
+    both.wire.state = Some(protocol::State {
+        gated: Some(true),
+        counts: [("public.coordination_events".to_owned(), 1)].into(),
+        user_counts: [("public.coordination_events".to_owned(), 0)].into(),
+        mutations: Some([("coordination_events".to_owned(), 1)].into()),
+        ..protocol::State::default()
+    });
+    let why = resume_check(&mut both, &request, None).unwrap_err();
+    assert_eq!(
+        why,
+        "move 20261114-080000-abcdef01 is not resumed: u@box's gated bank may have \
+        taken writes since the move's last rollback (public.coordination_events: 0 on the target, \
+        1 in the dump), and a resume would replace them. Give u@box back its own bank, keeping \
+        that bank in a backup there, with pseudolife-mcp move --release-target \
+        20261114-080000-abcdef01; then run a new move"
+    );
+    assert!(both.here.calls.is_empty());
+    assert!(both.wire.far.docker.calls.is_empty());
 }
 
 #[test]

@@ -677,6 +677,15 @@ async fn daemon_check(
 ) -> Result<Result<pyjson::Dict, Vec<u16>>, Refusal> {
     let local = format!("http://127.0.0.1:{port}");
     let health = net::invite_health(&local).await.map_err(|_| Refusal::new("the daemon /health response exceeds the JSON nesting limit; update the daemon before inviting"))?;
+    const READ_ONLY_BANK: &str =
+        "the local daemon serves a read-only bank: run invite on the writable daemon host";
+    if let Some(health) = &health
+        && pyjson::get(health, "status").and_then(J::as_str) == Some("degraded")
+        && !pyjson::get(health, "bank").is_some_and(J::truthy)
+        && pyjson::get(health, "read_only") == Some(&J::Bool(true))
+    {
+        return Ok(Err(units(READ_ONLY_BANK)));
+    }
     let Some(health) =
         health.filter(|h| pyjson::get(h, "status").and_then(J::as_str) == Some("ok"))
     else {
@@ -729,9 +738,25 @@ async fn daemon_check(
         )));
     }
     if !member("bank").truthy() {
-        return Ok(Err(units(
-            "the daemon has not reported which bank it serves yet (/health bank is null until its storage has started and the agent board has been used once): start a session against it, then re-run",
-        )));
+        let identity = member("bank_identity_failed");
+        let pending = member("pending");
+        let message = if member("read_only") == J::Bool(true) {
+            READ_ONLY_BANK
+        } else if identity == J::Bool(true) {
+            "the daemon could not initialize its bank identity: check its startup logs before re-running invite"
+        } else if member("db") == J::Null
+            && matches!(&pending, J::List(stages) if stages.iter().any(|stage| stage.as_str() == Some("init")))
+        {
+            "the daemon is still starting its storage: wait a few seconds, then re-run invite"
+        } else if identity == J::Null {
+            "this daemon version does not give a fresh bank its identity at startup: update the daemon, then re-run invite"
+        } else if matches!(&pending, J::List(stages) if stages.iter().any(|stage| stage.as_str() == Some("bank_identity")))
+        {
+            "the daemon is still initializing its bank identity: wait a few seconds, then re-run invite"
+        } else {
+            "the daemon has no usable bank identity: check its startup logs before re-running invite"
+        };
+        return Ok(Err(units(message)));
     }
     Ok(Ok(health))
 }

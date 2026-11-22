@@ -698,7 +698,8 @@ def archive_case(case_id, variant, *extra, rules=(), stdout_closed=False):
 REDACT_DB = _bank.name(PREFIX + "rd")
 
 
-# Diagnostics from the frozen Python CLI's _redact and _bank paths. Each
+# Transcribed from pseudolife_memory/board_audit_cli.py at
+# 3ac81bcdcb3a6d64a769b40057c02b1c35458225 (_redact and _bank). Each
 # refusal case declares its outcome; these tables do not decide what to reject.
 _REDACT_REFUSALS = {
     "invalid_message_id": "--message-id must be one message id as the audit log shows it",
@@ -812,6 +813,68 @@ def _rich(key, index=None, cut=None):
 
 def _pruned(key):
     return _Lazy(lambda: ids("pruned")[key])
+
+
+_REDACT_REFERENCE_DB = _bank.name(PREFIX + "rd_ref")
+
+
+def _project_removed_redaction(bank, message_id, reason, now):
+    """Apply the direct v46 removal contract to a private reference copy."""
+    from rust.harness_support.fixture_rows import checked_fixture_insert  # noqa: PLC0415
+
+    with _bank.connect(bank) as conn:
+        _assert_audit_database(conn, bank)
+        [(seq, agent, recipient, project, task)] = conn.execute(
+            "SELECT seq,agent_id,recipient_agent_id,project,task FROM coordination_events "
+            "WHERE event='send' AND message_id=%s", (message_id,)).fetchall()
+        (head_seq, head_hash) = conn.execute(
+            "SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
+        live_text, = conn.execute("SELECT text FROM coordination_messages WHERE message_id=%s",
+                                  (message_id,)).fetchone()
+        event = dict(seq=head_seq + 1, event="redact", actor="operator", principal="",
+                     agent_id=agent, recipient_agent_id=recipient, project=project, task=task,
+                     message_id=message_id, hlc="", created_at=now, prev_hash=head_hash,
+                     payload=canonical_payload({"message_id": message_id, "seq": seq,
+                                                "reason": reason, "audit_copy": "removed"}),
+                     body=None, body_salt=None)
+        event["hash"] = audit_hash(head_hash, event)
+        conn.execute("UPDATE coordination_events SET body=NULL,body_salt=NULL WHERE seq=%s", (seq,))
+        conn.execute("UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
+                     "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message_id))
+        insert, values = checked_fixture_insert(conn, "coordination_events", [event])
+        conn.execute(insert, values)
+
+    redact_seq = event["seq"]
+    digest = event["hash"]
+    return {"ok": True, "message_id": message_id, "seq": seq, "redact_seq": redact_seq,
+            "redact_hash": digest, "expect_head": f"{redact_seq}:{digest}",
+            "live_body_cleared": live_text is not None, "audit_copy": "removed",
+            "other_copies": [], "vacuumed": True}
+
+
+def _redact_removed_reference(key, reason, home):
+    started = time.time()
+    _copy(ensure("rich"), _REDACT_REFERENCE_DB)
+    message_id = ids("rich")[key]
+    report = _project_removed_redaction(_REDACT_REFERENCE_DB, message_id, reason, started)
+    core._reset(home)
+    (home / "cwd").mkdir()
+    newline = b"\r\n" if core.WINDOWS else b"\n"
+    stderr = ("board-audit: record this head outside the bank; `pseudolife-mcp board-audit "
+              f"verify --expect-head {report['expect_head']}` later shows the redaction record "
+              "is still there")
+    return {"home": str(home), "window": [started, time.time()], "exit": 0,
+            "stdout": _encoded(json.dumps(report).encode("ascii") + newline),
+            "stderr": _encoded(stderr.encode("utf-8") + newline),
+            "files": core.snapshot(home), "modes": core.modes(home),
+            "db": _bank.dump(_REDACT_REFERENCE_DB)}
+
+
+def redact_removed_case(case_id, key, reason, *, cut=None):
+    """A direct v46 send with a full fixture ID for the reference."""
+    case = redact_case(case_id, "rich", _rich(key, cut=cut), reason)
+    case.reference = partial(_redact_removed_reference, key, reason)
+    return case
 
 
 def stats_events():
@@ -1346,8 +1409,8 @@ def cases() -> list[core.Case]:
         bank_export_case("export-nolog", "nolog", recorded=True),
         read_case("export-stdout-closed", "rich", ["export"], stdout_closed=True),
         # redact, each arm on its own copy
-        redact_case("redact-removed", "rich", _rich("to_redact"), "wrong paste ✓"),
-        redact_case("redact-prefix", "rich", _rich("to_redact", cut=10), "wrong paste"),
+        redact_removed_case("redact-removed", "to_redact", "wrong paste ✓"),
+        redact_removed_case("redact-prefix", "to_redact", "wrong paste", cut=10),
         redact_case("redact-fanout-siblings", "rich", _rich("hello", index=0),
                     "sent to everyone by mistake"),
         redact_case("redact-kept-v45", "rich", _rich("v45"), "pasted by mistake"),
@@ -1401,7 +1464,7 @@ def cases() -> list[core.Case]:
                     stdout_closed=True),
         # (O4) coverage: LEAST(expires_at, now), ambiguous prefixes, pre-v46,
         # the vacuum-skip path with warnings hidden by default
-        redact_case("redact-future-expiry", "rich", _rich("future"), "wrong paste"),
+        redact_removed_case("redact-future-expiry", "future", "wrong paste"),
         bank_export_case("export-agent-ambiguous", "rich", ["--agent", "ab12cd34"], recorded=True),
         read_case("export-agent-ambiguous-out", "rich",
                   ["export", "--agent", "ab12cd34ef5", "--out", _home("out.jsonl")]),
