@@ -858,16 +858,8 @@ impl Storage {
         }
     }
 
-    /// Give a writable bank its identity before publishing storage to `/health`.
-    pub(crate) async fn initialize_bank_identity(&mut self) -> crate::board::error::Result<()> {
-        use crate::board::store::{DAEMON_PRINCIPAL, ensure_bank_identity};
-        let tx = self.client.transaction().await?;
-        let value = ensure_bank_identity(&tx, DAEMON_PRINCIPAL, DAEMON_PRINCIPAL).await?;
-        crate::board::db::commit(tx).await?;
-        if let Some(id) = value.as_str().filter(|id| !id.is_empty()) {
-            self.remember_bank_id(id);
-        }
-        Ok(())
+    pub(crate) fn knows_bank_id(&self) -> bool {
+        self.bank_id.lock().unwrap().id.is_some()
     }
 
     /// Publish a committed identity, superseding any negative lookup.

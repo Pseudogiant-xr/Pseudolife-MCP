@@ -27,6 +27,10 @@ class Connection:
 
 
 def fake_run(command, *, env, **kwargs):
+    if "PL_BANK_IDENTITY_TEST_DSN" in env:
+        assert command[1:3] == ["--ignored", "--exact"]
+        assert command[3] in startup_ci.BANK_IDENTITY_CHECKS
+        return subprocess.CompletedProcess(command, 0, "test result: ok. 1 passed; 0 failed\n", "")
     if "PL_SHADOW_REFRESH_DSN" in env:
         assert env["PL_SHADOW_REFRESH_REQUIRED"] == "1"
         assert all(f in command for f in startup_ci.SHADOW_DB_FILTERS)
@@ -123,9 +127,10 @@ class WriterGuard(unittest.TestCase):
             if saved is not None:
                 sys.modules["pgdisposable"] = saved
         self.assertEqual(code, 0)
-        self.assertEqual(sorted(result), ["control", "hydration_rows", "mutant", "shadow_refresh"])
+        self.assertEqual(set(result), {"control", "hydration_rows", "mutant", "shadow_refresh",
+                                      *startup_ci.BANK_IDENTITY_CHECKS})
         self.assertTrue(all(value["accepted"] for value in result.values()), result)
-        self.assertEqual(len(created), 4)
+        self.assertEqual(len(created), 6)
 
 
 class StressProfileMatchesStartupCi(unittest.TestCase):

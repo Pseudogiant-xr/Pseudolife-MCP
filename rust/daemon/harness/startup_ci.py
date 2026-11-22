@@ -39,6 +39,10 @@ SHADOW_DB_TESTS = 21
 # opens its own session; 600 s bounds a hang while leaving the part-2
 # step (26 minutes, about 13 used by the cells) its margin.
 SHADOW_TIMEOUT_S = 600
+BANK_IDENTITY_CHECKS = (
+    "service::tests::board_contexts_publish_one_identity_to_health",
+    "service::tests::memory_tools_work_while_bank_identity_is_blocked",
+)
 
 
 def shadow_fixture(root: Path) -> dict:
@@ -84,6 +88,28 @@ def shadow_refresh(binary: Path, env: dict, pg) -> dict:
         pg.drop(name)
 
 
+def bank_identity_checks(binary: Path, env: dict, pg) -> dict:
+    """Run the required identity and memory isolation tests on fresh banks."""
+    result = {}
+    for test in BANK_IDENTITY_CHECKS:
+        name = pg.name(pg.PREFIX + "identity_" + str(time.time_ns()))
+        dsn = pg.create(name)
+        try:
+            with tempfile.TemporaryDirectory(prefix="pl-pgs-identity-") as scratch:
+                child = dict(env, PL_BANK_IDENTITY_TEST_DSN=dsn, **shadow_fixture(Path(scratch)))
+                child.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+                run = subprocess.run([str(binary), "--ignored", "--exact", test, "--nocapture"],
+                                     cwd=REPO, env=child, capture_output=True, text=True, timeout=60)
+                accepted = run.returncode == 0 and "test result: ok. 1 passed;" in run.stdout
+                result[test] = {"exit_code": run.returncode, "accepted": accepted}
+                if not accepted:
+                    print(run.stdout, end="")
+                    print(run.stderr, end="", file=sys.stderr)
+        finally:
+            pg.drop(name)
+    return result
+
+
 def writer_guard(binary: Path, env: dict, output: Path) -> int:
     """A canceled writer cannot absorb the next hydration stamp writes."""
     sys.path.insert(0, str(REPO))
@@ -125,6 +151,7 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
     finally:
         pg.drop(name)
     result["shadow_refresh"] = shadow_refresh(binary, env, pg)
+    result.update(bank_identity_checks(binary, env, pg))
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(f"writer guard: {'0 diffs / mutant caught' if all(v['accepted'] for v in result.values()) else 'FAIL'}", flush=True)
     return int(not all(value["accepted"] for value in result.values()))

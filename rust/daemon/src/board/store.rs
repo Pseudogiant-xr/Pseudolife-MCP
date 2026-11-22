@@ -467,6 +467,21 @@ pub(crate) async fn ensure_bank_identity(
     Ok(candidate)
 }
 
+/// Run on a separate session so identity setup cannot hold the memory writer.
+pub(crate) async fn initialize_bank_identity(dsn: &str) -> Result<String> {
+    let mut conn = super::db::Conn::new(dsn.to_owned());
+    let tx = conn.client().await?.transaction().await?;
+    tx.batch_execute("SET LOCAL statement_timeout = '5s'")
+        .await?;
+    let value = ensure_bank_identity(&tx, DAEMON_PRINCIPAL, DAEMON_PRINCIPAL).await?;
+    super::db::commit(tx).await?;
+    value
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| BoardError::code("invalid_bank_identity"))
+}
+
 impl Store {
     // ---- context --------------------------------------------------------
 

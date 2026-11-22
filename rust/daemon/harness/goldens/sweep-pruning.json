@@ -1204,11 +1204,6 @@
     "retrieval_events",
     "created_at",
     "clock: retrieval event wall clock per row"
-   ],
-   [
-    "slot_reads",
-    "last_read_at",
-    "clock: wall clock per slot read"
    ]
   ],
   "golden": "golden_scrub in run.py",

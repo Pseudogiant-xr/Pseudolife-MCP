@@ -197,11 +197,13 @@ def test_valid_schema_still_creates_code_with_requested_grants(candidate, tmp_pa
      "the local daemon serves a read-only bank: run invite on the writable daemon host"),
     ({"version": "0.25.0", "db": None, "pending": ["init"]},
      "the daemon is still starting its storage: wait a few seconds, then re-run invite"),
-    ({"version": "0.25.0"},
-     "this daemon version does not give a fresh bank its identity at startup: update the daemon, then re-run invite"),
     ({"version": "0.26.0"},
+     "this daemon version does not give a fresh bank its identity at startup: update the daemon, then re-run invite"),
+    ({"version": "0.25.0", "bank_identity_failed": False},
      "the daemon has no usable bank identity: check its startup logs before re-running invite"),
-], ids=["read-only", "starting", "older-daemon", "missing-identity"])
+    ({"version": "0.25.0", "bank_identity_failed": False, "pending": ["bank_identity"]},
+     "the daemon is still initializing its bank identity: wait a few seconds, then re-run invite"),
+], ids=["read-only", "starting", "older-daemon", "missing-identity", "identity-pending"])
 def test_invite_without_bank_identity_names_next_step(candidate, tmp_path, bank, fields, message):
     health = {"status": "ok", "auth": True, "schema": 59, "bank": None, "db": "ok", **fields}
     daemon = FixtureDaemon({"/health": json_body(health)})
@@ -274,6 +276,11 @@ def health_after_storage_opens(daemon):
     return wait_for_daemon_health(daemon, lambda status, body: status == 200 and body.get("db") == "ok")
 
 
+def health_after_bank_identity(daemon):
+    return wait_for_daemon_health(daemon, lambda status, body:
+                                  status == 200 and body.get("db") == "ok" and body.get("bank"))
+
+
 def audit_identity(bank):
     with _bank.connect(bank) as conn:
         rows = conn.execute("SELECT value FROM meta WHERE key = 'coordination_bank_id'").fetchall()
@@ -284,14 +291,41 @@ def audit_identity(bank):
     return bank_id
 
 
+def test_move_counts_user_audit_rows_in_preflight_and_after_start(bank):
+    # The move helpers include this same literal. `bank` owns a new database
+    # per test, and the audit rows only exist in this session's temp table.
+    predicate = (Path(__file__).resolve().parents[1] / "shim/src/cli/restore_cli/move_native"
+                 / "coordination_events_filter.sql").read_text(encoding="utf-8")
+    identity = '{"bank_id":"pairing-native-fixture"}'
+    daemon_event = (1, "bank_identity", "daemon", "daemon", "", identity)
+    context_event = (1, "bank_identity", "agent", "default", "", identity)
+    cases = (
+        ([daemon_event], 0),
+        ([context_event], 0),
+        ([context_event, (2, "register", "agent", "default", "agent-id", "{}")], 1),
+        ([(1, "register", "daemon", "daemon", "", identity)], 1),
+        ([(1, "bank_identity", "daemon", "daemon", "", '{"bank_id":"other"}')], 1),
+        ([(1, "bank_identity", "daemon", "daemon", "", "{}")], 1),
+    )
+    with _bank.connect(bank) as conn:
+        conn.execute("CREATE TEMP TABLE coordination_events "
+                     "(seq bigint, event text, actor text, principal text, agent_id text, payload text)")
+        for rows, expected in cases:
+            conn.execute("TRUNCATE pg_temp.coordination_events")
+            with conn.cursor() as cursor:
+                cursor.executemany("INSERT INTO pg_temp.coordination_events VALUES (%s,%s,%s,%s,%s,%s)", rows)
+            count = conn.execute(f"SELECT count(*) FROM pg_temp.coordination_events {predicate}").fetchone()[0]
+            assert count == expected, rows
+
+
 def test_fresh_daemon_reports_bank_identity_across_restart(native_daemon, tmp_path, fresh_bank):
     daemon = new_daemon(native_daemon, tmp_path, fresh_bank)
     try:
-        health = health_after_storage_opens(daemon)
+        health = health_after_bank_identity(daemon)
         identity = audit_identity(fresh_bank)
         assert health["bank"] == hashlib.sha256(identity.encode()).hexdigest()[:16]
         daemon.stop()
-        restarted = health_after_storage_opens(daemon)
+        restarted = health_after_bank_identity(daemon)
         assert restarted["bank"] == health["bank"]
         assert audit_identity(fresh_bank) == identity
     finally:
@@ -326,7 +360,7 @@ def test_read_only_start_preserves_bank(candidate, native_daemon, tmp_path, fres
 def test_first_invite_uses_fresh_daemon_bank(candidate, native_daemon, tmp_path, fresh_bank):
     daemon = new_daemon(native_daemon, tmp_path, fresh_bank)
     try:
-        health_after_storage_opens(daemon)
+        health_after_bank_identity(daemon)
         result = invoke(candidate, tmp_path, fresh_bank,
                         ["laptop", "--url", f"http://127.0.0.1:{daemon.port}"], port=daemon.port)
         # An assertion failure must not print a freshly minted code.
@@ -357,7 +391,9 @@ def test_transient_bank_identity_failure_retries_startup(candidate, native_daemo
     daemon = new_daemon(native_daemon, tmp_path, fresh_bank)
     try:
         health = wait_for_daemon_health(daemon, lambda status, body:
-                                        status == 503 and body.get("bank_identity_failed") is True)
+                                        status == 200 and body.get("bank_identity_failed") is True)
+        assert health["db"] == "ok"
+        assert health["bank_identity_error"] == "coordination_unavailable"
         assert health["bank"] is None
         result = invoke(candidate, tmp_path, fresh_bank, ["laptop"], port=daemon.port)
         assert result.returncode == 4
@@ -366,9 +402,10 @@ def test_transient_bank_identity_failure_retries_startup(candidate, native_daemo
         assert matches, "identity initialization failure gave the wrong invite remedy"
         with _bank.connect(fresh_bank) as conn:
             conn.execute("DROP TRIGGER block_bank_identity ON meta")
-        health = health_after_storage_opens(daemon)
+        health = health_after_bank_identity(daemon)
         assert "bank_identity_failed" not in health
         assert health["bank"] == hashlib.sha256(audit_identity(fresh_bank).encode()).hexdigest()[:16]
+        assert "bank identity initialization failed: PostgreSQL SQLSTATE 55P03" in daemon.log.read_text(encoding="utf-8")
     finally:
         daemon.stop()
 

@@ -670,18 +670,6 @@ fn diagnostic_member(key: &str, value: J) -> J {
     }
 }
 
-/// Version 0.25.0 and earlier depended on the first writable board context.
-fn needs_board_context(version: &str) -> Option<bool> {
-    let core = version.split(['-', '+']).next()?;
-    let mut parts = core.split('.');
-    let release = (
-        parts.next()?.parse::<u32>().ok()?,
-        parts.next()?.parse::<u32>().ok()?,
-        parts.next()?.parse::<u32>().ok()?,
-    );
-    parts.next().is_none().then_some(release <= (0, 25, 0))
-}
-
 /// Check the daemon before inviting. Diagnostics contain only known field shapes.
 async fn daemon_check(
     port: u32,
@@ -697,11 +685,6 @@ async fn daemon_check(
     {
         if pyjson::get(health, "read_only") == Some(&J::Bool(true)) {
             return Ok(Err(units(READ_ONLY_BANK)));
-        }
-        if pyjson::get(health, "bank_identity_failed") == Some(&J::Bool(true)) {
-            return Ok(Err(units(
-                "the daemon could not initialize its bank identity: check its startup logs before re-running invite",
-            )));
         }
     }
     let Some(health) =
@@ -756,14 +739,21 @@ async fn daemon_check(
         )));
     }
     if !member("bank").truthy() {
+        let identity = member("bank_identity_failed");
+        let pending = member("pending");
         let message = if member("read_only") == J::Bool(true) {
             READ_ONLY_BANK
+        } else if identity == J::Bool(true) {
+            "the daemon could not initialize its bank identity: check its startup logs before re-running invite"
         } else if member("db") == J::Null
-            && matches!(member("pending"), J::List(stages) if stages.iter().any(|stage| stage.as_str() == Some("init")))
+            && matches!(&pending, J::List(stages) if stages.iter().any(|stage| stage.as_str() == Some("init")))
         {
             "the daemon is still starting its storage: wait a few seconds, then re-run invite"
-        } else if member("version").as_str().and_then(needs_board_context) == Some(true) {
+        } else if identity == J::Null {
             "this daemon version does not give a fresh bank its identity at startup: update the daemon, then re-run invite"
+        } else if matches!(&pending, J::List(stages) if stages.iter().any(|stage| stage.as_str() == Some("bank_identity")))
+        {
+            "the daemon is still initializing its bank identity: wait a few seconds, then re-run invite"
         } else {
             "the daemon has no usable bank identity: check its startup logs before re-running invite"
         };

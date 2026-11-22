@@ -904,62 +904,11 @@ fn a_fresh_targets_own_bank_identity_keeps_it_empty() {
     assert_read_only(&fresh);
 }
 
-#[tokio::test]
-async fn move_counts_user_audit_rows_in_preflight_and_after_start() {
-    let Ok(dsn) = std::env::var("PL_BANK_IDENTITY_TEST_DSN") else {
-        eprintln!("PL_BANK_IDENTITY_TEST_DSN unset: skipping database test");
-        return;
-    };
-    let config: tokio_postgres::Config = dsn.parse().expect("parse fixture DSN");
-    assert!(
-        matches!(config.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1")
-    );
-    assert!(
-        config
-            .get_dbname()
-            .is_some_and(|name| name.starts_with("pl_cf_pairing_context_"))
-    );
-    let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
-    tokio::spawn(connection);
-    client
-        .batch_execute(
-            "CREATE TEMP TABLE coordination_events \
-         (seq bigint, event text, actor text, principal text, agent_id text, payload text); \
-         CREATE TABLE public.meta (key text PRIMARY KEY, value jsonb); \
-         INSERT INTO public.meta VALUES ('coordination_bank_id', '\"fixture\"')",
-        )
-        .await
-        .unwrap();
-    let mut observed = Vec::new();
-    for rows in [
-        "(1, 'bank_identity', 'daemon', 'daemon', '', '{\"bank_id\":\"fixture\"}')",
-        "(1, 'bank_identity', 'agent', 'default', '', '{\"bank_id\":\"fixture\"}')",
-        "(1, 'bank_identity', 'agent', 'default', '', '{\"bank_id\":\"fixture\"}'), (2, 'register', 'agent', 'default', 'agent-id', '{}')",
-        "(1, 'register', 'daemon', 'daemon', '', '{\"bank_id\":\"fixture\"}')",
-        "(1, 'bank_identity', 'daemon', 'daemon', '', '{\"bank_id\":\"different\"}')",
-        "(1, 'bank_identity', 'daemon', 'daemon', '', '{}')",
-    ] {
-        client
-            .batch_execute(&format!(
-                "TRUNCATE coordination_events; INSERT INTO coordination_events VALUES {rows}"
-            ))
-            .await
-            .unwrap();
-        for filter in [
-            probe::user_filter("coordination_events"),
-            probe::served_filter("coordination_events"),
-        ] {
-            let query = format!("SELECT count(*) FROM coordination_events{filter}");
-            observed.push(
-                client
-                    .query_one(&query, &[])
-                    .await
-                    .unwrap()
-                    .get::<_, i64>(0),
-            );
-        }
-    }
-    assert_eq!(observed, [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]);
+#[test]
+fn move_uses_the_postgres_tested_audit_filter_before_and_after_start() {
+    let tested = include_str!("coordination_events_filter.sql").trim();
+    assert_eq!(probe::user_filter("coordination_events").trim(), tested);
+    assert_eq!(probe::served_filter("coordination_events").trim(), tested);
 }
 
 #[test]
@@ -2239,8 +2188,14 @@ fn a_resume_with_an_older_audit_count_names_release() {
         ..protocol::State::default()
     });
     let why = resume_check(&mut both, &request, None).unwrap_err();
-    assert!(why.contains("public.coordination_events: 0 on the target, 1 in the dump"));
-    assert!(why.contains(&format!("pseudolife-mcp move --release-target {MOVE}")));
+    assert_eq!(
+        why,
+        "move 20261114-080000-abcdef01 is not resumed: u@box's gated bank may have \
+        taken writes since the move's last rollback (public.coordination_events: 0 on the target, \
+        1 in the dump), and a resume would replace them. Give u@box back its own bank, keeping \
+        that bank in a backup there, with pseudolife-mcp move --release-target \
+        20261114-080000-abcdef01; then run a new move"
+    );
     assert!(both.here.calls.is_empty());
     assert!(both.wire.far.docker.calls.is_empty());
 }

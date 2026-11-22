@@ -783,7 +783,7 @@
   },
   "daemon-bank-null-json": {
    "home": null,
-   "utc_offset": 0,
+   "utc_offset": 39600,
    "exit": 4,
    "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhZW1vbiB2ZXJzaW9uIGRvZXMgbm90IGdpdmUgYSBmcmVzaCBiYW5rIGl0cyBpZGVudGl0eSBhdCBzdGFydHVwOiB1cGRhdGUgdGhlIGRhZW1vbiwgdGhlbiByZS1ydW4gaW52aXRlIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogbnVsbAogIH0KfQo=",
    "stderr": "",
