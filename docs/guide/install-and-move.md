@@ -132,17 +132,19 @@ On reruns, the native installer can check a client without changing its
 registration. It uses read-only helpers to inspect the Pseudolife entry in
 Gemini's configuration, verify the existing bearer token with the daemon,
 and identify connection plans that need only credential verification.
-For a current Codex registration on a client-only rerun, it can wait up to
-three minutes for that read. If a grouped client-only check fails, the
-installer checks the clients separately and keeps completed work.
+For a current registration on a client-only rerun, credential verification
+can wait up to three minutes if the daemon is unreachable. If a grouped
+client-only check fails, the installer checks the clients separately and
+keeps completed work.
 
 For a new client-only machine, [pair it to the daemon](remote-bank.md#adding-a-machine-invite-and-pair)
 with `--pairing-code` / `-PairingCode`. The installer creates a private token
 file. If you supply an existing token file with `--token-file` / `-TokenFile`,
 use an owner-only regular file. For a new registration on a daemon that
-requires a bearer token, use the default stdio transport. The installer can
-preserve an existing HTTP registration and exit 0 with a warning to verify
-the credential in the client.
+requires a bearer token, use the default stdio transport
+(`--transport shim` / `-Transport shim`). The installer can preserve an
+existing HTTP registration and exit 0 with a warning to verify the
+credential in the client.
 
 Release update can refresh existing Codex hook scripts when their approved
 definitions stay the same. If a definition changes, open `/hooks` in the
