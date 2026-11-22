@@ -15,6 +15,7 @@ import pytest
 from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider
+from tests.test_client_install_ux import _marker_block
 from tests.test_installer_existing_upgrade import _bash_fixture_path, _bash_variants, _between
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -227,15 +228,16 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
         (fake_bin / name).chmod(0o755)
     helper = _between("ops/install-native.sh", "resolve_installed_shim() {",
                       "\n}\n\n# Two env pairs") + "\n}"
-    loop = _between("ops/install-native.sh",
-                    'for selected_client in $CLIENTS; do\n    if [ "$selected_client" = claude-desktop ]; then',
-                    "\ndone\n\n# ── 12. health") + "\ndone"
+    install = (ROOT / "ops/install-native.sh").read_text(encoding="utf-8")
+    loop = "\n".join("\n".join(_marker_block(install, section)) for section in (
+        "client registration state", "client registration helpers", "client registrations"))
     config = ("pseudolife-memory\n" + existing) if existing else ""
     body = f"""PATH='{shell.path(installed_bin)}:{shell.path(fake_bin)}:/usr/bin:/bin'
 export PATH CALL_LOG='{shell.path(call_log)}' FAKE_CONFIG='{_q(config)}'
 export FAKE_LAUNCHER='{shell.path(installed_bin / "pseudolife-mcp")}' {"FAKE_KEEP_LAUNCHER=1" if migrate_exit is None else f"FAKE_MIGRATE_EXIT={migrate_exit}"}
 CLIENTS='{client}'
 TRANSPORT=shim
+TOKEN_STATE='{"present" if token_file else "opted-out"}'
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED='' CODEX_CONNECTION_CONFIGURED='' CODEX_CREDENTIAL_FILE=''
 CODEX_CREDENTIAL_URL='' CODEX_RUNTIME_DEFAULTS=''
 MCP_CODEX='' MCP_CLAUDE='' MCP_GEMINI=''
@@ -371,11 +373,13 @@ def test_existing_gemini_registration_gets_the_manual_fix(bash, tmp_path):
 def test_existing_http_registration_is_warned_about_not_broken_silently(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     proc, calls = _wire(shell, "claude", token_file="/fixture/claude-code.token",
-                        existing="Type: http\nURL: http://127.0.0.1:8765/mcp")
+                        existing="Type: http\nURL: http://127.0.0.1:8765/mcp\nHeaders: Authorization")
     assert proc.returncode == 0, proc.stderr
     assert _adds(calls) == []
-    assert "requires a bearer token" in proc.stderr
-    assert "register the stdio shim instead" in proc.stderr
+    [warning] = [line for line in proc.stderr.splitlines() if line.startswith("WARNING:")]
+    assert "HTTP registration was preserved" in warning
+    assert "Verify the registration's bearer credential in the client." in warning
+    assert "STATE=present/" in proc.stdout
 
 
 @BASH

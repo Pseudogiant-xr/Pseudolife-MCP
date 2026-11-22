@@ -2226,6 +2226,9 @@ connect_client_names() {  # the selected clients as connect names them, comma-se
     done
     printf '%s' "$connect_names"
 }
+# The native installer also uses connect-report current and the credentials
+# verify-token-file and gemini-guard helpers. This parser handles the five
+# modes below for legacy connect.
 connect_report_lines() {  # $1 = valid|error|plan|manual|handled; connect's --json report on stdin
     "$(installer_python)" -c '
 import json, sys
