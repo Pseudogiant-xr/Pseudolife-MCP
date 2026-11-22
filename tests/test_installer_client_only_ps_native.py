@@ -22,7 +22,7 @@ from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
-from tests.test_installer_client_only_native import CODEX_HOOK_APPROVAL, CODEX_HOOK_REPORTS, COMPLETION_CASES, DENIED_CREDENTIAL
+from tests.test_installer_client_only_native import CODEX_HOOK_APPROVAL, CODEX_HOOK_REPORTS, CODEX_PENDING_CASES, COMPLETION_CASES, DENIED_CREDENTIAL
 from tests.test_installer_existing_upgrade import _between, user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -932,7 +932,7 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
                   runtime_failed: bool = False, gemini_list: str = "",
                   show_ladder: bool = False, transport: str = "shim", hook_report: str = "",
-                  hook_trust: str = "yes"):
+                  hook_trust: str = "yes", hook_interactive: bool = False):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex adds."""
@@ -957,6 +957,7 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
     if hook_report:
         steps = steps.replace(
             """return '{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}'""",
+            f"Add-Content -LiteralPath '{_q(ps.calls)}' -Value ('hook-options|' + ($args -join ' ')); "
             "return $env:FAKE_HOOK_REPORT", 1,
         )
     codex = "" if missing else ps.stub_function("codex", CODEX_STUB + "\n$global:LASTEXITCODE = [int]$env:FAKE_MCP_ADD_EXIT")
@@ -975,7 +976,8 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
     body = f"""$env:PATH = '{_q(ps.tmp)}'
 $clients = @({providers}); $CodexHooks = 'auto'; $CodexHookTrust = '{hook_trust}'
 $requestedClients = '{requested or ''}' -split ' '
-$Instructions = 'auto'; $ClaudeMd = ''; $AgentsFile = ''; $interactive = $false
+$Instructions = '{'skip' if hook_interactive else 'auto'}'; $ClaudeMd = ''; $AgentsFile = ''
+$interactive = {'$true' if hook_interactive else '$false'}
 $Transport = '{transport}'
 $ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
 function Get-EnvValue($name) {{ return $null }}
@@ -1127,13 +1129,21 @@ def test_codex_hook_failure_is_reported_at_completion(tmp_path, hook_status, rec
         assert "Warnings" in proc.stderr.splitlines()
 
 
-def test_untrusted_codex_hooks_use_doctor_guidance_without_failing(tmp_path):
-    report = json.dumps(dict(status="pending", source="manual", instructions="present",
-                             recovery="PseudoLife hooks await approval. Use Codex /hooks."))
-    proc, _ = _codex_wiring(_PowerShell(tmp_path), requested="codex gemini",
-                            hook_report=report, hook_trust="no")
+@pytest.mark.parametrize("trust,interactive,recovery", CODEX_PENDING_CASES)
+def test_pending_codex_hooks_warn_without_failing(tmp_path, trust, interactive, recovery):
+    ps = _PowerShell(tmp_path)
+    report = json.dumps(dict(status="pending", source="manual", instructions="present", recovery=recovery))
+    proc, adds = _codex_wiring(ps, requested="codex gemini", hook_report=report,
+                               hook_trust=trust, hook_interactive=interactive)
     assert proc.returncode == 0, _output(proc)
-    assert proc.stderr.splitlines()[-2:] == ["Warnings", "Codex hook setup needs attention. " + CODEX_HOOK_APPROVAL]
+    assert adds and "REMAINING_STEPS_FINISHED" in proc.stdout
+    [hook_args] = [line for line in ps.logged() if line.startswith("hook-options|")]
+    assert f" --trust {trust} " in hook_args
+    assert ("--non-interactive" in hook_args) is not interactive
+    reason = CODEX_HOOK_APPROVAL if recovery.startswith("PseudoLife") else (
+        "Hooks are not installed. Rerun the installer with -CodexHookTrust yes."
+    )
+    assert proc.stderr.splitlines()[-2:] == ["Warnings", "Codex hook setup needs attention. " + reason]
 
 
 def test_requested_codex_instruction_failure_is_a_warning(tmp_path):

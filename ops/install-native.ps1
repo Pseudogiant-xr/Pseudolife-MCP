@@ -692,6 +692,7 @@ $script:installerRerun = $false
 $script:recordedBankLocation = $null
 $script:recordedInstructionChoices = @{}
 $restoredExtractor = $false
+$restoredExtractorRequested = $false
 $restoredClient = $false
 $clientExplicit = [bool]$Client
 if (-not $ClientOnly -and -not $DaemonUrl -and -not $env:PSEUDOLIFE_MCP_DAEMON_URL -and (Test-Path -LiteralPath $envFile)) {
@@ -716,19 +717,22 @@ if (-not $ClientOnly -and -not $DaemonUrl -and -not $env:PSEUDOLIFE_MCP_DAEMON_U
             'NO_TOKEN' { if (-not $PSBoundParameters.ContainsKey('NoToken') -and $value -eq '1') { $NoToken = [switch]$true } }
         }
     }
-    if ($restoredClient -and $Client) {
-        # Old records lack provenance. The marker must name the exact saved
-        # client list and be inside the installer's managed block.
+    if ($restoredClient -or $restoredExtractor) {
+        # A marker inside the managed block must match the restored choice.
         $insideManaged = $false
-        $savedRequest = $null
+        $savedClientRequest = $null
+        $savedExtractorRequest = $null
         foreach ($line in (Get-Content -LiteralPath $envFile)) {
             if ($line -ceq $EnvBegin) { $insideManaged = $true; continue }
             if ($line -ceq $EnvEnd) { $insideManaged = $false; continue }
-            if ($insideManaged -and $line -cmatch '^PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=(.*)$') {
-                $savedRequest = $Matches[1]
+            if (-not $insideManaged) { continue }
+            switch -CaseSensitive -Regex ($line) {
+                '^PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=(.*)$' { $savedClientRequest = $Matches[1] }
+                '^PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED=(.*)$' { $savedExtractorRequest = $Matches[1] }
             }
         }
-        $clientExplicit = $savedRequest -ceq $Client
+        if ($restoredClient -and $Client) { $clientExplicit = $savedClientRequest -ceq $Client }
+        $restoredExtractorRequested = $restoredExtractor -and $Extractor -and ($savedExtractorRequest -ceq $Extractor)
     }
     if ($restoredExtractor) { Assert-ExtractorArgs }
 }
@@ -1537,7 +1541,7 @@ if ($ClientOnly) {
 
 # -- 3. extractor choice (explicit, no default) ---------------------------------
 # A client-only install has none: the remote daemon runs its own extractor.
-$extractorRequested = [bool]$Extractor -and -not $restoredExtractor
+$extractorRequested = $restoredExtractorRequested -or ([bool]$Extractor -and -not $restoredExtractor)
 if (-not $Extractor -and -not $ClientOnly) {
     if (-not $interactive -or $script:installerRerun) {
         $insideManaged = $false
@@ -1883,6 +1887,7 @@ if (-not $ClientOnly) {
     $block.Add("PSEUDOLIFE_INSTALL_SHIM_PORT=$ShimPort")
     $block.Add("PSEUDOLIFE_INSTALL_CLIENT=$clientList")
     if ($requestedClients) { $block.Add("PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=$clientList") }
+    if ($extractorRequested) { $block.Add("PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED=$Extractor") }
     $block.Add("PSEUDOLIFE_INSTALL_BANK_LOCATION=$($script:BankLocation)")
     $block.Add("PSEUDOLIFE_INSTALL_INSTRUCTIONS=$(if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { 'auto' })")
     $block.Add("PSEUDOLIFE_INSTALL_CODEX_HOOKS=$CodexHooks")
@@ -2060,6 +2065,7 @@ $claudePluginMarketplace = "pseudolife-mcp"
 # shorthand as a GitHub source and refreshes it over SSH, which fails on a
 # host with no GitHub key (seen 2026-10-04). The repository is public.
 $claudePluginMarketplaceSource = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+# Claude Code's override points to the plugins root, which contains cache/.
 $claudePluginDir = if ($env:CLAUDE_CODE_PLUGIN_CACHE_DIR) { $env:CLAUDE_CODE_PLUGIN_CACHE_DIR }
                    elseif ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR "plugins" }
                    else { Join-Path $env:USERPROFILE ".claude\plugins" }
@@ -3723,7 +3729,9 @@ if ($shimAutostartFamily) {
         } catch { $autostartCode = 1 }
         if ($autostartCode -eq 3) {
             # The native client has already printed the task and its repair.
-            $script:extractorAutostartFailure = "Task Scheduler refused to change an existing task. Follow the recovery above and rerun the installer with the same extractor mode."
+            if ($extractorRequested -and -not $restoredExtractor) {
+                $script:extractorAutostartFailure = "The existing task was left in place because it was registered from an elevated shell or by another account. Follow the task recovery above and rerun the installer with the same extractor mode."
+            }
         } elseif ($autostartCode -ne 0) {
             Write-Warning "Shim autostart registration or start failed (see the message above)."
             $script:extractorAutostartFailure = "Shim autostart registration or start failed. Fix the reported error and rerun the installer with the same extractor mode."
@@ -4197,7 +4205,7 @@ function Get-CodexHookCompletionReason {
             if ($codexSetup.recovery -clike "PseudoLife hooks await approval.*") {
                 "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
             } else {
-                "Hooks are not installed. Rerun the installer with --codex-hook-trust yes (PowerShell -CodexHookTrust yes)."
+                "Hooks are not installed. Rerun the installer with -CodexHookTrust yes."
             }
         }
         "unavailable" {
@@ -4213,8 +4221,8 @@ function Get-ClientSetupWarnings {
     $script:httpCredentialWarnings
     if ($script:legacyClaude -eq "error") { "Claude Code legacy hook cleanup failed. See the repair above." }
     if (-not $script:clientSetupFailures.ContainsKey("codex") -and
-        (($CodexHooks -eq "skip" -and $hookState["codex"] -in "pending", "unavailable") -or
-         ($CodexHookTrust -eq "no" -and $hookState["codex"] -eq "pending"))) {
+        ($hookState["codex"] -eq "pending" -or
+         ($CodexHooks -eq "skip" -and $hookState["codex"] -eq "unavailable"))) {
         "Codex hook setup needs attention. $(Get-CodexHookCompletionReason)"
     }
     if ($script:codexRuntimeDefaults -eq "failed") { "Codex runtime defaults were not confirmed. $script:codexRuntimeRecovery" }
@@ -4246,13 +4254,8 @@ function Get-ClientCompletionReasons([string]$Provider, [string]$ConnectionFailu
             }
         }
         "codex" {
-            if (-not $ConnectionFailure -and $CodexHooks -ne "skip") {
-                switch ($hookState["codex"]) {
-                    "unavailable" { Get-CodexHookCompletionReason }
-                    "pending" {
-                        if ($CodexHookTrust -ne "no") { Get-CodexHookCompletionReason }
-                    }
-                }
+            if (-not $ConnectionFailure -and $CodexHooks -ne "skip" -and $hookState["codex"] -eq "unavailable") {
+                Get-CodexHookCompletionReason
             }
         }
     }

@@ -973,7 +973,8 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
                   runtime_failed: bool = False, gemini_list: str = "", show_ladder: bool = False,
-                  hook_report: str = "", hook_trust: str = "yes"):
+                  hook_report: str = "", hook_trust: str = "yes",
+                  hook_interactive: bool = False):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex calls."""
@@ -994,7 +995,13 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
     if runtime_failed:
         steps = steps.replace("codex-runtime-defaults)\n", "codex-runtime-defaults) return 1\n", 1)
     if hook_report:
-        steps = steps.replace(_HOOKS_READY, 'printf "%s\\n" "$FAKE_HOOK_REPORT"', 1)
+        steps = steps.replace(
+            _HOOKS_READY,
+            'printf "hook-options|%s\\n" "$*" >> "$CALL_LOG"; printf "%s\\n" "$FAKE_HOOK_REPORT"', 1)
+    terminal = (
+        "function [ { if [[ $* == '! -t 0 ]' ]]; then return 1; fi; builtin [ \"$@\"; }\n"
+        if hook_interactive else ""
+    )
     finish_fixture = ""
     if requested is not None:
         if native_exit and not gemini_list:
@@ -1017,10 +1024,11 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
         f"CLIENTS='codex{' gemini' if requested is not None else ''}'\n"
         f"REQUESTED_CLIENTS='{requested or ''}'\n"
-        f"CODEX_HOOKS=auto CODEX_HOOK_TRUST={hook_trust} INSTRUCTIONS=auto CLAUDE_MD='' EXPLICIT_ARGS=''\n"
+        f"CODEX_HOOKS=auto CODEX_HOOK_TRUST={hook_trust} INSTRUCTIONS={'skip' if hook_interactive else 'auto'} "
+        "CLAUDE_MD='' EXPLICIT_ARGS=''\n"
         "AGENTS_FILE='' TRANSPORT=shim\n"
         + _between("ops/install-native.sh", "get_env() {", "\n") + "\n" + native_stub.BASH + "\n"
-        + steps + stages + ladder
+        + terminal + steps + stages + ladder
         + "\nprintf 'MCP_CODEX=%s\\n' \"$MCP_CODEX\"\n" + finish_fixture,
         strict="set -euo pipefail",
         extra_env={"FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
@@ -1169,8 +1177,6 @@ CODEX_HOOK_APPROVAL = (
     "Review and trust the Pseudolife handlers, then start a new session."
 )
 CODEX_HOOK_REPORTS = [
-    pytest.param("pending", "PseudoLife hooks await approval. Rerun the installer interactively, "
-                 "or review them in Codex /hooks.", CODEX_HOOK_APPROVAL, id="approval"),
     pytest.param("unavailable", "The fixture could not write hooks.",
                  "Hooks could not be set up. Fix the hook problem reported above and rerun the installer.",
                  id="failure"),
@@ -1196,14 +1202,29 @@ def test_codex_hook_failure_is_reported_at_completion(bash, tmp_path, hook_statu
         assert "Warnings" in proc.stderr.splitlines()
 
 
+CODEX_PENDING_CASES = [
+    pytest.param("ask", False, "No hooks are installed.", id="unattended"),
+    pytest.param("ask", True, "PseudoLife hooks await approval. Use Codex /hooks.", id="declined"),
+    pytest.param("no", False, "PseudoLife hooks await approval. Use Codex /hooks.", id="opt-out"),
+]
+
+
+@pytest.mark.parametrize("trust,interactive,recovery", CODEX_PENDING_CASES)
 @BASH
-def test_untrusted_codex_hooks_use_doctor_guidance_without_failing(bash, tmp_path):
-    report = json.dumps(dict(status="pending", source="manual", instructions="present",
-                             recovery="PseudoLife hooks await approval. Use Codex /hooks."))
-    proc, _ = _codex_wiring(_Shell(bash, tmp_path), requested="codex gemini",
-                            hook_report=report, hook_trust="no")
+def test_pending_codex_hooks_warn_without_failing(bash, tmp_path, trust, interactive, recovery):
+    shell = _Shell(bash, tmp_path)
+    report = json.dumps(dict(status="pending", source="manual", instructions="present", recovery=recovery))
+    proc, adds = _codex_wiring(shell, requested="codex gemini", hook_report=report,
+                               hook_trust=trust, hook_interactive=interactive)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert proc.stderr.splitlines()[-2:] == ["Warnings", "Codex hook setup needs attention. " + CODEX_HOOK_APPROVAL]
+    assert adds and "REMAINING_STEPS_FINISHED" in proc.stdout
+    [hook_args] = [line for line in shell.logged() if line.startswith("hook-options|")]
+    assert f" --trust {trust} " in hook_args
+    assert ("--non-interactive" in hook_args) is not interactive
+    reason = CODEX_HOOK_APPROVAL if recovery.startswith("PseudoLife") else (
+        "Hooks are not installed. Rerun the installer with --codex-hook-trust yes."
+    )
+    assert proc.stderr.splitlines()[-2:] == ["Warnings", "Codex hook setup needs attention. " + reason]
 
 
 @BASH

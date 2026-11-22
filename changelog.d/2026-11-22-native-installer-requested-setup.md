@@ -1,3 +1,4 @@
 ### Fixed (2026-11-22 — Report incomplete requested installer setup)
-- Both native installers finish the remaining work and exit 5 if a requested client's plugin or hooks could not be set up, or shim autostart fails for an explicitly selected extractor. The completion summary names the failed step and its recovery.
+- Both native installers finish setup and exit 5 when a requested client's plugin or hooks fail, or native shim autostart fails for an extractor chosen by flag or typed prompt answer, including a restored explicit choice. The summary names each failure and its recovery. Hooks awaiting approval and platforms without native shim autostart produce warnings. An existing Windows task that this shell cannot change produces exit 5 only when the extractor was explicitly selected in the current run.
 - Both native installers report a linked client-only token file as an invalid file type, including when its target is empty or missing.
+- Both native installers look for Claude Code plugin registrations under the active profile or the plugins root set by CLAUDE_CODE_PLUGIN_CACHE_DIR.

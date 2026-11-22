@@ -71,6 +71,8 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
     home = Path(env["HOME"])
     if sc.profile_var:
         env[sc.profile_var] = _bash_fixture_path(bash, tmp_path / "active profile", env)
+        if sc.profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
+            env["CLAUDE_CONFIG_DIR"] = _bash_fixture_path(bash, tmp_path / "separate config", env)
     if sc.marketplace:
         _record_marketplace(home)
     if sc.plugin:
@@ -158,6 +160,8 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     home = Path(env["USERPROFILE"])
     if sc.profile_var:
         env[sc.profile_var] = str(tmp_path / "active profile")
+        if sc.profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
+            env["CLAUDE_CONFIG_DIR"] = str(tmp_path / "separate config")
     if sc.marketplace:
         _record_marketplace(home)
     if sc.plugin:
@@ -377,9 +381,21 @@ def test_plugin_failure_is_reported_at_completion(variant, tmp_path, requested):
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
 @pytest.mark.parametrize("profile_var", ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR"])
 def test_plugin_in_active_profile_is_installed_and_preserved(variant, tmp_path, profile_var):
+    root = tmp_path / "active profile"
+    if profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
+        # The override is the root. A record in the nested cache cannot stand
+        # in for installed_plugins.json beside the marketplaces and cache.
+        cache = root / "cache"
+        cache.mkdir(parents=True)
+        (cache / "installed_plugins.json").write_text(
+            json.dumps({"plugins": {PLUGIN_ID: [{"version": "decoy"}]}}), encoding="utf-8")
+        registry = root / "installed_plugins.json"
+    else:
+        registry = root / "plugins" / "installed_plugins.json"
     scenario = Scenario(requested=True, profile_var=profile_var)
     state, _, calls, proc = _run(variant, tmp_path, scenario)
     assert state == f"installed:{FAKE_VERSION}"
+    assert PLUGIN_ID in json.loads(registry.read_text(encoding="utf-8-sig"))["plugins"]
     assert "plugin detected" in proc.stdout.decode()
     assert f"claude|plugin install --yes {PLUGIN_ID}" in calls
     state, _, rerun_calls, proc = _run(variant, tmp_path, scenario)

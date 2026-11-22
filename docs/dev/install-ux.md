@@ -30,8 +30,10 @@ in line as they are touched, with no retrofit sweep.
   `--test-login` / `-TestLogin` and checkout-mode update, and checkout
   builds only by checkout mode.
 
-The native installers finish the remaining work and exit 5 if a requested
-client's connection, plugin, or hooks could not be set up, with a final line
-naming what failed and its recovery step.
-They also exit 5 at completion if shim autostart fails for an extractor
-explicitly selected by flag or prompt.
+The native installers finish the remaining work and exit 5 when setup fails
+for a requested client's connection, plugin, or hooks, with one final line
+per failure and warning-only guidance for hooks awaiting approval.
+They also exit 5 at completion when native shim autostart fails for an
+extractor selected by flag or typed prompt answer, in this run or restored
+from one, with warnings on platforms without native autostart and exit 5
+for locked Windows tasks only when the choice was made in this run.

@@ -790,6 +790,7 @@ RECORDED_BANK_LOCATION=""
 RECORDED_INSTRUCTIONS_GEMINI=""
 RECORDED_INSTRUCTIONS_GENERIC=""
 restored_extractor=""
+restored_extractor_requested=""
 restored_client=""
 if [ -z "${CLIENT_ONLY:-}${DAEMON_URL:-}${PSEUDOLIFE_MCP_DAEMON_URL:-}" ] && [ -f "$env_file" ]; then
     recorded_choices="$(installer_state choices --env-file "$env_file")" || exit 2
@@ -818,19 +819,30 @@ if [ -z "${CLIENT_ONLY:-}${DAEMON_URL:-}${PSEUDOLIFE_MCP_DAEMON_URL:-}" ] && [ -
             NO_TOKEN) case " $EXPLICIT_ARGS " in *" --no-token "*) ;; *) [ "$choice_value" != 1 ] || NO_TOKEN=1 ;; esac ;;
         esac
     done <<< "$recorded_choices"
-    if [ -n "$restored_client" ] && [ -n "$CLIENT" ]; then
-        # Old records lack provenance. Only a marker for this exact list
-        # inside the managed block proves that the earlier choice was explicit.
-        saved_request="$(awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
+    if [ -n "$restored_client$restored_extractor" ]; then
+        # A marker inside the managed block must match the restored choice.
+        saved_requests="$(awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
             { sub(/\r$/, "") }
             $0 == b { inside=1; next }
             $0 == e { inside=0; next }
             inside && /^PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=/ {
-                sub(/^PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=/, ""); request=$0
+                sub(/^PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=/, ""); client=$0
             }
-            END { print request }
+            inside && /^PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED=/ {
+                sub(/^PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED=/, ""); extractor=$0
+            }
+            END { print client; print extractor }
         ' "$env_file")"
-        [ "$saved_request" != "$CLIENT" ] || CLIENT_EXPLICIT=1
+        {
+            IFS= read -r saved_client_request || true
+            IFS= read -r saved_extractor_request || true
+        } <<< "$saved_requests"
+        if [ -n "$restored_client" ] && [ -n "$CLIENT" ] && [ "$saved_client_request" = "$CLIENT" ]; then
+            CLIENT_EXPLICIT=1
+        fi
+        if [ -n "$restored_extractor" ] && [ -n "$EXTRACTOR" ] && [ "$saved_extractor_request" = "$EXTRACTOR" ]; then
+            restored_extractor_requested=1
+        fi
     fi
     [ -z "$restored_extractor" ] || check_extractor_args
 fi
@@ -1617,7 +1629,7 @@ fi
 
 # ── 3. extractor choice (explicit, no default) ─────────────────────────────
 # A client-only install has none: the remote daemon runs its own extractor.
-extractor_requested=""
+extractor_requested="${restored_extractor_requested:-}"
 if [ -n "$EXTRACTOR" ] && [ -z "${restored_extractor:-}" ]; then extractor_requested=1; fi
 if [ -z "$EXTRACTOR" ] && [ -z "$CLIENT_ONLY" ]; then
     if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then
@@ -1979,6 +1991,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         echo "PSEUDOLIFE_INSTALL_SHIM_PORT=$SHIM_PORT"
         echo "PSEUDOLIFE_INSTALL_CLIENT=$CLIENT_LIST"
         if [ -n "${REQUESTED_CLIENTS:-}" ]; then echo "PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=$CLIENT_LIST"; fi
+        if [ -n "${extractor_requested:-}" ]; then echo "PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED=$EXTRACTOR"; fi
         echo "PSEUDOLIFE_INSTALL_BANK_LOCATION=$BANK_LOCATION"
         echo "PSEUDOLIFE_INSTALL_INSTRUCTIONS=${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
         echo "PSEUDOLIFE_INSTALL_CODEX_HOOKS=$CODEX_HOOKS"
@@ -2153,6 +2166,7 @@ CLAUDE_PLUGIN_MARKETPLACE="pseudolife-mcp"
 # shorthand as a GitHub source and refreshes it over SSH, which fails on a
 # host with no GitHub key (seen 2026-10-04). The repository is public.
 CLAUDE_PLUGIN_MARKETPLACE_SOURCE="https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+# Claude Code's override points to the plugins root, which contains cache/.
 CLAUDE_PLUGIN_DIR="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins}"
 PLUGIN_CLAUDE=""
 PLUGIN_CLAUDE_RECOVERY=""
@@ -3883,8 +3897,9 @@ if [ -n "$shim_autostart_family" ]; then
     ensure_shim
     shim_autostart_args=(extractor-shim install-autostart "$shim_autostart_family" --repo "$repo" --port "$SHIM_PORT" --model "$MODEL")
     if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
-        EXTRACTOR_AUTOSTART_FAILURE="Native shim autostart is unavailable on macOS. Rerun with --extractor sidecar."
-        printf 'WARNING: %s\n' "$EXTRACTOR_AUTOSTART_FAILURE" >&2
+        printf -v manual_shim '%q ' "${SHIM_PATH:-pseudolife-mcp}" extractor-shim "$shim_autostart_family" \
+            --repo "$repo" --port "$SHIM_PORT" --model "$MODEL"
+        printf 'WARNING: Native shim autostart is unavailable on macOS. Start the shim by hand with %s, or rerun the installer with --extractor sidecar.\n' "${manual_shim% }" >&2
     elif [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
         echo "WARNING: shim autostart was not registered: the native client is unavailable (see above)" >&2
         EXTRACTOR_AUTOSTART_FAILURE="Shim autostart was not registered because the native client is unavailable. Fix the native client install and rerun the installer with the same extractor mode."
@@ -4338,7 +4353,7 @@ codex_hook_completion_reason() {
             if [[ "${CODEX_HOOK_RECOVERY:-}" == "PseudoLife hooks await approval."* ]]; then
                 echo "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
             else
-                echo "Hooks are not installed. Rerun the installer with --codex-hook-trust yes (PowerShell -CodexHookTrust yes)."
+                echo "Hooks are not installed. Rerun the installer with --codex-hook-trust yes."
             fi ;;
         unavailable)
             case "${CODEX_HOOK_RECOVERY:-}" in
@@ -4353,8 +4368,8 @@ client_setup_warnings() {
     if [ -n "${HTTP_CREDENTIAL_WARNINGS:-}" ]; then printf '%s\n' "$HTTP_CREDENTIAL_WARNINGS"; fi
     if [ "${LEGACY_CLAUDE:-}" = error ]; then echo "Claude Code legacy hook cleanup failed. See the repair above."; fi
     if [ -z "${CODEX_CLIENT_FAILURE:-}" ]; then
-        case "${HOOK_CODEX:-}:${CODEX_HOOKS:-}:${CODEX_HOOK_TRUST:-}" in
-            pending:*:no|pending:skip:*|unavailable:skip:*)
+        case "${HOOK_CODEX:-}:${CODEX_HOOKS:-}" in
+            pending:*|unavailable:skip)
                 printf 'Codex hook setup needs attention. %s\n' "$(codex_hook_completion_reason)" ;;
         esac
     fi
@@ -4386,12 +4401,8 @@ client_completion_reasons() {
                 echo "Hook credentials were not written. Set the daemon URL and token file in the settings file's env block as shown above."
             fi ;;
         codex)
-            if [ -z "$connection_failure" ] && [ "${CODEX_HOOKS:-}" != skip ]; then
-                case "${HOOK_CODEX:-}" in
-                    unavailable) codex_hook_completion_reason ;;
-                    pending)
-                        if [ "${CODEX_HOOK_TRUST:-}" != no ]; then codex_hook_completion_reason; fi ;;
-                esac
+            if [ -z "$connection_failure" ] && [ "${CODEX_HOOKS:-}" != skip ] && [ "${HOOK_CODEX:-}" = unavailable ]; then
+                codex_hook_completion_reason
             fi ;;
     esac
     if [ -n "$connection_failure" ]; then printf '%s\n' "$connection_failure"; fi
