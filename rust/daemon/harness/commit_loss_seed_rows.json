@@ -1,0 +1,171 @@
+{
+  "vectors": {
+    "vector_1": "[0.8,-0.6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+    "vector_2": "[0.88148,-0.4722214,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]"
+  },
+  "cases": {
+    "forget-lesson-source": {
+      "positions": {"entries_id_seq": [2, true], "lessons_id_seq": [1, true], "retrieval_events_id_seq": [1, true], "store_decisions_id_seq": [1, true]},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ],
+        "cms_counters": [
+          {"id": 1, "tier_hits": {"flat": 0}, "updated_at": 1795000000, "preset_name": "flat", "tier_queries": 0, "surprise_history": {"flat": [1.0, 0.0]}, "interaction_count": 2, "logical_turn_count": 0, "consolidation_events": []}
+        ],
+        "entries": [
+          {"id": 1, "ts": 1795000000, "band": "flat", "tags": [], "text": "The backup job runs at 02:00 nightly.", "slots": [], "source": "agent", "surprise": 1, "authority": null, "embedding": "vector_1", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": null, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": null, "distortion_tolerance": null, "explicit_reinforcements": 0},
+          {"id": 2, "ts": 1795000000, "band": "flat", "tags": [], "text": "A note about the team lunch near the office.", "slots": [], "source": "agent", "surprise": 0, "authority": null, "embedding": "vector_1", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": null, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": null, "distortion_tolerance": null, "explicit_reinforcements": 0}
+        ],
+        "lessons": [
+          {"id": 1, "about": null, "value": "Run backups at night.", "entity": "schedule backups", "origin": "agent", "status": "current", "outcome": "success", "support": ["signal:1"], "tx_time": null, "version": 1, "hlc_phys": null, "polarity": "+", "attribute": "timing", "embedding": "vector_1", "entity_id": null, "writer_id": null, "confidence": 0.7, "provenance": ["entry:1"], "session_id": null, "valid_time": null, "asserted_at": 1700000000, "entity_norm": "schedule-backups", "hlc_logical": null, "superseded_at": null, "attribute_norm": "timing", "last_confirmed": 1700000000, "object_entity_id": null, "supersedes_value": null, "superseded_by_value": null}
+        ],
+        "store_decisions": [
+          {"id": 1, "store": "lesson", "action": "lineage", "reason": "verified_dependencies", "record": {"lesson": "Run backups at night.", "asserted_at": 1700000000, "source_entry_ids": [1]}, "decided_at": 1700000000.5, "decided_by": "lesson_synthesis", "entity_norm": "schedule-backups", "attribute_norm": "timing"}
+        ],
+        "retrieval_events": [
+          {"id": 1, "origin": "search", "params": {"bm25": {"b": 0.75, "k1": 1.5, "top_n": 20, "weight": 0.3, "enabled": true, "min_score": 0.1}, "top_k": 1, "filters": {"tags": null, "bands": null, "sources": null, "episodes": null, "min_logical_turn": null}, "reranker": {"fired": false, "top_n": 20, "enabled": false, "skip_reason": null, "scoring_policy": "complete_pool_or_skip", "candidate_count": 0, "scored_candidates": 0}, "timeline": {"fired": false, "enabled": false}, "min_score": 0.25, "band_count": 1, "recency_boost": false, "candidate_pool": {"fusion": "weighted_sum", "pool_size": 0, "multiplier": 1, "rerank_position": "after_cut"}, "hide_superseded": false, "min_score_explicit": false, "contiguity_neighbors": 0, "recency_base_half_life_s": 86400.0}, "served": [], "created_at": 1795000000, "episode_id": null, "query_text": "warmup probe", "session_id": null, "served_facts": null}
+        ]
+      }
+    },
+    "supersede": {
+      "positions": {"entries_id_seq": [1, true], "retrieval_events_id_seq": [1, true]},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ],
+        "cms_counters": [
+          {"id": 1, "tier_hits": {"flat": 0}, "updated_at": 1795000000, "preset_name": "flat", "tier_queries": 0, "surprise_history": {"flat": [1.0]}, "interaction_count": 1, "logical_turn_count": 0, "consolidation_events": []}
+        ],
+        "entries": [
+          {"id": 1, "ts": 1795000000, "band": "flat", "tags": [], "text": "The cache TTL is 300 seconds.", "slots": [], "source": "agent", "surprise": 1, "authority": null, "embedding": "vector_2", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": null, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": null, "distortion_tolerance": null, "explicit_reinforcements": 0}
+        ],
+        "retrieval_events": [
+          {"id": 1, "origin": "search", "params": {"bm25": {"b": 0.75, "k1": 1.5, "top_n": 20, "weight": 0.3, "enabled": true, "min_score": 0.1}, "top_k": 1, "filters": {"tags": null, "bands": null, "sources": null, "episodes": null, "min_logical_turn": null}, "reranker": {"fired": false, "top_n": 20, "enabled": false, "skip_reason": null, "scoring_policy": "complete_pool_or_skip", "candidate_count": 0, "scored_candidates": 0}, "timeline": {"fired": false, "enabled": false}, "min_score": 0.25, "band_count": 1, "recency_boost": false, "candidate_pool": {"fusion": "weighted_sum", "pool_size": 0, "multiplier": 1, "rerank_position": "after_cut"}, "hide_superseded": false, "min_score_explicit": false, "contiguity_neighbors": 0, "recency_base_half_life_s": 86400.0}, "served": [], "created_at": 1795000000, "episode_id": null, "query_text": "warmup probe", "session_id": null, "served_facts": null}
+        ]
+      }
+    },
+    "reinstate": {
+      "positions": {"entries_id_seq": [2, true], "retrieval_events_id_seq": [1, true]},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ],
+        "cms_counters": [
+          {"id": 1, "tier_hits": {"flat": 0}, "updated_at": 1795000000, "preset_name": "flat", "tier_queries": 0, "surprise_history": {"flat": [1.0, 0.0]}, "interaction_count": 2, "logical_turn_count": 0, "consolidation_events": []}
+        ],
+        "entries": [
+          {"id": 1, "ts": 1795000000, "band": "flat", "tags": [], "text": "The cache TTL is 300 seconds.", "slots": [], "source": "agent", "surprise": 1, "authority": null, "embedding": "vector_2", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": 1795000000, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": "The cache TTL is 600 seconds.", "distortion_tolerance": null, "explicit_reinforcements": 0},
+          {"id": 2, "ts": 1795000000, "band": "flat", "tags": [], "text": "The cache TTL is 600 seconds.", "slots": [], "source": "correction", "surprise": 0, "authority": null, "embedding": "vector_2", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": null, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": null, "distortion_tolerance": null, "explicit_reinforcements": 0}
+        ],
+        "retrieval_events": [
+          {"id": 1, "origin": "search", "params": {"bm25": {"b": 0.75, "k1": 1.5, "top_n": 20, "weight": 0.3, "enabled": true, "min_score": 0.1}, "top_k": 1, "filters": {"tags": null, "bands": null, "sources": null, "episodes": null, "min_logical_turn": null}, "reranker": {"fired": false, "top_n": 20, "enabled": false, "skip_reason": null, "scoring_policy": "complete_pool_or_skip", "candidate_count": 0, "scored_candidates": 0}, "timeline": {"fired": false, "enabled": false}, "min_score": 0.25, "band_count": 1, "recency_boost": false, "candidate_pool": {"fusion": "weighted_sum", "pool_size": 0, "multiplier": 1, "rerank_position": "after_cut"}, "hide_superseded": false, "min_score_explicit": false, "contiguity_neighbors": 0, "recency_base_half_life_s": 86400.0}, "served": [], "created_at": 1795000000, "episode_id": null, "query_text": "warmup probe", "session_id": null, "served_facts": null}
+        ]
+      }
+    },
+    "consolidate": {
+      "positions": {"entries_id_seq": [2, true], "retrieval_events_id_seq": [1, true]},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ],
+        "cms_counters": [
+          {"id": 1, "tier_hits": {"flat": 0}, "updated_at": 1795000000, "preset_name": "flat", "tier_queries": 0, "surprise_history": {"flat": [1.0, 0.0]}, "interaction_count": 2, "logical_turn_count": 0, "consolidation_events": []}
+        ],
+        "entries": [
+          {"id": 1, "ts": 1795000000, "band": "flat", "tags": [], "text": "The staging cluster runs three nodes.", "slots": [], "source": "agent", "surprise": 1, "authority": null, "embedding": "vector_1", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": null, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": null, "distortion_tolerance": null, "explicit_reinforcements": 0},
+          {"id": 2, "ts": 1795000000, "band": "flat", "tags": [], "text": "Staging cluster has three nodes running.", "slots": [], "source": "agent", "surprise": 0, "authority": null, "embedding": "vector_1", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": null, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": null, "distortion_tolerance": null, "explicit_reinforcements": 0}
+        ],
+        "retrieval_events": [
+          {"id": 1, "origin": "search", "params": {"bm25": {"b": 0.75, "k1": 1.5, "top_n": 20, "weight": 0.3, "enabled": true, "min_score": 0.1}, "top_k": 1, "filters": {"tags": null, "bands": null, "sources": null, "episodes": null, "min_logical_turn": null}, "reranker": {"fired": false, "top_n": 20, "enabled": false, "skip_reason": null, "scoring_policy": "complete_pool_or_skip", "candidate_count": 0, "scored_candidates": 0}, "timeline": {"fired": false, "enabled": false}, "min_score": 0.25, "band_count": 1, "recency_boost": false, "candidate_pool": {"fusion": "weighted_sum", "pool_size": 0, "multiplier": 1, "rerank_position": "after_cut"}, "hide_superseded": false, "min_score_explicit": false, "contiguity_neighbors": 0, "recency_base_half_life_s": 86400.0}, "served": [], "created_at": 1795000000, "episode_id": null, "query_text": "warmup probe", "session_id": null, "served_facts": null}
+        ]
+      }
+    },
+    "restore-world-legacy": {
+      "positions": {"entries_id_seq": [1, true], "retrieval_events_id_seq": [1, true], "store_decisions_id_seq": [1, true], "world_facts_id_seq": [2, true]},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ],
+        "cms_counters": [
+          {"id": 1, "tier_hits": {"flat": 0}, "updated_at": 1795000000, "preset_name": "flat", "tier_queries": 0, "surprise_history": {"flat": [1.0]}, "interaction_count": 1, "logical_turn_count": 0, "consolidation_events": []}
+        ],
+        "entries": [
+          {"id": 1, "ts": 1795000000, "band": "flat", "tags": [], "text": "A note so the bank is not empty.", "slots": [], "source": "agent", "surprise": 1, "authority": null, "embedding": "vector_1", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": null, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": null, "distortion_tolerance": null, "explicit_reinforcements": 0}
+        ],
+        "world_facts": [
+          {"id": 2, "value": "2024", "entity": "Rust", "origin": "source", "status": "retired", "support": ["source"], "tx_time": 1795000000, "version": 1, "hlc_phys": 1795000000000, "polarity": "+", "attribute": "edition", "embedding": "vector_1", "writer_id": "unknown", "confidence": 0.85, "provenance": [], "session_id": null, "source_url": "https://doc.rust-lang.org/", "valid_time": 1795000000, "asserted_at": 1795000000, "entity_norm": "rust", "hlc_logical": 0, "content_hash": null, "retrieved_at": 1795000000, "source_quote": "", "source_doc_id": null, "superseded_at": 1795000000, "attribute_norm": "edition", "last_confirmed": 1795000000, "freshness_class": "volatile", "supersedes_value": null, "superseded_by_value": null}
+        ],
+        "store_decisions": [
+          {"id": 1, "store": "world", "action": "retire", "reason": null, "record": {"value": "2024", "entity": "Rust", "origin": "source", "status": "retired", "polarity": "+", "attribute": "edition", "confidence": 0.85, "source_url": "https://doc.rust-lang.org/", "asserted_at": 1795000000.0, "content_hash": null, "retrieved_at": 1795000000.0, "source_quote": "", "source_doc_id": null, "last_confirmed": 1795000000.0, "freshness_class": "volatile"}, "decided_at": 1795000000, "decided_by": "agent", "entity_norm": "rust", "attribute_norm": "edition"}
+        ],
+        "retrieval_events": [
+          {"id": 1, "origin": "search", "params": {"bm25": {"b": 0.75, "k1": 1.5, "top_n": 20, "weight": 0.3, "enabled": true, "min_score": 0.1}, "top_k": 1, "filters": {"tags": null, "bands": null, "sources": null, "episodes": null, "min_logical_turn": null}, "reranker": {"fired": false, "top_n": 20, "enabled": false, "skip_reason": null, "scoring_policy": "complete_pool_or_skip", "candidate_count": 0, "scored_candidates": 0}, "timeline": {"fired": false, "enabled": false}, "min_score": 0.25, "band_count": 1, "recency_boost": false, "candidate_pool": {"fusion": "weighted_sum", "pool_size": 0, "multiplier": 1, "rerank_position": "after_cut"}, "hide_superseded": false, "min_score_explicit": false, "contiguity_neighbors": 0, "recency_base_half_life_s": 86400.0}, "served": [], "created_at": 1795000000, "episode_id": null, "query_text": "warmup probe", "session_id": null, "served_facts": null}
+        ]
+      }
+    },
+    "restore-world-curated": {
+      "positions": {"entries_id_seq": [1, true], "retrieval_events_id_seq": [1, true], "store_decisions_id_seq": [1, true], "world_facts_id_seq": [2, true]},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ],
+        "cms_counters": [
+          {"id": 1, "tier_hits": {"flat": 0}, "updated_at": 1795000000, "preset_name": "flat", "tier_queries": 0, "surprise_history": {"flat": [1.0]}, "interaction_count": 1, "logical_turn_count": 0, "consolidation_events": []}
+        ],
+        "entries": [
+          {"id": 1, "ts": 1795000000, "band": "flat", "tags": [], "text": "A note so the bank is not empty.", "slots": [], "source": "agent", "surprise": 1, "authority": null, "embedding": "vector_1", "episode_id": null, "dream_state": "pending", "access_count": 0, "episode_title": null, "superseded_at": null, "reinforcements": 0, "last_logical_turn": null, "superseded_by_text": null, "distortion_tolerance": null, "explicit_reinforcements": 0}
+        ],
+        "world_facts": [
+          {"id": 1, "value": "Debian 12", "entity": "Curate Host", "origin": "source", "status": "current", "support": ["source"], "tx_time": 1700000000, "version": 1, "hlc_phys": 1700000000000, "polarity": "+", "attribute": "OS", "embedding": null, "writer_id": "seed", "confidence": 0.9, "provenance": [], "session_id": null, "source_url": "https://example.org/host", "valid_time": 1700000000, "asserted_at": 1700000000, "entity_norm": "curate-host", "hlc_logical": 0, "content_hash": null, "retrieved_at": 1700000000, "source_quote": "Debian 12", "source_doc_id": null, "superseded_at": null, "attribute_norm": "os", "last_confirmed": 1700000000, "freshness_class": "evergreen", "supersedes_value": null, "superseded_by_value": null},
+          {"id": 2, "value": "Debian 12 (bookworm)", "entity": "Curate Host", "origin": "source", "status": "retired", "support": ["source"], "tx_time": 1700000050, "version": 1, "hlc_phys": 1700000050000, "polarity": "+", "attribute": "Operating System", "embedding": null, "writer_id": "seed", "confidence": 0.9, "provenance": [], "session_id": null, "source_url": "https://example.org/host", "valid_time": 1700000050, "asserted_at": 1700000050, "entity_norm": "curate-host", "hlc_logical": 1, "content_hash": null, "retrieved_at": 1700000000, "source_quote": "Debian 12 (bookworm)", "source_doc_id": null, "superseded_at": 1700000500, "attribute_norm": "operating-system", "last_confirmed": 1700000050, "freshness_class": "evergreen", "supersedes_value": null, "superseded_by_value": null}
+        ],
+        "store_decisions": [
+          {"id": 1, "store": "world", "action": "retire", "reason": "duplicate", "record": {"key": "curate-host|operating-system", "store": "world", "value": "Debian 12 (bookworm)", "entity": "Curate Host", "origin": "source", "status": "retired", "support": ["source"], "tx_time": 1700000050.0, "version": 1, "hlc_phys": 1700000050000, "polarity": "+", "attribute": "Operating System", "writer_id": "seed", "confidence": 0.9, "provenance": [], "session_id": null, "source_url": "https://example.org/host", "valid_time": 1700000050.0, "asserted_at": 1700000050.0, "entity_norm": "curate-host", "hlc_logical": 1, "content_hash": null, "retrieved_at": 1700000000.0, "source_quote": "Debian 12 (bookworm)", "source_doc_id": null, "superseded_at": 1700000500.0, "attribute_norm": "operating-system", "last_confirmed": 1700000050.0, "freshness_class": "evergreen", "supersedes_value": null, "_curation_duplicate": {"a": {"key": "curate-host|os", "store": "world", "value": "Debian 12", "entity": "Curate Host", "origin": "source", "status": "current", "support": ["source"], "tx_time": 1700000000.0, "version": 1, "hlc_phys": 1700000000000, "polarity": "+", "attribute": "OS", "embedding": null, "writer_id": "seed", "confidence": 0.9, "provenance": [], "session_id": null, "source_url": "https://example.org/host", "valid_time": 1700000000.0, "asserted_at": 1700000000.0, "entity_norm": "curate-host", "hlc_logical": 0, "content_hash": null, "retrieved_at": 1700000000.0, "source_quote": "Debian 12", "source_doc_id": null, "superseded_at": null, "attribute_norm": "os", "last_confirmed": 1700000000.0, "freshness_class": "evergreen", "supersedes_value": null, "superseded_by_value": null}, "b": {"key": "curate-host|operating-system", "store": "world", "value": "Debian 12 (bookworm)", "entity": "Curate Host", "origin": "source", "status": "current", "support": ["source"], "tx_time": 1700000050.0, "version": 1, "hlc_phys": 1700000050000, "polarity": "+", "attribute": "Operating System", "embedding": null, "writer_id": "seed", "confidence": 0.9, "provenance": [], "session_id": null, "source_url": "https://example.org/host", "valid_time": 1700000050.0, "asserted_at": 1700000050.0, "entity_norm": "curate-host", "hlc_logical": 1, "content_hash": null, "retrieved_at": 1700000000.0, "source_quote": "Debian 12 (bookworm)", "source_doc_id": null, "superseded_at": null, "attribute_norm": "operating-system", "last_confirmed": 1700000050.0, "freshness_class": "evergreen", "supersedes_value": null, "superseded_by_value": null}, "keep": "a", "version": 1, "a_fingerprint": "301b7ad67cf072f719bdcb980a1749bcf0f14005eb6ff9725b60201b5af88344", "b_fingerprint": "a1711cdccea01f9ddd2d1ddcaca88196461105ec1653067fd04474db53ecf30a", "loser_embedding": null}, "superseded_by_value": null, "_curation_retired_fingerprint": "eea859d529c08a1671e88a61beae6fa70fa53045a2698fbe020b59f27dbb8ef7", "_curation_evidence_fingerprint": "a1711cdccea01f9ddd2d1ddcaca88196461105ec1653067fd04474db53ecf30a"}, "decided_at": 1700000500, "decided_by": "dream-curation", "entity_norm": "curate-host", "attribute_norm": "operating-system"}
+        ],
+        "retrieval_events": [
+          {"id": 1, "origin": "search", "params": {"bm25": {"b": 0.75, "k1": 1.5, "top_n": 20, "weight": 0.3, "enabled": true, "min_score": 0.1}, "top_k": 1, "filters": {"tags": null, "bands": null, "sources": null, "episodes": null, "min_logical_turn": null}, "reranker": {"fired": false, "top_n": 20, "enabled": false, "skip_reason": null, "scoring_policy": "complete_pool_or_skip", "candidate_count": 0, "scored_candidates": 0}, "timeline": {"fired": false, "enabled": false}, "min_score": 0.25, "band_count": 1, "recency_boost": false, "candidate_pool": {"fusion": "weighted_sum", "pool_size": 0, "multiplier": 1, "rerank_position": "after_cut"}, "hide_superseded": false, "min_score_explicit": false, "contiguity_neighbors": 0, "recency_base_half_life_s": 86400.0}, "served": [], "created_at": 1795000000, "episode_id": null, "query_text": "warmup probe", "session_id": null, "served_facts": null}
+        ]
+      }
+    },
+    "standalone-shutdown": {
+      "positions": {},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ]
+      }
+    },
+    "counters-restore": {
+      "positions": {"retrieval_events_id_seq": [1, true]},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ],
+        "retrieval_events": [
+          {"id": 1, "origin": "search", "params": {"bm25": {"b": 0.75, "k1": 1.5, "top_n": 20, "weight": 0.3, "enabled": true, "min_score": 0.1}, "top_k": 1, "filters": {"tags": null, "bands": null, "sources": null, "episodes": null, "min_logical_turn": null}, "reranker": {"fired": false, "top_n": 20, "enabled": false, "skip_reason": null, "scoring_policy": "complete_pool_or_skip", "candidate_count": 0, "scored_candidates": 0}, "timeline": {"fired": false, "enabled": false}, "min_score": 0.25, "band_count": 1, "recency_boost": false, "candidate_pool": {"fusion": "weighted_sum", "pool_size": 0, "multiplier": 1, "rerank_position": "after_cut"}, "hide_superseded": false, "min_score_explicit": false, "contiguity_neighbors": 0, "recency_base_half_life_s": 86400.0}, "served": [], "created_at": 1795000000, "episode_id": null, "query_text": "warmup probe", "session_id": null, "served_facts": null}
+        ]
+      }
+    },
+    "search-after-restart": {
+      "positions": {"retrieval_events_id_seq": [1, true]},
+      "rows": {
+        "meta": [
+          {"key": "curation_listing_spelling_v2", "value": {"at": 1795000000.0, "copied": 0}},
+          {"key": "dream_ack_secret_v1", "value": "0101010101010101010101010101010101010101010101010101010101010101"}
+        ],
+        "retrieval_events": [
+          {"id": 1, "origin": "search", "params": {"bm25": {"b": 0.75, "k1": 1.5, "top_n": 20, "weight": 0.3, "enabled": true, "min_score": 0.1}, "top_k": 1, "filters": {"tags": null, "bands": null, "sources": null, "episodes": null, "min_logical_turn": null}, "reranker": {"fired": false, "top_n": 20, "enabled": false, "skip_reason": null, "scoring_policy": "complete_pool_or_skip", "candidate_count": 0, "scored_candidates": 0}, "timeline": {"fired": false, "enabled": false}, "min_score": 0.25, "band_count": 1, "recency_boost": false, "candidate_pool": {"fusion": "weighted_sum", "pool_size": 0, "multiplier": 1, "rerank_position": "after_cut"}, "hide_superseded": false, "min_score_explicit": false, "contiguity_neighbors": 0, "recency_base_half_life_s": 86400.0}, "served": [], "created_at": 1795000000, "episode_id": null, "query_text": "warmup probe", "session_id": null, "served_facts": null}
+        ]
+      }
+    }
+  }
+}

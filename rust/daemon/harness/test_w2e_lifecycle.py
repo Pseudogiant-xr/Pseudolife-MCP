@@ -42,12 +42,16 @@ def test_tls_proof_isolates_libpq_default_certificate_files(monkeypatch, tmp_pat
 
 
 @pytest.fixture
-def harness(monkeypatch):
+def harness(monkeypatch, tmp_path):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent))
     import pgdisposable as pg
     from rust.cli_harness.run_names import RunNames
     h = importlib.import_module("w2e")
     monkeypatch.setattr(pg, "NAMES", RunNames())
+    # A driver's main() takes the real database turn when this host's marker
+    # exists; no unit test here may reach it.
+    for module in (h, h.w1a, importlib.import_module("w2e_shutdown")):
+        monkeypatch.setattr(module, "_DATABASE_TURN_MARKER", tmp_path / "no-database-turn")
     return h
 
 
@@ -125,7 +129,7 @@ def test_overlapping_invocations_preserve_each_others_homes(harness, monkeypatch
     roots = []
 
     def overlap(*args, **kwargs):
-        root = args[2]
+        root = args[2] if driver == "w2e" else args[1]
         roots.append(root)
         marker = harness.daemons.make_home(root, "same-scenario", None) / f"run-{len(roots)}"
         marker.write_text("owned evidence", encoding="utf-8")
@@ -135,7 +139,11 @@ def test_overlapping_invocations_preserve_each_others_homes(harness, monkeypatch
             assert marker.read_text(encoding="utf-8") == "owned evidence"
         raise FixtureFailure("after home creation")
 
-    monkeypatch.setattr(harness, "run_scenario" if driver == "w2e" else "prepare_template", overlap)
+    if driver == "w2e":
+        monkeypatch.setattr(harness, "run_scenario", overlap)
+    else:
+        monkeypatch.setattr(module, "prepare_template", lambda owned: None)
+        monkeypatch.setattr(module, "run_arm", overlap)
     with pytest.raises(FixtureFailure, match="after home creation"):
         module.main()
     assert len(set(roots)) == 2
@@ -164,10 +172,529 @@ def test_relative_binary_is_resolved_before_provisioning(harness, monkeypatch, t
     monkeypatch.setattr(argparse.ArgumentParser, "parse_args", capture)
     monkeypatch.setattr(harness.daemons, "scratch_root", lambda: tmp_path)
     monkeypatch.setattr(harness, "run_scenario", stop)
-    monkeypatch.setattr(harness, "prepare_template", stop)
+    if driver == "w2e_shutdown":
+        monkeypatch.setattr(module, "prepare_template", stop)
     with pytest.raises(FixtureFailure, match="before provisioning"):
         module.main()
     assert seen[0].rust_bin == tmp_path / "candidate"
+
+
+ENTRY_COLUMNS = ["id", "band", "text", "embedding", "surprise", "ts", "access_count", "source",
+                 "superseded_at", "superseded_by_text", "last_logical_turn", "episode_id",
+                 "episode_title", "tags", "slots", "authority", "distortion_tolerance",
+                 "dream_state", "reinforcements", "explicit_reinforcements"]
+EVENT_COLUMNS = ["id", "query_text", "origin", "session_id", "episode_id", "served",
+                 "created_at", "params", "served_facts"]
+
+
+def _vector_text(vector):
+    return "[" + ",".join(repr(round(value, 8)) for value in vector) + "]"
+
+
+def _bank():
+    """A dump of an empty bank in the columns the native daemon writes."""
+    return {"catalog": {"sequences": [["public", "entries_id_seq", "bigint", 1, 1, None],
+                                      ["public", "retrieval_events_id_seq", "bigint", 1, 1, 2]]},
+            "rows": {"public.entries": {"columns": list(ENTRY_COLUMNS), "rows": []},
+                     "public.retrieval_events": {"columns": list(EVENT_COLUMNS), "rows": []},
+                     "public.meta": {"columns": ["key", "value"],
+                                     "rows": [["writer_lease_epoch", 2]]}}}
+
+
+def _stored(state, entry_id, text, *, source="agent", tags=(), ts=10.0, surprise=1.0, **changes):
+    """``state`` plus the row a correct store of ``text`` writes."""
+    from embedding_fixture import mean_unit_vector
+    import copy
+    state = copy.deepcopy(state)
+    row = {"id": entry_id, "band": "flat", "text": text,
+           "embedding": _vector_text(mean_unit_vector(text)), "surprise": surprise, "ts": ts,
+           "access_count": 0, "source": source, "superseded_at": None, "superseded_by_text": None,
+           "last_logical_turn": None, "episode_id": None, "episode_title": None,
+           "tags": list(tags), "slots": [], "authority": None, "distortion_tolerance": None,
+           "dream_state": "pending", "reinforcements": 0, "explicit_reinforcements": 0}
+    row.update(changes)
+    state["rows"]["public.entries"]["rows"].append([row[c] for c in ENTRY_COLUMNS])
+    state["catalog"]["sequences"][0][5] = entry_id
+    return state
+
+
+@pytest.mark.parametrize("change, expected", [
+    (None, None),
+    ("lost", "did not survive shutdown exactly once"),
+    ("extra-sequence", "/catalog/sequences"),
+    ("clock", "clock outside the store's window"),
+    ("vector", "differs from the offline fixture's vector"),
+    ("empty-vector", "embedding is not a vector"),
+    ("surprise", "surprise 0.5, expected 1.0"),
+    ("authority", "/rows/public.entries/rows"),
+    ("episode-title", "/rows/public.entries/rows"),
+    ("extra-row", "/rows/public.entries/rows"),
+    ("restart-rewrite", "after restart:"),
+])
+def test_shutdown_store_is_held_to_its_whole_expected_row(harness, change, expected):
+    import copy
+    from embedding_fixture import mean_unit_vector
+    from w2e_shutdown import TEXT, durable_diffs
+
+    before = _bank()
+    changes = {"source": "fixture"}
+    if change == "clock":
+        changes["ts"] = 3.0
+    elif change == "vector":
+        changes["embedding"] = _vector_text([0.6, -0.8] + [0.0] * 1022)
+    elif change == "empty-vector":
+        changes["embedding"] = ""
+    elif change == "surprise":
+        changes["surprise"] = 0.5
+    elif change == "authority":
+        changes["authority"] = "directive"
+    elif change == "episode-title":
+        changes["episode_title"] = "shutdown"
+    stopped = before if change == "lost" else _stored(before, 1, TEXT, **changes)
+    if change == "extra-sequence":
+        stopped["catalog"]["sequences"][0][5] = 2
+    if change == "extra-row":
+        stopped = _stored(stopped, 2, "A second copy of the store.", source="fixture")
+    restarted = copy.deepcopy(stopped)
+    restarted["rows"]["public.meta"]["rows"][0][1] = 3
+    if change == "restart-rewrite":
+        restarted["rows"]["public.entries"]["rows"][0][ENTRY_COLUMNS.index("access_count")] = 1
+    differences = durable_diffs(before, stopped, restarted, TEXT, (9.0, 11.0),
+                                surprise=1.0, vector=mean_unit_vector(TEXT))
+    if expected is None:
+        assert differences == []
+    else:
+        assert any(expected in difference for difference in differences), differences
+
+
+def test_fixture_surprises_follow_the_fixture_vectors(harness):
+    # "cache" is the one in-vocabulary word (an even id, +3) among eight
+    # pieces whose other seven are [UNK] (-3): mean (4, -2.25), against the
+    # all-[UNK] direction (4, -3): 1 - 22.75 / (sqrt(21.0625) * 5).
+    first, second, third = harness.fixture_surprises([
+        "The counters note about the build cache.",
+        "The counters note about the token rotation.",
+        "The counters note after the restart."])
+    assert first == 1.0
+    assert abs(second - (1 - 22.75 / (21.0625 ** 0.5 * 5))) < 1e-12
+    assert abs(second - 0.0085828265) < 1e-9
+    assert third == 0.0
+
+
+@pytest.mark.parametrize("change", [None, "vocabulary", "dimension", "pooling", "missing"])
+def test_offline_fixture_model_is_recognised_only_from_its_files(harness, tmp_path, change):
+    # The two files embedding_fixture.create writes for the 1,024-wide graph.
+    model = tmp_path / "model"
+    (model / "1_Pooling").mkdir(parents=True)
+    config = {"model_type": "bert", "hidden_size": 1024, "vocab_size": 9}
+    pooling = {"word_embedding_dimension": 1024, "pooling_mode_mean_tokens": True,
+               "pooling_mode_lasttoken": False}
+    if change == "vocabulary":
+        config["vocab_size"] = 151669
+    elif change == "dimension":
+        config["hidden_size"] = 4
+    elif change == "pooling":
+        pooling.update(pooling_mode_mean_tokens=False, pooling_mode_lasttoken=True)
+    (model / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    if change != "missing":
+        (model / "1_Pooling/config.json").write_text(json.dumps(pooling), encoding="utf-8")
+    env = {"PSEUDOLIFE_DAEMON_ONNX_DIR": str(model)}
+    assert harness.offline_fixture_model(env) is (change is None)
+    assert not harness.offline_fixture_model({})
+
+
+def _searched(state, event_id, query, served, params, created_at=10.5):
+    import copy
+    state = copy.deepcopy(state)
+    row = {"id": event_id, "query_text": query, "origin": "search", "session_id": None,
+           "episode_id": None, "served": served, "created_at": created_at, "params": params,
+           "served_facts": None}
+    state["rows"]["public.retrieval_events"]["rows"].append([row[c] for c in EVENT_COLUMNS])
+    state["catalog"]["sequences"][1][5] = event_id
+    return state
+
+
+@pytest.mark.parametrize("change, expected", [
+    (None, None),
+    ("rank", "/rows/public.retrieval_events/rows"),
+    ("score", "/rows/public.retrieval_events/rows"),
+    ("dense", "dense"),
+    ("bm25", "/rows/public.retrieval_events/rows"),
+    ("surprise", "/rows/public.retrieval_events/rows"),
+    ("params", "/rows/public.retrieval_events/rows"),
+    ("clock", "clock outside the search's window"),
+    ("extra-event", "/rows/public.retrieval_events/rows"),
+    ("unlogged", "did not log retrieval event 3"),
+    ("entry-rewrite", "/rows/public.entries/rows"),
+])
+def test_restart_search_is_pinned_to_the_fixture_ranking(harness, change, expected):
+    import copy
+    import w2e_clean_state as clean
+
+    first, second = harness.RESTART_TEXTS
+    before = _stored(_stored(_bank(), 1, first), 2, second, surprise=0.0, ts=10.1)
+    op = harness.tool("memory_search", query=harness.RESTART_QUERY, top_k=2, verbose=True)
+    want = harness.fixture_search_expectation("search-after-restart", op,
+                                              {first: (1, 1.0), second: (2, 0.0)})
+    # The fixture's literal ranking: equal dense scores, BM25 decides.
+    assert [(row["entry_id"], row["score"]) for row in want["served"]] == [(1, 1.3), (2, 1.0)]
+    served = copy.deepcopy(want["served"])
+    params = copy.deepcopy(want["params"])
+    for row in served:
+        row["components"]["dense"] = 0.99999994  # the daemon's f32 cosine
+    if change == "rank":
+        served.reverse()
+    elif change == "score":
+        served[0]["score"] = 1.2
+    elif change == "dense":
+        served[1]["components"]["dense"] = 0.9
+    elif change == "bm25":
+        served[1]["components"]["bm25"] = 0.2
+    elif change == "surprise":
+        served[0]["components"]["surprise"] = 0.5
+    elif change == "params":
+        params["min_score"] = 0.1
+    after = before if change == "unlogged" else _searched(
+        before, 3, harness.RESTART_QUERY, served, params,
+        created_at=99.0 if change == "clock" else 10.5)
+    if change == "extra-event":
+        after = _searched(after, 4, harness.RESTART_QUERY, served, params)
+    if change == "entry-rewrite":
+        after = copy.deepcopy(after)
+        after["rows"]["public.entries"]["rows"][0][ENTRY_COLUMNS.index("access_count")] = 1
+    differences = clean.search_diffs(before, after, query=harness.RESTART_QUERY,
+                                     window=(10.2, 11.0), expected=want)
+    if expected is None:
+        assert differences == []
+    else:
+        assert any(expected in difference for difference in differences), differences
+
+
+@pytest.mark.parametrize("change, expected", [
+    (None, None),
+    ("unflushed", "/rows/public.entries/rows"),
+    ("rewritten-counter", "/rows/public.entries/rows"),
+    ("extra-row", "/rows/public.entries/rows"),
+    ("extra-event", "/rows/public.retrieval_events/rows"),
+])
+def test_graceful_stop_writes_only_the_served_access_counts(harness, change, expected):
+    import copy
+    import w2e_clean_state as clean
+
+    first, second = harness.RESTART_TEXTS
+    before = _stored(_stored(_bank(), 1, first), 2, second, surprise=0.0, ts=10.1)
+    stopped = copy.deepcopy(before)
+    rows = stopped["rows"]["public.entries"]["rows"]
+    count = ENTRY_COLUMNS.index("access_count")
+    if change != "unflushed":
+        rows[0][count] = 1
+    if change == "rewritten-counter":
+        rows[1][count] = 1
+    if change == "extra-row":
+        stopped = _stored(stopped, 3, "A note the exit flush must not write.")
+    if change == "extra-event":
+        stopped = _searched(stopped, 3, "unasked", [], {})
+    differences = clean.stop_diffs(before, stopped, {1: 1})
+    if expected is None:
+        assert differences == []
+    else:
+        assert any(expected in difference for difference in differences), differences
+
+
+@pytest.mark.parametrize("change, expected", [
+    (None, None),
+    ("surprise", "surprise 0.5, expected 1.0"),
+    ("source", "/rows/public.entries/rows"),
+    ("tags", "/rows/public.entries/rows"),
+    ("duplicate", "/rows/public.entries/rows"),
+])
+def test_clean_exit_store_is_held_to_its_whole_expected_row(harness, change, expected):
+    from embedding_fixture import mean_unit_vector
+    import w2e_clean_state as clean
+
+    text = "The counters note about the build cache."
+    before = _bank()
+    changes = {"source": "pseudolife-mcp", "tags": ["counter-cache"]}
+    if change == "surprise":
+        changes["surprise"] = 0.5
+    elif change == "source":
+        changes["source"] = "agent"
+    elif change == "tags":
+        changes["tags"] = []
+    after = _stored(before, 1, text, **changes)
+    if change == "duplicate":
+        after = _stored(after, 2, text, source="pseudolife-mcp", tags=["counter-cache"])
+    differences = clean.store_diffs(before, after, text=text, source="pseudolife-mcp",
+                                    tags=["counter-cache"], window=(9.0, 11.0), surprise=1.0,
+                                    vector=mean_unit_vector(text))
+    if expected is None:
+        assert differences == []
+    else:
+        assert any(expected in difference for difference in differences), differences
+
+
+@pytest.mark.parametrize("name, text", [("vector_1", "The backup job runs at 02:00 nightly."),
+                                        ("vector_2", "The cache TTL is 300 seconds.")])
+def test_fixture_vectors_equal_the_captured_seed_vectors(name, text):
+    # The seed rows were captured from the frozen Python daemon running the
+    # graph itself (commit_loss_seed_rows.md), independently of this oracle.
+    from embedding_fixture import mean_unit_vector
+
+    captured = json.loads((Path(__file__).with_name("commit_loss_seed_rows.json"))
+                          .read_text(encoding="utf-8"))["vectors"][name]
+    assert all(abs(a - b) <= 1e-6 for a, b in zip(json.loads(captured), mean_unit_vector(text)))
+    assert len(json.loads(captured)) == 1024
+
+
+def test_fixture_surprises_count_a_text_stored_twice(harness):
+    once = harness.fixture_surprises(["The counters note about the build cache."])
+    assert once == [1.0]
+    # The second copy is an exact duplicate: 0, not dropped.
+    assert harness.fixture_surprises(["The counters note about the build cache."] * 2) == [1.0, 0.0]
+
+
+def _clean_run(harness, monkeypatch, tmp_path, dumps, *, fixture=False):
+    """run_clean_lifecycle over two stores with every bank dump given."""
+    import background_sessions
+    import psycopg
+    import w2e_shutdown_seed
+
+    texts = ["The counters note about the build cache.",
+             "The counters note about the token rotation."]
+    scenario = {"seed": [], "config": None, "env": {},
+                "ops": [harness.store(text, source="pseudolife-mcp") for text in texts]}
+    states = iter(dumps)
+    monkeypatch.setattr(harness.time, "time", lambda: 10.0)
+    monkeypatch.setattr(harness.pg, "name", lambda label: label)
+    monkeypatch.setattr(harness.pg, "create", lambda name, template=None: f"postgresql://x/{name}")
+    monkeypatch.setattr(harness.pg, "base_database", lambda: None)
+    monkeypatch.setattr(w2e_shutdown_seed, "prepare_empty", lambda dsn, name, copied: None)
+    monkeypatch.setattr(harness.daemons, "make_home", lambda root, label, config: tmp_path)
+    monkeypatch.setattr(harness.daemons, "free_port", lambda: 1)
+    monkeypatch.setattr(harness.daemons, "base_env", lambda home, env: env)
+    monkeypatch.setattr(harness.daemons, "rust_daemon", lambda *a: SimpleNamespace(
+        start=lambda timeout: None, stop=lambda: None, port=1))
+    monkeypatch.setattr(harness.w1a, "wait_settled", lambda ports, token: None)
+    monkeypatch.setattr(harness, "warmup_expected", lambda scn: False)
+    monkeypatch.setattr(harness, "offline_fixture_model", lambda env: fixture)
+    monkeypatch.setattr(harness, "Mcp", lambda port: SimpleNamespace(init=lambda: None))
+    monkeypatch.setattr(harness, "run_op", lambda op, port, client, dsn: {
+        "isError": False, "value": {"stored": True}})
+    monkeypatch.setattr(harness.dbstate, "dump", lambda dsn: next(states))
+    monkeypatch.setattr(background_sessions, "graceful_stop", lambda daemon: None)
+    entry = iter([(1, 1.0), (2, 0.0085828)])
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, query, params=()):
+            return SimpleNamespace(fetchone=lambda: next(entry))
+
+    monkeypatch.setattr(psycopg, "connect", lambda dsn, autocommit: Connection())
+    result = harness.run_clean_lifecycle("probe", scenario, "probe", tmp_path / "daemon",
+                                         tmp_path, [], None)
+    return texts, {step["step"]: step["diffs"] for step in result["steps"]}, result
+
+
+@pytest.mark.parametrize("between", [False, True])
+def test_a_write_between_clean_exit_steps_differs(harness, monkeypatch, tmp_path, between):
+    empty = _bank()
+    first = _stored(empty, 1, "The counters note about the build cache.", source="pseudolife-mcp")
+    # Between the first store's last dump and the second store's first one, a
+    # row lands that no step wrote: a late write absorbed into the baseline.
+    start = (_stored(first, 9, "a write after the first answer", source="agent")
+             if between else first)
+    second = _stored(start, 2, "The counters note about the token rotation.",
+                     source="pseudolife-mcp", surprise=0.0085828)
+    texts, diffs, _ = _clean_run(harness, monkeypatch, tmp_path,
+                                 [empty, empty, empty, first, start, second])
+    assert not any("between steps" in d for d in diffs[1])
+    assert any("between steps" in d for d in diffs[2]) is between
+
+
+@pytest.mark.parametrize("surprise, differs", [(1.0, False), (0.5, True)])
+def test_the_first_clean_exit_store_is_pinned_under_any_model(harness, monkeypatch, tmp_path,
+                                                             surprise, differs):
+    empty = _bank()
+    first = _stored(empty, 1, "The counters note about the build cache.",
+                    source="pseudolife-mcp", surprise=surprise)
+    second = _stored(first, 2, "The counters note about the token rotation.",
+                     source="pseudolife-mcp", surprise=0.0085828)
+    _, diffs, result = _clean_run(harness, monkeypatch, tmp_path,
+                                  [empty, empty, empty, first, first, second])
+    assert result["pins"] == {"fixture_values": False, "fixture_vectors": False,
+                              "first_surprise": True}
+    assert any("expected 1.0" in d for d in diffs[1]) is differs
+    # The second store has neighbours under an unknown model: range only.
+    assert not any("expected" in d for d in diffs[2])
+
+
+@pytest.mark.parametrize("scenario", ["counters-restore", "search-after-restart"])
+def test_clean_exit_uses_native_lifecycle_runner(harness, monkeypatch, tmp_path, scenario):
+    def reject_oracle(*args, **kwargs):
+        pytest.fail("clean-exit scenario prepared a Python template")
+
+    def native(name, config, tag, binary, root, owned, mutant):
+        assert name == scenario
+        assert config is harness.SCENARIOS[scenario]
+        assert tag == scenario.replace("-", "_")
+        assert root == tmp_path
+        return {"scenario": name, "steps": [], "stats": {}}
+
+    monkeypatch.setattr(harness, "prepare_template", reject_oracle)
+    monkeypatch.setattr(harness, "run_clean_lifecycle", native, raising=False)
+    result = harness.run_scenario(scenario, tmp_path / "candidate", tmp_path, "live", False, {})
+    assert result["scenario"] == scenario
+
+
+@pytest.mark.parametrize("change", [None, "history", "interactions", "preset", "unsaved"])
+def test_saved_counter_history_rejects_a_same_length_rewrite(harness, change):
+    value = {"preset_name": "flat", "interaction_count": 2, "updated_at": 5.0,
+             "surprise_history": {"flat": [0.75, 0.25]}}
+    if change == "history":
+        value["surprise_history"]["flat"] = [0.0, 0.0]
+    elif change == "interactions":
+        value["interaction_count"] = 3
+    elif change == "preset":
+        value["preset_name"] = "standard"
+    elif change == "unsaved":
+        value["updated_at"] = None
+    assert harness.saved_counter_history_matches(value, [0.75, 0.25]) is (change is None)
+
+
+@pytest.mark.parametrize("row", [None, ("flat", 2, 0, 1, {"flat": 1}, {"flat": [1.0]}, [], 5.0)])
+def test_read_counters_names_each_column_of_the_singleton_row(harness, monkeypatch, row):
+    import psycopg
+
+    seen = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, query):
+            seen.append(query)
+            return SimpleNamespace(fetchone=lambda: row)
+
+    monkeypatch.setattr(psycopg, "connect", lambda dsn, autocommit: Connection())
+    value = harness.read_counters("postgresql://fixture/pl_cf_w2e_counters")
+    assert seen == ["SELECT " + ", ".join(harness.COUNTERS_COLUMNS) + " FROM cms_counters WHERE id = 1"]
+    if row is None:
+        assert value is None
+    else:
+        assert value == dict(zip(harness.COUNTERS_COLUMNS, row))
+        assert value["interaction_count"] == 2 and value["preset_name"] == "flat"
+
+
+def test_commit_loss_refuses_a_copied_base_bank_before_creating_one(harness, monkeypatch):
+    commit_loss = importlib.import_module("commit_loss")
+    monkeypatch.setattr(commit_loss.pgdisposable, "base_database", lambda: "pl_cf_mir_base")
+    monkeypatch.setattr(commit_loss.pg, "create", lambda *a, **k: pytest.fail("created a bank"))
+    owned = []
+    with pytest.raises(RuntimeError, match="unset PL_HARNESS_BASE_DATABASE"):
+        commit_loss.prepare_template("supersede", owned)
+    assert owned == []
+
+
+@pytest.mark.parametrize("copied", [False, True])
+def test_shutdown_seed_replays_rows_only_into_a_fresh_bank(harness, monkeypatch, copied):
+    import psycopg
+    import w2e_shutdown_seed as seed
+
+    monkeypatch.delenv("PL_HARNESS_BASE_DATABASE", raising=False)
+    calls = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(seed, "replay", lambda dsn, name: calls.append(("replay", dsn, name)))
+    monkeypatch.setattr(seed, "require_fixture_database", lambda name: calls.append(("fixture", name)))
+    monkeypatch.setattr(seed, "initialize_bank", lambda conn: calls.append(("initialize",)))
+    monkeypatch.setattr(psycopg, "connect", lambda dsn: Connection())
+    dsn = "postgresql://fixture@127.0.0.1:5434/pl_cf_w2e_copy_t"
+    seed.prepare_empty(dsn, "counters-restore", copied=copied)
+    if copied:
+        # A copied real bank keeps its rows; only the shared initializer runs.
+        assert calls == [("fixture", "pl_cf_w2e_copy_t"), ("initialize",)]
+    else:
+        assert calls == [("replay", dsn, "counters-restore")]
+
+
+@pytest.mark.parametrize("mutant, verdict", [
+    ({"exit": 0, "tracked_drain": False, "persisted": 0}, "caught"),
+    ({"exit": 0, "tracked_drain": True, "persisted": 0}, "MISSED"),
+    ({"exit": 0, "tracked_drain": False, "persisted": 1}, "MISSED"),
+    ({"exit": 1, "tracked_drain": False, "persisted": 0}, "MISSED"),
+    ({"exit": 0, "tracked_drain": False, "persisted": 0, "no_loss_difference": True}, "MISSED"),
+])
+def test_shutdown_mutant_is_caught_only_when_it_loses_the_untracked_store(
+        harness, monkeypatch, tmp_path, capsys, mutant, verdict):
+    module = importlib.import_module("w2e_shutdown")
+    monkeypatch.setattr(sys, "argv", ["w2e_shutdown.py", "--rust-bin", "candidate", "--out",
+                                      str(tmp_path / "result.json"), "--mutant", "store-cancellable"])
+    monkeypatch.setattr(harness.daemons, "scratch_root", lambda: tmp_path)
+    monkeypatch.setattr(module, "prepare_template", lambda owned: "template")
+    healthy = {"exit": 0, "tracked_drain": True, "persisted": 1}
+    lost = [] if mutant.pop("no_loss_difference", False) else [module.LOST_STORE]
+
+    def arm(binary, root, template, label, mutant_name, owned):
+        if label == "rust":
+            return dict(healthy), []
+        return dict(mutant), [*lost, "mutant: blocked store did not appear in the admitted-write drain"]
+
+    monkeypatch.setattr(module, "run_arm", arm)
+    assert module.main() == (verdict != "caught")
+    assert f"mutant store-cancellable: {verdict}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("field", ["entry_id", "score", "components"])
+def test_restart_served_witness_rejects_wrong_retrieval_log(harness, field):
+    entries = [{"id": 1, "score": 0.8, "via": None, "bank": None}]
+    logged = [{"entry_id": 1, "score": 0.8, "rank": 0, "via": None, "bank": None,
+               "components": {"dense": 0.8}}]
+    prior = {1: {"dense": 0.8}}
+    assert not harness.restart_served_diffs(entries, logged, prior)
+    logged[0][field] = {"entry_id": 2, "score": 0.0, "components": {"dense": 0.0}}[field]
+    assert harness.restart_served_diffs(entries, logged, prior)
+
+
+def test_recording_keeps_other_scenarios_after_clean_exit_rows(harness, monkeypatch, tmp_path):
+    monkeypatch.setattr(harness, "SCENARIOS", {
+        "store-defaults": {}, "counters-restore": {"clean_stop": True}, "health-consistency": {},
+    })
+    monkeypatch.setattr(harness, "run_root", lambda: tmp_path)
+    monkeypatch.setattr(sys, "argv", ["w2e.py", "live", "--record", "--rust-bin", "candidate"])
+    seen = []
+
+    def scenario(name, binary, root, mode, record, tol, **kwargs):
+        assert record
+        seen.append(name)
+        return {"scenario": name, "steps": [], "stats": {}}
+
+    monkeypatch.setattr(harness, "run_scenario", scenario)
+    assert harness.main() == 0
+    assert seen == ["store-defaults", "health-consistency"]
+
+
+def test_explicit_clean_exit_recording_refuses_before_any_writes(harness, monkeypatch, capsys):
+    monkeypatch.setattr(harness, "run_root", lambda: pytest.fail("recording made a scratch root"))
+    monkeypatch.setattr(sys, "argv", [
+        "w2e.py", "live", "--record", "--rust-bin", "candidate", "--only", "store-defaults", "counters-restore",
+    ])
+    with pytest.raises(SystemExit, match="2"):
+        harness.main()
+    assert "omit --record for counters-restore" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("mode,stage", [
@@ -1499,6 +2026,7 @@ def _w1a(monkeypatch, tmp_path):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent))
     w1a = importlib.import_module("run")
     monkeypatch.setattr(w1a, "GOLDENS", tmp_path / "goldens")
+    monkeypatch.setattr(w1a, "_DATABASE_TURN_MARKER", tmp_path / "no-database-turn")
     binary = tmp_path / "pseudolife-daemon"
     binary.write_bytes(b"candidate")
     return w1a, binary
