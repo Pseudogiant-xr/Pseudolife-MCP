@@ -2992,7 +2992,8 @@ client_requires_bearer() {
 check_client_http_auth() {
     if [ "${2:-}" = existing ]; then
         local warning="The $1 HTTP registration was preserved. The daemon requires a bearer token. Verify the registration's bearer credential in the client."
-        HTTP_CREDENTIAL_WARNINGS="${HTTP_CREDENTIAL_WARNINGS:+$HTTP_CREDENTIAL_WARNINGS"$'\n'"}$warning"
+        local newline=$'\n'
+        HTTP_CREDENTIAL_WARNINGS="${HTTP_CREDENTIAL_WARNINGS:+$HTTP_CREDENTIAL_WARNINGS$newline}$warning"
         printf 'WARNING: %s\n' "$warning" >&2
     elif [ "$TRANSPORT" = shim ]; then
         warn_client_failure "$1" "The native client could not be installed (see above), and the daemon requires a bearer token for this connection. Fix the native client install, then rerun the installer."
@@ -4396,7 +4397,7 @@ client_completion_reasons() {
     if [ -n "$connection_failure" ]; then printf '%s\n' "$connection_failure"; fi
 }
 finish_client_setup() {
-    local provider reason label warnings connection_failure failures=""
+    local provider reason label warnings connection_failure failures="" newline=$'\n'
     warnings="$(client_setup_warnings)"
     for provider in $CLIENTS; do
         connection_failure="$(client_setup_failure "$provider")"
@@ -4410,13 +4411,13 @@ finish_client_setup() {
         esac
         while IFS= read -r reason; do
             case " ${REQUESTED_CLIENTS:-} " in
-                *" $provider "*) failures="${failures:+$failures"$'\n'"}Requested client setup incomplete ($label). $reason" ;;
-                *) warnings="${warnings:+$warnings"$'\n'"}Detected client setup incomplete ($label). $reason" ;;
+                *" $provider "*) failures="${failures:+$failures$newline}Requested client setup incomplete ($label). $reason" ;;
+                *) warnings="${warnings:+$warnings$newline}Detected client setup incomplete ($label). $reason" ;;
             esac
         done < <(client_completion_reasons "$provider" "$connection_failure")
     done
     if [ -n "${extractor_requested:-}" ] && [ -n "${EXTRACTOR_AUTOSTART_FAILURE:-}" ]; then
-        failures="${failures:+$failures"$'\n'"}Requested extractor setup incomplete ($EXTRACTOR). $EXTRACTOR_AUTOSTART_FAILURE"
+        failures="${failures:+$failures$newline}Requested extractor setup incomplete ($EXTRACTOR). $EXTRACTOR_AUTOSTART_FAILURE"
     fi
     if [ -n "$warnings" ]; then printf '\nWarnings\n%s\n' "$warnings" >&2; fi
     if [ -n "$failures" ]; then

@@ -1381,14 +1381,16 @@ def test_unattended_detected_clients_keep_success_when_native_install_fails(bash
     output = proc.stdout + proc.stderr
     assert proc.returncode == 0, output
     assert "the native client could not be installed" in output
-    assert (
+    assert proc.stderr.splitlines()[-5:] == [
+        "Warnings",
+        "Detected client setup incomplete (Claude Code). Hooks were not installed because the native client is "
+        "unavailable. Fix the native client install and rerun the installer.",
         "Detected client setup incomplete (Claude Code). the pseudolife-mcp shim is unavailable (see the message above), "
-        "and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
-    ) in proc.stderr.splitlines()
-    assert proc.stderr.splitlines()[-1] == (
+        "and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run.",
+        "Detected client setup incomplete (Codex). Codex exited before hook setup completed.",
         "Detected client setup incomplete (Gemini CLI). shim unavailable for Gemini CLI (see warnings above), "
-        "and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
-    )
+        "and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run.",
+    ]
     assert "Requested client setup incomplete" not in output
     assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
 

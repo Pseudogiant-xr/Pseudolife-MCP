@@ -170,6 +170,55 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
 INSTALLER_SHELLS = [*_bash_variants(), "powershell"]
 
 
+@pytest.mark.parametrize("shell", INSTALLER_SHELLS, ids=lambda name: Path(name).name)
+def test_completion_lists_separate_failures_in_order(tmp_path, shell):
+    if shell == "powershell":
+        runner = _PowerShell(tmp_path)
+        path = "ops/install-native.ps1"
+        setup = (
+            "$clients = @('claude', 'codex', 'gemini'); $requestedClients = @('claude', 'codex')\n"
+            "$hookState = @{}; $instrState = @{}\n"
+            "$extractorRequested = $true; $Extractor = 'claude-only'\n"
+            "$script:extractorAutostartFailure = 'Fixture extractor repair.'\n"
+            "Set-ClientSetupFailure claude 'Fixture Claude repair.'\n"
+            "Set-ClientSetupFailure codex 'Fixture Codex repair.'\n"
+            "Set-ClientSetupFailure gemini 'Fixture Gemini repair.'\n"
+            "Write-ClientHttpAuthResult claude -Existing\n"
+            "Write-ClientHttpAuthResult codex -Existing\n"
+        )
+    else:
+        runner = _Shell(shell, tmp_path)
+        path = "ops/install-native.sh"
+        setup = (
+            "CLIENTS='claude codex gemini' REQUESTED_CLIENTS='claude codex'\n"
+            "extractor_requested=1 EXTRACTOR=claude-only\n"
+            "EXTRACTOR_AUTOSTART_FAILURE='Fixture extractor repair.'\n"
+            "record_client_failure claude 'Fixture Claude repair.'\n"
+            "record_client_failure codex 'Fixture Codex repair.'\n"
+            "record_client_failure gemini 'Fixture Gemini repair.'\n"
+            "check_client_http_auth claude existing\n"
+            "check_client_http_auth codex existing\n"
+        )
+    source = _read(path)
+    proc = runner.run(
+        "\n".join(_marker_block(source, "client registration state")) + "\n"
+        + "\n".join(_marker_block(source, "client registration helpers")) + "\n" + setup
+        + "\n".join(_marker_block(source, "client setup result")) + "\n"
+    )
+    assert proc.returncode == 5, proc.stdout + proc.stderr
+    assert proc.stderr.splitlines()[-7:] == [
+        "Warnings",
+        "The claude HTTP registration was preserved. The daemon requires a bearer token. "
+        "Verify the registration's bearer credential in the client.",
+        "The codex HTTP registration was preserved. The daemon requires a bearer token. "
+        "Verify the registration's bearer credential in the client.",
+        "Detected client setup incomplete (Gemini CLI). Fixture Gemini repair.",
+        "Requested client setup incomplete (Claude Code). Fixture Claude repair.",
+        "Requested client setup incomplete (Codex). Fixture Codex repair.",
+        "Requested extractor setup incomplete (claude-only). Fixture extractor repair.",
+    ]
+
+
 def _stage(path, start, end):
     return _read(path).split(start, 1)[1].split("\n", 1)[1].split(end, 1)[0]
 
