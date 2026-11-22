@@ -34,7 +34,7 @@ lite bank is refused with the Docker migration instruction.
 | Archive reader: universal newlines, blank lines (`str.strip`) skipped, duplicate decoded keys (`line N has a duplicate key...`), shape check (`line N is not an exported audit event`), `cannot read PATH`, every diagnostic naming `str(Path(PATH))` | `_read_export` 233-270 |
 | Row hash: sha256(prev_hash ‖ compact `json.dumps([format, seq, event, actor, principal, agent_id, recipient, project, task, message_id, float(created_at), hlc, payload_text], ensure_ascii=False)`), payload re-canonicalized (`sort_keys`) when parsed | `audit_hash` coordination.py:957-971 |
 | Chain walk: `broken_link` (genesis / prev hash), `sequence_gap`, `hash_mismatch`, `body_mismatch` (salt without body, body not opening `text_commitment`, body still beside its operator redact), `body_missing` / `body_not_exported` for the lowest unexplained v46 send, `unanchored_start` (cut record: daemon actor, window >= 1 day, `audit_cutoff`, first row not older), `head_pruned` (with `start_cut`), `head_missing`, `head_mismatch`; report key order and `print(json.dumps(report))` spelling | `verify_audit_chain` 1035-1150, `_cut` 988-1010, `audit_cutoff` 978-985, `body_commitment` 516-525, `_body_matches` 1024-1032 |
-| Redact: id shape (`invalid_message_id`), reason (`invalid_reason`: blank, > 240 chars, Cc/Cf/Cs/Zl/Zp), `secret_like_body`, prefix resolution (`message_not_found` / `ambiguous_message_id`), one transaction: live row `FOR UPDATE`, chain lock, send event, `gone`/`kept`/`removed` paths, `already_redacted`, `body_in_hashed_payload`, live copy blanked with `expires_at=LEAST(expires_at, now)`, chained operator `redact` event, burst siblings; refusal JSON echoes the id as given plus the `_REDACT_REFUSALS` line (`: detail` when present); busy (`LockNotAvailable`, 5 s) exit 2 | `CoordinationStore.redact` 3987-4112, `_burst_siblings` 4114, `_redact` 318-365, `_REDACT_REFUSALS` 58-71 |
+| Redact: id shape (`invalid_message_id`), reason (`invalid_reason`: blank, > 240 chars, Cc/Cf/Cs/Zl/Zp), `secret_like_body`, prefix resolution (`message_not_found` / `ambiguous_message_id`), one transaction: live row `FOR UPDATE`, chain lock, send event, `gone`/`kept`/`removed` paths, `already_redacted`, `body_in_hashed_payload`, live text set to NULL with `expires_at=LEAST(expires_at, now)`, chained operator `redact` event, burst siblings; refusal JSON echoes the id as given plus the `_REDACT_REFUSALS` line (`: detail` when present); busy (`LockNotAvailable`, 5 s) exit 2 | `CoordinationStore.redact` 4391, `_burst_siblings` 4518, `_redact` 318-365, `_REDACT_REFUSALS` 58-71 |
 | Post-commit `_vacuum` (`SET client_min_messages TO warning`, both VACUUMs, setting restored; WARNING notices are skips), `vacuumed` and the four stderr notes, the `--expect-head` record line | `_vacuum` 283-315, `_redact` 331-365 |
 | `--out` failures identify staging, write or publication with a plain cause and correction; staged output is removed, and the final path is unchanged | native `board_audit/output.rs` |
 | Archive rows: a repeated key is reported when its object closes (`object_pairs_hook`), so a scan error or an over-long integer earlier in that object wins | `_read_export` 250-257, `_unique_keys` 224-230 |
@@ -68,13 +68,17 @@ The twelve refusal references are `redact-already`, `redact-busy`,
 left 27 Linux and 28 Windows cases with live Python comparisons.
 `redact-ambiguous-prefix` keeps both arms because its diagnostic lists
 ordered distinguishing prefixes from the matching seeded message IDs.
+The package-deletion change also retires the AST test that reads the frozen
+CLI's nine refusal messages. The table transcribed at `3ac81bc` remains
+the reference for the refusal text.
 
 `redact-removed`, `redact-prefix` and `redact-future-expiry` verify the
 direct v46 removal contract against a separate copy of the seed. The
-reference clears both stored body copies, caps the live expiry at its
-own clock, and appends the expected audit record. The clock rule validates
-each arm's own head before normalizing it. These three references leave
-24 Linux and 25 Windows cases with live Python comparisons.
+reference nulls the send event's `body` and `body_salt` and the live message's
+`text`, sets the live message's `fingerprint` to `redacted`, caps its expiry
+at the reference clock, and appends the expected audit record. The clock
+rule validates each arm's own head before normalizing it. These three
+references left 24 Linux and 25 Windows cases with live Python comparisons.
 
 The native command has no Python fallback. `application_name` and
 `connect_timeout` use the shared PostgreSQL connector's native support.
@@ -189,12 +193,31 @@ continues to run both arms for its recorded diagnostic divergence.
 Bank stdout export references select the original JSON lines with filter
 literals from the case table in `rows/audit.py`. Three stdout refusals reuse
 frozen-Python goldens.
-File publication and divergent export cases continue to run both arms.
+
+The remaining export cases use independent references. The two successful
+file exports use LF JSON lines from the rich seed with either all rows or
+the rows for task `t3`. The malformed-payload stdout case uses the first
+row of its seed, before the invalid second row. The failure diagnostics
+come from the frozen CLI and were checked against its live export arms at
+`1f437f83b`. The long Windows name uses an exclusive open of the disposable
+path to reproduce the frozen diagnostic under the active long-path policy.
+Each bank-backed reference requires an unchanged bank.
+
+The reference includes the full post-run directory and its POSIX modes.
+Under umask `022` the frozen exporter creates mode `0644` files, including
+the empty files left by agent lookup refusals. The native exporter publishes
+mode `0600` archives and removes its staging file on refusal. The file
+references retain these known differences in the live comparison. The
+existing-destination case preserves the seed file, the Linux output-loop
+case preserves its symlink, and path refusals leave no new entries. The
+Windows snapshots compare bytes and directory entries because the harness's
+mode observation is POSIX-only.
 
 Automatic CI skips live mode, so the 80 Linux and 85 Windows file references,
-14 bank-verify references, 34 stdout export references, 12 redaction
-refusal references and 3 direct removal references run only in local or
-manual-stress live runs. Offline tests pin the file hashes and case
+14 bank-verify references, 34 original stdout export references, 11 further
+export references on Linux and 12 on Windows, 12 redaction refusal references
+and 3 direct removal references run only in local or manual-stress live runs.
+Offline tests pin the file hashes and case
 registration and check exit status, stdout and stderr for the three
 entries shared with the goldens on both platforms.
 

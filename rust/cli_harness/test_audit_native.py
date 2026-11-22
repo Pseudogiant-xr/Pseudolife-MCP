@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import atexit
 import base64
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+import errno
 import hashlib
 from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -375,6 +377,120 @@ def test_audit_live_export_refuses_candidate_recordings(monkeypatch, tmp_path):
         case = audit.bank_export_case(case_id, "rich", ["--agent", "ffffffff0"], recorded=True)
         with pytest.raises(ValueError, match="live export refusal requires a frozen Python recording"):
             case.reference(tmp_path / "bank-export")
+
+
+def test_audit_remaining_export_references(monkeypatch, tmp_path):
+    unfiltered = b'{"seq":1,"task":"t2"}\n{"seq":2,"task":"t3"}\n'
+    filtered = unfiltered.splitlines(keepends=True)[1]
+    expected = {
+        "export-out": (0, "", unfiltered),
+        "export-out-filtered": (0, "", filtered),
+        "export-out-exists": (2, "exists; export never replaces a file", b"keep"),
+        "export-agent-unknown-out": (2, "no agent id starts with ffffffff0", b""),
+        "export-agent-ambiguous-out": (2, "ab12cd34ef56, ab12cd34ef57; give a longer prefix", b""),
+        "export-out-missing-dir-before-agent": (2, "No such file or directory", None),
+        "export-stdout-closed": (2, "the output was closed before the export finished", None),
+        "export-invalid-payload-prefix": (2, "the database error is not shown", None),
+        "export-local-minute-no-bank": (2, "no bank found:", None),
+        "export-iso-overwritten": (2, "no bank found:", None),
+    }
+    with _cold_audit(monkeypatch) as audit:
+        if audit.core.WINDOWS:
+            expected["export-windows-invalid-name"] = (2, "Invalid argument", None)
+            expected["export-windows-long-name"] = (2, "board-audit: cannot create", None)
+        else:
+            expected["export-output-loop"] = (2, "File exists", None)
+        for key in tuple(os.environ):
+            if key.startswith("PSEUDOLIFE_") or key in {"PL_HARNESS_BASE_DATABASE", "TZ", "TZDIR"}:
+                monkeypatch.delenv(key)
+        monkeypatch.setattr(audit, "ensure", lambda kind: audit._name(kind))
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        monkeypatch.setattr(audit, "export_bytes", lambda kind: unfiltered)
+        # The invalid-payload bank has one good row before the malformed tail.
+        connection = MagicMock()
+        monkeypatch.setattr(_bank, "connect", connection)
+        monkeypatch.setattr(audit, "_stored_audit_rows", lambda conn: iter(["prefix", "bad-payload"]))
+        encode = MagicMock(return_value=b'{"seq":1}\n')
+        monkeypatch.setattr(audit, "_export_line", encode)
+        blocked = MagicMock(side_effect=AssertionError("export reference started a child"))
+        monkeypatch.setattr(subprocess, "Popen", blocked)
+        for name in dir(os):
+            if name == "system" or name.startswith(("spawn", "posix_spawn", "exec")):
+                monkeypatch.setattr(os, name, blocked)
+        cases = {case.id: case for case in audit.cases() if case.runs_here()}
+        newline = b"\r\n" if audit.core.WINDOWS else b"\n"
+        previous_umask = audit.core.pin_umask()
+        try:
+            for case_id, (code, stderr_text, data) in expected.items():
+                case = cases[case_id]
+                assert case.reference is not None, case_id
+                want = case.reference(tmp_path / case_id)
+                assert want["exit"] == code, case_id
+                stderr = audit.core.decode(want, "stderr")
+                if stderr_text:
+                    assert stderr_text.encode() in stderr and stderr.endswith(newline), case_id
+                else:
+                    assert stderr == b"", case_id
+                stdout = b'{"seq":1}' + newline if case_id == "export-invalid-payload-prefix" else b""
+                assert audit.core.decode(want, "stdout") == stdout, case_id
+                files = {"cwd": "dir"}
+                modes = {} if audit.core.WINDOWS else {"cwd": "0o755"}
+                if data is not None:
+                    files["out.jsonl"] = "file:" + base64.b64encode(data).decode()
+                    if not audit.core.WINDOWS:
+                        modes["out.jsonl"] = "0o644"
+                if case_id == "export-output-loop":
+                    files["loop"] = "link:loop"
+                    # A symlink created under the same umask has the seed's
+                    # mode on both Linux and Darwin.
+                    seed_link = tmp_path / "seed-link"
+                    seed_link.symlink_to("seed-link")
+                    modes["loop"] = oct(stat.S_IMODE(seed_link.lstat().st_mode))
+                assert want["files"] == files, case_id
+                assert want["modes"] == modes, case_id
+                if "no-bank" in case_id or case_id == "export-iso-overwritten":
+                    assert "db" not in want, case_id
+                else:
+                    assert want["db"] == "unchanged", case_id
+        finally:
+            if previous_umask is not None:
+                os.umask(previous_umask)
+        encode.assert_called_once_with("prefix")
+        blocked.assert_not_called()
+
+
+@pytest.mark.parametrize(("code", "message"), [
+    (errno.ENOENT, "No such file or directory"),
+    (errno.EINVAL, "Invalid argument"),
+    (None, None),
+])
+def test_audit_long_output_reference_uses_filesystem_error(monkeypatch, tmp_path, code, message):
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(audit, "ensure", lambda kind: audit._name(kind))
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        case = next(case for case in audit.cases() if case.id == "export-windows-long-name")
+        home = tmp_path / "long-output"
+        out = home / ("x" * 260)
+        original_open = Path.open
+
+        def open_path(path, *args, **kwargs):
+            if path == out and args == ("x",):
+                if code is None:
+                    return nullcontext()
+                raise OSError(code, message)
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_path)
+        if code is None:
+            with pytest.raises(AssertionError, match="invalid export path was successfully opened"):
+                case.reference(home)
+            return
+        want = case.reference(home)
+        newline = "\r\n" if audit.core.WINDOWS else "\n"
+        assert audit.core.decode(want, "stderr") == (
+            f"board-audit: cannot create {out}: {message}{newline}".encode())
+        assert want["exit"] == 2
+        assert want["files"] == {"cwd": "dir"}
 
 
 def test_audit_removed_redaction_reference_uses_a_separate_seed_copy(monkeypatch, tmp_path):

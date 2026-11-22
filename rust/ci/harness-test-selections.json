@@ -15,6 +15,8 @@
         "test_audit_bank_export_reference_without_the_frozen_package",
         "test_audit_export_time_references_match_frozen_argument_parsing",
         "test_audit_live_export_refuses_candidate_recordings",
+        "test_audit_remaining_export_references",
+        "test_audit_long_output_reference_uses_filesystem_error",
         "test_audit_archive_edit_rehashes_without_the_frozen_package",
         "test_audit_bank_verify_reference_without_the_frozen_package",
         "test_audit_export_preserves_field_order_and_legacy_payload",
