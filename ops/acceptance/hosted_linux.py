@@ -67,9 +67,13 @@ class DockerFixture:
     @staticmethod
     def inventory():
         resources = {}
-        for resource, flags in (("container", ("--all",)), ("network", ()), ("volume", ())):
-            result = docker(resource, "ls", *flags, "--quiet", "--no-trunc")
-            require(result.code == 0, "Docker fixture inventory succeeded.")
+        for resource, flags, assertion in (
+            ("container", ("--all", "--no-trunc"), "The runner could not list Docker containers."),
+            ("network", ("--no-trunc",), "The runner could not list Docker networks."),
+            ("volume", (), "The runner could not list Docker volumes."),
+        ):
+            result = docker(resource, "ls", *flags, "--quiet")
+            require(result.code == 0, assertion)
             resources[resource] = set(result.output.decode().splitlines())
         return resources
 
@@ -461,7 +465,11 @@ def run(tag, platform, output):
     except Unavailable as error:
         for receipt in receipts:
             receipt.note = str(error)
-    except (Failed, OSError, ValueError, KeyError, IndexError, matrix.RecordError):
+    except Failed as error:
+        for receipt in receipts:
+            receipt.status = "fail"
+            receipt.note = str(error)
+    except (OSError, ValueError, KeyError, IndexError, matrix.RecordError):
         for receipt in receipts:
             receipt.status = "fail"
             receipt.note = "A precondition for collecting hosted observations failed."
