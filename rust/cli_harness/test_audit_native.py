@@ -334,10 +334,10 @@ def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     assert edited["hash"] == expected["hash"]
 
 
-@pytest.mark.parametrize("variant", ["matching-head", "stored-text-edit", "no-log"])
+@pytest.mark.parametrize("variant", ["matching-head", "mismatching-head", "stored-text-edit", "no-log"])
 def test_audit_bank_verify_reference_without_the_frozen_package(monkeypatch, tmp_path, variant):
     row = event()
-    head = "1:" + row["hash"]
+    head = "1:" + ("0" * 64 if variant == "mismatching-head" else row["hash"])
     kind = "nolog" if variant == "no-log" else "rich"
     if variant == "no-log":
         code, stdout = 2, b""
@@ -347,6 +347,9 @@ def test_audit_bank_verify_reference_without_the_frozen_package(monkeypatch, tmp
         row["payload"] = '{"safe": "雪"}'  # Same JSON value, different stored hash input.
         code, stderr = 1, b""
         stdout = b'{"ok": false, "seq": 1, "reason": "hash_mismatch"}'
+    elif variant == "mismatching-head":
+        code, stderr = 1, b""
+        stdout = b'{"ok": false, "seq": 1, "reason": "head_mismatch"}'
     else:
         code, stderr = 0, b""
         stdout = (b'{"ok": true, "events": 1, "first_seq": 1, "head_seq": 1, "head_hash": "'
@@ -382,6 +385,11 @@ def test_audit_bank_verify_reference_without_the_frozen_package(monkeypatch, tmp
         connect.assert_not_called()
     else:
         connect.assert_called_once_with(name)
+        assert conn.execute.call_args.args == (
+            "SELECT seq,event,actor,principal,agent_id,recipient_agent_id,project,task,"
+            "message_id,payload,created_at,hlc,prev_hash,hash,body,body_salt "
+            "FROM coordination_events ORDER BY seq",
+        )
         assert case.argv == ["board-audit", "verify", "--expect-head", head]
 
 
