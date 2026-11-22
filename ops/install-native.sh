@@ -513,14 +513,22 @@ native_fetch_refuse() {  # $1 = what was fetched (SHA256SUMS or the archive name
         *) native_refuse "$1 could not be fetched from $native_base (curl exit ${NATIVE_CURL_EXIT:-?}: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and retry." ;;
     esac
 }
-native_bounded() {  # $1 = both|out, then the command; its output on stdout; status 124 when it does not finish in time
+native_bounded() {  # $1 = both|out|windows, then the command; status 124 on timeout
     native_bound_which="$1"; shift
     native_bound_out="$(mktemp "${TMPDIR:-/tmp}/pseudolife-native-out.XXXXXX")" || return 125
-    if [ "$native_bound_which" = both ]; then "$@" >"$native_bound_out" 2>&1 & else "$@" >"$native_bound_out" 2>/dev/null & fi
+    if [ "$native_bound_which" = out ]; then "$@" >"$native_bound_out" 2>/dev/null & else "$@" >"$native_bound_out" 2>&1 & fi
     native_bound_pid=$!
     native_bound_ticks=$((NATIVE_PROBE_SECONDS * 10))
     while kill -0 "$native_bound_pid" 2>/dev/null; do
         if [ "$native_bound_ticks" -le 0 ]; then
+            if [ "$native_bound_which" = windows ]; then
+                # The direct bridge child is still in this Bash job. Stop its
+                # Windows process tree if it got as far as launching the client.
+                native_bound_winpid="$(cat "/proc/$native_bound_pid/winpid" 2>/dev/null)" || native_bound_winpid=""
+                if [ -n "$native_bound_winpid" ]; then
+                    taskkill.exe //PID "$native_bound_winpid" //T //F >/dev/null 2>&1 || true
+                fi
+            fi
             kill "$native_bound_pid" 2>/dev/null
             wait "$native_bound_pid" 2>/dev/null
             rm -f "$native_bound_out"
@@ -542,8 +550,12 @@ native_windows_version() {
     probe_ps="$(command -v powershell.exe)" ||
         probe_ps="$(cygpath -u "${SYSTEMROOT:-${SystemRoot:-C:\Windows}}")/System32/WindowsPowerShell/v1.0/powershell.exe"
     probe_exe="$(cygpath -w "$1")" || return 1
-    PSEUDOLIFE_NATIVE_PROBE_EXE="$probe_exe" PSEUDOLIFE_NATIVE_PROBE_TIMEOUT="$NATIVE_PROBE_SECONDS" \
-        "$probe_ps" -NoProfile -NonInteractive -Command '
+    # Keep the requested timeout for the client, with two seconds for the
+    # bridge to start or clean up. The outer timeout still stops a hung bridge.
+    local probe_seconds="$NATIVE_PROBE_SECONDS"
+    local NATIVE_PROBE_SECONDS=$((probe_seconds + 2))
+    PSEUDOLIFE_NATIVE_PROBE_EXE="$probe_exe" PSEUDOLIFE_NATIVE_PROBE_TIMEOUT="$probe_seconds" \
+        native_bounded windows "$probe_ps" -NoProfile -NonInteractive -Command '
         $ErrorActionPreference = "Stop"
         $info = [Diagnostics.ProcessStartInfo]::new($env:PSEUDOLIFE_NATIVE_PROBE_EXE, "version")
         $info.UseShellExecute = $false
@@ -678,21 +690,28 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     NATIVE_STAGED="$native_stage_dir/$native_binary"
     chmod 755 "$NATIVE_STAGED" 2>/dev/null || true
     native_says=""
-    native_says_status=0
-    case "$NATIVE_TARGET" in
-        *windows*)
-            if native_result="$(native_windows_version "$NATIVE_STAGED" 2>&1)"; then
+    native_says_status=""
+    if [ "$NATIVE_TARGET" = x86_64-pc-windows-msvc ] && command -v cygpath >/dev/null 2>&1; then
+        native_bridge_status=0
+        native_result="$(native_windows_version "$NATIVE_STAGED" 2>&1)" || native_bridge_status=$?
+        case "$native_bridge_status" in
+            0)
                 native_status_line="${native_result%%$'\n'*}"
                 native_says_status="${native_status_line%$'\r'}"
-                [ "$native_status_line" = "$native_result" ] || native_says="${native_result#*$'\n'}"
-            else
-                native_says="$native_result"
-                native_says_status=""
-            fi ;;
-        *)
-            native_says="$(native_bounded both "$NATIVE_STAGED" version)" || native_says_status=$?
-            [ "$native_says_status" != 124 ] || native_says_status=timeout ;;
-    esac
+                if [ "$native_says_status" != timeout ]; then
+                    case "${native_says_status#-}" in ""|*[!0-9]*) native_says_status="" ;; esac
+                fi
+                [ "$native_status_line" = "$native_result" ] || native_says="${native_result#*$'\n'}" ;;
+            124) native_says_status=timeout ;;
+        esac
+    fi
+    if [ -z "$native_says_status" ]; then
+        # A restricted PowerShell can refuse the bridge while allowing the
+        # client itself. In that case Bash can still probe it directly.
+        native_says_status=0
+        native_says="$(native_bounded both "$NATIVE_STAGED" version)" || native_says_status=$?
+        [ "$native_says_status" != 124 ] || native_says_status=timeout
+    fi
     [ "$native_says_status" != timeout ] ||
         native_refuse "the downloaded client did not answer version within $NATIVE_PROBE_SECONDS s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
     if [ "$native_says_status" != 0 ]; then

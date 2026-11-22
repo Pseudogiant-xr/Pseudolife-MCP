@@ -341,7 +341,15 @@ fn the_windows_missing_library_exit_names_the_fix_before_handoff() {
         assert_eq!(ladder["handoff"]["state"], "failed");
         let detail = ladder["handoff"]["detail"].as_str().unwrap();
         assert!(detail.contains("Windows could not start the client because a system library is missing (exit code -1073741515, 0xC0000135)"), "{detail}");
-        assert!(detail.contains("The runtime itself is installed. Retry the client update with the current release. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64."), "{detail}");
+        assert!(detail.contains("The runtime itself is installed. Extract the client from the current Windows release ZIP."), "{detail}");
+        assert!(
+            detail.contains(
+                "./pseudolife-mcp.exe update --clients-only --tag RELEASE_VERSION --daemon-url"
+            ),
+            "{detail}"
+        );
+        assert!(detail.contains("--reinstall. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64."), "{detail}");
+        assert!(!detail.contains("pseudolife-mcp-old update"), "{detail}");
         assert!(spawn.calls.borrow().is_empty());
     }
 }

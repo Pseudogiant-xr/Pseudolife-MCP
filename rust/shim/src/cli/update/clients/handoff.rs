@@ -205,10 +205,9 @@ pub fn hand_off(
         .unwrap_or_default();
     // The same daemon and downgrade grant as this run, so the retry
     // repairs what this one could not.
-    let retry = |version: &str| {
+    let retry = |program: &str, version: &str| {
         format!(
-            "{} update --clients-only --tag {version} --daemon-url {}{} --reinstall",
-            parent.retry_program,
+            "{program} update --clients-only --tag {version} --daemon-url {}{} --reinstall",
             super::super::seams::quote(parent.daemon_url),
             if parent.allow_downgrade {
                 " --allow-downgrade"
@@ -226,7 +225,10 @@ pub fn hand_off(
             name,
             version,
             why,
-            &format!("Retry, building the runtime again: {}", retry(version)),
+            &format!(
+                "Retry, building the runtime again: {}",
+                retry(&parent.retry_program, version)
+            ),
         )
     };
     let runtime = match runtime::read_runtime(&path) {
@@ -257,7 +259,10 @@ pub fn hand_off(
                 &name,
                 &version,
                 "Windows could not start the client because a system library is missing (exit code -1073741515, 0xC0000135)",
-                "Retry the client update with the current release. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64.",
+                &format!(
+                    "Extract the client from the current Windows release ZIP. Open a shell in that directory, replace RELEASE_VERSION with that archive's version, and run {}. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64.",
+                    retry("./pseudolife-mcp.exe", "RELEASE_VERSION"),
+                ),
             ),
             None,
         ))

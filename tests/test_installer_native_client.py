@@ -246,6 +246,10 @@ def test_rerun_on_a_native_host_says_nothing_changed(tmp_path):
      "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
     (53, "", "the downloaded client does not run on this host (exit code 53). "
      "Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+    (29, "direct probe failed", "the downloaded client does not run on this host (exit code 29, direct probe failed). "
+     "Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+    (124, "", "the downloaded client did not answer version within 30 s. "
+     "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."),
 ])
 def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_path, code, output, diagnostic):
     assets = tmp_path / "release"
@@ -261,10 +265,14 @@ cygpath() { printf '%s\\n' "$2"; }
 unzip() {
     # Some Linux test hosts have no unzip. The real checksum still covers the ZIP.
     [ "$1 $2 $4 $5" = '-q -o pseudolife-mcp.exe -d' ] || return 1
-    printf '#!/bin/sh\\nexit 53\\n' >"$6/$4"
+    printf '%s\\n' '#!/bin/sh' 'printf "%s\\n" "direct probe failed"' 'exit 29' >"$6/$4"
 }
 powershell.exe() {
     [ -f "$PSEUDOLIFE_NATIVE_PROBE_EXE" ] || return 1
+    case "$STUB_VERSION_CODE" in
+        29) printf '%s\\n' 'Method invocation is not permitted in this language mode' >&2; return 1 ;;
+        124) return 124 ;;
+    esac
     printf '%s\\r\\n%s' "$STUB_VERSION_CODE" "$STUB_VERSION_OUTPUT"
 }
 native_stage
