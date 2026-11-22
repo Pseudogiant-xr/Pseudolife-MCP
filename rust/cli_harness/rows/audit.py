@@ -618,7 +618,10 @@ def _bank_export_reference(case, kind, filters, recorded, home):
             "modes": core.modes(home), "db": "unchanged"}
     if recorded:
         # These stdout refusals have frozen-Python goldens on both platforms.
-        frozen = _recorded_cases(core.PLATFORM)[case.id]
+        golden = _audit_golden(core.PLATFORM)
+        if case.id in (golden.get("recorded_from_candidate") or {}):
+            raise ValueError(f"{case.id}: live export refusal requires a frozen Python recording")
+        frozen = golden["cases"][case.id]
         return dict(want, exit=frozen["exit"], stdout=frozen["stdout"], stderr=frozen["stderr"])
     data = export_bytes(kind)
     if filters:
@@ -855,9 +858,13 @@ def stats_durations():
 
 
 @cache
-def _recorded_cases(platform):
+def _audit_golden(platform):
     path = Path(__file__).resolve().parents[1] / "goldens" / f"audit.{platform}.json"
-    return json.loads(path.read_text(encoding="utf-8"))["cases"]
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _recorded_cases(platform):
+    return _audit_golden(platform)["cases"]
 
 
 def _recorded_reference(case_id, home):

@@ -322,6 +322,22 @@ def test_audit_bank_export_reference_without_the_frozen_package(monkeypatch, tmp
     assert want["db"] == "unchanged"
 
 
+def test_audit_live_export_refuses_candidate_recordings(monkeypatch, tmp_path):
+    with _cold_audit(monkeypatch) as audit:
+        case_id = "export-agent-unknown"
+        golden_dir = tmp_path / "goldens"
+        golden_dir.mkdir()
+        golden = {"cases": {case_id: {"exit": 2, "stdout": "", "stderr": ""}},
+                  "recorded_from_candidate": {case_id: {"platform": audit.core.PLATFORM}}}
+        (golden_dir / f"audit.{audit.core.PLATFORM}.json").write_text(json.dumps(golden), encoding="utf-8")
+        monkeypatch.setattr(audit, "__file__", str(tmp_path / "rows" / "audit.py"))
+        monkeypatch.setattr(audit, "ensure", lambda kind: audit._name(kind))
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        case = audit.bank_export_case(case_id, "rich", ["--agent", "ffffffff0"], recorded=True)
+        with pytest.raises(ValueError, match="live export refusal requires a frozen Python recording"):
+            case.reference(tmp_path / "bank-export")
+
+
 def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     raw = event()
     raw["payload"] = json.loads(raw["payload"])
