@@ -29,8 +29,11 @@ renamed for installation. These binaries need no Python runtime.
 
 The Linux builds use Ubuntu 22.04 (glibc 2.35) on each architecture;
 macOS builds set a deployment target of 11.0. The Windows build uses MSVC
-on the Windows 2022 runner. The workflow uses native runners for all five
-targets and executes each unpacked archive's `version` command there.
+on the Windows 2022 runner and links the C runtime statically. The Windows
+client can start without the Microsoft Visual C++ Redistributable. The
+workflow checks the packaged Windows executable's normal and delay-load
+imports against the system DLL allowlist, then executes its `version`
+command. The other targets also run `version` on their native runners.
 The runner labels follow [GitHub's hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 
 ## Checksums and compose bundle

@@ -319,6 +319,45 @@ fn a_runtime_that_does_not_start_is_never_handed_the_steps() {
 }
 
 #[test]
+fn the_windows_missing_library_exit_names_the_fix_before_handoff() {
+    let f = Fixture::new();
+    let runtime = f.runtime(TARGET);
+    for first_probe in [true, false] {
+        let mut probe = Probe::current();
+        let missing = (-1073741515, String::new());
+        if first_probe {
+            probe.start = missing;
+        } else {
+            probe.protocols = missing;
+        }
+        let spawn = Spawn::new(writes(child_report(), 0));
+        let (result, _) = run(
+            &shim(&format!("installed:{TARGET}"), &runtime),
+            &parent(false),
+            &probe,
+            &spawn,
+        );
+        let (ladder, _) = result.unwrap();
+        assert_eq!(ladder["handoff"]["state"], "failed");
+        let detail = ladder["handoff"]["detail"].as_str().unwrap();
+        assert!(detail.contains("Windows could not start the client because a system library is missing (exit code -1073741515, 0xC0000135)"), "{detail}");
+        assert!(
+            detail.contains("The runtime itself is installed. Extract the client from a Windows release ZIP that bundles the C runtime. Open PowerShell in that directory, replace RELEASE_VERSION with that archive's version, and run"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains(
+                r".\pseudolife-mcp.exe update --clients-only --tag RELEASE_VERSION --daemon-url"
+            ),
+            "{detail}"
+        );
+        assert!(detail.contains("--reinstall. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64."), "{detail}");
+        assert!(!detail.contains("pseudolife-mcp-old update"), "{detail}");
+        assert!(spawn.calls.borrow().is_empty());
+    }
+}
+
+#[test]
 fn a_target_that_predates_the_protocol_is_finished_here_with_one_line() {
     let f = Fixture::new();
     let runtime = f.runtime(TARGET);
