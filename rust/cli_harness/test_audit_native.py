@@ -661,6 +661,33 @@ def test_audit_redact_refusal_reference_without_the_frozen_package(
         assert compare.diff(want, dict(want, db=changed), case.rules)[0] == "db differ:"
 
 
+def test_audit_redaction_diagnostics_match_frozen_source_by_ast():
+    import ast
+    from .rows import audit
+
+    source = Path(__file__).resolve().parents[2] / "pseudolife_memory/board_audit_cli.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    table, = (node.value for node in tree.body if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "_REDACT_REFUSALS"
+                      for target in node.targets))
+    assert audit._REDACT_REFUSALS == ast.literal_eval(table)
+
+    def diagnostic(function, prefix):
+        body, = (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function)
+        text, = (node.args[0].value for node in ast.walk(body)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                 and node.func.id == "AuditCliError" and node.args
+                 and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+                 and node.args[0].value.startswith(prefix))
+        return text
+
+    assert audit._REDACT_UNAVAILABLE == {
+        "busy": diagnostic("_redact", "the board is busy"),
+        "nolog": diagnostic("_bank", "this bank has no audit log yet"),
+        "prev46": diagnostic("_bank", "this bank's audit log predates schema v46"),
+    }
+
+
 def test_audit_fixture_checks_the_database_before_inserts(monkeypatch):
     from .rows import audit
 

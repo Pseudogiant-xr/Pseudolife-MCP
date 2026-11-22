@@ -698,7 +698,8 @@ def archive_case(case_id, variant, *extra, rules=(), stdout_closed=False):
 REDACT_DB = _bank.name(PREFIX + "rd")
 
 
-# Diagnostics from the frozen Python CLI's _redact and _bank paths. Each
+# Transcribed from pseudolife_memory/board_audit_cli.py at
+# 3ac81bcdcb3a6d64a769b40057c02b1c35458225 (_redact and _bank). Each
 # refusal case declares its outcome; these tables do not decide what to reject.
 _REDACT_REFUSALS = {
     "invalid_message_id": "--message-id must be one message id as the audit log shows it",
