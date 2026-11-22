@@ -428,10 +428,13 @@ def test_a_token_file_without_owner_only_protection_is_refused(bash, tmp_path):
     assert not any(call.startswith("curl|") for call in shell.logged())
 
 
+@pytest.mark.parametrize("target", ["nonempty", "empty", "missing"])
 @BASH
-def test_a_symlinked_token_file_is_refused(bash, tmp_path):
+def test_a_symlinked_token_file_is_refused(bash, tmp_path, target):
     shell = _Shell(bash, tmp_path)
-    token = _token(shell)
+    token = _token(shell) if target == "nonempty" else tmp_path / "target.token"
+    if target == "empty":
+        token.touch()
     link = tmp_path / "link.token"
     try:
         os.symlink(token, link)
@@ -440,6 +443,7 @@ def test_a_symlinked_token_file_is_refused(bash, tmp_path):
     proc = _preflight(shell, token_file=shell.path(link))
     assert proc.returncode == 1
     assert "regular file" in proc.stderr
+    assert not any(call.startswith("curl|") for call in shell.logged())
 
 
 @BASH
@@ -968,7 +972,8 @@ CRED_READY = ('{"status":"ready","credential_file_configured":true,"connection_c
 def _codex_wiring(shell: _Shell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
-                  runtime_failed: bool = False, gemini_list: str = ""):
+                  runtime_failed: bool = False, gemini_list: str = "", show_ladder: bool = False,
+                  hook_report: str = ""):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex calls."""
@@ -988,6 +993,8 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
         (shell.bin / "codex").unlink()
     if runtime_failed:
         steps = steps.replace("codex-runtime-defaults)\n", "codex-runtime-defaults) return 1\n", 1)
+    if hook_report:
+        steps = steps.replace(_HOOKS_READY, 'printf "%s\\n" "$FAKE_HOOK_REPORT"', 1)
     finish_fixture = ""
     if requested is not None:
         if native_exit and not gemini_list:
@@ -1003,6 +1010,8 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
     source = (ROOT / "ops" / "install-native.sh").read_text(encoding="utf-8")
     stages = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)"
                        r"^# [^\n]*12\. health", source)[1]
+    ladder = re.search(r"(?ms)^# [^\n]*13\. per-provider wiring ladder[^\n]*\n(.*?)"
+                       r"^# One line for the agent board", source)[1] if show_ladder else ""
     proc = shell.run(
         f"env_file='{shell.path(shell.tmp / 'absent.env')}'\n"
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
@@ -1011,12 +1020,13 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
         "CODEX_HOOKS=auto CODEX_HOOK_TRUST=yes INSTRUCTIONS=auto CLAUDE_MD='' EXPLICIT_ARGS=''\n"
         "AGENTS_FILE='' TRANSPORT=shim\n"
         + _between("ops/install-native.sh", "get_env() {", "\n") + "\n" + native_stub.BASH + "\n"
-        + steps + stages
+        + steps + stages + ladder
         + "\nprintf 'MCP_CODEX=%s\\n' \"$MCP_CODEX\"\n" + finish_fixture,
         strict="set -euo pipefail",
         extra_env={"FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
                    "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(native_exit),
                    "FAKE_EXISTING": existing, "FAKE_MCP_ADD_EXIT": str(add_exit),
+                   "FAKE_HOOK_REPORT": hook_report,
                    "FAKE_GEMINI_LIST": gemini_list,
                    "FAKE_LAUNCHER": _bash_fixture_path(shell.bash, installed / "pseudolife-mcp", shell.env),
                    "FAKE_KEEP_LAUNCHER": "1"})
@@ -1042,14 +1052,22 @@ COMPLETION_CASES = [
                   "cred_exit": 1}, DENIED_CREDENTIAL, id="credential-refused"),
     pytest.param({"cred": '{"status":"tokenless","credential_file_configured":false,'
                            '"connection_configured":true,"daemon_url":"%s"}' % REMOTE},
-                 "did not produce a token file", id="credential-missing"),
-    pytest.param({"missing": True}, "CLI is not on PATH", id="cli-missing"),
-    pytest.param({"add_exit": 17}, "MCP registration failed (exit 17)", id="registration"),
-    pytest.param({"native_exit": 7}, "Fix the native client install", id="native-install"),
+                 f"Codex was not registered: credential setup for the daemon at {REMOTE} "
+                 "did not produce a token file. Fix the error above and rerun the installer.",
+                 id="credential-missing"),
+    pytest.param({"missing": True}, "The codex CLI is not on PATH. Install it and rerun, or drop it from --client.",
+                 id="cli-missing"),
+    pytest.param({"add_exit": 17}, "MCP registration failed (exit 17). Fix the CLI error above and rerun the installer.",
+                 id="registration"),
+    pytest.param({"native_exit": 7}, "Codex authentication requires the stdio shim. HTTP fallback was not registered. "
+                 "Fix the native client install (see above), then rerun the installer.", id="native-install"),
     pytest.param({"existing": "pseudolife-memory\ncommand: pseudolife-mcp\n{PSEUDOLIFE_MCP_NO_SPAWN=1}"},
-                 "still resolves to a different executable", id="migration"),
+                 "the existing Codex registration was preserved and the checkout shim installed, but bare "
+                 "pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from "
+                 "PATH or put the installed scripts directory first, then re-run.", id="migration"),
     pytest.param({"existing": "pseudolife-memory\ncommand: custom-shim"},
-                 "has no verifiable no-spawn guard", id="verification"),
+                 "The existing stdio registration has no verifiable no-spawn guard. "
+                 "Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun.", id="verification"),
 ]
 
 
@@ -1063,8 +1081,7 @@ def test_incomplete_client_leaves_other_steps_running(bash, tmp_path, kwargs, re
     assert f"MCP_GEMINI={other_state}" in proc.stdout
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
     label = "Requested" if requested else "Detected"
-    assert f"{label} client setup incomplete (Codex)." in proc.stderr.splitlines()[-1]
-    assert reason in proc.stderr.splitlines()[-1]
+    assert proc.stderr.splitlines()[-1] == f"{label} client setup incomplete (Codex). {reason}"
     assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
 
 
@@ -1075,12 +1092,17 @@ def test_malformed_gemini_listing_reports_only_that_client(bash, tmp_path):
     assert proc.returncode == 5, proc.stdout + proc.stderr
     assert "MCP_CODEX=shim-env" in proc.stdout
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
-    assert "Requested client setup incomplete (Gemini CLI). Gemini CLI did not return" in proc.stderr.splitlines()[-1]
+    assert proc.stderr.splitlines()[-1] == (
+        "Requested client setup incomplete (Gemini CLI). Gemini CLI did not return a usable Pseudolife registration. "
+        "Check gemini mcp list, then rerun the installer."
+    )
 
 
 @pytest.mark.parametrize("transport,repair", [
-    ("shim", "Fix the native client install"),
-    ("http", "Rerun the installer with --transport shim"),
+    ("shim", "The native client could not be installed (see above), and the daemon requires a bearer token "
+             "for this connection. Fix the native client install, then rerun the installer."),
+    ("http", "The installer cannot add the daemon's required bearer token to an HTTP registration. "
+             "Rerun the installer with --transport shim."),
 ])
 @BASH
 def test_bearer_transport_failure_names_the_right_repair(bash, tmp_path, transport, repair):
@@ -1089,24 +1111,32 @@ def test_bearer_transport_failure_names_the_right_repair(bash, tmp_path, transpo
         + _block("client registration state") + _block("client registration helpers")
         + "check_client_http_auth claude\n" + _block("client setup result"))
     assert proc.returncode == 5, proc.stdout + proc.stderr
-    assert repair in proc.stderr.splitlines()[-1]
+    assert proc.stderr.splitlines()[-1] == f"Requested client setup incomplete (Claude Code). {repair}"
 
 
 @pytest.mark.parametrize("kwargs", [{}, {"runtime_failed": True},
                                     {"existing": "pseudolife-memory\ncommand: custom-shim\n{PSEUDOLIFE_MCP_NO_SPAWN=1}"}])
 @BASH
 def test_successful_client_setup_and_rerun_exit_zero(bash, tmp_path, kwargs):
-    proc, _ = _codex_wiring(_Shell(bash, tmp_path), requested="codex gemini", **kwargs)
+    proc, _ = _codex_wiring(_Shell(bash, tmp_path), requested="codex gemini", show_ladder=True, **kwargs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
-    assert "Done. First session" in proc.stdout
+    assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
+    codex_ladder = proc.stdout.split("  OpenAI Codex\n", 1)[1]
     if kwargs.get("runtime_failed"):
         assert "Warnings\nCodex runtime defaults were not confirmed." in proc.stderr
+        assert codex_ladder.startswith("    [!] MCP transport        stdio shim")
+        assert "    [!] Runtime defaults     not confirmed -" in codex_ladder
+    elif kwargs.get("existing"):
+        assert codex_ladder.startswith("    [x] MCP transport        already wired with custom command (unchanged)")
+    else:
+        assert codex_ladder.startswith("    [x] MCP transport        stdio shim")
 
 
 @pytest.mark.parametrize("deferred", [False, True], ids=["full", "client-only"])
+@pytest.mark.parametrize("requested", [True, False], ids=["requested", "detected"])
 @BASH
-def test_a_claude_hook_write_failure_stays_a_warning(bash, tmp_path, deferred):
+def test_a_claude_hook_write_failure_is_reported_at_completion(bash, tmp_path, deferred, requested):
     shell = _Shell(bash, tmp_path)
     ops = tmp_path / "ops"
     ops.mkdir()
@@ -1115,16 +1145,67 @@ def test_a_claude_hook_write_failure_stays_a_warning(bash, tmp_path, deferred):
         "ops/install-native.sh", '    step "Installing $selected_client session hook..."', "\ndone")
     proc = shell.run(
         f"repo='{shell.path(tmp_path)}'\n"
-        "CLIENTS='claude' REQUESTED_CLIENTS='claude' HOOK_CLAUDE=deferred\n"
+        f"CLIENTS='claude' REQUESTED_CLIENTS='{'claude' if requested else ''}' HOOK_CLAUDE=deferred\n"
         "selected_client=claude briefing_command=fixture SHIM_OK=1 SHIM_PATH=/fixture/shim\n"
         "ensure_shim() { :; }\n"
         + _block("client registration state") + block
         + "\nprintf 'CLIENT_SETUP_CONTINUED\\n'\n" + _block("client setup result"),
         strict="set -eu",
     )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.returncode == (5 if requested else 0), proc.stdout + proc.stderr
     assert "CLIENT_SETUP_CONTINUED" in proc.stdout
-    assert "Warnings\nClaude Code hooks were not installed." in proc.stderr
+    lines = proc.stderr.splitlines()
+    label = "Requested" if requested else "Detected"
+    assert lines[-1] == (
+        f"{label} client setup incomplete (Claude Code). "
+        "Hooks were not installed. Fix the hook error above and rerun the installer."
+    )
+    if not requested:
+        assert lines[-2] == "Warnings"
+
+
+CODEX_HOOK_APPROVAL = (
+    "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. "
+    "Review and trust the Pseudolife handlers, then start a new session."
+)
+CODEX_HOOK_REPORTS = [
+    pytest.param("pending", "PseudoLife hooks await approval. Rerun the installer interactively, "
+                 "or review them in Codex /hooks.", CODEX_HOOK_APPROVAL, id="approval"),
+    pytest.param("unavailable", "The fixture could not write hooks. Check permissions and rerun.",
+                 "Hooks could not be set up. The fixture could not write hooks. Check permissions and rerun.",
+                 id="failure"),
+]
+
+
+@pytest.mark.parametrize("hook_status,recovery,reason", CODEX_HOOK_REPORTS)
+@pytest.mark.parametrize("requested", ["codex gemini", ""], ids=["requested", "detected"])
+@BASH
+def test_codex_hook_failure_is_reported_at_completion(bash, tmp_path, hook_status, recovery, reason, requested):
+    report = json.dumps(dict(status=hook_status, source="manual", instructions="present", recovery=recovery))
+    proc, adds = _codex_wiring(_Shell(bash, tmp_path), requested=requested, hook_report=report)
+    assert proc.returncode == (5 if requested else 0), proc.stdout + proc.stderr
+    assert adds and "MCP_GEMINI=shim-env" in proc.stdout
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    label = "Requested" if requested else "Detected"
+    assert proc.stderr.splitlines()[-1] == f"{label} client setup incomplete (Codex). {reason}"
+    if not requested:
+        assert "Warnings" in proc.stderr.splitlines()
+
+
+@BASH
+def test_requested_codex_instruction_failure_is_a_warning(bash, tmp_path):
+    report = json.dumps({
+        "status": "ready", "source": "manual", "instructions": "skipped",
+        "instructions_error": {"file": "fixture-AGENTS.md", "cause": "fixture write failed"},
+        "recovery": "Standing instructions could not be written: fixture write failed",
+    })
+    proc, adds = _codex_wiring(_Shell(bash, tmp_path), requested="codex gemini", hook_report=report)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert adds and "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
+    assert proc.stderr.splitlines()[-2:] == [
+        "Warnings", "Codex standing instructions could not be written. Check the Codex home and file permissions.",
+    ]
 
 
 @pytest.mark.parametrize("outcome,recovery", [
@@ -1286,9 +1367,12 @@ def test_unattended_detected_clients_keep_success_when_native_install_fails(bash
     output = proc.stdout + proc.stderr
     assert proc.returncode == 0, output
     assert "the native client could not be installed" in output
-    assert "Detected client setup incomplete (Claude Code)" in output
+    assert (
+        "Detected client setup incomplete (Claude Code). The native client could not be installed (see above), "
+        "and the daemon requires a bearer token for this connection. Fix the native client install, then rerun the installer."
+    ) in proc.stderr.splitlines()
     assert "Requested client setup incomplete" not in output
-    assert "Done. First session" in output
+    assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
 
 
 @BASH
@@ -1448,7 +1532,10 @@ def test_client_only_connect_failure_keeps_the_native_client_and_reports_partial
     assert "could not check the existing registration" in output and "the fixture refuses" in output
     assert "Nothing was changed" not in output and "nothing was changed" not in output
     assert "stopped part way" not in output
-    assert "Requested client setup incomplete (Claude Code)." in proc.stderr.splitlines()[-1]
+    assert proc.stderr.splitlines()[-1] == (
+        "Requested client setup incomplete (Claude Code). pseudolife-mcp connect could not check the existing "
+        "registration (exit 1: the fixture refuses). Fix the reported problem and rerun the installer."
+    )
     assert any(call.startswith("gemini|mcp add -s user") for call in shell.logged())
     assert (installed / "pseudolife-mcp").is_file()
     settings = json.loads((shell.home / ".claude" / "settings.json").read_text(encoding="utf-8"))

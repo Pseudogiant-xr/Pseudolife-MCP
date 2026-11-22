@@ -22,7 +22,7 @@ from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
-from tests.test_installer_client_only_native import COMPLETION_CASES, DENIED_CREDENTIAL
+from tests.test_installer_client_only_native import CODEX_HOOK_REPORTS, COMPLETION_CASES, DENIED_CREDENTIAL
 from tests.test_installer_existing_upgrade import _between, user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -442,9 +442,12 @@ def test_a_token_file_written_with_set_content_is_refused(tmp_path):
     assert not any(call.startswith("Invoke-RestMethod|") for call in ps.logged())
 
 
-def test_a_symlinked_token_file_is_refused(tmp_path):
+@pytest.mark.parametrize("target", ["nonempty", "empty", "missing"])
+def test_a_symlinked_token_file_is_refused(tmp_path, target):
     ps = _PowerShell(tmp_path)
-    token = _token(ps)
+    token = _token(ps) if target == "nonempty" else tmp_path / "target.token"
+    if target == "empty":
+        token.touch()
     link = tmp_path / "link.token"
     try:
         os.symlink(token, link)
@@ -453,6 +456,7 @@ def test_a_symlinked_token_file_is_refused(tmp_path):
     proc = _preflight(ps, token_file=str(link))
     assert proc.returncode == 1
     assert "regular file" in _output(proc)
+    assert not any(call.startswith("Invoke-RestMethod|") for call in ps.logged())
 
 
 def test_the_banner_says_when_the_environment_implied_client_only(tmp_path):
@@ -926,7 +930,8 @@ CODEX_STUB = """$global:LASTEXITCODE = 0
 def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
-                  runtime_failed: bool = False, gemini_list: str = ""):
+                  runtime_failed: bool = False, gemini_list: str = "",
+                  show_ladder: bool = False, transport: str = "shim", hook_report: str = ""):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex adds."""
@@ -937,14 +942,21 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
     launcher.write_text("placeholder\n", encoding="utf-8")
     if "FAKE_INSTALL_BIN" in ps.env:  # a test's own launcher that answers connect
         launcher = Path(ps.env["FAKE_INSTALL_BIN"]) / "pseudolife-mcp.ps1"
-    stages = re.search(r"(?ms)^# -- 9\. session lifecycle hooks[^\n]*\n(.*?)^# -- 12\. health",
-                       (ROOT / INSTALL).read_text(encoding="utf-8"))[1]
+    source = (ROOT / INSTALL).read_text(encoding="utf-8")
+    stages = re.search(r"(?ms)^# -- 9\. session lifecycle hooks[^\n]*\n(.*?)^# -- 12\. health", source)[1]
+    ladder = re.search(r"(?ms)^# -- 13\. per-provider wiring ladder[^\n]*\n(.*?)"
+                       r"^# One line for the agent board", source)[1] if show_ladder else ""
     steps = _codex_steps_ps(
         "$null = @($input); $global:LASTEXITCODE = [int]$env:FAKE_CRED_EXIT; return $env:FAKE_CRED")
     if runtime_failed:
         steps = steps.replace(
             """return '{"status":"ready","runtime_defaults":"configured"}'""",
             """$global:LASTEXITCODE = 1; return '{"status":"needs-configuration"}'""",
+        )
+    if hook_report:
+        steps = steps.replace(
+            """return '{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}'""",
+            "return $env:FAKE_HOOK_REPORT", 1,
         )
     codex = "" if missing else ps.stub_function("codex", CODEX_STUB + "\n$global:LASTEXITCODE = [int]$env:FAKE_MCP_ADD_EXIT")
     if native_exit and not gemini_list:
@@ -953,7 +965,7 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
         "gemini", "$global:LASTEXITCODE = 0\n"
         "if ($args -contains 'list') { $env:FAKE_GEMINI_LIST }\n"
         "if ($args -contains '--help') { '  -e, --env' }")
-    providers = "'codex'" if requested is None else "'codex','gemini'"
+    providers = "'codex'" if requested in (None, "codex") else "'codex','gemini'"
     finish_fixture = "" if requested is None else (
         "Write-Output ('MCP_GEMINI=' + $mcpState['gemini'])\n"
         "Write-Output 'REMAINING_STEPS_FINISHED'\n"
@@ -963,7 +975,7 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
 $clients = @({providers}); $CodexHooks = 'auto'; $CodexHookTrust = 'yes'
 $requestedClients = '{requested or ''}' -split ' '
 $Instructions = 'auto'; $ClaudeMd = ''; $AgentsFile = ''; $interactive = $false
-$Transport = 'shim'
+$Transport = '{transport}'
 $ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
 function Get-EnvValue($name) {{ return $null }}
 {native_stub.POWERSHELL}
@@ -971,6 +983,7 @@ function Get-EnvValue($name) {{ return $null }}
 {codex}
 {gemini}
 {stages}
+{ladder}
 Write-Output ("MCP_CODEX=" + $mcpState['codex'])
 {finish_fixture}
 """
@@ -978,7 +991,7 @@ Write-Output ("MCP_CODEX=" + $mcpState['codex'])
         "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
         "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(native_exit),
         "FAKE_EXISTING": existing, "FAKE_MCP_ADD_EXIT": str(add_exit),
-        "FAKE_GEMINI_LIST": gemini_list,
+        "FAKE_GEMINI_LIST": gemini_list, "FAKE_HOOK_REPORT": hook_report,
         "FAKE_LAUNCHER": str(launcher), "FAKE_KEEP_LAUNCHER": "1"})
     adds = [call for call in ps.logged()
             if call.startswith("codex|mcp add") and "--help" not in call]
@@ -1004,8 +1017,9 @@ def test_incomplete_client_leaves_other_steps_running(tmp_path, kwargs, reason, 
     assert f"MCP_GEMINI={other_state}" in proc.stdout
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
     label = "Requested" if requested else "Detected"
-    assert f"{label} client setup incomplete (Codex)." in proc.stderr.splitlines()[-1]
-    assert reason in proc.stderr.splitlines()[-1]
+    reason = reason.replace("drop it from --client", "drop it from -Client")
+    reason = reason.replace("the existing Codex registration was preserved", "The existing Codex registration was preserved")
+    assert proc.stderr.splitlines()[-1] == f"{label} client setup incomplete (Codex). {reason}"
     assert FIXTURE_TOKEN not in _output(proc)
 
 
@@ -1015,12 +1029,17 @@ def test_malformed_gemini_listing_reports_only_that_client(tmp_path):
     assert proc.returncode == 5, _output(proc)
     assert "MCP_CODEX=shim-env" in proc.stdout
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
-    assert "Requested client setup incomplete (Gemini CLI). Gemini CLI did not return" in proc.stderr.splitlines()[-1]
+    assert proc.stderr.splitlines()[-1] == (
+        "Requested client setup incomplete (Gemini CLI). Gemini CLI did not return a usable Pseudolife registration. "
+        "Check gemini mcp list, then rerun the installer."
+    )
 
 
 @pytest.mark.parametrize("transport,repair", [
-    ("shim", "Fix the native client install"),
-    ("http", "Rerun the installer with -Transport shim"),
+    ("shim", "The native client could not be installed (see above), and the daemon requires a bearer token "
+             "for this connection. Fix the native client install, then rerun the installer."),
+    ("http", "The installer cannot add the daemon's required bearer token to an HTTP registration. "
+             "Rerun the installer with -Transport shim."),
 ])
 def test_bearer_transport_failure_names_the_right_repair(tmp_path, transport, repair):
     proc = _PowerShell(tmp_path).run(
@@ -1030,29 +1049,48 @@ def test_bearer_transport_failure_names_the_right_repair(tmp_path, transport, re
         + _block("client registration state") + _block("client registration helpers")
         + 'Write-ClientHttpAuthResult "claude"\n' + _block("client setup result"))
     assert proc.returncode == 5, _output(proc)
-    assert repair in proc.stderr.splitlines()[-1]
+    assert proc.stderr.splitlines()[-1] == f"Requested client setup incomplete (Claude Code). {repair}"
+
+
+def test_codex_refuses_explicit_http_when_authenticated(tmp_path):
+    proc, adds = _codex_wiring(
+        _PowerShell(tmp_path), requested="codex", transport="http", native_exit=7)
+    assert proc.returncode == 5, _output(proc)
+    assert not adds
+    assert proc.stderr.splitlines()[-1] == (
+        "Requested client setup incomplete (Codex). Codex authentication requires the stdio shim. "
+        "HTTP transport was not registered. Rerun the installer with -Transport shim."
+    )
 
 
 @pytest.mark.parametrize("kwargs", [{}, {"runtime_failed": True},
                                     {"existing": "pseudolife-memory\ncommand: custom-shim\n{PSEUDOLIFE_MCP_NO_SPAWN=1}"}])
 def test_successful_client_setup_and_rerun_exit_zero(tmp_path, kwargs):
-    proc, _ = _codex_wiring(_PowerShell(tmp_path), requested="codex gemini", **kwargs)
+    proc, _ = _codex_wiring(_PowerShell(tmp_path), requested="codex gemini", show_ladder=True, **kwargs)
     assert proc.returncode == 0, _output(proc)
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
-    assert "Done. First session" in proc.stdout
+    assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
+    codex_ladder = proc.stdout.split("  OpenAI Codex\n", 1)[1]
     if kwargs.get("runtime_failed"):
         assert "Warnings\nCodex runtime defaults were not confirmed." in proc.stderr
+        assert codex_ladder.startswith("    [!] MCP transport        stdio shim")
+        assert "    [!] Runtime defaults     not confirmed -" in codex_ladder
+    elif kwargs.get("existing"):
+        assert codex_ladder.startswith("    [x] MCP transport        already wired with custom command (unchanged)")
+    else:
+        assert codex_ladder.startswith("    [x] MCP transport        stdio shim")
 
 
 @pytest.mark.parametrize("deferred", [False, True], ids=["full", "client-only"])
 @pytest.mark.parametrize("failure", ['throw "fixture hook write failure"', "exit 19"])
-def test_a_claude_hook_write_failure_stays_a_warning(tmp_path, deferred, failure):
+@pytest.mark.parametrize("requested", [True, False], ids=["requested", "detected"])
+def test_a_claude_hook_write_failure_is_reported_at_completion(tmp_path, deferred, failure, requested):
     ps = _PowerShell(tmp_path)
     (tmp_path / "install-hook.ps1").write_text(failure + "\n", encoding="utf-8")
     block = _block("client-only claude hook") if deferred else _between(
         INSTALL, '    Step "Installing $selectedClient session hook..."', "\n}")
     proc = ps.run(
-        "$clients = @('claude'); $requestedClients = $clients\n"
+        f"$clients = @('claude'); $requestedClients = {'$clients' if requested else '@()'}\n"
         "$hookState = @{claude = 'deferred'}; $instrState = @{}\n"
         "$selectedClient = 'claude'; $briefingCommand = 'fixture'\n"
         "$script:shimInstallPath = '/fixture/shim.exe'\n"
@@ -1060,10 +1098,46 @@ def test_a_claude_hook_write_failure_stays_a_warning(tmp_path, deferred, failure
         + _block("client registration state") + block
         + "\nWrite-Output 'CLIENT_SETUP_CONTINUED'\n" + _block("client setup result")
     )
-    assert proc.returncode == 0, _output(proc)
+    assert proc.returncode == (5 if requested else 0), _output(proc)
     assert "CLIENT_SETUP_CONTINUED" in proc.stdout
-    assert "Warnings\nClaude Code hooks were not installed." in proc.stderr
+    lines = proc.stderr.splitlines()
+    label = "Requested" if requested else "Detected"
+    assert lines[-1] == (
+        f"{label} client setup incomplete (Claude Code). "
+        "Hooks were not installed. Fix the hook error above and rerun the installer."
+    )
+    if not requested:
+        assert lines[-2] == "Warnings"
     assert "fixture hook write failure" not in _output(proc)
+
+
+@pytest.mark.parametrize("hook_status,recovery,reason", CODEX_HOOK_REPORTS)
+@pytest.mark.parametrize("requested", ["codex gemini", ""], ids=["requested", "detected"])
+def test_codex_hook_failure_is_reported_at_completion(tmp_path, hook_status, recovery, reason, requested):
+    report = json.dumps(dict(status=hook_status, source="manual", instructions="present", recovery=recovery))
+    proc, adds = _codex_wiring(_PowerShell(tmp_path), requested=requested, hook_report=report)
+    assert proc.returncode == (5 if requested else 0), _output(proc)
+    assert adds and "MCP_GEMINI=shim-env" in proc.stdout
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    label = "Requested" if requested else "Detected"
+    assert proc.stderr.splitlines()[-1] == f"{label} client setup incomplete (Codex). {reason}"
+    if not requested:
+        assert "Warnings" in proc.stderr.splitlines()
+
+
+def test_requested_codex_instruction_failure_is_a_warning(tmp_path):
+    report = json.dumps({
+        "status": "ready", "source": "manual", "instructions": "skipped",
+        "instructions_error": {"file": "fixture-AGENTS.md", "cause": "fixture write failed"},
+        "recovery": "Standing instructions could not be written: fixture write failed",
+    })
+    proc, adds = _codex_wiring(_PowerShell(tmp_path), requested="codex gemini", hook_report=report)
+    assert proc.returncode == 0, _output(proc)
+    assert adds and "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
+    assert proc.stderr.splitlines()[-2:] == [
+        "Warnings", "Codex standing instructions could not be written. Check the Codex home and file permissions.",
+    ]
 
 
 @pytest.mark.parametrize("accepted", [True, False], ids=["accepted", "rejected"])
@@ -1356,7 +1430,10 @@ def test_client_only_connect_failure_keeps_the_native_client_and_reports_partial
     assert "could not check the existing registration" in output and "the fixture refuses" in output
     assert "Nothing was changed" not in output and "nothing was changed" not in output
     assert "stopped part way" not in output
-    assert "Requested client setup incomplete (Claude Code)." in proc.stderr.splitlines()[-1]
+    assert proc.stderr.splitlines()[-1] == (
+        "Requested client setup incomplete (Claude Code). pseudolife-mcp connect could not check the existing "
+        "registration (exit 1: the fixture refuses). Fix the reported problem and rerun the installer."
+    )
     assert any(call.startswith("gemini|mcp add -s user") for call in ps.logged())
     assert shim.is_file()
     settings = json.loads((ps.home / ".claude" / "settings.json").read_text(encoding="utf-8-sig"))
@@ -1390,5 +1467,7 @@ def test_a_cli_exception_is_reported_as_an_incomplete_requested_client(tmp_path,
     assert "the fixture gemini CLI broke" in output
     assert "Nothing was changed" not in output and "nothing was changed" not in output
     assert "stopped part way" not in output
-    assert "Requested client setup incomplete (Gemini CLI)." in proc.stderr.splitlines()[-1]
-    assert "the fixture gemini CLI broke" in proc.stderr.splitlines()[-1]
+    assert proc.stderr.splitlines()[-1] == (
+        "Requested client setup incomplete (Gemini CLI). MCP setup failed. "
+        "the fixture gemini CLI broke Fix the reported problem and rerun the installer."
+    )

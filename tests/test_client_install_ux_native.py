@@ -11,6 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_installer_client_only_native import _Shell, _stub
+from tests.test_installer_client_only_ps_native import _PowerShell
+from tests.test_installer_existing_upgrade import _bash_variants
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -161,8 +165,120 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
             '} elseif (($Transport -eq "shim")', 1)[0]
     assert 'CODEX_RUNTIME_DEFAULTS=failed' in sh
     assert '$script:codexRuntimeDefaults = "failed"' in ps
-    assert 'if [ "$CODEX_RUNTIME_DEFAULTS" = failed ]; then codex_marker=\'[!]\'; fi' in sh
-    assert '$codexMarker = if ($codexRuntimeDefaults -eq "failed") { "[!]" }' in ps
+
+
+INSTALLER_SHELLS = [*_bash_variants(), "powershell"]
+
+
+def _stage(path, start, end):
+    return _read(path).split(start, 1)[1].split("\n", 1)[1].split(end, 1)[0]
+
+
+@pytest.mark.parametrize("shell", INSTALLER_SHELLS, ids=lambda name: Path(name).name)
+def test_requested_client_instruction_write_failure_is_a_warning(tmp_path, shell):
+    if shell == "powershell":
+        runner = _PowerShell(tmp_path)
+        path = "ops/install-native.ps1"
+        setup = (
+            "$clients = @('claude'); $requestedClients = $clients; $hookState = @{claude = 'hook'}\n"
+            "$instructionChoice = 'append'\n"
+        )
+        continued = "Write-Output REMAINING_STEPS_FINISHED\n"
+    else:
+        runner = _Shell(shell, tmp_path)
+        path = "ops/install-native.sh"
+        setup = (
+            "CLIENTS=claude REQUESTED_CLIENTS=claude HOOK_CLAUDE=hook instruction_choice=append\n"
+            "CLAUDE_PLUGIN_INSTALLED=''\n"
+        )
+        continued = "echo REMAINING_STEPS_FINISHED\n"
+    # A file in place of the parent makes the write fail even for an elevated runner.
+    (runner.home / ".claude").write_text("fixture", encoding="utf-8")
+    target = runner.home / ".claude" / "CLAUDE.md"
+    display_path = target if shell == "powershell" else runner.path(target)
+    proc = runner.run(
+        setup + _stage(path, "10. standing memory instructions", "11. wire into selected MCP clients")
+        .rsplit("\n#", 1)[0] + "\n" + continued
+        + "\n".join(_marker_block(_read(path), "client registration state")) + "\n"
+        + "\n".join(_marker_block(_read(path), "client setup result")) + "\n"
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
+    assert proc.stderr.splitlines()[-2:] == [
+        "Warnings",
+        f"Standing instructions could not be written to {display_path}. Check permissions and rerun.",
+    ]
+
+
+@pytest.mark.parametrize("shell", INSTALLER_SHELLS, ids=lambda name: Path(name).name)
+@pytest.mark.parametrize("choice", ["flag", "prompt", "restored", "default"])
+def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
+    mode = "claude-only" if choice in ("flag", "restored") else ""
+    restored = choice == "restored"
+    if shell == "powershell":
+        runner = _PowerShell(tmp_path)
+        path = "ops/install-native.ps1"
+        (tmp_path / "scheduled_task_lock.ps1").touch()
+        (tmp_path / "fixture-shim.ps1").write_text(
+            "Write-Output (\"AUTOSTART \" + ($args -join ' '))\nexit 19\n", encoding="utf-8"
+        )
+        setup = (
+            f"$Extractor = '{mode}'; $restoredExtractor = {'$true' if restored else '$false'}\n"
+            "$clients = @(); $hookState = @{}; $instrState = @{}\n"
+            f"$ShimPort = 0; $Model = 'haiku'; $interactive = {'$true' if choice == 'prompt' else '$false'}\n"
+            "$script:shimInstallPath = Join-Path $PSScriptRoot 'fixture-shim.ps1'\n"
+            "function Read-Host { '1' }\n"
+            "function Assert-ExtractorArgs {}\n"
+            "function claude { throw 'unexpected Claude invocation' }\n"
+            "function Install-ShimOnce { return $true }\n"
+            "function Get-ScheduledTask { return $null }\n"
+            "function Get-NetTCPConnection { return $null }\n"
+        )
+        continued = "Write-Output REMAINING_STEPS_FINISHED\n"
+    else:
+        runner = _Shell(shell, tmp_path)
+        path = "ops/install-native.sh"
+        launcher = runner.bin / "fixture-shim"
+        _stub(launcher, "printf 'AUTOSTART %s\\n' \"$*\"\nexit 19\n")
+        _stub(runner.bin / "systemctl", "exit 1\n")
+        setup = (
+            f"EXTRACTOR='{mode}' restored_extractor='{'1' if restored else ''}'\n"
+            f"CLIENTS='' CLIENT_ONLY='' MODEL=haiku SHIM_PORT=0 SHIM_OK=1 SHIM_PATH='{runner.path(launcher)}'\n"
+            "check_extractor_args() { :; }\n"
+            "ensure_shim() { :; }\n"
+        )
+        if choice == "prompt":
+            setup += (
+                # Answer only the extractors menu. The fixture passes its
+                # script over stdin, so there is no real terminal to detect.
+                "function [ { if [[ $* == '! -t 0 ]' ]]; then return 1; fi; builtin [ \"$@\"; }\n"
+                "read() { if [[ $* == '-r choice' ]]; then choice=1; else builtin read \"$@\"; fi; }\n"
+            )
+        continued = "echo REMAINING_STEPS_FINISHED\n"
+    proc = runner.run(
+        setup + _stage(path, "3. extractor choice", "# >>> endpoint preflight >>>")
+        + "\n".join(_marker_block(_read(path), "client registration state")) + "\n"
+        + "\n".join(_marker_block(_read(path), "shim autostart")) + "\n"
+        + continued + "\n".join(_marker_block(_read(path), "client setup result")) + "\n"
+    )
+    output = proc.stdout + proc.stderr
+    assert ("AUTOSTART extractor-shim install-autostart claude" in proc.stdout) == (choice != "default")
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert proc.returncode == (5 if choice in ("flag", "prompt") else 0), output
+    if choice in ("flag", "prompt"):
+        assert proc.stderr.splitlines()[-1] == (
+            "Requested extractor setup incomplete (claude-only). Shim autostart registration or start failed. "
+            "Fix the reported error and rerun the installer with the same extractor mode."
+        )
+    else:
+        assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
+        if restored:
+            assert proc.stderr.splitlines()[-2:] == [
+                "Warnings", "Extractor shim autostart failed. See the repair command above."
+            ]
+        else:
+            assert proc.stderr == ""
 
 
 def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:

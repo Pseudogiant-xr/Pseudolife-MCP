@@ -10,7 +10,7 @@
 # extractor choice -> compose up -> client hooks -> standing instructions ->
 # MCP registration -> health. Re-running is safe; re-running with a different
 # --extractor is the supported way to switch modes.
-# Exit statuses: 0 completed, 1 operational failure, 2 usage or prerequisite refusal, 5 requested client setup incomplete.
+# Exit statuses: 0 completed, 1 operational failure, 2 usage or prerequisite refusal, 5 requested client or extractor setup incomplete.
 #
 #   ops/install.sh                                  # interactive
 #   ops/install.sh --extractor sidecar --client codex
@@ -1559,7 +1559,8 @@ client_only_preflight() {
             exit 1
         fi
     else
-        if [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
+        # The client validator can report a link even if the target is empty or missing.
+        if [ ! -L "$TOKEN_FILE" ] && { [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; }; then
             echo "client-only install: the token file is missing or empty: $TOKEN_FILE. Pair this machine instead: remove it if it is empty, then re-run with --pairing-code <code> from pseudolife-mcp invite <name> on the daemon's host; or, as the fallback, create it with --read-token or write the daemon's token into it owner-only, then re-run" >&2
             exit 1
         fi
@@ -1616,6 +1617,8 @@ fi
 
 # ── 3. extractor choice (explicit, no default) ─────────────────────────────
 # A client-only install has none: the remote daemon runs its own extractor.
+extractor_requested=""
+if [ -n "$EXTRACTOR" ] && [ -z "${restored_extractor:-}" ]; then extractor_requested=1; fi
 if [ -z "$EXTRACTOR" ] && [ -z "$CLIENT_ONLY" ]; then
     if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then
         if [ -f "${env_file:-}" ] && awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
@@ -1651,6 +1654,7 @@ if [ -z "$EXTRACTOR" ] && [ -z "$CLIENT_ONLY" ]; then
                 7) EXTRACTOR=endpoint-fallback ;;
                 *) echo "  please answer 1-7" ;;
             esac
+            if [ -n "$EXTRACTOR" ] && [ -n "$choice" ]; then extractor_requested=1; fi
         done
         case "$EXTRACTOR" in endpoint|endpoint-fallback)
             while [ -z "$EXTRACTOR_URL" ]; do
@@ -2199,7 +2203,7 @@ install_claude_plugin() {
         step "Adding the $CLAUDE_PLUGIN_MARKETPLACE plugin marketplace to Claude Code..."
         if ! claude plugin marketplace add "$CLAUDE_PLUGIN_MARKETPLACE_SOURCE"; then
             PLUGIN_CLAUDE=failed
-            PLUGIN_CLAUDE_RECOVERY="'claude plugin marketplace add $CLAUDE_PLUGIN_MARKETPLACE_SOURCE' failed (GitHub reachable?); retry it, or $(claude_plugin_manual)"
+            PLUGIN_CLAUDE_RECOVERY="'claude plugin marketplace add $CLAUDE_PLUGIN_MARKETPLACE_SOURCE' failed. Fix the reported error and rerun the installer."
             echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
             return 0
         fi
@@ -2214,7 +2218,7 @@ install_claude_plugin() {
     case "$install_help" in *--yes*) yes_flag=--yes ;; esac
     if ! claude plugin install ${yes_flag:+"$yes_flag"} "$CLAUDE_PLUGIN_ID"; then
         PLUGIN_CLAUDE=failed
-        PLUGIN_CLAUDE_RECOVERY="'claude plugin install $CLAUDE_PLUGIN_ID' failed (see above); retry it, or $(claude_plugin_manual)"
+        PLUGIN_CLAUDE_RECOVERY="'claude plugin install $CLAUDE_PLUGIN_ID' failed. Fix the reported error and rerun the installer."
         echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
         return 0
     fi
@@ -2222,7 +2226,7 @@ install_claude_plugin() {
         PLUGIN_CLAUDE="installed:$(claude_plugin_installed_version)"
     else
         PLUGIN_CLAUDE=failed
-        PLUGIN_CLAUDE_RECOVERY="'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $CLAUDE_PLUGIN_ID; check 'claude plugin list', or $(claude_plugin_manual)"
+        PLUGIN_CLAUDE_RECOVERY="'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $CLAUDE_PLUGIN_ID. Run /plugin install $CLAUDE_PLUGIN_ID inside Claude Code."
         echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
     fi
 }
@@ -2726,6 +2730,9 @@ for selected_client in $CLIENTS; do
                         IFS= read -r CODEX_HOOK_RECOVERY || true
                     } <<< "$setup_fields"
                     CODEX_SETUP_VALID=1
+                    if grep -Eq '(^|[,{])[[:space:]]*"instructions_error"[[:space:]]*:[[:space:]]*\{' <<< "$setup_output"; then
+                        CODEX_INSTRUCTION_WARNING=1
+                    fi
                 else
                     CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Rerun this installer to retry."
                 fi
@@ -3875,13 +3882,13 @@ if [ -n "$shim_autostart_family" ]; then
     shim_autostart_args=(extractor-shim install-autostart "$shim_autostart_family" --repo "$repo" --port "$SHIM_PORT" --model "$MODEL")
     if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
         echo "WARNING: shim autostart was not registered: the native client is unavailable (see above)" >&2
-        EXTRACTOR_AUTOSTART_WARNING=1
+        EXTRACTOR_AUTOSTART_FAILURE="Shim autostart was not registered because the native client is unavailable. Fix the native client install and rerun the installer with the same extractor mode."
         echo "  Re-run later: pseudolife-mcp ${shim_autostart_args[*]}" >&2
     # The stable launcher, not the numbered runtime it starts: the service
     # then runs whatever release a later update installs.
     elif ! "$SHIM_PATH" "${shim_autostart_args[@]}" --native-exe "$SHIM_PATH"; then
         echo "WARNING: shim autostart registration failed (see above: usually no systemd --user on this host)" >&2
-        EXTRACTOR_AUTOSTART_WARNING=1
+        EXTRACTOR_AUTOSTART_FAILURE="Shim autostart registration or start failed. Fix the reported error and rerun the installer with the same extractor mode."
         echo "  Re-run later: $SHIM_PATH ${shim_autostart_args[*]} --native-exe $SHIM_PATH" >&2
         echo "  Or start it manually: $SHIM_PATH extractor-shim $shim_autostart_family --repo $repo --port $SHIM_PORT --model $MODEL" >&2
     fi
@@ -3951,6 +3958,7 @@ if [ "${HOOK_CLAUDE:-}" = deferred ]; then
     else
         echo "WARNING: the Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)." >&2
         HOOK_CLAUDE=failed
+        CLAUDE_HOOK_RECOVERY="Hooks were not installed because the native client is unavailable. Fix the native client install and rerun the installer."
     fi
 fi
 # <<< client-only claude hook <<<
@@ -4003,7 +4011,7 @@ for selected_client in $CLIENTS; do
                 echo "    [x] Session briefing     Claude Code plugin"
                 echo "    [x] Per-turn discipline  Claude Code plugin"
             elif [ "$HOOK_CLAUDE" = failed ]; then
-                echo "    [!] Session briefing     not installed - the shim is unavailable"
+                echo "    [!] Session briefing     not installed"
                 echo "    [!] Per-turn discipline  not installed"
             else
                 echo "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
@@ -4322,42 +4330,79 @@ echo "Optional ChatGPT access: follow the native tunnel profile steps in docs/gu
 client_setup_warnings() {
     local state
     if [ -n "${HTTP_CREDENTIAL_WARNINGS:-}" ]; then printf '%s\n' "$HTTP_CREDENTIAL_WARNINGS"; fi
-    case "${PLUGIN_CLAUDE:-}" in failed|no-cli) printf 'Claude Code plugin: %s\n' "$PLUGIN_CLAUDE_RECOVERY" ;; esac
     if [ "${LEGACY_CLAUDE:-}" = error ]; then echo "Claude Code legacy hook cleanup failed. See the repair above."; fi
-    if [ "${HOOK_CLAUDE:-}" = failed ]; then echo "Claude Code hooks were not installed. See the hook error above and rerun the installer."; fi
     if [ -z "${CODEX_CLIENT_FAILURE:-}" ]; then
-        case "${HOOK_CODEX:-}" in pending|unavailable) printf 'Codex hooks: %s. %s\n' "$HOOK_CODEX" "${CODEX_HOOK_RECOVERY:-}" ;; esac
+        case "${HOOK_CODEX:-}:${CODEX_HOOKS:-}:${CODEX_HOOK_TRUST:-}" in
+            pending:*:no|pending:skip:*|unavailable:skip:*)
+                printf 'Codex hooks: %s. %s\n' "$HOOK_CODEX" "${CODEX_HOOK_RECOVERY:-}" ;;
+        esac
     fi
     if [ "${CODEX_RUNTIME_DEFAULTS:-}" = failed ]; then printf 'Codex runtime defaults were not confirmed. %s\n' "$CODEX_RUNTIME_RECOVERY"; fi
-    if [ -n "${CLIENT_HOOK_SETTINGS_WARNING:-}" ]; then echo "Claude Code hook credential settings were not written. See the repair above."; fi
     if [ -n "${GEMINI_GUARD_WARNING:-}" ]; then echo "Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json."; fi
     if [ -n "${GEMINI_CREDENTIAL_WARNING:-}" ]; then printf '%s\n' "$GEMINI_CREDENTIAL_WARNING"; fi
+    if [ -n "${CODEX_INSTRUCTION_WARNING:-}" ]; then echo "Codex standing instructions could not be written. Check the Codex home and file permissions."; fi
     for state in "${INSTR_CLAUDE:-}" "${INSTR_CODEX:-}" "${INSTR_GEMINI:-}" "${INSTR_GENERIC:-}"; do
         case "$state" in failed:*) printf 'Standing instructions could not be written to %s. Check permissions and rerun.\n' "${state#*:}" ;; esac
     done
-    if [ -n "${EXTRACTOR_AUTOSTART_WARNING:-}" ]; then echo "Extractor shim autostart failed. See the repair command above."; fi
+    if [ -n "${EXTRACTOR_AUTOSTART_FAILURE:-}" ] && [ -z "${extractor_requested:-}" ]; then echo "Extractor shim autostart failed. See the repair command above."; fi
     if [ "${CLIENT_SCHEDULE_STATE:-}" = failed ]; then echo "Automatic client updates were not scheduled. See the scheduling command above."; fi
     if [ -n "${CONSOLE_SIGNIN_WARNING:-}" ]; then echo "Console sign-in did not finish. Run pseudolife-mcp console once the reported problem is fixed."; fi
 }
+client_completion_reasons() {
+    local provider="$1" connection_failure="$2"
+    case "$provider" in
+        claude)
+            case "${PLUGIN_CLAUDE:-}" in
+                failed) printf 'Plugin was not installed. %s\n' "$PLUGIN_CLAUDE_RECOVERY" ;;
+                no-cli) echo "Plugin was not installed because the claude CLI is not on PATH. Put the Claude Code CLI on PATH and rerun the installer." ;;
+            esac
+            if [ "${HOOK_CLAUDE:-}" = failed ]; then
+                printf '%s\n' "${CLAUDE_HOOK_RECOVERY:-Hooks were not installed. Fix the hook error above and rerun the installer.}"
+            fi
+            if [ -n "${CLIENT_HOOK_SETTINGS_WARNING:-}" ]; then
+                echo "Hook credentials were not written. Set the daemon URL and token file in the settings file's env block as shown above."
+            fi ;;
+        codex)
+            if [ -z "$connection_failure" ] && [ "${CODEX_HOOKS:-}" != skip ]; then
+                case "${HOOK_CODEX:-}" in
+                    unavailable)
+                        printf 'Hooks could not be set up. %s\n' "${CODEX_HOOK_RECOVERY:-Fix the hook error above and rerun the installer.}" ;;
+                    pending)
+                        if [ "${CODEX_HOOK_TRUST:-}" != no ]; then
+                            if [[ "${CODEX_HOOK_RECOVERY:-}" == "PseudoLife hooks await approval."* ]]; then
+                                echo "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
+                            else
+                                echo "Hooks are not installed. Rerun the installer with --codex-hook-trust yes (PowerShell -CodexHookTrust yes)."
+                            fi
+                        fi ;;
+                esac
+            fi ;;
+    esac
+    if [ -n "$connection_failure" ]; then printf '%s\n' "$connection_failure"; fi
+}
 finish_client_setup() {
-    local provider reason label warnings failures=""
+    local provider reason label warnings connection_failure failures=""
     warnings="$(client_setup_warnings)"
     for provider in $CLIENTS; do
-        reason="$(client_setup_failure "$provider")"
-        [ -n "$reason" ] || continue
-        reason="${reason//$'\n'/ }"
-        reason="${reason//$'\r'/ }"
+        connection_failure="$(client_setup_failure "$provider")"
+        connection_failure="${connection_failure//$'\n'/ }"
+        connection_failure="${connection_failure//$'\r'/ }"
         case "$provider" in
             claude) label="Claude Code" ;;
             claude-desktop) label="Claude Desktop" ;;
             codex) label="Codex" ;;
             gemini) label="Gemini CLI" ;;
         esac
-        case " ${REQUESTED_CLIENTS:-} " in
-            *" $provider "*) failures="${failures:+$failures"$'\n'"}Requested client setup incomplete ($label). $reason" ;;
-            *) warnings="${warnings:+$warnings"$'\n'"}Detected client setup incomplete ($label). $reason" ;;
-        esac
+        while IFS= read -r reason; do
+            case " ${REQUESTED_CLIENTS:-} " in
+                *" $provider "*) failures="${failures:+$failures"$'\n'"}Requested client setup incomplete ($label). $reason" ;;
+                *) warnings="${warnings:+$warnings"$'\n'"}Detected client setup incomplete ($label). $reason" ;;
+            esac
+        done < <(client_completion_reasons "$provider" "$connection_failure")
     done
+    if [ -n "${extractor_requested:-}" ] && [ -n "${EXTRACTOR_AUTOSTART_FAILURE:-}" ]; then
+        failures="${failures:+$failures"$'\n'"}Requested extractor setup incomplete ($EXTRACTOR). $EXTRACTOR_AUTOSTART_FAILURE"
+    fi
     if [ -n "$warnings" ]; then printf '\nWarnings\n%s\n' "$warnings" >&2; fi
     if [ -n "$failures" ]; then
         NATIVE_RUN_DONE=1

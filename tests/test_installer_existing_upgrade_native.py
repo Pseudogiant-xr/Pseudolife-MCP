@@ -605,11 +605,18 @@ def test_requested_gemini_rerun_checks_settings_when_listing_hides_guard(
         assert "Check the pseudolife-memory entry in ~/.gemini/settings.json." in output
     assert ("Requested client setup incomplete (Gemini CLI)" in output) == (exit_code == 5)
     if exit_code == 5:
-        failure = output.splitlines()[-1]
         if credential == "missing":
-            assert "no credential in its settings or this launch environment" in failure
+            reason = (
+                "The daemon requires a bearer token, and the existing Gemini CLI stdio entry has no credential in "
+                "its settings or this launch environment. Set PSEUDOLIFE_MCP_TOKEN_FILE in ~/.gemini/settings.json "
+                "to a valid token file, then rerun."
+            )
         else:
-            assert failure.endswith("Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun.")
+            reason = (
+                "The existing stdio registration has no verifiable no-spawn guard. "
+                "Set PSEUDOLIFE_MCP_NO_SPAWN=1 in the existing entry, then rerun."
+            )
+        assert proc.stderr.decode().splitlines()[-1] == f"Requested client setup incomplete (Gemini CLI). {reason}"
     else:
         assert "STATE=present-current" in output
     assert "synthetic-inherited" not in output

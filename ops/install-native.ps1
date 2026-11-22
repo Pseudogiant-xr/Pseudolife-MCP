@@ -11,7 +11,7 @@
 # extractor choice -> compose up -> client hooks -> standing instructions ->
 # MCP registration -> health. Re-running is safe; re-running with a different
 # -Extractor is the supported way to switch modes.
-# Exit statuses: 0 completed, 1 operational failure, 2 usage or prerequisite refusal, 5 requested client setup incomplete.
+# Exit statuses: 0 completed, 1 operational failure, 2 usage or prerequisite refusal, 5 requested client or extractor setup incomplete.
 #
 #   ops\install.ps1                                    # interactive
 #   ops\install.ps1 -Extractor sidecar -Client codex   # non-interactive
@@ -1537,6 +1537,7 @@ if ($ClientOnly) {
 
 # -- 3. extractor choice (explicit, no default) ---------------------------------
 # A client-only install has none: the remote daemon runs its own extractor.
+$extractorRequested = [bool]$Extractor -and -not $restoredExtractor
 if (-not $Extractor -and -not $ClientOnly) {
     if (-not $interactive -or $script:installerRerun) {
         $insideManaged = $false
@@ -1564,7 +1565,8 @@ if (-not $Extractor -and -not $ClientOnly) {
         Write-Host "  6) endpoint          - any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
         Write-Host "  7) endpoint-fallback - that server primary, sidecar auto-fallback (~11.8 GB image)"
         while (-not $Extractor) {
-            switch (Read-Host "Choose 1-7 (Enter = 3, sidecar)") {
+            $choice = Read-Host "Choose 1-7 (Enter = 3, sidecar)"
+            switch ($choice) {
                 "1" { $Extractor = "claude-only" }
                 "2" { $Extractor = "claude-fallback" }
                 "" { $Extractor = "sidecar" }
@@ -1575,6 +1577,7 @@ if (-not $Extractor -and -not $ClientOnly) {
                 "7" { $Extractor = "endpoint-fallback" }
                 default { Write-Host "  please answer 1-7" }
             }
+            if ($Extractor -and $choice) { $extractorRequested = $true }
         }
         if ($Extractor -in "endpoint", "endpoint-fallback") {
             while (-not $ExtractorUrl) {
@@ -2091,6 +2094,7 @@ function Move-ClaudeMarketplaceToHttps {
 }
 function Install-ClaudePlugin {
     if ($clients -notcontains "claude") { return }
+    $PSNativeCommandUseErrorActionPreference = $false
     if (($ClaudePlugin -ne "skip") -and (Get-Command claude -ErrorAction SilentlyContinue)) {
         Move-ClaudeMarketplaceToHttps
     }
@@ -2115,7 +2119,7 @@ function Install-ClaudePlugin {
         claude plugin marketplace add $claudePluginMarketplaceSource
         if ($LASTEXITCODE -ne 0) {
             $script:pluginClaude = "failed"
-            $script:pluginClaudeRecovery = "'claude plugin marketplace add $claudePluginMarketplaceSource' failed (GitHub reachable?); retry it, or $(Get-ClaudePluginManual)"
+            $script:pluginClaudeRecovery = "'claude plugin marketplace add $claudePluginMarketplaceSource' failed. Fix the reported error and rerun the installer."
             Write-Warning $script:pluginClaudeRecovery
             return
         }
@@ -2130,7 +2134,7 @@ function Install-ClaudePlugin {
     claude plugin install @yesFlag $claudePluginId
     if ($LASTEXITCODE -ne 0) {
         $script:pluginClaude = "failed"
-        $script:pluginClaudeRecovery = "'claude plugin install $claudePluginId' failed (see above); retry it, or $(Get-ClaudePluginManual)"
+        $script:pluginClaudeRecovery = "'claude plugin install $claudePluginId' failed. Fix the reported error and rerun the installer."
         Write-Warning $script:pluginClaudeRecovery
         return
     }
@@ -2138,7 +2142,7 @@ function Install-ClaudePlugin {
         $script:pluginClaude = "installed:$(Get-ClaudePluginInstalledVersion)"
     } else {
         $script:pluginClaude = "failed"
-        $script:pluginClaudeRecovery = "'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $claudePluginId; check 'claude plugin list', or $(Get-ClaudePluginManual)"
+        $script:pluginClaudeRecovery = "'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $claudePluginId. Run /plugin install $claudePluginId inside Claude Code."
         Write-Warning $script:pluginClaudeRecovery
     }
 }
@@ -3701,7 +3705,7 @@ if ($shimAutostartFamily) {
     $rerun = "pseudolife-mcp " + ($autostartArgs -join " ")
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
         Write-Warning "Shim autostart was not registered: the native client is unavailable (see above)."
-        $script:extractorAutostartWarning = $true
+        $script:extractorAutostartFailure = "Shim autostart was not registered because the native client is unavailable. Fix the native client install and rerun the installer with the same extractor mode."
         Write-Host "  Re-run later in a normal (not elevated) pwsh: $rerun"
     } else {
         $autostartCode = 1
@@ -3713,11 +3717,11 @@ if ($shimAutostartFamily) {
             $autostartCode = $LASTEXITCODE
         } catch { $autostartCode = 1 }
         if ($autostartCode -eq 3) {
-            # A task this shell may not change was left as it is; the native
-            # client printed its one line, and its shim keeps serving.
+            # The native client has already printed the task and its repair.
+            $script:extractorAutostartFailure = "Task Scheduler refused to change an existing task. Follow the recovery above and rerun the installer with the same extractor mode."
         } elseif ($autostartCode -ne 0) {
             Write-Warning "Shim autostart registration or start failed (see the message above)."
-            $script:extractorAutostartWarning = $true
+            $script:extractorAutostartFailure = "Shim autostart registration or start failed. Fix the reported error and rerun the installer with the same extractor mode."
             Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with: & `"$($script:shimInstallPath)`" $($autostartArgs -join ' ')"
             # Only on a free port: on Windows a second shim fails to bind while one listens.
             if (-not (Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)) {
@@ -3790,6 +3794,7 @@ if ($hookState["claude"] -eq "deferred") {
     } else {
         Write-Warning "The Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)."
         $hookState["claude"] = "failed"
+        $script:claudeHookRecovery = "Hooks were not installed because the native client is unavailable. Fix the native client install and rerun the installer."
     }
 }
 # <<< client-only claude hook <<<
@@ -3845,7 +3850,7 @@ foreach ($selectedClient in $clients) {
                 Write-Host "    [x] Session briefing     Claude Code plugin"
                 Write-Host "    [x] Per-turn discipline  Claude Code plugin"
             } elseif ($hookState["claude"] -eq "failed") {
-                Write-Host "    [!] Session briefing     not installed - the shim is unavailable"
+                Write-Host "    [!] Session briefing     not installed"
                 Write-Host "    [!] Per-turn discipline  not installed"
             } else {
                 Write-Host "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
@@ -4183,41 +4188,81 @@ Remove-NativeStage
 # >>> client setup result >>>
 function Get-ClientSetupWarnings {
     $script:httpCredentialWarnings
-    if ($script:pluginClaude -in "failed", "no-cli") { "Claude Code plugin: $($script:pluginClaudeRecovery)" }
     if ($script:legacyClaude -eq "error") { "Claude Code legacy hook cleanup failed. See the repair above." }
-    if ($hookState["claude"] -eq "failed") { "Claude Code hooks were not installed. See the hook error above and rerun the installer." }
-    if (-not $script:clientSetupFailures.ContainsKey("codex") -and $hookState["codex"] -in "pending", "unavailable") {
+    if (-not $script:clientSetupFailures.ContainsKey("codex") -and
+        (($CodexHooks -eq "skip" -and $hookState["codex"] -in "pending", "unavailable") -or
+         ($CodexHookTrust -eq "no" -and $hookState["codex"] -eq "pending"))) {
         "Codex hooks: $($hookState['codex']). $($codexSetup.recovery)"
     }
     if ($script:codexRuntimeDefaults -eq "failed") { "Codex runtime defaults were not confirmed. $script:codexRuntimeRecovery" }
-    if ($script:clientHookSettingsWarning) { "Claude Code hook credential settings were not written. See the repair above." }
     if ($script:geminiGuardWarning) { "Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json." }
     if ($script:geminiCredentialWarning) { $script:geminiCredentialWarning }
-    if ($script:codexInstructionWarning) { "Codex standing instructions could not be written. Check the Codex home and file permissions." }
+    if ($script:codexInstructionWarning -or $codexSetup.instructions_error) { "Codex standing instructions could not be written. Check the Codex home and file permissions." }
     foreach ($state in $instrState.Values) {
         if ($state -like "failed:*") { "Standing instructions could not be written to $($state.Substring(7)). Check permissions and rerun." }
     }
-    if ($script:extractorAutostartWarning) { "Extractor shim autostart failed. See the repair command above." }
+    if ($script:extractorAutostartFailure -and -not $extractorRequested) { "Extractor shim autostart failed. See the repair command above." }
     if ($script:clientScheduleState -eq "failed") { "Automatic client updates were not scheduled. See the scheduling command above." }
     if ($script:consoleSigninWarning) { "Console sign-in did not finish. Run pseudolife-mcp console once the reported problem is fixed." }
+}
+function Get-ClientCompletionReasons([string]$Provider, [string]$ConnectionFailure) {
+    switch ($Provider) {
+        "claude" {
+            switch ($script:pluginClaude) {
+                "failed" { "Plugin was not installed. $($script:pluginClaudeRecovery)" }
+                "no-cli" { "Plugin was not installed because the claude CLI is not on PATH. Put the Claude Code CLI on PATH and rerun the installer." }
+            }
+            if ($hookState["claude"] -eq "failed") {
+                if ($script:claudeHookRecovery) { $script:claudeHookRecovery }
+                else { "Hooks were not installed. Fix the hook error above and rerun the installer." }
+            }
+            if ($script:clientHookSettingsWarning) {
+                "Hook credentials were not written. Set the daemon URL and token file in the settings file's env block as shown above."
+            }
+        }
+        "codex" {
+            if (-not $ConnectionFailure -and $CodexHooks -ne "skip") {
+                switch ($hookState["codex"]) {
+                    "unavailable" {
+                        $recovery = if ($codexSetup.recovery) { $codexSetup.recovery }
+                                    else { "Fix the hook error above and rerun the installer." }
+                        "Hooks could not be set up. $recovery"
+                    }
+                    "pending" {
+                        if ($CodexHookTrust -ne "no") {
+                            if ($codexSetup.recovery -clike "PseudoLife hooks await approval.*") {
+                                "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
+                            } else {
+                                "Hooks are not installed. Rerun the installer with --codex-hook-trust yes (PowerShell -CodexHookTrust yes)."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if ($ConnectionFailure) { $ConnectionFailure }
 }
 $clientWarnings = @(Get-ClientSetupWarnings)
 $failedRequests = @()
 foreach ($provider in $clients) {
-    $reason = $script:clientSetupFailures[$provider]
-    if (-not $reason) { continue }
-    $reason = $reason -replace '[\r\n]+', ' '
     $label = switch ($provider) {
         "claude" { "Claude Code" }
         "claude-desktop" { "Claude Desktop" }
         "codex" { "Codex" }
         "gemini" { "Gemini CLI" }
     }
-    if ($requestedClients -contains $provider) {
-        $failedRequests += "Requested client setup incomplete ($label). $reason"
-    } else {
-        $clientWarnings += "Detected client setup incomplete ($label). $reason"
+    foreach ($reason in Get-ClientCompletionReasons $provider $script:clientSetupFailures[$provider]) {
+        $reason = $reason -replace '[\r\n]+', ' '
+        if ($requestedClients -contains $provider) {
+            $failedRequests += "Requested client setup incomplete ($label). $reason"
+        } else {
+            $clientWarnings += "Detected client setup incomplete ($label). $reason"
+        }
     }
+}
+if ($extractorRequested -and $script:extractorAutostartFailure) {
+    $failedRequests += "Requested extractor setup incomplete ($Extractor). $script:extractorAutostartFailure"
 }
 if ($clientWarnings.Count) {
     [Console]::Error.WriteLine("Warnings")

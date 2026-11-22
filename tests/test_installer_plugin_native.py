@@ -52,8 +52,9 @@ def _record_marketplace(home: Path) -> None:
 class Scenario:
     def __init__(self, *, clients="claude", flag="auto", cli=True, marketplace=False,
                  plugin=False, marketplace_exit=0, install_exit=0, install_records=True,
-                 help_has_yes=True, helper_out="", helper_exit=0):
+                 help_has_yes=True, helper_out="", helper_exit=0, requested=None):
         self.clients, self.flag, self.cli = clients, flag, cli
+        self.requested = requested
         # The native client's plugin-marketplace step as the installer runs
         # it (native_helper / Invoke-NativeHelper): a stub that records its
         # call and answers with ``helper_out`` / ``helper_exit``.
@@ -109,6 +110,16 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
     call_log_shell = _bash_fixture_path(bash, call_log, env).replace("'", "'\\''")
     helper_log_shell = _bash_fixture_path(bash, tmp_path / "helper-calls.txt", env).replace("'", "'\\''")
     repo_shell = _bash_fixture_path(bash, ROOT, env).replace("'", "'\\''")
+    finish = ""
+    if sc.requested is not None:
+        finish = (
+            f"REQUESTED_CLIENTS={'claude' if sc.requested else ''}\n"
+            "echo REMAINING_STEPS_FINISHED\n"
+            + _between("ops/install-native.sh", "# >>> client registration state >>>",
+                       "# <<< client registration state <<<")
+            + "\n" + _between("ops/install-native.sh", "# >>> client setup result >>>",
+                              "# <<< client setup result <<<")
+        )
     # The installer's own strict mode: an abort in the block must fail here.
     script = f"""set -euo pipefail
 PATH='{fake_bin_shell}:/usr/bin:/bin'
@@ -125,6 +136,7 @@ step() {{ printf 'STEP: %s\\n' "$*"; }}
 install_claude_plugin
 printf 'STATE=%s\\n' "$PLUGIN_CLAUDE"
 printf 'LINE=%s\\n' "$(describe_plugin "$PLUGIN_CLAUDE")"
+{finish}
 """
     proc = subprocess.run([bash], input=script.encode(), capture_output=True, check=False,
                           timeout=20, env=env)
@@ -146,6 +158,18 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     call_log = tmp_path / "calls.txt"
     escaped_helper_log = str(tmp_path / "helper-calls.txt").replace("'", "''")
     escaped_log = str(call_log).replace("'", "''")
+    finish = ""
+    if sc.requested is not None:
+        requested = "'claude'" if sc.requested else ""
+        finish = (
+            f"$requestedClients = @({requested})\n"
+            "$hookState = @{}; $instrState = @{}\n"
+            "Write-Output REMAINING_STEPS_FINISHED\n"
+            + _between("ops/install-native.ps1", "# >>> client registration state >>>",
+                       "# <<< client registration state <<<")
+            + "\n" + _between("ops/install-native.ps1", "# >>> client setup result >>>",
+                              "# <<< client setup result <<<")
+        )
     fake = "" if not sc.cli else f"""function global:claude {{
     $callArgs = @($args)
     Add-Content -LiteralPath '{escaped_log}' -Value ('claude|' + ($callArgs -join ' '))
@@ -206,6 +230,7 @@ function Step($message) {{ Write-Output "STEP: $message" }}
 Install-ClaudePlugin
 Write-Output "STATE=$($script:pluginClaude)"
 Write-Output ("LINE=" + (Describe-Plugin $script:pluginClaude))
+{finish}
 """
     runner = tmp_path / "run-plugin.ps1"
     runner.write_text(script, encoding="utf-8")
@@ -316,6 +341,26 @@ def test_install_failure_is_reported_not_fatal(variant, tmp_path):
     assert state == "failed"
     assert line.startswith("[!] Plugin") and "plugin install" in line
     assert "WARNING" in _all_output(proc)
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+@pytest.mark.parametrize("requested", [True, False], ids=["requested", "detected"])
+def test_plugin_failure_is_reported_at_completion(variant, tmp_path, requested):
+    kind, bash = variant
+    scenario = Scenario(install_exit=19, requested=requested)
+    proc, calls = (_run_bash(bash, tmp_path, scenario) if kind == "bash"
+                   else _run_powershell(tmp_path, scenario))
+    assert f"claude|plugin install --yes {PLUGIN_ID}" in calls
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout.decode()
+    assert proc.returncode == (5 if requested else 0), _all_output(proc)
+    lines = proc.stderr.decode().splitlines()
+    label = "Requested" if requested else "Detected"
+    assert lines[-1] == (
+        f"{label} client setup incomplete (Claude Code). Plugin was not installed. "
+        f"'claude plugin install {PLUGIN_ID}' failed. Fix the reported error and rerun the installer."
+    )
+    if not requested:
+        assert lines[-2] == "Warnings"
 
 
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)

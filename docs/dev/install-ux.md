@@ -29,3 +29,9 @@ in line as they are touched, with no retrofit sweep.
 - **Contributor-only setup stays out:** the test login is created only by
   `--test-login` / `-TestLogin` and checkout-mode update, and checkout
   builds only by checkout mode.
+
+The native installers finish the remaining work and exit 5 if a requested
+client's connection, plugin, or hooks could not be set up, with a final line
+naming what failed and its recovery step.
+They also exit 5 at completion if shim autostart fails for an extractor
+explicitly selected by flag or prompt.
