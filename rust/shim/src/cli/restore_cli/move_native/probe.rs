@@ -481,6 +481,9 @@ pub(super) fn user_filter(table: &str) -> String {
         "meta" => meta_filter,
         "relations" => " WHERE NOT builtin".to_owned(),
         "maintainer_bootstrap" => " WHERE used_at IS NOT NULL OR credential_id IS NOT NULL".to_owned(),
+        // The daemon's startup and a board context can both create the
+        // initial identity. Real board activity has its own rows and events.
+        "coordination_events" => format!(" {}", include_str!("coordination_events_filter.sql").trim_end()),
         // Every daemon start runs its own warm-up search,
         // search("warmup probe", top_k=1), outside any session: one row
         // per start that no user made (service.py warm-up, Rust

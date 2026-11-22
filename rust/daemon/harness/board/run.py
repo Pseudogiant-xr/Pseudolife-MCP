@@ -531,6 +531,23 @@ def wait_ready(port: int, timeout: float = 600.0, *, require_embedder: bool = Tr
     raise RuntimeError("the daemon did not reach the required readiness tier")
 
 
+def seed_live_bank_identity(dsn: str) -> None:
+    """Keep startup bookkeeping outside the live Python/Rust comparison."""
+    import psycopg
+    from rust.harness_support.bank_fixture import assert_fixture_database
+    from rust.harness_support.schema import ensure_schema
+
+    with psycopg.connect(dsn) as conn:
+        assert_fixture_database(conn)
+        ensure_schema(conn)
+        conn.execute(
+            "INSERT INTO public.meta (key, value) "
+            "VALUES ('coordination_bank_id', to_jsonb(%s::text)) "
+            "ON CONFLICT (key) DO NOTHING",
+            ("00000000-0000-4000-8000-000000000001",),
+        )
+
+
 def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
     import yaml
     import dbstate
@@ -551,6 +568,8 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
             # Read the base (if any) before the first response is normalized,
             # which recognises the base's own clocks by it.
             dbstate._base_hashes(dsn)
+            if mode == "live" and not record:
+                seed_live_bank_identity(dsn)
             procs[side] = start(side, scn, binary, root, dsn, tag)
             cleanup.callback(procs[side].stop)
             arms[side] = Arm(side, procs[side], dsn, retention_days)

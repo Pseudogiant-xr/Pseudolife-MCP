@@ -108,6 +108,7 @@ impl Ready {
 pub struct Snapshot {
     pub init_refusal: Option<String>,
     pub not_ready: Option<String>,
+    pub bank_identity_error: Option<String>,
     pub storage: Option<Arc<Storage>>,
     pub embedder: Option<Value>,
     /// The published stores' startup state, once an init has completed its
@@ -152,6 +153,7 @@ pub struct Service {
     /// The service lock: one init at a time; callers wait on it.
     inner: tokio::sync::Mutex<Inner>,
     snap: RwLock<Snapshot>,
+    bank_identity_wake: tokio::sync::Notify,
     /// This service's own handle and the board's, installed once at
     /// startup (`install`): the background dream work needs an owned
     /// service (the dream pass spawns), and the stall notice the board.
@@ -253,6 +255,7 @@ impl Service {
             ort_threads,
             inner: tokio::sync::Mutex::new(Inner::default()),
             snap: RwLock::new(Snapshot::default()),
+            bank_identity_wake: tokio::sync::Notify::new(),
             handle: std::sync::OnceLock::new(),
             board: std::sync::OnceLock::new(),
             hlc: Arc::default(),
@@ -334,6 +337,107 @@ impl Service {
         f(&mut self.snap.write().expect("snapshot lock"));
     }
 
+    pub(crate) fn publish_board_bank_identity(&self, observed: &Arc<Storage>, id: &str) {
+        observed.remember_bank_id(id);
+        self.update(|s| {
+            if let Some(current) = &s.storage {
+                if Arc::ptr_eq(observed, current) {
+                    s.bank_identity_error = None;
+                } else {
+                    // A late reply cannot seed the replacement's cache.
+                    current.retry_bank_id_lookup();
+                }
+            }
+        });
+        self.bank_identity_wake.notify_one();
+    }
+
+    /// Identity setup retries independently of memory warmup and the writer.
+    pub(crate) async fn bootstrap_bank_identity(
+        &self,
+        mut stop: tokio::sync::watch::Receiver<bool>,
+    ) {
+        use crate::board::error::BoardError;
+
+        let mut delay = Duration::from_secs(5);
+        while !*stop.borrow() {
+            if let Some(storage) = self
+                .snapshot()
+                .storage
+                .filter(|s| !s.read_only() && !s.knows_bank_id())
+            {
+                let attempt = crate::board::store::initialize_bank_identity(&self.dsn);
+                let (code, reason) =
+                    match tokio::time::timeout(Duration::from_secs(15), attempt).await {
+                        Ok(Ok(id)) => {
+                            self.publish_board_bank_identity(&storage, &id);
+                            delay = Duration::from_secs(5);
+                            continue;
+                        }
+                        Ok(Err(error)) => {
+                            // A database error message or connection error can contain
+                            // credentials, SQL parameters, or server-provided text.
+                            let reason = match &error {
+                                BoardError::Database(error) => error.code().map_or_else(
+                                    || {
+                                        if error.is_closed() {
+                                            "PostgreSQL connection closed".into()
+                                        } else {
+                                            "PostgreSQL transport or protocol error".into()
+                                        }
+                                    },
+                                    |state| format!("PostgreSQL SQLSTATE {}", state.code()),
+                                ),
+                                BoardError::Refused(refusal) => refusal.code.clone(),
+                                _ => "could not open the PostgreSQL identity session".into(),
+                            };
+                            (error.public().code, reason)
+                        }
+                        Err(_) => (
+                            "coordination_unavailable".into(),
+                            "PostgreSQL identity attempt timed out".into(),
+                        ),
+                    };
+                eprintln!("bank identity initialization failed: {reason}");
+                self.update(|s| {
+                    if s.storage
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(&storage, current))
+                        && !storage.knows_bank_id()
+                    {
+                        s.bank_identity_error = Some(code);
+                    }
+                });
+                let storage_changed = async {
+                    loop {
+                        self.bank_identity_wake.notified().await;
+                        // A queued notice for this same publication must
+                        // not bypass backoff on a persistently failing bank.
+                        if storage.knows_bank_id()
+                            || self
+                                .snapshot()
+                                .storage
+                                .is_none_or(|current| !Arc::ptr_eq(&storage, &current))
+                        {
+                            break;
+                        }
+                    }
+                };
+                tokio::select! {
+                    _ = stop.changed() => return,
+                    _ = tokio::time::sleep(delay) => delay = (delay * 2).min(Duration::from_secs(60)),
+                    _ = storage_changed => delay = Duration::from_secs(5),
+                }
+            } else {
+                delay = Duration::from_secs(5);
+                tokio::select! {
+                    _ = stop.changed() => return,
+                    _ = self.bank_identity_wake.notified() => {}
+                }
+            }
+        }
+    }
+
     /// `_arm_retry_backoff`.
     fn arm_backoff(inner: &mut Inner) {
         if crate::mutants::active("no-backoff") {
@@ -377,29 +481,42 @@ impl Service {
             Storage::open(&self.dsn).await
         };
         let storage = match opened {
-            Ok(s) => Arc::new(s),
+            Ok(s) => s,
             Err(OpenError::LeaseHeld(msg)) => {
                 // Retryable: the holder may leave.
-                self.update(|s| s.not_ready = Some(msg.clone()));
+                self.update(|s| {
+                    s.not_ready = Some(msg.clone());
+                });
                 Self::arm_backoff(inner);
                 return Err(msg);
             }
             Err(OpenError::Refused(msg)) => {
                 // The embedding-dimension refusal: recorded, no backoff.
-                self.update(|s| s.init_refusal = Some(msg.clone()));
+                self.update(|s| {
+                    s.init_refusal = Some(msg.clone());
+                });
                 return Err(msg);
             }
             // A connection failure records nothing (spec L3).
             Err(OpenError::Failed(msg)) => return Err(msg),
         };
+        // A failed search_path check closes the session and records nothing.
+        if let Err(message) = storage.check_search_path().await {
+            self.update(|s| {
+                s.init_refusal = None;
+                s.not_ready = None;
+            });
+            return Err(message);
+        }
+        let storage = Arc::new(storage);
+        inner.storage = Some(storage.clone());
         self.update(|s| {
+            s.storage = Some(storage.clone());
             s.init_refusal = None;
             s.not_ready = None;
+            s.bank_identity_error = None;
         });
-        // A failed search_path check closes the session and records nothing.
-        storage.check_search_path().await?;
-        inner.storage = Some(storage.clone());
-        self.update(|s| s.storage = Some(storage.clone()));
+        self.bank_identity_wake.notify_one();
         Ok(storage)
     }
 
@@ -902,11 +1019,13 @@ impl Service {
         inner.ready = republished.clone();
         self.update(|s| {
             s.storage = Some(fresh);
+            s.bank_identity_error = None;
             // Only a ready service `/health` already sees is republished.
             if s.ready.is_some() {
                 s.ready = republished;
             }
         });
+        self.bank_identity_wake.notify_one();
         Ok(())
     }
 
@@ -1592,6 +1711,299 @@ mod shadow_refresh_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn identity_test_dsn() -> String {
+        let dsn =
+            std::env::var("PL_BANK_IDENTITY_TEST_DSN").expect("disposable identity fixture DSN");
+        let parsed = crate::storage::parse_dsn(&dsn).expect("parse fixture DSN");
+        assert!(
+            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1")
+        );
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|name| name.starts_with("pl_cf_pairing_context_")
+                    || name.starts_with("pl_cf_pgs_identity_"))
+        );
+        dsn
+    }
+
+    #[tokio::test]
+    #[ignore = "run by startup_ci.py with a disposable PostgreSQL bank"]
+    async fn board_contexts_publish_one_identity_to_health() {
+        use sha2::Digest;
+
+        let dsn = identity_test_dsn();
+
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::from("unused"),
+            dsn.clone(),
+            true,
+        ));
+        // Stage an already-running writer whose bank has no identity, as
+        // when a pre-identity bank is restored during a writer handover.
+        let storage = Arc::new(Storage::open(&dsn).await.unwrap());
+        service.inner.lock().await.storage = Some(storage.clone());
+        service.update(|snapshot| snapshot.storage = Some(storage.clone()));
+        let principals = Arc::new(crate::auth::PrincipalStore::new());
+        let health = crate::health::payload(&service, &principals, false).await;
+        assert_eq!(health["db"], "ok");
+        assert!(health["bank"].is_null());
+
+        let first = crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn.clone(),
+            service.clone(),
+            principals.clone(),
+        );
+        let second = crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn.clone(),
+            service.clone(),
+            principals.clone(),
+        );
+        let headers = std::collections::HashMap::new();
+        let (first, second) = tokio::join!(
+            first.dispatch("context", Default::default(), &headers, "default"),
+            second.dispatch("context", Default::default(), &headers, "default"),
+        );
+        let first = first.unwrap();
+        assert_eq!(first["bank_id"], second.unwrap()["bank_id"]);
+        let rows = storage
+            .client()
+            .query(
+                "SELECT payload::jsonb FROM coordination_events WHERE event='bank_identity'",
+                &[],
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].get::<_, Value>(0),
+            json!({"bank_id": first["bank_id"]})
+        );
+        let health = crate::health::payload(&service, &principals, false).await;
+        let digest = sha2::Sha256::digest(first["bank_id"].as_str().unwrap().as_bytes());
+        assert_eq!(health["bank"], hex::encode(digest)[..16]);
+
+        // The previous board connection can finish delivering its result
+        // after the writer session has been replaced and the bank restored.
+        let pid: i32 = storage
+            .client()
+            .query_one("SELECT pg_backend_pid()", &[])
+            .await
+            .unwrap()
+            .get(0);
+        let mut side = crate::board::db::Conn::new(dsn.clone());
+        let side = side.client().await.unwrap();
+        assert!(
+            side.query_one("SELECT pg_terminate_backend($1, 5000)", &[&pid])
+                .await
+                .unwrap()
+                .get::<_, bool>(0)
+        );
+        side.execute("DELETE FROM meta WHERE key = 'coordination_bank_id'", &[])
+            .await
+            .unwrap();
+        let current = Arc::new(Storage::open(&dsn).await.unwrap());
+        assert_eq!(current.cached_bank_id().await, None);
+        let replacement = "11111111-1111-4111-8111-111111111111";
+        side.execute(
+            "INSERT INTO meta (key, value) VALUES ('coordination_bank_id', $1)",
+            &[&json!(replacement)],
+        )
+        .await
+        .unwrap();
+        service.update(|snapshot| snapshot.storage = Some(current));
+        service.publish_board_bank_identity(&storage, first["bank_id"].as_str().unwrap());
+        let health = crate::health::payload(&service, &principals, false).await;
+        let digest = sha2::Sha256::digest(replacement.as_bytes());
+        assert_eq!(health["bank"], hex::encode(digest)[..16]);
+    }
+
+    #[tokio::test]
+    #[ignore = "run by startup_ci.py with a disposable PostgreSQL bank"]
+    async fn bank_identity_retry_wakes_on_storage_republish() {
+        let dsn = identity_test_dsn();
+        let service = Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::from("unused"),
+            dsn.clone(),
+            true,
+        );
+        let storage = service.storage_tier().await.unwrap();
+        let principals = crate::auth::PrincipalStore::new();
+        // Take the first health sample before starting the worker, so an
+        // identity that initializes quickly cannot race the assertion.
+        let health = crate::health::payload(&service, &principals, false).await;
+        assert_eq!(
+            health["pending"],
+            json!(["init", "principals", "bank_identity"])
+        );
+        assert_eq!(health["ready"], false);
+        assert_eq!(health["bank_identity_failed"], false);
+
+        let mut side = crate::board::db::Conn::new(dsn);
+        let side = side.client().await.unwrap();
+        side.execute(
+            "INSERT INTO public.meta (key, value) VALUES ('coordination_bank_id', 'false'::jsonb)",
+            &[],
+        )
+        .await
+        .unwrap();
+        let pid: i32 = storage
+            .client()
+            .query_one("SELECT pg_backend_pid()", &[])
+            .await
+            .unwrap()
+            .get(0);
+        let (stop, rx) = tokio::sync::watch::channel(false);
+        let recover = async {
+            while service.snapshot().bank_identity_error.is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            side.execute(
+                "DELETE FROM public.meta WHERE key = 'coordination_bank_id'",
+                &[],
+            )
+            .await
+            .unwrap();
+            assert!(
+                side.query_one("SELECT pg_terminate_backend($1, 5000)", &[&pid])
+                    .await
+                    .unwrap()
+                    .get::<_, bool>(0)
+            );
+            let mut inner = service.inner.lock().await;
+            service.verify_writer_session(&mut inner).await.unwrap();
+            drop(inner);
+            let replacement = service.snapshot().storage.unwrap();
+            assert!(!Arc::ptr_eq(&storage, &replacement));
+            while !replacement.knows_bank_id() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        // The whole recovery must fit inside the first backoff interval.
+        let (result, ()) = tokio::join!(
+            async {
+                let result = tokio::time::timeout(Duration::from_secs(4), recover).await;
+                stop.send_replace(true);
+                result
+            },
+            service.bootstrap_bank_identity(rx),
+        );
+        result.expect("storage republish must wake the bank identity retry before its backoff");
+        let health = crate::health::payload(&service, &principals, false).await;
+        assert_eq!(health["pending"], json!(["init", "principals"]));
+        assert!(health["bank"].is_string());
+    }
+
+    #[tokio::test]
+    #[ignore = "run by startup_ci.py with PostgreSQL and the offline embedder"]
+    async fn memory_tools_work_while_bank_identity_is_blocked() {
+        use crate::mcp::dispatch::{CallIdentity, ToolCall, registry};
+
+        let dsn = identity_test_dsn();
+        Storage::open(&dsn).await.unwrap().close().await;
+        let mut side = crate::board::db::Conn::new(dsn.clone());
+        let side = side.client().await.unwrap();
+        side.batch_execute(
+            "CREATE FUNCTION block_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN IF NEW.key = 'coordination_bank_id' THEN RAISE lock_not_available; END IF;
+            RETURN NEW; END $$;
+            CREATE TRIGGER block_identity BEFORE INSERT ON public.meta
+            FOR EACH ROW EXECUTE FUNCTION block_identity()",
+        )
+        .await
+        .unwrap();
+
+        let model =
+            PathBuf::from(std::env::var_os("PL_SHADOW_EMBED_FIXTURE").expect("offline embedder"));
+        let mut config = Config::default();
+        config.embedding.model_name = "pseudolife-test/bank-identity-fixture".into();
+        let service = Arc::new(Service::new(
+            config,
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            model.parent().unwrap().to_owned(),
+            dsn.clone(),
+            false,
+        ));
+        service.inner.lock().await.embedder = Some(Arc::new(
+            Embedder::load_config(&service.config.embedding, Some(&model), 1).unwrap(),
+        ));
+        let principals = Arc::new(crate::auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn,
+            service.clone(),
+            principals.clone(),
+        ));
+        service.install(&board);
+        let app = crate::http::App::new(
+            service.clone(),
+            crate::auth::EnvTokens::from_lookup(&|_| None),
+            principals.clone(),
+            None,
+            board,
+        );
+        let (stop, rx) = tokio::sync::watch::channel(false);
+        let svc = service.clone();
+        let identity = tokio::spawn(async move { svc.bootstrap_bank_identity(rx).await });
+        service.storage_tier().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while service.snapshot().bank_identity_error.is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("identity write must report the blocked insert");
+        let health = crate::health::payload(&service, &principals, false).await;
+        assert_eq!(health["status"], "ok");
+        assert_eq!(health["bank_identity_error"], "coordination_unavailable");
+        assert!(health["bank"].is_null());
+
+        let ident = CallIdentity {
+            principal: "default".into(),
+            writer: "fixture".into(),
+            header_session: None,
+            transport_session: None,
+            headers: Default::default(),
+        };
+        let text = "The fixture remembers a test fact during bank identity failure.";
+        let args = json!({"text": text});
+        let stored = registry()["memory_store"](
+            &app,
+            ToolCall {
+                args: args.as_object().unwrap(),
+                ident: &ident,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(stored["stored"], true);
+        let args = json!({"query": text, "top_k": 5});
+        let found = registry()["memory_search"](
+            &app,
+            ToolCall {
+                args: args.as_object().unwrap(),
+                ident: &ident,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            found["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["text"] == text)
+        );
+        stop.send_replace(true);
+        identity.await.unwrap();
+    }
 
     #[tokio::test]
     async fn compaction_keeps_one_policy_when_a_patch_arrives_during_initialization() {

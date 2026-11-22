@@ -109,14 +109,23 @@ pub enum BoardError {
     Refused(Refusal),
     /// `CoordinationClockChanged`: a send retries once after a reseed.
     ClockChanged,
+    Database(tokio_postgres::Error),
     /// Anything else: a database error, a broken invariant. Public
     /// `coordination_unavailable`, never its text.
-    Internal(#[allow(dead_code)] String),
+    Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, BoardError>;
 
 impl BoardError {
+    pub fn internal_log(&self) -> Option<std::borrow::Cow<'_, str>> {
+        match self {
+            Self::Internal(text) => Some(text.as_str().into()),
+            Self::Database(error) => Some(error.to_string().into()),
+            _ => None,
+        }
+    }
+
     pub fn code(code: impl Into<String>) -> BoardError {
         BoardError::Refused(Refusal {
             code: code.into(),
@@ -173,20 +182,22 @@ impl BoardError {
                 accepted: None,
                 action: None,
             },
-            BoardError::ClockChanged | BoardError::Internal(_) => Refusal {
-                code: "coordination_unavailable".into(),
-                detail: None,
-                param: None,
-                accepted: None,
-                action: None,
-            },
+            BoardError::ClockChanged | BoardError::Database(_) | BoardError::Internal(_) => {
+                Refusal {
+                    code: "coordination_unavailable".into(),
+                    detail: None,
+                    param: None,
+                    accepted: None,
+                    action: None,
+                }
+            }
         }
     }
 }
 
 impl From<tokio_postgres::Error> for BoardError {
     fn from(e: tokio_postgres::Error) -> Self {
-        BoardError::Internal(e.to_string())
+        BoardError::Database(e)
     }
 }
 

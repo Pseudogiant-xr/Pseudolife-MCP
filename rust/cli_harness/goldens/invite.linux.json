@@ -785,11 +785,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 4,
-   "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIGhhcyBub3QgcmVwb3J0ZWQgd2hpY2ggYmFuayBpdCBzZXJ2ZXMgeWV0ICgvaGVhbHRoIGJhbmsgaXMgbnVsbCB1bnRpbCBpdHMgc3RvcmFnZSBoYXMgc3RhcnRlZCBhbmQgdGhlIGFnZW50IGJvYXJkIGhhcyBiZWVuIHVzZWQgb25jZSk6IHN0YXJ0IGEgc2Vzc2lvbiBhZ2FpbnN0IGl0LCB0aGVuIHJlLXJ1biIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6IG51bGwKICB9Cn0K",
+   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhZW1vbiB2ZXJzaW9uIGRvZXMgbm90IGdpdmUgYSBmcmVzaCBiYW5rIGl0cyBpZGVudGl0eSBhdCBzdGFydHVwOiB1cGRhdGUgdGhlIGRhZW1vbiwgdGhlbiByZS1ydW4gaW52aXRlIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogbnVsbAogIH0KfQo=",
    "stderr": "",
    "window": [
-    1794544454.160927,
-    1794544454.465999
+    1795318383.55682,
+    1795318383.620797
    ],
    "requests": [
     {
@@ -799,14 +799,14 @@
      "body": ""
     }
    ],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir"
    },
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "43515",
+   "argv_port": "59751",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -73650,6 +73650,12 @@
   }
  },
  "recorded_from_candidate": {
+  "daemon-bank-null-json": {
+   "commit": "62ac8bf684607fbaacc7a7fa2ba09491fd84af83",
+   "rust_tree": "modified",
+   "platform": "linux",
+   "candidate_sha256": "9fc533b44ab8b21eef7546afe5d260aa8467e0842b2c97dd257ee43b27347def"
+  },
   "daemon-schema-text": {
    "commit": "f91ec40712985cca84d7a7a4af4835251b17ed02",
    "rust_tree": "modified",

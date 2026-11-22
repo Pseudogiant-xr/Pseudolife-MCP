@@ -60,7 +60,7 @@ const SESSION_LEASE_TTL: i64 = 3600;
 /// A board refusal as the MCP error payload builds it from the
 /// `CoordinationRefused` Python raises (`_error_payload`).
 fn tool_error(e: BoardError) -> ToolError {
-    if let BoardError::Internal(text) = &e {
+    if let Some(text) = e.internal_log() {
         eprintln!("coordination tool failed: {text}");
     }
     let r = e.public();

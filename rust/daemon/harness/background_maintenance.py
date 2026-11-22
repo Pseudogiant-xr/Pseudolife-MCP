@@ -32,6 +32,16 @@ def register(harness):
 
         def prepare_template(self, dsn):
             seed_bank(dsn, "pruning")
+            # Measure pruning on a bank that already has its identity. That
+            # keeps the sweep's exact post-state independent of startup UUIDs.
+            with psycopg.connect(dsn) as conn:
+                assert_fixture_database(conn)
+                conn.execute(
+                    "INSERT INTO public.meta (key, value) "
+                    "VALUES ('coordination_bank_id', to_jsonb(%s::text)) "
+                    "ON CONFLICT (key) DO NOTHING",
+                    ("00000000-0000-4000-8000-000000000001",),
+                )
             self.before = self.snapshot_db(dsn)
 
         def snapshot_db(self, dsn):

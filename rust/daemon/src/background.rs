@@ -132,6 +132,13 @@ impl Background {
         self.tasks.lock().expect("background tasks").push(handle);
     }
 
+    pub fn start_bank_identity(&self, service: Arc<crate::service::Service>) {
+        let stop = self.stop.subscribe();
+        self.push(tokio::spawn(async move {
+            service.bootstrap_bank_identity(stop).await
+        }));
+    }
+
     pub fn start_background_durability(&self, duties: Arc<dyn Duties>, seconds: f64) -> bool {
         if self.durability_started.swap(true, Ordering::SeqCst) {
             return false;

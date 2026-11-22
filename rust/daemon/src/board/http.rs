@@ -71,7 +71,7 @@ fn json(status: u16, body: &Value) -> Response {
 }
 
 fn refusal(e: &BoardError) -> Response {
-    if let BoardError::Internal(text) = e {
+    if let Some(text) = e.internal_log() {
         // Python logs the exception type only; the text can carry row
         // data, so it is printed only when a harness asks for it.
         if std::env::var_os("PSEUDOLIFE_DAEMON_DEBUG_BOARD").is_some() {

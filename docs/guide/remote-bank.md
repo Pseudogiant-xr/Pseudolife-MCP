@@ -160,16 +160,13 @@ the tailnet address, and `--port` takes ASCII digits only. `tailscale` is
 found only in absolute `PATH` directories (and its usual install
 location), never in the current directory.
 
-`/health` reports the bank fingerprint as `bank`: the first 16 hex
-characters of the SHA-256 of the bank's coordination identity. It is not a
-secret; it tells two daemons' banks apart, which `version` and `schema`
-cannot. It is `null` until the daemon's storage has started and the bank
-identity exists (a freshly started daemon that has not served a call yet,
-a bank whose agent board has never been used, or a file-mode daemon), and
-in any `/health` whose database check failed; callers treat `null` as
-unknown. Once storage has started, `/health` reads the identity after a
-successful database check, at most once a minute, until it exists, then
-keeps it.
+`/health` reports the bank fingerprint as `bank`, the first 16 hex
+characters of the SHA-256 of the bank's coordination identity. The Rust
+daemon creates an identity for a fresh writable bank after opening storage.
+`bank` is `null` until the identity exists and whenever the database check
+fails. If identity setup fails, memory tools can still use the bank and the
+daemon retries setup in the background. Check the daemon's startup logs
+when `/health` reports `bank_identity_failed: true`.
 
 ### 1. Tailscale Serve, TCP mode
 
@@ -231,8 +228,10 @@ Two commands give another machine its own identity on the bank, with no
 daemon restart and no token travelling between machines. This is the way
 to add every machine other than the daemon's host. Copying another
 machine's token there instead works, but if two machines use one token,
-rotating it breaks both and neither can be revoked alone. On the daemon
-host, after [exposing it](#expose-the-daemon-with-one-command):
+rotating it breaks both and neither can be revoked alone. On the writable
+daemon host, run `invite` after [exposing it](#expose-the-daemon-with-one-command).
+The Rust daemon gives a fresh writable bank its identity at startup, so
+you can invite a machine before any agent connects:
 
 ```bash
 pseudolife-mcp invite laptop            # prints a code such as 7K3Q-M9XA-2PDF
@@ -312,7 +311,11 @@ The rules:
 - The daemon must have a token of its own (`"auth": true`): invited
   principals do not turn authentication on. An invite also checks that
   the database it writes is the bank the local daemon serves (`/health`'s
-  `bank`), and refuses while that is still `null`.
+  `bank`). If the daemon is still starting its storage, wait a few seconds
+  and retry. If the local daemon serves a read-only bank, use the writable
+  daemon host. If `invite` reports that the daemon does not create its bank
+  identity at startup, run `pseudolife-mcp update` on that host before
+  retrying.
 - On a Docker install `invite` runs inside the daemon container, so the
   host never handles the database password; elsewhere it uses
   `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded Postgres.
@@ -756,8 +759,17 @@ records. The target needs:
 - free space for the move's files under `~/.pseudolife-mcp/moves` (or
   `--target-work-dir`), plus the restore's 8 GiB margin.
 
-A fresh target has no bank identity yet, so the plan says `--target-url` is
-matched only by release and schema.
+The Rust daemon gives a fresh target its bank identity at startup. The
+native `move` client asks the target's installed native client to check
+whether the bank is empty. Update the native client on the target to a
+release that recognizes this startup event. A 0.25.0 target helper reports
+`the target bank is not empty (coordination_events 1)` when the startup
+event is the only audit row. The frozen Python `move` client checks that
+table from the source and can give the same refusal. Use the native client
+on the source and update the target's native client before retrying.
+
+For an older target with no bank identity yet, the plan says
+`--target-url` is matched only by release and schema.
 
 The move, in order:
 1. Claims the target, pauses unattended updates and restart policies on both
@@ -807,6 +819,9 @@ replacing that move's own restored bank there. It does so only while that
 bank is still as the rollback left it: gated, with the same row counts and
 write counters. Otherwise it refuses before changing anything, because the
 bank may hold writes that exist nowhere else.
+Finish, roll back or release a paused move before updating the native client
+on the target, because older clients include the bank identity audit event
+in the saved row count.
 
 **`pseudolife-mcp move --release-target <move id>`** frees a target that
 still holds a rolled-back move's restored bank, writes or not. It:
