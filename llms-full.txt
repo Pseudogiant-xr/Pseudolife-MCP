@@ -95,7 +95,8 @@ The Windows x64 native client bundles its C runtime starting with 0.25.1.
 If an older archive fails to start because a system library is missing
 (`0xC0000135`), use a release that bundles the runtime or install the
 Microsoft Visual C++ Redistributable for x64 to keep using that archive.
-The native installers and updater report this error when they detect it.
+Starting with 0.25.1, the native installers and the native updater's
+hand-off probe identify this loader error when they detect it.
 
 On an installer-managed Python client from 0.23.0 or later, opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (set
@@ -125,12 +126,13 @@ while the daemon starts. A rejected token (HTTP 401 or 403) stops the check
 immediately. If the check fails, the installer completes the rest of the
 setup and skips Codex registration.
 
-If a requested client cannot be connected, the native installer completes
-the remaining setup and exits with status 5. Its final summary names the
-incomplete clients and how to retry. A client chosen by flag or typed at
-the installer prompt counts as requested, including when a rerun restores
-that choice. A failure for an automatically detected client produces a
-warning and allows a successful exit.
+If the native installer records a connection setup failure for a requested
+client, it completes the remaining setup and exits with status 5. Its final
+summary names the incomplete clients and how to retry. Clients selected by
+flag or at the prompt count as requested, including the default accepted
+with Enter. A rerun treats a restored list as requested only when the saved
+request matches the list. A detected-client failure produces a warning and
+allows a successful exit.
 
 On reruns, the native installer can check a client without changing its
 registration. It uses read-only helpers to inspect the Pseudolife entry in
@@ -140,11 +142,13 @@ For a current Codex registration on a client-only rerun, it can wait up to
 three minutes for that read. If a grouped client-only check fails, the
 installer checks the clients separately and keeps completed work.
 
-For native client-only setup, use an owner-only regular file with
-`--token-file` / `-TokenFile`. For a new registration on a daemon that
-requires a bearer token, use the default stdio transport. The installer
-preserves existing HTTP registrations and warns when you need to verify
-their credentials in the client.
+For a new client-only machine, [pair it to the daemon](remote-bank.md#adding-a-machine-invite-and-pair)
+with `--pairing-code` / `-PairingCode`. The installer creates a private token
+file. If you supply an existing token file with `--token-file` / `-TokenFile`,
+use an owner-only regular file. For a new registration on a daemon that
+requires a bearer token, use the default stdio transport. The installer can
+preserve an existing HTTP registration and exit 0 with a warning to verify
+the credential in the client.
 
 Release update can refresh existing Codex hook scripts when their approved
 definitions stay the same. If a definition changes, open `/hooks` in the
