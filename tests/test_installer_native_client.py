@@ -155,8 +155,9 @@ def _release(directory: Path, *, sums_override: str | None = None, extra_line: b
     (directory / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, release: bool = True,
+def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, release: bool = True, host_only: bool = False,
          version: str = VERSION, **release_kwargs) -> subprocess.CompletedProcess:
+    """Use the same sandbox for either the installer or its host-only control."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
@@ -171,15 +172,16 @@ def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, releas
         stub = forbidden / name
         stub.write_text(f'#!/bin/sh\necho "{name} $*" >>"$FORBIDDEN_CALLS"\nexit 99\n', encoding="utf-8", newline="\n")
         stub.chmod(0o755)
-    script = "\n".join([
-        "set -euo pipefail",
-        'step() { echo "==> $*"; }',
-        f"repo='{_p(repo)}'",
-        _between("# >>> native client >>>", "# <<< native client <<<"),
-        f"native_target() {{ echo {native_client_stub.host_target() if release_kwargs.get('real') else TARGET}; }}",
-        _between('SHIM_TRIED=""\nSHIM_OK=""', "\ncli_env_flag() {").removesuffix("\ncli_env_flag() {"),
-        body,
-    ])
+    if not host_only:
+        body = "\n".join([
+            "set -euo pipefail",
+            'step() { echo "==> $*"; }',
+            f"repo='{_p(repo)}'",
+            _between("# >>> native client >>>", "# <<< native client <<<"),
+            f"native_target() {{ echo {native_client_stub.host_target() if release_kwargs.get('real') else TARGET}; }}",
+            _between('SHIM_TRIED=""\nSHIM_OK=""', "\ncli_env_flag() {").removesuffix("\ncli_env_flag() {"),
+            body,
+        ])
     launcher = home / "share" / "pseudolife-mcp" / "bin" / (
         "pseudolife-mcp.exe" if release_kwargs.get("real") and os.name == "nt" else "pseudolife-mcp")
     run_env = {
@@ -201,7 +203,7 @@ def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, releas
     (tmp_path / "tmp").mkdir(exist_ok=True)
     run_env.update(env or {})
     script_file = tmp_path / "run.sh"
-    script_file.write_text(script + "\n", encoding="utf-8", newline="\n")
+    script_file.write_text(body + "\n", encoding="utf-8", newline="\n")
     installer_sandbox.require(run_env, tmp_path)
     result = subprocess.run([BASH, _p(script_file)], capture_output=True, text=True, env=run_env, timeout=120)
     forbidden_log = tmp_path / "forbidden-calls"
@@ -253,6 +255,11 @@ def test_rerun_on_a_native_host_says_nothing_changed(tmp_path):
      "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."),
 ])
 def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_path, code, output, diagnostic):
+    control = tmp_path / "host-control"
+    control.mkdir()
+    probe_env = {"STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output}
+    host = _run(control, ":", release=False, host_only=True, env=probe_env)
+    assert host.returncode == 0, host.stdout + host.stderr
     assets = tmp_path / "release"
     assets.mkdir()
     name = f"pseudolife-mcp-{VERSION}-x86_64-pc-windows-msvc.zip"
@@ -278,7 +285,7 @@ powershell.exe() {
 }
 native_stage
 echo STAGED
-''', release=False, env={"STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output})
+''', release=False, env=probe_env)
     home = tmp_path / "home"
     downloads = home / ".pseudolife-mcp" / "downloads" / VERSION
     assert result.returncode == 1, result.stdout + result.stderr
@@ -287,8 +294,18 @@ echo STAGED
         f"The native pseudolife-mcp client cannot be installed: {diagnostic} "
         f"Nothing else was changed: the download in {_p(downloads)} is kept for a rerun (delete it to free the space)."
     )
-    assert set(home.rglob("*")) == {downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent}
-    assert not list((tmp_path / "tmp").iterdir())
+    host_home = control / "home"
+    host_entries = {path.relative_to(host_home) for path in host_home.rglob("*")}
+    installed_entries = {path.relative_to(home) for path in home.rglob("*")}
+    assert installed_entries - host_entries == {
+        path.relative_to(home)
+        for path in (downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent)
+    }
+    probe_temp = tmp_path / "tmp"
+    control_temp = control / "tmp"
+    assert {path.relative_to(probe_temp) for path in probe_temp.rglob("*")} <= {
+        path.relative_to(control_temp) for path in control_temp.rglob("*")
+    }
 
 
 @pytest.mark.parametrize("case, expected", [

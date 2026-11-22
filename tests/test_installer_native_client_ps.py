@@ -131,10 +131,11 @@ def _release(directory: Path, *, client: str, digest_override: str | None = None
     (directory / "SHA256SUMS").write_text("" if omit else f"{digest}  {asset}\n", encoding="utf-8")
 
 
-def _run(client: str, tmp_path: Path, body: str, *, release: bool = True,
+def _run(client: str, tmp_path: Path, body: str, *, release: bool = True, host_only: bool = False,
          extra_env: dict[str, str] | None = None, **release_kwargs) -> subprocess.CompletedProcess:
     """``body`` run after the installer's native-client block; ``client``
-    ("stub" or "real") is the release ``_release`` packs."""
+    ("stub" or "real") is the release ``_release`` packs. A host-only
+    control runs the body with the same sandbox setup and no installer code."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
@@ -155,16 +156,17 @@ def _run(client: str, tmp_path: Path, body: str, *, release: bool = True,
             stub.chmod(0o755)
     runtimes = home / "runtimes"
     launcher = home / "bin" / ("pseudolife-mcp.exe" if WINDOWS else "pseudolife-mcp")
-    script = "\n".join([
-        '$ErrorActionPreference = "Stop"',
-        "function Step($msg) { Write-Host \"==> $msg\" }",
-        f"$repo = '{repo}'",
-        _block("# >>> native client >>>", "# <<< native client <<<"),
-        _block("$script:shimInstallResult = $null\n", "\n# Two env pairs ride each shim registration"),
-        body,
-    ])
+    if not host_only:
+        body = "\n".join([
+            '$ErrorActionPreference = "Stop"',
+            "function Step($msg) { Write-Host \"==> $msg\" }",
+            f"$repo = '{repo}'",
+            _block("# >>> native client >>>", "# <<< native client <<<"),
+            _block("$script:shimInstallResult = $null\n", "\n# Two env pairs ride each shim registration"),
+            body,
+        ])
     script_file = tmp_path / "run.ps1"
-    script_file.write_text(script, encoding="utf-8")
+    script_file.write_text(body, encoding="utf-8")
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("PSEUDOLIFE_", "XDG_"))}
     env.update({
@@ -211,6 +213,9 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
      "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
 ])
 def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_path, code, output, diagnostic):
+    control = tmp_path / "host-control"
+    control_temp = control / "probe-temp"
+    control_temp.mkdir(parents=True)
     probe_temp = tmp_path / "probe-temp"
     probe_temp.mkdir()
     body = '''
@@ -231,15 +236,14 @@ Write-Host 'INSTALLED'
     with zipfile.ZipFile(archive, "w") as stream:
         stream.writestr("pseudolife-mcp.exe", b"version probe stand-in")
     (assets / "SHA256SUMS").write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {name}\n", encoding="utf-8")
-    # On Unix, redirect PowerShell's own startup cache and module directories
-    # out of the installer home before checking what was left behind.
-    powershell_state = tmp_path / "powershell-state"
+    probe_env = {"STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output}
+    temp_keys = ("TEMP", "TMP", "TMPDIR")
+    host = _run("stub", control, "$null = 0", release=False, host_only=True, extra_env={
+        **probe_env, **dict.fromkeys(temp_keys, str(control_temp)),
+    })
+    assert host.returncode == 0, host.stdout + host.stderr
     result = _run("stub", tmp_path, body, release=False, extra_env={
-        "STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output,
-        **{key: str(powershell_state / key) for key in (
-            "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
-        )},
-        **dict.fromkeys(("TEMP", "TMP", "TMPDIR"), str(probe_temp)),
+        **probe_env, **dict.fromkeys(temp_keys, str(probe_temp)),
     })
     home = tmp_path / "home"
     downloads = home / ".pseudolife-mcp" / "downloads" / VERSION
@@ -249,14 +253,18 @@ Write-Host 'INSTALLED'
         f"The native pseudolife-mcp client cannot be installed: {diagnostic} "
         f"Nothing else was changed: the download in {downloads} is kept for a rerun (delete it to free the space)."
     )
-    installed_files = set(home.rglob("*"))
-    if WINDOWS:
-        # Windows PowerShell 7 writes this .NET startup profile under the
-        # account's known LocalApplicationData folder as the shell exits.
-        startup_profile = home / "AppData/Local/Microsoft/PowerShell/StartupProfileData-NonInteractive"
-        installed_files.difference_update((startup_profile, *startup_profile.parents[:4]))
-    assert installed_files == {downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent}
-    assert not list(probe_temp.iterdir())
+    # Subtract exact host-only entries. Extra files inside an existing host
+    # directory still show up in the installer's remainder.
+    host_home = control / "home"
+    host_entries = {path.relative_to(host_home) for path in host_home.rglob("*")}
+    installed_entries = {path.relative_to(home) for path in home.rglob("*")}
+    assert installed_entries - host_entries == {
+        path.relative_to(home)
+        for path in (downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent)
+    }
+    assert {path.relative_to(probe_temp) for path in probe_temp.rglob("*")} <= {
+        path.relative_to(control_temp) for path in control_temp.rglob("*")
+    }
 
 
 def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
