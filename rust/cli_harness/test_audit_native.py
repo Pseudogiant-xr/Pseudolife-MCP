@@ -277,6 +277,51 @@ def _cold_audit(monkeypatch):
                 atexit.unregister(cleanup)
 
 
+@pytest.mark.parametrize("recorded", [False, True], ids=["selected-rows", "recorded-refusal"])
+def test_audit_bank_export_reference_without_the_frozen_package(monkeypatch, tmp_path, recorded):
+    sender = b'{"seq":2, "project":"p", "task":"t1", "agent_id":"a", "recipient_agent_id":null, "created_at":10}\n'
+    recipient = b'{"seq":3,"project":"p","task":"t1","agent_id":"b","recipient_agent_id":"a","created_at":20}\n'
+    data = (b'{"seq":1,"project":"p","task":"t1","agent_id":"a","recipient_agent_id":null,"created_at":9}\n'
+            + sender + recipient
+            + b'{"seq":4,"project":"p","task":"t1","agent_id":"a","recipient_agent_id":null,"created_at":30}\n'
+            + b'{"seq":5,"project":"q","task":"t1","agent_id":"a","recipient_agent_id":null,"created_at":15}\n'
+            + b'{"seq":6,"project":"p","task":"t2","agent_id":"a","recipient_agent_id":null,"created_at":15}\n'
+            + b'{"seq":7,"project":"p","task":"t1","agent_id":"b","recipient_agent_id":null,"created_at":15}\n')
+    with _cold_audit(monkeypatch) as audit:
+        source = MagicMock(return_value=data)
+        monkeypatch.setattr(audit, "export_bytes", source)
+        monkeypatch.setattr(audit, "ensure", lambda kind: audit._name(kind))
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        if recorded:
+            case = audit.bank_export_case("export-agent-unknown", "rich", ["--agent", "ffffffff0"], recorded=True)
+        else:
+            case = audit.bank_export_case("export-control", "rich",
+                                          ["--project", "p", "--ta=t2", "--task", "t1", "--agent", "a",
+                                           "--since", "10", "--until", "30"],
+                                          project="p", task="t1", agent=audit._Lazy(lambda: "a"), since=10, until=30)
+        previous_umask = audit.core.pin_umask()
+        try:
+            want = case.reference(tmp_path / "bank-export")
+        finally:
+            if previous_umask is not None:
+                os.umask(previous_umask)
+
+    newline = b"\r\n" if audit.core.WINDOWS else b"\n"
+    if recorded:
+        source.assert_not_called()
+        assert want["exit"] == 2
+        assert audit.core.decode(want, "stdout") == b""
+        assert audit.core.decode(want, "stderr") == b"board-audit: no agent id starts with ffffffff0" + newline
+    else:
+        source.assert_called_once_with("rich")
+        assert want["exit"] == 0
+        assert audit.core.decode(want, "stdout") == (sender + recipient).replace(b"\n", newline)
+        assert audit.core.decode(want, "stderr") == b""
+    assert want["files"] == {"cwd": "dir"}
+    assert want["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755"})
+    assert want["db"] == "unchanged"
+
+
 def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     raw = event()
     raw["payload"] = json.loads(raw["payload"])
