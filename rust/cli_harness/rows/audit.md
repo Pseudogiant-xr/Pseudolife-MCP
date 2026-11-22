@@ -148,8 +148,24 @@ Windows file operations remain unproven for 2/3/206 → ENOENT, 5/32 → EACCES,
 
 ## Reader compatibility checks
 
-The live row compares open errors, malformed JSON, UTF-8 diagnostics and
-8192-byte decoding order. Its payload fixture covers non-finite floats,
+The live row checks open errors, malformed JSON, UTF-8 diagnostics and
+8192-byte decoding order. File-only archive and argument cases use
+`audit.file.linux.json` and `audit.file.windows.json`. These capture the
+frozen Python CLI at `f1faebaa7cf11cd685b1ce3a82dbe7725b9385b6` on the native
+Linux and Windows dev machines. The capture prepared each case's inputs,
+ran the frozen arm and saved exit status, stdout and stderr with the case
+home normalized. For a successful nonempty archive report, the reference
+fills the head hash and creation time from the prepared archive. The
+whitespace-only 100 MiB case uses the empty-chain result and still supplies
+the full input to the native CLI.
+
+Bank verify references read the seeded rows in sequence order and feed their
+stored payload text to the frozen chain rules in `audit_oracle.py`. The
+reference includes the complete report or refusal, input files and modes,
+and requires the bank to remain unchanged. The closed-stdout bank case
+continues to run both arms for its recorded diagnostic divergence.
+
+The payload fixture covers non-finite floats,
 200-digit integers, nesting beyond 128, Unicode key order and lone surrogates.
 The measured CPython 3.11 container limits are 988 for export and 987 for
 stored payload inspection; the archive's 987 includes its outer row. Reader
@@ -157,8 +173,9 @@ failures preserve the Python diagnostic and exit rather than admitting a
 partial interpretation. Golden replay remains limited to the stable subset.
 
 The 100,000-key object case exceeded five seconds with the previous linear
-scan and checks the indexed reader against Python. The local-minute ISO case now requires native parsing before the no-bank diagnostic. The driver-side row decode
-case now requires a safe native refusal. A PostgreSQL-wire regression blocks
+scan and checks the indexed reader against the frozen diagnostic. The
+local-minute ISO case requires native parsing before the no-bank diagnostic.
+The driver-side row decode case requires a safe native refusal. A PostgreSQL-wire regression blocks
 an export query and confirms the final destination remains absent. It installs
 a competing destination before failing the query and proves that cleanup
 preserves it. Private staging cleanup checks the staging file's identity;

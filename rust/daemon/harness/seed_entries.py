@@ -1,13 +1,7 @@
-"""Seed a disposable bank through the Python daemon's own write path.
+"""Restore the captured continuum seed into a fresh disposable bank.
 
-usage: python seed_entries.py <dsn>
-
-Stores a few public-repo paragraphs with ``MemoryService.store`` under the
-``continuum`` preset (so every row carries a continuum band name), with one
-slot-bearing entry, a tagged one and one from source ``assistant``. The bank
-is then served under the default ``flat`` preset, so hydration must rewrite
-every band stamp. Run with ``PSEUDOLIFE_MCP_DATA_DIR`` pointing at a
-disposable directory (the harness does).
+The frozen writer stored these entries under the ``continuum`` preset.
+Serving them with the default ``flat`` preset exercises band hydration.
 """
 from __future__ import annotations
 
@@ -17,31 +11,15 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
+from w2d_seed_rows import load_capture, replay  # noqa: E402
 
-TEXTS = [
-    ("Deploy only via pseudolife-mcp update: backup, rollback tag, daemon-only recreate, health, clients.", "spike-seed", None),
-    ("A contender is a competing value parked against a slot instead of overwriting it.", "spike-seed", ["glossary"]),
-    ("Remote clients authenticate with a bearer token in the Authorization header.", "assistant", None),
-    ("A schema bump touches seven places together, including the version pin and the atlas.", "spike-seed", None),
-    ("The cortex keeps one current value per entity and attribute slot; supersession keeps history.", "spike-seed", None),
-    ("Never run docker compose down -v: the bank volumes are external precisely so that is survivable.", "spike-seed", ["ops"]),
-]
+CAPTURE_SHA256 = "c41b4a93c2ddcbb14c642f872749489be90fec6966a69717633a1aa0f317bade"
 
 
-def main() -> int:
-    dsn = sys.argv[1]
-    data = Path(os.environ["PSEUDOLIFE_MCP_DATA_DIR"])
-    data.mkdir(parents=True, exist_ok=True)
-    (data / "config.yaml").write_text("memory:\n  miras:\n    preset: continuum\n", encoding="utf-8")
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=str(data), database_url=dsn)
-    for text, source, tags in TEXTS:
-        svc.store(text, source=source, tags=tags)
-    svc.flush()
-    svc._storage.close()
-    return 0
+def seed(dsn):
+    capture = load_capture("continuum", CAPTURE_SHA256)
+    replay(dsn, capture["bank"])
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    seed(os.environ["PL_HARNESS_SEED_DSN"])

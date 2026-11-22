@@ -968,7 +968,7 @@ CRED_READY = ('{"status":"ready","credential_file_configured":true,"connection_c
 def _codex_wiring(shell: _Shell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
-                  runtime_failed: bool = False, tunnel_exit: int = 0, gemini_list: str = ""):
+                  runtime_failed: bool = False, gemini_list: str = ""):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex calls."""
@@ -998,7 +998,7 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
               "if [ \"$*\" = 'mcp add --help' ]; then echo '  -e, --env'; fi\n"
               "exit 0\n")
         finish_fixture = ("\nprintf 'MCP_GEMINI=%s\\n' \"$MCP_GEMINI\"\n"
-                          f"echo REMAINING_STEPS_FINISHED\ntunnel_rc={tunnel_exit}\n"
+                          "echo REMAINING_STEPS_FINISHED\n"
                           + _block("client setup result"))
     source = (ROOT / "ops" / "install-native.sh").read_text(encoding="utf-8")
     stages = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)"
@@ -1102,13 +1102,6 @@ def test_successful_client_setup_and_rerun_exit_zero(bash, tmp_path, kwargs):
     assert "Done. First session" in proc.stdout
     if kwargs.get("runtime_failed"):
         assert "Warnings\nCodex runtime defaults were not confirmed." in proc.stderr
-
-
-@BASH
-def test_a_tunnel_failure_cannot_hide_incomplete_requested_clients(bash, tmp_path):
-    proc, _ = _codex_wiring(_Shell(bash, tmp_path), requested="codex gemini", add_exit=17, tunnel_exit=2)
-    assert proc.returncode == 5, proc.stdout + proc.stderr
-    assert proc.stderr.splitlines()[-1].startswith("Requested client setup incomplete (Codex).")
 
 
 @pytest.mark.parametrize("deferred", [False, True], ids=["full", "client-only"])

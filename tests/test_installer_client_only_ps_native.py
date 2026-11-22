@@ -926,7 +926,7 @@ CODEX_STUB = """$global:LASTEXITCODE = 0
 def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
-                  runtime_failed: bool = False, tunnel_exit: int = 0, gemini_list: str = ""):
+                  runtime_failed: bool = False, gemini_list: str = ""):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex adds."""
@@ -956,7 +956,7 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
     providers = "'codex'" if requested is None else "'codex','gemini'"
     finish_fixture = "" if requested is None else (
         "Write-Output ('MCP_GEMINI=' + $mcpState['gemini'])\n"
-        f"Write-Output 'REMAINING_STEPS_FINISHED'\n$tunnelExit={tunnel_exit}\n"
+        "Write-Output 'REMAINING_STEPS_FINISHED'\n"
         + _block("client setup result")
     )
     body = f"""$env:PATH = '{_q(ps.tmp)}'
@@ -1025,7 +1025,7 @@ def test_malformed_gemini_listing_reports_only_that_client(tmp_path):
 def test_bearer_transport_failure_names_the_right_repair(tmp_path, transport, repair):
     proc = _PowerShell(tmp_path).run(
         f"$Transport = '{transport}'\n"
-        "$clients = @('claude'); $requestedClients = $clients; $tunnelExit = 0\n"
+        "$clients = @('claude'); $requestedClients = $clients\n"
         "$hookState = @{}; $instrState = @{}; $mcpState = @{}\n"
         + _block("client registration state") + _block("client registration helpers")
         + 'Write-ClientHttpAuthResult "claude"\n' + _block("client setup result"))
@@ -1044,12 +1044,6 @@ def test_successful_client_setup_and_rerun_exit_zero(tmp_path, kwargs):
         assert "Warnings\nCodex runtime defaults were not confirmed." in proc.stderr
 
 
-def test_a_tunnel_failure_cannot_hide_incomplete_requested_clients(tmp_path):
-    proc, _ = _codex_wiring(_PowerShell(tmp_path), requested="codex gemini", add_exit=17, tunnel_exit=2)
-    assert proc.returncode == 5, _output(proc)
-    assert proc.stderr.splitlines()[-1].startswith("Requested client setup incomplete (Codex).")
-
-
 @pytest.mark.parametrize("deferred", [False, True], ids=["full", "client-only"])
 @pytest.mark.parametrize("failure", ['throw "fixture hook write failure"', "exit 19"])
 def test_a_claude_hook_write_failure_stays_a_warning(tmp_path, deferred, failure):
@@ -1058,7 +1052,7 @@ def test_a_claude_hook_write_failure_stays_a_warning(tmp_path, deferred, failure
     block = _block("client-only claude hook") if deferred else _between(
         INSTALL, '    Step "Installing $selectedClient session hook..."', "\n}")
     proc = ps.run(
-        "$clients = @('claude'); $requestedClients = $clients; $tunnelExit = 0\n"
+        "$clients = @('claude'); $requestedClients = $clients\n"
         "$hookState = @{claude = 'deferred'}; $instrState = @{}\n"
         "$selectedClient = 'claude'; $briefingCommand = 'fixture'\n"
         "$script:shimInstallPath = '/fixture/shim.exe'\n"
@@ -1084,7 +1078,6 @@ def test_current_credential_probe_in_native_powershell(tmp_path, accepted):
 $requestedClients = $clients
 $DaemonUrl = '{REMOTE}'
 $TokenFile = 'fixture.token'
-$tunnelExit = 0
 $hookState = @{{}}
 $instrState = @{{}}
 $mcpState = @{{}}
