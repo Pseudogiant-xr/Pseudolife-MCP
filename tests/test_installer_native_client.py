@@ -19,6 +19,7 @@ import shutil
 import re
 import subprocess
 import tarfile
+import zipfile
 
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -235,6 +236,59 @@ def test_rerun_on_a_native_host_says_nothing_changed(tmp_path):
     assert second.returncode == 0, second.stderr
     assert f"Native client {VERSION} already installed at" in second.stdout
     assert "nothing changed" in second.stdout
+
+
+@pytest.mark.parametrize(("code", "output", "diagnostic"), [
+    (-1073741515, "", "Windows could not start the downloaded client because a system library is missing "
+     "(exit code -1073741515, 0xC0000135). Install the Microsoft Visual C++ Redistributable for x64 before rerunning "
+     "with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C "
+     "runtime and rerun that tag's installer with its matching archive."),
+    (1, "version probe failed\nmore detail", "the downloaded client does not run on this host "
+     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+    (53, "", "the downloaded client does not run on this host (exit code 53). "
+     "Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+    (29, "direct probe failed", "the downloaded client does not run on this host (exit code 29, direct probe failed). "
+     "Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+    (124, "", "the downloaded client did not answer version within 30 s. "
+     "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."),
+])
+def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_path, code, output, diagnostic):
+    assets = tmp_path / "release"
+    assets.mkdir()
+    name = f"pseudolife-mcp-{VERSION}-x86_64-pc-windows-msvc.zip"
+    archive = assets / name
+    with zipfile.ZipFile(archive, "w") as stream:
+        stream.writestr("pseudolife-mcp.exe", "#!/bin/sh\nexit 53\n")
+    (assets / "SHA256SUMS").write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {name}\n", encoding="utf-8")
+    result = _run(tmp_path, '''
+native_target() { echo x86_64-pc-windows-msvc; }
+cygpath() { printf '%s\\n' "$2"; }
+unzip() {
+    # Some Linux test hosts have no unzip. The real checksum still covers the ZIP.
+    [ "$1 $2 $4 $5" = '-q -o pseudolife-mcp.exe -d' ] || return 1
+    printf '%s\\n' '#!/bin/sh' 'printf "%s\\n" "direct probe failed"' 'exit 29' >"$6/$4"
+}
+powershell.exe() {
+    [ -f "$PSEUDOLIFE_NATIVE_PROBE_EXE" ] || return 1
+    case "$STUB_VERSION_CODE" in
+        29) printf '%s\\n' 'Method invocation is not permitted in this language mode' >&2; return 1 ;;
+        124) return 124 ;;
+    esac
+    printf '%s\\r\\n%s' "$STUB_VERSION_CODE" "$STUB_VERSION_OUTPUT"
+}
+native_stage
+echo STAGED
+''', release=False, env={"STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output})
+    home = tmp_path / "home"
+    downloads = home / ".pseudolife-mcp" / "downloads" / VERSION
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert result.stderr.strip() == (
+        f"The native pseudolife-mcp client cannot be installed: {diagnostic} "
+        f"Nothing else was changed: the download in {_p(downloads)} is kept for a rerun (delete it to free the space)."
+    )
+    assert set(home.rglob("*")) == {downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent}
+    assert not list((tmp_path / "tmp").iterdir())
 
 
 @pytest.mark.parametrize("case, expected", [
