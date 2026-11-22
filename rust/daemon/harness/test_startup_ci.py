@@ -27,6 +27,10 @@ class Connection:
 
 
 def fake_run(command, *, env, **kwargs):
+    if "PL_BANK_IDENTITY_TEST_DSN" in env:
+        assert command[1:3] == ["--ignored", "--exact"]
+        assert command[3] in startup_ci.BANK_IDENTITY_CHECKS
+        return subprocess.CompletedProcess(command, 0, "test result: ok. 1 passed; 0 failed\n", "")
     if "PL_SHADOW_REFRESH_DSN" in env:
         assert env["PL_SHADOW_REFRESH_REQUIRED"] == "1"
         assert all(f in command for f in startup_ci.SHADOW_DB_FILTERS)
@@ -102,6 +106,11 @@ class ShadowRefresh(unittest.TestCase):
 
 class WriterGuard(unittest.TestCase):
     def test_every_database_it_creates_is_owned_through_hydration(self):
+        for platform, identity_checks in (("linux", startup_ci.BANK_IDENTITY_CHECKS), ("win32", ())):
+            with self.subTest(platform=platform):
+                self.check_database_creation(platform, identity_checks)
+
+    def check_database_creation(self, platform, identity_checks):
         saved = sys.modules.pop("pgdisposable", None)
         try:
             with patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}):
@@ -114,6 +123,7 @@ class WriterGuard(unittest.TestCase):
                                      side_effect=lambda conn, statement: created.append(statement)), \
                         patch.object(startup_ci.subprocess, "run", side_effect=fake_run), \
                         patch.object(startup_ci, "shadow_fixture", return_value=FIXTURE), \
+                        patch.object(startup_ci, "PLATFORM", platform), \
                         tempfile.TemporaryDirectory() as tmp:
                     output = Path(tmp) / "startup.json"
                     code = startup_ci.writer_guard(Path("daemon-test"), {}, output)
@@ -123,9 +133,10 @@ class WriterGuard(unittest.TestCase):
             if saved is not None:
                 sys.modules["pgdisposable"] = saved
         self.assertEqual(code, 0)
-        self.assertEqual(sorted(result), ["control", "hydration_rows", "mutant", "shadow_refresh"])
+        self.assertEqual(set(result), {"control", "hydration_rows", "mutant", "shadow_refresh",
+                                      *identity_checks})
         self.assertTrue(all(value["accepted"] for value in result.values()), result)
-        self.assertEqual(len(created), 4)
+        self.assertEqual(len(created), 4 + len(identity_checks))
 
 
 class StressProfileMatchesStartupCi(unittest.TestCase):

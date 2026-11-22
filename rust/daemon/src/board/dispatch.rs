@@ -402,14 +402,14 @@ impl Board {
         {
             return Err(BoardError::code("coordination_unavailable"));
         }
-        self.ensure_tier().await?;
+        let storage = self.ensure_tier().await?;
         let mut conn = self.conn.lock().await;
         {
             let client = conn.client().await?;
             if action == "context" {
                 return self
-                    .store
                     .context(
+                        &storage,
                         client,
                         principal,
                         params.get("agent_id").and_then(Value::as_str),
@@ -420,8 +420,7 @@ impl Board {
             }
             if let Some(binding) = binding {
                 let context = self
-                    .store
-                    .context(client, principal, None, None, false)
+                    .context(&storage, client, principal, None, None, false)
                     .await?;
                 let found = (
                     context["bank_id"].as_str().unwrap_or("").to_string(),
@@ -701,13 +700,32 @@ impl Board {
         Ok(result)
     }
 
+    async fn context(
+        &self,
+        storage: &Arc<crate::storage::Storage>,
+        client: &mut tokio_postgres::Client,
+        principal: &str,
+        agent_id: Option<&str>,
+        nonce: Option<&str>,
+        read_only: bool,
+    ) -> Result<Value> {
+        let context = self
+            .store
+            .context(client, principal, agent_id, nonce, read_only)
+            .await?;
+        self.service.publish_board_bank_identity(
+            storage,
+            context["bank_id"].as_str().expect("validated bank id"),
+        );
+        Ok(context)
+    }
+
     /// `_ensure_tier(full=False)`: the storage tier (schema, seeds, lease
     /// epoch) before the board's own connection is used.
-    async fn ensure_tier(&self) -> Result<()> {
+    async fn ensure_tier(&self) -> Result<Arc<crate::storage::Storage>> {
         self.service
             .storage_tier()
             .await
-            .map(|_| ())
             .map_err(BoardError::Internal)
     }
 

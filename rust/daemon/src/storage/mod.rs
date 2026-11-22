@@ -20,7 +20,7 @@ mod tls;
 mod tls_transport;
 pub use tls::Config;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::task::JoinHandle;
@@ -225,7 +225,7 @@ pub struct Storage {
     lease_epoch: i64,
     /// The reconnect bookkeeping `PostgresStorage` keeps beside its session.
     session: Mutex<SessionState>,
-    bank_id: Mutex<BankIdCache>,
+    bank_id: Arc<Mutex<BankIdCache>>,
 }
 
 /// `PostgresStorage`'s session bookkeeping (postgres.py:424-437). A
@@ -253,6 +253,7 @@ struct SessionState {
     schema_retry_at: Option<Instant>,
 }
 
+#[derive(Default)]
 struct BankIdCache {
     id: Option<String>,
     /// `_bank_id_retry_at`; `None` is Python's initial 0.0 (always due).
@@ -719,10 +720,7 @@ impl Storage {
                 ok_at: Some(Instant::now()),
                 ..SessionState::default()
             }),
-            bank_id: Mutex::new(BankIdCache {
-                id: None,
-                retry_at: None,
-            }),
+            bank_id: Arc::default(),
         })
     }
 
@@ -791,10 +789,7 @@ impl Storage {
                     ok_at: Some(Instant::now()),
                     ..SessionState::default()
                 }),
-                bank_id: Mutex::new(BankIdCache {
-                    id: None,
-                    retry_at: None,
-                }),
+                bank_id: Arc::default(),
             }),
             Err(e) => {
                 // Close now, not at some later drop: the caller's retry
@@ -863,6 +858,23 @@ impl Storage {
         }
     }
 
+    pub(crate) fn knows_bank_id(&self) -> bool {
+        self.bank_id.lock().unwrap().id.is_some()
+    }
+
+    /// Publish a committed identity, superseding any negative lookup.
+    pub(crate) fn remember_bank_id(&self, id: &str) {
+        self.bank_id
+            .lock()
+            .unwrap()
+            .id
+            .get_or_insert_with(|| id.to_owned());
+    }
+
+    pub(crate) fn retry_bank_id_lookup(&self) {
+        self.bank_id.lock().unwrap().retry_at = None;
+    }
+
     /// `cached_bank_id` (postgres.py:721-752, spec H9): the coordination
     /// bank id, read on a fresh connection at most once per 60 s (the
     /// window is armed before the attempt) until found, then never again.
@@ -895,13 +907,13 @@ impl Storage {
             let _ = task.await;
             value.ok()
         };
-        let row = read.await?;
+        let row = read.await.flatten();
         let value: Option<serde_json::Value> = row.map(|r| r.get(0));
         let mut cache = self.bank_id.lock().unwrap();
         if let Some(serde_json::Value::String(id)) = value
             && !id.is_empty()
         {
-            cache.id = Some(id);
+            cache.id.get_or_insert(id);
         }
         cache.id.clone()
     }
@@ -1153,18 +1165,12 @@ impl Storage {
             eprintln!("{m}");
         }
         // Another writer may have restored a different bank here: the
-        // cached bank id goes with the resident copy.
+        // cached bank id goes with the resident copy. An ordinary reconnect
+        // shares the cache so it cannot lose a concurrent context commit.
         let bank_id = if handed_over.is_some() {
-            BankIdCache {
-                id: None,
-                retry_at: None,
-            }
+            Arc::default()
         } else {
-            let cache = self.bank_id.lock().unwrap();
-            BankIdCache {
-                id: cache.id.clone(),
-                retry_at: cache.retry_at,
-            }
+            self.bank_id.clone()
         };
         Ok(Storage {
             read_only: false,
@@ -1177,7 +1183,7 @@ impl Storage {
                 resident_invalidated: handed_over,
                 ..SessionState::default()
             }),
-            bank_id: Mutex::new(bank_id),
+            bank_id,
         })
     }
 

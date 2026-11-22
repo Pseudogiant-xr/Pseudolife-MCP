@@ -3894,17 +3894,30 @@ configured, such as an embedding-dimension mismatch, and the shim exits on
 it.
 
 `/health` also says when a starting daemon can serve. `pending` lists the
-startup stages still unfinished, in this order: `init` (storage connected,
-the embedder loaded, the stores hydrated and the clock reseeded) and
-`principals` (the first read of the bank's stored principals; a daemon
-without Postgres never lists it). `ready` is true only when `status` is
-`"ok"` and `pending` is empty. Until then a request waits on the service or
-fails initialization, and a bearer the environment does not match is
-refused `503 principals_unavailable`. Neither key changes `status` or the
-HTTP code, so the Docker healthcheck and `pseudolife-mcp update` treat a
-daemon that is still warming up as a healthy one. A script that starts a
-daemon and calls it at once should wait for `ready: true`; a daemon older
-than these keys sends neither.
+unfinished stages in order:
+
+- `init` covers storage, the embedder, store hydration and clock reseeding.
+- `principals` covers the first read of stored principals. A daemon without
+  PostgreSQL never lists this stage.
+- `bank_identity` covers the first identity attempt for writable storage
+  whose bank has no usable identity. The attempt takes at most 15 seconds.
+
+`ready` is true when `status` is `"ok"` and `pending` is empty. An identity
+failure ends the `bank_identity` stage, so readiness waits for at most one
+identity attempt when writable storage opens. While `db` is `"ok"` and
+the writable bank's fingerprint is still `null`, `bank_identity_failed` is
+`false` during that first attempt and `true` after it fails. On failure,
+`bank_identity_error` carries the public error code and the daemon logs the
+cause. Memory tools can serve as soon as their own initialization finishes,
+including while the identity retries in the background.
+
+During `init`, memory requests wait on the service or fail initialization.
+During `principals`, a bearer the environment does not match is refused
+with `503 principals_unavailable`. Readiness leaves `status` and the HTTP
+code unchanged, so the Docker healthcheck and `pseudolife-mcp update` can
+see a warming daemon as healthy. A script that starts a daemon and calls it
+immediately should wait for `ready: true`. Older daemons may omit `ready`
+and `pending`.
 
 ### When the shim refuses its token file
 

@@ -351,6 +351,7 @@ fn main() {
         let background = background::Background::default();
         background.start_background_durability(service.clone(), autosave_every);
         if !read_only {
+            background.start_bank_identity(service.clone());
             background.start_session_reaper(service.clone(), reap_every, idle_seconds);
         }
         background.start_dream_sweep(
