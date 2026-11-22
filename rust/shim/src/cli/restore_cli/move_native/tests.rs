@@ -2214,7 +2214,8 @@ fn a_resume_with_an_older_audit_count_names_release() {
     let why = resume_check(&mut both, &request, None).unwrap_err();
     assert!(why.contains("public.coordination_events: 0 on the target, 1 in the dump"));
     assert!(why.contains(&format!("pseudolife-mcp move --release-target {MOVE}")));
-    assert_read_only(&both);
+    assert!(both.here.calls.is_empty());
+    assert!(both.wire.far.docker.calls.is_empty());
 }
 
 #[test]
