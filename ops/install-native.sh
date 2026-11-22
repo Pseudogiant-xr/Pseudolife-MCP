@@ -718,7 +718,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
         native_refuse "the downloaded client did not answer version within $NATIVE_PROBE_SECONDS s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
     if [ "$native_says_status" != 0 ]; then
         if [ "$NATIVE_TARGET" = x86_64-pc-windows-msvc ] && [ "$native_says_status" = -1073741515 ]; then
-            native_refuse "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Rerun with the current release. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64."
+            native_refuse "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Install the Microsoft Visual C++ Redistributable for x64 before rerunning with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C runtime and rerun that tag's installer with its matching archive."
         fi
         case "$NATIVE_TARGET" in
             *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;

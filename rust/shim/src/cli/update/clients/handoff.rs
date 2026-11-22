@@ -260,8 +260,8 @@ pub fn hand_off(
                 &version,
                 "Windows could not start the client because a system library is missing (exit code -1073741515, 0xC0000135)",
                 &format!(
-                    "Extract the client from the current Windows release ZIP. Open a shell in that directory, replace RELEASE_VERSION with that archive's version, and run {}. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64.",
-                    retry("./pseudolife-mcp.exe", "RELEASE_VERSION"),
+                    "Extract the client from a Windows release ZIP that bundles the C runtime. Open PowerShell in that directory, replace RELEASE_VERSION with that archive's version, and run {}. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64.",
+                    retry(r".\pseudolife-mcp.exe", "RELEASE_VERSION"),
                 ),
             ),
             None,

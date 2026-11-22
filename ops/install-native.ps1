@@ -534,7 +534,7 @@ function Initialize-NativeClient {
     } catch { $says = $_.Exception.Message; $ran = $false }
     if (-not $ran) {
         if ($target -like "*windows*" -and $answer.Code -eq -1073741515) {
-            Stop-NativeInstall "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Rerun with the current release. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64."
+            Stop-NativeInstall "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Install the Microsoft Visual C++ Redistributable for x64 before rerunning with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C runtime and rerun that tag's installer with its matching archive."
         }
         $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
         $detail = ($says -split "`n", 2)[0].Trim()

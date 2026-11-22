@@ -204,8 +204,9 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
 
 @pytest.mark.parametrize(("code", "output", "diagnostic"), [
     (-1073741515, "", "Windows could not start the downloaded client because a system library is missing "
-     "(exit code -1073741515, 0xC0000135). Rerun with the current release. To use an older archive, first install "
-     "the Microsoft Visual C++ Redistributable for x64."),
+     "(exit code -1073741515, 0xC0000135). Install the Microsoft Visual C++ Redistributable for x64 before rerunning "
+     "with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C "
+     "runtime and rerun that tag's installer with its matching archive."),
     (1, "version probe failed\nmore detail", "the downloaded client does not run on this host "
      "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
 ])

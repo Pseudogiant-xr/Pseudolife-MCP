@@ -1,5 +1,6 @@
 """Synthetic PE32+ images exercise the import guard without a Windows build."""
 
+import re
 import struct
 
 import pytest
@@ -7,7 +8,7 @@ import pytest
 from windows_imports import check_windows_imports, imported_dlls
 
 
-def pe_image(normal=b"KERNEL32.dll", delayed=b"Ws2_32.DLL"):
+def pe_image(normal=b"KERNEL32.dll", delayed=b"Ws2_32.DLL", *, include_imports=True):
     data = bytearray(0x400)
     data[:2] = b"MZ"
     struct.pack_into("<I", data, 0x3C, 0x80)
@@ -19,6 +20,8 @@ def pe_image(normal=b"KERNEL32.dll", delayed=b"Ws2_32.DLL"):
     struct.pack_into("<I", data, optional + 108, 16)
     # One section mapping RVA 0x1000 to file offset 0x200.
     struct.pack_into("<III", data, optional + optional_size + 12, 0x1000, 0x200, 0x200)
+    if not include_imports:
+        return bytes(data)
     for index, rva, size in ((1, 0x1000, 40), (13, 0x1040, 64)):
         struct.pack_into("<II", data, optional + 112 + index * 8, rva, size)
     struct.pack_into("<I", data, 0x20C, 0x1100)  # normal descriptor's name
@@ -55,3 +58,13 @@ def test_malformed_imports_fail_closed(offset, value, error):
     struct.pack_into("<I", data, offset, value)
     with pytest.raises(ValueError, match=error):
         check_windows_imports(bytes(data))
+
+
+@pytest.mark.parametrize(("image", "error"), [
+    pytest.param(b"", "malformed PE import table", id="empty-file"),
+    pytest.param(bytes(0x400), "expected a Windows x64 PE32+", id="non-pe-file"),
+    pytest.param(pe_image(include_imports=False), "Windows client has no PE imports", id="both-import-directories-empty"),
+])
+def test_missing_import_data_fails_closed(image, error):
+    with pytest.raises(ValueError, match=re.escape(error)):
+        check_windows_imports(image)
