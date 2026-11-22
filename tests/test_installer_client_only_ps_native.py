@@ -932,7 +932,7 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
                   runtime_failed: bool = False, gemini_list: str = "",
                   show_ladder: bool = False, transport: str = "shim", hook_report: str = "",
-                  hook_trust: str = "yes", hook_interactive: bool = False):
+                  hook_trust: str = "yes", hook_interactive: bool = False, hook_exit: int = 0):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex adds."""
@@ -958,6 +958,8 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
         steps = steps.replace(
             """return '{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}'""",
             f"Add-Content -LiteralPath '{_q(ps.calls)}' -Value ('hook-options|' + ($args -join ' ')); "
+            f"$global:LASTEXITCODE = {hook_exit}; "
+            "if ($LASTEXITCODE -and $PSNativeCommandUseErrorActionPreference) { throw 'fixture native error promotion' }; "
             "return $env:FAKE_HOOK_REPORT", 1,
         )
     codex = "" if missing else ps.stub_function("codex", CODEX_STUB + "\n$global:LASTEXITCODE = [int]$env:FAKE_MCP_ADD_EXIT")
@@ -978,6 +980,7 @@ $clients = @({providers}); $CodexHooks = 'auto'; $CodexHookTrust = '{hook_trust}
 $requestedClients = '{requested or ''}' -split ' '
 $Instructions = '{'skip' if hook_interactive else 'auto'}'; $ClaudeMd = ''; $AgentsFile = ''
 $interactive = {'$true' if hook_interactive else '$false'}
+$PSNativeCommandUseErrorActionPreference = {'$true' if hook_exit else '$false'}
 $Transport = '{transport}'
 $ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
 function Get-EnvValue($name) {{ return $null }}
@@ -1134,7 +1137,7 @@ def test_pending_codex_hooks_warn_without_failing(tmp_path, trust, interactive, 
     ps = _PowerShell(tmp_path)
     report = json.dumps(dict(status="pending", source="manual", instructions="present", recovery=recovery))
     proc, adds = _codex_wiring(ps, requested="codex gemini", hook_report=report,
-                               hook_trust=trust, hook_interactive=interactive)
+                               hook_trust=trust, hook_interactive=interactive, hook_exit=1)
     assert proc.returncode == 0, _output(proc)
     assert adds and "REMAINING_STEPS_FINISHED" in proc.stdout
     [hook_args] = [line for line in ps.logged() if line.startswith("hook-options|")]
@@ -1144,6 +1147,19 @@ def test_pending_codex_hooks_warn_without_failing(tmp_path, trust, interactive, 
         "Hooks are not installed. Rerun the installer with -CodexHookTrust yes."
     )
     assert proc.stderr.splitlines()[-2:] == ["Warnings", "Codex hook setup needs attention. " + reason]
+
+
+def test_codex_hook_and_connection_failures_are_reported_separately(tmp_path):
+    report = json.dumps(dict(status="unavailable", source="manual", instructions="present",
+                             recovery="The fixture could not write hooks."))
+    proc, _ = _codex_wiring(_PowerShell(tmp_path), requested="codex gemini", hook_report=report, add_exit=17)
+    assert proc.returncode == 5, _output(proc)
+    assert proc.stderr.splitlines()[-2:] == [
+        "Requested client setup incomplete (Codex). Hooks could not be set up. "
+        "Fix the hook problem reported above and rerun the installer.",
+        "Requested client setup incomplete (Codex). MCP registration failed (exit 17). "
+        "Fix the CLI error above and rerun the installer.",
+    ]
 
 
 def test_requested_codex_instruction_failure_is_a_warning(tmp_path):

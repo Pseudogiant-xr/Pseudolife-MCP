@@ -1228,6 +1228,20 @@ def test_pending_codex_hooks_warn_without_failing(bash, tmp_path, trust, interac
 
 
 @BASH
+def test_codex_hook_and_connection_failures_are_reported_separately(bash, tmp_path):
+    report = json.dumps(dict(status="unavailable", source="manual", instructions="present",
+                             recovery="The fixture could not write hooks."))
+    proc, _ = _codex_wiring(_Shell(bash, tmp_path), requested="codex gemini", hook_report=report, add_exit=17)
+    assert proc.returncode == 5, proc.stdout + proc.stderr
+    assert proc.stderr.splitlines()[-2:] == [
+        "Requested client setup incomplete (Codex). Hooks could not be set up. "
+        "Fix the hook problem reported above and rerun the installer.",
+        "Requested client setup incomplete (Codex). MCP registration failed (exit 17). "
+        "Fix the CLI error above and rerun the installer.",
+    ]
+
+
+@BASH
 def test_requested_codex_instruction_failure_is_a_warning(bash, tmp_path):
     report = json.dumps({
         "status": "ready", "source": "manual", "instructions": "skipped",

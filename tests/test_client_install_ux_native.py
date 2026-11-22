@@ -278,7 +278,10 @@ def _run_extractor_fixture(runner, *, mode="", answer=None, locked=False, macos=
         (tmp_path / "scheduled_task_lock.ps1").touch()
         registrar_output = 'Write-Output ("AUTOSTART " + ($args -join " "))\n'
         if locked:
-            registrar_output += "[Console]::Error.WriteLine('The fixture task was left in place.')\nexit 3\n"
+            registrar_output += (
+                "if ($PSNativeCommandUseErrorActionPreference) { throw 'fixture native error promotion' }\n"
+                "[Console]::Error.WriteLine('Could not determine the owner of the fixture task.')\nexit 3\n"
+            )
         else:
             registrar_output += "exit 19\n"
         (tmp_path / "fixture-shim.ps1").write_text(registrar_output, encoding="utf-8")
@@ -290,6 +293,7 @@ def _run_extractor_fixture(runner, *, mode="", answer=None, locked=False, macos=
             "$ClaudeLegacyHooks = 'keep'; $Transport = 'shim'\n"
             "$clients = @(); $hookState = @{}; $instrState = @{}\n"
             "$ShimPort = 0; $Model = 'haiku'\n"
+            f"$PSNativeCommandUseErrorActionPreference = {'$true' if locked else '$false'}\n"
             "$script:shimInstallPath = Join-Path $PSScriptRoot 'fixture-shim.ps1'\n"
             f"function Read-Host {{ '{answer or ''}' }}\n"
             "function Assert-ExtractorArgs {}\n"
@@ -304,7 +308,12 @@ def _run_extractor_fixture(runner, *, mode="", answer=None, locked=False, macos=
     else:
         path = "ops/install-native.sh"
         launcher = runner.bin / "fixture-shim"
-        _stub(launcher, "printf 'AUTOSTART %s\\n' \"$*\"\nexit 19\n")
+        registrar_output = "printf 'AUTOSTART %s\\n' \"$*\"\n"
+        if locked:
+            registrar_output += "echo 'Could not determine the owner of the fixture task.' >&2\nexit 3\n"
+        else:
+            registrar_output += "exit 19\n"
+        _stub(launcher, registrar_output)
         _stub(runner.bin / "systemctl", "exit 1\n")
         setup = (
             f"env_file='{runner.path(env_file)}' ENV_BEGIN='{BEGIN}' ENV_END='{END}'\n"
@@ -344,8 +353,6 @@ def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
     if choice == "macos" and shell == "powershell":
         pytest.skip("macOS runs the native Bash installer")
     locked = choice.startswith("locked-")
-    if locked and shell != "powershell":
-        pytest.skip("the Task Scheduler lock result applies to PowerShell")
     if choice in ("restored", "locked-restored"):
         choices = {"PSEUDOLIFE_INSTALL_EXTRACTOR": "claude-only"}
         if locked:
@@ -365,13 +372,12 @@ def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
         assert proc.stderr.splitlines()[-1] == REQUESTED_EXTRACTOR_FAILURE
     elif choice == "locked-flag":
         assert proc.stderr.splitlines() == [
-            "The fixture task was left in place.",
-            "Requested extractor setup incomplete (claude-only). The existing task was left in place because it "
-            "was registered from an elevated shell or by another account. Follow the task recovery above and "
-            "rerun the installer with the same extractor mode.",
+            "Could not determine the owner of the fixture task.",
+            "Requested extractor setup incomplete (claude-only). The registrar left an existing Windows task in place. "
+            "Follow its recovery above and rerun the installer with the same extractor mode.",
         ]
     elif choice == "locked-restored":
-        assert proc.stderr.splitlines() == ["The fixture task was left in place."]
+        assert proc.stderr.splitlines() == ["Could not determine the owner of the fixture task."]
         assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
     elif choice == "macos":
         lead = "WARNING: Native shim autostart is unavailable on macOS. Start the shim by hand with "
@@ -411,10 +417,12 @@ def test_explicit_extractor_failure_survives_a_plain_rerun(tmp_path, shell, sele
 
 
 @pytest.mark.parametrize("shell", INSTALLER_SHELLS, ids=lambda name: Path(name).name)
-@pytest.mark.parametrize("marker", [None, "openai-only"], ids=["old", "mismatch"])
+@pytest.mark.parametrize("marker", [None, "openai-only", "decoy"], ids=["old", "mismatch", "client-value"])
 def test_only_matching_managed_provenance_restores_an_explicit_extractor(tmp_path, shell, marker):
     choices = {"PSEUDOLIFE_INSTALL_EXTRACTOR": "claude-only"}
-    if marker:
+    if marker == "decoy":
+        choices["PSEUDOLIFE_INSTALL_CLIENT_REQUESTED"] = "PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED=claude-only"
+    elif marker:
         choices["PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED"] = marker
     # A marker outside the managed block cannot promote a restored choice.
     (tmp_path / ".env").write_text(
@@ -465,6 +473,8 @@ def test_new_explicit_extractor_replaces_the_saved_marker(tmp_path, shell):
 @pytest.mark.parametrize("shell", INSTALLER_SHELLS, ids=lambda name: Path(name).name)
 @pytest.mark.parametrize("requested", [True, False], ids=["requested", "detected"])
 def test_claude_hook_credentials_failure_at_completion(tmp_path, shell, requested):
+    config = tmp_path / "active profile"
+    settings = config / "settings.json"
     if shell == "powershell":
         runner = _PowerShell(tmp_path)
         path = "ops/install-native.ps1"
@@ -472,12 +482,16 @@ def test_claude_hook_credentials_failure_at_completion(tmp_path, shell, requeste
             f"$clients = @('claude'); $requestedClients = {'$clients' if requested else '@()'}\n"
             "$hookState = @{claude = 'hook'}; $instrState = @{}\n"
             "$DaemonUrl = 'http://127.0.0.1:9'; $ClientOnly = $true; $TokenFile = 'fixture.token'\n"
+            f"$env:CLAUDE_CONFIG_DIR = '{_q(config)}'\n"
+            "$PSNativeCommandUseErrorActionPreference = $true\n"
             "function Invoke-NativeHelper {\n"
             "    if ($args[0] -ne 'credentials' -or $args[1] -ne 'claude-settings-env') { throw 'Unexpected helper' }\n"
+            "    if ($PSNativeCommandUseErrorActionPreference) { throw 'fixture native error promotion' }\n"
             "    $global:LASTEXITCODE = 19\n"
             "    '{\"status\":\"failed\",\"error\":\"fixture settings write failed\"}'\n"
             "}\n"
         )
+        settings_display = str(settings)
         continued = "Write-Output REMAINING_STEPS_FINISHED\n"
     else:
         runner = _Shell(shell, tmp_path)
@@ -485,12 +499,14 @@ def test_claude_hook_credentials_failure_at_completion(tmp_path, shell, requeste
         setup = (
             f"CLIENTS=claude REQUESTED_CLIENTS='{'claude' if requested else ''}' HOOK_CLAUDE=hook\n"
             "DAEMON_URL=http://127.0.0.1:9 CLIENT_ONLY=1 TOKEN_FILE=fixture.token\n"
+            f"CLAUDE_CONFIG_DIR='{runner.path(config)}'\n"
             "native_helper() {\n"
             "    [ \"$1 $2\" = 'credentials claude-settings-env' ] || return 2\n"
             "    echo '{\"status\":\"failed\",\"error\":\"fixture settings write failed\"}'\n"
             "    return 19\n"
             "}\n"
         )
+        settings_display = runner.path(settings)
         continued = "echo REMAINING_STEPS_FINISHED\n"
     source = _read(path)
     proc = runner.run(
@@ -504,7 +520,7 @@ def test_claude_hook_credentials_failure_at_completion(tmp_path, shell, requeste
     label = "Requested" if requested else "Detected"
     assert proc.stderr.splitlines()[-1] == (
         f"{label} client setup incomplete (Claude Code). Hook credentials were not written. "
-        "Set the daemon URL and token file in the settings file's env block as shown above."
+        f"Set the daemon URL and token file in the env block of {settings_display} as shown above."
     )
     if not requested:
         assert proc.stderr.splitlines()[-2] == "Warnings"

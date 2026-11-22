@@ -826,10 +826,10 @@ if [ -z "${CLIENT_ONLY:-}${DAEMON_URL:-}${PSEUDOLIFE_MCP_DAEMON_URL:-}" ] && [ -
             $0 == b { inside=1; next }
             $0 == e { inside=0; next }
             inside && /^PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=/ {
-                sub(/^PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=/, ""); client=$0
+                client=substr($0, index($0, "=") + 1)
             }
             inside && /^PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED=/ {
-                sub(/^PSEUDOLIFE_INSTALL_EXTRACTOR_REQUESTED=/, ""); extractor=$0
+                extractor=substr($0, index($0, "=") + 1)
             }
             END { print client; print extractor }
         ' "$env_file")"
@@ -3078,8 +3078,9 @@ fi
 # the file and the URL there as much as the plugin's hooks do.
 if { [ "${HOOK_CLAUDE:-}" = plugin ] || [ -n "${CLIENT_ONLY:-}" ]; } && [ -n "$CLAUDE_TOKEN_FILE" ] &&
         [ -z "${CLAUDE_CLIENT_FAILURE:-}" ]; then
+    claude_hook_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
     settings_args=(credentials claude-settings-env
-        --settings "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+        --settings "$claude_hook_settings"
         --token-file "$CLAUDE_TOKEN_FILE" --daemon-url "$CLIENT_DAEMON_URL")
     # A client-only install's hooks must reach the remote daemon with the
     # operator's file, whatever an earlier local install left there.
@@ -3095,8 +3096,8 @@ if { [ "${HOOK_CLAUDE:-}" = plugin ] || [ -n "${CLIENT_ONLY:-}" ]; } && [ -n "$C
                 step "Claude Code plugin hooks: PSEUDOLIFE_MCP_TOKEN_FILE set in ~/.claude/settings.json (env)."
             fi ;;
         *'"kept"'*|*'"unchanged"'*) ;;
-        *) CLIENT_HOOK_SETTINGS_WARNING=1
-           echo "WARNING: could not give the Claude Code hooks the token file ($settings_output). Set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE and PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL in the env block of ~/.claude/settings.json." >&2 ;;
+        *) CLIENT_HOOK_SETTINGS_WARNING="Hook credentials were not written. Set the daemon URL and token file in the env block of $claude_hook_settings as shown above."
+           echo "WARNING: could not give the Claude Code hooks the token file ($settings_output). Set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE and PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL in the env block of $claude_hook_settings." >&2 ;;
     esac
 fi
 # <<< client token files <<<
@@ -3906,11 +3907,21 @@ if [ -n "$shim_autostart_family" ]; then
         echo "  Re-run later: pseudolife-mcp ${shim_autostart_args[*]}" >&2
     # The stable launcher, not the numbered runtime it starts: the service
     # then runs whatever release a later update installs.
-    elif ! "$SHIM_PATH" "${shim_autostart_args[@]}" --native-exe "$SHIM_PATH"; then
-        echo "WARNING: shim autostart registration failed (see above: usually no systemd --user on this host)" >&2
-        EXTRACTOR_AUTOSTART_FAILURE="Shim autostart registration or start failed. Fix the reported error and rerun the installer with the same extractor mode."
-        echo "  Re-run later: $SHIM_PATH ${shim_autostart_args[*]} --native-exe $SHIM_PATH" >&2
-        echo "  Or start it manually: $SHIM_PATH extractor-shim $shim_autostart_family --repo $repo --port $SHIM_PORT --model $MODEL" >&2
+    elif "$SHIM_PATH" "${shim_autostart_args[@]}" --native-exe "$SHIM_PATH"; then
+        :
+    else
+        autostart_code=$?
+        if [ "$autostart_code" -eq 3 ]; then
+            # The Windows registrar has already printed the task and its repair.
+            if [ -n "${extractor_requested:-}" ] && [ -z "${restored_extractor:-}" ]; then
+                EXTRACTOR_AUTOSTART_FAILURE="The registrar left an existing Windows task in place. Follow its recovery above and rerun the installer with the same extractor mode."
+            fi
+        else
+            echo "WARNING: shim autostart registration failed (see above: usually no systemd --user on this host)" >&2
+            EXTRACTOR_AUTOSTART_FAILURE="Shim autostart registration or start failed. Fix the reported error and rerun the installer with the same extractor mode."
+            echo "  Re-run later: $SHIM_PATH ${shim_autostart_args[*]} --native-exe $SHIM_PATH" >&2
+            echo "  Or start it manually: $SHIM_PATH extractor-shim $shim_autostart_family --repo $repo --port $SHIM_PORT --model $MODEL" >&2
+        fi
     fi
 fi
 # <<< shim autostart <<<
@@ -4367,7 +4378,7 @@ client_setup_warnings() {
     local state
     if [ -n "${HTTP_CREDENTIAL_WARNINGS:-}" ]; then printf '%s\n' "$HTTP_CREDENTIAL_WARNINGS"; fi
     if [ "${LEGACY_CLAUDE:-}" = error ]; then echo "Claude Code legacy hook cleanup failed. See the repair above."; fi
-    if [ -z "${CODEX_CLIENT_FAILURE:-}" ]; then
+    if [ -z "${CODEX_CREDENTIAL_BOOTSTRAP_FAILED:-}" ]; then
         case "${HOOK_CODEX:-}:${CODEX_HOOKS:-}" in
             pending:*|unavailable:skip)
                 printf 'Codex hook setup needs attention. %s\n' "$(codex_hook_completion_reason)" ;;
@@ -4398,10 +4409,10 @@ client_completion_reasons() {
                 printf '%s\n' "${CLAUDE_HOOK_RECOVERY:-Hooks were not installed. Fix the hook error above and rerun the installer.}"
             fi
             if [ -n "${CLIENT_HOOK_SETTINGS_WARNING:-}" ]; then
-                echo "Hook credentials were not written. Set the daemon URL and token file in the settings file's env block as shown above."
+                printf '%s\n' "$CLIENT_HOOK_SETTINGS_WARNING"
             fi ;;
         codex)
-            if [ -z "$connection_failure" ] && [ "${CODEX_HOOKS:-}" != skip ] && [ "${HOOK_CODEX:-}" = unavailable ]; then
+            if [ -z "${CODEX_CREDENTIAL_BOOTSTRAP_FAILED:-}" ] && [ "${CODEX_HOOKS:-}" != skip ] && [ "${HOOK_CODEX:-}" = unavailable ]; then
                 codex_hook_completion_reason
             fi ;;
     esac

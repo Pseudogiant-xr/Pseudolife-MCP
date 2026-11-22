@@ -2076,12 +2076,21 @@ function Get-ClaudePluginManual {
 }
 function Test-ClaudePluginRecorded {
     $file = Join-Path $claudePluginDir "installed_plugins.json"
-    return (Test-Path $file) -and ((Get-Content $file -Raw) -match [regex]::Escape("`"$claudePluginId`""))
+    try {
+        return (Test-Path -LiteralPath $file) -and ((Get-Content -LiteralPath $file -Raw) -match [regex]::Escape("`"$claudePluginId`""))
+    } catch {
+        if ($ClaudePlugin -ne "skip") {
+            $script:pluginClaude = "failed"
+            $script:pluginClaudeRecovery = "Could not read the Claude Code plugin registry at $file. Fix its permissions and rerun the installer."
+            Write-Warning $script:pluginClaudeRecovery
+        }
+        return $false
+    }
 }
 function Get-ClaudePluginInstalledVersion {
     $file = Join-Path $claudePluginDir "installed_plugins.json"
     try {
-        $records = @((Get-Content $file -Raw | ConvertFrom-Json).plugins.$claudePluginId)
+        $records = @((Get-Content -LiteralPath $file -Raw | ConvertFrom-Json).plugins.$claudePluginId)
         if ($records.Count -gt 0) { return [string]$records[0].version }
     } catch {}
     return ""
@@ -2114,6 +2123,7 @@ function Install-ClaudePlugin {
         $script:pluginClaude = "present:$(Get-ClaudePluginInstalledVersion)"
         return
     }
+    if ($script:pluginClaude -eq "failed") { return }
     if ($ClaudePlugin -eq "skip") { $script:pluginClaude = "skipped"; return }
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         $script:pluginClaude = "no-cli"
@@ -2121,8 +2131,8 @@ function Install-ClaudePlugin {
         return
     }
     $marketplaces = Join-Path $claudePluginDir "known_marketplaces.json"
-    $marketplaceKnown = (Test-Path $marketplaces) -and
-        ((Get-Content $marketplaces -Raw) -match [regex]::Escape("`"$claudePluginMarketplace`""))
+    $marketplaceKnown = (Test-Path -LiteralPath $marketplaces) -and
+        ((Get-Content -LiteralPath $marketplaces -Raw) -match [regex]::Escape("`"$claudePluginMarketplace`""))
     if (-not $marketplaceKnown) {
         Step "Adding the $claudePluginMarketplace plugin marketplace to Claude Code..."
         claude plugin marketplace add $claudePluginMarketplaceSource
@@ -2149,7 +2159,7 @@ function Install-ClaudePlugin {
     }
     if (Test-ClaudePluginRecorded) {
         $script:pluginClaude = "installed:$(Get-ClaudePluginInstalledVersion)"
-    } else {
+    } elseif ($script:pluginClaude -ne "failed") {
         $script:pluginClaude = "failed"
         $pluginRecord = Join-Path $claudePluginDir "installed_plugins.json"
         $script:pluginClaudeRecovery = "'claude plugin install' returned success but $pluginRecord does not list $claudePluginId. Run /plugin install $claudePluginId inside Claude Code."
@@ -2556,8 +2566,19 @@ if ($ClientOnly) { Invoke-ClientOnlyConnect }
 
 $installedPlugins = if ($claudePluginDir) { Join-Path $claudePluginDir "installed_plugins.json" }
                     else { Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json" }
-$claudePluginInstalled = (Test-Path $installedPlugins) -and
-    ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
+$claudePluginInstalled = $false
+if ($clients -contains "claude" -and $script:pluginClaude -ne "failed") {
+    try {
+        $claudePluginInstalled = (Test-Path -LiteralPath $installedPlugins) -and
+            ((Get-Content -LiteralPath $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
+    } catch {
+        if ($ClaudePlugin -ne "skip") {
+            $script:pluginClaude = "failed"
+            $script:pluginClaudeRecovery = "Could not read the Claude Code plugin registry at $installedPlugins. Fix its permissions and rerun the installer."
+            Write-Warning $script:pluginClaudeRecovery
+        }
+    }
+}
 $instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
 if ($claudePluginInstalled -and ($clients -contains "claude")) {
     Step "pseudolife-memory Claude Code plugin detected - skipping Claude"
@@ -2682,7 +2703,10 @@ foreach ($selectedClient in $clients) {
             if (-not $interactive -or $script:installerRerun) { $setupArgs += "--non-interactive" }
             $setupLaunchFailed = $false
             try {
-                $setupOutput = Invoke-NativeHelper @setupArgs
+                $setupOutput = & {
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    Invoke-NativeHelper @setupArgs
+                }
                 $setupExit = $LASTEXITCODE
             } catch {
                 $setupLaunchFailed = $true
@@ -3022,13 +3046,19 @@ $geminiTokenFile = if ($clients -notcontains "gemini") { $null } elseif ($Client
 if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile -and
     -not $script:clientSetupFailures["claude"]) {
     $claudeSettingsHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
+    $claudeHookSettings = Join-Path $claudeSettingsHome "settings.json"
     $settingsArgs = @("credentials", "claude-settings-env",
-        "--settings", (Join-Path $claudeSettingsHome "settings.json"),
+        "--settings", $claudeHookSettings,
         "--token-file", $claudeTokenFile, "--daemon-url", $clientDaemonUrl)
     # A client-only install's hooks must reach the remote daemon with the
     # operator's file, whatever an earlier local install left there.
     if ($ClientOnly) { $settingsArgs += "--replace" }
-    $settingsOutput = Invoke-NativeHelper @settingsArgs
+    try {
+        $settingsOutput = & {
+            $PSNativeCommandUseErrorActionPreference = $false
+            Invoke-NativeHelper @settingsArgs
+        }
+    } catch { $settingsOutput = $_.Exception.Message }
     $settingsReport = try { ($settingsOutput -join "`n") | ConvertFrom-Json } catch { $null }
     switch ("$($settingsReport.status)") {
         "updated" {
@@ -3041,8 +3071,8 @@ if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile 
         }
         { $_ -in "kept", "unchanged" } { }
         default {
-            $script:clientHookSettingsWarning = $true
-            Write-Warning "Could not give the Claude Code hooks the token file ($($settingsOutput -join ' ')). Set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile and PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl in the env block of ~/.claude/settings.json."
+            $script:clientHookSettingsWarning = "Hook credentials were not written. Set the daemon URL and token file in the env block of $claudeHookSettings as shown above."
+            Write-Warning "Could not give the Claude Code hooks the token file ($($settingsOutput -join ' ')). Set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile and PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl in the env block of $claudeHookSettings."
         }
     }
 }
@@ -3724,13 +3754,16 @@ if ($shimAutostartFamily) {
         # then runs whatever release a later update installs.
         $autostartArgs += @("--native-exe", $script:shimInstallPath)
         try {
-            & $script:shimInstallPath @autostartArgs
+            & {
+                $PSNativeCommandUseErrorActionPreference = $false
+                & $script:shimInstallPath @autostartArgs
+            }
             $autostartCode = $LASTEXITCODE
         } catch { $autostartCode = 1 }
         if ($autostartCode -eq 3) {
             # The native client has already printed the task and its repair.
             if ($extractorRequested -and -not $restoredExtractor) {
-                $script:extractorAutostartFailure = "The existing task was left in place because it was registered from an elevated shell or by another account. Follow the task recovery above and rerun the installer with the same extractor mode."
+                $script:extractorAutostartFailure = "The registrar left an existing Windows task in place. Follow its recovery above and rerun the installer with the same extractor mode."
             }
         } elseif ($autostartCode -ne 0) {
             Write-Warning "Shim autostart registration or start failed (see the message above)."
@@ -4220,7 +4253,7 @@ function Get-CodexHookCompletionReason {
 function Get-ClientSetupWarnings {
     $script:httpCredentialWarnings
     if ($script:legacyClaude -eq "error") { "Claude Code legacy hook cleanup failed. See the repair above." }
-    if (-not $script:clientSetupFailures.ContainsKey("codex") -and
+    if (-not $codexCredentialBootstrapFailed -and
         ($hookState["codex"] -eq "pending" -or
          ($CodexHooks -eq "skip" -and $hookState["codex"] -eq "unavailable"))) {
         "Codex hook setup needs attention. $(Get-CodexHookCompletionReason)"
@@ -4250,11 +4283,11 @@ function Get-ClientCompletionReasons([string]$Provider, [string]$ConnectionFailu
                 else { "Hooks were not installed. Fix the hook error above and rerun the installer." }
             }
             if ($script:clientHookSettingsWarning) {
-                "Hook credentials were not written. Set the daemon URL and token file in the settings file's env block as shown above."
+                $script:clientHookSettingsWarning
             }
         }
         "codex" {
-            if (-not $ConnectionFailure -and $CodexHooks -ne "skip" -and $hookState["codex"] -eq "unavailable") {
+            if (-not $codexCredentialBootstrapFailed -and $CodexHooks -ne "skip" -and $hookState["codex"] -eq "unavailable") {
                 Get-CodexHookCompletionReason
             }
         }

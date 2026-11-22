@@ -52,10 +52,12 @@ def _record_marketplace(home: Path) -> None:
 class Scenario:
     def __init__(self, *, clients="claude", flag="auto", cli=True, marketplace=False,
                  plugin=False, marketplace_exit=0, install_exit=0, install_records=True,
-                 help_has_yes=True, helper_out="", helper_exit=0, requested=None, profile_var=None):
+                 help_has_yes=True, helper_out="", helper_exit=0, requested=None, profile_var=None,
+                 profile_dir="active [profile]"):
         self.clients, self.flag, self.cli = clients, flag, cli
         self.requested = requested
         self.profile_var = profile_var
+        self.profile_dir = profile_dir
         # The native client's plugin-marketplace step as the installer runs
         # it (native_helper / Invoke-NativeHelper): a stub that records its
         # call and answers with ``helper_out`` / ``helper_exit``.
@@ -70,7 +72,7 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
     env = _fixture_env(tmp_path / "bash-env")
     home = Path(env["HOME"])
     if sc.profile_var:
-        env[sc.profile_var] = _bash_fixture_path(bash, tmp_path / "active profile", env)
+        env[sc.profile_var] = _bash_fixture_path(bash, tmp_path / sc.profile_dir, env)
         if sc.profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
             env["CLAUDE_CONFIG_DIR"] = _bash_fixture_path(bash, tmp_path / "separate config", env)
     if sc.marketplace:
@@ -159,7 +161,7 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     env = _fixture_env(tmp_path / "powershell-env")
     home = Path(env["USERPROFILE"])
     if sc.profile_var:
-        env[sc.profile_var] = str(tmp_path / "active profile")
+        env[sc.profile_var] = str(tmp_path / sc.profile_dir)
         if sc.profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
             env["CLAUDE_CONFIG_DIR"] = str(tmp_path / "separate config")
     if sc.marketplace:
@@ -195,15 +197,15 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     }}
     if ($callArgs[0] -eq 'plugin' -and $callArgs[1] -eq 'marketplace' -and $callArgs[2] -eq 'add') {{
         if ($env:FAKE_MARKET_EXIT -eq '0') {{
-            New-Item -ItemType Directory -Force $plugins | Out-Null
-            @{{ 'pseudolife-mcp' = @{{ source = @{{ source = 'github'; repo = $callArgs[3] }} }} }} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $plugins 'known_marketplaces.json')
+            [IO.Directory]::CreateDirectory($plugins) | Out-Null
+            @{{ 'pseudolife-mcp' = @{{ source = @{{ source = 'github'; repo = $callArgs[3] }} }} }} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $plugins 'known_marketplaces.json')
         }}
         $global:LASTEXITCODE = [int]$env:FAKE_MARKET_EXIT; return
     }}
     if ($callArgs[0] -eq 'plugin' -and $callArgs[1] -eq 'install') {{
         if ($env:FAKE_INSTALL_EXIT -eq '0' -and $env:FAKE_INSTALL_RECORD -eq 'yes') {{
-            New-Item -ItemType Directory -Force $plugins | Out-Null
-            @{{ version = 2; plugins = @{{ '{PLUGIN_ID}' = @(@{{ scope = 'user'; version = $env:FAKE_VERSION }}) }} }} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $plugins 'installed_plugins.json')
+            [IO.Directory]::CreateDirectory($plugins) | Out-Null
+            @{{ version = 2; plugins = @{{ '{PLUGIN_ID}' = @(@{{ scope = 'user'; version = $env:FAKE_VERSION }}) }} }} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $plugins 'installed_plugins.json')
         }}
         $global:LASTEXITCODE = [int]$env:FAKE_INSTALL_EXIT; return
     }}
@@ -381,7 +383,7 @@ def test_plugin_failure_is_reported_at_completion(variant, tmp_path, requested):
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
 @pytest.mark.parametrize("profile_var", ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR"])
 def test_plugin_in_active_profile_is_installed_and_preserved(variant, tmp_path, profile_var):
-    root = tmp_path / "active profile"
+    root = tmp_path / "active [profile]"
     if profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
         # The override is the root. A record in the nested cache cannot stand
         # in for installed_plugins.json beside the marketplaces and cache.
@@ -402,6 +404,26 @@ def test_plugin_in_active_profile_is_installed_and_preserved(variant, tmp_path, 
     assert state == f"present:{FAKE_VERSION}"
     assert "plugin detected" in proc.stdout.decode()
     assert rerun_calls == calls
+
+
+@pytest.mark.parametrize("clients,status", [("claude", 5), ("codex", 0)])
+def test_powershell_unreadable_plugin_registry_does_not_abort(tmp_path, clients, status):
+    registry = tmp_path / "unreadable profile" / "installed_plugins.json"
+    registry.mkdir(parents=True)
+    proc, calls = _run_powershell(
+        tmp_path, Scenario(clients=clients, requested=True, profile_var="CLAUDE_CODE_PLUGIN_CACHE_DIR",
+                           profile_dir=registry.parent.name))
+    assert proc.returncode == status, _all_output(proc)
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout.decode()
+    assert calls == []
+    if clients == "claude":
+        assert proc.stderr.decode().splitlines()[-1] == (
+            f"Requested client setup incomplete (Claude Code). Plugin was not installed. "
+            f"Could not read the Claude Code plugin registry at {registry}. Fix its permissions and rerun the installer."
+        )
+    else:
+        assert proc.stderr == b""
+        assert "Could not read the Claude Code plugin registry" not in proc.stdout.decode()
 
 
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
