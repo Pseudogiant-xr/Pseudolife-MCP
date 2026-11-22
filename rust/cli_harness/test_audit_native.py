@@ -334,6 +334,57 @@ def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     assert edited["hash"] == expected["hash"]
 
 
+@pytest.mark.parametrize("variant", ["matching-head", "stored-text-edit", "no-log"])
+def test_audit_bank_verify_reference_without_the_frozen_package(monkeypatch, tmp_path, variant):
+    row = event()
+    head = "1:" + row["hash"]
+    kind = "nolog" if variant == "no-log" else "rich"
+    if variant == "no-log":
+        code, stdout = 2, b""
+        stderr = (b"board-audit: this bank has no audit log yet (schema older than v42); "
+                  b"start a v42 daemon once to create it")
+    elif variant == "stored-text-edit":
+        row["payload"] = '{"safe": "雪"}'  # Same JSON value, different stored hash input.
+        code, stderr = 1, b""
+        stdout = b'{"ok": false, "seq": 1, "reason": "hash_mismatch"}'
+    else:
+        code, stderr = 0, b""
+        stdout = (b'{"ok": true, "events": 1, "first_seq": 1, "head_seq": 1, "head_hash": "'
+                  + row["hash"].encode("ascii") + b'", "head_created_at": 1700000000.0, "start_cut": null}')
+
+    with _cold_audit(monkeypatch) as audit:
+        name = audit._name(kind)
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        values = tuple(row[key] for key in audit._EXPORT_FIELDS + audit._BODY_FIELDS)
+        conn.execute.side_effect = [None, SimpleNamespace(fetchone=lambda: (True,)), [values]]
+        connect = MagicMock(return_value=conn)
+        monkeypatch.setattr(audit, "ensure", lambda _: name)
+        monkeypatch.setattr(_bank, "url", lambda label: f"postgresql://localhost/{label}")
+        monkeypatch.setattr(_bank, "connect", connect)
+        case = audit.bank_verify_case("bank-verify-control", kind,
+                                      expect_head=None if kind == "nolog" else audit._Lazy(lambda: head))
+        previous_umask = audit.core.pin_umask()
+        try:
+            observation = case.reference(tmp_path / "bank-verify")
+        finally:
+            if previous_umask is not None:
+                os.umask(previous_umask)
+
+    newline = b"\r\n" if audit.core.WINDOWS else b"\n"
+    assert observation["exit"] == code
+    assert audit.core.decode(observation, "stdout") == (stdout + newline if stdout else b"")
+    assert audit.core.decode(observation, "stderr") == (stderr + newline if stderr else b"")
+    assert observation["files"] == {"cwd": "dir"}
+    assert observation["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755"})
+    assert observation["db"] == "unchanged"
+    if kind == "nolog":
+        connect.assert_not_called()
+    else:
+        connect.assert_called_once_with(name)
+        assert case.argv == ["board-audit", "verify", "--expect-head", head]
+
+
 def test_audit_export_preserves_field_order_and_legacy_payload():
     from .rows import audit
 
@@ -378,12 +429,36 @@ def test_audit_file_reference_resolves_the_supplied_archive_head(tmp_path):
     archive = json.dumps({"hash": digest, "created_at": 17.25}).encode() + b"\r\n\r\n"
     case = audit.file_case("reference-control", ["verify", "--input", "{HOME}/archive.jsonl"],
                            files={"archive.jsonl": archive})
-    recorded = [0, '{"head_hash": "<archive-head-hash>", "head_created_at": <archive-head-created-at>}\n', ""]
-    want = audit._file_reference(case, recorded, tmp_path / "case")
+    recorded = [1, '{"head_hash": "<archive-head-hash>", "head_created_at": <archive-head-created-at>}\n',
+                "fixture diagnostic\n"]
+    previous_umask = audit.core.pin_umask()
+    try:
+        want = audit._file_reference(case, recorded, tmp_path / "case")
+    finally:
+        if previous_umask is not None:
+            os.umask(previous_umask)
+
+    assert want["exit"] == 1
     assert audit.core.decode(want, "stdout") == (
         '{"head_hash": "' + digest + '", "head_created_at": 17.25}\n').encode()
-    assert base64.b64decode(want["files"]["archive.jsonl"][5:]) == archive
-    assert want["modes"] == audit.core.modes(tmp_path / "case")
+    assert audit.core.decode(want, "stderr") == b"fixture diagnostic\n"
+    assert want["files"] == {"cwd": "dir", "archive.jsonl": "file:" + base64.b64encode(archive).decode()}
+    assert want["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755", "archive.jsonl": "0o644"})
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_audit_file_reference_streams_match_shared_goldens(platform):
+    from .rows import audit
+
+    references = audit._file_references(platform)
+    goldens = audit._recorded_cases(platform)
+    shared = references.keys() & goldens.keys()
+    assert shared == {"audit-reserved-number-key-duplicates", "input-empty", "input-missing"}
+    for case_id in sorted(shared):
+        record = goldens[case_id]
+        assert references[case_id] == [record["exit"],
+                                       audit.core.decode(record, "stdout").decode(),
+                                       audit.core.decode(record, "stderr").decode()], case_id
 
 
 def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):
