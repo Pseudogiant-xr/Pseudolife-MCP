@@ -39,6 +39,18 @@ BASELINE_MESSAGES = (
     (b"Daemon engine: python", "Daemon engine: python"),
     (b"Daemon engine: rust", "Daemon engine: rust"),
     (b"no match for platform in manifest", "no match for platform in manifest"),
+    (b"Preflight failed", "Preflight failed. <details redacted>"),
+    (b"could not be fetched", "A release asset could not be fetched. <details redacted>"),
+    (b"does not match the release's SHA256SUMS", "The release asset did not match SHA256SUMS."),
+    (b"Permission denied", "Permission denied. <details redacted>"),
+    (b"No space left on device", "No space left on device."),
+    (b"address already in use", "Address already in use."),
+    (b"already exists", "A resource already exists. <details redacted>"),
+    (b"foreign container", "The installer detected a foreign container."),
+    (b"owner-only", "The installer reported an owner-only path requirement. <details redacted>"),
+    (b"no native client is published", "The installer reported that no native client was published for the platform."),
+    (b"Native client install (PSEUDOLIFE_SHIM_ENGINE=native)", "Native client install selected."),
+    (b"Unattended install:", "Unattended install: no prompts; documented defaults apply."),
     (b"nothing was deployed", "Nothing was deployed. <details redacted>"),
     (b"rollback", "Rollback: <details redacted>"),
     (b"docker compose up -d --build", "docker compose up -d --build (checkout or images changed)..."),
@@ -214,6 +226,7 @@ def image_observation(container_id, existing_images):
     }
 
 
+@contextmanager
 def baseline(release, path, scratch, output):
     """Observe the tag's stock Docker install before any emulation."""
     binfmt = binfmt_status()
@@ -225,6 +238,7 @@ def baseline(release, path, scratch, output):
     images_before = docker("image", "ls", "--all", "--quiet", "--no-trunc")
     require(images_before.code == 0, "The runner could not inventory images before the install.")
     existing_images = {item.removeprefix("sha256:") for item in images_before.output.decode().splitlines()}
+    receipt = None
     try:
         result = install(repo, profile, DOCKER_FLAGS, timeout=600)
         added = docker_state.added()
@@ -265,14 +279,16 @@ def baseline(release, path, scratch, output):
                 "installer_lines": codex_lines,
             },
         }
+        yield receipt, result, repo, profile
     finally:
         stop_units(profile)
-        require(docker_state.clean(), "Default-install Docker objects were removed.")
+        cleaned = docker_state.clean()
         shutil.rmtree(profile.folder)
         shutil.rmtree(repo)
-    receipt["cleanup_verified"] = True
-    write_json(output / "default-install.json", receipt)
-    return receipt
+        if receipt is not None:
+            receipt["cleanup_verified"] = cleaned
+            write_json(output / "default-install.json", receipt)
+        require(cleaned, "Default-install Docker objects were removed.")
 
 
 def native_images(images):
@@ -282,6 +298,26 @@ def native_images(images):
                 not image["has_repository_digest"] for image in images)
         and any(image["container"] == DAEMON and image["build_source"] == "checkout" for image in images)
     )
+
+
+def stock_connection(release, profile, repo, scratch, *, legacy=False):
+    if legacy:
+        require(profile.installed_launcher.is_file(), "The stock v0.24.0 installer installed its launcher.")
+    else:
+        require(profile.native_marker(release), "The stock installer activated the verified native client.")
+    values = (repo / "ops" / ".env").read_text().splitlines()
+    token = next((line.split("=", 1)[1] for line in values if line.startswith("PSEUDOLIFE_MCP_TOKEN=")), "")
+    require(bool(token), "The installer generated a disposable owner token.")
+    token_file = scratch / "peer.token"
+    with token_file.open("x", encoding="utf-8") as stream:
+        token_file.chmod(0o600)
+        stream.write(token + "\n")
+    env = profile.env | {TOKEN_FILE: str(token_file), DAEMON_URL: LOOPBACK, "PSEUDOLIFE_MCP_NO_SPAWN": "1"}
+    if legacy:
+        env["PATH"] += os.pathsep + os.environ["PATH"]
+    peer = Peer(DAEMONS[1], LOOPBACK, token_file, str(profile.installed_launcher), env, repo)
+    require(peer.sample()["status"] == 200, "The stock daemon accepted its disposable token.")
+    return peer
 
 
 @contextmanager
@@ -309,22 +345,7 @@ def stock_peer(row, release, path, scratch):
         if not native_images(images):
             raise Unavailable("The stock installation did not supply the identified native arm64 checkout stack.")
         row.daemon = DAEMONS[1]
-        if legacy:
-            require(profile.installed_launcher.is_file(), "The stock v0.24.0 installer installed its launcher.")
-        else:
-            require(profile.native_marker(release), "The stock installer activated the verified native client.")
-        values = (repo / "ops" / ".env").read_text().splitlines()
-        token = next((line.split("=", 1)[1] for line in values if line.startswith("PSEUDOLIFE_MCP_TOKEN=")), "")
-        require(bool(token), "The installer generated a disposable owner token.")
-        token_file = scratch / "peer.token"
-        with token_file.open("x", encoding="utf-8") as stream:
-            token_file.chmod(0o600)
-            stream.write(token + "\n")
-        owner_env = profile.env | {TOKEN_FILE: str(token_file), DAEMON_URL: LOOPBACK, "PSEUDOLIFE_MCP_NO_SPAWN": "1"}
-        if legacy:
-            owner_env["PATH"] += os.pathsep + os.environ["PATH"]
-        peer = Peer(DAEMONS[1], LOOPBACK, token_file, str(profile.installed_launcher), owner_env, repo)
-        require(peer.sample()["status"] == 200, "The stock daemon accepted its disposable token.")
+        peer = stock_connection(release, profile, repo, scratch, legacy=legacy)
         yield peer, profile
     finally:
         stop_units(profile)
@@ -682,6 +703,29 @@ def bank_recovery(receipt, release, repo, profile, peer, scratch):
     raise Unavailable("Backup and restore were exercised on the stock arm64 bank. Move and legacy import-state witnesses remain pending.")
 
 
+def run_case(row, probe):
+    try:
+        probe()
+        row.status = "pass"
+        row.note = matrix.SCENARIOS[row.scenario].outcome
+    except Unavailable as error:
+        row.note = str(error)
+    except Failed as error:
+        row.status = "fail"
+        row.note = str(error)
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        row.status = "fail"
+        row.note = diagnostic_note(error)
+
+
+def diagnostic_note(error):
+    frame = next((frame for frame in reversed(extract_tb(error.__traceback__))
+                  if Path(frame.filename).name in ("hosted.py", "hosted_linux.py", "matrix.py")), None)
+    diagnostic = (f" ({type(error).__name__}, {Path(frame.filename).name} line {frame.lineno})"
+                  if frame is not None else "")
+    return f"The harness could not complete the observation{diagnostic}."
+
+
 def run(tag, platform, output):
     receipts = [Receipt(scenario, platform) for scenario in matrix.SCENARIOS]
     release = None
@@ -696,34 +740,35 @@ def run(tag, platform, output):
             release = published_release(tag, platform, scratch / "release")
             path = native_path(scratch, prepare_codex(platform, scratch))
             before_docker = DockerFixture()
-            provenance = baseline(release, path, scratch, output)
-            if not native_images(provenance["running_containers"]):
-                raise Unavailable("The stock installer did not produce the identified native arm64 checkout stack.")
-            functions = {
-                "clean-install": clean_install, "upgrade-and-rollback": stock_upgrade,
-                "ordinary-native-use": ordinary, "failure-and-retry": failure, "bank-recovery": bank_recovery,
-            }
-            for receipt in receipts:
-                scope = scratch / receipt.scenario
+            by_name = {row.scenario: row for row in receipts}
+            with baseline(release, path, scratch, output) as (provenance, result, repo, profile):
+                if not native_images(provenance["running_containers"]):
+                    raise Unavailable("The stock installer did not produce the identified native arm64 checkout stack.")
+                peer = stock_connection(release, profile, repo, scratch)
+                clean = by_name["clean-install"]
+                clean.observe(f"{INSTALL} <stock Docker>", result,
+                              result.code == 0 and provenance["daemon_healthy"],
+                              "The tagged stock installer left a healthy daemon.",
+                              template=matrix.commands(clean.scenario, clean.platform)[0])
+                for name, probe in (("clean-install", clean_install), ("ordinary-native-use", ordinary),
+                                    ("failure-and-retry", failure), ("bank-recovery", bank_recovery)):
+                    row = by_name[name]
+                    row.daemon = peer.kind
+                    scope = scratch / name
+                    scope.mkdir()
+                    run_case(row, lambda: probe(row, release, repo, profile, peer, scope))
+
+            def do_upgrade():
+                if release.tag == "v0.24.0":
+                    raise Unavailable("The selected release is also the required upgrade starting tag.")
+                scope = scratch / "upgrade"
                 scope.mkdir()
-                try:
-                    daemon_release = release
-                    if receipt.scenario == "upgrade-and-rollback":
-                        if release.tag == "v0.24.0":
-                            raise Unavailable("The selected release is also the required upgrade starting tag.")
-                        daemon_release = published_release("v0.24.0", platform, scope / "earlier-release")
-                    with stock_peer(receipt, daemon_release, path, scope) as (peer, profile):
-                        functions[receipt.scenario](receipt, release, peer.checkout, profile, peer, scope)
-                        receipt.status = "pass"
-                        receipt.note = matrix.SCENARIOS[receipt.scenario].outcome
-                except Unavailable as error:
-                    receipt.note = str(error)
-                except Failed as error:
-                    receipt.status = "fail"
-                    receipt.note = str(error)
-                except (OSError, ValueError, KeyError, IndexError):
-                    receipt.status = "fail"
-                    receipt.note = "The observation harness could not complete the scenario."
+                old = published_release("v0.24.0", platform, scope / "earlier-release")
+                row = by_name["upgrade-and-rollback"]
+                with stock_peer(row, old, path, scope) as (peer, profile):
+                    stock_upgrade(row, release, peer.checkout, profile, peer, scope)
+
+            run_case(by_name["upgrade-and-rollback"], do_upgrade)
             cleaned = before_docker.clean()
     except Unavailable as error:
         for receipt in receipts:
@@ -733,13 +778,9 @@ def run(tag, platform, output):
             receipt.status = "fail"
             receipt.note = str(error)
     except (OSError, ValueError, KeyError, IndexError, matrix.RecordError) as error:
-        frame = next((frame for frame in reversed(extract_tb(error.__traceback__))
-                      if Path(frame.filename).name in ("hosted.py", "hosted_linux.py", "matrix.py")), None)
-        diagnostic = (f" ({type(error).__name__}, {Path(frame.filename).name} line {frame.lineno})"
-                      if frame is not None else "")
         for receipt in receipts:
             receipt.status = "fail"
-            receipt.note = f"A precondition for collecting hosted observations failed{diagnostic}."
+            receipt.note = diagnostic_note(error)
     finally:
         for receipt in receipts:
             if receipt.status == "pass" and not cleaned:
