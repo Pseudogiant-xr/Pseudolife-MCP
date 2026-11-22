@@ -211,6 +211,53 @@ def test_daemon_snapshot_tracks_bank_and_state_mounts(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+@pytest.mark.parametrize("digest_suffix", ["", "@sha256:" + "a" * 64])
+def test_release_rollback_uses_a_tag_only_ghcr_reference(tmp_path, monkeypatch, digest_suffix):
+    from ops.acceptance import hosted_linux as linux
+
+    calls = []
+
+    def docker(*argv, **options):
+        calls.append((argv, options))
+        return hosted.Result(0, b"old\n", 0)
+
+    monkeypatch.setattr(linux, "docker", docker)
+    monkeypatch.setattr(linux, "readiness", lambda _: True)
+    monkeypatch.setattr(linux, "get", lambda _: ({}, {"version": "0.24.0"}))
+    peer = SimpleNamespace(checkout=tmp_path, url="fixture", sample=lambda: {"status": 200})
+    row = hosted.Receipt("upgrade-and-rollback", "linux-arm64")
+    report = {"rollback": {"tag": f"ghcr.io/pseudogiant-xr/pseudolife-daemon:0.24.0-pre-update-fixture{digest_suffix}"}}
+    if digest_suffix:
+        with pytest.raises(hosted.Failed, match="documented Compose route"):
+            linux.docker_rollback(row, peer, {"image": "old", "version": "0.24.0"}, report)
+        assert all(argv[0] != "compose" for argv, _ in calls)
+    else:
+        linux.docker_rollback(row, peer, {"image": "old", "version": "0.24.0"}, report)
+        assert calls[1][1]["env"] == {"PSEUDOLIFE_IMAGE_TAG": "0.24.0-pre-update-fixture"}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Mac acceptance harness is POSIX-only")
+def test_apple_postgres_password_is_piped_to_initdb(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_macos as mac
+
+    monkeypatch.setattr(mac, "build_source_peer", lambda *args: (tmp_path, None, {}))
+    monkeypatch.setattr(mac.secrets, "token_hex", lambda _: "fixture")
+    calls = []
+
+    def initdb(argv, **options):
+        calls.append((argv, options))
+        assert list(tmp_path.iterdir()) == []
+        return hosted.Result(1, b"", 0)
+
+    with pytest.raises(hosted.Unavailable, match="fixture could not initialize"):
+        with mac.apple_peer(None, None, None, tmp_path, SimpleNamespace(run=initdb)):
+            pytest.fail("initdb's failure should prevent the peer from starting")
+    argv, options = calls[0]
+    assert argv[argv.index("--pwfile") + 1] == "/dev/stdin"
+    assert options["data"] == b"fixture\n"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
 def test_service_cleanup_checks_owned_unit_state(tmp_path, monkeypatch):
     from ops.acceptance import hosted_linux as linux
 

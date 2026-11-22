@@ -526,9 +526,9 @@ def docker_rollback(receipt, peer, previous, report):
         result = docker("tag", tag, image_tag)
         receipt.observe("docker tag <reported rollback> <reported checkout image>", result, result.code == 0,
                         "The documented checkout rollback restored the previous tag.")
-    elif tag.startswith("ghcr.io/") and "pseudolife-daemon:" in tag:
+    elif registry_tag := re.fullmatch(r"ghcr\.io/pseudogiant-xr/pseudolife-daemon:([A-Za-z0-9_.-]{1,64})", tag):
         recipe.extend(["-f", str(config / "docker-compose.ghcr.yml")])
-        env["PSEUDOLIFE_IMAGE_TAG"] = tag.rsplit(":", 1)[-1]
+        env["PSEUDOLIFE_IMAGE_TAG"] = registry_tag[1]
     else:
         raise Failed("The recorded rollback did not match a documented Compose route.")
     result = docker("compose", "--env-file", str(config / ".env"), "-p", "pseudolife-mcp",

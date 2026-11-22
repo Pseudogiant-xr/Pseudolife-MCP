@@ -205,11 +205,10 @@ def build_source_peer(release, repo, scratch, budget):
 def apple_peer(release, repo, path, scratch, budget):
     postgres, executable, env = build_source_peer(release, repo, scratch, budget)
     password = secrets.token_hex(24)
-    pwfile = private_file(scratch / "postgres-password", password + "\n")
     database = scratch / "postgres"
     initialized = budget.run([postgres / "initdb", "-D", database, "-U", "acceptance",
-                              "--auth=scram-sha-256", "--pwfile", pwfile, "--no-locale"], env=env)
-    pwfile.unlink()
+                              "--auth=scram-sha-256", "--pwfile", "/dev/stdin", "--no-locale"],
+                             env=env, data=(password + "\n").encode("ascii"))
     if initialized.code != 0:
         raise Unavailable("The native PostgreSQL fixture could not initialize.")
     pgport = loopback_port()
