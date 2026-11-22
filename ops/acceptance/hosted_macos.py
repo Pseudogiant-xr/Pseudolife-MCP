@@ -17,9 +17,9 @@ import zipfile
 from . import matrix
 from .hosted import (
     DAEMON_URL, DAEMONS, INSTALL, TOKEN_FILE, Failed, Peer, Profile, Receipt, Unavailable,
-    command, download, native_path, prepare_codex, published_release, require,
+    command, download, native_path, prepare_codex, published_release, require, write_json,
 )
-from .hosted_linux import clean_install, free_space, install, live_install, ordinary, readiness
+from .hosted_linux import clean_install, diagnostic_note, free_space, install, live_install, ordinary, readiness
 
 
 LIMA_VERSION = "2.3.0"
@@ -37,6 +37,7 @@ GUEST_SCRIPT = Path(__file__).with_name("hosted_lima_guest.sh")
 class Budget:
     def __init__(self, seconds):
         self.deadline = monotonic() + seconds
+        self.steps = []
 
     def remaining(self, maximum):
         left = int(self.deadline - monotonic())
@@ -44,8 +45,11 @@ class Budget:
             raise Unavailable("Peer preparation reached its time limit.")
         return min(left, maximum)
 
-    def run(self, argv, *, timeout=120, **kwargs):
-        return command(argv, timeout=self.remaining(timeout), **kwargs)
+    def run(self, argv, *, timeout=120, label=None, **kwargs):
+        result = command(argv, timeout=self.remaining(timeout), **kwargs)
+        if label is not None:
+            self.steps.append({"command": label, "exit_code": result.code, "seconds": result.seconds})
+        return result
 
 
 def private_file(path, value):
@@ -79,10 +83,10 @@ def lima_tool(scratch, budget):
     sums = scratch / "SHA256SUMS"
     download(f"{LIMA_BASE}/SHA256SUMS", sums, LIMA_SUMS, timeout=budget.remaining(45))
     name = f"lima-{LIMA_VERSION}-Darwin-x86_64.tar.gz"
-    digest = next(
-        checksum for checksum, asset in (line.split() for line in sums.read_text().splitlines())
-        if asset.lstrip("*") == name
-    )
+    match = next((line.split() for line in sums.read_text().splitlines() if line.rstrip().endswith(name)), None)
+    require(match is not None and len(match) == 2 and match[1].lstrip("*") == name,
+            "The pinned Lima SHA256SUMS named its Intel archive.")
+    digest = match[0]
     archive = scratch / name
     download(f"{LIMA_BASE}/{name}", archive, digest, timeout=budget.remaining(90))
     destination = scratch / "lima"
@@ -110,12 +114,13 @@ def lima_peer(release, repo, path, scratch, budget):
     }))
     try:
         started = budget.run([tool, "start", "--tty=false", "--name", name, config],
-                             env=env, timeout=420)
+                             env=env, timeout=420, label="limactl start <private VZ guest>")
         if started.code != 0:
             raise Unavailable("The Intel runner did not start the verified VZ guest.")
         shell = [str(tool), "shell", name]
         setup = budget.run([*shell, "bash", "-s", "--", release.tag, release.commit],
-                           env=env, data=GUEST_SCRIPT.read_bytes(), timeout=budget.remaining(600))
+                           env=env, data=GUEST_SCRIPT.read_bytes(), timeout=budget.remaining(600),
+                           label="limactl shell <guest> <tagged daemon install>")
         if setup.code != 0:
             raise Unavailable("The verified Linux guest did not finish its daemon setup.")
         details = setup.output.splitlines()[-3:]
@@ -146,7 +151,8 @@ def build_source_peer(release, repo, scratch, budget):
     env = isolated_env(scratch)
     env.update({"HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_INSTALL_CLEANUP": "1"})
     for formula in ("postgresql@18", "pgvector"):
-        result = budget.run(["brew", "install", "--force-bottle", formula], env=env, timeout=150)
+        result = budget.run(["brew", "install", "--force-bottle", formula], env=env, timeout=150,
+                            label=f"brew install --force-bottle {formula}")
         if result.code != 0:
             raise Unavailable("Homebrew PostgreSQL or pgvector was unavailable.")
     binary = budget.run(["brew", "--prefix", "postgresql@18"], env=env)
@@ -165,10 +171,15 @@ def build_source_peer(release, repo, scratch, budget):
         "CARGO_PROFILE_DEV_DEBUG": "0",
     })
     free_space(scratch)
+    compiler = budget.run(["rustup", "toolchain", "install", "1.94.0", "--profile", "minimal"],
+                          env=env, timeout=120, label="rustup toolchain install 1.94.0 --profile minimal")
+    if compiler.code != 0:
+        raise Unavailable("The pinned Rust toolchain could not be installed on the runner.")
     compiled = budget.run(
         ["cargo", "+1.94.0", "build", "--manifest-path", str(repo / "rust/Cargo.toml"),
          "--locked", "--bin", "pseudolife-daemon", "-j", "2"],
         env=env, cwd=repo, timeout=budget.remaining(1500),
+        label="cargo +1.94.0 build --locked --bin pseudolife-daemon",
     )
     if compiled.code != 0:
         raise Unavailable("The released daemon source did not compile on the Apple silicon runner.")
@@ -180,7 +191,7 @@ def build_source_peer(release, repo, scratch, budget):
         "PSEUDOLIFE_BUILD_GIT_SHA": release.commit, "PSEUDOLIFE_BUILD_SOURCE": "checkout",
     })
     models = budget.run([executable, "provision", "models", "--if-missing"], env=env,
-                        timeout=budget.remaining(300))
+                        timeout=budget.remaining(300), label="pseudolife-daemon provision models --if-missing")
     if models.code != 0:
         raise Unavailable("The source-built daemon could not provision its pinned models.")
     return postgres, executable, env
@@ -257,6 +268,7 @@ def run(tag, platform, output):
     probes = {"clean-install": clean_install, "ordinary-native-use": ordinary}
     release = None
     cleaned = False
+    attempts = []
     try:
         machine = "x86_64" if platform == "macos-x64" else "arm64"
         require(os.environ.get("GITHUB_ACTIONS") == "true" and os.uname().sysname == "Darwin"
@@ -276,14 +288,19 @@ def run(tag, platform, output):
             for index in (1, 2):
                 attempt = scratch / f"peer-{index}"
                 attempt.mkdir(mode=0o700)
+                budget = Budget(cap)
+                observation = {"attempt": index, "cap_seconds": cap, "steps": budget.steps}
+                attempts.append(observation)
                 try:
                     free_space(attempt)
-                    with manager(release, repo, path, attempt, Budget(cap)) as peer:
+                    with manager(release, repo, path, attempt, budget) as peer:
+                        observation["assertion"] = "The real peer became ready."
                         for row in rows:
                             if row.scenario in probes:
                                 observe(row, release, repo, path, peer, scratch, (launchd, gui), probes[row.scenario])
                     break
                 except Unavailable as error:
+                    observation["assertion"] = str(error)
                     if index == 2:
                         for row in rows:
                             if row.scenario in probes:
@@ -292,11 +309,11 @@ def run(tag, platform, output):
     except (Failed, OSError, ValueError, KeyError, IndexError, StopIteration) as error:
         for row in rows:
             if row.scenario in probes:
-                row.status, row.note = "fail", (str(error) if isinstance(error, Failed) else
-                                                "The macOS observation harness could not complete setup.")
+                row.status, row.note = "fail", str(error) if isinstance(error, Failed) else diagnostic_note(error)
     except Unavailable as error:
         for row in rows:
             row.note = str(error)
+    write_json(output / "peer-setup.json", {"platform": platform, "attempts": attempts})
     for row in rows:
         row.write(output, release, cleaned)
         print(f"{row.scenario}: {row.status}. {row.note}")
@@ -322,5 +339,5 @@ def observe(row, release, repo, path, peer, scratch, launchd, probe, pending_rea
         row.status, row.note = "fail", str(error)
     except Unavailable as error:
         row.note = str(error)
-    except (OSError, ValueError, KeyError, IndexError):
-        row.status, row.note = "fail", "The observation harness could not complete the scenario."
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        row.status, row.note = "fail", diagnostic_note(error)

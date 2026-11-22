@@ -719,8 +719,9 @@ def run_case(row, probe):
 
 
 def diagnostic_note(error):
+    sources = ("hosted.py", "hosted_linux.py", "hosted_macos.py", "matrix.py")
     frame = next((frame for frame in reversed(extract_tb(error.__traceback__))
-                  if Path(frame.filename).name in ("hosted.py", "hosted_linux.py", "matrix.py")), None)
+                  if Path(frame.filename).name in sources), None)
     diagnostic = (f" ({type(error).__name__}, {Path(frame.filename).name} line {frame.lineno})"
                   if frame is not None else "")
     return f"The harness could not complete the observation{diagnostic}."

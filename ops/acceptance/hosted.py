@@ -68,13 +68,13 @@ class Result:
             return {}
 
 
-def command(argv, *, env=None, cwd=None, timeout=60, data=None) -> Result:
+def command(argv, *, env=None, cwd=None, timeout=60, data=None, stdout_only=False) -> Result:
     """Keep arbitrary subprocess output and argv outside published evidence."""
     started = monotonic()
     with subprocess.Popen(
         argv, cwd=cwd, env=env, start_new_session=True,
         stdin=subprocess.DEVNULL if data is None else subprocess.PIPE,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE if stdout_only else subprocess.STDOUT,
     ) as process:
         try:
             output, _ = process.communicate(data, timeout=timeout)
@@ -160,9 +160,10 @@ def published_release(tag, platform, folder):
     if "RELEASE-READY.json" in assets:
         fetch("RELEASE-READY.json")
     remote = command(["git", "ls-remote", "--exit-code", f"https://github.com/{PROJECT}.git",
-                      f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"])
+                      f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"], stdout_only=True)
     require(remote.code == 0, "Published tag resolved.")
-    refs = {ref: sha for sha, ref in (line.split() for line in remote.output.decode("ascii").splitlines())}
+    refs = {ref.decode("ascii"): sha.decode("ascii") for sha, ref in
+            re.findall(rb"^([a-f0-9]{40})\t(refs/tags/[a-zA-Z0-9.^{}-]+)$", remote.output, re.MULTILINE)}
     commit = refs.get(f"refs/tags/{tag}^{{}}", refs.get(f"refs/tags/{tag}", ""))
     require(re.fullmatch(r"[a-f0-9]{40}", commit), "Published tag resolved to a full commit.")
     ready = folder / "RELEASE-READY.json"
