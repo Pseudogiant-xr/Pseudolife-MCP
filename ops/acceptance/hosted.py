@@ -423,6 +423,7 @@ class Receipt:
     commands: list = field(default_factory=list)
     status: str = "not yet run"
     note: str = "The scenario was not selected."
+    cleanup_failed: bool = False
 
     def observe(self, label, result, ok, assertion, *, template=None, required=True):
         # The labels and assertions are fixed call-site strings. Never
@@ -435,6 +436,7 @@ class Receipt:
             require(ok, assertion)
 
     def write(self, output, release, cleanup):
+        cleanup = cleanup and not self.cleanup_failed
         row = matrix.pending(self.scenario, self.platform)
         if release is not None and self.commands and self.status != "not yet run":
             row.update({
@@ -442,7 +444,7 @@ class Receipt:
                 "sha256": release.digest, "machine_role": "ephemeral hosted runner",
                 "commands": self.commands,
                 "outcome": (matrix.SCENARIOS[self.scenario].outcome if self.status == "pass"
-                            else matrix.FAILURE_OUTCOMES[3 if self.note.startswith("The disposable environment") else 2]),
+                            else matrix.FAILURE_OUTCOMES[3 if self.cleanup_failed else 2]),
                 "cleanup": {"done": cleanup, "verified": cleanup},
             })
         matrix.write_record(output / "ledger", row)

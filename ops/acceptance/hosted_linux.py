@@ -379,9 +379,11 @@ def stock_peer(row, release, path, scratch):
         peer = stock_connection(release, profile, repo, scratch, legacy=legacy)
         yield peer, profile
     finally:
+        row.cleanup_failed = True
         services_clean = stop_units(profile)
         docker_clean = scope.clean()
-        require(services_clean and docker_clean, "The disposable environment's Docker objects and user services were removed.")
+        row.cleanup_failed = not (services_clean and docker_clean)
+        require(not row.cleanup_failed, "The disposable environment's Docker objects and user services were removed.")
 
 
 def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=False):
@@ -877,6 +879,7 @@ def run(tag, platform, output):
             if receipt.status == "pass" and not cleaned:
                 receipt.status = "fail"
                 receipt.note = "The disposable environment could not be cleaned up and verified."
+                receipt.cleanup_failed = True
             receipt.write(output, release, cleaned)
             print(f"{receipt.scenario}: {receipt.status}. {receipt.note}")
     return int(any(receipt.status == "fail" for receipt in receipts))

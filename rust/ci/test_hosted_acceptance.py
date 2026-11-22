@@ -222,6 +222,15 @@ def test_service_cleanup_checks_owned_unit_state(tmp_path, monkeypatch):
     assert linux.stop_units(profile) is False
 
 
+def test_service_cleanup_failure_cannot_be_marked_verified(tmp_path):
+    (tmp_path / "ledger").mkdir()
+    row = hosted.Receipt("upgrade-and-rollback", "linux-arm64", cleanup_failed=True)
+    row.status = "fail"
+    row.write(tmp_path, None, True)
+    receipt = json.loads((tmp_path / "upgrade-and-rollback.json").read_bytes())
+    assert receipt["cleanup_verified"] is False
+
+
 @pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
 def test_failed_backup_retains_its_ledger_command(tmp_path, monkeypatch):
     from ops.acceptance import hosted_linux as linux
