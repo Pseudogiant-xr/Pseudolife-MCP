@@ -1473,7 +1473,11 @@ function Invoke-ClientOnlyPreflight {
         }
     } else {
         $tokenItem = Get-Item -LiteralPath $script:TokenFile -Force -ErrorAction SilentlyContinue
-        if (-not $tokenItem -or $tokenItem.PSIsContainer -or $tokenItem.Length -eq 0) {
+        # A Windows symlink can report length zero. Let the shim reject
+        # reparse points with the regular-file diagnosis.
+        $emptyTokenFile = $tokenItem -and $tokenItem.Length -eq 0 -and
+            -not ($tokenItem.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        if (-not $tokenItem -or $tokenItem.PSIsContainer -or $emptyTokenFile) {
             throw "client-only install: the token file is missing or empty: $($script:TokenFile). Pair this machine instead: remove it if it is empty, then re-run with -PairingCode <code> from pseudolife-mcp invite <name> on the daemon's host; or, as the fallback, create it with -ReadToken or write the daemon's token into it owner-only, then re-run"
         }
         Assert-ClientTokenFile
