@@ -230,8 +230,14 @@ Write-Host 'INSTALLED'
     with zipfile.ZipFile(archive, "w") as stream:
         stream.writestr("pseudolife-mcp.exe", b"version probe stand-in")
     (assets / "SHA256SUMS").write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {name}\n", encoding="utf-8")
+    # Keep PowerShell's own startup cache and module directories out of the
+    # installer's disposable home so we can check exactly what it left there.
+    powershell_state = tmp_path / "powershell-state"
     result = _run("stub", tmp_path, body, release=False, extra_env={
         "STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output,
+        **{key: str(powershell_state / key) for key in (
+            "APPDATA", "LOCALAPPDATA", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+        )},
         **dict.fromkeys(("TEMP", "TMP", "TMPDIR"), str(probe_temp)),
     })
     home = tmp_path / "home"

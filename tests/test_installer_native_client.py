@@ -258,6 +258,11 @@ def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_
     result = _run(tmp_path, '''
 native_target() { echo x86_64-pc-windows-msvc; }
 cygpath() { printf '%s\\n' "$2"; }
+unzip() {
+    # Some Linux test hosts have no unzip. The real checksum still covers the ZIP.
+    [ "$1 $2 $4 $5" = '-q -o pseudolife-mcp.exe -d' ] || return 1
+    printf '#!/bin/sh\\nexit 53\\n' >"$6/$4"
+}
 powershell.exe() {
     [ -f "$PSEUDOLIFE_NATIVE_PROBE_EXE" ] || return 1
     printf '%s\\r\\n%s' "$STUB_VERSION_CODE" "$STUB_VERSION_OUTPUT"
