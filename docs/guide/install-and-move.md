@@ -81,8 +81,15 @@ client, check out a release tag that carries the native installer and set
 `PSEUDOLIFE_SHIM_ENGINE=native` before running the same installer. The native
 installer runs its setup and client-registration steps without host Python.
 It checks the platform archive against `SHA256SUMS` and confirms that the
-client supports the installer's setup commands before making changes. The
-client choice is independent of `--engine`, which selects the Docker daemon.
+client supports the installer's setup commands before making changes. Use
+the installer and native archive from the same release. The client choice
+is independent of `--engine`, which selects the Docker daemon.
+
+The Windows x64 native client bundles its C runtime starting with 0.25.1.
+If an older archive fails to start because a system library is missing
+(`0xC0000135`), use a release that bundles the runtime or install the
+Microsoft Visual C++ Redistributable for x64 to keep using that archive.
+The native installers and updater report this error when they detect it.
 
 On an installer-managed Python client from 0.23.0 or later, opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (set
@@ -101,7 +108,7 @@ the foreground. See [the tunnel guide](tunnels.md#autostart-and-private-storage)
 before moving a host that serves a tunnel.
 
 The installer's guided tunnel setup (`--tunnel` or `-Tunnel`) is available
-with the Python client. The native installer refuses that switch before
+with the Python client. The native installer exits with status 1 before
 changing the host. For the native client, rerun without the switch and
 follow the [explicit profile and key setup](tunnels.md).
 
@@ -110,11 +117,24 @@ install's own or a supplied file), it waits up to three minutes for an
 authenticated daemon read. It retries a connection failure or server error
 while the daemon starts. A rejected token (HTTP 401 or 403) stops the check
 immediately. If the check fails, the installer completes the rest of the
-setup and skips Codex registration. It prints a warning with the reason
-and tells you how to retry the installer. Release update can refresh existing
-Codex hook scripts when their approved definitions stay the same. If a
-definition changes, open `/hooks` in Codex to review and approve the changed
-Pseudolife handlers.
+setup and skips Codex registration.
+
+If a requested client cannot be connected, the native installer completes
+the remaining setup and exits with status 5. Its final summary names the
+incomplete clients and how to retry. A client chosen by flag or typed at
+the installer prompt counts as requested, including when a rerun restores
+that choice. A failure for an automatically detected client produces a
+warning and allows a successful exit.
+
+On reruns, the native installer can check a client without changing its
+registration. It uses read-only helpers to inspect the Pseudolife entry in
+Gemini's configuration, verify the existing bearer token with the daemon,
+and identify connection plans that need only credential verification.
+
+Release update can refresh existing Codex hook scripts when their approved
+definitions stay the same. If a definition changes, open `/hooks` in the
+Codex CLI or **Settings > Hooks** in the Codex app to review and trust the
+changed Pseudolife handlers.
 
 ## Installer refusals
 

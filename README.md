@@ -384,8 +384,9 @@ An `ask` firewall rule or client-update schedule is skipped with the
 finishing command. On Linux, `--firewall-rule yes` authorizes that rule;
 client-only `--client-update-schedule yes|HH:MM` opts into its timer.
 The Console is not opened; the summary prints `pseudolife-mcp console`.
-Guided tunnel setup is skipped with its finishing command, even with
-`--tunnel` / `-Tunnel`, because it needs a person.
+The Python installer skips guided tunnel setup in unattended mode and prints
+the finishing command. The native installer refuses `--tunnel` / `-Tunnel`
+before changing the host. See [native tunnel setup](docs/guide/install-and-move.md#native-client).
 
 Image sizes, the Windows WSL2 memory cap, and what the installer automates:
 [the containerized install](#install--containerized-any-os) below.
