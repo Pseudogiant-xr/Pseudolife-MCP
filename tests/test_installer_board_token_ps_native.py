@@ -17,6 +17,7 @@ import pytest
 from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider
+from tests.test_client_install_ux import _marker_block
 from tests.test_installer_existing_upgrade import _between
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -163,7 +164,7 @@ def _client_files(ps: _PowerShell, env_file: Path, clients: list[str], *, hook: 
     return ps.run(
         f"$envFile = '{_q(env_file)}'\n$clients = @({client_list})\n$Transport = 'shim'\n"
         f"$hookState = @{{ claude = '{hook}' }}\n" + getters + "\n"
-        + _block("client token files")
+        + _block("client registration state") + _block("client token files")
         + "\nWrite-Output \"CLAUDE=$claudeTokenFile\"\nWrite-Output \"GEMINI=$geminiTokenFile\"\n"
         + "Write-Output \"LEFT=$env:PSEUDOLIFE_INSTALLER_TOKEN$env:PSEUDOLIFE_INSTALLER_TOKENS\"\n",
         extra_env=extra_env)
@@ -265,9 +266,9 @@ def _wire(ps: _PowerShell, client: str, *, token_file: str, existing: str | None
 }}""")
     helper = _between(INSTALL, "function Resolve-InstalledShimPath",
                       "\n}\n\n# Two env pairs") + "\n}"
-    loop = _between(INSTALL,
-                    'foreach ($selectedClient in $clients) {\n    if ($selectedClient -eq "claude-desktop") {',
-                    "\n}\n\n# -- 12. health") + "\n}"
+    install = (ROOT / INSTALL).read_text(encoding="utf-8")
+    loop = "\n".join("\n".join(_marker_block(install, section)) for section in (
+        "client registration state", "client registration helpers", "client registrations"))
     gemini_file = token_file.replace("claude-code", "gemini") if token_file else ""
     config = ("pseudolife-memory\n" + existing) if existing else ""
     body = f"""$env:PATH = '{_q(installed_bin)}' + [IO.Path]::PathSeparator + $env:PATH
@@ -276,6 +277,7 @@ $env:FAKE_LAUNCHER = '{_q(shim)}'
 $env:FAKE_KEEP_LAUNCHER = '1'
 $clients = @('{client}')
 $Transport = 'shim'
+$tokenState = '{"present" if token_file else "opted-out"}'
 $codexCredentialBootstrapFailed = $false
 $codexConnectionConfigured = $false
 $codexCredentialFile = $null
@@ -426,6 +428,20 @@ def test_tokenless_existing_gemini_registration_gets_no_token_warning(tmp_path):
                         existing="pseudolife-memory: pseudolife-mcp (stdio) - Connected")
     assert proc.returncode == 0, _output(proc)
     assert "Edit it in place in ~/.gemini/settings.json" not in _output(proc)
+
+
+def test_existing_http_registration_is_preserved_with_a_credential_warning(tmp_path):
+    proc, calls = _wire(
+        _PowerShell(tmp_path), "claude", token_file=r"C:\fixture\claude-code.token",
+        existing="Type: http\nURL: http://127.0.0.1:8765/mcp\nHeaders: Authorization",
+    )
+    output = _output(proc)
+    assert proc.returncode == 0, output
+    assert _adds(calls) == []
+    [warning] = [line for line in output.splitlines() if "WARNING:" in line]
+    assert "HTTP registration was preserved" in warning
+    assert "Verify the registration's bearer credential in the client." in warning
+    assert "STATE=present" in proc.stdout
 
 
 def _board(ps: _PowerShell, *, token_state: str, mcp_state: str = "@{}"):

@@ -1045,10 +1045,11 @@ jobs:
     # runs. Retries belong here only; the merge gate holds deterministic tests.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
-    # The 30-file lane this half came from took 862 s on windows-latest; the
-    # plumbing half plus the nine files added below is most of that, and a
-    # retry repeats only what failed.
-    timeout-minutes: 45
+    # On 22 November 2026 the scheduled baseline (44948665139) took 26m10s.
+    # With the added installer files, dispatch 44990919617 spent 6m58s in
+    # setup and reached 86% before the 45m timeout, without a retry.
+    # The projected 52m total plus 30% headroom rounds up to 70m.
+    timeout-minutes: 70
 
     steps:
       - uses: actions/checkout@v4
@@ -1184,6 +1185,14 @@ jobs:
           tests/test_installer_no_python.py
           tests/test_installer_existing_upgrade.py
           tests/test_installer_existing_upgrade_native.py
+          tests/test_installer_bank_question_native.py
+          tests/test_installer_board_token_native.py
+          tests/test_installer_board_token_ps_native.py
+          tests/test_installer_client_only_native.py
+          --deselect tests/test_installer_client_only_native.py::test_shell_fragment_transport_is_utf8_with_a_cp1252_parent
+          tests/test_installer_client_only_ps_native.py
+          --deselect tests/test_installer_client_only_ps_native.py::test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent
+          --deselect tests/test_installer_client_only_ps_native.py::test_powershell_fixture_roundtrips_unicode_stdio
           tests/test_codex_hooks.py
           tests/test_codex_hooks_native.py
           --deselect tests/test_codex_hooks.py::test_native_hook_rejects_broadened_managed_connection_acl

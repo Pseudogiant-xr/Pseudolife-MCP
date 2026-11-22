@@ -171,6 +171,35 @@ def block(script, name):
     marker = f"# >>> {name} >>>\n"
     return source.split(marker, 1)[1].split(f"# <<< {name} <<<", 1)[0] if marker in source else ""
 
+@pytest.mark.parametrize("script", ["install-native.sh", "install-native.ps1"])
+@pytest.mark.parametrize("marker,explicit", [(None, 0), ("claude", 0), ("codex", 1)])
+def test_only_matching_managed_provenance_restores_a_requested_client(tmp_path, script, marker, explicit):
+    env = tmp_path / ".env"
+    values = {"PSEUDOLIFE_INSTALL_CLIENT": "codex"}
+    if marker is not None:
+        values["PSEUDOLIFE_INSTALL_CLIENT_REQUESTED"] = marker
+    # A value outside the managed block cannot make an old detected choice explicit.
+    env.write_text("PSEUDOLIFE_INSTALL_CLIENT_REQUESTED=codex\n" + managed(**values), encoding="utf-8")
+    if script.endswith(".ps1"):
+        ps = _PowerShell(tmp_path)
+        proc = ps.run(
+            HELPER_PS + f"$envFile='{_q(env)}'\n$EnvBegin='{BEGIN}'\n$EnvEnd='{END}'\n"
+            "$ClientOnly=$false; $DaemonUrl=''; $Client=''; $Extractor='sidecar'\n"
+            + block(script, "recorded choices") + '\n"CLIENT=$Client EXPLICIT=$([int]$clientExplicit)"\n'
+        )
+    else:
+        variants = _bash_variants()
+        if not variants:
+            pytest.skip("Bash unavailable")
+        shell = _Shell(variants[0], tmp_path)
+        proc = shell.run(
+            HELPER_SH + f"env_file='{shell.path(env)}'\nENV_BEGIN='{BEGIN}'\nENV_END='{END}'\n"
+            "CLIENT_ONLY='' DAEMON_URL='' CLIENT='' CLIENT_EXPLICIT='' EXTRACTOR=sidecar EXPLICIT_ARGS=''\n"
+            + block(script, "recorded choices") + '\necho "CLIENT=$CLIENT EXPLICIT=${CLIENT_EXPLICIT:-0}"\n'
+        )
+    assert proc.returncode == 0, _output(proc)
+    assert f"CLIENT=codex EXPLICIT={explicit}" in proc.stdout
+
 
 @pytest.mark.parametrize("script", ["install-native.sh", "install-native.ps1"])
 def test_a_recorded_endpoint_is_reused_without_an_extractor_flag(tmp_path, script):
