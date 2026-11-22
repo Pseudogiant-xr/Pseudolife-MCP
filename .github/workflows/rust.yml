@@ -520,7 +520,14 @@ jobs:
       - name: Check Windows client DLL imports
         if: runner.os == 'Windows'
         working-directory: .
-        run: python rust/ci/windows_imports.py rust/target/debug/pseudolife-stdio.exe
+        shell: python
+        env:
+          PYTHONPATH: .
+        run: |
+          from pathlib import Path
+          from rust.ci.windows_imports import check_windows_imports
+
+          check_windows_imports(Path("rust/target/debug/pseudolife-stdio.exe").read_bytes())
       # The Codex setup planning comparison with the frozen Python
       # (shim/tests/setup_codex_parity.py) left with the Python freeze; the
       # bearer, token-file and authority rules it covered are asserted by
@@ -719,7 +726,14 @@ jobs:
       - name: Check Windows release client DLL imports
         if: runner.os == 'Windows'
         working-directory: .
-        run: python rust/ci/windows_imports.py rust/target/release/pseudolife-stdio.exe
+        shell: python
+        env:
+          PYTHONPATH: .
+        run: |
+          from pathlib import Path
+          from rust.ci.windows_imports import check_windows_imports
+
+          check_windows_imports(Path("rust/target/release/pseudolife-stdio.exe").read_bytes())
       - name: Retain default static candidate
         working-directory: ${{ github.workspace }}
         shell: pwsh

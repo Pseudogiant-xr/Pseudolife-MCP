@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "candidate",
-  "before": "4ecb836547864d17",
-  "fingerprint": "2b7b864ae0f12368",
-  "reason": "On Windows, checks the DLL imports of the release-profile client the job already builds. Adds no build, runner or setup."
-}

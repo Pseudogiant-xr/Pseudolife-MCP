@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "rust",
-  "before": "f655902a708fc676",
-  "fingerprint": "021740563b5b2354",
-  "reason": "On Windows, reads the debug client already built by Nextest and checks its DLL imports. Adds no build, runner or setup."
-}

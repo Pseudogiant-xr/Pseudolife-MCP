@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "candidate",
+  "before": "4ecb836547864d17",
+  "fingerprint": "740f8e476b6a8454",
+  "reason": "The Windows release DLL guard runs the same library against the same built executable through the Python shell. No job or build is added."
+}

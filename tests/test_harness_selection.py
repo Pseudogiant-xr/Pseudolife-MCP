@@ -1,6 +1,7 @@
 """Batch-head workflow selection uses data, never candidate imports or commands."""
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 import yaml
@@ -35,6 +36,38 @@ def workflow(tree, job, command):
     value = yaml.safe_load(tree[selection.WORKFLOW])
     value["jobs"][job]["steps"].append({"run": command})
     tree[selection.WORKFLOW] = yaml.safe_dump(value)
+
+
+@pytest.mark.parametrize("job,profile", [("rust", "debug"), ("candidate", "release")])
+def test_real_workflow_accepts_windows_import_guard_and_refuses_unclassified_sibling(job, profile):
+    root = Path(__file__).resolve().parents[1]
+    paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=root, encoding="utf-8").rstrip("\0").split("\0")
+
+    def read(path):
+        return (root / path).read_text(encoding="utf-8")
+
+    assert "rust/ci" in selection.recipe(read, paths).commands[0].paths
+
+    candidate = yaml.safe_load(read(selection.WORKFLOW))
+    guard, = (step for step in candidate["jobs"][job]["steps"]
+              if "from rust.ci.windows_imports import" in step.get("run", ""))
+    assert f"rust/target/{profile}/pseudolife-stdio.exe" in guard["run"]
+    candidate["jobs"][job]["steps"].append({
+        "name": "Unclassified import guard sibling",
+        "working-directory": ".",
+        "run": "python rust/ci/windows_imports_sibling.py",
+    })
+
+    def read_with_sibling(path):
+        return yaml.safe_dump(candidate) if path == selection.WORKFLOW else read(path)
+
+    with pytest.raises(selection.SelectionError, match=f"{job}.*unclassified.*windows_imports_sibling"):
+        selection.recipe(read_with_sibling, paths)
+
+    candidate["jobs"][job]["steps"].pop()
+    guard["run"] += "check_windows_imports(Path('other.exe').read_bytes())\n"
+    with pytest.raises(selection.SelectionError, match=f"{job}.*unclassified Windows DLL import guard"):
+        selection.recipe(read_with_sibling, paths)
 
 
 def test_recipe_adds_candidate_free_parity_but_keeps_native_cases_in_their_lane(tree):
