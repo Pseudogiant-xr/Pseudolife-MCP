@@ -546,8 +546,8 @@ def test_audit_removed_redaction_reference_uses_a_separate_seed_copy(monkeypatch
         conn.__enter__.return_value = conn
         conn.execute.side_effect = [
             SimpleNamespace(fetchall=lambda: [(3, "sender", "recipient", "p", "t")]),
-            SimpleNamespace(fetchone=lambda: (7, previous)),
             SimpleNamespace(fetchone=lambda: ("synthetic text",)),
+            SimpleNamespace(fetchone=lambda: (7, previous)),
             None, None, None,
         ]
         insert = MagicMock(return_value=("synthetic insert", ()))
@@ -805,6 +805,92 @@ def test_audit_redact_refusal_reference_without_the_frozen_package(
 
         changed = dict(seed, sequences={"coordination_events_seq_seq": 4})
         assert compare.diff(want, dict(want, db=changed), case.rules)[0] == "db differ:"
+
+
+def test_audit_remaining_redact_refusals_use_seed_observations(monkeypatch, tmp_path):
+    left = "cd34ef56ab1200000000000000000001"
+    right = "cd34ef56ab1300000000000000000002"
+    legacy = "ef12ab34cd5600000000000000000001"
+    rows = {
+        "coordination_messages": [json.dumps({"message_id": right})],
+        "coordination_events": [
+            json.dumps({"event": "send", "message_id": message}) for message in (right, left)
+        ] + [json.dumps({"event": "redact", "message_id": "cd34ef56a00000000000000000000003"})],
+    }
+    with _cold_audit(monkeypatch) as audit:
+        rich, payload = audit._name("rich"), audit._name("payload")
+        seed = {"tables": rows, "sequences": {}, "columns": [], "indexes": [], "constraints": []}
+        monkeypatch.setattr(audit, "_BASELINE", {rich: seed, payload: seed})
+        monkeypatch.setattr(audit, "ensure", audit._name)
+        monkeypatch.setattr(audit, "ids", lambda kind: {"legacy": legacy})
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        cases = {case.id: case for case in audit.cases()}
+        expected = {
+            "redact-abbreviated": (
+                "x", "message_not_found",
+                "no record of this message id: an unknown id, or one whose send "
+                "event audit retention removed and whose live copy is gone too", "unchanged",
+            ),
+            "redact-ambiguous-prefix": (
+                "cd34ef56", "ambiguous_message_id", "ambiguous_message_id: cd34ef56ab12, cd34ef56ab13", seed,
+            ),
+            "redact-payload-domain": (
+                legacy, "body_in_hashed_payload",
+                "this message was sent before schema v46, when the body was "
+                "part of the hashed payload; removing it would break the chain, so it stays "
+                "until audit retention removes the event, and its live copy is already gone", seed,
+            ),
+        }
+        newline = b"\r\n" if audit.core.WINDOWS else b"\n"
+        for case_id, (message, reason, diagnostic, db) in expected.items():
+            want = cases[case_id].reference(tmp_path / case_id)
+            assert want["exit"] == 1
+            assert audit.core.decode(want, "stdout") == (
+                f'{{"ok": false, "message_id": "{message}", "reason": "{reason}"}}'.encode() + newline)
+            assert audit.core.decode(want, "stderr") == f"board-audit: {diagnostic}".encode() + newline
+            assert want["files"] == {"cwd": "dir"}
+            assert want["db"] == db
+        assert audit._fixture_message_prefix("cd34ef56ab13").make() == right
+
+
+@pytest.mark.parametrize("audit_copy", ["kept", "gone"])
+def test_audit_redaction_projects_kept_and_gone_send_copies(monkeypatch, audit_copy):
+    message = "a" * 32
+    envelope = ("sender", "recipient", "project", "task")
+    now = 1700000000.0
+    with _cold_audit(monkeypatch) as audit:
+        from rust.harness_support import fixture_rows
+
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        read_rows = (
+            [SimpleNamespace(fetchall=lambda: [(4, *envelope)]),
+             SimpleNamespace(fetchone=lambda: ("text",))]
+            if audit_copy == "kept" else
+            [SimpleNamespace(fetchone=lambda: (None, *envelope))]
+        )
+        conn.execute.side_effect = [*read_rows, SimpleNamespace(fetchone=lambda: (7, "1" * 64)), None, None]
+        guard = MagicMock()
+        insert = MagicMock(return_value=("synthetic insert", ()))
+        monkeypatch.setattr(_bank, "connect", lambda _: conn)
+        monkeypatch.setattr(audit, "_assert_audit_database", guard)
+        monkeypatch.setattr(fixture_rows, "checked_fixture_insert", insert)
+        want = audit._project_redaction("reference", message, "old paste", now, audit_copy, [])
+        guard.assert_called_once_with(conn, "reference")
+        expected_seq = 4 if audit_copy == "kept" else None
+        assert want["seq"] == expected_seq
+        assert want["live_body_cleared"] == (audit_copy == "kept")
+        assert ("other_copies" in want) == (audit_copy == "kept")
+        assert want["audit_copy"] == audit_copy
+        assert conn.execute.call_args_list[-2].args == (
+            "UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
+            "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message),
+        )
+        sent = insert.call_args.args[2][0]
+        assert (sent["agent_id"], sent["recipient_agent_id"], sent["project"], sent["task"]) == envelope
+        assert json.loads(sent["payload"]) == {
+            "message_id": message, "seq": expected_seq, "reason": "old paste", "audit_copy": audit_copy,
+        }
 
 
 def test_audit_redaction_diagnostics_match_frozen_source_by_ast():

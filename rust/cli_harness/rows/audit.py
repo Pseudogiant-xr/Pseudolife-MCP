@@ -815,7 +815,17 @@ _REDACT_UNAVAILABLE = {
 }
 
 
-def _redact_refusal_reference(case, source, original, refusal, home):
+def _redact_prefix_matches(bank, prefix):
+    tables = _BASELINE[bank]["tables"]
+    messages = {json.loads(text)["message_id"] for text in tables["coordination_messages"]}
+    for text in tables["coordination_events"]:
+        row = json.loads(text)
+        if row["event"] == "send":
+            messages.add(row["message_id"])
+    return sorted(message for message in messages if message is not None and message.startswith(prefix))
+
+
+def _redact_refusal_reference(case, source, original, refusal, home, *, read_only=False):
     """A refusal leaves the candidate's template copy equal to the seed bank."""
     started = time.time()
     bank = ensure(source)
@@ -823,18 +833,33 @@ def _redact_refusal_reference(case, source, original, refusal, home):
     core._reset(home)
     (home / "cwd").mkdir()
     newline = b"\r\n" if core.WINDOWS else b"\n"
-    if refusal in _REDACT_REFUSALS:
+    if refusal in _REDACT_REFUSALS or refusal == "ambiguous_message_id":
         code = 1
         result = {"ok": False, "message_id": case.argv[3], "reason": refusal}
         stdout = json.dumps(result).encode("ascii") + newline
-        diagnostic = _REDACT_REFUSALS[refusal]
+        diagnostic = _REDACT_REFUSALS.get(refusal, refusal)
+        if refusal == "ambiguous_message_id":
+            # This fixture has exactly two twins. Resolve the order and
+            # shortest distinguishing length from the original bank.
+            first, second = _redact_prefix_matches(bank, case.argv[3])
+            cut = len(os.path.commonprefix((first, second))) + 1
+            diagnostic += f": {first[:cut]}, {second[:cut]}"
     else:
         code, stdout = 2, b""
         diagnostic = _REDACT_UNAVAILABLE[refusal]
     stderr = f"board-audit: {diagnostic}".encode("utf-8") + newline
     return {"home": str(home), "window": [started, time.time()], "exit": code,
             "stdout": _encoded(stdout), "stderr": _encoded(stderr), "files": core.snapshot(home),
-            "modes": core.modes(home), "db": _BASELINE[bank]}
+            "modes": core.modes(home), "db": "unchanged" if read_only else _BASELINE[bank]}
+
+
+def _prepare_redaction_bank(bank, statements):
+    if not statements:
+        return
+    with _bank.connect(bank, autocommit=True) as conn:
+        _assert_audit_database(conn, bank)
+        for statement in statements:
+            conn.execute(statement.replace("{DB}", bank))
 
 
 def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock",),
@@ -847,11 +872,7 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
 
     def setup(arm):
         _copy(ensure(source), REDACT_DB)
-        if prepare:
-            with _bank.connect(REDACT_DB, autocommit=True) as conn:
-                _assert_audit_database(conn, REDACT_DB)
-                for statement in prepare:
-                    conn.execute(statement.replace("{DB}", REDACT_DB))
+        _prepare_redaction_bank(REDACT_DB, prepare)
         _resolve_argv(case, original)
         if hold:
             import psycopg  # noqa: PLC0415
@@ -901,34 +922,53 @@ def _rich(key, index=None, cut=None):
     return _Lazy(make)
 
 
-def _pruned(key):
-    return _Lazy(lambda: ids("pruned")[key])
+def _fixture_message_prefix(prefix):
+    def make():
+        message, = _redact_prefix_matches(ensure("rich"), prefix)
+        return message
+
+    return _Lazy(make)
+
+
+def _abbreviated_redact_case():
+    original = ["board-audit", "redact", "--m", "x", "--r", "why"]
+    case = read_case("redact-abbreviated", "rich", original[1:])
+    case.reference = partial(_redact_refusal_reference, case, "rich", original,
+                             "message_not_found", read_only=True)
+    return case
 
 
 _REDACT_REFERENCE_DB = _bank.name(PREFIX + "rd_ref")
 
 
-def _project_removed_redaction(bank, message_id, reason, now):
-    """Apply the direct v46 removal contract to a private reference copy."""
+def _project_redaction(bank, message_id, reason, now, audit_copy, siblings):
+    """Apply the fixture's known redaction to a separate, guarded bank copy."""
     from rust.harness_support.fixture_rows import checked_fixture_insert  # noqa: PLC0415
 
     with _bank.connect(bank) as conn:
         _assert_audit_database(conn, bank)
-        [(seq, agent, recipient, project, task)] = conn.execute(
-            "SELECT seq,agent_id,recipient_agent_id,project,task FROM coordination_events "
-            "WHERE event='send' AND message_id=%s", (message_id,)).fetchall()
-        (head_seq, head_hash) = conn.execute(
+        if audit_copy == "gone":
+            seq = None
+            live_text, agent, recipient, project, task = conn.execute(
+                "SELECT text,sender_agent_id,recipient_agent_id,project,task "
+                "FROM coordination_messages WHERE message_id=%s", (message_id,)).fetchone()
+        else:
+            [(seq, agent, recipient, project, task)] = conn.execute(
+                "SELECT seq,agent_id,recipient_agent_id,project,task FROM coordination_events "
+                "WHERE event='send' AND message_id=%s", (message_id,)).fetchall()
+            live_text, = conn.execute("SELECT text FROM coordination_messages WHERE message_id=%s",
+                                      (message_id,)).fetchone()
+        head_seq, head_hash = conn.execute(
             "SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
-        live_text, = conn.execute("SELECT text FROM coordination_messages WHERE message_id=%s",
-                                  (message_id,)).fetchone()
         event = dict(seq=head_seq + 1, event="redact", actor="operator", principal="",
                      agent_id=agent, recipient_agent_id=recipient, project=project, task=task,
                      message_id=message_id, hlc="", created_at=now, prev_hash=head_hash,
                      payload=canonical_payload({"message_id": message_id, "seq": seq,
-                                                "reason": reason, "audit_copy": "removed"}),
+                                                "reason": reason, "audit_copy": audit_copy}),
                      body=None, body_salt=None)
         event["hash"] = audit_hash(head_hash, event)
-        conn.execute("UPDATE coordination_events SET body=NULL,body_salt=NULL WHERE seq=%s", (seq,))
+        if audit_copy == "removed":
+            conn.execute("UPDATE coordination_events SET body=NULL,body_salt=NULL WHERE seq=%s", (seq,))
         conn.execute("UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
                      "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message_id))
         insert, values = checked_fixture_insert(conn, "coordination_events", [event])
@@ -936,35 +976,85 @@ def _project_removed_redaction(bank, message_id, reason, now):
 
     redact_seq = event["seq"]
     digest = event["hash"]
-    return {"ok": True, "message_id": message_id, "seq": seq, "redact_seq": redact_seq,
-            "redact_hash": digest, "expect_head": f"{redact_seq}:{digest}",
-            "live_body_cleared": live_text is not None, "audit_copy": "removed",
-            "other_copies": [], "vacuumed": True}
+    report = {"ok": True, "message_id": message_id, "seq": seq, "redact_seq": redact_seq,
+              "redact_hash": digest, "expect_head": f"{redact_seq}:{digest}",
+              "live_body_cleared": live_text is not None, "audit_copy": audit_copy}
+    if audit_copy != "gone":
+        report["other_copies"] = siblings
+    return report
 
 
-def _redact_removed_reference(key, reason, home):
+def _redact_fixture_warnings(bank):
+    # Exercise the reference copy's ANALYZE instrument directly. PostgreSQL
+    # supplies the notice count and order for the actual fixture rows.
+    warnings = []
+    with _bank.connect(bank, autocommit=True) as conn:
+        _assert_audit_database(conn, bank)
+
+        def note(diag):
+            if diag.severity_nonlocalized == "WARNING":
+                warnings.append(diag.message_primary or "")
+
+        conn.add_notice_handler(note)
+        conn.execute("SET client_min_messages TO warning")
+        conn.execute("VACUUM (ANALYZE) coordination_events, coordination_messages")
+        conn.execute("VACUUM pg_catalog.pg_statistic")
+    if "audit test warning" not in warnings:
+        raise AssertionError("the redaction reference's ANALYZE instrument produced no warning")
+    return warnings
+
+
+def _redact_projected_reference(source, message, reason, audit_copy, siblings, prepare, stdout_closed, home):
     started = time.time()
-    _copy(ensure("rich"), _REDACT_REFERENCE_DB)
-    message_id = ids("rich")[key]
-    report = _project_removed_redaction(_REDACT_REFERENCE_DB, message_id, reason, started)
+    _copy(ensure(source), _REDACT_REFERENCE_DB)
+    _prepare_redaction_bank(_REDACT_REFERENCE_DB, prepare)
+    message_id = message.make() if isinstance(message, _Lazy) else message
+    siblings = [other.make() for other in siblings]
+    report = _project_redaction(_REDACT_REFERENCE_DB, message_id, reason, started, audit_copy, siblings)
+    warnings = _redact_fixture_warnings(_REDACT_REFERENCE_DB) if prepare else []
+    report["vacuumed"] = not warnings
+    notes = []
+    if audit_copy == "kept":
+        notes.append("the live copy is blanked and out of delivery, but this message "
+                     "was sent before schema v46: the audit log keeps its body until audit "
+                     "retention removes the send event")
+    if siblings:
+        notes.append(f"this message was one of {len(siblings) + 1} copies "
+                     "of one send to a project or the whole board; each keeps its own copy of the "
+                     "body until it is redacted too: " + " ".join(siblings))
+    if audit_copy == "gone":
+        notes.append("audit retention had already removed this message's send event, "
+                     "so the audit log held no copy of it; its live request fingerprint (and any "
+                     "live text) is blanked")
+    if warnings:
+        notes.append("the redaction is committed, but Postgres skipped part of the "
+                     "clean-up (" + "; ".join(warnings) + "), so the old row versions or the "
+                     "statistics may still hold the body; run `VACUUM (ANALYZE) coordination_events, "
+                     "coordination_messages` and `VACUUM pg_statistic` as the tables' owner or a superuser")
+    notes.append("record this head outside the bank; `pseudolife-mcp board-audit "
+                 f"verify --expect-head {report['expect_head']}` later shows the redaction record is still there")
+
     core._reset(home)
     (home / "cwd").mkdir()
     newline = b"\r\n" if core.WINDOWS else b"\n"
-    stderr = ("board-audit: record this head outside the bank; `pseudolife-mcp board-audit "
-              f"verify --expect-head {report['expect_head']}` later shows the redaction record "
-              "is still there")
-    return {"home": str(home), "window": [started, time.time()], "exit": 0,
-            "stdout": _encoded(json.dumps(report).encode("ascii") + newline),
-            "stderr": _encoded(stderr.encode("utf-8") + newline),
-            "files": core.snapshot(home), "modes": core.modes(home),
-            "db": _bank.dump(_REDACT_REFERENCE_DB)}
+    stdout = b"" if stdout_closed else json.dumps(report).encode("ascii") + newline
+    stderr = b"".join(f"board-audit: {note}".encode("utf-8") + newline for note in notes)
+    return {"home": str(home), "window": [started, time.time()], "exit": 120 if stdout_closed else 0,
+            "stdout": _encoded(stdout), "stderr": _encoded(stderr),
+            "files": core.snapshot(home), "modes": core.modes(home), "db": _bank.dump(_REDACT_REFERENCE_DB)}
+
+
+def redact_projected_case(case_id, source, message, reason, *, resolved_id=None, audit_copy="removed",
+                          siblings=(), prepare=(), stdout_closed=False, rules=("audit-redact-clock",)):
+    case = redact_case(case_id, source, message, reason, prepare=prepare, rules=rules, stdout_closed=stdout_closed)
+    case.reference = partial(_redact_projected_reference, source, resolved_id or message, reason,
+                             audit_copy, siblings, prepare, stdout_closed)
+    return case
 
 
 def redact_removed_case(case_id, key, reason, *, cut=None):
     """A direct v46 send with a full fixture ID for the reference."""
-    case = redact_case(case_id, "rich", _rich(key, cut=cut), reason)
-    case.reference = partial(_redact_removed_reference, key, reason)
-    return case
+    return redact_projected_case(case_id, "rich", _rich(key, cut=cut), reason, resolved_id=_rich(key))
 
 
 def stats_events():
@@ -1430,7 +1520,7 @@ def cases() -> list[core.Case]:
         file_case("input-unknown-option", ["verify", "--unknown=x"]),
         file_case("input-unrecognized", ["verify", "extra", "--unknown", "x"]),
         file_case("redact-required", ["redact"]),
-        read_case("redact-abbreviated", "rich", ["redact", "--m", "x", "--r", "why"]),
+        _abbreviated_redact_case(),
         file_case("export-bad-time", ["export", "--since", "NaN"]),
         *[file_case(f"export-bad-numeric-{name}", ["export", "--since=" + value])
           for name, value in [("inf", "inf"), ("negative-inf", "-Infinity"), ("overflow", "1e9999")]],
@@ -1452,9 +1542,12 @@ def cases() -> list[core.Case]:
         bank_verify_case("bank-verify-payload-domain", "payload"),
         bank_verify_case("bank-verify-surrogate-send", "surrogate_send"),
         bank_export_case("export-surrogate-send", "surrogate_send"),
-        redact_case("redact-surrogate-send", "surrogate_send", _Lazy(lambda: ids("surrogate_send")["message"]), "old paste"),
-        redact_case("redact-nonfinite-fanout", "payload_send", _Lazy(lambda: ids("payload_send")["message"]), "old paste"),
-        redact_case("redact-payload-domain", "payload", _Lazy(lambda: ids("payload")["legacy"]), "old paste"),
+        redact_projected_case("redact-surrogate-send", "surrogate_send",
+                              _Lazy(lambda: ids("surrogate_send")["message"]), "old paste"),
+        redact_projected_case("redact-nonfinite-fanout", "payload_send",
+                              _Lazy(lambda: ids("payload_send")["message"]), "old paste"),
+        redact_case("redact-payload-domain", "payload", _Lazy(lambda: ids("payload")["legacy"]),
+                    "old paste", refusal="body_in_hashed_payload"),
         file_case("input-payload-domain", ["verify", "--input", _home("archive.jsonl")],
                   files={"archive.jsonl": lambda: export_bytes("payload")}),
         # verify against the bank
@@ -1509,10 +1602,11 @@ def cases() -> list[core.Case]:
         # redact, each arm on its own copy
         redact_removed_case("redact-removed", "to_redact", "wrong paste ✓"),
         redact_removed_case("redact-prefix", "to_redact", "wrong paste", cut=10),
-        redact_case("redact-fanout-siblings", "rich", _rich("hello", index=0),
-                    "sent to everyone by mistake"),
-        redact_case("redact-kept-v45", "rich", _rich("v45"), "pasted by mistake"),
-        redact_case("redact-gone", "pruned", _pruned("old"), "pasted by mistake"),
+        redact_projected_case("redact-fanout-siblings", "rich", _rich("hello", index=0),
+                              "sent to everyone by mistake", siblings=(_rich("hello", index=1),)),
+        redact_projected_case("redact-kept-v45", "rich", _rich("v45"), "pasted by mistake", audit_copy="kept"),
+        redact_projected_case("redact-gone", "pruned", _Lazy(lambda: ids("pruned")["old"]),
+                              "pasted by mistake", audit_copy="gone"),
         redact_case("redact-legacy-refused", "rich", _rich("legacy"), "too old", refusal="body_in_hashed_payload"),
         redact_case("redact-already", "rich", _rich("redacted"), "again", refusal="already_redacted"),
         redact_case("redact-unknown", "rich", "0" * 32, "unknown", refusal="message_not_found"),
@@ -1557,9 +1651,9 @@ def cases() -> list[core.Case]:
         # (O2) a stdout that refuses the report
         read_case("defer-bank-verify-stdout-closed", "rich", ["verify"],
                   stdout_closed=True),
-        redact_case("redact-stdout-closed", "rich", _rich("to_redact"), "wrong paste",
-                    rules=("audit-redact-clock", "audit-stdout-closed-trailer"),
-                    stdout_closed=True),
+        redact_projected_case("redact-stdout-closed", "rich", _rich("to_redact"), "wrong paste",
+                              rules=("audit-redact-clock", "audit-stdout-closed-trailer"),
+                              stdout_closed=True),
         # (O4) coverage: LEAST(expires_at, now), ambiguous prefixes, pre-v46,
         # the vacuum-skip path with warnings hidden by default
         redact_removed_case("redact-future-expiry", "future", "wrong paste"),
@@ -1571,12 +1665,14 @@ def cases() -> list[core.Case]:
         ),
         bank_export_case("export-agent-twin", "rich", ["--agent", "ab12cd34ef57"],
                          agent="ab12cd34ef57000000000000000000a2"),
-        redact_case("redact-ambiguous-prefix", "rich", "cd34ef56", "wrong paste"),
-        redact_case("redact-twin-prefix", "rich", "cd34ef56ab13", "wrong paste"),
+        redact_case("redact-ambiguous-prefix", "rich", "cd34ef56", "wrong paste",
+                    refusal="ambiguous_message_id"),
+        redact_projected_case("redact-twin-prefix", "rich", "cd34ef56ab13", "wrong paste",
+                              resolved_id=_fixture_message_prefix("cd34ef56ab13")),
         bank_verify_case("bank-verify-prev46", "prev46"),
         bank_export_case("export-prev46", "prev46"),
         redact_case("redact-prev46", "prev46", _Lazy(lambda: ids("legacy")["legacy"]), "why", refusal="prev46"),
-        redact_case("redact-vacuum-warning", "rich", _rich("to_redact"), "wrong paste",
-                    prepare=VACUUM_WARNING),
+        redact_projected_case("redact-vacuum-warning", "rich", _rich("to_redact"), "wrong paste",
+                              prepare=VACUUM_WARNING),
     ]
     return out
