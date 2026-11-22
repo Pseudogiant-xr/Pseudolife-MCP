@@ -833,10 +833,12 @@ if [ -z "${CLIENT_ONLY:-}${DAEMON_URL:-}${PSEUDOLIFE_MCP_DAEMON_URL:-}" ] && [ -
             }
             END { print client; print extractor }
         ' "$env_file")"
-        {
-            IFS= read -r saved_client_request || true
-            IFS= read -r saved_extractor_request || true
-        } <<< "$saved_requests"
+        request_newline=$'\n'
+        saved_client_request="${saved_requests%%"$request_newline"*}"
+        saved_extractor_request=""
+        if [[ "$saved_requests" == *"$request_newline"* ]]; then
+            saved_extractor_request="${saved_requests#*"$request_newline"}"
+        fi
         if [ -n "$restored_client" ] && [ -n "$CLIENT" ] && [ "$saved_client_request" = "$CLIENT" ]; then
             CLIENT_EXPLICIT=1
         fi
