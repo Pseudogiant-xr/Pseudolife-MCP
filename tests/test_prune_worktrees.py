@@ -47,8 +47,12 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def _configure(repo: Path) -> None:
+    # Keep commits and fetches from starting housekeeping behind _backdate's walk.
     for key, value in (("user.name", "Test"), ("user.email", "test@example.com"),
-                       ("commit.gpgsign", "false"), ("core.autocrlf", "false")):
+                       ("commit.gpgsign", "false"), ("core.autocrlf", "false"),
+                       ("maintenance.auto", "false"), ("gc.auto", "0"),
+                       ("maintenance.autoDetach", "false"), ("gc.autoDetach", "false"),
+                       ("fetch.writeCommitGraph", "false")):
         _git(repo, "config", key, value)
 
 
@@ -64,8 +68,11 @@ def _backdate(path: Path, when: float = OLD) -> None:
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
         for name in filenames + dirnames:
             entry = os.path.join(dirpath, name)
-            if not _is_link(entry):  # never age a link's target
-                os.utime(entry, (when, when))
+            try:
+                if not _is_link(entry):  # never age a link's target
+                    os.utime(entry, (when, when))
+            except FileNotFoundError:
+                continue  # the entry vanished after the walk listed it
     if not _is_link(str(path)):
         os.utime(path, (when, when))       # the root dir's own mtime too
     dotgit = path / ".git"
@@ -103,6 +110,7 @@ class Env:
         self.wt_root.mkdir()
         self.cache_root.mkdir()
         _git(tmp, "init", "--bare", "-b", "master", str(self.origin))
+        _configure(self.origin)
         _git(tmp, "clone", str(self.origin), str(self.repo))
         _configure(self.repo)
         (self.repo / ".gitignore").write_text(
@@ -187,6 +195,36 @@ def run(env: Env, *argv: str, roots: bool = True) -> tuple[int, str]:
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         rc = prune.main(env.args(*argv, roots=roots))
     return rc, buf.getvalue()
+
+
+def test_backdate_skips_an_entry_that_disappears(tmp_path, monkeypatch):
+    vanished = tmp_path / "maintenance.lock"
+    survivor = tmp_path / "keep.txt"
+    vanished.touch()
+    survivor.touch()
+    lstat = os.lstat
+
+    def disappearing_lstat(path, *args, **kwargs):
+        if path == str(vanished):
+            vanished.unlink()
+        return lstat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "lstat", disappearing_lstat)
+        _backdate(tmp_path)
+
+    assert not vanished.exists()
+    assert survivor.stat().st_mtime == pytest.approx(OLD, abs=1, rel=0)
+
+
+def test_fixture_repositories_disable_git_auto_maintenance(env):
+    clone = _clone(env, "maintenance-config")
+    worktree = env.add("maintenance-config-wt", age=False)
+    for repo in (env.origin, env.repo, clone, worktree):
+        for key, value in (("maintenance.auto", "false"), ("gc.auto", "0"),
+                           ("maintenance.autoDetach", "false"), ("gc.autoDetach", "false"),
+                           ("fetch.writeCommitGraph", "false")):
+            assert _git(repo, "config", "--local", "--get", key) == value, (repo, key)
 
 
 # --- sweep mode: worktrees -------------------------------------------------
@@ -1773,6 +1811,7 @@ def test_a_bare_repository_in_a_scratch_dir_is_kept(env):
     bare = env.tmp / "scratch" / "mirror.git"
     bare.parent.mkdir(parents=True, exist_ok=True)
     _git(env.tmp, "init", "-q", "--bare", str(bare))
+    _configure(bare)
     _backdate(bare)
     rc, out = run_scratch(env, "--apply")
     assert rc == 0, out
@@ -2384,6 +2423,7 @@ def test_a_lent_clone_is_kept_when_only_a_linked_worktree_of_the_borrower_is_see
     outside = env.tmp / "outside" / "borrower"
     outside.parent.mkdir()
     _git(env.tmp, "clone", "-q", "--shared", str(lender), str(outside))
+    _configure(outside)
     _git(outside, "worktree", "add", "-q", "--detach", str(env.tmp / "clones" / "borrower-wt"))
     _backdate(lender)
     rc, out = run_clones(env, "--apply")
