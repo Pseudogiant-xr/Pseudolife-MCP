@@ -857,8 +857,9 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
     let service = Registered {
         kind: Kind::UserUnit,
         name: "pseudolife-tunnel-dot.service".into(),
-        place: "systemd user unit /home/alexandra/.config/systemd/user/pseudolife-tunnel-dot.service"
-            .into(),
+        place:
+            "systemd user unit /home/alexandra/.config/systemd/user/pseudolife-tunnel-dot.service"
+                .into(),
         file: None,
         command: Some(vec![
             "/home/alexandra/.local/bin/pseudolife-mcp".into(),
@@ -894,7 +895,9 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
         let kept: String = line.chars().take(400).collect();
         assert!(kept.contains("Nothing was changed; "), "{kept}");
         assert!(
-            line.contains("--profile-dir '/home/alexandra/.local/share/pseudolife/tunnel profiles'"),
+            line.contains(
+                "--profile-dir '/home/alexandra/.local/share/pseudolife/tunnel profiles'"
+            ),
             "{line}"
         );
         assert!(
