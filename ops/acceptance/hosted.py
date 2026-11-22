@@ -37,11 +37,13 @@ INSTALL = "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh"
 CLIENT = "pseudolife-mcp"
 TOKEN_FILE = "PSEUDOLIFE_MCP_TOKEN_FILE"
 DAEMON_URL = "PSEUDOLIFE_MCP_DAEMON_URL"
-CODEX_TAG = "rust-v0.171.0"
 CODEX_ASSETS = {
-    "linux-arm64": ("aarch64-unknown-linux-musl", "bcf50b836385e51bd2976ab2bbe92b1b08a1cbe37712eb8dbe378aa78d24871c"),
-    "macos-x64": ("x86_64-apple-darwin", "6f9b1144ffaa64aa12bf30f312405b266b84c433bae9f070be10245762c7aa44"),
-    "macos-arm64": ("aarch64-apple-darwin", "9414c8c967f110b11e8324c0cfa2b20f012094ef890110a561c92ee535a2681a"),
+    "linux-arm64": ("rust-v0.134.0", "aarch64-unknown-linux-musl",
+                    "8e066f998111eb8b44250ac11df004daa07fadf276c5942a7183cb8e421091a3"),
+    "macos-x64": ("rust-v0.171.0", "x86_64-apple-darwin",
+                  "6f9b1144ffaa64aa12bf30f312405b266b84c433bae9f070be10245762c7aa44"),
+    "macos-arm64": ("rust-v0.171.0", "aarch64-apple-darwin",
+                    "9414c8c967f110b11e8324c0cfa2b20f012094ef890110a561c92ee535a2681a"),
 }
 
 
@@ -170,10 +172,10 @@ def published_release(tag, platform, folder):
 
 
 def prepare_codex(platform, scratch):
-    target, digest = CODEX_ASSETS[platform]
+    tag, target, digest = CODEX_ASSETS[platform]
     name = f"codex-{target}"
     archive = scratch / "codex.tar.gz"
-    download(f"https://github.com/openai/codex/releases/download/{CODEX_TAG}/{name}.tar.gz",
+    download(f"https://github.com/openai/codex/releases/download/{tag}/{name}.tar.gz",
              archive, digest)
     target_dir = scratch / "tools"
     target_dir.mkdir()

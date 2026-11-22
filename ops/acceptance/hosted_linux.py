@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 from threading import Event, Thread
 from time import monotonic, sleep
+from traceback import extract_tb
 
 from . import matrix
 from .hosted import (
@@ -615,10 +616,14 @@ def run(tag, platform, output):
         for receipt in receipts:
             receipt.status = "fail"
             receipt.note = str(error)
-    except (OSError, ValueError, KeyError, IndexError, matrix.RecordError):
+    except (OSError, ValueError, KeyError, IndexError, matrix.RecordError) as error:
+        frame = next((frame for frame in reversed(extract_tb(error.__traceback__))
+                      if Path(frame.filename).name in ("hosted.py", "hosted_linux.py", "matrix.py")), None)
+        diagnostic = (f" ({type(error).__name__}, {Path(frame.filename).name} line {frame.lineno})"
+                      if frame is not None else "")
         for receipt in receipts:
             receipt.status = "fail"
-            receipt.note = "A precondition for collecting hosted observations failed."
+            receipt.note = f"A precondition for collecting hosted observations failed{diagnostic}."
     finally:
         for receipt in receipts:
             if receipt.status == "pass" and not cleaned:
