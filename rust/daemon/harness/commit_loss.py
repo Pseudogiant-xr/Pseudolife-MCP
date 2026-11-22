@@ -1,8 +1,7 @@
-"""Commit-loss fault injection: what each daemon serves when PostgreSQL
-commits a write and the daemon never receives the COMMIT reply.
+"""Observe native recovery when PostgreSQL commits and the reply is lost.
 
 usage:
-  python commit_loss.py --rust-bin PATH [--only CASE ...] [--engines python,rust]
+  python commit_loss.py --rust-bin PATH [--only CASE ...]
                         [--fault lost-reply|rollback] [--out FILE] [--report FILE] [--keep]
   python commit_loss.py --smoke        (the proxy alone, against plain psycopg)
 
@@ -21,10 +20,8 @@ itself. ``SSLRequest`` and
 ``GSSENCRequest`` are refused by the proxy itself (``N``), so the stream
 stays plaintext; daemon DSNs to the proxy carry ``sslmode=disable``.
 
-Each case prepares a template bank through the Python daemon's own tools
-(plus declared SQL seeds after the seeding daemon stopped, for rows only
-the dream or curation writes), clones it per engine, and then for each
-engine:
+Each case replays its captured template and checks the native daemon
+against the durable bank:
 
 * (a) arms the proxy and runs the operation: the tool answer;
 * (b) what the daemon serves right after (``memory_search`` for each
@@ -39,7 +36,7 @@ engine:
 
 None of the probe reads are pure (``memory_get`` reinforces, a search logs
 a retrieval event); the first probe after the fault is also what triggers
-the reconnect on both engines, so (b) and (d) may agree.
+the reconnect, so (b) and (d) may agree.
 
 A case whose proxy never fired is invalid (``fault.fired: false``), not a
 pass. Results: a JSON file and a markdown report (paths printed). Never
@@ -139,8 +136,18 @@ class CommitCutProxy:
         return self
 
     def close(self) -> None:
-        if self._server is not None:
-            self.loop.call_soon_threadsafe(self._server.close)
+        async def shut_down():
+            if self._server is not None:
+                self._server.close()
+            # A connection the fault cut can still have its handler parked on
+            # a read; cancel it so the stopped loop holds no pending task.
+            handlers = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in handlers:
+                task.cancel()
+            await asyncio.gather(*handlers, return_exceptions=True)
+
+        if self._thread.is_alive():
+            asyncio.run_coroutine_threadsafe(shut_down(), self.loop).result(10)
         self.loop.call_soon_threadsafe(self.loop.stop)
         self._thread.join(5)
 
@@ -395,128 +402,15 @@ class Mcp:
         return {"isError": bool(res.get("isError")), "value": value}
 
 
-# ── seeds (the same shapes as w2e.py) ────────────────────────────────────
-
-def tool(name, headers=(), **args) -> dict:
-    return {"op": "tool", "name": name, "args": args, "headers": list(headers)}
-
-
-def store(text, **kw) -> dict:
-    return tool("memory_store", text=text, **kw)
-
-
-def sql(statement: str) -> dict:
-    """Seed-only: run after the seeding daemon stopped (its exit flush
-    rewrites the slots it holds)."""
-    return {"op": "sql", "sql": statement}
-
-
-def _q(v):
-    return "NULL" if v is None else "'" + v.replace("'", "''") + "'"
-
-
-def lineage_lesson(task, aspect, task_norm, aspect_norm, lesson, source_texts,
-                   embedding_text) -> list[dict]:
-    """w2e.lineage_lesson: a current lesson whose provenance and synthesis
-    lineage audit name the entries with ``source_texts``."""
-    texts = ", ".join(_q(t) for t in source_texts)
-    return [
-        sql("INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, about, "
-            "polarity, outcome, status, confidence, origin, support, provenance, asserted_at, "
-            "last_confirmed, embedding) SELECT "
-            f"{_q(task)}, {_q(aspect)}, {_q(task_norm)}, {_q(aspect_norm)}, {_q(lesson)}, NULL, "
-            "'+', 'success', 'current', 0.7, 'agent', '[\"signal:1\"]', "
-            "(SELECT jsonb_agg('entry:' || id ORDER BY id) FROM entries "
-            f"WHERE text IN ({texts})), 1700000000, 1700000000, embedding "
-            f"FROM entries WHERE text = {_q(embedding_text)}"),
-        sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
-            "decided_by, reason, record, decided_at) SELECT 'lesson', "
-            f"{_q(task_norm)}, {_q(aspect_norm)}, 'lineage', 'lesson_synthesis', "
-            "'verified_dependencies', jsonb_build_object('lesson', "
-            f"{_q(lesson)}, 'asserted_at', 1700000000, 'source_entry_ids', "
-            f"(SELECT jsonb_agg(id ORDER BY id) FROM entries WHERE text IN ({texts}))), "
-            "1700000000.5"),
-    ]
-
-
 def slot_norm(s: str) -> str:
     return re.sub(r"[\s._\-/]+", "-", s.strip().casefold()).strip("-")
 
 
-def evidence_fp(record: dict) -> str:
-    return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"),
-                                     ensure_ascii=False, allow_nan=False)
-                          .encode("utf-8")).hexdigest()
-
-
-def _lit(v) -> str:
-    if v is None:
-        return "NULL"
-    if isinstance(v, (int, float)):
-        return repr(v)
-    if isinstance(v, (list, dict)):
-        return "'" + json.dumps(v).replace("'", "''") + "'::jsonb"
-    return "'" + str(v).replace("'", "''") + "'"
-
-
-SLOT_STAMP = 1700000000.0
-_SLOT_COMMON = ("entity", "attribute", "value", "polarity", "status", "confidence", "origin",
-                "support", "provenance", "asserted_at", "last_confirmed", "supersedes_value",
-                "superseded_by_value", "superseded_at", "tx_time", "valid_time", "hlc_phys",
-                "hlc_logical", "writer_id", "session_id", "version")
-
-
-def slot_world(entity, attribute, value, *, status="current", asserted=SLOT_STAMP,
-               superseded_at=None, hlc_logical=0) -> dict:
-    return {"entity": entity, "attribute": attribute, "value": value, "polarity": "+",
-            "status": status, "confidence": 0.9, "origin": "source", "support": ["source"],
-            "provenance": [], "asserted_at": asserted, "last_confirmed": asserted,
-            "supersedes_value": None, "superseded_by_value": None,
-            "superseded_at": superseded_at, "tx_time": asserted, "valid_time": asserted,
-            "hlc_phys": int(asserted * 1000), "hlc_logical": hlc_logical, "writer_id": "seed",
-            "session_id": None, "version": 1, "source_url": "https://example.org/host",
-            "source_quote": value, "retrieved_at": SLOT_STAMP, "freshness_class": "evergreen",
-            "content_hash": None, "source_doc_id": None}
-
-
-def slot_row_sql(row: dict) -> dict:
-    cols = dict(row, entity_norm=slot_norm(row["entity"]),
-                attribute_norm=slot_norm(row["attribute"]))
-    return sql(f"INSERT INTO world_facts ({', '.join(cols)}) "
-               f"VALUES ({', '.join(_lit(v) for v in cols.values())})")
-
-
-def slot_snapshot(row: dict, **changes) -> dict:
-    row = dict(row, **changes)
-    en, an = slot_norm(row["entity"]), slot_norm(row["attribute"])
-    snap = {"store": "world", "key": f"{en}|{an}", "entity_norm": en, "attribute_norm": an}
-    snap.update({k: row[k] for k in _SLOT_COMMON})
-    snap.update({k: row[k] for k in ("source_url", "source_quote", "retrieved_at",
-                                     "freshness_class", "content_hash", "source_doc_id")})
-    snap["embedding"] = None
-    return snap
-
-
-def curated_retire(survivor: dict, loser: dict, decided_at=SLOT_STAMP + 500) -> dict:
-    """w2e.curated_retire for a world pair kept on side a."""
-    retired = dict(loser, status="retired", superseded_at=decided_at)
-    record = dict(retired)
-    record.update({
-        "_curation_evidence_fingerprint": evidence_fp(loser),
-        "_curation_retired_fingerprint": evidence_fp(retired),
-        "_curation_duplicate": {"version": 1, "keep": "a", "a": survivor, "b": loser,
-                                "a_fingerprint": evidence_fp(survivor),
-                                "b_fingerprint": evidence_fp(loser),
-                                "loser_embedding": None},
-    })
-    record.pop("embedding")
-    return sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
-               f"decided_by, reason, record, decided_at) VALUES ('world', "
-               f"{_lit(loser['entity_norm'])}, {_lit(loser['attribute_norm'])}, 'retire', "
-               f"'dream-curation', 'duplicate', {_lit(record)}, {decided_at!r})")
-
-
 # ── cases ─────────────────────────────────────────────────────────────────
+# Each case's starting bank is its captured template in
+# commit_loss_seed_rows.json (replayed by w2e_shutdown_seed.replay); the
+# seeding calls that produced it are the frozen prepare_template at the
+# commit commit_loss_seed_rows.md names.
 
 BACKUP = "The backup job runs at 02:00 nightly."
 LUNCH = "A note about the team lunch near the office."
@@ -525,9 +419,6 @@ TTL = "The cache TTL is 300 seconds."
 TTL_NEW = "The cache TTL is 600 seconds."
 STAGE = ["The staging cluster runs three nodes.", "Staging cluster has three nodes running."]
 STAGE_NEW = "The staging cluster runs three nodes in total."
-HOST = slot_world("Curate Host", "OS", "Debian 12")
-HOST_LOSER = slot_world("Curate Host", "Operating System", "Debian 12 (bookworm)",
-                        asserted=SLOT_STAMP + 50, hlc_logical=1)
 
 # Markers: a regex over the statements of the transaction to cut (both
 # engines' SQL, checked against pseudolife_memory/storage/postgres.py and
@@ -555,9 +446,6 @@ def _reinstate_args(dsn: str) -> dict:
 CASES: dict[str, dict] = {
     "forget-lesson-source": {
         "about": "memory_forget(scope='memory') of the only entry a current lesson cites",
-        "seed": [store(BACKUP), store(LUNCH),
-                 *lineage_lesson("schedule backups", "timing", "schedule-backups", "timing",
-                                 BACKUP_LESSON, [BACKUP], BACKUP)],
         "marker": DELETE_ENTRY,
         "op": lambda dsn: ("memory_forget", {"scope": "memory", "text": BACKUP}, ()),
         "entries": [BACKUP, LUNCH],
@@ -569,7 +457,6 @@ CASES: dict[str, dict] = {
     },
     "supersede": {
         "about": "memory_supersede of one live entry by exact text",
-        "seed": [store(TTL)],
         "marker": RETIRE_ENTRY,
         "op": lambda dsn: ("memory_supersede", {"new_text": TTL_NEW, "old_text": TTL}, ()),
         "entries": [TTL, TTL_NEW],
@@ -579,7 +466,6 @@ CASES: dict[str, dict] = {
     },
     "reinstate": {
         "about": "memory_reinstate of a superseded entry (reviewer principal)",
-        "seed": [store(TTL), tool("memory_supersede", new_text=TTL_NEW, old_text=TTL)],
         "marker": REINSTATE_DECISION,
         "op": lambda dsn: ("memory_reinstate", _reinstate_args(dsn), (REVIEWER,)),
         "entries": [TTL, TTL_NEW],
@@ -589,7 +475,6 @@ CASES: dict[str, dict] = {
     },
     "consolidate": {
         "about": "memory_consolidate of two live entries into one",
-        "seed": [store(STAGE[0]), store(STAGE[1])],
         "marker": RETIRE_ENTRY,
         "op": lambda dsn: ("memory_consolidate",
                            {"new_text": STAGE_NEW, "replaces": list(STAGE)}, ()),
@@ -603,10 +488,6 @@ CASES: dict[str, dict] = {
         "about": "memory_graph_review(restore_slot) of a forgotten world fact (legacy path: "
                  "resident restore, one store_decisions txn per record, then the slot save); "
                  "the cut is the decision's COMMIT",
-        "seed": [store("A note so the bank is not empty."),
-                 tool("memory_world_set", entity="Rust", attribute="edition", value="2024",
-                      source_url="https://doc.rust-lang.org/"),
-                 tool("memory_forget", scope="world", entity="Rust", attribute="edition")],
         "marker": STORE_DECISION,
         "op": lambda dsn: ("memory_graph_review",
                            {"action": "restore_slot", "store": "world", "src": "rust|edition"},
@@ -623,11 +504,6 @@ CASES: dict[str, dict] = {
         "about": "memory_graph_review(restore_slot) of a curated duplicate retirement (one "
                  "transaction: locked-row validation, slot rewrite, restore decision; "
                  "recovery: reconcile_restore / recover_slot_curation)",
-        "seed": [store("A note so the bank is not empty."),
-                 slot_row_sql(HOST),
-                 slot_row_sql(dict(HOST_LOSER, status="retired",
-                                   superseded_at=SLOT_STAMP + 500)),
-                 curated_retire(slot_snapshot(HOST), slot_snapshot(HOST_LOSER))],
         "marker": STORE_DECISION,
         "op": lambda dsn: ("memory_graph_review",
                            {"action": "restore_slot", "store": "world",
@@ -857,20 +733,9 @@ def base_side_env(dsn: str) -> dict:
             "PSEUDOLIFE_MCP_TOKENS": f"{REVIEWER_TOKEN}:reviewer"}
 
 
-def make_daemon(engine: str, binary: Path | None, home: Path, dsn: str) -> daemons.Daemon:
+def make_daemon(binary: Path, home: Path, dsn: str) -> daemons.Daemon:
     env = base_side_env(dsn)
     port = daemons.free_port()
-    if engine == "python":
-        d = daemons.python_daemon(home, port, daemons.base_env(home, env))
-        # A returning signal handler: uvicorn's lifespan shutdown (and the
-        # exit flush) runs on SIGTERM, as in w2e.configure_clean_exit.
-        d.argv = [sys.executable, "-c", (
-            "import signal\n"
-            "for sig in (signal.SIGTERM, getattr(signal, 'SIGBREAK', signal.SIGTERM)):\n"
-            "    signal.signal(sig, lambda *_: None)\n"
-            "from pseudolife_memory.daemon import run_daemon\n"
-            "run_daemon()\n")]
-        return d
     return daemons.rust_daemon(binary, home, port, daemons.base_env(home, w1a.rust_env(env)))
 
 
@@ -941,17 +806,17 @@ VARIANTS = {
 }
 
 
-def run_engine(name: str, case: dict, engine: str, binary: Path | None, template: str,
+def run_engine(name: str, case: dict, binary: Path, template: str,
                root: Path, owned: list[str], variant: str = "unrelated",
                fault: str = "lost-reply") -> dict:
-    db = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:20]}_{engine[:2]}_{variant[:2]}_{fault[:2]}")
+    db = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:20]}_ru_{variant[:2]}_{fault[:2]}")
     owned.append(db)
     dsn = pg.create(db, template=template)
     proxy = CommitCutProxy(*upstream(), mode=fault).start()
-    home = daemons.make_home(root, f"{name}-{engine}-{variant}-{fault}", None)
-    result: dict = {"case": name, "engine": engine, "variant": variant, "fault_mode": fault,
+    home = daemons.make_home(root, f"{name}-rust-{variant}-{fault}", None)
+    result: dict = {"case": name, "engine": "rust", "variant": variant, "fault_mode": fault,
                     "about": case["about"], "marker": case["marker"]}
-    d = make_daemon(engine, binary, home, proxied_dsn(dsn, proxy.port))
+    d = make_daemon(binary, home, proxied_dsn(dsn, proxy.port))
     known: dict[str, set[int]] = {}
     try:
         start(d)
@@ -983,7 +848,7 @@ def run_engine(name: str, case: dict, engine: str, binary: Path | None, template
                                 "value": again["value"]}
         else:
             again = mcp.call("memory_store", {
-                "text": f"An unrelated note stored after the fault ({engine}, {name})."})
+                "text": f"An unrelated note stored after the fault (rust, {name})."})
             result["d_call"] = {"tool": "memory_store", "isError": again["isError"],
                                 "value": again["value"]}
         result["d"] = checkpoint(mcp, case, dsn, known)
@@ -994,7 +859,7 @@ def run_engine(name: str, case: dict, engine: str, binary: Path | None, template
         result["stop_db_changed"] = _truth_diff(result["d"]["db"], result["stop_db"])
         result["log_before_restart"] = log_excerpt(d.log)
         shutil.copy(d.log, home / "daemon-first.log")
-        d = make_daemon(engine, binary, home, dsn)
+        d = make_daemon(binary, home, dsn)
         start(d)
         mcp = Mcp(d.port)
         mcp.init()
@@ -1023,30 +888,16 @@ def _health(port: int) -> dict:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
-def prepare_template(name: str, case: dict, root: Path, owned: list[str]) -> str:
+def prepare_template(name: str, owned: list[str]) -> str:
+    from w2e_shutdown_seed import replay
+
+    if pg.base_database() is not None:
+        raise RuntimeError(
+            f"{pgdisposable.BASE_ENV} is set, but commit-loss cases replay captured rows into an "
+            f"empty bank and cannot start from a copied real bank; unset {pgdisposable.BASE_ENV}")
     template = pg.name(f"pl_cf_w7c_{name.replace('-', '_')[:24]}_t")
     owned.append(template)
-    dsn = pg.create(template)
-    home = daemons.make_home(root, f"{name}-seed", None)
-    d = daemons.python_daemon(home, daemons.free_port(),
-                              daemons.base_env(home, base_side_env(dsn)))
-    try:
-        start(d)
-        mcp = Mcp(d.port)
-        mcp.init()
-        for op in case["seed"]:
-            if op["op"] != "tool":
-                continue
-            r = mcp.call(op["name"], op["args"], [tuple(h) for h in op["headers"]])
-            if r["isError"]:
-                raise RuntimeError(f"seed op failed: {op} -> {r}")
-    finally:
-        d.stop()
-    import psycopg
-    with psycopg.connect(dsn, autocommit=True) as conn:
-        for op in case["seed"]:
-            if op["op"] == "sql":
-                conn.execute(op["sql"])
+    replay(pg.create(template), name)
     return template
 
 
@@ -1255,7 +1106,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--rust-bin", type=Path)
     ap.add_argument("--only", nargs="*", choices=sorted(CASES))
-    ap.add_argument("--engines", default="python,rust")
+    ap.add_argument("--engines", default="rust", choices=["rust"], help="the native engine")
     ap.add_argument("--variants", default=",".join(VARIANTS))
     ap.add_argument("--fault", choices=sorted(FAULTS), default="lost-reply")
     ap.add_argument("--out", type=Path)
@@ -1276,16 +1127,16 @@ def main() -> int:
             _turn_sys.path.remove(_turn_root)
     if a.smoke:
         return smoke()
-    engines = [e.strip() for e in a.engines.split(",") if e.strip()]
     variants = [v.strip() for v in a.variants.split(",") if v.strip()]
     if not set(variants) <= set(VARIANTS):
         ap.error(f"--variants: expected some of {sorted(VARIANTS)}")
-    if "rust" in engines and not a.rust_bin:
+    if not a.rust_bin:
         ap.error("--rust-bin is required for the rust engine")
+    a.rust_bin = a.rust_bin.resolve()
     root = Path(tempfile.mkdtemp(prefix=f"commit-loss-{os.getpid()}-", dir=daemons.scratch_root()))
     out = a.out or root / "commit-loss.json"
     rep = a.report or out.with_suffix(".md")
-    meta = {"started": time.time(), "engines": engines, "variants": variants,
+    meta = {"started": time.time(), "engines": ["rust"], "variants": variants,
             "fault": a.fault}
     if a.rust_bin:
         meta["rust_sha256"] = hashlib.sha256(a.rust_bin.read_bytes()).hexdigest()
@@ -1308,20 +1159,16 @@ def main() -> int:
             owned: list[str] = []
             try:
                 print(f"[{time.strftime('%H:%M:%S')}] {name}: seeding", flush=True)
-                template = prepare_template(name, case, root, owned)
+                template = prepare_template(name, owned)
                 for variant in variants:
-                    for engine in engines:
-                        print(f"[{time.strftime('%H:%M:%S')}] {name}: {engine} / {variant}",
-                              flush=True)
-                        r = run_engine(name, case, engine, a.rust_bin, template, root, owned,
-                                       variant, a.fault)
-                        r["verdict"] = verdict(r)
-                        results.append(r)
-                        print(f"  {engine}/{variant}: "
-                              f"{json.dumps(r['verdict'], ensure_ascii=False)}", flush=True)
-                        gb = free_gb(root)
-                        if gb < a.min_free_gb:
-                            raise RuntimeError(f"{gb:.2f} GB free, below the floor")
+                    print(f"[{time.strftime('%H:%M:%S')}] {name}: rust / {variant}", flush=True)
+                    r = run_engine(name, case, a.rust_bin, template, root, owned, variant, a.fault)
+                    r["verdict"] = verdict(r)
+                    results.append(r)
+                    print(f"  rust/{variant}: {json.dumps(r['verdict'], ensure_ascii=False)}", flush=True)
+                    gb = free_gb(root)
+                    if gb < a.min_free_gb:
+                        raise RuntimeError(f"{gb:.2f} GB free, below the floor")
             except Exception as exc:  # noqa: BLE001
                 results.append({"case": name, "engine": "-", "variant": "-",
                                 "fault_mode": a.fault, "about": case["about"],
