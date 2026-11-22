@@ -322,6 +322,45 @@ def test_audit_bank_export_reference_without_the_frozen_package(monkeypatch, tmp
     assert want["db"] == "unchanged"
 
 
+def test_audit_export_time_references_match_frozen_argument_parsing(monkeypatch):
+    from datetime import datetime
+    import sys
+
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        tested = set()
+        for case in audit.cases():
+            reference = case.reference
+            if getattr(reference, "func", None) is not audit._bank_export_reference:
+                continue
+            _, _, filters, _ = reference.args
+            bounds = {}
+            for index, arg in enumerate(case.argv):
+                if isinstance(arg, str):
+                    flag, joined, value = arg.partition("=")
+                    if flag in ("--since", "--until"):
+                        bounds[flag[2:]] = value if joined else case.argv[index + 1]
+            assert bounds.keys() == filters.keys() & {"since", "until"}, case.id
+            for bound, arg in bounds.items():
+                # The frozen CLI tries an epoch first, then an ISO datetime.
+                try:
+                    parsed = float(arg)
+                except ValueError:
+                    try:
+                        parsed = datetime.fromisoformat(arg)
+                    except ValueError:
+                        # Some ISO spellings entered the frozen parser in 3.11.
+                        if sys.version_info < (3, 11):
+                            continue
+                        raise
+                declared = filters[bound]
+                if not isinstance(declared, datetime) and isinstance(parsed, datetime):
+                    parsed = parsed.timestamp()
+                assert declared == parsed, (case.id, bound, arg)
+                tested.add(bound)
+        assert tested == {"since", "until"}
+
+
 def test_audit_live_export_refuses_candidate_recordings(monkeypatch, tmp_path):
     with _cold_audit(monkeypatch) as audit:
         case_id = "export-agent-unknown"
@@ -401,6 +440,7 @@ def test_audit_bank_verify_reference_without_the_frozen_package(monkeypatch, tmp
         connect.assert_not_called()
     else:
         connect.assert_called_once_with(name)
+        assert conn.execute.call_args_list[0].args == ("SET LOCAL extra_float_digits = 3",)
         assert conn.execute.call_args.args == (
             "SELECT seq,event,actor,principal,agent_id,recipient_agent_id,project,task,"
             "message_id,payload,created_at,hlc,prev_hash,hash,body,body_salt "
