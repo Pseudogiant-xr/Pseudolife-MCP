@@ -106,6 +106,11 @@ the Python client to retain autostart. On the native client, tunnels run in
 the foreground. See [the tunnel guide](tunnels.md#autostart-and-private-storage)
 before moving a host that serves a tunnel.
 
+The installer's guided tunnel setup (`--tunnel` or `-Tunnel`) is available
+with the Python client. The native installer refuses that switch before
+changing the host. For the native client, rerun without the switch and
+follow the [explicit profile and key setup](tunnels.md).
+
 When the native installer sets up Codex with a daemon token (the local
 install's own or a supplied file), it waits up to three minutes for an
 authenticated daemon read. It retries a connection failure or server error
@@ -14047,13 +14052,22 @@ An older native foreground supervisor needs a one-time `pseudolife-mcp tunnel st
 followed by `pseudolife-mcp tunnel run` for the same profile and directory.
 Use the same commands when the updated client pins a different vendor version.
 If a service or scheduled task started that supervisor, restart the existing
-registration through its manager. A Python-supervised tunnel keeps serving
-after an opted-in client move, and native `tunnel stop` refuses to stop it.
-For a planned switch, stop the old tunnel with the Python client before
-changing clients. If you already switched, end the old process before
-reusing its profile. Then run `pseudolife-mcp tunnel run` in a terminal you
-can keep open. Removing a Python autostart registration also removes
-automatic starts for that profile. Keep the Python client if you need them.
+registration through its manager.
+
+A Python-supervised tunnel keeps serving after the client switch.
+For a planned switch, stop it with the Python client before changing clients.
+After switching, run `pseudolife-mcp tunnel stop --profile <name>`. It prints
+a copyable stop command when it can read the saved profile and locate the
+retained Python client. The `tunnel update` JSON report puts the same guidance
+in its `detail` field. If you cannot stop the Python tunnel, wait until its
+process ends, for example after a restart.
+Once `tunnel status` reports the tunnel has stopped, move aside any leftover
+process record it names. If the saved profile is missing, use `tunnel
+update` to check for an orphaned process record and move it aside only when
+the report marks it `leftover`. Restore or recreate the profile before
+starting the tunnel. Run `pseudolife-mcp tunnel run --profile <name>` in a
+terminal you keep open. Include the same `--profile-dir` if you use a custom
+directory.
 
 An interrupted key renewal or a retained previous key reports `stale` with
 guidance for that state. A pending refresh request written by the Python
@@ -14074,7 +14088,7 @@ the saved key to check it: a damaged key file is no usable key, and a key
 sealed by another account, or read over a logon without the account's
 credentials (such as a key-based SSH logon), is reported as `not_verified`.
 `pseudolife-mcp doctor` lists saved tunnels and names only steps this client
-runs. If your tunnel relies on background start or refresh, keep the
+runs. If your tunnel relies on automatic or background start, keep the
 Python client. An update keeps it unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
@@ -14093,9 +14107,11 @@ pseudolife-mcp tunnel setup
 ```
 
 With the Python client, the installer can enter this guided flow with
-`ops/install.sh --tunnel` or `ops/install.ps1 -Tunnel`. Native clients use the
-explicit profile and key setup described above. Setup reuses saved choices
-and does not ask again for access consent or a saved key.
+`ops/install.sh --tunnel` or `ops/install.ps1 -Tunnel`. The native installer
+refuses that switch before changing the host. For the native client, rerun
+without the switch and follow the explicit profile and key setup above.
+Guided setup reuses saved choices and does not ask again for access consent
+or a saved key.
 If discovery finds conflicting registrations or only a literal token, select the
 connection explicitly using an existing owner-only token file:
 
@@ -14246,7 +14262,8 @@ a sleeping or powered-off host available.
 
 **A machine with an autostart service stays on the Python client.** The
 service starts the tunnel through the installed `pseudolife-mcp` launcher,
-and the native client supports foreground operation only. A run that would
+and the native client supports foreground operation through
+`pseudolife-mcp tunnel run`. A run that would
 move this machine to the native client refuses while an installer-owned
 tunnel service is registered and runs that launcher, including a disabled
 service. An update with
@@ -14256,7 +14273,8 @@ names the service and changes nothing. Rerun without
 `PSEUDOLIFE_SHIM_ENGINE=native` to stay on the Python client. To move anyway,
 first run the `pseudolife-mcp tunnel service remove` command the refusal
 prints (it carries the service's `--profile`, `--profile-dir` and, for a root
-service, `--system-service`), then rerun. An unattended update on the
+service, `--system-service`), then rerun. Removing autostart means the tunnel
+will no longer start on its own. An unattended update on the
 daemon's host that was configured to opt in instead updates the daemon alone
 and says why. Once the autostart is gone, a release update can move the
 client when it runs with `PSEUDOLIFE_SHIM_ENGINE=native`.

@@ -57,6 +57,7 @@ def decision_checks() -> list[tuple[str, str]]:
 
     for name, scenario in w2e.SCENARIOS.items():
         walk(name, scenario)  # ops, settles, seeds: wherever a check may sit
+    walk("candidate-auto-reopen", w2e_queue_judges.candidate_reopen_wait("1" * 64, "a" * 64).as_string())
     # Run-time: the records Python's candidate fingerprint check compares.
     found.add(("fingerprint_diffs",
                f"SELECT count(*) FROM ({w2e_queue_judges.candidate_records_sql()}) own"))
@@ -64,7 +65,8 @@ def decision_checks() -> list[tuple[str, str]]:
 
 
 def test_conjunction_parts_are_checked_on_their_own():
-    parts = exists_parts(w2e_queue_judges.CANDIDATE_REOPENED)
+    wait = w2e_queue_judges.candidate_reopen_wait("1" * 64, "a" * 64).as_string()
+    parts = exists_parts(wait)
     assert len(parts) == 2 and all("value->'pair' IN" in p for p in parts)
 
 

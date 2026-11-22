@@ -3,6 +3,7 @@ import contextlib
 import copy
 import io
 import sys
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -119,18 +120,102 @@ class Scenario:
 
 
 class MutantQualification(unittest.TestCase):
+    def test_cortex_capture_pins_modes_and_query_order(self):
+        from w2d_seed_rows import load_capture
+
+        capture = load_capture("cortex", cortex.CAPTURE_SHA256)
+        self.assertEqual(set(capture["modes"]), {"default", "bm25_demote", "quarantine"})
+        for mode, observation in capture["modes"].items():
+            with self.subTest(mode=mode):
+                self.assertEqual(len(observation["cases"]), 26)
+                self.assertEqual([case["query"] for case in observation["cases"]], cortex.QUERIES)
+
+    def test_fixed_seed_refuses_an_older_capture_before_connecting(self):
+        import w2d_seed_rows as seed_rows
+        from rust.harness_support.schema import load_plan
+
+        current = load_plan()[0]["schema_version"]
+        captured = {"tables": {"meta": [{"key": "schema_version", "value": current - 1}]}, "sequences": {}}
+        conn = unittest.mock.MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (False,)
+        with (patch.object(seed_rows, "check_target"),
+              patch.object(seed_rows.psycopg, "connect", return_value=conn) as connect,
+              patch.object(seed_rows, "assert_fixture_database"),
+              patch.object(seed_rows, "ensure_schema") as ensure,
+              patch.object(seed_rows, "checked_fixture_insert", return_value=(seed_rows.sql.SQL("INSERT"), ()))):
+            with self.assertRaisesRegex(ValueError, rf"capture schema version {current - 1}.*schema plan version {current}.*re-make"):
+                seed_rows.replay("dbname=pl_cf_w2d_fixture", captured)
+        connect.assert_not_called()
+        ensure.assert_not_called()
+
+    def test_continuum_seed_retains_its_captured_clock(self):
+        import seed_entries
+
+        with (patch("time.time", return_value=1800000000.0),
+              patch.object(seed_entries, "replay") as replay):
+            seed_entries.seed("dbname=pl_cf_w2d_fixture")
+        bank = replay.call_args.args[1]
+        row = next(entry for entry in bank["tables"]["entries"] if entry["id"] == 1)
+        self.assertEqual(row["ts"], 1795000000.25)
+
+    def test_fixed_seed_refuses_partial_schema_without_meta(self):
+        import w2d_seed_rows as seed_rows
+        from rust.harness_support.schema import load_plan
+
+        conn = unittest.mock.MagicMock()
+        conn.__enter__.return_value = conn
+
+        def query(sql):
+            result = unittest.mock.MagicMock()
+            # The partial bank contains an entries table and no meta table.
+            result.fetchone.return_value = ("pg_class" in sql,)
+            return result
+
+        conn.execute.side_effect = query
+        version = load_plan()[0]["schema_version"]
+        captured = {"tables": {"meta": [{"key": "schema_version", "value": version}]}, "sequences": {}}
+        with (patch.object(seed_rows, "check_target"),
+              patch.object(seed_rows.psycopg, "connect", return_value=conn),
+              patch.object(seed_rows, "assert_fixture_database"),
+              patch.object(seed_rows, "ensure_schema") as ensure):
+            with self.assertRaisesRegex(ValueError, "requires a fresh disposable bank"):
+                seed_rows.replay("dbname=pl_cf_w2d_fixture", captured)
+        ensure.assert_not_called()
+
+    def test_seeded_base_refusal_precedes_clone_and_is_only_for_seeded(self):
+        import run
+
+        with (patch.dict(run.os.environ, {"PL_HARNESS_BASE_DATABASE": "pl_cf_mir_fixture"}, clear=True),
+              patch.object(run.pg, "name", return_value="pl_cf_w1a_fixture"),
+              patch.object(run.pg, "create", side_effect=RuntimeError("clone attempted")) as create):
+            with self.assertRaisesRegex(ValueError, "unset PL_HARNESS_BASE_DATABASE"):
+                run._run_scenario(run.SeededBank(), Path("candidate"), Path("unused"), "golden", False)
+            create.assert_not_called()
+            with self.assertRaisesRegex(RuntimeError, "clone attempted"):
+                run._run_scenario(run.SCENARIOS["mcp-search-explain"](), Path("candidate"),
+                                  Path("unused"), "golden", False)
+            create.assert_called_once_with("pl_cf_w1a_fixture")
+
     def test_cortex_requires_one_result_per_oracle_case(self):
         cases = [{"query": "first", "entries": []}, {"query": "second", "entries": []}]
         state = {"rows": {}}
+        reference = {"at": 0, "bank": {}, "modes": {"default": {
+            "cases": cases, "delta": {},
+            "terminal": {"public.slot_reads": None, "public.retrieval_events": None},
+        }}}
+        marker = Path(self.enterContext(tempfile.TemporaryDirectory())) / "test-postgres.turn-enabled"
         for count in (1, 2, 3):
             with (self.subTest(results=count),
                   patch.object(sys, "argv", ["w2d_cortex_check.py", "--mode", "default"]),
-                  patch.dict(cortex.os.environ, {"CARGO_TARGET_DIR": "unused"}),
+                  patch.dict(cortex.os.environ, {"CARGO_TARGET_DIR": "unused"}, clear=True),
+                  patch.object(cortex, "_DATABASE_TURN_MARKER", marker),
                   patch.object(cortex.tempfile, "mkdtemp", return_value="unused"),
-                  patch.object(cortex, "seed", return_value=(0, [])),
+                  patch.object(cortex, "QUERIES", ["first", "second"]),
+                  patch.object(cortex, "load_capture", return_value=reference),
                   patch.object(cortex, "create", return_value="fixture"),
+                  patch.object(cortex, "replay"),
                   patch.object(cortex, "drop"),
-                  patch.object(cortex, "run_python", return_value=(cases, state, state)),
                   patch.object(cortex, "run_rust", return_value=([{"entries": []}] * count, state, state)),
                   contextlib.redirect_stdout(io.StringIO())):
                 self.assertEqual(cortex.main(), 0 if count == len(cases) else 1)

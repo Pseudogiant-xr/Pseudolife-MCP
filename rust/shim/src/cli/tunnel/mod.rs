@@ -415,12 +415,52 @@ fn setup_command(name: &str, directory: Option<&str>) -> String {
 fn tunnel_command(action: &str, name: &str, directory: Option<&str>) -> String {
     let mut command = format!("pseudolife-mcp tunnel {action} --profile {name}");
     if let Some(directory) = directory {
-        command.push_str(&format!(
-            " --profile-dir {}",
-            crate::cli::update::seams::quote(directory)
-        ));
+        command.push_str(&format!(" --profile-dir {}", quote_tunnel_arg(directory)));
     }
     command
+}
+
+fn quote_tunnel_arg(text: &str) -> String {
+    let quoted = crate::cli::update::seams::quote(text);
+    if cfg!(windows) {
+        // PowerShell treats each of these as a single quote delimiter.
+        quoted
+            .replace('‘', "‘‘")
+            .replace('’', "’’")
+            .replace('‚', "‚‚")
+            .replace('‛', "‛‛")
+    } else {
+        quoted
+    }
+}
+
+fn legacy_handoff(name: &str, record: &record::Record) -> String {
+    let directory = record.path.parent().and_then(Path::to_str);
+    if let Some((console, directory)) = record
+        .legacy_console
+        .as_deref()
+        .and_then(Path::to_str)
+        .zip(directory)
+    {
+        let invoke = if cfg!(windows) { "& " } else { "" };
+        return format!(
+            "Stop it with `{invoke}{} tunnel stop --profile {name} --profile-dir {}`",
+            quote_tunnel_arg(console),
+            quote_tunnel_arg(directory)
+        );
+    }
+    let run = tunnel_command("run", name, directory);
+    format!(
+        "It keeps serving until its process ends, for example when this machine restarts. Once you confirm it has stopped, move its leftover process record at {} aside if it still exists. Start it natively with `{run}` in a terminal you keep open",
+        record.path.display()
+    )
+}
+
+fn legacy_profile_recovery(path: &Path) -> String {
+    format!(
+        "Restore the saved tunnel profile at {} from a readable, owner-only backup before stopping it, or let its process end",
+        path.display()
+    )
 }
 
 fn previous_key_hint(command: &str) -> String {
@@ -446,10 +486,12 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
             "tunnel {name} is running (process record {file}); use tunnel stop to stop its native supervisor"
         ),
         Liveness::Running if updating => format!(
-            "the Python client started tunnel {name} (process record {file}). The native client cannot verify or restart that launch and left it running. Use the Python client that started it to stop it"
+            "the Python client started tunnel {name} (process record {file}). The native client cannot verify or restart that launch and left it running. {}",
+            legacy_handoff(name, record)
         ),
         Liveness::Running => format!(
-            "tunnel {name} is running (process record {file}). Use the client that started it to stop it"
+            "tunnel {name} is running (process record {file}). {}",
+            legacy_handoff(name, record)
         ),
         Liveness::Gone => format!(
             "tunnel {name} is not running; its process record {file} is left from a tunnel that stopped and can be deleted"
@@ -783,10 +825,13 @@ fn update_with_runtime(root: &Path, executable: Option<&Path>) -> Answer {
                     (Ok(_), Liveness::Gone) => "unread",
                     _ => "stale",
                 };
-                let sentence = record_sentence(name, record, true);
                 let sentence = match unread {
-                    Ok(unread) => format!("{unread}; {sentence}"),
-                    Err(_) => sentence,
+                    Ok(unread) if !record.native && record.liveness == Liveness::Running => {
+                        let recovery = legacy_profile_recovery(&store::profile_file(root, name));
+                        format!("{unread}. The running Python tunnel was left in place. {recovery}")
+                    }
+                    Ok(unread) => format!("{unread}; {}", record_sentence(name, record, true)),
+                    Err(_) => record_sentence(name, record, true),
                 };
                 let running = match record.liveness {
                     Liveness::Running => "true",
@@ -1211,11 +1256,147 @@ mod tests {
         assert!(
             detail.contains("the Python client started tunnel dot")
                 && detail.contains("cannot verify or restart that launch and left it running")
-                && detail.contains("Use the Python client that started it to stop it"),
+                && detail.contains("It keeps serving until its process ends")
+                && detail.contains(&tunnel_command("run", "dot", store.0.to_str()))
+                && detail.contains("in a terminal you keep open")
+                && !detail.contains("Use the Python client that started it"),
             "{detail}"
+        );
+        assert!(
+            matches!(runtime::stop(&store.0, "dot"), Err(Fail::Detail(message))
+            if message.contains("It keeps serving until its process ends")
+                && message.contains(&tunnel_command("run", "dot", store.0.to_str()))
+                && !message.contains("stop it with the client that started it"))
         );
         // Still running afterwards: the record and this process are untouched.
         assert!(store.0.join("dot.process.json").is_file());
+    }
+
+    #[test]
+    fn legacy_status_and_handoff_render_literal_commands() {
+        let mut record = record::Record {
+            path: "tunnels/dot.process.json".into(),
+            liveness: Liveness::Running,
+            native: false,
+            legacy_console: None,
+            ready: true,
+            why: None,
+        };
+        assert_eq!(
+            record_sentence("dot", &record, false),
+            "tunnel dot is running (process record tunnels/dot.process.json). It keeps serving until its process ends, for example when this machine restarts. Once you confirm it has stopped, move its leftover process record at tunnels/dot.process.json aside if it still exists. Start it natively with `pseudolife-mcp tunnel run --profile dot --profile-dir 'tunnels'` in a terminal you keep open"
+        );
+        let (console, command) = if cfg!(windows) {
+            (
+                r"old‘a’b‚c‛d\Scripts\pseudolife-mcp.exe",
+                r"`& 'old‘‘a’’b‚‚c‛‛d\Scripts\pseudolife-mcp.exe' tunnel stop --profile dot --profile-dir 'tunnels'`",
+            )
+        } else {
+            (
+                "old‘a’b‚c‛d/bin/pseudolife-mcp",
+                "`'old‘a’b‚c‛d/bin/pseudolife-mcp' tunnel stop --profile dot --profile-dir 'tunnels'`",
+            )
+        };
+        record.legacy_console = Some(console.into());
+        assert_eq!(
+            legacy_handoff("dot", &record),
+            format!("Stop it with {command}")
+        );
+        assert_eq!(
+            record_sentence("dot", &record, true),
+            format!(
+                "the Python client started tunnel dot (process record tunnels/dot.process.json). The native client cannot verify or restart that launch and left it running. Stop it with {command}"
+            )
+        );
+    }
+
+    #[test]
+    fn update_and_stop_name_the_retained_python_console() {
+        let mut store = Store::new();
+        let directory = store.0.with_file_name("tunnel’s data");
+        std::fs::rename(&store.0, &directory).unwrap();
+        store.0 = directory;
+        store.profile("dot", true);
+        store.key("dot");
+        let venv = store.0.parent().unwrap().join("old runtime’s venv");
+        let console = venv.join(if cfg!(windows) {
+            "Scripts/pseudolife-mcp.exe"
+        } else {
+            "bin/pseudolife-mcp"
+        });
+        std::fs::create_dir_all(console.parent().unwrap()).unwrap();
+        std::fs::write(&console, b"fixture console").unwrap();
+        std::fs::write(venv.join("pyvenv.cfg"), b"fixture venv").unwrap();
+        let exe = own_exe();
+        let pid = std::process::id();
+        let process = serde_json::json!({
+            "pid": pid, "exe": exe,
+            "supervisor": {"pid": pid, "exe": exe, "argv": [exe, console, "tunnel", "run"]}
+        });
+        store.put("dot.process.json", &serde_json::to_vec(&process).unwrap());
+
+        let quote = |text| {
+            let quoted = crate::cli::update::seams::quote(text);
+            if cfg!(windows) {
+                quoted.replace('’', "’’")
+            } else {
+                quoted
+            }
+        };
+        let invoke = if cfg!(windows) { "& " } else { "" };
+        let console = store::checked_path(&console).unwrap();
+        let expected = format!(
+            "{invoke}{} tunnel stop --profile dot --profile-dir {}",
+            quote(console.to_str().unwrap()),
+            quote(store.0.to_str().unwrap())
+        );
+        let report = report_of(update(&store.0));
+        assert!(
+            report["detail"].as_str().unwrap().contains(&expected),
+            "{report}"
+        );
+        assert!(
+            matches!(runtime::stop(&store.0, "dot"), Err(Fail::Detail(message))
+            if message.contains(&expected) && !message.contains("stop it with the client that started it"))
+        );
+        assert!(store.0.join("dot.process.json").is_file());
+    }
+
+    #[test]
+    fn stop_a_live_python_orphan_names_the_missing_profile() {
+        let store = Store::new();
+        store.record("dot", u64::from(std::process::id()), &own_exe());
+        let outcome = runtime::stop(&store.0, "dot");
+        let profile = store.0.join("dot.profile.json");
+        assert!(
+            matches!(outcome, Err(Fail::Detail(ref message))
+                if message.contains("Restore the saved tunnel profile")
+                    && message.contains(profile.to_str().unwrap())
+                    && !message.contains("tunnel run")),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn unreadable_profile_gets_repair_guidance_before_stopping_python_tunnel() {
+        let store = Store::new();
+        // A BOM reaches the unread-report path. Malformed JSON refuses earlier.
+        store.put("dot.profile.json", b"\xef\xbb\xbf{}");
+        assert!(matches!(store::load(&store.0, "dot"), Err(Fail::Defer)));
+        store.record("dot", u64::from(std::process::id()), &own_exe());
+        let stop = runtime::stop(&store.0, "dot");
+        let update = report_of(update(&store.0));
+        let detail = update["detail"].as_str().unwrap();
+        let helps = |message: &str| {
+            message.contains("Restore the saved tunnel profile")
+                && message.contains("dot.profile.json")
+                && !message.contains("tunnel status")
+                && !message.contains("tunnel run")
+        };
+        assert!(
+            matches!(&stop, Err(Fail::Detail(message)) if helps(message)) && helps(detail),
+            "{stop:?}: {detail}"
+        );
     }
 
     #[test]
