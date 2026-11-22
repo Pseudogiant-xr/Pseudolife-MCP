@@ -5140,9 +5140,16 @@ disabled is reported and offered again.
 `pseudolife-mcp doctor` checks Codex's runtime hook trust, including when
 run in T3 Code: matching script files alone do not prove the hooks run.
 When Codex skips a modified or untrusted handler, doctor reports
-`needs-approval`; from a checkout run
-`python ops/setup-codex-hooks.py --source plugin --trust ask`, approve the
-handlers and start a new session. A `disabled` result means enable the
+`needs-approval`. Native doctor directs you to `/hooks` in the Codex CLI or
+**Settings > Hooks** in the Codex app. Review and trust the Pseudolife
+handlers there, then start a new session.
+[Codex hook review guidance](https://learn.chatgpt.com/docs/hooks#plugin-bundled-hooks)
+
+For the frozen Python client, run
+`python ops/setup-codex-hooks.py --source plugin --trust ask` from a
+checkout, approve the handlers and start a new session.
+
+A `disabled` result means enable the
 Pseudolife handlers in Codex `/hooks` if wanted. `not-loaded` means check
 the plugin is installed and enabled in Codex's plugin manager, then start
 a new session. Doctor diagnoses these states; it never approves hooks.
