@@ -230,13 +230,13 @@ Write-Host 'INSTALLED'
     with zipfile.ZipFile(archive, "w") as stream:
         stream.writestr("pseudolife-mcp.exe", b"version probe stand-in")
     (assets / "SHA256SUMS").write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {name}\n", encoding="utf-8")
-    # Keep PowerShell's own startup cache and module directories out of the
-    # installer's disposable home so we can check exactly what it left there.
+    # On Unix, redirect PowerShell's own startup cache and module directories
+    # out of the installer home before checking what was left behind.
     powershell_state = tmp_path / "powershell-state"
     result = _run("stub", tmp_path, body, release=False, extra_env={
         "STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output,
         **{key: str(powershell_state / key) for key in (
-            "APPDATA", "LOCALAPPDATA", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+            "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
         )},
         **dict.fromkeys(("TEMP", "TMP", "TMPDIR"), str(probe_temp)),
     })
@@ -248,7 +248,13 @@ Write-Host 'INSTALLED'
         f"The native pseudolife-mcp client cannot be installed: {diagnostic} "
         f"Nothing else was changed: the download in {downloads} is kept for a rerun (delete it to free the space)."
     )
-    assert set(home.rglob("*")) == {downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent}
+    installed_files = set(home.rglob("*"))
+    if WINDOWS:
+        # Windows PowerShell 7 writes this .NET startup profile under the
+        # account's known LocalApplicationData folder as the shell exits.
+        startup_profile = home / "AppData/Local/Microsoft/PowerShell/StartupProfileData-NonInteractive"
+        installed_files.difference_update((startup_profile, *startup_profile.parents[:4]))
+    assert installed_files == {downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent}
     assert not list(probe_temp.iterdir())
 
 
