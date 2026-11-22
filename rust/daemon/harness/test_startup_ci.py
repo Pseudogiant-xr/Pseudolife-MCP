@@ -123,7 +123,7 @@ class WriterGuard(unittest.TestCase):
                                      side_effect=lambda conn, statement: created.append(statement)), \
                         patch.object(startup_ci.subprocess, "run", side_effect=fake_run), \
                         patch.object(startup_ci, "shadow_fixture", return_value=FIXTURE), \
-                        patch.object(startup_ci.sys, "platform", platform), \
+                        patch.object(startup_ci, "PLATFORM", platform), \
                         tempfile.TemporaryDirectory() as tmp:
                     output = Path(tmp) / "startup.json"
                     code = startup_ci.writer_guard(Path("daemon-test"), {}, output)

@@ -27,6 +27,8 @@ from schema_ci import PACKAGE, test_artifact
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
+# Tests vary this selector without changing how dependencies detect the OS.
+PLATFORM = sys.platform
 # The read-only shadow's incremental-refresh database tests: the store
 # level (rust/daemon/src/shadow_tests.rs) and through Service::init
 # (rust/daemon/src/service_shadow_tests.rs), `db_` prefix. With
@@ -152,7 +154,7 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
     finally:
         pg.drop(name)
     result["shadow_refresh"] = shadow_refresh(binary, env, pg)
-    if sys.platform == "linux":
+    if PLATFORM == "linux":
         # These database checks cover shared SQL and service state. The
         # separately stressed pairing cases cover real daemons on Windows.
         result.update(bank_identity_checks(binary, env, pg))
