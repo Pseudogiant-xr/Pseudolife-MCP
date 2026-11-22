@@ -55,6 +55,13 @@ lite bank is refused with the Docker migration instruction.
 
 ## Native completion and refusals
 
+Selected redaction refusals use independent exit status and stream
+expectations from the frozen CLI diagnostics. Their expected database is
+the full snapshot of the untouched seed. The native arm still receives its
+own template copy, and the busy case still holds the row lock during that
+call. Successful redactions and cases requiring a different comparison
+continue to use both arms.
+
 The native command has no Python fallback. `application_name` and
 `connect_timeout` use the shared PostgreSQL connector's native support.
 Unsupported DSNs, ambient controls, connection failures, non-Unicode OS
@@ -171,16 +178,18 @@ frozen-Python goldens.
 File publication and divergent export cases continue to run both arms.
 
 Automatic CI skips live mode, so the 80 Linux and 85 Windows file references,
-14 bank-verify references and 34 stdout export references run only in local
-or manual-stress live runs. Offline tests pin the file hashes and case
+14 bank-verify references, 34 stdout export references and 12 redaction
+refusal references run only in local or manual-stress live runs. Offline
+tests pin the file hashes and case
 registration and check exit status, stdout and stderr for the three entries
 shared with the goldens on both platforms.
 
 The 41-case automatic CI roster in `rust/ci/audit_golden_cases.json` replays
 committed goldens and compares the full observation, including files, modes
 and database state where applicable. It covers 5 of the 34 converted export
-cases and 7 of the 14 converted bank-verify cases. The other 29 export and
-7 bank-verify cases have no automatic CI output comparison.
+cases, 7 of the 14 converted bank-verify cases and 1 of the 12 converted
+redaction refusals (`redact-nolog`). The other 29 export, 7 bank-verify and
+11 redaction refusal cases have no automatic CI output comparison.
 
 The payload fixture covers non-finite floats,
 200-digit integers, nesting beyond 128, Unicode key order and lone surrogates.

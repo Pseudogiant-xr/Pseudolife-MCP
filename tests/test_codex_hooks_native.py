@@ -198,7 +198,7 @@ def test_powershell_installer_recovers_when_hook_helper_launch_throws(tmp_path):
 
 @pytest.mark.parametrize(("bootstrap_success", "shim_available", "runtime_success", "expected_state"), [
     (True, True, True, "shim-env"),
-    (True, True, False, "failed"),
+    (True, True, False, "shim-env"),
     (True, False, True, "failed"),
     (False, True, True, "failed"),
 ])
@@ -351,7 +351,7 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
 
 @pytest.mark.parametrize(("bootstrap_success", "runtime_success", "expected_state"), [
     (True, True, "shim-env"),
-    (True, False, "failed"),
+    (True, False, "shim-env"),
     (False, True, "failed"),
 ])
 def test_powershell_explicit_installer_connection_isolated_and_recoverable(
