@@ -42,6 +42,7 @@ SHADOW_TIMEOUT_S = 600
 BANK_IDENTITY_CHECKS = (
     "service::tests::board_contexts_publish_one_identity_to_health",
     "service::tests::memory_tools_work_while_bank_identity_is_blocked",
+    "service::tests::bank_identity_retry_wakes_on_storage_republish",
 )
 
 
@@ -151,7 +152,10 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
     finally:
         pg.drop(name)
     result["shadow_refresh"] = shadow_refresh(binary, env, pg)
-    result.update(bank_identity_checks(binary, env, pg))
+    if sys.platform == "linux":
+        # These database checks cover shared SQL and service state. The
+        # separately stressed pairing cases cover real daemons on Windows.
+        result.update(bank_identity_checks(binary, env, pg))
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(f"writer guard: {'0 diffs / mutant caught' if all(v['accepted'] for v in result.values()) else 'FAIL'}", flush=True)
     return int(not all(value["accepted"] for value in result.values()))

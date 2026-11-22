@@ -408,9 +408,25 @@ impl Service {
                         s.bank_identity_error = Some(code);
                     }
                 });
+                let storage_changed = async {
+                    loop {
+                        self.bank_identity_wake.notified().await;
+                        // A queued notice for this same publication must
+                        // not bypass backoff on a persistently failing bank.
+                        if storage.knows_bank_id()
+                            || self
+                                .snapshot()
+                                .storage
+                                .is_none_or(|current| !Arc::ptr_eq(&storage, &current))
+                        {
+                            break;
+                        }
+                    }
+                };
                 tokio::select! {
                     _ = stop.changed() => return,
                     _ = tokio::time::sleep(delay) => delay = (delay * 2).min(Duration::from_secs(60)),
+                    _ = storage_changed => delay = Duration::from_secs(5),
                 }
             } else {
                 delay = Duration::from_secs(5);
@@ -1805,6 +1821,84 @@ mod tests {
         let health = crate::health::payload(&service, &principals, false).await;
         let digest = sha2::Sha256::digest(replacement.as_bytes());
         assert_eq!(health["bank"], hex::encode(digest)[..16]);
+    }
+
+    #[tokio::test]
+    #[ignore = "run by startup_ci.py with a disposable PostgreSQL bank"]
+    async fn bank_identity_retry_wakes_on_storage_republish() {
+        let dsn = identity_test_dsn();
+        let service = Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::from("unused"),
+            dsn.clone(),
+            true,
+        );
+        let storage = service.storage_tier().await.unwrap();
+        let principals = crate::auth::PrincipalStore::new();
+        // Take the first health sample before starting the worker, so an
+        // identity that initializes quickly cannot race the assertion.
+        let health = crate::health::payload(&service, &principals, false).await;
+        assert_eq!(
+            health["pending"],
+            json!(["init", "principals", "bank_identity"])
+        );
+        assert_eq!(health["ready"], false);
+        assert_eq!(health["bank_identity_failed"], false);
+
+        let mut side = crate::board::db::Conn::new(dsn);
+        let side = side.client().await.unwrap();
+        side.execute(
+            "INSERT INTO public.meta (key, value) VALUES ('coordination_bank_id', 'false'::jsonb)",
+            &[],
+        )
+        .await
+        .unwrap();
+        let pid: i32 = storage
+            .client()
+            .query_one("SELECT pg_backend_pid()", &[])
+            .await
+            .unwrap()
+            .get(0);
+        let (stop, rx) = tokio::sync::watch::channel(false);
+        let recover = async {
+            while service.snapshot().bank_identity_error.is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            side.execute(
+                "DELETE FROM public.meta WHERE key = 'coordination_bank_id'",
+                &[],
+            )
+            .await
+            .unwrap();
+            assert!(
+                side.query_one("SELECT pg_terminate_backend($1, 5000)", &[&pid])
+                    .await
+                    .unwrap()
+                    .get::<_, bool>(0)
+            );
+            let mut inner = service.inner.lock().await;
+            service.verify_writer_session(&mut inner).await.unwrap();
+            drop(inner);
+            let replacement = service.snapshot().storage.unwrap();
+            assert!(!Arc::ptr_eq(&storage, &replacement));
+            while !replacement.knows_bank_id() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        // The whole recovery must fit inside the first backoff interval.
+        let (result, ()) = tokio::join!(
+            async {
+                let result = tokio::time::timeout(Duration::from_secs(4), recover).await;
+                stop.send_replace(true);
+                result
+            },
+            service.bootstrap_bank_identity(rx),
+        );
+        result.expect("storage republish must wake the bank identity retry before its backoff");
+        let health = crate::health::payload(&service, &principals, false).await;
+        assert_eq!(health["pending"], json!(["init", "principals"]));
+        assert!(health["bank"].is_string());
     }
 
     #[tokio::test]
