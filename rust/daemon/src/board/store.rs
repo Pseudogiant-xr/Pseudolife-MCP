@@ -427,7 +427,10 @@ pub fn min_keep_type(value: &Value, cap: f64) -> Value {
 
 async fn read_bank_identity(tx: &tokio_postgres::Transaction<'_>) -> Result<Value> {
     let row = tx
-        .query_opt("SELECT value FROM public.meta WHERE key=$1", &[&BANK_ID_META_KEY])
+        .query_opt(
+            "SELECT value FROM public.meta WHERE key=$1",
+            &[&BANK_ID_META_KEY],
+        )
         .await?
         .ok_or_else(|| BoardError::code("invalid_bank_identity"))?;
     Ok(row.try_get::<_, super::db::JsonValue>(0)?.0)
@@ -452,9 +455,11 @@ pub(crate) async fn ensure_bank_identity(
     }
     append(
         tx,
-        vec![Event::new("bank_identity", &json!({"bank_id": candidate}))
-            .actor(actor)
-            .principal(principal)],
+        vec![
+            Event::new("bank_identity", &json!({"bank_id": candidate}))
+                .actor(actor)
+                .principal(principal),
+        ],
         now(),
         None,
     )

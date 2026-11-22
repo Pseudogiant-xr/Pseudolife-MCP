@@ -911,16 +911,25 @@ async fn move_counts_user_audit_rows_in_preflight_and_after_start() {
         return;
     };
     let config: tokio_postgres::Config = dsn.parse().expect("parse fixture DSN");
-    assert!(matches!(config.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1"));
-    assert!(config.get_dbname().is_some_and(|name| name.starts_with("pl_cf_pairing_context_")));
+    assert!(
+        matches!(config.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1")
+    );
+    assert!(
+        config
+            .get_dbname()
+            .is_some_and(|name| name.starts_with("pl_cf_pairing_context_"))
+    );
     let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
     tokio::spawn(connection);
-    client.batch_execute(
-        "CREATE TEMP TABLE coordination_events \
+    client
+        .batch_execute(
+            "CREATE TEMP TABLE coordination_events \
          (seq bigint, event text, actor text, principal text, agent_id text, payload text); \
          CREATE TABLE public.meta (key text PRIMARY KEY, value jsonb); \
          INSERT INTO public.meta VALUES ('coordination_bank_id', '\"fixture\"')",
-    ).await.unwrap();
+        )
+        .await
+        .unwrap();
     let mut observed = Vec::new();
     for rows in [
         "(1, 'bank_identity', 'daemon', 'daemon', '', '{\"bank_id\":\"fixture\"}')",
@@ -930,10 +939,24 @@ async fn move_counts_user_audit_rows_in_preflight_and_after_start() {
         "(1, 'bank_identity', 'daemon', 'daemon', '', '{\"bank_id\":\"different\"}')",
         "(1, 'bank_identity', 'daemon', 'daemon', '', '{}')",
     ] {
-        client.batch_execute(&format!("TRUNCATE coordination_events; INSERT INTO coordination_events VALUES {rows}")).await.unwrap();
-        for filter in [probe::user_filter("coordination_events"), probe::served_filter("coordination_events")] {
+        client
+            .batch_execute(&format!(
+                "TRUNCATE coordination_events; INSERT INTO coordination_events VALUES {rows}"
+            ))
+            .await
+            .unwrap();
+        for filter in [
+            probe::user_filter("coordination_events"),
+            probe::served_filter("coordination_events"),
+        ] {
             let query = format!("SELECT count(*) FROM coordination_events{filter}");
-            observed.push(client.query_one(&query, &[]).await.unwrap().get::<_, i64>(0));
+            observed.push(
+                client
+                    .query_one(&query, &[])
+                    .await
+                    .unwrap()
+                    .get::<_, i64>(0),
+            );
         }
     }
     assert_eq!(observed, [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]);

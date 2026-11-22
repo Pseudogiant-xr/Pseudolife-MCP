@@ -422,7 +422,10 @@ impl Service {
         if !storage.read_only()
             && let Err(error) = storage.initialize_bank_identity().await
         {
-            let message = format!("bank identity initialization failed ({})", error.public().code);
+            let message = format!(
+                "bank identity initialization failed ({})",
+                error.public().code
+            );
             self.update(|s| {
                 s.bank_identity_failed = true;
                 s.init_refusal = None;
@@ -1641,8 +1644,14 @@ mod tests {
             return;
         };
         let parsed = crate::storage::parse_dsn(&dsn).expect("parse fixture DSN");
-        assert!(matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1"));
-        assert!(parsed.get_dbname().is_some_and(|name| name.starts_with("pl_cf_pairing_context_")));
+        assert!(
+            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1")
+        );
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|name| name.starts_with("pl_cf_pairing_context_"))
+        );
 
         let service = Arc::new(Service::new(
             Config::default(),
@@ -1662,10 +1671,16 @@ mod tests {
         assert!(health["bank"].is_null());
 
         let first = crate::board::Board::new(
-            service.config.coordination.clone(), dsn.clone(), service.clone(), principals.clone(),
+            service.config.coordination.clone(),
+            dsn.clone(),
+            service.clone(),
+            principals.clone(),
         );
         let second = crate::board::Board::new(
-            service.config.coordination.clone(), dsn.clone(), service.clone(), principals.clone(),
+            service.config.coordination.clone(),
+            dsn.clone(),
+            service.clone(),
+            principals.clone(),
         );
         let headers = std::collections::HashMap::new();
         let (first, second) = tokio::join!(
@@ -1674,27 +1689,51 @@ mod tests {
         );
         let first = first.unwrap();
         assert_eq!(first["bank_id"], second.unwrap()["bank_id"]);
-        let rows = storage.client().query(
-            "SELECT payload::jsonb FROM coordination_events WHERE event='bank_identity'", &[],
-        ).await.unwrap();
+        let rows = storage
+            .client()
+            .query(
+                "SELECT payload::jsonb FROM coordination_events WHERE event='bank_identity'",
+                &[],
+            )
+            .await
+            .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].get::<_, Value>(0), json!({"bank_id": first["bank_id"]}));
+        assert_eq!(
+            rows[0].get::<_, Value>(0),
+            json!({"bank_id": first["bank_id"]})
+        );
         let health = crate::health::payload(&service, &principals, false).await;
         let digest = sha2::Sha256::digest(first["bank_id"].as_str().unwrap().as_bytes());
         assert_eq!(health["bank"], hex::encode(digest)[..16]);
 
         // The previous board connection can finish delivering its result
         // after the writer session has been replaced and the bank restored.
-        let pid: i32 = storage.client().query_one("SELECT pg_backend_pid()", &[]).await.unwrap().get(0);
+        let pid: i32 = storage
+            .client()
+            .query_one("SELECT pg_backend_pid()", &[])
+            .await
+            .unwrap()
+            .get(0);
         let mut side = crate::board::db::Conn::new(dsn.clone());
         let side = side.client().await.unwrap();
-        assert!(side.query_one("SELECT pg_terminate_backend($1, 5000)", &[&pid]).await.unwrap().get::<_, bool>(0));
-        side.execute("DELETE FROM meta WHERE key = 'coordination_bank_id'", &[]).await.unwrap();
+        assert!(
+            side.query_one("SELECT pg_terminate_backend($1, 5000)", &[&pid])
+                .await
+                .unwrap()
+                .get::<_, bool>(0)
+        );
+        side.execute("DELETE FROM meta WHERE key = 'coordination_bank_id'", &[])
+            .await
+            .unwrap();
         let current = Arc::new(Storage::open(&dsn).await.unwrap());
         assert_eq!(current.cached_bank_id().await, None);
         let replacement = "11111111-1111-4111-8111-111111111111";
-        side.execute("INSERT INTO meta (key, value) VALUES ('coordination_bank_id', $1)",
-                     &[&json!(replacement)]).await.unwrap();
+        side.execute(
+            "INSERT INTO meta (key, value) VALUES ('coordination_bank_id', $1)",
+            &[&json!(replacement)],
+        )
+        .await
+        .unwrap();
         service.update(|snapshot| snapshot.storage = Some(current));
         service.publish_board_bank_identity(&storage, first["bank_id"].as_str().unwrap());
         let health = crate::health::payload(&service, &principals, false).await;
