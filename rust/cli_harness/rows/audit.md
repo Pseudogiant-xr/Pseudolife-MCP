@@ -55,6 +55,13 @@ lite bank is refused with the Docker migration instruction.
 
 ## Native completion and refusals
 
+Selected redaction refusals use independent exit status and stream
+expectations from the frozen CLI diagnostics. Their expected database is
+the full snapshot of the untouched seed. The native arm still receives its
+own template copy, and the busy case still holds the row lock during that
+call. Successful redactions and cases requiring a different comparison
+continue to use both arms.
+
 The native command has no Python fallback. `application_name` and
 `connect_timeout` use the shared PostgreSQL connector's native support.
 Unsupported DSNs, ambient controls, connection failures, non-Unicode OS

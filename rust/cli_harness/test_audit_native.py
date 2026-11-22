@@ -439,6 +439,47 @@ def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):
         assert message["expires_at"] == json.loads(send["payload"])["expires_at"] == now + audit.DAY
 
 
+@pytest.mark.parametrize("refusal, exit_code, stdout, diagnostic", [
+    ("invalid_reason", 1, b'{"ok": false, "message_id": "sample-id", "reason": "invalid_reason"}',
+     b"--reason must be 1-240 characters on one line, with no control, format or separator characters"),
+    ("busy", 2, b"", b"the board is busy: a row or the audit chain stayed locked for more than 5 s. "
+     b"Nothing was changed; retry"),
+])
+def test_audit_redact_refusal_reference_without_the_frozen_package(
+        monkeypatch, tmp_path, refusal, exit_code, stdout, diagnostic):
+    from . import compare
+
+    seed = {"tables": {"coordination_events": [], "coordination_messages": []},
+            "sequences": {"coordination_events_seq_seq": 3}}
+    with _cold_audit(monkeypatch) as audit:
+        name = audit._name("rich")
+        monkeypatch.setattr(audit, "ensure", lambda _: name)
+        monkeypatch.setattr(audit, "_BASELINE", {name: seed})
+        monkeypatch.setattr(_bank, "url", lambda label: f"postgresql://localhost/{label}")
+        case = audit.redact_case("redact-control", "rich", audit._Lazy(lambda: "sample-id"), "  ",
+                                 hold=refusal == "busy", refusal=refusal)
+        setup = MagicMock(side_effect=AssertionError("the reference must not clone or lock a bank"))
+        monkeypatch.setattr(case, "setup", setup)
+        previous_umask = audit.core.pin_umask()
+        try:
+            want = case.reference(tmp_path / "redact-refusal")
+        finally:
+            if previous_umask is not None:
+                os.umask(previous_umask)
+
+        newline = b"\r\n" if audit.core.WINDOWS else b"\n"
+        assert want["exit"] == exit_code
+        assert audit.core.decode(want, "stdout") == (stdout + newline if stdout else b"")
+        assert audit.core.decode(want, "stderr") == b"board-audit: " + diagnostic + newline
+        assert want["files"] == {"cwd": "dir"}
+        assert want["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755"})
+        assert want["db"] == seed
+        setup.assert_not_called()
+
+        changed = dict(seed, sequences={"coordination_events_seq_seq": 4})
+        assert compare.diff(want, dict(want, db=changed), case.rules)[0] == "db differ:"
+
+
 def test_audit_fixture_checks_the_database_before_inserts(monkeypatch):
     from .rows import audit
 
