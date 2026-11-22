@@ -16,7 +16,7 @@ import stat
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import cache, partial
 from pathlib import Path
 
@@ -594,6 +594,56 @@ def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
     return case
 
 
+def _filter_export(data, *, project=None, task=None, agent=None, since=None, until=None):
+    """Select seeded rows while preserving their JSON lines and sequence order."""
+    lines = []
+    for line in data.splitlines(keepends=True):
+        row = json.loads(line)
+        if ((project is not None and row["project"] != project)
+                or (task is not None and row["task"] != task)
+                or (agent is not None and agent not in (row["agent_id"], row["recipient_agent_id"]))
+                or (since is not None and row["created_at"] < since)
+                or (until is not None and row["created_at"] >= until)):
+            continue
+        lines.append(line)
+    return b"".join(lines)
+
+
+def _bank_export_reference(case, kind, filters, recorded, home):
+    core._reset(home)
+    arm = core.Arm("reference", home, home / "cwd")
+    arm.cwd.mkdir()
+    case.setup(arm)
+    want = {"home": str(home), "files": arm.state["before"],
+            "modes": core.modes(home), "db": "unchanged"}
+    if recorded:
+        # These stdout refusals have frozen-Python goldens on both platforms.
+        golden = _audit_golden(core.PLATFORM)
+        if case.id in (golden.get("recorded_from_candidate") or {}):
+            raise ValueError(f"{case.id}: live export refusal requires a frozen Python recording")
+        frozen = golden["cases"][case.id]
+        return dict(want, exit=frozen["exit"], stdout=frozen["stdout"], stderr=frozen["stderr"])
+    data = export_bytes(kind)
+    if filters:
+        resolved = {}
+        for key, value in filters.items():
+            if isinstance(value, _Lazy):
+                value = value.make()
+            if isinstance(value, datetime):
+                value, = _audit_timestamps((value.isoformat(),))
+            resolved[key] = value
+        data = _filter_export(data, **resolved)
+    stdout = data.replace(b"\n", b"\r\n") if core.WINDOWS else data
+    return dict(want, exit=0, stdout=_encoded(stdout), stderr="")
+
+
+def bank_export_case(case_id, kind, argv=(), *, recorded=False, **filters):
+    """Use a stored-row projection or a recorded refusal for export to stdout."""
+    case = read_case(case_id, kind, ["export", *argv])
+    case.reference = partial(_bank_export_reference, case, kind, filters, recorded)
+    return case
+
+
 @cache
 def _file_references(platform):
     path = Path(__file__).with_name(f"audit.file.{platform}.json")
@@ -858,9 +908,13 @@ def stats_durations():
 
 
 @cache
-def _recorded_cases(platform):
+def _audit_golden(platform):
     path = Path(__file__).resolve().parents[1] / "goldens" / f"audit.{platform}.json"
-    return json.loads(path.read_text(encoding="utf-8"))["cases"]
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _recorded_cases(platform):
+    return _audit_golden(platform)["cases"]
 
 
 def _recorded_reference(case_id, home):
@@ -890,6 +944,22 @@ def _encoded(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
+def _audit_timestamps(dates):
+    if sys.platform == "linux" and "TZDIR" in os.environ:
+        # The CLI arm inherits TZ but drops TZDIR. Resolve under the same
+        # inputs without changing the harness process's timezone.
+        env = {"TZ": os.environ["TZ"]} if "TZ" in os.environ else {}
+        code = (
+            "import sys\n"
+            "from datetime import datetime\n"
+            "print(*(datetime.fromisoformat(date).timestamp() for date in sys.argv[1:]))"
+        )
+        timestamps = subprocess.check_output(
+            [sys.executable, "-I", "-c", code, *dates], env=env, text=True, timeout=5)
+        return tuple(map(float, timestamps.split()))
+    return tuple(datetime.fromisoformat(date).timestamp() for date in dates)
+
+
 def _stats_report(case, report_id):
     reference, corpus = _stats_references()
     shape = reference["reports"][report_id]
@@ -900,20 +970,7 @@ def _stats_report(case, report_id):
             case.argv[case.argv.index(flag) + 1]
             for flag in ("--since", "--until")
         ]
-        if sys.platform == "linux" and "TZDIR" in os.environ:
-            # The CLI arm inherits TZ but drops TZDIR. Resolve under the
-            # same inputs without changing the harness process's timezone.
-            env = {"TZ": os.environ["TZ"]} if "TZ" in os.environ else {}
-            code = (
-                "import sys\n"
-                "from datetime import datetime\n"
-                "print(*(datetime.fromisoformat(date).timestamp() for date in sys.argv[1:]))"
-            )
-            timestamps = subprocess.check_output(
-                [sys.executable, "-I", "-c", code, *dates], env=env, text=True, timeout=5)
-            since, until = map(float, timestamps.split())
-        else:
-            since, until = (datetime.fromisoformat(date).timestamp() for date in dates)
+        since, until = _audit_timestamps(dates)
         report["window"] = {"since": since, "until": until, "hours": round((until - since) / 3600, 3)}
     return (json.dumps(report, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
 
@@ -1107,15 +1164,18 @@ def cases() -> list[core.Case]:
         file_case("input-wide-object", ["verify", "--input", _home("wide.jsonl")],
                   files={"wide.jsonl": lambda: json.dumps({f"key-{n}": None for n in range(100000)}).encode("utf-8")},
                   timeout=30.0 if os.name == "nt" else 5.0),
-        *[read_case(f"export-iso-{name}", "rich", ["export", "--since", value]) for name, value in [
-            ("week-date", "2026-W41-1"),
-            ("week-datetime", "2026-W41-6T12:00:00"),
-            ("hour", "2026-10-11T12"),
-            ("compact-offset", "2026-10-11T12:00:00+0100"),
-            ("hour-offset", "2026-10-11T12:00:00+01"),
-            ("comma-fraction", "2026-10-11T12:00:00,5+00:00"),
-            ("compact-hour", "20261011T12"),
-            ("second-offset", "2026-10-11T12:00:00-00:00:30"),
+        *[bank_export_case(f"export-iso-{name}", "rich", ["--since", value], since=since)
+          for name, value, since in [
+            ("week-date", "2026-W41-1", datetime(2026, 10, 5)),
+            ("week-datetime", "2026-W41-6T12:00:00", datetime(2026, 10, 10, 12)),
+            ("hour", "2026-10-11T12", datetime(2026, 10, 11, 12)),
+            ("compact-offset", "2026-10-11T12:00:00+0100", datetime(2026, 10, 11, 11, tzinfo=timezone.utc)),
+            ("hour-offset", "2026-10-11T12:00:00+01", datetime(2026, 10, 11, 11, tzinfo=timezone.utc)),
+            ("comma-fraction", "2026-10-11T12:00:00,5+00:00",
+             datetime(2026, 10, 11, 12, microsecond=500_000, tzinfo=timezone.utc)),
+            ("compact-hour", "20261011T12", datetime(2026, 10, 11, 12)),
+            ("second-offset", "2026-10-11T12:00:00-00:00:30",
+             datetime(2026, 10, 11, 12, second=30, tzinfo=timezone.utc)),
         ]],
         # The pre-fix 100 MiB newline scan exceeded 10s on Linux (2026-10-12).
         file_case("input-long-line", ["verify", "--input", _home("long.jsonl")],
@@ -1226,13 +1286,13 @@ def cases() -> list[core.Case]:
         _fixed_stats_case("stats-help", ["stats", "--help"]),
         _fixed_stats_case("stats-invalid-option", ["stats", "--unknown"]),
         file_case("help-explicit-value", ["verify", "--help=x"]),
-        read_case("export-repeated-abbreviated", "rich", ["export", "--ta=t2", "--task", "t1"]),
-        read_case("export-negative-time", "rich", ["export", "--since", "-5"]),
-        read_case("export-underscore-time", "rich", ["export", "--since=١_٧٠٠_٠٠٠_٠٠٠"]),
-        read_case("export-payload-domain", "payload", ["export"]),
+        bank_export_case("export-repeated-abbreviated", "rich", ["--ta=t2", "--task", "t1"], task="t1"),
+        bank_export_case("export-negative-time", "rich", ["--since", "-5"], since=-5),
+        bank_export_case("export-underscore-time", "rich", ["--since=١_٧٠٠_٠٠٠_٠٠٠"], since=T0),
+        bank_export_case("export-payload-domain", "payload"),
         bank_verify_case("bank-verify-payload-domain", "payload"),
         bank_verify_case("bank-verify-surrogate-send", "surrogate_send"),
-        read_case("export-surrogate-send", "surrogate_send", ["export"]),
+        bank_export_case("export-surrogate-send", "surrogate_send"),
         redact_case("redact-surrogate-send", "surrogate_send", _Lazy(lambda: ids("surrogate_send")["message"]), "old paste"),
         redact_case("redact-nonfinite-fanout", "payload_send", _Lazy(lambda: ids("payload_send")["message"]), "old paste"),
         redact_case("redact-payload-domain", "payload", _Lazy(lambda: ids("payload")["legacy"]), "old paste"),
@@ -1252,25 +1312,25 @@ def cases() -> list[core.Case]:
         bank_verify_case("bank-verify-tampered", "tampered"),
         bank_verify_case("bank-verify-legacy", "legacy"),
         # export
-        read_case("export-all", "rich", ["export"]),
-        read_case("export-task", "rich", ["export", "--task", "t1"]),
-        read_case("export-project-since", "rich",
-                  ["export", "--project", "p", "--since", "1700000050"]),
-        read_case("export-until-fraction", "rich", ["export", "--until", "1700000044.5"]),
-        read_case("export-since-iso", "rich",
-                  ["export", "--since", "2023-11-14T22:14:20+00:00", "--until",
-                   "2023-11-14T23:15:00+01:00"]),
-        read_case("export-since-iso-fraction", "rich",
-                  ["export", "--since", "2023-11-14T22:14:20.500000+00:00", "--until",
-                   "2023-11-14T23:15:00.000001+01:00"]),
-        read_case("export-since-iso-long-fraction", "rich",
-                  ["export", "--since", "2023-11-14T22:14:20.123456789+00:00"]),
-        read_case("export-until-iso-epoch-boundary", "fraction",
-                  ["export", "--until", "1970-01-01T00:00:59.999999+00:01"]),
-        read_case("export-agent-full", "rich", ["export", "--agent", _rich("b")]),
-        read_case("export-agent-prefix", "rich", ["export", "--agent", _rich("a", cut=8)]),
-        read_case("export-agent-literal", "rich", ["export", "--agent", "alice"]),
-        read_case("export-agent-unknown", "rich", ["export", "--agent", "ffffffff0"]),
+        bank_export_case("export-all", "rich"),
+        bank_export_case("export-task", "rich", ["--task", "t1"], task="t1"),
+        bank_export_case("export-project-since", "rich", ["--project", "p", "--since", "1700000050"],
+                         project="p", since=T0 + 50),
+        bank_export_case("export-until-fraction", "rich", ["--until", "1700000044.5"], until=T0 + 44.5),
+        bank_export_case("export-since-iso", "rich",
+                         ["--since", "2023-11-14T22:14:20+00:00", "--until", "2023-11-14T23:15:00+01:00"],
+                         since=T0 + 60, until=T0 + 100),
+        bank_export_case("export-since-iso-fraction", "rich",
+                         ["--since", "2023-11-14T22:14:20.500000+00:00", "--until",
+                          "2023-11-14T23:15:00.000001+01:00"], since=T0 + 60.5, until=T0 + 100.000001),
+        bank_export_case("export-since-iso-long-fraction", "rich",
+                         ["--since", "2023-11-14T22:14:20.123456789+00:00"], since=T0 + 60.123456),
+        bank_export_case("export-until-iso-epoch-boundary", "fraction",
+                         ["--until", "1970-01-01T00:00:59.999999+00:01"], until=-0.000001),
+        bank_export_case("export-agent-full", "rich", ["--agent", _rich("b")], agent=_rich("b")),
+        bank_export_case("export-agent-prefix", "rich", ["--agent", _rich("a", cut=8)], agent=_rich("a")),
+        bank_export_case("export-agent-literal", "rich", ["--agent", "alice"], agent="alice"),
+        bank_export_case("export-agent-unknown", "rich", ["--agent", "ffffffff0"], recorded=True),
         read_case("export-agent-unknown-out", "rich",
                   ["export", "--agent", "ffffffff0", "--out", _home("out.jsonl")]),
         read_case("export-windows-invalid-name", "rich", ["export", "--out", _home("bad<name.jsonl")],
@@ -1280,10 +1340,10 @@ def cases() -> list[core.Case]:
                   ["export", "--out", _home("out.jsonl"), "--task", "t3"]),
         read_case("export-out-exists", "rich", ["export", "--out", _home("out.jsonl")],
                   files={"out.jsonl": b"keep"}),
-        read_case("export-pruned", "pruned", ["export"]),
-        read_case("export-legacy", "legacy", ["export"]),
-        read_case("export-empty", "empty", ["export"]),
-        read_case("export-nolog", "nolog", ["export"]),
+        bank_export_case("export-pruned", "pruned"),
+        bank_export_case("export-legacy", "legacy"),
+        bank_export_case("export-empty", "empty"),
+        bank_export_case("export-nolog", "nolog", recorded=True),
         read_case("export-stdout-closed", "rich", ["export"], stdout_closed=True),
         # redact, each arm on its own copy
         redact_case("redact-removed", "rich", _rich("to_redact"), "wrong paste ✓"),
@@ -1308,8 +1368,8 @@ def cases() -> list[core.Case]:
         *stats_cases(),
         *transport_cases(),
         file_case("verify-help", ["verify", "--help"]),
-        read_case("export-joined-option", "rich", ["export", "--task=t1"]),
-        read_case("export-float-spelling", "rich", ["export", "--since", "1.7e9"]),
+        bank_export_case("export-joined-option", "rich", ["--task=t1"], task="t1"),
+        bank_export_case("export-float-spelling", "rich", ["--since", "1.7e9"], since=T0),
         # Empty-chain verification pins native DSN options without random head bytes.
         bank_verify_case("defer-dsn-option", "empty",
                          env={"PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name("empty"))
@@ -1342,14 +1402,15 @@ def cases() -> list[core.Case]:
         # (O4) coverage: LEAST(expires_at, now), ambiguous prefixes, pre-v46,
         # the vacuum-skip path with warnings hidden by default
         redact_case("redact-future-expiry", "rich", _rich("future"), "wrong paste"),
-        read_case("export-agent-ambiguous", "rich", ["export", "--agent", "ab12cd34"]),
+        bank_export_case("export-agent-ambiguous", "rich", ["--agent", "ab12cd34"], recorded=True),
         read_case("export-agent-ambiguous-out", "rich",
                   ["export", "--agent", "ab12cd34ef5", "--out", _home("out.jsonl")]),
-        read_case("export-agent-twin", "rich", ["export", "--agent", "ab12cd34ef57"]),
+        bank_export_case("export-agent-twin", "rich", ["--agent", "ab12cd34ef57"],
+                         agent="ab12cd34ef57000000000000000000a2"),
         redact_case("redact-ambiguous-prefix", "rich", "cd34ef56", "wrong paste"),
         redact_case("redact-twin-prefix", "rich", "cd34ef56ab13", "wrong paste"),
         bank_verify_case("bank-verify-prev46", "prev46"),
-        read_case("export-prev46", "prev46", ["export"]),
+        bank_export_case("export-prev46", "prev46"),
         redact_case("redact-prev46", "prev46", _Lazy(lambda: ids("legacy")["legacy"]), "why", refusal="prev46"),
         redact_case("redact-vacuum-warning", "rich", _rich("to_redact"), "wrong paste",
                     prepare=VACUUM_WARNING),

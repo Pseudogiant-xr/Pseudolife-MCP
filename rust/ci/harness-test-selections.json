@@ -12,6 +12,8 @@
         "test_audit_verifier_requires_matching_operator_redaction",
         "test_audit_verifier_anchors_a_pruned_chain",
         "test_audit_verifier_rejects_invalid_prune_record",
+        "test_audit_bank_export_reference_without_the_frozen_package",
+        "test_audit_live_export_refuses_candidate_recordings",
         "test_audit_archive_edit_rehashes_without_the_frozen_package",
         "test_audit_bank_verify_reference_without_the_frozen_package",
         "test_audit_export_preserves_field_order_and_legacy_payload",

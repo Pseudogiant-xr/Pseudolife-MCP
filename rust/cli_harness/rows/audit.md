@@ -155,9 +155,9 @@ Windows file operations remain unproven for 2/3/206 → ENOENT, 5/32 → EACCES,
 
 ## Reader compatibility checks
 
-The live row checks open errors, malformed JSON, UTF-8 diagnostics and
-8192-byte decoding order. File-only archive and argument cases use
-`audit.file.linux.json` and `audit.file.windows.json`. These capture the
+File-only archive and argument cases check open errors, malformed JSON,
+UTF-8 diagnostics and 8192-byte decoding order against `audit.file.linux.json`
+and `audit.file.windows.json`. These capture the
 frozen Python CLI at `f1faebaa7cf11cd685b1ce3a82dbe7725b9385b6` on the native
 Linux and Windows dev machines. The capture prepared each case's inputs,
 ran the frozen arm and saved exit status, stdout and stderr with the case
@@ -171,6 +171,23 @@ stored payload text to the frozen chain rules in `audit_oracle.py`. The
 reference includes the complete report or refusal, input files and modes,
 and requires the bank to remain unchanged. The closed-stdout bank case
 continues to run both arms for its recorded diagnostic divergence.
+
+Bank stdout export references select the original JSON lines with filter
+literals from the case table in `rows/audit.py`. Three stdout refusals reuse
+frozen-Python goldens.
+File publication and divergent export cases continue to run both arms.
+
+Automatic CI skips live mode, so the 80 Linux and 85 Windows file references,
+14 bank-verify references and 34 stdout export references run only in local
+or manual-stress live runs. Offline tests pin the file hashes and case
+registration and check exit status, stdout and stderr for the three entries
+shared with the goldens on both platforms.
+
+The 41-case automatic CI roster in `rust/ci/audit_golden_cases.json` replays
+committed goldens and compares the full observation, including files, modes
+and database state where applicable. It covers 5 of the 34 converted export
+cases and 7 of the 14 converted bank-verify cases. The other 29 export and
+7 bank-verify cases have no automatic CI output comparison.
 
 The payload fixture covers non-finite floats,
 200-digit integers, nesting beyond 128, Unicode key order and lone surrogates.
