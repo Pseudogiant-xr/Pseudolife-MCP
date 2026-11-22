@@ -212,10 +212,14 @@ def test_requested_client_instruction_write_failure_is_a_warning(tmp_path, shell
 
 
 @pytest.mark.parametrize("shell", INSTALLER_SHELLS, ids=lambda name: Path(name).name)
-@pytest.mark.parametrize("choice", ["flag", "prompt", "restored", "default"])
+@pytest.mark.parametrize("choice", ["flag", "prompt", "restored", "default", "enter", "macos"])
 def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
-    mode = "claude-only" if choice in ("flag", "restored") else ""
+    if choice == "macos" and shell == "powershell":
+        pytest.skip("macOS runs the native Bash installer")
+    mode = "claude-only" if choice in ("flag", "restored", "macos") else ""
     restored = choice == "restored"
+    interactive = choice in ("prompt", "enter")
+    answer = "1" if choice == "prompt" else ""
     if shell == "powershell":
         runner = _PowerShell(tmp_path)
         path = "ops/install-native.ps1"
@@ -226,9 +230,9 @@ def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
         setup = (
             f"$Extractor = '{mode}'; $restoredExtractor = {'$true' if restored else '$false'}\n"
             "$clients = @(); $hookState = @{}; $instrState = @{}\n"
-            f"$ShimPort = 0; $Model = 'haiku'; $interactive = {'$true' if choice == 'prompt' else '$false'}\n"
+            f"$ShimPort = 0; $Model = 'haiku'; $interactive = {'$true' if interactive else '$false'}\n"
             "$script:shimInstallPath = Join-Path $PSScriptRoot 'fixture-shim.ps1'\n"
-            "function Read-Host { '1' }\n"
+            f"function Read-Host {{ '{answer}' }}\n"
             "function Assert-ExtractorArgs {}\n"
             "function claude { throw 'unexpected Claude invocation' }\n"
             "function Install-ShimOnce { return $true }\n"
@@ -248,13 +252,15 @@ def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
             "check_extractor_args() { :; }\n"
             "ensure_shim() { :; }\n"
         )
-        if choice == "prompt":
+        if interactive:
             setup += (
                 # Answer only the extractors menu. The fixture passes its
                 # script over stdin, so there is no real terminal to detect.
                 "function [ { if [[ $* == '! -t 0 ]' ]]; then return 1; fi; builtin [ \"$@\"; }\n"
-                "read() { if [[ $* == '-r choice' ]]; then choice=1; else builtin read \"$@\"; fi; }\n"
+                f"read() {{ if [[ $* == '-r choice' ]]; then choice='{answer}'; else builtin read \"$@\"; fi; }}\n"
             )
+        if choice == "macos":
+            setup += "uname() { printf 'Darwin\\n'; }\n"
         continued = "echo REMAINING_STEPS_FINISHED\n"
     proc = runner.run(
         setup + _stage(path, "3. extractor choice", "# >>> endpoint preflight >>>")
@@ -263,21 +269,30 @@ def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
         + continued + "\n".join(_marker_block(_read(path), "client setup result")) + "\n"
     )
     output = proc.stdout + proc.stderr
-    assert ("AUTOSTART extractor-shim install-autostart claude" in proc.stdout) == (choice != "default")
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
-    assert proc.returncode == (5 if choice in ("flag", "prompt") else 0), output
+    assert proc.returncode == (5 if choice in ("flag", "prompt", "macos") else 0), output
+    assert ("AUTOSTART extractor-shim install-autostart claude" in proc.stdout) == (
+        choice in ("flag", "prompt", "restored")
+    )
+    failure = (
+        "Shim autostart registration or start failed. "
+        "Fix the reported error and rerun the installer with the same extractor mode."
+    )
     if choice in ("flag", "prompt"):
+        assert proc.stderr.splitlines()[-1] == "Requested extractor setup incomplete (claude-only). " + failure
+    elif choice == "macos":
         assert proc.stderr.splitlines()[-1] == (
-            "Requested extractor setup incomplete (claude-only). Shim autostart registration or start failed. "
-            "Fix the reported error and rerun the installer with the same extractor mode."
+            "Requested extractor setup incomplete (claude-only). "
+            "Native shim autostart is unavailable on macOS. Rerun with --extractor sidecar."
         )
     else:
         assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
         if restored:
             assert proc.stderr.splitlines()[-2:] == [
-                "Warnings", "Extractor shim autostart failed. See the repair command above."
+                "Warnings", "Extractor setup incomplete (claude-only). " + failure
             ]
         else:
+            assert "Extractor mode: sidecar" in proc.stdout
             assert proc.stderr == ""
 
 

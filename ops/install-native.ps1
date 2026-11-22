@@ -2060,17 +2060,20 @@ $claudePluginMarketplace = "pseudolife-mcp"
 # shorthand as a GitHub source and refreshes it over SSH, which fails on a
 # host with no GitHub key (seen 2026-10-04). The repository is public.
 $claudePluginMarketplaceSource = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+$claudePluginDir = if ($env:CLAUDE_CODE_PLUGIN_CACHE_DIR) { $env:CLAUDE_CODE_PLUGIN_CACHE_DIR }
+                   elseif ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR "plugins" }
+                   else { Join-Path $env:USERPROFILE ".claude\plugins" }
 $script:pluginClaude = ""
 $script:pluginClaudeRecovery = ""
 function Get-ClaudePluginManual {
     "inside Claude Code run /plugin marketplace add $claudePluginMarketplaceSource then /plugin install $claudePluginId"
 }
 function Test-ClaudePluginRecorded {
-    $file = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+    $file = Join-Path $claudePluginDir "installed_plugins.json"
     return (Test-Path $file) -and ((Get-Content $file -Raw) -match [regex]::Escape("`"$claudePluginId`""))
 }
 function Get-ClaudePluginInstalledVersion {
-    $file = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+    $file = Join-Path $claudePluginDir "installed_plugins.json"
     try {
         $records = @((Get-Content $file -Raw | ConvertFrom-Json).plugins.$claudePluginId)
         if ($records.Count -gt 0) { return [string]$records[0].version }
@@ -2111,7 +2114,7 @@ function Install-ClaudePlugin {
         $script:pluginClaudeRecovery = "the claude CLI is not on PATH; $(Get-ClaudePluginManual)"
         return
     }
-    $marketplaces = Join-Path $env:USERPROFILE ".claude\plugins\known_marketplaces.json"
+    $marketplaces = Join-Path $claudePluginDir "known_marketplaces.json"
     $marketplaceKnown = (Test-Path $marketplaces) -and
         ((Get-Content $marketplaces -Raw) -match [regex]::Escape("`"$claudePluginMarketplace`""))
     if (-not $marketplaceKnown) {
@@ -2142,7 +2145,8 @@ function Install-ClaudePlugin {
         $script:pluginClaude = "installed:$(Get-ClaudePluginInstalledVersion)"
     } else {
         $script:pluginClaude = "failed"
-        $script:pluginClaudeRecovery = "'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $claudePluginId. Run /plugin install $claudePluginId inside Claude Code."
+        $pluginRecord = Join-Path $claudePluginDir "installed_plugins.json"
+        $script:pluginClaudeRecovery = "'claude plugin install' returned success but $pluginRecord does not list $claudePluginId. Run /plugin install $claudePluginId inside Claude Code."
         Write-Warning $script:pluginClaudeRecovery
     }
 }
@@ -2544,7 +2548,8 @@ function Invoke-ClientOnlyPair {
 if ($PairingCode) { Invoke-ClientOnlyPair }
 if ($ClientOnly) { Invoke-ClientOnlyConnect }
 
-$installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+$installedPlugins = if ($claudePluginDir) { Join-Path $claudePluginDir "installed_plugins.json" }
+                    else { Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json" }
 $claudePluginInstalled = (Test-Path $installedPlugins) -and
     ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
 $instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
@@ -4186,13 +4191,31 @@ Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnl
 Write-Host "Optional ChatGPT access: follow the native tunnel profile steps in docs/guide/tunnels.md."
 Remove-NativeStage
 # >>> client setup result >>>
+function Get-CodexHookCompletionReason {
+    switch ($hookState["codex"]) {
+        "pending" {
+            if ($codexSetup.recovery -clike "PseudoLife hooks await approval.*") {
+                "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
+            } else {
+                "Hooks are not installed. Rerun the installer with --codex-hook-trust yes (PowerShell -CodexHookTrust yes)."
+            }
+        }
+        "unavailable" {
+            if ($codexSetup.recovery -clike "Codex hooks are disabled in configuration (features.hooks = false);*") {
+                "Hooks are disabled in Codex. Set features.hooks = true in the active Codex configuration and rerun the installer."
+            } else {
+                "Hooks could not be set up. Fix the hook problem reported above and rerun the installer."
+            }
+        }
+    }
+}
 function Get-ClientSetupWarnings {
     $script:httpCredentialWarnings
     if ($script:legacyClaude -eq "error") { "Claude Code legacy hook cleanup failed. See the repair above." }
     if (-not $script:clientSetupFailures.ContainsKey("codex") -and
         (($CodexHooks -eq "skip" -and $hookState["codex"] -in "pending", "unavailable") -or
          ($CodexHookTrust -eq "no" -and $hookState["codex"] -eq "pending"))) {
-        "Codex hooks: $($hookState['codex']). $($codexSetup.recovery)"
+        "Codex hook setup needs attention. $(Get-CodexHookCompletionReason)"
     }
     if ($script:codexRuntimeDefaults -eq "failed") { "Codex runtime defaults were not confirmed. $script:codexRuntimeRecovery" }
     if ($script:geminiGuardWarning) { "Gemini CLI stdio guard was not verified. Check the pseudolife-memory entry in ~/.gemini/settings.json." }
@@ -4201,7 +4224,9 @@ function Get-ClientSetupWarnings {
     foreach ($state in $instrState.Values) {
         if ($state -like "failed:*") { "Standing instructions could not be written to $($state.Substring(7)). Check permissions and rerun." }
     }
-    if ($script:extractorAutostartFailure -and -not $extractorRequested) { "Extractor shim autostart failed. See the repair command above." }
+    if ($script:extractorAutostartFailure -and -not $extractorRequested) {
+        "Extractor setup incomplete ($Extractor). $script:extractorAutostartFailure"
+    }
     if ($script:clientScheduleState -eq "failed") { "Automatic client updates were not scheduled. See the scheduling command above." }
     if ($script:consoleSigninWarning) { "Console sign-in did not finish. Run pseudolife-mcp console once the reported problem is fixed." }
 }
@@ -4223,19 +4248,9 @@ function Get-ClientCompletionReasons([string]$Provider, [string]$ConnectionFailu
         "codex" {
             if (-not $ConnectionFailure -and $CodexHooks -ne "skip") {
                 switch ($hookState["codex"]) {
-                    "unavailable" {
-                        $recovery = if ($codexSetup.recovery) { $codexSetup.recovery }
-                                    else { "Fix the hook error above and rerun the installer." }
-                        "Hooks could not be set up. $recovery"
-                    }
+                    "unavailable" { Get-CodexHookCompletionReason }
                     "pending" {
-                        if ($CodexHookTrust -ne "no") {
-                            if ($codexSetup.recovery -clike "PseudoLife hooks await approval.*") {
-                                "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
-                            } else {
-                                "Hooks are not installed. Rerun the installer with --codex-hook-trust yes (PowerShell -CodexHookTrust yes)."
-                            }
-                        }
+                        if ($CodexHookTrust -ne "no") { Get-CodexHookCompletionReason }
                     }
                 }
             }

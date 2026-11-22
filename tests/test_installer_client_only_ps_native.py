@@ -22,7 +22,7 @@ from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
-from tests.test_installer_client_only_native import CODEX_HOOK_REPORTS, COMPLETION_CASES, DENIED_CREDENTIAL
+from tests.test_installer_client_only_native import CODEX_HOOK_APPROVAL, CODEX_HOOK_REPORTS, COMPLETION_CASES, DENIED_CREDENTIAL
 from tests.test_installer_existing_upgrade import _between, user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -931,7 +931,8 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
                   runtime_failed: bool = False, gemini_list: str = "",
-                  show_ladder: bool = False, transport: str = "shim", hook_report: str = ""):
+                  show_ladder: bool = False, transport: str = "shim", hook_report: str = "",
+                  hook_trust: str = "yes"):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex adds."""
@@ -972,7 +973,7 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
         + _block("client setup result")
     )
     body = f"""$env:PATH = '{_q(ps.tmp)}'
-$clients = @({providers}); $CodexHooks = 'auto'; $CodexHookTrust = 'yes'
+$clients = @({providers}); $CodexHooks = 'auto'; $CodexHookTrust = '{hook_trust}'
 $requestedClients = '{requested or ''}' -split ' '
 $Instructions = 'auto'; $ClaudeMd = ''; $AgentsFile = ''; $interactive = $false
 $Transport = '{transport}'
@@ -1119,10 +1120,20 @@ def test_codex_hook_failure_is_reported_at_completion(tmp_path, hook_status, rec
     assert proc.returncode == (5 if requested else 0), _output(proc)
     assert adds and "MCP_GEMINI=shim-env" in proc.stdout
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert recovery in proc.stdout
     label = "Requested" if requested else "Detected"
     assert proc.stderr.splitlines()[-1] == f"{label} client setup incomplete (Codex). {reason}"
     if not requested:
         assert "Warnings" in proc.stderr.splitlines()
+
+
+def test_untrusted_codex_hooks_use_doctor_guidance_without_failing(tmp_path):
+    report = json.dumps(dict(status="pending", source="manual", instructions="present",
+                             recovery="PseudoLife hooks await approval. Use Codex /hooks."))
+    proc, _ = _codex_wiring(_PowerShell(tmp_path), requested="codex gemini",
+                            hook_report=report, hook_trust="no")
+    assert proc.returncode == 0, _output(proc)
+    assert proc.stderr.splitlines()[-2:] == ["Warnings", "Codex hook setup needs attention. " + CODEX_HOOK_APPROVAL]
 
 
 def test_requested_codex_instruction_failure_is_a_warning(tmp_path):

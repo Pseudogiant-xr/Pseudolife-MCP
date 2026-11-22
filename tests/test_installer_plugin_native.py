@@ -52,9 +52,10 @@ def _record_marketplace(home: Path) -> None:
 class Scenario:
     def __init__(self, *, clients="claude", flag="auto", cli=True, marketplace=False,
                  plugin=False, marketplace_exit=0, install_exit=0, install_records=True,
-                 help_has_yes=True, helper_out="", helper_exit=0, requested=None):
+                 help_has_yes=True, helper_out="", helper_exit=0, requested=None, profile_var=None):
         self.clients, self.flag, self.cli = clients, flag, cli
         self.requested = requested
+        self.profile_var = profile_var
         # The native client's plugin-marketplace step as the installer runs
         # it (native_helper / Invoke-NativeHelper): a stub that records its
         # call and answers with ``helper_out`` / ``helper_exit``.
@@ -68,12 +69,14 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
     block = _between("ops/install-native.sh", "# >>> claude plugin >>>", "# <<< claude plugin <<<")
     env = _fixture_env(tmp_path / "bash-env")
     home = Path(env["HOME"])
+    if sc.profile_var:
+        env[sc.profile_var] = _bash_fixture_path(bash, tmp_path / "active profile", env)
     if sc.marketplace:
         _record_marketplace(home)
     if sc.plugin:
         _record_plugin(home)
     fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    fake_bin.mkdir(exist_ok=True)
     call_log = tmp_path / "calls.txt"
     if sc.cli:
         # Writes the same registry files the real CLI does, pretty-printed
@@ -81,7 +84,7 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
         (fake_bin / "claude").write_text(
             "#!/bin/sh\n"
             "printf 'claude|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-            "plugins=\"$HOME/.claude/plugins\"\n"
+            'plugins="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins}"\n'
             "if [ \"$1\" = plugin ] && [ \"$2\" = install ] && [ \"$3\" = --help ]; then\n"
             "  [ \"$FAKE_HELP_YES\" = yes ] && echo '  -y, --yes   Accept the displayed command'\n"
             # Pads past the pipe buffer and, like a real CLI, dies when the
@@ -114,6 +117,8 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
     if sc.requested is not None:
         finish = (
             f"REQUESTED_CLIENTS={'claude' if sc.requested else ''}\n"
+            + _between("ops/install-native.sh", 'instruction_choice="${INSTRUCTIONS:', '\nHOOK_CLAUDE=')
+            + "\n"
             "echo REMAINING_STEPS_FINISHED\n"
             + _between("ops/install-native.sh", "# >>> client registration state >>>",
                        "# <<< client registration state <<<")
@@ -151,6 +156,8 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     block = _between("ops/install-native.ps1", "# >>> claude plugin >>>", "# <<< claude plugin <<<")
     env = _fixture_env(tmp_path / "powershell-env")
     home = Path(env["USERPROFILE"])
+    if sc.profile_var:
+        env[sc.profile_var] = str(tmp_path / "active profile")
     if sc.marketplace:
         _record_marketplace(home)
     if sc.plugin:
@@ -164,6 +171,8 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
         finish = (
             f"$requestedClients = @({requested})\n"
             "$hookState = @{}; $instrState = @{}\n"
+            + _between("ops/install-native.ps1", '$installedPlugins =', '\n$hookState =')
+            + "\n"
             "Write-Output REMAINING_STEPS_FINISHED\n"
             + _between("ops/install-native.ps1", "# >>> client registration state >>>",
                        "# <<< client registration state <<<")
@@ -173,7 +182,9 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     fake = "" if not sc.cli else f"""function global:claude {{
     $callArgs = @($args)
     Add-Content -LiteralPath '{escaped_log}' -Value ('claude|' + ($callArgs -join ' '))
-    $plugins = Join-Path $env:USERPROFILE '.claude\\plugins'
+    $plugins = if ($env:CLAUDE_CODE_PLUGIN_CACHE_DIR) {{ $env:CLAUDE_CODE_PLUGIN_CACHE_DIR }}
+               elseif ($env:CLAUDE_CONFIG_DIR) {{ Join-Path $env:CLAUDE_CONFIG_DIR 'plugins' }}
+               else {{ Join-Path $env:USERPROFILE '.claude\\plugins' }}
     if ($callArgs[0] -eq 'plugin' -and $callArgs[1] -eq 'install' -and $callArgs[2] -eq '--help') {{
         if ($env:FAKE_HELP_YES -eq 'yes') {{ Write-Output '  -y, --yes   Accept the displayed command' }}
         $global:LASTEXITCODE = 0; return
@@ -361,6 +372,20 @@ def test_plugin_failure_is_reported_at_completion(variant, tmp_path, requested):
     )
     if not requested:
         assert lines[-2] == "Warnings"
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+@pytest.mark.parametrize("profile_var", ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR"])
+def test_plugin_in_active_profile_is_installed_and_preserved(variant, tmp_path, profile_var):
+    scenario = Scenario(requested=True, profile_var=profile_var)
+    state, _, calls, proc = _run(variant, tmp_path, scenario)
+    assert state == f"installed:{FAKE_VERSION}"
+    assert "plugin detected" in proc.stdout.decode()
+    assert f"claude|plugin install --yes {PLUGIN_ID}" in calls
+    state, _, rerun_calls, proc = _run(variant, tmp_path, scenario)
+    assert state == f"present:{FAKE_VERSION}"
+    assert "plugin detected" in proc.stdout.decode()
+    assert rerun_calls == calls
 
 
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)

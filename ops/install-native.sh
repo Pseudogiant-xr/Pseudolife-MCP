@@ -2153,18 +2153,19 @@ CLAUDE_PLUGIN_MARKETPLACE="pseudolife-mcp"
 # shorthand as a GitHub source and refreshes it over SSH, which fails on a
 # host with no GitHub key (seen 2026-10-04). The repository is public.
 CLAUDE_PLUGIN_MARKETPLACE_SOURCE="https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+CLAUDE_PLUGIN_DIR="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins}"
 PLUGIN_CLAUDE=""
 PLUGIN_CLAUDE_RECOVERY=""
 claude_plugin_manual() {
     echo "inside Claude Code run /plugin marketplace add $CLAUDE_PLUGIN_MARKETPLACE_SOURCE then /plugin install $CLAUDE_PLUGIN_ID"
 }
 claude_plugin_recorded() {
-    grep -q "\"$CLAUDE_PLUGIN_ID\"" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null
+    grep -q "\"$CLAUDE_PLUGIN_ID\"" "$CLAUDE_PLUGIN_DIR/installed_plugins.json" 2>/dev/null
 }
 claude_plugin_installed_version() {
     # The record is pretty-printed JSON: the plugin's entry follows its key
     # within a few lines. curl+sed hosts only — no jq or python assumed.
-    { grep -A 12 "\"$CLAUDE_PLUGIN_ID\"" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null \
+    { grep -A 12 "\"$CLAUDE_PLUGIN_ID\"" "$CLAUDE_PLUGIN_DIR/installed_plugins.json" 2>/dev/null \
         | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1; } || true
 }
 claude_marketplace_https() {
@@ -2199,7 +2200,7 @@ install_claude_plugin() {
         PLUGIN_CLAUDE_RECOVERY="the claude CLI is not on PATH; $(claude_plugin_manual)"
         return 0
     fi
-    if ! grep -q "\"$CLAUDE_PLUGIN_MARKETPLACE\"" "$HOME/.claude/plugins/known_marketplaces.json" 2>/dev/null; then
+    if ! grep -q "\"$CLAUDE_PLUGIN_MARKETPLACE\"" "$CLAUDE_PLUGIN_DIR/known_marketplaces.json" 2>/dev/null; then
         step "Adding the $CLAUDE_PLUGIN_MARKETPLACE plugin marketplace to Claude Code..."
         if ! claude plugin marketplace add "$CLAUDE_PLUGIN_MARKETPLACE_SOURCE"; then
             PLUGIN_CLAUDE=failed
@@ -2226,7 +2227,7 @@ install_claude_plugin() {
         PLUGIN_CLAUDE="installed:$(claude_plugin_installed_version)"
     else
         PLUGIN_CLAUDE=failed
-        PLUGIN_CLAUDE_RECOVERY="'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $CLAUDE_PLUGIN_ID. Run /plugin install $CLAUDE_PLUGIN_ID inside Claude Code."
+        PLUGIN_CLAUDE_RECOVERY="'claude plugin install' returned success but $CLAUDE_PLUGIN_DIR/installed_plugins.json does not list $CLAUDE_PLUGIN_ID. Run /plugin install $CLAUDE_PLUGIN_ID inside Claude Code."
         echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
     fi
 }
@@ -2611,7 +2612,7 @@ pair_with_code() {
 
 instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
 if grep -q "pseudolife-memory@pseudolife-mcp" \
-        "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
+        "${CLAUDE_PLUGIN_DIR:-$HOME/.claude/plugins}/installed_plugins.json" 2>/dev/null; then
     CLAUDE_PLUGIN_INSTALLED=1
     case " $CLIENTS " in *" claude "*)
         step "pseudolife-memory Claude Code plugin detected — skipping Claude"
@@ -3880,7 +3881,10 @@ if [ -n "$shim_autostart_family" ]; then
     case "$shim_autostart_family" in claude) step "Registering the Claude shim autostart (systemd --user)..." ;; *) step "Registering the Codex shim autostart (systemd --user)..." ;; esac
     ensure_shim
     shim_autostart_args=(extractor-shim install-autostart "$shim_autostart_family" --repo "$repo" --port "$SHIM_PORT" --model "$MODEL")
-    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+    if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+        EXTRACTOR_AUTOSTART_FAILURE="Native shim autostart is unavailable on macOS. Rerun with --extractor sidecar."
+        printf 'WARNING: %s\n' "$EXTRACTOR_AUTOSTART_FAILURE" >&2
+    elif [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
         echo "WARNING: shim autostart was not registered: the native client is unavailable (see above)" >&2
         EXTRACTOR_AUTOSTART_FAILURE="Shim autostart was not registered because the native client is unavailable. Fix the native client install and rerun the installer with the same extractor mode."
         echo "  Re-run later: pseudolife-mcp ${shim_autostart_args[*]}" >&2
@@ -4327,6 +4331,22 @@ if [ -n "$CLIENT_ONLY" ]; then offer_client_update_schedule; fi
 print_update_line
 echo "Optional ChatGPT access: follow the native tunnel profile steps in docs/guide/tunnels.md."
 # >>> client setup result >>>
+codex_hook_completion_reason() {
+    case "${HOOK_CODEX:-}" in
+        pending)
+            if [[ "${CODEX_HOOK_RECOVERY:-}" == "PseudoLife hooks await approval."* ]]; then
+                echo "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
+            else
+                echo "Hooks are not installed. Rerun the installer with --codex-hook-trust yes (PowerShell -CodexHookTrust yes)."
+            fi ;;
+        unavailable)
+            case "${CODEX_HOOK_RECOVERY:-}" in
+                "Codex hooks are disabled in configuration (features.hooks = false);"*)
+                    echo "Hooks are disabled in Codex. Set features.hooks = true in the active Codex configuration and rerun the installer." ;;
+                *) echo "Hooks could not be set up. Fix the hook problem reported above and rerun the installer." ;;
+            esac ;;
+    esac
+}
 client_setup_warnings() {
     local state
     if [ -n "${HTTP_CREDENTIAL_WARNINGS:-}" ]; then printf '%s\n' "$HTTP_CREDENTIAL_WARNINGS"; fi
@@ -4334,7 +4354,7 @@ client_setup_warnings() {
     if [ -z "${CODEX_CLIENT_FAILURE:-}" ]; then
         case "${HOOK_CODEX:-}:${CODEX_HOOKS:-}:${CODEX_HOOK_TRUST:-}" in
             pending:*:no|pending:skip:*|unavailable:skip:*)
-                printf 'Codex hooks: %s. %s\n' "$HOOK_CODEX" "${CODEX_HOOK_RECOVERY:-}" ;;
+                printf 'Codex hook setup needs attention. %s\n' "$(codex_hook_completion_reason)" ;;
         esac
     fi
     if [ "${CODEX_RUNTIME_DEFAULTS:-}" = failed ]; then printf 'Codex runtime defaults were not confirmed. %s\n' "$CODEX_RUNTIME_RECOVERY"; fi
@@ -4344,7 +4364,9 @@ client_setup_warnings() {
     for state in "${INSTR_CLAUDE:-}" "${INSTR_CODEX:-}" "${INSTR_GEMINI:-}" "${INSTR_GENERIC:-}"; do
         case "$state" in failed:*) printf 'Standing instructions could not be written to %s. Check permissions and rerun.\n' "${state#*:}" ;; esac
     done
-    if [ -n "${EXTRACTOR_AUTOSTART_FAILURE:-}" ] && [ -z "${extractor_requested:-}" ]; then echo "Extractor shim autostart failed. See the repair command above."; fi
+    if [ -n "${EXTRACTOR_AUTOSTART_FAILURE:-}" ] && [ -z "${extractor_requested:-}" ]; then
+        printf 'Extractor setup incomplete (%s). %s\n' "$EXTRACTOR" "$EXTRACTOR_AUTOSTART_FAILURE"
+    fi
     if [ "${CLIENT_SCHEDULE_STATE:-}" = failed ]; then echo "Automatic client updates were not scheduled. See the scheduling command above."; fi
     if [ -n "${CONSOLE_SIGNIN_WARNING:-}" ]; then echo "Console sign-in did not finish. Run pseudolife-mcp console once the reported problem is fixed."; fi
 }
@@ -4365,16 +4387,9 @@ client_completion_reasons() {
         codex)
             if [ -z "$connection_failure" ] && [ "${CODEX_HOOKS:-}" != skip ]; then
                 case "${HOOK_CODEX:-}" in
-                    unavailable)
-                        printf 'Hooks could not be set up. %s\n' "${CODEX_HOOK_RECOVERY:-Fix the hook error above and rerun the installer.}" ;;
+                    unavailable) codex_hook_completion_reason ;;
                     pending)
-                        if [ "${CODEX_HOOK_TRUST:-}" != no ]; then
-                            if [[ "${CODEX_HOOK_RECOVERY:-}" == "PseudoLife hooks await approval."* ]]; then
-                                echo "Hooks await approval. Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
-                            else
-                                echo "Hooks are not installed. Rerun the installer with --codex-hook-trust yes (PowerShell -CodexHookTrust yes)."
-                            fi
-                        fi ;;
+                        if [ "${CODEX_HOOK_TRUST:-}" != no ]; then codex_hook_completion_reason; fi ;;
                 esac
             fi ;;
     esac

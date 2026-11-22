@@ -973,7 +973,7 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
                   cred_exit: int = 0, native_exit: int = 0, existing: str = "",
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
                   runtime_failed: bool = False, gemini_list: str = "", show_ladder: bool = False,
-                  hook_report: str = ""):
+                  hook_report: str = "", hook_trust: str = "yes"):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex calls."""
@@ -1017,7 +1017,7 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
         f"CLIENTS='codex{' gemini' if requested is not None else ''}'\n"
         f"REQUESTED_CLIENTS='{requested or ''}'\n"
-        "CODEX_HOOKS=auto CODEX_HOOK_TRUST=yes INSTRUCTIONS=auto CLAUDE_MD='' EXPLICIT_ARGS=''\n"
+        f"CODEX_HOOKS=auto CODEX_HOOK_TRUST={hook_trust} INSTRUCTIONS=auto CLAUDE_MD='' EXPLICIT_ARGS=''\n"
         "AGENTS_FILE='' TRANSPORT=shim\n"
         + _between("ops/install-native.sh", "get_env() {", "\n") + "\n" + native_stub.BASH + "\n"
         + steps + stages + ladder
@@ -1171,9 +1171,12 @@ CODEX_HOOK_APPROVAL = (
 CODEX_HOOK_REPORTS = [
     pytest.param("pending", "PseudoLife hooks await approval. Rerun the installer interactively, "
                  "or review them in Codex /hooks.", CODEX_HOOK_APPROVAL, id="approval"),
-    pytest.param("unavailable", "The fixture could not write hooks. Check permissions and rerun.",
-                 "Hooks could not be set up. The fixture could not write hooks. Check permissions and rerun.",
+    pytest.param("unavailable", "The fixture could not write hooks.",
+                 "Hooks could not be set up. Fix the hook problem reported above and rerun the installer.",
                  id="failure"),
+    pytest.param("unavailable", "Codex hooks are disabled in configuration (features.hooks = false); setup preserves that choice.",
+                 "Hooks are disabled in Codex. Set features.hooks = true in the active Codex configuration and rerun the installer.",
+                 id="disabled"),
 ]
 
 
@@ -1186,10 +1189,21 @@ def test_codex_hook_failure_is_reported_at_completion(bash, tmp_path, hook_statu
     assert proc.returncode == (5 if requested else 0), proc.stdout + proc.stderr
     assert adds and "MCP_GEMINI=shim-env" in proc.stdout
     assert "REMAINING_STEPS_FINISHED" in proc.stdout
+    assert recovery in proc.stdout
     label = "Requested" if requested else "Detected"
     assert proc.stderr.splitlines()[-1] == f"{label} client setup incomplete (Codex). {reason}"
     if not requested:
         assert "Warnings" in proc.stderr.splitlines()
+
+
+@BASH
+def test_untrusted_codex_hooks_use_doctor_guidance_without_failing(bash, tmp_path):
+    report = json.dumps(dict(status="pending", source="manual", instructions="present",
+                             recovery="PseudoLife hooks await approval. Use Codex /hooks."))
+    proc, _ = _codex_wiring(_Shell(bash, tmp_path), requested="codex gemini",
+                            hook_report=report, hook_trust="no")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stderr.splitlines()[-2:] == ["Warnings", "Codex hook setup needs attention. " + CODEX_HOOK_APPROVAL]
 
 
 @BASH
@@ -1368,9 +1382,13 @@ def test_unattended_detected_clients_keep_success_when_native_install_fails(bash
     assert proc.returncode == 0, output
     assert "the native client could not be installed" in output
     assert (
-        "Detected client setup incomplete (Claude Code). The native client could not be installed (see above), "
-        "and the daemon requires a bearer token for this connection. Fix the native client install, then rerun the installer."
+        "Detected client setup incomplete (Claude Code). the pseudolife-mcp shim is unavailable (see the message above), "
+        "and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
     ) in proc.stderr.splitlines()
+    assert proc.stderr.splitlines()[-1] == (
+        "Detected client setup incomplete (Gemini CLI). shim unavailable for Gemini CLI (see warnings above), "
+        "and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
+    )
     assert "Requested client setup incomplete" not in output
     assert proc.stdout.splitlines()[-1] == "Done. First session: tell your coding agent to remember something."
 
