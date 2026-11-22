@@ -72,3 +72,16 @@ def test_docker_volume_inventory_uses_a_supported_format(monkeypatch):
     assert hosted_linux.DockerFixture.inventory() == {
         "container": {"fixture"}, "network": {"fixture"}, "volume": {"fixture"},
     }
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_install_tail_redacts_fixture_details():
+    from ops.acceptance.hosted_linux import installer_tail
+
+    assert installer_tail(b"Update later with one command: /tmp/private-fixture update\n"
+                          b"unknown command output: fixture-value\n"
+                          b"WARNING: Codex MCP registration was skipped because credential setup failed.\n") == [
+        "Update later with one command: <launcher> update.",
+        "<unrecognized line redacted>",
+        "WARNING: Codex MCP registration was skipped because credential setup failed.",
+    ]

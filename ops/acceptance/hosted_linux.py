@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -32,11 +33,51 @@ BASELINE_MESSAGES = (
     (b"does not match the detected host platform", "The image platform does not match the host platform."),
     (b"exec format error", "exec format error"),
     (b"Cannot pull ghcr.io/", "Cannot pull the release daemon image."),
-    (b"Falling back to Python", "Falling back to Python."),
+    (b"The default Rust daemon is unavailable, so this install uses the Python daemon.",
+     "The default Rust daemon is unavailable, so this install uses the Python daemon."),
+    (b"Daemon engine: python", "Daemon engine: python"),
+    (b"Daemon engine: rust", "Daemon engine: rust"),
+    (b"docker compose up -d --build", "docker compose up -d --build (checkout or images changed)..."),
     (b"daemon not healthy yet", "WARNING: daemon not healthy yet."),
     (b"Volumes ready:", "Volumes ready."),
     (b"AppArmor", "Docker reported an AppArmor error."),
     (b"not enough free space", "The installer reported insufficient free space."),
+    (b"Healthy: http://127.0.0.1:8765/health", "Healthy: http://127.0.0.1:8765/health"),
+    (b"What got wired, per agent:", "What got wired, per agent:"),
+    (b"OpenAI Codex", "OpenAI Codex"),
+    (b"Memory hooks", "Memory hooks: <details redacted>"),
+    (b"MCP transport        registration FAILED", "MCP transport        registration FAILED - see the warning above and re-run"),
+    (b"MCP transport", "MCP transport: <details redacted>"),
+    (b"Server instructions", "Server instructions  automatic (MCP instructions field)"),
+    (b"Verify runtime: codex mcp get pseudolife-memory",
+     "Verify runtime: codex mcp get pseudolife-memory; run doctor from that command's environment."),
+    (b"Runtime defaults", "Runtime defaults: <details redacted>"),
+    (b"Standing file", "Standing file: <details redacted>"),
+    (b"Agent board", "Agent board: <details redacted>"),
+    (b'Verify: memory_dream(action="status")', 'Verify: memory_dream(action="status") - <endpoint redacted>'),
+    (b"Note: dreams pause (and retry next sweep) whenever the shim is down or the CLI is logged out.",
+     "Note: dreams pause (and retry next sweep) whenever the shim is down or the CLI is logged out."),
+    (b"Note: Codex-served extraction quality is unmeasured", "Note: Codex-served extraction quality is unmeasured."),
+    (b"Update later with one command:", "Update later with one command: <launcher> update."),
+    (b"Keep this checkout: ops/.env is this install's configuration and credential source",
+     "Keep this checkout: ops/.env is this install's configuration and credential source, and extractor autostart may reference its files."),
+    (b"Optional ChatGPT access:", "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."),
+    (b"Done. First session: tell your coding agent to remember something.",
+     "Done. First session: tell your coding agent to remember something."),
+)
+CODEX_MESSAGES = (
+    (b"Codex MCP registration was skipped because credential setup failed.",
+     "WARNING: Codex MCP registration was skipped because credential setup failed."),
+    (b"Codex was not registered:", "WARNING: Codex was not registered: <details redacted>."),
+    (b"Codex authentication requires the stdio shim; HTTP fallback was not registered.",
+     "WARNING: Codex authentication requires the stdio shim; HTTP fallback was not registered."),
+    (b"Codex CLI has no env flag", "WARNING: this Codex CLI has no env flag; the stdio registration was skipped."),
+    (b"Wired into Codex via the pseudolife-mcp shim", "Wired into Codex via the pseudolife-mcp shim."),
+    (b"Codex credential setup failed.", "Codex credential setup failed."),
+)
+OFFICIAL_IMAGE = re.compile(
+    r"(?:ghcr\.io/pseudogiant-xr/)?pseudolife-(?:daemon(?:-rust)?|pg|extractor)"
+    r"(?::[A-Za-z0-9_.-]{1,64})?(?:@sha256:[a-f0-9]{64})?"
 )
 SENTINEL = "Hosted acceptance disposable bank marker"
 
@@ -109,41 +150,124 @@ def stop_units(profile):
         command(["systemctl", "--user", "daemon-reload"], env=profile.env)
 
 
+def installer_tail(output):
+    lines = (line.strip() for line in output.splitlines())
+    return [
+        next((safe for fragment, safe in (*CODEX_MESSAGES, *BASELINE_MESSAGES)
+              if fragment.lower() in line.lower()), "<unrecognized line redacted>")
+        for line in list(filter(None, lines))[-18:]
+    ]
+
+
+def binfmt_status():
+    folder = Path("/proc/sys/fs/binfmt_misc")
+    listed = command(["ls", "-1", folder])
+    require(listed.code == 0, "The runner could not list binfmt registrations.")
+    entries = listed.output.decode("ascii").splitlines()
+    handlers = [folder / name for name in entries if name not in ("status", "register")]
+    amd64 = any(
+        re.search(r"x86[-_]?64|amd64", handler.name, re.IGNORECASE)
+        or re.search(rb"^interpreter .*?(x86[-_]?64|amd64)", handler.read_bytes(), re.IGNORECASE | re.MULTILINE)
+        for handler in handlers
+    )
+    return {
+        "command": "ls /proc/sys/fs/binfmt_misc", "exit_code": listed.code,
+        "handlers": len(handlers), "amd64_handler_registered": amd64,
+    }
+
+
+def image_observation(container_id, existing_images):
+    result = docker("inspect", container_id)
+    require(result.code == 0, "The runner could not inspect an installed container.")
+    container = result.json()[0]
+    if not container["State"]["Running"]:
+        return None
+    inspected = docker("image", "inspect", container["Image"])
+    require(inspected.code == 0, "The runner could not inspect the running container's image.")
+    image = inspected.json()[0]
+    labels = image["Config"].get("Labels") or {}
+    reference = container["Config"]["Image"]
+    role = container["Name"].lstrip("/")
+    source = labels.get("pseudolife.build.source")
+    entrypoint = (image["Config"].get("Entrypoint") or [""])[0]
+    architecture = image.get("Architecture")
+    operating_system = image.get("Os")
+    engine = None
+    if role == DAEMON:
+        if entrypoint == "python":
+            engine = "python"
+        elif entrypoint.endswith("/provision-daemon-models"):
+            engine = "rust"
+    return {
+        "container": role if role in (DAEMON, POSTGRES, "pseudolife-mcp-extractor") else "<unrecognized container>",
+        "image": reference if OFFICIAL_IMAGE.fullmatch(reference) else "<unrecognized image reference>",
+        "architecture": architecture if architecture in ("arm64", "amd64") else None,
+        "os": operating_system if operating_system in ("linux", "windows") else None,
+        "has_repository_digest": bool(image.get("RepoDigests")),
+        "present_before_install": container["Image"].removeprefix("sha256:") in existing_images,
+        "build_source": source if source in ("checkout", "release") else None,
+        "engine_from_image": engine,
+    }
+
+
 def baseline(release, path, scratch, output):
-    """Observe the normal local Docker install before QEMU is registered."""
-    registration = Path("/proc/sys/fs/binfmt_misc").glob("*")
-    if any("x86_64" in item.name or "amd64" in item.name for item in registration):
+    """Observe the tag's stock Docker install before any emulation."""
+    binfmt = binfmt_status()
+    if binfmt["amd64_handler_registered"]:
         raise Unavailable("The runner already had an amd64 emulator before the default install.")
     repo = release.checkout(scratch / "baseline-checkout")
     profile = Profile(scratch / "baseline-home", path)
     docker_state = DockerFixture()
+    images_before = docker("image", "ls", "--all", "--quiet", "--no-trunc")
+    require(images_before.code == 0, "The runner could not inventory images before the install.")
+    existing_images = {item.removeprefix("sha256:") for item in images_before.output.decode().splitlines()}
     try:
         result = install(repo, profile, DOCKER_FLAGS, timeout=600)
         added = docker_state.added()
-        visible = [line.lower() for line in result.output.splitlines()[-18:]]
-        messages = []
-        for line in visible:
-            for fragment, projection in BASELINE_MESSAGES:
-                if fragment.lower() in line and projection not in messages:
-                    messages.append(projection)
-        write_json(output / "default-install.json", {
-            "platform": "linux-arm64", "daemon": "none",
+        images = [observed for container_id in sorted(added["container"])
+                  if (observed := image_observation(container_id, existing_images)) is not None]
+        http, health = get(LOOPBACK + "/health")
+        engine = health.get("engine") or health.get("daemon_engine")
+        source = (health.get("build") or {}).get("source")
+        codex = command(["codex", "mcp", "get", "pseudolife-memory", "--json"], cwd=repo, env=profile.env)
+        codex_lines = [line for fragment, line in CODEX_MESSAGES if fragment in result.output]
+        selected_engine = [line for fragment, line in BASELINE_MESSAGES
+                           if fragment in result.output and (line.startswith("Daemon engine:")
+                                                             or "default Rust daemon is unavailable" in line)]
+        receipt = {
+            "platform": "linux-arm64",
             "command": f"{INSTALL} --yes --client codex --extractor openai-only --firewall-rule no",
             "exit_code": result.code, "seconds": result.seconds,
-            "last_lines_allowlisted": messages,
-                "daemon_healthy": bool(readiness(LOOPBACK)),
+            "last_lines_sanitized": installer_tail(result.output),
+            "installer_engine_lines": selected_engine,
+            "binfmt_before_install": binfmt,
+            "running_containers": images,
+            "health": {
+                "http_status": http["status"],
+                "engine_reported": engine if engine in ("rust", "python") else None,
+                "build_source": source if source in ("checkout", "release") else None,
+                "ready": health.get("ready") is True,
+            },
+            "daemon_healthy": http["status"] == 200 and health.get("status") == "ok",
             "created_containers": len(added["container"]),
             "created_networks": len(added["network"]),
             "created_volumes": len(added["volume"]),
             "wrote_deployment_settings": (repo / "ops" / ".env").is_file(),
             "installed_native_runtime": profile.native_marker(release),
-            "wrote_client_configuration": (profile.codex / "config.toml").is_file(),
-        })
+            "codex": {
+                "configured_location": "CODEX_HOME/config.toml",
+                "wrote_configuration": (profile.codex / "config.toml").is_file(),
+                "mcp_get_exit_code": codex.code,
+                "installer_lines": codex_lines,
+            },
+        }
     finally:
         stop_units(profile)
         require(docker_state.clean(), "Default-install Docker objects were removed.")
         shutil.rmtree(profile.folder)
         shutil.rmtree(repo)
+    receipt["cleanup_verified"] = True
+    write_json(output / "default-install.json", receipt)
 
 
 def enable_amd64():
@@ -449,6 +573,11 @@ def run(tag, platform, output):
             repo = release.checkout(scratch / "release-checkout")
             before_docker = DockerFixture()
             baseline(release, path, scratch, output)
+            if os.environ.get("HOSTED_ACCEPTANCE_IDENTIFY_ONLY") == "1":
+                for receipt in receipts:
+                    receipt.note = "This rehearsal only identified the stock install's containers."
+                cleaned = before_docker.clean()
+                return 0
             enable_amd64()
             functions = {
                 "clean-install": clean_install, "upgrade-and-rollback": upgrade,
