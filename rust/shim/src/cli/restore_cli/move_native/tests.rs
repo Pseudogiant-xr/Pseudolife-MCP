@@ -48,6 +48,8 @@ struct Host {
     /// The bank holds one `retrieval_events` table, with its daemon's
     /// warm-up row in it.
     warmup_row: bool,
+    /// One daemon startup identity row in coordination_events.
+    startup_identity_row: bool,
 }
 
 fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
@@ -101,6 +103,7 @@ impl Host {
             token_hashes: None,
             engine: None,
             warmup_row: false,
+            startup_identity_row: false,
         }
     }
 }
@@ -160,7 +163,11 @@ impl Docker for Host {
                     // A daemon's own warm-up row counts only when the query
                     // does not skip it.
                     let skips = sql.contains("\"retrieval_events\" WHERE NOT (query_text = 'warmup probe' AND session_id IS NULL AND episode_id IS NULL AND served = '[]'::jsonb)");
-                    if self.warmup_row && !skips {
+                    if self.startup_identity_row {
+                        let skips_identity = sql.contains("\"coordination_events\" WHERE")
+                            && sql.contains("event = 'bank_identity'");
+                        ok(&format!("{}|{}", self.counts, u8::from(!skips_identity)))
+                    } else if self.warmup_row && !skips {
                         ok(&format!("{}|1", self.counts))
                     } else if self.warmup_row {
                         ok(&format!("{}|0", self.counts))
@@ -886,6 +893,46 @@ fn a_fresh_targets_own_warmup_search_is_not_user_data() {
         why.contains("the target bank is not empty (retrieval_events 2)"),
         "{why}"
     );
+}
+
+#[test]
+fn a_fresh_targets_own_bank_identity_keeps_it_empty() {
+    let mut fresh = world();
+    fresh.wire.far.docker.tables = r#"["entries","facts","meta","coordination_events"]"#.into();
+    fresh.wire.far.docker.startup_identity_row = true;
+    preflight(&mut fresh, &request()).expect("the startup identity alone is a fresh bank");
+    assert_read_only(&fresh);
+}
+
+#[tokio::test]
+async fn move_counts_user_audit_rows_in_preflight_and_after_start() {
+    let Ok(dsn) = std::env::var("PL_BANK_IDENTITY_TEST_DSN") else {
+        eprintln!("PL_BANK_IDENTITY_TEST_DSN unset: skipping database test");
+        return;
+    };
+    let config: tokio_postgres::Config = dsn.parse().expect("parse fixture DSN");
+    assert!(matches!(config.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1"));
+    assert!(config.get_dbname().is_some_and(|name| name.starts_with("pl_cf_pairing_context_")));
+    let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
+    tokio::spawn(connection);
+    client.batch_execute(
+        "CREATE TEMP TABLE coordination_events \
+         (seq bigint, event text, actor text, principal text, agent_id text, payload text)",
+    ).await.unwrap();
+    let mut observed = Vec::new();
+    for rows in [
+        "(1, 'bank_identity', 'daemon', 'daemon', '', '{\"bank_id\":\"fixture\"}')",
+        "(1, 'bank_identity', 'agent', 'default', '', '{\"bank_id\":\"fixture\"}')",
+        "(1, 'bank_identity', 'agent', 'default', '', '{}'), (2, 'register', 'agent', 'default', 'agent-id', '{}')",
+        "(1, 'register', 'daemon', 'daemon', '', '{\"bank_id\":\"fixture\"}')",
+    ] {
+        client.batch_execute(&format!("TRUNCATE coordination_events; INSERT INTO coordination_events VALUES {rows}")).await.unwrap();
+        for filter in [probe::user_filter("coordination_events"), probe::served_filter("coordination_events")] {
+            let query = format!("SELECT count(*) FROM coordination_events{filter}");
+            observed.push(client.query_one(&query, &[]).await.unwrap().get::<_, i64>(0));
+        }
+    }
+    assert_eq!(observed, [0, 0, 0, 0, 1, 1, 1, 1]);
 }
 
 #[test]
@@ -2146,6 +2193,28 @@ fn a_resume_is_refused_before_any_change_when_the_gated_bank_took_writes() {
     let mut both = world();
     both.wire.state = Some(reading(3, true));
     assert!(resume_check(&mut both, &request, None).is_err());
+}
+
+#[test]
+fn a_resume_with_an_older_audit_count_names_release() {
+    let mut request = request();
+    request.resume_move = MOVE.into();
+    request.resume_baseline = Some(super::record::Baseline {
+        user_counts: [("public.coordination_events".to_owned(), 1)].into(),
+        mutations: [("coordination_events".to_owned(), 1)].into(),
+    });
+    let mut both = world();
+    both.wire.state = Some(protocol::State {
+        gated: Some(true),
+        counts: [("public.coordination_events".to_owned(), 1)].into(),
+        user_counts: [("public.coordination_events".to_owned(), 0)].into(),
+        mutations: Some([("coordination_events".to_owned(), 1)].into()),
+        ..protocol::State::default()
+    });
+    let why = resume_check(&mut both, &request, None).unwrap_err();
+    assert!(why.contains("public.coordination_events: 0 on the target, 1 in the dump"));
+    assert!(why.contains(&format!("pseudolife-mcp move --release-target {MOVE}")));
+    assert_read_only(&both);
 }
 
 #[test]

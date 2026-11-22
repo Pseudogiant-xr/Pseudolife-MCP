@@ -202,10 +202,11 @@ chmod 600 .env client.token
 ```
 
 The first token authenticates the reserved `default` principal. Keep it
-private; never paste it into chat or tracked YAML. After connecting, use
-[`pseudolife-mcp invite`](remote-bank.md#adding-a-machine-invite-and-pair) to issue
-separate credentials to other machines. The stack passes through every
-runtime setting from `ops/docker-compose.yml`, including
+private; never paste it into chat or tracked YAML. The Rust daemon gives
+the writable bank its identity at startup. Once it is ready, use
+[`pseudolife-mcp invite`](remote-bank.md#adding-a-machine-invite-and-pair) on the
+daemon host to issue separate credentials to other machines. The stack
+passes through every runtime setting from `ops/docker-compose.yml`, including
 `PSEUDOLIFE_MCP_TOKENS`, `PSEUDOLIFE_MCP_TIER_MAP`, the dream, fallback and
 judge keys, memory limits, and both volume-name overrides. Put overrides in
 the same env file, not in a rewritten compose file.
@@ -12927,8 +12928,10 @@ Two commands give another machine its own identity on the bank, with no
 daemon restart and no token travelling between machines. This is the way
 to add every machine other than the daemon's host. Copying another
 machine's token there instead works, but if two machines use one token,
-rotating it breaks both and neither can be revoked alone. On the daemon
-host, after [exposing it](#expose-the-daemon-with-one-command):
+rotating it breaks both and neither can be revoked alone. On the writable
+daemon host, run `invite` after [exposing it](#expose-the-daemon-with-one-command).
+The Rust daemon gives a fresh writable bank its identity at startup, so
+you can invite a machine before any agent connects:
 
 ```bash
 pseudolife-mcp invite laptop            # prints a code such as 7K3Q-M9XA-2PDF
@@ -13008,7 +13011,10 @@ The rules:
 - The daemon must have a token of its own (`"auth": true`): invited
   principals do not turn authentication on. An invite also checks that
   the database it writes is the bank the local daemon serves (`/health`'s
-  `bank`), and refuses while that is still `null`.
+  `bank`). If the daemon is still starting its storage, wait a few seconds
+  and retry. If the local daemon serves a read-only bank, use the writable
+  daemon host. If a daemon at 0.25.0 or earlier has no bank identity, run
+  `pseudolife-mcp update` on that host before retrying.
 - On a Docker install `invite` runs inside the daemon container, so the
   host never handles the database password; elsewhere it uses
   `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded Postgres.
@@ -13452,8 +13458,17 @@ records. The target needs:
 - free space for the move's files under `~/.pseudolife-mcp/moves` (or
   `--target-work-dir`), plus the restore's 8 GiB margin.
 
-A fresh target has no bank identity yet, so the plan says `--target-url` is
-matched only by release and schema.
+The Rust daemon gives a fresh target its bank identity at startup. The
+native `move` client asks the target's installed native client to check
+whether the bank is empty. Update the native client on the target to a
+release that recognizes this startup event. A 0.25.0 target helper reports
+`the target bank is not empty (coordination_events 1)` when the startup
+event is the only audit row. The frozen Python `move` client checks that
+table from the source and can give the same refusal. Use the native client
+on the source and update the target's native client before retrying.
+
+For an older target with no bank identity yet, the plan says
+`--target-url` is matched only by release and schema.
 
 The move, in order:
 1. Claims the target, pauses unattended updates and restart policies on both
@@ -13503,6 +13518,9 @@ replacing that move's own restored bank there. It does so only while that
 bank is still as the rollback left it: gated, with the same row counts and
 write counters. Otherwise it refuses before changing anything, because the
 bank may hold writes that exist nowhere else.
+Finish, roll back or release a paused move before updating the native client
+on the target, because older clients include the bank identity audit event
+in the saved row count.
 
 **`pseudolife-mcp move --release-target <move id>`** frees a target that
 still holds a rolled-back move's restored bank, writes or not. It:

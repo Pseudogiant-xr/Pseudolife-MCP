@@ -389,7 +389,8 @@ fn state<S: Site>(
         }
     }
     // Whatever tables were asked for: a resume compares these before it
-    // replaces the gated bank. A plain daemon start changes only meta and
+    // replaces the gated bank. The source identity is restored, so a plain
+    // daemon start adds no identity event. The remaining changes are meta and
     // retrieval_events (measured once, 14 November 2026, on the first Linux
     // dev box: one restart of the 0.21.0 daemon on a 12-entry bank moved
     // meta's updates by 2 and retrieval_events' inserts by 1, and no other

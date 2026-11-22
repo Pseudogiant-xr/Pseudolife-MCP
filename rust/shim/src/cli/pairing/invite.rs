@@ -670,6 +670,18 @@ fn diagnostic_member(key: &str, value: J) -> J {
     }
 }
 
+/// Version 0.25.0 and earlier depended on the first writable board context.
+fn needs_board_context(version: &str) -> Option<bool> {
+    let core = version.split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let release = (
+        parts.next()?.parse::<u32>().ok()?,
+        parts.next()?.parse::<u32>().ok()?,
+        parts.next()?.parse::<u32>().ok()?,
+    );
+    parts.next().is_none().then_some(release <= (0, 25, 0))
+}
+
 /// Check the daemon before inviting. Diagnostics contain only known field shapes.
 async fn daemon_check(
     port: u32,
@@ -729,9 +741,18 @@ async fn daemon_check(
         )));
     }
     if !member("bank").truthy() {
-        return Ok(Err(units(
-            "the daemon has not reported which bank it serves yet (/health bank is null until its storage has started and the agent board has been used once): start a session against it, then re-run",
-        )));
+        let message = if member("read_only") == J::Bool(true) {
+            "the local daemon serves a read-only bank: run invite on the writable daemon host"
+        } else if member("db") == J::Null
+            && matches!(member("pending"), J::List(stages) if stages.iter().any(|stage| stage.as_str() == Some("init")))
+        {
+            "the daemon is still starting its storage: wait a few seconds, then re-run invite"
+        } else if member("version").as_str().and_then(needs_board_context) == Some(true) {
+            "this daemon version does not give a fresh bank its identity at startup: update the daemon, then re-run invite"
+        } else {
+            "the daemon has no usable bank identity: check its startup logs before re-running invite"
+        };
+        return Ok(Err(units(message)));
     }
     Ok(Ok(health))
 }

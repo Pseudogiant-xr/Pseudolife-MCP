@@ -10,6 +10,7 @@ use super::error::{BoardError, Result};
 use super::secrets::refused as looks_like_secret;
 use super::text::{self, check_string, check_value};
 use super::{lease, mail, wake};
+use crate::storage::BANK_ID_META_KEY;
 use serde_json::{Map, Value, json};
 use tokio_postgres::GenericClient;
 
@@ -49,7 +50,6 @@ pub const HOOK_CHILD_TTL: f64 = ATTACHED_IDLE_WINDOW;
 pub const ATTACHMENT_LEASE: f64 = 60.0;
 pub const LEASE_EXPECT_MAX: i64 = 7 * 86400;
 pub const MAX_PAGE: i64 = 50;
-pub const BANK_ID_META_KEY: &str = "coordination_bank_id";
 pub const DAEMON_PRINCIPAL: &str = "daemon";
 pub const MAINTAINER_PRINCIPAL: &str = "maintainer";
 pub const RESERVED_SENDERS: [&str; 2] = [DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL];
@@ -425,6 +425,43 @@ pub fn min_keep_type(value: &Value, cap: f64) -> Value {
     }
 }
 
+async fn read_bank_identity(tx: &tokio_postgres::Transaction<'_>) -> Result<Value> {
+    let row = tx
+        .query_opt("SELECT value FROM public.meta WHERE key=$1", &[&BANK_ID_META_KEY])
+        .await?
+        .ok_or_else(|| BoardError::code("invalid_bank_identity"))?;
+    Ok(row.try_get::<_, super::db::JsonValue>(0)?.0)
+}
+
+/// The identity row and its audit event commit together. A concurrent
+/// creator waits on the unique key and reads the winner's committed row.
+pub(crate) async fn ensure_bank_identity(
+    tx: &tokio_postgres::Transaction<'_>,
+    actor: &str,
+    principal: &str,
+) -> Result<Value> {
+    let candidate = Value::String(uuid::Uuid::new_v4().hyphenated().to_string());
+    let created = tx
+        .execute(
+            "INSERT INTO public.meta (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING",
+            &[&BANK_ID_META_KEY, &candidate],
+        )
+        .await?;
+    if created == 0 {
+        return read_bank_identity(tx).await;
+    }
+    append(
+        tx,
+        vec![Event::new("bank_identity", &json!({"bank_id": candidate}))
+            .actor(actor)
+            .principal(principal)],
+        now(),
+        None,
+    )
+    .await?;
+    Ok(candidate)
+}
+
 impl Store {
     // ---- context --------------------------------------------------------
 
@@ -437,41 +474,18 @@ impl Store {
         nonce: Option<&str>,
         read_only: bool,
     ) -> Result<Value> {
-        let candidate = uuid::Uuid::new_v4().hyphenated().to_string();
         let tx = client.transaction().await?;
-        let mut created = 0u64;
-        if !read_only {
-            created = tx
-                .execute(
-                    "INSERT INTO meta (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING",
-                    &[&BANK_ID_META_KEY, &Value::String(candidate)],
-                )
-                .await?;
-        }
-        let bank = tx
-            .query_opt("SELECT value FROM meta WHERE key=$1", &[&BANK_ID_META_KEY])
-            .await?;
-        let Some(bank) = bank else {
-            return Err(BoardError::code("invalid_bank_identity"));
+        let value = if read_only {
+            read_bank_identity(&tx).await?
+        } else {
+            ensure_bank_identity(&tx, "agent", principal).await?
         };
-        let value: Value = bank.get::<_, super::db::JsonValue>(0).0;
         let bank_id = match value.as_str() {
             Some(s) if uuid::Uuid::parse_str(s).is_ok_and(|u| u.hyphenated().to_string() == s) => {
                 s.to_string()
             }
             _ => return Err(BoardError::code("invalid_bank_identity")),
         };
-        if created > 0 {
-            append(
-                &tx,
-                vec![
-                    Event::new("bank_identity", &json!({"bank_id": bank_id})).principal(principal),
-                ],
-                now(),
-                None,
-            )
-            .await?;
-        }
         let mut result = json!({"bank_id": bank_id, "principal": principal});
         if let (Some(agent_id), Some(nonce)) = (agent_id, nonce) {
             let row = tx

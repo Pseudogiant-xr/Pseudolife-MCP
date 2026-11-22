@@ -879,6 +879,10 @@
     ],
     "rows": [
      [
+      "coordination_bank_id",
+      "00000000-0000-4000-8000-000000000001"
+     ],
+     [
       "schema_version",
       59
      ],
@@ -1200,10 +1204,21 @@
     "retrieval_events",
     "created_at",
     "clock: retrieval event wall clock per row"
+   ],
+   [
+    "slot_reads",
+    "last_read_at",
+    "clock: wall clock per slot read"
    ]
   ],
   "golden": "golden_scrub in run.py",
   "health": "normalize_health in run.py"
+ },
+ "recorded_from_candidate": {
+  "candidate_sha256": "06dc155e400fa15aaa84d01025c4ab7532ee123671fbd27786a67c87bc1a4f5b",
+  "commit": "62ac8bf684607fbaacc7a7fa2ba09491fd84af83",
+  "platform": "linux",
+  "rust_tree": "modified"
  },
  "responses": [
   {
@@ -2087,6 +2102,10 @@
        "value"
       ],
       "rows": [
+       [
+        "coordination_bank_id",
+        "00000000-0000-4000-8000-000000000001"
+       ],
        [
         "schema_version",
         59

@@ -408,7 +408,6 @@ impl Board {
             let client = conn.client().await?;
             if action == "context" {
                 return self
-                    .store
                     .context(
                         client,
                         principal,
@@ -420,7 +419,6 @@ impl Board {
             }
             if let Some(binding) = binding {
                 let context = self
-                    .store
                     .context(client, principal, None, None, false)
                     .await?;
                 let found = (
@@ -699,6 +697,26 @@ impl Board {
             _ => {}
         }
         Ok(result)
+    }
+
+    async fn context(
+        &self,
+        client: &mut tokio_postgres::Client,
+        principal: &str,
+        agent_id: Option<&str>,
+        nonce: Option<&str>,
+        read_only: bool,
+    ) -> Result<Value> {
+        let context = self
+            .store
+            .context(client, principal, agent_id, nonce, read_only)
+            .await?;
+        // The transaction has committed. Use the current snapshot in case a
+        // writer reconnect replaced storage while the board connection worked.
+        if let Some(storage) = self.service.snapshot().storage {
+            storage.remember_bank_id(context["bank_id"].as_str().expect("validated bank id"));
+        }
+        Ok(context)
     }
 
     /// `_ensure_tier(full=False)`: the storage tier (schema, seeds, lease

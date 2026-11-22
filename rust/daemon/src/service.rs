@@ -376,8 +376,8 @@ impl Service {
         } else {
             Storage::open(&self.dsn).await
         };
-        let storage = match opened {
-            Ok(s) => Arc::new(s),
+        let mut storage = match opened {
+            Ok(s) => s,
             Err(OpenError::LeaseHeld(msg)) => {
                 // Retryable: the holder may leave.
                 self.update(|s| s.not_ready = Some(msg.clone()));
@@ -398,6 +398,12 @@ impl Service {
         });
         // A failed search_path check closes the session and records nothing.
         storage.check_search_path().await?;
+        if !storage.read_only() {
+            storage.initialize_bank_identity().await.map_err(|error| {
+                format!("bank identity initialization failed ({})", error.public().code)
+            })?;
+        }
+        let storage = Arc::new(storage);
         inner.storage = Some(storage.clone());
         self.update(|s| s.storage = Some(storage.clone()));
         Ok(storage)
@@ -1592,6 +1598,58 @@ mod shadow_refresh_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn board_contexts_publish_one_identity_to_health() {
+        use sha2::Digest;
+
+        let Ok(dsn) = std::env::var("PL_BANK_IDENTITY_TEST_DSN") else {
+            eprintln!("PL_BANK_IDENTITY_TEST_DSN unset: skipping database test");
+            return;
+        };
+        let parsed = crate::storage::parse_dsn(&dsn).expect("parse fixture DSN");
+        assert!(matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1"));
+        assert!(parsed.get_dbname().is_some_and(|name| name.starts_with("pl_cf_pairing_context_")));
+
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::from("unused"),
+            dsn.clone(),
+            true,
+        ));
+        // Stage an already-running writer whose bank has no identity, as
+        // when a pre-identity bank is restored during a writer handover.
+        let storage = Arc::new(Storage::open(&dsn).await.unwrap());
+        service.inner.lock().await.storage = Some(storage.clone());
+        service.update(|snapshot| snapshot.storage = Some(storage.clone()));
+        let principals = Arc::new(crate::auth::PrincipalStore::new());
+        let health = crate::health::payload(&service, &principals, false).await;
+        assert_eq!(health["db"], "ok");
+        assert!(health["bank"].is_null());
+
+        let first = crate::board::Board::new(
+            service.config.coordination.clone(), dsn.clone(), service.clone(), principals.clone(),
+        );
+        let second = crate::board::Board::new(
+            service.config.coordination.clone(), dsn, service.clone(), principals.clone(),
+        );
+        let headers = std::collections::HashMap::new();
+        let (first, second) = tokio::join!(
+            first.dispatch("context", Default::default(), &headers, "default"),
+            second.dispatch("context", Default::default(), &headers, "default"),
+        );
+        let first = first.unwrap();
+        assert_eq!(first["bank_id"], second.unwrap()["bank_id"]);
+        let rows = storage.client().query(
+            "SELECT payload::jsonb FROM coordination_events WHERE event='bank_identity'", &[],
+        ).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get::<_, Value>(0), json!({"bank_id": first["bank_id"]}));
+        let health = crate::health::payload(&service, &principals, false).await;
+        let digest = sha2::Sha256::digest(first["bank_id"].as_str().unwrap().as_bytes());
+        assert_eq!(health["bank"], hex::encode(digest)[..16]);
+    }
 
     #[tokio::test]
     async fn compaction_keeps_one_policy_when_a_patch_arrives_during_initialization() {

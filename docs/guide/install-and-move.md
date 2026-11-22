@@ -196,10 +196,11 @@ chmod 600 .env client.token
 ```
 
 The first token authenticates the reserved `default` principal. Keep it
-private; never paste it into chat or tracked YAML. After connecting, use
-[`pseudolife-mcp invite`](remote-bank.md#adding-a-machine-invite-and-pair) to issue
-separate credentials to other machines. The stack passes through every
-runtime setting from `ops/docker-compose.yml`, including
+private; never paste it into chat or tracked YAML. The Rust daemon gives
+the writable bank its identity at startup. Once it is ready, use
+[`pseudolife-mcp invite`](remote-bank.md#adding-a-machine-invite-and-pair) on the
+daemon host to issue separate credentials to other machines. The stack
+passes through every runtime setting from `ops/docker-compose.yml`, including
 `PSEUDOLIFE_MCP_TOKENS`, `PSEUDOLIFE_MCP_TIER_MAP`, the dream, fallback and
 judge keys, memory limits, and both volume-name overrides. Put overrides in
 the same env file, not in a rewritten compose file.
