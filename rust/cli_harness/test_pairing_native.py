@@ -311,11 +311,11 @@ def test_move_counts_user_audit_rows_in_preflight_and_after_start(bank):
         conn.execute("CREATE TEMP TABLE coordination_events "
                      "(seq bigint, event text, actor text, principal text, agent_id text, payload text)")
         for rows, expected in cases:
-            conn.execute("TRUNCATE pg_temp.coordination_events")
-            with conn.cursor() as cursor:
-                cursor.executemany("INSERT INTO pg_temp.coordination_events VALUES (%s,%s,%s,%s,%s,%s)", rows)
-            count = conn.execute(f"SELECT count(*) FROM pg_temp.coordination_events {predicate}").fetchone()[0]
-            assert count == expected, rows
+            with conn.transaction(force_rollback=True):
+                with conn.cursor() as cursor:
+                    cursor.executemany("INSERT INTO pg_temp.coordination_events VALUES (%s,%s,%s,%s,%s,%s)", rows)
+                count = conn.execute(f"SELECT count(*) FROM pg_temp.coordination_events {predicate}").fetchone()[0]
+                assert count == expected, rows
 
 
 def test_fresh_daemon_reports_bank_identity_across_restart(native_daemon, tmp_path, fresh_bank):
