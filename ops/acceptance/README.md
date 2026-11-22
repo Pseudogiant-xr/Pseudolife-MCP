@@ -40,6 +40,7 @@ retry. Platform keys combine OS and architecture. They are `windows-x64`,
 | `commands` | Ordered objects with a published `command` template and its observed integer `exit_code` |
 | `outcome` | One sentence selected from the scenario's success outcome or `FAILURE_OUTCOMES` |
 | `cleanup` | Boolean `done` and `verified` fields |
+| `daemon`, `daemon_engine` | Optional paired fields for observed rows. The hosted workflow includes them when it identifies the peer and requires them for passes. The kind is a listed fixture provenance and the engine is `python` or `rust`. |
 
 A pending row has the first four fields only. The checker prints the
 matrix, counts each status, and exits 1 for malformed or missing rows.
@@ -69,7 +70,7 @@ can run the archived Python image.
 
 Templates use placeholders for fixture arguments and operator-specific
 commands. The writer and checker reject unlisted templates, arbitrary prose,
-paths, names and extra fields. Supply commit and digest values from the
+paths, names and fields outside the schema. Supply commit and digest values from the
 release evidence. Keep raw argv, environment, stdout, stderr and cleanup
 inventories out of the ledger.
 

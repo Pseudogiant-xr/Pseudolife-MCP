@@ -38,6 +38,13 @@ COMPOSE_NAME = re.compile(rf"pseudolife-compose-{VERSION}\.tar\.gz")
 CHECKSUM_ROW = re.compile(r"([0-9a-fA-F]{64}) [ *](\S+)")
 CELL_FIELDS = {"schema", "scenario", "platform", "status"}
 RUN_FIELDS = {"commit", "archive", "sha256", "machine_role", "commands", "outcome", "cleanup"}
+DAEMON_KINDS = (
+    "Linux arm64 checkout build",
+    "published image in a Linux guest",
+    "source-built from the tag",
+)
+DAEMON_ENGINES = ("python", "rust")
+DAEMON_FIELDS = {"daemon", "daemon_engine"}
 
 
 @dataclass(frozen=True)
@@ -267,10 +274,16 @@ def _validate(record: object) -> tuple[str, str]:
     if status not in STATUSES:
         raise RecordError("unknown status")
     fields = CELL_FIELDS if status == "not yet run" else CELL_FIELDS | RUN_FIELDS
+    if status != "not yet run" and DAEMON_FIELDS & record.keys():
+        fields |= DAEMON_FIELDS
     if record.keys() != fields:
         raise RecordError("record fields do not match its status")
     if status == "not yet run":
         return scenario, platform
+    if DAEMON_FIELDS <= record.keys() and (
+        record["daemon"] not in DAEMON_KINDS or record["daemon_engine"] not in DAEMON_ENGINES
+    ):
+        raise RecordError("use a listed daemon kind and engine")
 
     if not _digest(record["commit"], 40) or not _digest(record["sha256"], 64):
         raise RecordError("use a full Git commit and SHA-256 digest in lowercase hex")
