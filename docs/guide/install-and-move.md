@@ -100,6 +100,11 @@ the Python client to retain autostart. On the native client, tunnels run in
 the foreground. See [the tunnel guide](tunnels.md#autostart-and-private-storage)
 before moving a host that serves a tunnel.
 
+The installer's guided tunnel setup (`--tunnel` or `-Tunnel`) is available
+with the Python client. The native installer refuses that switch before
+changing the host. For the native client, rerun without the switch and
+follow the [explicit profile and key setup](tunnels.md).
+
 When the native installer sets up Codex with a daemon token (the local
 install's own or a supplied file), it waits up to three minutes for an
 authenticated daemon read. It retries a connection failure or server error

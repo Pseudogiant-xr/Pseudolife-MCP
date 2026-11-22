@@ -202,15 +202,35 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
     assert "nothing changed" in second.stdout
 
 
-@pytest.mark.skipif(WINDOWS, reason="the refusing stand-in is a shell script; on Windows the fixture is a real client")
 def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
-    # The staged client's runtime install --check exits 3 (issue #1632): the
-    # preflight refuses, and nothing was changed.
-    result = _run("stub", tmp_path, 'Install-ShimOnce | Out-Null; Write-Host "INSTALLED"',
-                  extra_env={"STUB_REFUSE_TUNNEL": "1"})
+    # On Unix the real bounded probe launches the staged shell fixture, whose
+    # runtime install --check exits 3. Windows needs an in-process stand-in
+    # because a shell script cannot be the staged Windows executable.
+    body = 'Install-ShimOnce | Out-Null; Write-Host "INSTALLED"'
+    if WINDOWS:
+        body = '''
+function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
+    switch ($Arguments -join ' ') {
+        'version' { @{ Code = 0; Out = 'pseudolife-mcp 9.8.7' } }
+        'installer --capability' { @{ Code = 0; Out = "pseudolife-mcp installer-protocol $NativeInstallerProtocol" } }
+        'runtime install --check' {
+            @{ Code = 3; Err = 'runtime install refused: this machine stays on the Python client' }
+        }
+        default { throw "Unexpected probe $Arguments" }
+    }
+}
+''' + body
+    result = _run("stub", tmp_path, body, extra_env={"STUB_REFUSE_TUNNEL": "1"})
     assert result.returncode == 1, result.stderr + result.stdout
     assert "INSTALLED" not in result.stdout
     assert "runtime install refused: this machine stays on the Python client" in result.stderr
+    assert (
+        "a tunnel is registered to start by itself through this machine's Python client. "
+        "The native client has no tunnel service command to manage that registration after the move."
+    ) in result.stderr
+    assert "pseudolife-mcp tunnel run" in result.stderr
+    assert ("cannot run " "a tunnel yet") not in result.stderr
+    assert "the tunnel will no longer start on its own" in result.stderr
     # The verified download is kept for the rerun; nothing else changed.
     assert "Nothing else was changed: the download in" in result.stderr
     assert not (tmp_path / "home" / "runtimes").exists()

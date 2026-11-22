@@ -56,6 +56,8 @@ pub(super) struct Record {
     pub liveness: Liveness,
     /// Native supervisors accept a stop request bound to this launch.
     pub native: bool,
+    /// The Python console script the supervisor used, within a retained venv.
+    pub legacy_console: Option<PathBuf>,
     /// The record's own readiness flag, meaningful only while it runs.
     pub ready: bool,
     /// Why the verdict is `Unknown`; `None` otherwise.
@@ -107,6 +109,7 @@ pub(super) fn read(path: PathBuf, table: Option<&[Row]>) -> Option<Record> {
             path,
             liveness: Liveness::Unknown,
             native: false,
+            legacy_console: None,
             ready: false,
             why: Some(Why::Unreadable),
         });
@@ -118,17 +121,52 @@ pub(super) fn read(path: PathBuf, table: Option<&[Row]>) -> Option<Record> {
         None => (Liveness::Unknown, Some(Why::NoTable)),
         Some(rows) => assess(&record, rows),
     };
+    let native = record
+        .get("native_launch")
+        .and_then(Value::as_str)
+        .and_then(super::runtime::launch_id)
+        .is_some();
     Some(Record {
         path,
         liveness,
-        native: record
-            .get("native_launch")
-            .and_then(Value::as_str)
-            .and_then(super::runtime::launch_id)
-            .is_some(),
+        native,
+        legacy_console: if liveness == Liveness::Running && !native {
+            legacy_console(&record)
+        } else {
+            None
+        },
         ready: record.get("ready") == Some(&Value::Bool(true)),
         why,
     })
+}
+
+fn legacy_console(record: &Value) -> Option<PathBuf> {
+    // The shared launcher may now be native. In a Python venv the supervisor
+    // records the inner console script, with or without its interpreter first.
+    let args = record["supervisor"]["argv"].as_array()?;
+    let command = args
+        .windows(3)
+        .take(2)
+        .find(|words| words[1] == "tunnel" && words[2] == "run")?;
+    let arg = command[0].as_str()?;
+    let path = Path::new(arg);
+    if !path.is_absolute() || arg.contains(['\n', '\r']) {
+        return None;
+    }
+    let (bin, file) = if cfg!(windows) {
+        ("Scripts", "pseudolife-mcp.exe")
+    } else {
+        ("bin", "pseudolife-mcp")
+    };
+    let path = store::checked_path(path).ok()?;
+    let scripts = path.parent()?;
+    (path.file_name()? == file
+        && scripts.file_name()? == bin
+        && scripts.parent()?.join("pyvenv.cfg").is_file()
+        && path.is_file()
+        && !crate::runtime::default_layout()
+            .is_ok_and(|layout| crate::runtime::same_path(&path, &layout.launcher)))
+    .then_some(path)
 }
 
 /// Whether any process `record` names runs under its recorded image.
