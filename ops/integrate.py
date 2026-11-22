@@ -67,6 +67,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -4490,8 +4491,8 @@ def _docs_scope(master: str, head: str, preview: str) -> tuple[bool, bool]:
     return pull, merged
 
 
-def _docs_guard_env(home: Path) -> dict[str, str]:
-    env = {key: value for key, value in os.environ.items() if key.upper() in CENSUS_ENV}
+def _docs_guard_env(home: Path, parent_env: Mapping[str, str]) -> dict[str, str]:
+    env = {key: value for key, value in parent_env.items() if key.upper() in CENSUS_ENV}
     env.update({name: str(home) for name in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA")})
     # Torch uses getpass.getuser() for its cache path. Windows has no pwd fallback.
     env.update(USERNAME="docs-guard", USER="docs-guard", LOGNAME="docs-guard")
@@ -4508,7 +4509,7 @@ def _docs_guards(number: int, master: str, preview: str) -> bool:
             home = Path(temporary) / "home"
             home.mkdir()
             result = _run([sys.executable, "-I", "-S", "-c", _DOCS_TEST_RUNNER, master],
-                          cwd=root, env=_docs_guard_env(home), check=False)
+                          cwd=root, env=_docs_guard_env(home, os.environ), check=False)
             if result.returncode:
                 raise Refusal(f"doc guards failed on the test merge of #{number} (pytest exit "
                               f"{result.returncode}); fix the failure below and retry\n"
@@ -4551,8 +4552,9 @@ def merge_docs(args: argparse.Namespace) -> int:
     census_drift = _docs_guards(number, master, preview)
     _refuse_docs_during_batch(master)
     current = _docs_pr_view(number)
-    # Recheck the PR metadata, then read the actual base ref again.
-    if (current.get("baseRefOid"), current.get("headRefOid")) != (recorded_base, head):
+    # GitHub's metadata may catch up to the base we tested while the guards run.
+    if (current.get("baseRefOid") not in (recorded_base, master)
+            or current.get("headRefOid") != head):
         raise Refusal(f"the base or head of #{number} changed during the doc guards; retry on the new tree")
     master_ref = f"refs/heads/{BASE}"
     if _out("ls-remote", "--exit-code", REMOTE, master_ref) != f"{master}\t{master_ref}":

@@ -600,6 +600,7 @@ def test_merge_docs_refuses_an_incomplete_open_pr_listing(world, capsys, monkeyp
                  id="master-moved"),
     pytest.param("older", "current", "recorded", "base or head of #42 changed during the doc guards",
                  id="recorded-base-changed"),
+    pytest.param("older", "current", "caught-up", None, id="recorded-base-caught-up"),
 ])
 def test_merge_docs_uses_the_preview_base(recorded, preview_base, change_after_guards,
                                          refusal, monkeypatch, capsys):
@@ -607,7 +608,8 @@ def test_merge_docs_uses_the_preview_base(recorded, preview_base, change_after_g
     master, head, preview, landed = shas["current"], "d" * 40, "e" * 40, "f" * 40
     view = FakeGh.VIEW_DEFAULTS | {"number": 42, "isDraft": False, "mergeable": "MERGEABLE",
                                    "baseRefOid": shas[recorded], "headRefOid": head}
-    current = view | {"baseRefOid": shas["unrelated"]} if change_after_guards == "recorded" else view
+    reported_after = {"recorded": shas["unrelated"], "caught-up": master}
+    current = view | {"baseRefOid": reported_after.get(change_after_guards, shas[recorded])}
     remote_base = "1" * 40 if change_after_guards == "master" else master
     gh = Mock(side_effect=[json.dumps(view), json.dumps(current),
                            json.dumps({"merged": True, "sha": landed})])
