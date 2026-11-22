@@ -17,6 +17,7 @@
         "test_audit_archive_edit_rehashes_without_the_frozen_package",
         "test_audit_bank_verify_reference_without_the_frozen_package",
         "test_audit_export_preserves_field_order_and_legacy_payload",
+        "test_audit_removed_redaction_reference_uses_a_separate_seed_copy",
         "test_audit_ensure_refuses_before_database_setup",
         "test_audit_captured_seed_runs_without_the_frozen_package",
         "test_audit_file_references_are_frozen_and_registered",
