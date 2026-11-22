@@ -15,7 +15,7 @@ credentials.
 
 | Column | Daemon peer | Coverage limit |
 | --- | --- | --- |
-| Linux arm64 | A published Linux amd64 image under QEMU user-mode emulation. | The stock Docker install is observed first, without emulation. The v0.25.0 daemon and PostgreSQL images publish for Linux amd64. Emulated results exercise the published arm64 client against that stack. An arm64 Docker deployment and the legacy import remain open. |
+| Linux arm64 | The native arm64 Docker stack that the tag's installer builds on the runner. | The stock v0.25.0 installer can fall back to a checkout-built Python daemon and PostgreSQL. The published daemon and PostgreSQL images are Linux amd64. The workflow records container image provenance and exercises the real release updater from a stock v0.24.0 install without changing its image selection. |
 | macOS Intel | The published Linux amd64 daemon in a private Lima VZ guest, if the runner can start and reach it. | The Mac client uses the guest's private address. The Docker backup and restore command runs inside the guest. |
 | macOS Apple silicon | A daemon built from the selected release tag, with a private PostgreSQL cluster, if the runner can compile and start it. | The published Mac client is exercised against the source build. A published Docker daemon and its bank recovery remain open. |
 
@@ -46,7 +46,9 @@ exit codes, deciding assertions and daemon type. Unavailable prerequisites
 leave a cell pending. An observed assertion failure fails the job. The
 artifact contains no raw command output, pairing codes, tokens or paths.
 The Linux artifact also records the stock install's exit, elapsed time,
-allowlisted diagnostics and what it left behind before cleanup.
+sanitized diagnostics, Codex registration and image provenance. The upgrade
+receipt records whether the original daemon continued serving and whether
+the runtime, configuration and volumes changed.
 
 The `ledger/` folder contains version 1 records for the selected column.
 Copy these into a new [installed acceptance

@@ -38,7 +38,7 @@ def test_pending_receipt_does_not_copy_process_output(tmp_path):
     row.write(tmp_path, None, True)
     receipt = json.loads((tmp_path / "ordinary-native-use.json").read_text(encoding="utf-8"))
     assert "fixture raw output" not in json.dumps(receipt)
-    assert receipt["daemon"] == "published amd64 image under emulation"
+    assert receipt["daemon"] == "built on the runner by the tag's installer (native arm64)"
     assert receipt["steps"][0]["exit_code"] == 0
     record = tmp_path / "ledger" / "ordinary-native-use--linux-arm64.json"
     assert json.loads(record.read_text(encoding="utf-8")) == matrix.pending(row.scenario, row.platform)

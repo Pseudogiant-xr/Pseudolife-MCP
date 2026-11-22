@@ -30,7 +30,7 @@ API = f"https://api.github.com/repos/{PROJECT}/releases/tags"
 PLATFORMS = ("linux-arm64", "macos-x64", "macos-arm64")
 SELECTIONS = {**{platform: (platform,) for platform in PLATFORMS},
               "all": PLATFORMS, "macos": PLATFORMS[1:]}
-DAEMONS = ("none", "published amd64 image under emulation",
+DAEMONS = ("none", "built on the runner by the tag's installer (native arm64)",
            "published image in a Linux guest", "source-built from the tag")
 OUTCOMES = ("pass", "fail", "not yet run")
 INSTALL = "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh"
@@ -214,7 +214,7 @@ class Profile:
 
     def __post_init__(self):
         self.folder.mkdir(mode=0o700)
-        for name in ("tmp", "local/bin", "config", "cache", "data"):
+        for name in ("tmp", ".local/bin", "config", "cache", "data"):
             (self.folder / name).mkdir(parents=True)
 
     @property
@@ -226,7 +226,7 @@ class Profile:
         env = {
             "HOME": str(self.folder),
             "CODEX_HOME": str(self.codex),
-            "PATH": self.path + os.pathsep + str(self.folder / "local/bin"),
+            "PATH": self.path + os.pathsep + str(self.folder / ".local/bin"),
             "TMPDIR": str(self.folder / "tmp"),
             "XDG_CONFIG_HOME": str(self.folder / "config"),
             "XDG_CACHE_HOME": str(self.folder / "cache"),
@@ -249,8 +249,12 @@ class Profile:
     def launcher(self):
         return self.registration()["command"]
 
+    @property
+    def installed_launcher(self):
+        return self.folder / "data" / "pseudolife-mcp" / "bin" / CLIENT
+
     def native_marker(self, release):
-        launcher = self.folder / "data" / "pseudolife-mcp" / "bin" / CLIENT
+        launcher = self.installed_launcher
         if not launcher.is_file():
             return False
         active_digest = sha256(launcher)
@@ -264,8 +268,7 @@ class Profile:
                    and marker.get("binary_sha256") == active_digest for marker in markers)
 
     def fingerprint(self):
-        launcher = Path(self.launcher())
-        files = [launcher, self.codex / "config.toml", *self.folder.rglob("runtime.json")]
+        files = [self.installed_launcher, self.codex / "config.toml", *self.folder.rglob("runtime.json")]
         return {file.relative_to(self.folder): sha256(file) for file in files if file.is_file()}
 
 
@@ -408,14 +411,15 @@ class Receipt:
     status: str = "not yet run"
     note: str = "The scenario was not selected."
 
-    def observe(self, label, result, ok, assertion, *, template=None):
+    def observe(self, label, result, ok, assertion, *, template=None, required=True):
         # The labels and assertions are fixed call-site strings. Never
         # interpolate subprocess data, endpoints, paths, or credentials.
         self.steps.append({"command": label, "exit_code": result.code, "observed": bool(ok),
                            "assertion": assertion, "seconds": result.seconds})
         if template is not None:
             self.commands.append({"command": template, "exit_code": result.code})
-        require(ok, assertion)
+        if required:
+            require(ok, assertion)
 
     def write(self, output, release, cleanup):
         row = matrix.pending(self.scenario, self.platform)

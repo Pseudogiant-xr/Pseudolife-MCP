@@ -19,7 +19,7 @@ from . import matrix
 from .hosted import (
     CLIENT, DAEMON_URL, DAEMONS, INSTALL, TOKEN_FILE, Failed, Peer, Profile, Receipt,
     Result, Unavailable, command, get, native_path, prepare_codex, published_release,
-    registered_session, require, session, write_json,
+    registered_session, require, session, sha256, write_json,
 )
 
 
@@ -38,6 +38,9 @@ BASELINE_MESSAGES = (
      "The default Rust daemon is unavailable, so this install uses the Python daemon."),
     (b"Daemon engine: python", "Daemon engine: python"),
     (b"Daemon engine: rust", "Daemon engine: rust"),
+    (b"no match for platform in manifest", "no match for platform in manifest"),
+    (b"nothing was deployed", "Nothing was deployed. <details redacted>"),
+    (b"rollback", "Rollback: <details redacted>"),
     (b"docker compose up -d --build", "docker compose up -d --build (checkout or images changed)..."),
     (b"daemon not healthy yet", "WARNING: daemon not healthy yet."),
     (b"Volumes ready:", "Volumes ready."),
@@ -269,49 +272,63 @@ def baseline(release, path, scratch, output):
         shutil.rmtree(repo)
     receipt["cleanup_verified"] = True
     write_json(output / "default-install.json", receipt)
+    return receipt
 
 
-def enable_amd64():
-    update = command(["sudo", "-n", "apt-get", "-qq", "update"], timeout=90)
-    install_qemu = command(["sudo", "-n", "apt-get", "-qq", "install", "-y", "qemu-user-static",
-                            "binfmt-support"], timeout=120) if update.code == 0 else update
-    binfmt = Path("/proc/sys/fs/binfmt_misc/qemu-x86_64")
-    if install_qemu.code != 0 or not binfmt.is_file() or not binfmt.read_text().startswith("enabled"):
-        raise Unavailable("Signed Ubuntu QEMU packages did not enable amd64 execution.")
+def native_images(images):
+    return (
+        {image["container"] for image in images} == {DAEMON, POSTGRES}
+        and all(image["architecture"] == "arm64" and image["os"] == "linux" and
+                not image["has_repository_digest"] for image in images)
+        and any(image["container"] == DAEMON and image["build_source"] == "checkout" for image in images)
+    )
 
 
 @contextmanager
-def linux_peer(release, path, scratch):
+def stock_peer(row, release, path, scratch):
     free_space(scratch)
     scope = DockerFixture()
     repo = release.checkout(scratch / "peer-checkout")
     profile = Profile(scratch / "peer-home", path)
-    emulated = {"DOCKER_DEFAULT_PLATFORM": "linux/amd64"}
+    legacy = row.scenario == "upgrade-and-rollback"
+    installer_engine = "python" if legacy else "native"
+    installer_label = "bash ops/install.sh <stock v0.24.0 Docker install>" if legacy else f"{INSTALL} <stock Docker>"
     try:
-        owner_env = profile.env | emulated
-        result = install(repo, profile, DOCKER_FLAGS + ["--engine", "rust"],
-                         overrides=emulated, timeout=540)
-        if result.code != 0 or not readiness(LOOPBACK):
-            raise Unavailable("The emulated published Docker peer did not become ready.")
-        for name in (DAEMON, POSTGRES):
-            image = docker("inspect", "--format", "{{.Image}}", name)
-            require(image.code == 0, "The expected Docker container existed.")
-            platform = docker("image", "inspect", "--format", "{{.Os}}/{{.Architecture}} {{json .RepoDigests}}",
-                              image.output.strip().decode())
-            require(platform.code == 0 and platform.output.startswith(b"linux/amd64 "),
-                    "The running Docker container used the amd64 platform.")
-            if name == DAEMON and (release.folder / "RELEASE-READY.json").is_file():
-                expected = json.loads((release.folder / "RELEASE-READY.json").read_bytes())["images"]["pseudolife-daemon-rust"]
-                require(expected.encode() in platform.output, "The running daemon matched the published release image digest.")
-        registration = profile.registration()
-        owner_env |= registration.get("env", {})
-        token = Path(owner_env[TOKEN_FILE])
-        peer = Peer(DAEMONS[1], LOOPBACK, token, profile.launcher(), owner_env, repo)
-        require(peer.sample()["status"] == 200, "The published peer accepted its disposable token.")
-        yield peer
+        result = install(repo, profile, DOCKER_FLAGS, engine=installer_engine, timeout=600)
+        row.observe(installer_label, result, result.code == 0 and readiness(LOOPBACK),
+                    "The tagged stock installer left a healthy daemon.",
+                    template=(matrix.commands(row.scenario, row.platform)[0]
+                              if row.scenario == "clean-install" else None),
+                    required=False)
+        row.steps[-1]["last_lines_sanitized"] = installer_tail(result.output)
+        row.steps[-1]["codex_installer_lines"] = [line for fragment, line in CODEX_MESSAGES
+                                                  if fragment in result.output]
+        require(result.code == 0 and readiness(LOOPBACK), "The tagged stock installer left a healthy daemon.")
+        images = [observed for container_id in sorted(scope.added()["container"])
+                  if (observed := image_observation(container_id, set())) is not None]
+        if not native_images(images):
+            raise Unavailable("The stock installation did not supply the identified native arm64 checkout stack.")
+        row.daemon = DAEMONS[1]
+        if legacy:
+            require(profile.installed_launcher.is_file(), "The stock v0.24.0 installer installed its launcher.")
+        else:
+            require(profile.native_marker(release), "The stock installer activated the verified native client.")
+        values = (repo / "ops" / ".env").read_text().splitlines()
+        token = next((line.split("=", 1)[1] for line in values if line.startswith("PSEUDOLIFE_MCP_TOKEN=")), "")
+        require(bool(token), "The installer generated a disposable owner token.")
+        token_file = scratch / "peer.token"
+        with token_file.open("x", encoding="utf-8") as stream:
+            token_file.chmod(0o600)
+            stream.write(token + "\n")
+        owner_env = profile.env | {TOKEN_FILE: str(token_file), DAEMON_URL: LOOPBACK, "PSEUDOLIFE_MCP_NO_SPAWN": "1"}
+        if legacy:
+            owner_env["PATH"] += os.pathsep + os.environ["PATH"]
+        peer = Peer(DAEMONS[1], LOOPBACK, token_file, str(profile.installed_launcher), owner_env, repo)
+        require(peer.sample()["status"] == 200, "The stock daemon accepted its disposable token.")
+        yield peer, profile
     finally:
         stop_units(profile)
-        require(scope.clean(), "Emulated peer Docker objects were removed.")
+        require(scope.clean(), "Stock peer Docker objects were removed.")
 
 
 def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=False):
@@ -368,11 +385,12 @@ def first_session(receipt, profile, repo, template=None):
 
 def clean_install(receipt, release, repo, profile, peer, scratch):
     first, session_template = matrix.commands(receipt.scenario, receipt.platform)
+    if receipt.platform == "linux-arm64":
+        first_session(receipt, profile, repo, session_template)
+        return
     paired_install(receipt, repo, profile, peer, template=first)
     require(profile.native_marker(release), "The installed runtime matched the candidate archive.")
     first_session(receipt, profile, repo, session_template)
-    if receipt.platform == "linux-arm64":
-        raise Unavailable("Published client installation worked. The stock local arm64 Docker stack and default extractor are still unproven.")
 
 
 def upgrade(receipt, release, repo, path, peer, scratch):
@@ -409,20 +427,107 @@ def upgrade(receipt, release, repo, path, peer, scratch):
                         result.code == 0 and restored != before and not profile.native_marker(release),
                         "The documented installer rollback replaced the native runtime.", template=next(templates))
         first_session(receipt, profile, repo)
-    if receipt.platform == "linux-arm64":
-        raise Unavailable("Both legacy client paths were exercised. The published arm64 daemon update and rollback cannot be observed.")
+
+
+def daemon_snapshot(peer, profile):
+    inspected = docker("inspect", DAEMON)
+    container = inspected.json()[0] if inspected.code == 0 else {}
+    _, health = get(peer.url + "/health")
+    version = health.get("version")
+    config = peer.checkout / "ops" / ".env"
+    return {
+        "id": container.get("Id"), "image": container.get("Image"),
+        "volumes": sorted(mount["Name"] for mount in container.get("Mounts", [])
+                          if mount.get("Type") == "volume"),
+        "config": sha256(config) if config.is_file() else None,
+        "runtime": profile.fingerprint(),
+        "version": version if isinstance(version, str) and re.fullmatch(matrix.VERSION, version) else None,
+        "authenticated": peer.sample()["status"] == 200,
+    }
+
+
+def docker_rollback(receipt, peer, previous, report):
+    details = report.get("rollback")
+    if not isinstance(details, dict):
+        raise Failed("The update changed the daemon without a structured rollback record.")
+    tag = details.get("tag")
+    if not isinstance(tag, str) or not OFFICIAL_IMAGE.fullmatch(tag) or "pre-update" not in tag:
+        raise Failed("The updater did not identify a usable rollback tag.")
+    image = docker("image", "inspect", "--format", "{{.Id}}", tag)
+    require(image.code == 0 and image.output.strip().decode() == previous["image"],
+            "The reported rollback tag matched the original daemon image.")
+    image_tag = details.get("image_tag")
+    env = {}
+    config = peer.checkout / "ops"
+    recipe = ["-f", str(config / "docker-compose.yml")]
+    if (config / "docker-compose.override.yml").is_file():
+        recipe.extend(["-f", str(config / "docker-compose.override.yml")])
+    if isinstance(image_tag, str) and OFFICIAL_IMAGE.fullmatch(image_tag):
+        result = docker("tag", tag, image_tag)
+        receipt.observe("docker tag <reported rollback> <reported checkout image>", result, result.code == 0,
+                        "The documented checkout rollback restored the previous tag.")
+    elif tag.startswith("ghcr.io/") and "pseudolife-daemon:" in tag:
+        recipe.extend(["-f", str(config / "docker-compose.ghcr.yml")])
+        env["PSEUDOLIFE_IMAGE_TAG"] = tag.rsplit(":", 1)[-1]
+    else:
+        raise Failed("The recorded rollback did not match a documented Compose route.")
+    result = docker("compose", "--env-file", str(config / ".env"), "-p", "pseudolife-mcp",
+                    *recipe, "up", "-d", "--no-deps", "--no-build", "pseudolife-daemon",
+                    env=env, timeout=180)
+    deadline = monotonic() + 90
+    while result.code == 0 and monotonic() < deadline and not readiness(peer.url):
+        sleep(2)
+    restored = docker("inspect", "--format", "{{.Image}}", DAEMON)
+    _, health = get(peer.url + "/health")
+    receipt.observe("docker compose <documented rollback> up -d --no-deps --no-build pseudolife-daemon",
+                    result, result.code == 0 and restored.code == 0
+                    and restored.output.strip().decode() == previous["image"]
+                    and health.get("version") == previous["version"] and peer.sample()["status"] == 200,
+                    "The previous image and authenticated daemon returned.")
+
+
+def stock_upgrade(receipt, release, repo, profile, peer, scratch):
+    previous = daemon_snapshot(peer, profile)
+    require(previous["version"] == "0.24.0" and previous["authenticated"],
+            "The stock v0.24.0 daemon served the upgrade's starting bank.")
+    result_file = scratch / "update-result.json"
+    result = peer.during(receipt, lambda: command(
+        [peer.owner_executable, "update", "--tag", release.version, "--result-file", result_file],
+        env=peer.owner_env | {"PSEUDOLIFE_SHIM_ENGINE": "native"}, cwd=repo, timeout=600))
+    after = daemon_snapshot(peer, profile)
+    changed = any(after[key] != previous[key] for key in ("id", "image", "volumes", "config", "runtime"))
+    upgraded = result.code == 0 and after["version"] == release.version and after["authenticated"]
+    receipt.observe(f"{CLIENT} update --tag <selected release>", result, upgraded,
+                    "Release-mode update reached the selected version and served an authenticated read.", required=False)
+    receipt.steps[-1].update({
+        "last_lines_sanitized": installer_tail(result.output),
+        "reported_daemon_version": after["version"],
+        "previous_daemon_still_serves": after["image"] == previous["image"]
+        and after["version"] == previous["version"] and after["authenticated"],
+        "daemon_container_unchanged": after["id"] == previous["id"],
+        "database_volumes_unchanged": after["volumes"] == previous["volumes"],
+        "deployment_settings_unchanged": after["config"] == previous["config"],
+        "client_runtime_unchanged": after["runtime"] == previous["runtime"],
+    })
+    if changed:
+        report = json.loads(result_file.read_bytes()) if result_file.is_file() else {}
+        if after["image"] != previous["image"] or after["version"] != previous["version"] or not after["authenticated"]:
+            docker_rollback(receipt, peer, previous, report)
+    require(upgraded, "The unmodified v0.24.0 release updater did not reach a healthy selected release.")
+    raise Unavailable("The stock v0.24.0 transition ran. The ledger also requires the separate v0.23.x client start.")
 
 
 def ordinary(receipt, release, repo, profile, peer, scratch):
-    paired_install(receipt, repo, profile, peer, try_schedule=True)
-    first_session(receipt, profile, repo)
     if receipt.platform == "linux-arm64":
-        timer = command(["systemctl", "--user", "is-active", "pseudolife-client-update.timer"], env=profile.env)
-        receipt.steps.append({"command": "systemctl --user is-active pseudolife-client-update.timer",
-                              "exit_code": timer.code, "assertion": "The client update timer was active.",
-                              "observed": timer.code == 0, "seconds": timer.seconds})
-    registration = profile.registration()
-    env = profile.env | registration.get("env", {})
+        with session(peer.owner_executable, [], peer.owner_env, repo) as mcp:
+            mcp.tool("memory_agents", action="update", project="hosted-acceptance", status="fixture")
+            mcp.tool("memory_search", query=SENTINEL, top_k=1)
+        env, launcher = peer.owner_env, peer.owner_executable
+    else:
+        paired_install(receipt, repo, profile, peer, try_schedule=True)
+        first_session(receipt, profile, repo)
+        env, launcher = profile.env | profile.registration().get("env", {}), profile.launcher()
+    failures = []
     for name, args, allowed, description in (
         ("connect", [peer.url, "--client", "codex", "--token-file", env[TOKEN_FILE], "--yes", "--json"],
          {0}, "Native connect accepted the disposable daemon and token."),
@@ -431,9 +536,14 @@ def ordinary(receipt, release, repo, profile, peer, scratch):
         ("update", ["--clients-only", "--tag", release.version, "--json"], {0, 3},
          "The native release updater accepted the installed release."),
     ):
-        invoke = lambda: command([profile.launcher(), name, *args], cwd=repo, env=env, timeout=180)
+        invoke = lambda: command([launcher, name, *args], cwd=repo, env=env, timeout=180)
         result = peer.during(receipt, invoke) if name == "update" else invoke()
-        receipt.observe(f"{CLIENT} {name} <fixture-options>", result, result.code in allowed, description)
+        receipt.observe(f"{CLIENT} {name} <fixture-options>", result, result.code in allowed, description,
+                        required=False)
+        if result.code not in allowed:
+            failures.append(name)
+    if failures:
+        raise Failed("One or more installed ordinary-use commands failed.")
     raise Unavailable("The hosted run exercises only the ordinary-use operations listed in this receipt.")
 
 
@@ -474,7 +584,7 @@ def cancel_download(release, repo, profile, flags):
     start = monotonic()
     with paused_download(release) as (url, requested):
         env = profile.env | {"PSEUDOLIFE_SHIM_ENGINE": "native", "PSEUDOLIFE_NATIVE_ARCHIVE_URL": url}
-        with subprocess.Popen(["bash", "ops/install.sh", *CLIENT_FLAGS, *flags],
+        with subprocess.Popen(["bash", "ops/install.sh", *flags],
                               cwd=repo, env=env, start_new_session=True, stdin=subprocess.DEVNULL,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as process:
             observed = requested.wait(20)
@@ -490,9 +600,20 @@ def cancel_download(release, repo, profile, flags):
 
 
 def failure(receipt, release, repo, profile, peer, scratch):
-    paired_install(receipt, repo, profile, peer)
+    local = receipt.platform == "linux-arm64"
+    if local:
+        flags = DOCKER_FLAGS
+        docker_before = DockerFixture.inventory()
+    else:
+        paired_install(receipt, repo, profile, peer)
+        flags = CLIENT_FLAGS + ["--daemon-url", peer.url, "--token-file", str(peer.token_file)]
+
+    def unchanged():
+        return (before == profile.fingerprint()
+                and (not local or DockerFixture.inventory() == docker_before)
+                and readiness(peer.url))
+
     before = profile.fingerprint()
-    flags = ["--daemon-url", peer.url, "--token-file", str(peer.token_file)]
     for defect, diagnostic in (("corrupt", b"does not match the release"),
                                ("missing", b"although its SHA256SUMS lists it")):
         assets = scratch / defect
@@ -500,34 +621,37 @@ def failure(receipt, release, repo, profile, peer, scratch):
         shutil.copyfile(release.folder / "SHA256SUMS", assets / "SHA256SUMS")
         if defect == "corrupt":
             (assets / release.archive.name).write_bytes(b"not a release archive\n")
-        result = live_install(peer, repo, profile, flags, overrides={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(assets)})
+        result = install(repo, profile, flags, overrides={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(assets)}, timeout=600)
         receipt.observe(f"{INSTALL} <{defect}-archive>", result,
-                        result.code not in (0, 124) and diagnostic in result.output and before == profile.fingerprint(),
+                        result.code not in (0, 124) and diagnostic in result.output and unchanged(),
                         "The installer rejected the fault before changing the working runtime.")
     result, observed = cancel_download(release, repo, profile, flags)
     receipt.observe(f"{INSTALL} <cancelled-install>", result,
-                    observed and result.code != 0 and before == profile.fingerprint(),
+                    observed and result.code != 0 and unchanged(),
                     "Interrupting the archive download preserved the working runtime.")
 
     locks = list(profile.folder.rglob(".native-update.lock"))
     require(len(locks) == 1, "The native runtime lock was present.")
     with locks[0].open("r+b") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = live_install(peer, repo, profile, flags)
+        result = install(repo, profile, flags, timeout=600)
         receipt.observe(f"{INSTALL} <locked-runtime>", result,
                         result.code not in (0, 124) and b"another native runtime update" in result.output
-                        and before == profile.fingerprint(),
+                        and unchanged(),
                         "The installed lock prevented concurrent activation.")
-    result = live_install(peer, repo, profile, flags)
+    result = install(repo, profile, flags, timeout=600)
     receipt.observe(f"{INSTALL} <retry-options>", result,
-                    result.code == 0 and profile.native_marker(release), "The clean retry selected the verified runtime.")
-    first_session(receipt, profile, repo)
+                    result.code == 0 and profile.native_marker(release) and readiness(peer.url),
+                    "The clean retry selected the verified runtime and left a healthy daemon.")
+    if local:
+        require(peer.sample()["status"] == 200, "The daemon served an authenticated read after retry.")
+    else:
+        first_session(receipt, profile, repo)
     raise Unavailable("Unobserved interruption points remain pending after the successful retry.")
 
 
 def bank_recovery(receipt, release, repo, profile, peer, scratch):
-    paired_install(receipt, repo, profile, peer)
-    with registered_session(profile, repo) as mcp:
+    with session(peer.owner_executable, [], peer.owner_env, repo) as mcp:
         mcp.tool("memory_store", text=SENTINEL, source="hosted-acceptance")
     backup = scratch / "backup"
     backup.mkdir(mode=0o700)
@@ -539,7 +663,7 @@ def bank_recovery(receipt, release, repo, profile, peer, scratch):
                     result.code == 0 and len(dumps) == len(archives) == 1,
                     "Native backup produced one database dump and one state archive.")
     post_backup = "Hosted acceptance change made after backup"
-    with registered_session(profile, repo) as mcp:
+    with session(peer.owner_executable, [], peer.owner_env, repo) as mcp:
         mcp.tool("memory_store", text=post_backup, source="hosted-acceptance")
         found = mcp.tool("memory_search", query=post_backup, top_k=5)
         require(post_backup in json.dumps(found.get("entries", [])), "The disposable bank was changed after backup.")
@@ -548,14 +672,14 @@ def bank_recovery(receipt, release, repo, profile, peer, scratch):
                      cwd=peer.checkout, env=peer.owner_env, timeout=240)
     receipt.observe(f"{CLIENT} restore <fixture-options>", result, result.code == 0 and readiness(peer.url),
                     "Native restore replayed the backup and restarted the disposable daemon.")
-    with registered_session(profile, repo) as mcp:
+    with session(peer.owner_executable, [], peer.owner_env, repo) as mcp:
         found = mcp.tool("memory_search", query=SENTINEL, top_k=5)
         require(SENTINEL in json.dumps(found.get("entries", [])), "The published client read the restored bank marker.")
         found = mcp.tool("memory_search", query=post_backup, top_k=5)
         # The query can also appear in response metadata. Inspect actual hits.
         require(post_backup not in json.dumps(found.get("entries", [])),
                 "The restored bank no longer contained the post-backup change.")
-    raise Unavailable("The emulated recovery is observable. The native arm64 bank and applicable move/import-state cases remain unproven.")
+    raise Unavailable("Backup and restore were exercised on the stock arm64 bank. Move and legacy import-state witnesses remain pending.")
 
 
 def run(tag, platform, output):
@@ -571,33 +695,25 @@ def run(tag, platform, output):
             free_space(scratch)
             release = published_release(tag, platform, scratch / "release")
             path = native_path(scratch, prepare_codex(platform, scratch))
-            repo = release.checkout(scratch / "release-checkout")
             before_docker = DockerFixture()
-            baseline(release, path, scratch, output)
-            if os.environ.get("HOSTED_ACCEPTANCE_IDENTIFY_ONLY") == "1":
-                for receipt in receipts:
-                    receipt.note = "This rehearsal only identified the stock install's containers."
-                cleaned = before_docker.clean()
-                return 0
-            enable_amd64()
+            provenance = baseline(release, path, scratch, output)
+            if not native_images(provenance["running_containers"]):
+                raise Unavailable("The stock installer did not produce the identified native arm64 checkout stack.")
             functions = {
-                "clean-install": clean_install, "upgrade-and-rollback": upgrade,
+                "clean-install": clean_install, "upgrade-and-rollback": stock_upgrade,
                 "ordinary-native-use": ordinary, "failure-and-retry": failure, "bank-recovery": bank_recovery,
             }
             for receipt in receipts:
                 scope = scratch / receipt.scenario
                 scope.mkdir()
                 try:
-                    with linux_peer(release, path, scope) as peer:
-                        receipt.daemon = peer.kind
-                        if receipt.scenario == "upgrade-and-rollback":
-                            upgrade(receipt, release, repo, path, peer, scope)
-                        else:
-                            profile = Profile(scope / "client-home", path)
-                            try:
-                                functions[receipt.scenario](receipt, release, repo, profile, peer, scope)
-                            finally:
-                                stop_units(profile)
+                    daemon_release = release
+                    if receipt.scenario == "upgrade-and-rollback":
+                        if release.tag == "v0.24.0":
+                            raise Unavailable("The selected release is also the required upgrade starting tag.")
+                        daemon_release = published_release("v0.24.0", platform, scope / "earlier-release")
+                    with stock_peer(receipt, daemon_release, path, scope) as (peer, profile):
+                        functions[receipt.scenario](receipt, release, peer.checkout, profile, peer, scope)
                         receipt.status = "pass"
                         receipt.note = matrix.SCENARIOS[receipt.scenario].outcome
                 except Unavailable as error:
