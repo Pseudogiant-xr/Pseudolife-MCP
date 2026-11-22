@@ -322,6 +322,45 @@ def test_audit_bank_export_reference_without_the_frozen_package(monkeypatch, tmp
     assert want["db"] == "unchanged"
 
 
+def test_audit_export_time_references_match_frozen_argument_parsing(monkeypatch):
+    from datetime import datetime
+    import sys
+
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        tested = set()
+        for case in audit.cases():
+            reference = case.reference
+            if getattr(reference, "func", None) is not audit._bank_export_reference:
+                continue
+            _, _, filters, _ = reference.args
+            bounds = {}
+            for index, arg in enumerate(case.argv):
+                if isinstance(arg, str):
+                    flag, joined, value = arg.partition("=")
+                    if flag in ("--since", "--until"):
+                        bounds[flag[2:]] = value if joined else case.argv[index + 1]
+            assert bounds.keys() == filters.keys() & {"since", "until"}, case.id
+            for bound, arg in bounds.items():
+                # The frozen CLI tries an epoch first, then an ISO datetime.
+                try:
+                    parsed = float(arg)
+                except ValueError:
+                    try:
+                        parsed = datetime.fromisoformat(arg)
+                    except ValueError:
+                        # Some ISO spellings entered the frozen parser in 3.11.
+                        if sys.version_info < (3, 11):
+                            continue
+                        raise
+                declared = filters[bound]
+                if not isinstance(declared, datetime) and isinstance(parsed, datetime):
+                    parsed = parsed.timestamp()
+                assert declared == parsed, (case.id, bound, arg)
+                tested.add(bound)
+        assert tested == {"since", "until"}
+
+
 def test_audit_live_export_refuses_candidate_recordings(monkeypatch, tmp_path):
     with _cold_audit(monkeypatch) as audit:
         case_id = "export-agent-unknown"
@@ -401,6 +440,7 @@ def test_audit_bank_verify_reference_without_the_frozen_package(monkeypatch, tmp
         connect.assert_not_called()
     else:
         connect.assert_called_once_with(name)
+        assert conn.execute.call_args_list[0].args == ("SET LOCAL extra_float_digits = 3",)
         assert conn.execute.call_args.args == (
             "SELECT seq,event,actor,principal,agent_id,recipient_agent_id,project,task,"
             "message_id,payload,created_at,hlc,prev_hash,hash,body,body_salt "
@@ -506,6 +546,47 @@ def test_audit_rich_fixture_keeps_runtime_mail_unexpired(monkeypatch):
         [send] = [row for row in events if row["message_id"] == message_id]
         assert message["created_at"] == send["created_at"] == now
         assert message["expires_at"] == json.loads(send["payload"])["expires_at"] == now + audit.DAY
+
+
+@pytest.mark.parametrize("refusal, exit_code, stdout, diagnostic", [
+    ("invalid_reason", 1, b'{"ok": false, "message_id": "sample-id", "reason": "invalid_reason"}',
+     b"--reason must be 1-240 characters on one line, with no control, format or separator characters"),
+    ("busy", 2, b"", b"the board is busy: a row or the audit chain stayed locked for more than 5 s. "
+     b"Nothing was changed; retry"),
+])
+def test_audit_redact_refusal_reference_without_the_frozen_package(
+        monkeypatch, tmp_path, refusal, exit_code, stdout, diagnostic):
+    from . import compare
+
+    seed = {"tables": {"coordination_events": [], "coordination_messages": []},
+            "sequences": {"coordination_events_seq_seq": 3}}
+    with _cold_audit(monkeypatch) as audit:
+        name = audit._name("rich")
+        monkeypatch.setattr(audit, "ensure", lambda _: name)
+        monkeypatch.setattr(audit, "_BASELINE", {name: seed})
+        monkeypatch.setattr(_bank, "url", lambda label: f"postgresql://localhost/{label}")
+        case = audit.redact_case("redact-control", "rich", audit._Lazy(lambda: "sample-id"), "  ",
+                                 hold=refusal == "busy", refusal=refusal)
+        setup = MagicMock(side_effect=AssertionError("the reference must not clone or lock a bank"))
+        monkeypatch.setattr(case, "setup", setup)
+        previous_umask = audit.core.pin_umask()
+        try:
+            want = case.reference(tmp_path / "redact-refusal")
+        finally:
+            if previous_umask is not None:
+                os.umask(previous_umask)
+
+        newline = b"\r\n" if audit.core.WINDOWS else b"\n"
+        assert want["exit"] == exit_code
+        assert audit.core.decode(want, "stdout") == (stdout + newline if stdout else b"")
+        assert audit.core.decode(want, "stderr") == b"board-audit: " + diagnostic + newline
+        assert want["files"] == {"cwd": "dir"}
+        assert want["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755"})
+        assert want["db"] == seed
+        setup.assert_not_called()
+
+        changed = dict(seed, sequences={"coordination_events_seq_seq": 4})
+        assert compare.diff(want, dict(want, db=changed), case.rules)[0] == "db differ:"
 
 
 def test_audit_fixture_checks_the_database_before_inserts(monkeypatch):

@@ -29,6 +29,7 @@ from rust.harness_support.database_guard import (
 
 DAY = 86400
 T0 = 1_700_000_000.0
+_NO_AUDIT_LOG = "this bank has no audit log yet (schema older than v42); start a v42 daemon once to create it"
 _FIXTURE = Path(__file__).with_suffix(".fixtures.json")
 _STATS_REFERENCES = Path(__file__).with_name("audit.stats.references.json")
 _STATS_CORPUS = Path(__file__).resolve().parents[2] / "shim/src/cli/board_audit/testdata/stats.json"
@@ -539,8 +540,7 @@ def _bank_verify_reference(case, kind, home):
     newline = b"\r\n" if core.WINDOWS else b"\n"
     if kind == "nolog":
         code, stdout = 2, b""
-        stderr = (b"board-audit: this bank has no audit log yet (schema older than v42); "
-                  b"start a v42 daemon once to create it" + newline)
+        stderr = f"board-audit: {_NO_AUDIT_LOG}".encode("utf-8") + newline
     else:
         expect = None
         if case.argv[2:]:
@@ -698,8 +698,56 @@ def archive_case(case_id, variant, *extra, rules=(), stdout_closed=False):
 REDACT_DB = _bank.name(PREFIX + "rd")
 
 
+# Diagnostics from the frozen Python CLI's _redact and _bank paths. Each
+# refusal case declares its outcome; these tables do not decide what to reject.
+_REDACT_REFUSALS = {
+    "invalid_message_id": "--message-id must be one message id as the audit log shows it",
+    "invalid_reason": "--reason must be 1-240 characters on one line, with no control, "
+                      "format or separator characters",
+    "secret_like_body": "the reason looks like it holds a credential, and the reason is "
+                        "kept in the log for good; describe the mistake without repeating it",
+    "message_not_found": "no record of this message id: an unknown id, or one whose send "
+                         "event audit retention removed and whose live copy is gone too",
+    "body_in_hashed_payload": "this message was sent before schema v46, when the body was "
+                              "part of the hashed payload; removing it would break the "
+                              "chain, so it stays until audit retention removes the event, "
+                              "and its live copy is already gone",
+    "already_redacted": "this message's body is already redacted",
+}
+_REDACT_UNAVAILABLE = {
+    "busy": "the board is busy: a row or the audit chain stayed locked for "
+            "more than 5 s. Nothing was changed; retry",
+    "nolog": _NO_AUDIT_LOG,
+    "prev46": "this bank's audit log predates schema v46, so no body in it can be redacted: "
+              "every send body is part of the hashed payload. Start a v46 daemon once to add "
+              "the body column; bodies sent before it stay unredactable",
+}
+
+
+def _redact_refusal_reference(case, source, original, refusal, home):
+    """A refusal leaves the candidate's template copy equal to the seed bank."""
+    started = time.time()
+    bank = ensure(source)
+    _resolve_argv(case, original)
+    core._reset(home)
+    (home / "cwd").mkdir()
+    newline = b"\r\n" if core.WINDOWS else b"\n"
+    if refusal in _REDACT_REFUSALS:
+        code = 1
+        result = {"ok": False, "message_id": case.argv[3], "reason": refusal}
+        stdout = json.dumps(result).encode("ascii") + newline
+        diagnostic = _REDACT_REFUSALS[refusal]
+    else:
+        code, stdout = 2, b""
+        diagnostic = _REDACT_UNAVAILABLE[refusal]
+    stderr = f"board-audit: {diagnostic}".encode("utf-8") + newline
+    return {"home": str(home), "window": [started, time.time()], "exit": code,
+            "stdout": _encoded(stdout), "stderr": _encoded(stderr), "files": core.snapshot(home),
+            "modes": core.modes(home), "db": _BASELINE[bank]}
+
+
 def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock",),
-                hold=False, prepare=(), stdout_closed=False, note=""):
+                hold=False, prepare=(), stdout_closed=False, note="", refusal=None):
     """A redaction on this arm's own TEMPLATE copy of a seeded bank;
     ``prepare`` statements run on that copy first (test instruments only)."""
     original = ["board-audit", "redact", "--message-id",
@@ -735,6 +783,8 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
                      env={**GUARDS, "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(REDACT_DB)},
                      setup=setup, after=after, rules=rules, timeout=60,
                      stdout_closed=stdout_closed, note=note, programs=PROGRAMS)
+    if refusal is not None:
+        case.reference = partial(_redact_refusal_reference, case, source, original, refusal)
     return case
 
 
@@ -1302,18 +1352,18 @@ def cases() -> list[core.Case]:
                     "sent to everyone by mistake"),
         redact_case("redact-kept-v45", "rich", _rich("v45"), "pasted by mistake"),
         redact_case("redact-gone", "pruned", _pruned("old"), "pasted by mistake"),
-        redact_case("redact-legacy-refused", "rich", _rich("legacy"), "too old"),
-        redact_case("redact-already", "rich", _rich("redacted"), "again"),
-        redact_case("redact-unknown", "rich", "0" * 32, "unknown"),
-        redact_case("redact-unknown-prefix", "rich", "fffffffff", "unknown"),
-        redact_case("redact-invalid-id", "rich", "bad.id", "why"),
-        redact_case("redact-reason-control", "rich", _rich("to_redact"), "bell\x07"),
-        redact_case("redact-reason-long", "rich", _rich("to_redact"), "x" * 241),
-        redact_case("redact-reason-blank", "rich", _rich("to_redact"), "  "),
+        redact_case("redact-legacy-refused", "rich", _rich("legacy"), "too old", refusal="body_in_hashed_payload"),
+        redact_case("redact-already", "rich", _rich("redacted"), "again", refusal="already_redacted"),
+        redact_case("redact-unknown", "rich", "0" * 32, "unknown", refusal="message_not_found"),
+        redact_case("redact-unknown-prefix", "rich", "fffffffff", "unknown", refusal="message_not_found"),
+        redact_case("redact-invalid-id", "rich", "bad.id", "why", refusal="invalid_message_id"),
+        redact_case("redact-reason-control", "rich", _rich("to_redact"), "bell\x07", refusal="invalid_reason"),
+        redact_case("redact-reason-long", "rich", _rich("to_redact"), "x" * 241, refusal="invalid_reason"),
+        redact_case("redact-reason-blank", "rich", _rich("to_redact"), "  ", refusal="invalid_reason"),
         redact_case("redact-reason-secret", "rich", _rich("to_redact"),
-                    "token=" + "q7Hd2kLm9Pz4" + "Rt6Wv8Xy1Bc3"),
-        redact_case("redact-busy", "rich", _rich("to_redact"), "wrong paste", hold=True),
-        redact_case("redact-nolog", "nolog", "0" * 32, "why"),
+                    "token=" + "q7Hd2kLm9Pz4" + "Rt6Wv8Xy1Bc3", refusal="secret_like_body"),
+        redact_case("redact-busy", "rich", _rich("to_redact"), "wrong paste", hold=True, refusal="busy"),
+        redact_case("redact-nolog", "nolog", "0" * 32, "why", refusal="nolog"),
         # Historical case ids remain stable across native implementation.
         *stats_cases(),
         *transport_cases(),
@@ -1361,7 +1411,7 @@ def cases() -> list[core.Case]:
         redact_case("redact-twin-prefix", "rich", "cd34ef56ab13", "wrong paste"),
         bank_verify_case("bank-verify-prev46", "prev46"),
         bank_export_case("export-prev46", "prev46"),
-        redact_case("redact-prev46", "prev46", _Lazy(lambda: ids("legacy")["legacy"]), "why"),
+        redact_case("redact-prev46", "prev46", _Lazy(lambda: ids("legacy")["legacy"]), "why", refusal="prev46"),
         redact_case("redact-vacuum-warning", "rich", _rich("to_redact"), "wrong paste",
                     prepare=VACUUM_WARNING),
     ]
