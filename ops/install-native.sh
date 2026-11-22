@@ -529,8 +529,8 @@ native_bounded() {  # $1 = both|out|windows, then the command; status 124 on tim
                     taskkill.exe //PID "$native_bound_winpid" //T //F >/dev/null 2>&1 || true
                 fi
             fi
-            kill "$native_bound_pid" 2>/dev/null
-            wait "$native_bound_pid" 2>/dev/null
+            kill "$native_bound_pid" 2>/dev/null || true
+            wait "$native_bound_pid" 2>/dev/null || true
             rm -f "$native_bound_out"
             return 124
         fi
