@@ -304,14 +304,16 @@ fn a_registered_user_unit_refuses_the_move_and_changes_nothing() {
     assert!(line.contains("Nothing was changed"), "{line}");
     assert!(
         line.starts_with(
-            "this machine stays on the Python client: a tunnel is registered to start by itself. The native client has no tunnel service command to manage that registration after the move."
+            "this machine stays on the Python client: a tunnel is registered to start by itself. Nothing was changed; to stay on it, rerun the same command"
         ),
         "{line}"
     );
     assert!(
         line.contains(
-            "The native client can run it in the foreground with pseudolife-mcp tunnel run"
-        ) && line.contains("has no automatic or background start")
+            "The native client has no tunnel service command to manage that registration after the move."
+        ) && line.contains("Run it in the foreground with pseudolife-mcp tunnel run.")
+            && line.matches("foreground").count() == 1
+            && line.contains("has no automatic or background start")
             && line.contains("Removing autostart means the tunnel will no longer start on its own")
             && !line.contains(concat!("cannot run ", "a tunnel yet")),
         "{line}"
@@ -855,9 +857,18 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
     let service = Registered {
         kind: Kind::UserUnit,
         name: "pseudolife-tunnel-dot.service".into(),
-        place: "systemd user unit /u".into(),
+        place: "systemd user unit /home/alexandra/.config/systemd/user/pseudolife-tunnel-dot.service"
+            .into(),
         file: None,
-        command: None,
+        command: Some(vec![
+            "/home/alexandra/.local/bin/pseudolife-mcp".into(),
+            "tunnel".into(),
+            "run".into(),
+            "--profile".into(),
+            "dot".into(),
+            "--profile-dir".into(),
+            "/home/alexandra/.local/share/pseudolife/tunnel profiles".into(),
+        ]),
     };
     let checkout = refusal(std::slice::from_ref(&service), false, Mover::Checkout);
     assert!(
@@ -882,6 +893,10 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
         // What a 0.23.x hand-off parent keeps of a warning.
         let kept: String = line.chars().take(400).collect();
         assert!(kept.contains("Nothing was changed; "), "{kept}");
+        assert!(
+            line.contains("--profile-dir '/home/alexandra/.local/share/pseudolife/tunnel profiles'"),
+            "{line}"
+        );
         assert!(
             !line.contains("keeps starting"),
             "a disabled unit does not start: {line}"

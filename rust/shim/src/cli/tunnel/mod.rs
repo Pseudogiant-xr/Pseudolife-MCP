@@ -449,10 +449,10 @@ fn legacy_handoff(name: &str, record: &record::Record) -> String {
             quote_tunnel_arg(directory)
         );
     }
-    let status = tunnel_command("status", name, directory);
     let run = tunnel_command("run", name, directory);
     format!(
-        "It keeps serving until its process ends, for example when this machine restarts. If `{status}` then reports a leftover process record, move that file aside. Start it natively with `{run}` in a terminal you keep open"
+        "It keeps serving until its process ends, for example when this machine restarts. Once you confirm it has stopped, move its leftover process record at {} aside if it still exists. Start it natively with `{run}` in a terminal you keep open",
+        record.path.display()
     )
 }
 
@@ -1284,7 +1284,7 @@ mod tests {
         };
         assert_eq!(
             record_sentence("dot", &record, false),
-            "tunnel dot is running (process record tunnels/dot.process.json). It keeps serving until its process ends, for example when this machine restarts. If `pseudolife-mcp tunnel status --profile dot --profile-dir 'tunnels'` then reports a leftover process record, move that file aside. Start it natively with `pseudolife-mcp tunnel run --profile dot --profile-dir 'tunnels'` in a terminal you keep open"
+            "tunnel dot is running (process record tunnels/dot.process.json). It keeps serving until its process ends, for example when this machine restarts. Once you confirm it has stopped, move its leftover process record at tunnels/dot.process.json aside if it still exists. Start it natively with `pseudolife-mcp tunnel run --profile dot --profile-dir 'tunnels'` in a terminal you keep open"
         );
         let (console, command) = if cfg!(windows) {
             (
