@@ -426,6 +426,30 @@ def test_powershell_unreadable_plugin_registry_does_not_abort(tmp_path, clients,
         assert "Could not read the Claude Code plugin registry" not in proc.stdout.decode()
 
 
+@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda name: Path(name).name)
+@pytest.mark.parametrize("requested", [True, False], ids=["requested", "detected"])
+def test_bash_unreadable_plugin_registry_does_not_abort(tmp_path, bash, requested):
+    registry = tmp_path / "unreadable profile" / "installed_plugins.json"
+    registry.mkdir(parents=True)
+    proc, calls = _run_bash(
+        bash, tmp_path, Scenario(requested=requested, install_records=False,
+                                 profile_var="CLAUDE_CODE_PLUGIN_CACHE_DIR",
+                                 profile_dir=registry.parent.name))
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout.decode()
+    assert proc.returncode == (5 if requested else 0), _all_output(proc)
+    registry_path = _bash_fixture_path(bash, registry, _fixture_env(tmp_path / "bash-env"))
+    lines = proc.stderr.decode().splitlines()
+    label = "Requested" if requested else "Detected"
+    assert lines[-1] == (
+        f"{label} client setup incomplete (Claude Code). Plugin was not installed. "
+        f"Could not read the Claude Code plugin registry at {registry_path}. "
+        "Fix its permissions and rerun the installer."
+    )
+    if not requested:
+        assert lines[-2] == "Warnings"
+    assert calls == []
+
+
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
 def test_success_exit_without_a_record_is_a_failure(variant, tmp_path):
     """The read-back is the proof, not the exit code: a CLI that returns 0

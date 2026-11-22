@@ -2176,7 +2176,19 @@ claude_plugin_manual() {
     echo "inside Claude Code run /plugin marketplace add $CLAUDE_PLUGIN_MARKETPLACE_SOURCE then /plugin install $CLAUDE_PLUGIN_ID"
 }
 claude_plugin_recorded() {
-    grep -q "\"$CLAUDE_PLUGIN_ID\"" "$CLAUDE_PLUGIN_DIR/installed_plugins.json" 2>/dev/null
+    local registry="$CLAUDE_PLUGIN_DIR/installed_plugins.json" status=0
+    [ -e "$registry" ] || return 1
+    if [ -f "$registry" ]; then
+        grep "\"$CLAUDE_PLUGIN_ID\"" "$registry" >/dev/null 2>&1 || status=$?
+    else
+        status=2
+    fi
+    if [ "$status" -gt 1 ] && [ "$CLAUDE_PLUGIN" != skip ]; then
+        PLUGIN_CLAUDE=failed
+        PLUGIN_CLAUDE_RECOVERY="Could not read the Claude Code plugin registry at $registry. Fix its permissions and rerun the installer."
+        echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
+    fi
+    return "$status"
 }
 claude_plugin_installed_version() {
     # The record is pretty-printed JSON: the plugin's entry follows its key
@@ -2210,6 +2222,7 @@ install_claude_plugin() {
         PLUGIN_CLAUDE="present:$(claude_plugin_installed_version)"
         return 0
     fi
+    if [ "$PLUGIN_CLAUDE" = failed ]; then return 0; fi
     if [ "$CLAUDE_PLUGIN" = skip ]; then PLUGIN_CLAUDE=skipped; return 0; fi
     if ! command -v claude >/dev/null 2>&1; then
         PLUGIN_CLAUDE=no-cli
@@ -2241,7 +2254,7 @@ install_claude_plugin() {
     fi
     if claude_plugin_recorded; then
         PLUGIN_CLAUDE="installed:$(claude_plugin_installed_version)"
-    else
+    elif [ "$PLUGIN_CLAUDE" != failed ]; then
         PLUGIN_CLAUDE=failed
         PLUGIN_CLAUDE_RECOVERY="'claude plugin install' returned success but $CLAUDE_PLUGIN_DIR/installed_plugins.json does not list $CLAUDE_PLUGIN_ID. Run /plugin install $CLAUDE_PLUGIN_ID inside Claude Code."
         echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
@@ -2627,8 +2640,8 @@ pair_with_code() {
 [ -z "${CLIENT_ONLY:-}" ] || connect_existing_registrations
 
 instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
-if grep -q "pseudolife-memory@pseudolife-mcp" \
-        "${CLAUDE_PLUGIN_DIR:-$HOME/.claude/plugins}/installed_plugins.json" 2>/dev/null; then
+plugin_registry="${CLAUDE_PLUGIN_DIR:-$HOME/.claude/plugins}/installed_plugins.json"
+if [ -f "$plugin_registry" ] && grep -q "pseudolife-memory@pseudolife-mcp" "$plugin_registry" 2>/dev/null; then
     CLAUDE_PLUGIN_INSTALLED=1
     case " $CLIENTS " in *" claude "*)
         step "pseudolife-memory Claude Code plugin detected — skipping Claude"
@@ -3893,6 +3906,7 @@ remove_shim_unit() {  # $1 = unit, $2 = the shim family it runs
 [ -n "${codex_shim_mode:-}" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-codex-shim.service Codex
 [ -n "${claude_shim_mode:-}" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-sonnet-shim.service Claude
 shim_autostart_family=""
+EXTRACTOR_AUTOSTART_WARNING=""
 if [ -n "${claude_shim_mode:-}" ]; then shim_autostart_family=claude
 elif [ -n "${codex_shim_mode:-}" ]; then shim_autostart_family=codex; fi
 if [ -n "$shim_autostart_family" ]; then
@@ -3902,7 +3916,8 @@ if [ -n "$shim_autostart_family" ]; then
     if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
         printf -v manual_shim '%q ' "${SHIM_PATH:-pseudolife-mcp}" extractor-shim "$shim_autostart_family" \
             --repo "$repo" --port "$SHIM_PORT" --model "$MODEL"
-        printf 'WARNING: Native shim autostart is unavailable on macOS. Start the shim by hand with %s, or rerun the installer with --extractor sidecar.\n' "${manual_shim% }" >&2
+        EXTRACTOR_AUTOSTART_WARNING="Native shim autostart is unavailable on macOS. Start the shim by hand with ${manual_shim% }, or rerun the installer with --extractor sidecar."
+        printf 'WARNING: %s\n' "$EXTRACTOR_AUTOSTART_WARNING" >&2
     elif [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
         echo "WARNING: shim autostart was not registered: the native client is unavailable (see above)" >&2
         EXTRACTOR_AUTOSTART_FAILURE="Shim autostart was not registered because the native client is unavailable. Fix the native client install and rerun the installer with the same extractor mode."
@@ -3916,7 +3931,7 @@ if [ -n "$shim_autostart_family" ]; then
         if [ "$autostart_code" -eq 3 ]; then
             # The Windows registrar has already printed the task and its repair.
             if [ -n "${extractor_requested:-}" ] && [ -z "${restored_extractor:-}" ]; then
-                EXTRACTOR_AUTOSTART_FAILURE="The registrar left an existing Windows task in place. Follow its recovery above and rerun the installer with the same extractor mode."
+                EXTRACTOR_AUTOSTART_FAILURE="An existing Windows scheduled task was left unchanged because it was registered from an elevated shell, belongs to another account, or its run-as account could not be verified. Ask the task owner or a Windows administrator to remove it before rerunning the installer with the same extractor mode."
             fi
         else
             echo "WARNING: shim autostart registration failed (see above: usually no systemd --user on this host)" >&2
@@ -4396,6 +4411,7 @@ client_setup_warnings() {
     if [ -n "${EXTRACTOR_AUTOSTART_FAILURE:-}" ] && [ -z "${extractor_requested:-}" ]; then
         printf 'Extractor setup incomplete (%s). %s\n' "$EXTRACTOR" "$EXTRACTOR_AUTOSTART_FAILURE"
     fi
+    if [ -n "${EXTRACTOR_AUTOSTART_WARNING:-}" ]; then printf '%s\n' "$EXTRACTOR_AUTOSTART_WARNING"; fi
     if [ "${CLIENT_SCHEDULE_STATE:-}" = failed ]; then echo "Automatic client updates were not scheduled. See the scheduling command above."; fi
     if [ -n "${CONSOLE_SIGNIN_WARNING:-}" ]; then echo "Console sign-in did not finish. Run pseudolife-mcp console once the reported problem is fixed."; fi
 }

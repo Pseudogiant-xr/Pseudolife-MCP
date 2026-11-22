@@ -373,8 +373,10 @@ def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
     elif choice == "locked-flag":
         assert proc.stderr.splitlines() == [
             "Could not determine the owner of the fixture task.",
-            "Requested extractor setup incomplete (claude-only). The registrar left an existing Windows task in place. "
-            "Follow its recovery above and rerun the installer with the same extractor mode.",
+            "Requested extractor setup incomplete (claude-only). An existing Windows scheduled task was left unchanged "
+            "because it was registered from an elevated shell, belongs to another account, or its run-as account could "
+            "not be verified. Ask the task owner or a Windows administrator to remove it before rerunning the installer "
+            "with the same extractor mode.",
         ]
     elif choice == "locked-restored":
         assert proc.stderr.splitlines() == ["Could not determine the owner of the fixture task."]
@@ -382,7 +384,8 @@ def test_extractor_autostart_failure_at_completion(tmp_path, shell, choice):
     elif choice == "macos":
         lead = "WARNING: Native shim autostart is unavailable on macOS. Start the shim by hand with "
         tail = ", or rerun the installer with --extractor sidecar."
-        [line] = proc.stderr.splitlines()
+        line, blank, heading, warning = proc.stderr.splitlines()
+        assert [blank, heading, warning] == ["", "Warnings", line.removeprefix("WARNING: ")]
         assert line.startswith(lead) and line.endswith(tail)
         assert shlex.split(line[len(lead):-len(tail)]) == [
             runner.path(runner.bin / "fixture-shim"), "extractor-shim", "claude", "--repo", runner.path(ROOT),

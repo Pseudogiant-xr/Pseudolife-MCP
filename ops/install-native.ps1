@@ -3763,7 +3763,7 @@ if ($shimAutostartFamily) {
         if ($autostartCode -eq 3) {
             # The native client has already printed the task and its repair.
             if ($extractorRequested -and -not $restoredExtractor) {
-                $script:extractorAutostartFailure = "The registrar left an existing Windows task in place. Follow its recovery above and rerun the installer with the same extractor mode."
+                $script:extractorAutostartFailure = "An existing Windows scheduled task was left unchanged because it was registered from an elevated shell, belongs to another account, or its run-as account could not be verified. Ask the task owner or a Windows administrator to remove it before rerunning the installer with the same extractor mode."
             }
         } elseif ($autostartCode -ne 0) {
             Write-Warning "Shim autostart registration or start failed (see the message above)."
