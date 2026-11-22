@@ -85,14 +85,14 @@ def isolated_env(scratch):
 
 def lima_tool(scratch, budget):
     sums = scratch / "SHA256SUMS"
-    download(f"{LIMA_BASE}/SHA256SUMS", sums, LIMA_SUMS, timeout=budget.remaining(45))
+    download(f"{LIMA_BASE}/SHA256SUMS", sums, LIMA_SUMS, timeout=budget.remaining(45), peer_asset=True)
     name = f"lima-{LIMA_VERSION}-Darwin-x86_64.tar.gz"
     match = next((line.split() for line in sums.read_text().splitlines() if line.rstrip().endswith(name)), None)
     require(match is not None and len(match) == 2 and match[1].lstrip("*") == name,
             "The pinned Lima SHA256SUMS named its Intel archive.")
     digest = match[0]
     archive = scratch / name
-    download(f"{LIMA_BASE}/{name}", archive, digest, timeout=budget.remaining(90))
+    download(f"{LIMA_BASE}/{name}", archive, digest, timeout=budget.remaining(90), peer_asset=True)
     destination = scratch / "lima"
     destination.mkdir()
     with tarfile.open(archive) as compressed:
@@ -163,7 +163,7 @@ def build_source_peer(release, repo, scratch, budget):
     require(binary.code == 0, "Homebrew located its PostgreSQL 18 installation.")
     postgres = Path(os.fsdecode(binary.output.strip())) / "bin"
     wheel = scratch / "onnxruntime.whl"
-    download(ONNX_WHEEL, wheel, ONNX_DIGEST, timeout=budget.remaining(90))
+    download(ONNX_WHEEL, wheel, ONNX_DIGEST, timeout=budget.remaining(90), peer_asset=True)
     onnx = scratch / "libonnxruntime.1.27.0.dylib"
     with zipfile.ZipFile(wheel) as archive:
         library = next(member for member in archive.namelist() if Path(member).name == onnx.name)
@@ -195,7 +195,7 @@ def build_source_peer(release, repo, scratch, budget):
         "PSEUDOLIFE_BUILD_GIT_SHA": release.commit, "PSEUDOLIFE_BUILD_SOURCE": "checkout",
     })
     models = budget.run([executable, "provision", "models", "--if-missing"], env=env,
-                        timeout=budget.remaining(300), label="pseudolife-daemon provision models --if-missing")
+                        timeout=budget.remaining(1500), label="pseudolife-daemon provision models --if-missing")
     if models.code != 0:
         raise Unavailable("The source-built daemon could not provision its pinned models.")
     return postgres, executable, env
@@ -263,7 +263,8 @@ def offline(receipt, release, repo, profile, scratch):
     url = f"http://127.0.0.1:{loopback_port()}"
     result = live_install(None, repo, profile, ["--daemon-url", url, "--token-file", str(token_file)])
     receipt.observe(f"{INSTALL} <closed-loopback>", result,
-                    result.code not in (0, 124) and not (profile.codex / "config.toml").is_file(),
+                    result.code not in (0, 124) and b"client-only install: no healthy daemon answered at" in result.output
+                    and not (profile.codex / "config.toml").is_file(),
                     "The published installer refused the closed endpoint without registering a client.")
 
 
@@ -296,9 +297,10 @@ def mac_recovery(row, release, repo, profile, peer, scratch):
     paired_install(row, repo, profile, peer)
     with registered_session(profile, repo) as mcp:
         mcp.tool("memory_store", text=SENTINEL, source="hosted-acceptance")
+    templates = matrix.commands(row.scenario, row.platform)
     backup = command([peer.owner_executable, "acceptance-backup"], env=peer.owner_env, timeout=180)
     row.observe(f"{CLIENT} backup <guest fixture>", backup, backup.code == 0,
-                "The published native admin client backed up the guest Docker bank.")
+                "The published native admin client backed up the guest Docker bank.", template=templates[0])
     after_backup = "Hosted acceptance guest change after backup"
     with registered_session(profile, repo) as mcp:
         mcp.tool("memory_store", text=after_backup, source="hosted-acceptance")
@@ -306,7 +308,7 @@ def mac_recovery(row, release, repo, profile, peer, scratch):
         require(after_backup in json.dumps(values.get("entries", [])), "The guest's post-backup change was observable.")
     restored = command([peer.owner_executable, "acceptance-restore"], env=peer.owner_env, timeout=240)
     row.observe(f"{CLIENT} restore <guest fixture>", restored, restored.code == 0 and readiness(peer.url),
-                "The published native admin client restored the guest Docker bank.")
+                "The published native admin client restored the guest Docker bank.", template=templates[1])
     with registered_session(profile, repo) as mcp:
         values = mcp.tool("memory_search", query=SENTINEL, top_k=5)
         require(SENTINEL in json.dumps(values.get("entries", [])), "The Mac client read the recovered marker.")

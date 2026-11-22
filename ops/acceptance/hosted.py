@@ -96,7 +96,7 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def download(url, path, digest=None, *, timeout=180):
+def download(url, path, digest=None, *, timeout=180, peer_asset=False):
     result = command(
         ["curl", "--disable", "--fail", "--silent", "--show-error", "--location",
          "--proto", "=https", "--proto-redir", "=https", "--max-time", str(timeout),
@@ -107,7 +107,11 @@ def download(url, path, digest=None, *, timeout=180):
     )
     label = path.name if re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", path.name) else "<asset>"
     status = result.output[-3:].decode("ascii") if re.fullmatch(rb"[0-9]{3}", result.output[-3:]) else "unknown"
-    require(result.code == 0, f"Public download failed for {label} (curl exit {result.code}, HTTP {status}).")
+    if result.code != 0:
+        message = f"Public download failed for {label} (curl exit {result.code}, HTTP {status})."
+        if peer_asset and result.code in (5, 6, 7, 18, 22, 28, 35, 52, 55, 56, 124):
+            raise Unavailable(message)
+        raise Failed(message)
     if digest is not None:
         require(sha256(path) == digest, "A download disagreed with its published SHA-256.")
 

@@ -9,7 +9,7 @@ mkdir "$root" "$root/bin" "$root/home"
 cd "$root"
 
 sudo -n apt-get -qq update
-sudo -n env DEBIAN_FRONTEND=noninteractive apt-get -qq install -y +    ca-certificates curl docker.io docker-compose-v2 git
+sudo -n env DEBIAN_FRONTEND=noninteractive apt-get -qq install -y ca-certificates curl docker.io docker-compose-v2 git
 sudo -n systemctl start docker
 for executable in /usr/bin/* /bin/* /usr/sbin/* /sbin/*; do
     case "${executable##*/}" in
@@ -46,9 +46,9 @@ guest = ipaddress.IPv4Interface(sys.argv[1])
 assert guest.ip.is_private and not guest.ip.is_loopback and not guest.ip.is_link_local
 print(guest.network.network_address + 1, guest.ip)
 ' "$cidr")
-sudo -n iptables -I DOCKER-USER 1 -i lima0 -p tcp -m conntrack +    --ctorigdst "$guest_address" --ctorigdstport 8765 -j DROP
-sudo -n iptables -I DOCKER-USER 1 -i lima0 -s "$host_address/32" -p tcp -m conntrack +    --ctorigdst "$guest_address" --ctorigdstport 8765 -j RETURN
-sudo -n iptables -C DOCKER-USER -i lima0 -s "$host_address/32" -p tcp -m conntrack +    --ctorigdst "$guest_address" --ctorigdstport 8765 -j RETURN
+sudo -n iptables -I DOCKER-USER 1 -i lima0 -p tcp -m conntrack --ctorigdst "$guest_address" --ctorigdstport 8765 -j DROP
+sudo -n iptables -I DOCKER-USER 1 -i lima0 -s "$host_address/32" -p tcp -m conntrack --ctorigdst "$guest_address" --ctorigdstport 8765 -j RETURN
+sudo -n iptables -C DOCKER-USER -i lima0 -s "$host_address/32" -p tcp -m conntrack --ctorigdst "$guest_address" --ctorigdstport 8765 -j RETURN
 
 compose_config=$(sudo -n docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' pseudolife-mcp-daemon)
 IFS=, read -ra files <<< "$compose_config"

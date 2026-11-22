@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -138,3 +140,139 @@ def test_fault_fixture_restores_the_previously_verified_archive(tmp_path):
         assert not archive.exists()
         archive.write_bytes(b"disposable replacement")
     assert archive.read_bytes() == b"verified archive fixture"
+
+
+def test_guest_arguments_have_no_patch_markers():
+    root = Path(__file__).resolve().parents[2]
+    shell = (root / "ops/acceptance/hosted_lima_guest.sh").read_text(encoding="utf-8")
+    for line in shell.splitlines():
+        if "apt-get -qq install" in line or "iptables" in line:
+            assert "+" not in line.split()
+
+
+def test_peer_fetch_transport_failure_allows_offline_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(hosted, "command", lambda *_, **__: hosted.Result(22, b"503", 0))
+    with pytest.raises(hosted.Unavailable, match="HTTP 503"):
+        hosted.download("https://example.com/asset", tmp_path / "fixture.tar.gz", peer_asset=True)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Mac acceptance harness is POSIX-only")
+def test_offline_installer_rejects_a_false_endpoint_witness(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_macos
+
+    profile = hosted.Profile(tmp_path / "home", "")
+    result = hosted.Result(1, b"release archive checksum mismatch", 0)
+    monkeypatch.setattr(hosted_macos, "live_install", lambda *a, **k: result)
+    row = hosted.Receipt("clean-install", "macos-arm64")
+    with pytest.raises(hosted.Failed, match="closed endpoint"):
+        hosted_macos.offline(row, None, tmp_path, profile, tmp_path)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_stock_update_uses_json_for_its_requested_rollback(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    previous = {"version": "0.24.0", "authenticated": True, "id": "old", "image": "old",
+                "volumes": ["state"], "state_volumes": ["state"], "database_volumes": ["bank"],
+                "config": "unchanged", "runtime": {}}
+    upgraded = previous | {"version": "0.25.0", "id": "new", "image": "new"}
+    snapshots = iter((previous, upgraded))
+    monkeypatch.setattr(linux, "daemon_snapshot", lambda *_: next(snapshots))
+    reports = []
+    monkeypatch.setattr(linux, "docker_rollback", lambda row, peer, before, report: reports.append(report))
+
+    def update(arguments, **_):
+        result_file = Path(arguments[arguments.index("--result-file") + 1])
+        result_file.write_text("0\n")
+        return hosted.Result(0, json.dumps({"rollback": {"tag": "fixture"}, "steps": ["updated"]}).encode(), 0)
+
+    monkeypatch.setattr(linux, "command", update)
+    peer = SimpleNamespace(owner_executable="fixture", owner_env={}, during=lambda _, run: run())
+    row = hosted.Receipt("upgrade-and-rollback", "linux-arm64")
+    with pytest.raises(hosted.Unavailable, match="v0.23.x"):
+        linux.stock_upgrade(row, SimpleNamespace(version="0.25.0"), tmp_path, None, peer, tmp_path)
+    assert reports == [{"rollback": {"tag": "fixture"}, "steps": ["updated"]}]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_daemon_snapshot_tracks_bank_and_state_mounts(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    def inspect(_, name):
+        mount = "bank" if name == linux.POSTGRES else "state"
+        return hosted.Result(0, json.dumps([{"Mounts": [{"Type": "volume", "Name": mount}]}]).encode(), 0)
+
+    monkeypatch.setattr(linux, "docker", inspect)
+    monkeypatch.setattr(linux, "get", lambda _: ({}, {"version": "0.24.0"}))
+    peer = SimpleNamespace(url="fixture", checkout=tmp_path, sample=lambda: {"status": 200})
+    snapshot = linux.daemon_snapshot(peer, SimpleNamespace(fingerprint=lambda: {}))
+    assert snapshot["database_volumes"] == ["bank"]
+    assert snapshot["state_volumes"] == ["state"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_service_cleanup_checks_owned_unit_state(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    profile = hosted.Profile(tmp_path / "home", "")
+    units = profile.folder / "config" / "systemd" / "user"
+    units.mkdir(parents=True)
+    (units / "pseudolife-fixture.service").touch()
+    monkeypatch.setattr(linux, "command", lambda *a, **k: hosted.Result(0, b"active\n", 0))
+    assert linux.stop_units(profile) is False
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_failed_backup_retains_its_ledger_command(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    @contextmanager
+    def session(*_):
+        yield SimpleNamespace(tool=lambda *a, **k: {})
+
+    monkeypatch.setattr(linux, "session", session)
+    monkeypatch.setattr(linux, "command", lambda *a, **k: hosted.Result(4, b"", 0))
+    peer = SimpleNamespace(owner_executable="fixture", owner_env={}, checkout=tmp_path)
+    row = hosted.Receipt("bank-recovery", "linux-arm64")
+    with pytest.raises(hosted.Failed):
+        linux.bank_recovery(row, None, tmp_path, None, peer, tmp_path)
+    assert row.commands == [{"command": matrix.commands(row.scenario, row.platform)[0], "exit_code": 4}]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_failed_stock_install_does_not_hide_the_upgrade_row(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    @contextmanager
+    def baseline(*_):
+        yield ({"running_containers": [], "daemon_healthy": False},
+               hosted.Result(1, b"", 0), tmp_path, None)
+
+    calls = []
+
+    @contextmanager
+    def stock_peer(*_):
+        calls.append("legacy")
+        yield SimpleNamespace(checkout=tmp_path), object()
+
+    def not_run(*_):
+        raise hosted.Unavailable("fixture")
+
+    candidate = SimpleNamespace(tag="v0.25.0", commit="0" * 40, digest="0" * 64,
+                                archive=Path("pseudolife-mcp-0.25.0-aarch64-unknown-linux-gnu.tar.gz"))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(os, "uname", lambda: SimpleNamespace(machine="aarch64"))
+    monkeypatch.setattr(linux, "baseline", baseline)
+    monkeypatch.setattr(linux, "stock_peer", stock_peer)
+    monkeypatch.setattr(linux, "wait_stock_ports", lambda *_: None)
+    monkeypatch.setattr(linux, "stock_upgrade", not_run)
+    monkeypatch.setattr(linux, "DockerFixture", lambda: SimpleNamespace(clean=lambda: True))
+    monkeypatch.setattr(linux, "free_space", lambda *_: None)
+    monkeypatch.setattr(linux, "published_release", lambda *a: candidate)
+    monkeypatch.setattr(linux, "prepare_codex", lambda *a: tmp_path)
+    monkeypatch.setattr(linux, "native_path", lambda *a: "")
+    (tmp_path / "ledger").mkdir()
+    assert linux.run("v0.25.0", "linux-arm64", tmp_path) == 1
+    assert calls == ["legacy"]
+    clean = json.loads((tmp_path / "clean-install.json").read_bytes())
+    assert clean["status"] == "fail"
