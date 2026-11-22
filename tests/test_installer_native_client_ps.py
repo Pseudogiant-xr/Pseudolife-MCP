@@ -202,6 +202,50 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
     assert "nothing changed" in second.stdout
 
 
+@pytest.mark.parametrize(("code", "output", "diagnostic"), [
+    (-1073741515, "", "Windows could not start the downloaded client because a system library is missing "
+     "(exit code -1073741515, 0xC0000135). Rerun with the current release. To use an older archive, first install "
+     "the Microsoft Visual C++ Redistributable for x64."),
+    (1, "version probe failed\nmore detail", "the downloaded client does not run on this host "
+     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+])
+def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_path, code, output, diagnostic):
+    probe_temp = tmp_path / "probe-temp"
+    probe_temp.mkdir()
+    body = '''
+function Get-NativeTarget { 'x86_64-pc-windows-msvc' }
+function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
+    if (($Arguments -join ' ') -ne 'version') { throw "Unexpected probe $Arguments" }
+    [pscustomobject]@{ TimedOut = $false; Code = [int]$env:STUB_VERSION_CODE; Out = ''; Err = $env:STUB_VERSION_OUTPUT }
+}
+Install-ShimOnce | Out-Null
+Write-Host 'INSTALLED'
+'''
+    # Only the process result is stubbed. Stage and verify a real ZIP on
+    # both platforms so the refusal also has to remove the staging directory.
+    assets = tmp_path / "release"
+    assets.mkdir()
+    name = f"pseudolife-mcp-{VERSION}-x86_64-pc-windows-msvc.zip"
+    archive = assets / name
+    with zipfile.ZipFile(archive, "w") as stream:
+        stream.writestr("pseudolife-mcp.exe", b"version probe stand-in")
+    (assets / "SHA256SUMS").write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {name}\n", encoding="utf-8")
+    result = _run("stub", tmp_path, body, release=False, extra_env={
+        "STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output,
+        **dict.fromkeys(("TEMP", "TMP", "TMPDIR"), str(probe_temp)),
+    })
+    home = tmp_path / "home"
+    downloads = home / ".pseudolife-mcp" / "downloads" / VERSION
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "INSTALLED" not in result.stdout
+    assert result.stderr.strip() == (
+        f"The native pseudolife-mcp client cannot be installed: {diagnostic} "
+        f"Nothing else was changed: the download in {downloads} is kept for a rerun (delete it to free the space)."
+    )
+    assert set(home.rglob("*")) == {downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent}
+    assert not list(probe_temp.iterdir())
+
+
 def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
     # On Unix the real bounded probe launches the staged shell fixture, whose
     # runtime install --check exits 3. Windows needs an in-process stand-in

@@ -517,6 +517,10 @@ jobs:
           if-no-files-found: warn
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
+      - name: Check Windows client DLL imports
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: python rust/ci/windows_imports.py rust/target/debug/pseudolife-stdio.exe
       # The Codex setup planning comparison with the frozen Python
       # (shim/tests/setup_codex_parity.py) left with the Python freeze; the
       # bearer, token-file and authority rules it covered are asserted by
@@ -712,6 +716,10 @@ jobs:
           cache-on-failure: true
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3
+      - name: Check Windows release client DLL imports
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: python rust/ci/windows_imports.py rust/target/release/pseudolife-stdio.exe
       - name: Retain default static candidate
         working-directory: ${{ github.workspace }}
         shell: pwsh

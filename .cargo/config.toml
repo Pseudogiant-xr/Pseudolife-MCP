@@ -14,3 +14,8 @@
 # aborted.
 # `rust/shared/entropy_source_tests.rs` fails if this stops reaching aws-lc-sys.
 AWS_LC_SYS_NO_JITTER_ENTROPY = "1"
+
+[target.x86_64-pc-windows-msvc]
+# Build the client and its native dependencies with the same static CRT so
+# the standalone release executable starts without the VC++ Redistributable.
+rustflags = ["-C", "target-feature=+crt-static"]

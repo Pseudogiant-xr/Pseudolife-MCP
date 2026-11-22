@@ -535,6 +535,38 @@ native_bounded() {  # $1 = both|out, then the command; its output on stdout; sta
     rm -f "$native_bound_out"
     return "$native_bound_status"
 }
+native_windows_version() {
+    # Bash reduces a process status to eight bits. Have Windows PowerShell
+    # report the full signed exit code on its first output line.
+    local probe_ps probe_exe
+    probe_ps="$(command -v powershell.exe)" ||
+        probe_ps="$(cygpath -u "${SYSTEMROOT:-${SystemRoot:-C:\Windows}}")/System32/WindowsPowerShell/v1.0/powershell.exe"
+    probe_exe="$(cygpath -w "$1")" || return 1
+    PSEUDOLIFE_NATIVE_PROBE_EXE="$probe_exe" PSEUDOLIFE_NATIVE_PROBE_TIMEOUT="$NATIVE_PROBE_SECONDS" \
+        "$probe_ps" -NoProfile -NonInteractive -Command '
+        $ErrorActionPreference = "Stop"
+        $info = [Diagnostics.ProcessStartInfo]::new($env:PSEUDOLIFE_NATIVE_PROBE_EXE, "version")
+        $info.UseShellExecute = $false
+        $info.RedirectStandardOutput = $true
+        $info.RedirectStandardError = $true
+        $child = [Diagnostics.Process]::Start($info)
+        try {
+            $timeout = [int]$env:PSEUDOLIFE_NATIVE_PROBE_TIMEOUT * 1000
+            $elapsed = [Diagnostics.Stopwatch]::StartNew()
+            $out = $child.StandardOutput.ReadToEndAsync()
+            $err = $child.StandardError.ReadToEndAsync()
+            if (-not $child.WaitForExit($timeout) -or -not [Threading.Tasks.Task]::WaitAll(
+                    [Threading.Tasks.Task[]]@($out, $err), [Math]::Max(0, $timeout - [int]$elapsed.ElapsedMilliseconds))) {
+                try { $child.Kill(); $null = $child.WaitForExit(10000) } catch { }
+                [Console]::WriteLine("timeout")
+            } else {
+                [Console]::WriteLine($child.ExitCode)
+                [Console]::Write($out.Result)
+                [Console]::Write($err.Result)
+            }
+        } finally { $child.Dispose() }
+    '
+}
 native_unstage() {  # removes this run's staging directory
     if [ -n "${native_stage_dir:-}" ] && [ -d "$native_stage_dir" ]; then rm -rf "$native_stage_dir"; fi
     native_stage_dir=""
@@ -645,17 +677,39 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     esac || native_refuse "$native_name could not be unpacked" "Rerun; the verified archive is kept in $native_dir."
     NATIVE_STAGED="$native_stage_dir/$native_binary"
     chmod 755 "$NATIVE_STAGED" 2>/dev/null || true
+    native_says=""
     native_says_status=0
-    native_says="$(native_bounded both "$NATIVE_STAGED" version)" || native_says_status=$?
-    [ "$native_says_status" != 124 ] ||
+    case "$NATIVE_TARGET" in
+        *windows*)
+            if native_result="$(native_windows_version "$NATIVE_STAGED" 2>&1)"; then
+                native_status_line="${native_result%%$'\n'*}"
+                native_says_status="${native_status_line%$'\r'}"
+                [ "$native_status_line" = "$native_result" ] || native_says="${native_result#*$'\n'}"
+            else
+                native_says="$native_result"
+                native_says_status=""
+            fi ;;
+        *)
+            native_says="$(native_bounded both "$NATIVE_STAGED" version)" || native_says_status=$?
+            [ "$native_says_status" != 124 ] || native_says_status=timeout ;;
+    esac
+    [ "$native_says_status" != timeout ] ||
         native_refuse "the downloaded client did not answer version within $NATIVE_PROBE_SECONDS s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
     if [ "$native_says_status" != 0 ]; then
+        if [ "$NATIVE_TARGET" = x86_64-pc-windows-msvc ] && [ "$native_says_status" = -1073741515 ]; then
+            native_refuse "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Rerun with the current release. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64."
+        fi
         case "$NATIVE_TARGET" in
             *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;
             *apple*) native_run_fix="The macOS client needs macOS 11 or newer." ;;
             *) native_run_fix="Check that nothing (an antivirus or an execution policy) blocks it, and rerun." ;;
         esac
-        native_refuse "the downloaded client does not run on this host ($(printf '%s' "$native_says" | head -1))" "$native_run_fix"
+        native_detail="${native_says%%$'\n'*}"
+        native_detail="${native_detail%$'\r'}"
+        if [ -n "$native_says_status" ]; then
+            native_detail="exit code $native_says_status${native_detail:+, $native_detail}"
+        fi
+        native_refuse "the downloaded client does not run on this host${native_detail:+ ($native_detail)}" "$native_run_fix"
     fi
     native_protocol_status=0
     native_protocol="$(native_bounded out "$NATIVE_STAGED" installer --capability)" || native_protocol_status=$?
