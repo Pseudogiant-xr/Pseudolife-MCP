@@ -5,12 +5,10 @@
 //! launchd job or a scheduled task whose command is the stable launcher
 //! (`<layout.launcher> tunnel run --profile <name> --profile-dir <store>`).
 //! Moving the machine to the native client replaces that launcher with the
-//! native binary, which cannot run a tunnel yet: `tunnel run` exits 1, and
-//! systemd and launchd then restart the service every few seconds for ever
-//! (reproduced on a disposable systemd user unit). So a run that would move
-//! the launcher refuses before it changes anything while such a service is
-//! registered. On a machine already on the native client the run goes on
-//! and says how to stop the failing service.
+//! native binary. It can run a tunnel in the foreground but has no tunnel
+//! service command. A run that would move the launcher refuses before it
+//! changes anything while such a service is registered. On a machine already
+//! on the native client the run goes on and names how to remove the service.
 //!
 //! The signal is exact: a definition this product wrote, carrying the
 //! `PseudolifeTunnelOwner:<sha256>` marker that `render_service` puts in it,
@@ -21,16 +19,14 @@
 //! exactly these files), so no service manager is asked anything. On Windows
 //! the registered task can be read only through `schtasks /Query`, which
 //! changes nothing. A disabled service is refused too: it is still
-//! registered, enabling it again would start the same failing loop, and
-//! after the move no client could remove it, since the native client has no
-//! `tunnel service`.
+//! registered and may be enabled again, and the native client has no
+//! `tunnel service` command to manage it.
 //!
 //! Detection never starts, stops, enables, disables or edits a service.
 //! When a definition cannot be read (an unreadable directory, `schtasks`
 //! that does not answer), the move goes ahead with one line saying what was
 //! not checked: blocking every update on a query that cannot run would
-//! strand the machine, and a Windows task fails at most a few times per
-//! logon rather than looping.
+//! strand the machine.
 
 use super::clients::{Output, Runner, WindowlessRunner};
 use crate::runtime::{self, Layout};
@@ -364,7 +360,7 @@ pub(crate) fn decide(
         return Decision::Proceed(
             affected
                 .iter()
-                .map(|r| failing(r, home))
+                .map(|r| registered_note(r, home))
                 .chain(handmade)
                 .chain(scan.notes)
                 .collect(),
@@ -987,20 +983,14 @@ fn quote(path: &str, powershell: bool) -> String {
 
 fn unchecked(what: &str, kind: Kind) -> String {
     format!(
-        "{what}, so this run could not check for a tunnel registered to start by itself; if one is, it fails at each start under the native client: stop it with {}, or go back to the Python client ({NATIVE_CLIENT_DOCS}) and remove it there with pseudolife-mcp tunnel service remove --profile <name>",
+        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you find a service, disable it with {}. To remove the registration, switch back to the Python client ({NATIVE_CLIENT_DOCS}) and run pseudolife-mcp tunnel service remove --profile <name>",
         Registered::stop_hint(kind)
     )
 }
 
-fn failing(service: &Registered, home: &Path) -> String {
-    let how = match service.kind {
-        Kind::Task => "it fails at each logon",
-        _ => {
-            "it fails at each start, and while it is enabled its service manager starts it again every few seconds"
-        }
-    };
+fn registered_note(service: &Registered, home: &Path) -> String {
     format!(
-        "the tunnel service {} runs this machine's launcher, now the native client, which cannot run a tunnel yet, so {how}, and this client has no tunnel service command. {}Remove it with: {} ; the Python client's record of it, {}, can be deleted too",
+        "the tunnel service {} uses this machine's native launcher. The native client can run a tunnel in the foreground and has no tunnel service command. {}Remove it with: {} ; the Python client's record of it, {}, can be deleted too",
         service.place,
         service.root_note(),
         service.remove_native(),
@@ -1012,15 +1002,6 @@ fn failing(service: &Registered, home: &Path) -> String {
 /// carrying the owner marker is this product's exact signal. What the user
 /// wrote is disabled, not deleted.
 fn made_by_hand(service: &Registered, native: bool, mover: Mover) -> String {
-    let when = if native {
-        "on this client"
-    } else {
-        "once this machine runs the native client"
-    };
-    let how = match service.kind {
-        Kind::Task => "it fails at each logon",
-        _ => "it fails at each start",
-    };
     let delete = match &service.file {
         Some(file) => format!(
             "; {} can then be deleted",
@@ -1038,7 +1019,7 @@ fn made_by_hand(service: &Registered, native: bool, mover: Mover) -> String {
         )
     };
     format!(
-        "{} looks like a tunnel service made by hand: it starts this machine's launcher with tunnel run, and the native client cannot run a tunnel yet, so {when} {how}. {}Stop it with: {} {delete}.{after}",
+        "{} looks like a tunnel service made by hand. It starts this machine's launcher with tunnel run. The native client can run a tunnel in the foreground and has no tunnel service command. {}Disable it with: {} {delete}.{after}",
         service.place,
         service.root_note(),
         service.disable_native()
@@ -1085,7 +1066,7 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
         ),
     };
     format!(
-        "this machine stays on the Python client: a tunnel is registered to start by itself and the native client cannot run a tunnel yet. {stay}. To move to the native client, first remove the autostart with the Python client ({removes}), then {again}. Registered: {places}"
+        "this machine stays on the Python client: a tunnel is registered to start by itself. {stay}. The native client has no tunnel service command to manage that registration after the move. To move to the native client, first remove the autostart with the Python client ({removes}), then {again}. Registered: {places}. Removing autostart means the tunnel will no longer start on its own. Run it in the foreground with pseudolife-mcp tunnel run. The native client has no automatic or background start"
     )
 }
 

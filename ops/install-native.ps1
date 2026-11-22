@@ -152,7 +152,7 @@ param(
     [string]$PairingCode = "",
     # Client-only: the daily client update task (see the header).
     [string]$ClientUpdateSchedule = "ask",
-    # Optional guided ChatGPT Secure MCP Tunnel setup after local installation.
+    # Guided Secure MCP Tunnel setup needs the Python client.
     [switch]$Tunnel,
     # Also give the test suite its own Postgres login (see the header).
     [switch]$TestLogin,
@@ -160,6 +160,13 @@ param(
     [ValidateSet("", "rust", "python")]
     [string]$Engine = ""
 )
+if ($Tunnel) {
+    [Console]::Error.WriteLine('The native client has no guided tunnel setup yet. Nothing was changed. Rerun without -Tunnel.')
+    [Console]::Error.WriteLine('After install, prepare a native tunnel profile with pseudolife-mcp tunnel setup --daemon-url "<daemon-url>" --token-file "<owner-only token file>" --accept-access.')
+    [Console]::Error.WriteLine('Save its ID with pseudolife-mcp tunnel setup --tunnel-id "<tunnel-id>", import the key with pseudolife-mcp tunnel setup --read-key, then run pseudolife-mcp tunnel run in a terminal you keep open. See docs/guide/tunnels.md.')
+    [Console]::Error.WriteLine('For guided setup, run Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE and rerun .\ops\install.ps1 -Tunnel with your other install options.')
+    exit 1
+}
 $ErrorActionPreference = "Stop"
 
 $repo = Split-Path -Parent $PSScriptRoot
@@ -557,7 +564,7 @@ function Initialize-NativeClient {
         $says = "$($check.Err)$($check.Out)".Trim()
         if ($check.Code -eq 3) {
             if ($says) { [Console]::Error.WriteLine($says) }
-            Stop-NativeInstall "a tunnel is registered to start by itself through this machine's Python client, and the native client cannot run a tunnel yet (the line above names it)" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first) to keep the Python client, or first remove the autostart with the command the line above prints, then rerun."
+            Stop-NativeInstall "a tunnel is registered to start by itself through this machine's Python client. The native client has no tunnel service command to manage that registration after the move. It can run the tunnel in the foreground with pseudolife-mcp tunnel run" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first) to keep the Python client. To move to the native client, run the autostart removal command above, then rerun. Removing autostart means the tunnel will no longer start on its own."
         } elseif (($check.Code -eq 0) -and $says) {
             [Console]::Error.WriteLine($says)
         }
@@ -3990,29 +3997,7 @@ function Invoke-ClientUpdateScheduleOffer {
 # <<< client update schedule offer <<<
 if ($ClientOnly) { Invoke-ClientUpdateScheduleOffer }
 Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly) -PairingHintUrl "$script:pairingHintUrl" -Scheduled:($script:clientScheduleState -eq "scheduled")
-if ($Tunnel -and -not $interactive) {
-    Write-Host "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
-} elseif ($Tunnel) {
-    if (-not $script:shimInstallPath) {
-        throw "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup."
-    }
-    $tunnelOldUrl = $env:PSEUDOLIFE_MCP_DAEMON_URL
-    $tunnelOldFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
-    try {
-        if ($boardFile) {
-            $env:PSEUDOLIFE_MCP_DAEMON_URL = $script:ClientDaemonUrl
-            $env:PSEUDOLIFE_MCP_TOKEN_FILE = $boardFile
-        }
-        & $script:shimInstallPath tunnel setup
-        $tunnelExit = $LASTEXITCODE
-    } finally {
-        $env:PSEUDOLIFE_MCP_DAEMON_URL = $tunnelOldUrl
-        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $tunnelOldFile
-    }
-    if ($tunnelExit -ne 0) { exit $tunnelExit }
-} else {
-    Write-Host "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
-}
+Write-Host "Optional ChatGPT access: follow the native tunnel profile steps in docs/guide/tunnels.md."
 Remove-NativeStage
 $script:nativeRunDone = $true
 Write-Host "Done. First session: tell your coding agent to remember something."
