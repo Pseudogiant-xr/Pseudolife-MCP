@@ -19,7 +19,7 @@ from threading import Thread
 from time import monotonic
 import tomllib
 from urllib.error import HTTPError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from . import matrix
 
@@ -37,11 +37,11 @@ INSTALL = "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh"
 CLIENT = "pseudolife-mcp"
 TOKEN_FILE = "PSEUDOLIFE_MCP_TOKEN_FILE"
 DAEMON_URL = "PSEUDOLIFE_MCP_DAEMON_URL"
-CODEX_TAG = "rust-v0.134.0"
+CODEX_TAG = "rust-v0.171.0"
 CODEX_ASSETS = {
-    "linux-arm64": ("aarch64-unknown-linux-musl", "8e066f998111eb8b44250ac11df004daa07fadf276c5942a7183cb8e421091a3"),
-    "macos-x64": ("x86_64-apple-darwin", "265f8f6d627ba9c6ed1cac7f36e5d19eff60ef345332924f95af2cb6a0c8bbb7"),
-    "macos-arm64": ("aarch64-apple-darwin", "78ad482ccaeb0eb8983b340f33a1f28c8ad315b6d5e3140c34c7e119c826bc12"),
+    "linux-arm64": ("aarch64-unknown-linux-musl", "bcf50b836385e51bd2976ab2bbe92b1b08a1cbe37712eb8dbe378aa78d24871c"),
+    "macos-x64": ("x86_64-apple-darwin", "6f9b1144ffaa64aa12bf30f312405b266b84c433bae9f070be10245762c7aa44"),
+    "macos-arm64": ("aarch64-apple-darwin", "9414c8c967f110b11e8324c0cfa2b20f012094ef890110a561c92ee535a2681a"),
 }
 
 
@@ -94,12 +94,12 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def download(url, path, digest=None):
+def download(url, path, digest=None, *, timeout=180):
     result = command(
         ["curl", "--disable", "--fail", "--silent", "--show-error", "--location",
-         "--proto", "=https", "--proto-redir", "=https", "--max-time", "180",
+         "--proto", "=https", "--proto-redir", "=https", "--max-time", str(timeout),
          "--output", path, url],
-        timeout=185,
+        timeout=timeout + 5,
     )
     require(result.code == 0, "A required public download failed.")
     if digest is not None:
@@ -248,13 +248,18 @@ class Profile:
         return self.registration()["command"]
 
     def native_marker(self, release):
+        launcher = self.folder / "data" / "pseudolife-mcp" / "bin" / CLIENT
+        if not launcher.is_file():
+            return False
+        active_digest = sha256(launcher)
         markers = [
             json.loads(marker.read_bytes())
             for marker in self.folder.rglob("runtime.json")
             if marker.is_file()
         ]
         return any(marker.get("kind") == "native" and marker.get("version") == release.version
-                   and marker.get("archive_sha256") == release.digest for marker in markers)
+                   and marker.get("archive_sha256") == release.digest
+                   and marker.get("binary_sha256") == active_digest for marker in markers)
 
     def fingerprint(self):
         launcher = Path(self.launcher())
@@ -271,7 +276,7 @@ def get(url, token=None):
     start = monotonic()
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
-        with build_opener(NoRedirect()).open(Request(url, headers=headers), timeout=5) as response:
+        with build_opener(ProxyHandler({}), NoRedirect()).open(Request(url, headers=headers), timeout=5) as response:
             status = response.status
             first = response.read(1)
             ttfb = monotonic() - start
@@ -422,10 +427,13 @@ class Receipt:
                 "cleanup": {"done": cleanup, "verified": cleanup},
             })
         matrix.write_record(output / "ledger", row)
-        write_json(output / f"{self.scenario}.json", {
+        receipt = {
             "scenario": self.scenario, "platform": self.platform, "daemon": self.daemon,
-            "status": self.status, "assertion": self.note, "steps": self.steps,
-        })
+            "status": self.status, "assertion": self.note, "steps": self.steps, "cleanup_verified": cleanup,
+        }
+        if release is not None:
+            receipt.update(release_commit=release.commit, archive=release.archive.name, archive_sha256=release.digest)
+        write_json(output / f"{self.scenario}.json", receipt)
 
 
 def write_json(path, payload):
@@ -471,11 +479,15 @@ def main():
         return 0
     if args.platform not in SELECTIONS[args.selection]:
         return 0
-    from . import hosted_linux
-
     args.output.mkdir()
     (args.output / "ledger").mkdir()
-    return hosted_linux.run(args.tag, args.platform, args.output)
+    if args.platform == "linux-arm64":
+        from . import hosted_linux
+
+        return hosted_linux.run(args.tag, args.platform, args.output)
+    from . import hosted_macos
+
+    return hosted_macos.run(args.tag, args.platform, args.output)
 
 
 if __name__ == "__main__":

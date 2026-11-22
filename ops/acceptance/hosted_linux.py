@@ -26,7 +26,7 @@ DAEMON = "pseudolife-mcp-daemon"
 POSTGRES = "pseudolife-mcp-postgres"
 DOCKER_FLAGS = ["--yes", "--client", "codex", "--extractor", "openai-only", "--firewall-rule", "no"]
 CLIENT_FLAGS = ["--yes", "--client-only", "--client", "codex", "--claude-plugin", "skip",
-                "--client-update-schedule", "no"]
+                "--codex-hooks", "manual", "--codex-hook-trust", "yes", "--client-update-schedule", "no"]
 BASELINE_MESSAGES = (
     (b"no matching manifest for linux/arm64", "no matching manifest for linux/arm64"),
     (b"does not match the detected host platform", "The image platform does not match the host platform."),
@@ -189,7 +189,7 @@ def linux_peer(release, path, scratch):
         require(scope.clean(), "Emulated peer Docker objects were removed.")
 
 
-def paired_install(receipt, release, profile, peer, *, template=None):
+def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=False):
     start = monotonic()
     with session(peer.owner_executable, [], peer.owner_env, peer.checkout) as mcp:
         mcp.tool("memory_agents", action="update", project="hosted-acceptance", status="fixture")
@@ -208,10 +208,19 @@ def paired_install(receipt, release, profile, peer, *, template=None):
     code = result.json().get("code")
     receipt.observe(f"{CLIENT} invite <fixture> --json", result,
                     result.code == 0 and isinstance(code, str), "The disposable daemon issued a pairing code.")
-    result = peer.during(receipt, lambda: live_install(peer, release, profile,
-                         ["--daemon-url", peer.url, "--pairing-code", code]))
+    flags = ["--daemon-url", peer.url, "--pairing-code", code]
+    if try_schedule:
+        flags.extend(["--client-update-schedule", "yes"])
+    result = peer.during(receipt, lambda: live_install(peer, repo, profile, flags))
     receipt.observe(f"{INSTALL} <client-only pairing>", result, result.code == 0,
                     "The published client-only installer completed.", template=template)
+    receipt.steps.append({"command": f"{INSTALL} <codex-hook-verification>", "exit_code": result.code,
+                          "assertion": "The installer reported trusted and verified Codex hooks.",
+                          "observed": b"Memory hooks         trusted and verified" in result.output})
+    if try_schedule and receipt.platform != "linux-arm64":
+        receipt.steps.append({"command": f"{INSTALL} --client-update-schedule yes", "exit_code": result.code,
+                              "assertion": "The installer reported the documented macOS scheduling limit.",
+                              "observed": b"the daily job needs systemd (Linux) or Task Scheduler (Windows)" in result.output})
 
 
 def live_install(peer, repo, profile, flags, *, overrides=None, engine="native"):
@@ -272,7 +281,7 @@ def upgrade(receipt, release, repo, path, peer, scratch):
         result = live_install(peer, repo, profile, flags, engine="python")
         restored = profile.fingerprint()
         receipt.observe("PSEUDOLIFE_SHIM_ENGINE=python bash ops/install.sh <rollback>", result,
-                        result.code == 0 and restored != before,
+                        result.code == 0 and restored != before and not profile.native_marker(release),
                         "The documented installer rollback replaced the native runtime.", template=next(templates))
         first_session(receipt, profile, repo)
     if receipt.platform == "linux-arm64":
@@ -280,8 +289,13 @@ def upgrade(receipt, release, repo, path, peer, scratch):
 
 
 def ordinary(receipt, release, repo, profile, peer, scratch):
-    paired_install(receipt, repo, profile, peer)
+    paired_install(receipt, repo, profile, peer, try_schedule=True)
     first_session(receipt, profile, repo)
+    if receipt.platform == "linux-arm64":
+        timer = command(["systemctl", "--user", "is-active", "pseudolife-client-update.timer"], env=profile.env)
+        receipt.steps.append({"command": "systemctl --user is-active pseudolife-client-update.timer",
+                              "exit_code": timer.code, "assertion": "The client update timer was active.",
+                              "observed": timer.code == 0, "seconds": timer.seconds})
     registration = profile.registration()
     env = profile.env | registration.get("env", {})
     for name, args, allowed, description in (
@@ -403,7 +417,7 @@ def bank_recovery(receipt, release, repo, profile, peer, scratch):
     with registered_session(profile, repo) as mcp:
         mcp.tool("memory_store", text=post_backup, source="hosted-acceptance")
         found = mcp.tool("memory_search", query=post_backup, top_k=5)
-        require(post_backup in json.dumps(found), "The disposable bank was changed after backup.")
+        require(post_backup in json.dumps(found.get("entries", [])), "The disposable bank was changed after backup.")
     result = command([peer.owner_executable, "restore", "--backup-file", dumps[0],
                       "--state-archive", archives[0], "--yes"],
                      cwd=peer.checkout, env=peer.owner_env, timeout=240)
@@ -411,7 +425,7 @@ def bank_recovery(receipt, release, repo, profile, peer, scratch):
                     "Native restore replayed the backup and restarted the disposable daemon.")
     with registered_session(profile, repo) as mcp:
         found = mcp.tool("memory_search", query=SENTINEL, top_k=5)
-        require(SENTINEL in json.dumps(found), "The published client read the restored bank marker.")
+        require(SENTINEL in json.dumps(found.get("entries", [])), "The published client read the restored bank marker.")
         found = mcp.tool("memory_search", query=post_backup, top_k=5)
         # The query can also appear in response metadata. Inspect actual hits.
         require(post_backup not in json.dumps(found.get("entries", [])),
@@ -450,7 +464,10 @@ def run(tag, platform, output):
                             upgrade(receipt, release, repo, path, peer, scope)
                         else:
                             profile = Profile(scope / "client-home", path)
-                            functions[receipt.scenario](receipt, release, repo, profile, peer, scope)
+                            try:
+                                functions[receipt.scenario](receipt, release, repo, profile, peer, scope)
+                            finally:
+                                stop_units(profile)
                         receipt.status = "pass"
                         receipt.note = matrix.SCENARIOS[receipt.scenario].outcome
                 except Unavailable as error:
