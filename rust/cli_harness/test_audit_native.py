@@ -382,24 +382,43 @@ def test_audit_live_export_refuses_candidate_recordings(monkeypatch, tmp_path):
 def test_audit_remaining_export_references(monkeypatch, tmp_path):
     unfiltered = b'{"seq":1,"task":"t2"}\n{"seq":2,"task":"t3"}\n'
     filtered = unfiltered.splitlines(keepends=True)[1]
+    no_bank = ("board-audit: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run "
+               "where the lite tier's data dir holds one (Docker tier: start the daemon, or run "
+               "`docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)")
     expected = {
         "export-out": (0, "", unfiltered),
         "export-out-filtered": (0, "", filtered),
-        "export-out-exists": (2, "exists; export never replaces a file", b"keep"),
-        "export-agent-unknown-out": (2, "no agent id starts with ffffffff0", b""),
-        "export-agent-ambiguous-out": (2, "ab12cd34ef56, ab12cd34ef57; give a longer prefix", b""),
-        "export-out-missing-dir-before-agent": (2, "No such file or directory", None),
-        "export-stdout-closed": (2, "the output was closed before the export finished", None),
-        "export-invalid-payload-prefix": (2, "the database error is not shown", None),
-        "export-local-minute-no-bank": (2, "no bank found:", None),
-        "export-iso-overwritten": (2, "no bank found:", None),
+        "export-out-exists": (2, f"board-audit: {tmp_path / 'export-out-exists' / 'out.jsonl'} "
+                              "exists; export never replaces a file", b"keep"),
+        "export-agent-unknown-out": (2, "board-audit: no agent id starts with ffffffff0", b""),
+        "export-agent-ambiguous-out": (2, "board-audit: --agent ab12cd34ef5 matches several ids: "
+                                      "ab12cd34ef56, ab12cd34ef57; give a longer prefix", b""),
+        "export-out-missing-dir-before-agent": (
+            2, f"board-audit: cannot create {tmp_path / 'export-out-missing-dir-before-agent' / 'missing' / 'out.jsonl'}: "
+            "No such file or directory", None),
+        "export-stdout-closed": (2, "board-audit: the output was closed before the export finished", None),
+        "export-invalid-payload-prefix": (2, "board-audit failed; the database error is not shown because it can "
+                                          "include the connection string. Check PSEUDOLIFE_MCP_DATABASE_URL.", None),
+        "export-local-minute-no-bank": (2, no_bank, None),
+        "export-iso-overwritten": (2, no_bank, None),
     }
     with _cold_audit(monkeypatch) as audit:
         if audit.core.WINDOWS:
-            expected["export-windows-invalid-name"] = (2, "Invalid argument", None)
-            expected["export-windows-long-name"] = (2, "board-audit: cannot create", None)
+            invalid = tmp_path / "export-windows-invalid-name" / "bad<name.jsonl"
+            long = tmp_path / "export-windows-long-name" / ("x" * 260)
+            expected["export-windows-invalid-name"] = (2, f"board-audit: cannot create {invalid}: Invalid argument", None)
+            expected["export-windows-long-name"] = (2, f"board-audit: cannot create {long}: Invalid argument", None)
+            original_open = Path.open
+
+            def open_path(path, *args, **kwargs):
+                if path == long and args == ("x",):
+                    raise OSError(errno.EINVAL, "Invalid argument")
+                return original_open(path, *args, **kwargs)
+
+            monkeypatch.setattr(Path, "open", open_path)
         else:
-            expected["export-output-loop"] = (2, "File exists", None)
+            loop = tmp_path / "export-output-loop" / "loop"
+            expected["export-output-loop"] = (2, f"board-audit: cannot create {loop}: File exists", None)
         for key in tuple(os.environ):
             if key.startswith("PSEUDOLIFE_") or key in {"PL_HARNESS_BASE_DATABASE", "TZ", "TZDIR"}:
                 monkeypatch.delenv(key)
@@ -409,7 +428,9 @@ def test_audit_remaining_export_references(monkeypatch, tmp_path):
         # The invalid-payload bank has one good row before the malformed tail.
         connection = MagicMock()
         monkeypatch.setattr(_bank, "connect", connection)
-        monkeypatch.setattr(audit, "_stored_audit_rows", lambda conn: iter(["prefix", "bad-payload"]))
+        prefix = (None,) * 9 + ("{}",) + (None,) * 6
+        malformed = prefix[:9] + ("{",) + prefix[10:]
+        monkeypatch.setattr(audit, "_stored_audit_rows", lambda conn: iter([prefix, malformed]))
         encode = MagicMock(return_value=b'{"seq":1}\n')
         monkeypatch.setattr(audit, "_export_line", encode)
         blocked = MagicMock(side_effect=AssertionError("export reference started a child"))
@@ -426,11 +447,8 @@ def test_audit_remaining_export_references(monkeypatch, tmp_path):
                 assert case.reference is not None, case_id
                 want = case.reference(tmp_path / case_id)
                 assert want["exit"] == code, case_id
-                stderr = audit.core.decode(want, "stderr")
-                if stderr_text:
-                    assert stderr_text.encode() in stderr and stderr.endswith(newline), case_id
-                else:
-                    assert stderr == b"", case_id
+                stderr = stderr_text.encode("utf-8") + newline if stderr_text else b""
+                assert audit.core.decode(want, "stderr") == stderr, case_id
                 stdout = b'{"seq":1}' + newline if case_id == "export-invalid-payload-prefix" else b""
                 assert audit.core.decode(want, "stdout") == stdout, case_id
                 files = {"cwd": "dir"}
@@ -455,8 +473,20 @@ def test_audit_remaining_export_references(monkeypatch, tmp_path):
         finally:
             if previous_umask is not None:
                 os.umask(previous_umask)
-        encode.assert_called_once_with("prefix")
+        encode.assert_called_once_with(prefix)
         blocked.assert_not_called()
+
+
+def test_audit_invalid_payload_reference_requires_a_malformed_second_row(monkeypatch, tmp_path):
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(audit, "ensure", lambda kind: audit._name(kind))
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        monkeypatch.setattr(_bank, "connect", MagicMock())
+        valid = (None,) * 9 + ("{}",) + (None,) * 6
+        monkeypatch.setattr(audit, "_stored_audit_rows", lambda conn: iter([valid, valid]))
+        case = next(case for case in audit.cases() if case.id == "export-invalid-payload-prefix")
+        with pytest.raises(AssertionError, match="second audit payload must be malformed"):
+            case.reference(tmp_path / "export")
 
 
 @pytest.mark.parametrize(("code", "message"), [

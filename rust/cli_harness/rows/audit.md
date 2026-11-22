@@ -223,11 +223,14 @@ entries shared with the goldens on both platforms.
 
 The 41-case automatic CI roster in `rust/ci/audit_golden_cases.json` replays
 committed goldens and compares the full observation, including files, modes
-and database state where applicable. It covers 5 of the 34 converted export
-cases, 7 of the 14 converted bank-verify cases and 1 of the 12 converted
-redaction refusals (`redact-nolog`). The other 29 export, 7 bank-verify and
-11 redaction refusal cases have no automatic CI output comparison. The
-three direct-removal references also have no automatic CI output comparison.
+and database state where applicable. It covers 9 of the converted export
+cases (45 on Linux, 46 on Windows), 7 of the 14 converted bank-verify cases
+and 1 of the 12 converted redaction refusals (`redact-nolog`). The export
+roster includes `export-agent-unknown-out`, `export-out-exists`,
+`export-stdout-closed` and `export-agent-ambiguous-out`. The three
+direct-removal references have no automatic CI output comparison.
+The live row still starts the frozen CLI for 13 cases on each platform:
+`no-bank`, `defer-bank-verify-stdout-closed` and the 11 remaining redactions.
 
 The payload fixture covers non-finite floats,
 200-digit integers, nesting beyond 128, Unicode key order and lone surrogates.

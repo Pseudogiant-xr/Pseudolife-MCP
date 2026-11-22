@@ -701,9 +701,15 @@ def _export_stdout_failure_reference(case, kind, diagnostic, home):
     case.setup(arm)
     stdout = b""
     if kind == "invalid_payload":
-        # This seed has exactly one valid row before the malformed payload.
         with _bank.connect(arm.state["name"]) as conn:
-            stdout = _export_line(next(iter(_stored_audit_rows(conn))))
+            prefix, tail = _stored_audit_rows(conn)
+            try:
+                json.loads(tail[_EXPORT_FIELDS.index("payload")])
+            except json.JSONDecodeError:
+                pass
+            else:
+                raise AssertionError("the second audit payload must be malformed")
+            stdout = _export_line(prefix)
     return _export_observation(arm, 2, stdout, diagnostic)
 
 
