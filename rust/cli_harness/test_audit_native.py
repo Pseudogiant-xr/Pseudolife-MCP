@@ -377,6 +377,78 @@ def test_audit_live_export_refuses_candidate_recordings(monkeypatch, tmp_path):
             case.reference(tmp_path / "bank-export")
 
 
+def test_audit_removed_redaction_reference_uses_a_separate_seed_copy(monkeypatch, tmp_path):
+    from . import compare
+
+    message_id, reason, now = "a" * 32, "wrong paste ✓", 1700000000.0
+    previous = "1" * 64
+    expected_event = event(seq=8, event="redact", actor="operator", principal="",
+                           agent_id="sender", recipient_agent_id="recipient", project="p", task="t",
+                           message_id=message_id, created_at=now, prev_hash=previous,
+                           payload=json.dumps({"audit_copy": "removed", "message_id": message_id,
+                                               "reason": reason, "seq": 3}))
+    expected_db = {"tables": {"coordination_events": [json.dumps(expected_event)],
+                              "coordination_messages": [json.dumps({"message_id": message_id, "expires_at": now})]}}
+    with _cold_audit(monkeypatch) as audit:
+        from rust.harness_support import fixture_rows
+
+        seed = audit._name("rich")
+        copy_bank = MagicMock()
+        dump = MagicMock(return_value=expected_db)
+        guard = MagicMock()
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.side_effect = [
+            SimpleNamespace(fetchall=lambda: [(3, "sender", "recipient", "p", "t")]),
+            SimpleNamespace(fetchone=lambda: (7, previous)),
+            SimpleNamespace(fetchone=lambda: ("synthetic text",)),
+            None, None, None,
+        ]
+        insert = MagicMock(return_value=("synthetic insert", ()))
+        monkeypatch.setattr(audit, "ensure", lambda _: seed)
+        monkeypatch.setattr(audit, "ids", lambda _: {"to_redact": message_id})
+        monkeypatch.setattr(audit, "_copy", copy_bank)
+        monkeypatch.setattr(audit, "_assert_audit_database", guard)
+        monkeypatch.setattr(audit, "time", SimpleNamespace(time=lambda: now))
+        monkeypatch.setattr(_bank, "connect", lambda _: conn)
+        monkeypatch.setattr(_bank, "dump", dump)
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        monkeypatch.setattr(fixture_rows, "checked_fixture_insert", insert)
+        case = audit.redact_removed_case("removed-control", "to_redact", reason, cut=10)
+        previous_umask = audit.core.pin_umask()
+        try:
+            want = case.reference(tmp_path / "removed")
+        finally:
+            if previous_umask is not None:
+                os.umask(previous_umask)
+
+        reference_bank = audit._REDACT_REFERENCE_DB
+        copy_bank.assert_called_once_with(seed, reference_bank)
+        guard.assert_called_once_with(conn, reference_bank)
+        dump.assert_called_once_with(reference_bank)
+        insert.assert_called_once_with(conn, "coordination_events", [expected_event])
+        assert conn.execute.call_args_list[3].args == (
+            "UPDATE coordination_events SET body=NULL,body_salt=NULL WHERE seq=%s", (3,),
+        )
+        assert conn.execute.call_args_list[4].args == (
+            "UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
+            "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message_id),
+        )
+        assert reference_bank not in {seed, audit.REDACT_DB}
+        assert case.argv[3].make() == message_id[:10]
+        assert want["exit"] == 0 and want["db"] == expected_db
+        assert want["files"] == {"cwd": "dir"}
+        assert want["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755"})
+        report = json.loads(audit.core.decode(want, "stdout"))
+        assert report == {"ok": True, "message_id": message_id, "seq": 3, "redact_seq": 8,
+                          "redact_hash": expected_event["hash"], "expect_head": "8:" + expected_event["hash"],
+                          "live_body_cleared": True, "audit_copy": "removed", "other_copies": [], "vacuumed": True}
+        assert b"verify --expect-head 8:" + expected_event["hash"].encode() in audit.core.decode(want, "stderr")
+        stale = {"tables": dict(expected_db["tables"], coordination_messages=[
+            json.dumps({"message_id": message_id, "expires_at": now, "text": "synthetic text"})])}
+        assert compare.diff(want, dict(want, db=stale), case.rules)[0] == "db differ:"
+
+
 def test_audit_archive_edit_rehashes_without_the_frozen_package(monkeypatch):
     raw = event()
     raw["payload"] = json.loads(raw["payload"])
@@ -587,6 +659,33 @@ def test_audit_redact_refusal_reference_without_the_frozen_package(
 
         changed = dict(seed, sequences={"coordination_events_seq_seq": 4})
         assert compare.diff(want, dict(want, db=changed), case.rules)[0] == "db differ:"
+
+
+def test_audit_redaction_diagnostics_match_frozen_source_by_ast():
+    import ast
+    from .rows import audit
+
+    source = Path(__file__).resolve().parents[2] / "pseudolife_memory/board_audit_cli.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    table, = (node.value for node in tree.body if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "_REDACT_REFUSALS"
+                      for target in node.targets))
+    assert audit._REDACT_REFUSALS == ast.literal_eval(table)
+
+    def diagnostic(function, prefix):
+        body, = (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function)
+        text, = (node.args[0].value for node in ast.walk(body)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                 and node.func.id == "AuditCliError" and node.args
+                 and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+                 and node.args[0].value.startswith(prefix))
+        return text
+
+    assert audit._REDACT_UNAVAILABLE == {
+        "busy": diagnostic("_redact", "the board is busy"),
+        "nolog": diagnostic("_bank", "this bank has no audit log yet"),
+        "prev46": diagnostic("_bank", "this bank's audit log predates schema v46"),
+    }
 
 
 def test_audit_fixture_checks_the_database_before_inserts(monkeypatch):
