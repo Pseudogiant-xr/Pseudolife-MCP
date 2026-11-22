@@ -63,10 +63,13 @@ def test_summary_allows_only_known_status_and_peer_names(tmp_path, capsys):
         json.dumps({"status": "pass", "daemon": hosted.DAEMONS[3], "daemon_engine": "rust"}), encoding="utf-8")
     (folder / "ordinary-native-use.json").write_text(
         json.dumps({"status": "not yet run", "daemon": "fixture raw output"}), encoding="utf-8")
+    (folder / "bank-recovery.json").write_text(
+        json.dumps({"status": "pass", "daemon": hosted.DAEMONS[3]}), encoding="utf-8")
     hosted.summary("macos-arm64", tmp_path)
     rendered = capsys.readouterr().out
     assert "pass / source-built from the tag / rust" in rendered
     assert "invalid result" in rendered
+    assert "| bank-recovery | not selected | not selected | invalid result |" in rendered.splitlines()
     assert "fixture raw output" not in rendered
     assert len(rendered.splitlines()) == 2 + len(matrix.SCENARIOS)
 
@@ -185,6 +188,7 @@ def test_guest_checks_the_running_image_repository_digest(tmp_path, matches):
     shell = (root / "ops/acceptance/hosted_lima_guest.sh").read_text(encoding="utf-8")
     start = shell.index("verify_published_daemon() {")
     verify = shell[start:shell.index("\n}", start) + 2]
+    readiness = shell.split('chmod 700 "$root/owner"\n', 1)[1]
     repository = "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust"
     expected = f"{repository}@sha256:{'a' * 64}"
     observed = expected if matches else f"{repository}@sha256:{'b' * 64}"
@@ -198,9 +202,15 @@ def test_guest_checks_the_running_image_repository_digest(tmp_path, matches):
         "    *) return 2;;\n"
         "  esac\n"
         "}\n"
-        f"published_image='{expected}'\n{verify}\nverify_published_daemon\n", encoding="utf-8",
+        f"published_image='{expected}'\n{verify}\n"
+        "guest_address=127.0.0.1\ntoken=fixture\n"
+        f"{readiness}", encoding="utf-8",
     )
-    assert subprocess.run(["bash", script], timeout=5, check=False).returncode == (0 if matches else 1)
+    result = subprocess.run(["bash", script], timeout=5, check=False, capture_output=True)
+    if matches:
+        assert (result.returncode, result.stdout.splitlines()[0]) == (0, b"peer-ready")
+    else:
+        assert (result.returncode, result.stdout, result.stderr.strip()) == (1, b"", b"peer-image-unverified")
 
 
 def test_peer_fetch_transport_failure_allows_offline_fallback(tmp_path, monkeypatch):

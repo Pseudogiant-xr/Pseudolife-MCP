@@ -60,9 +60,9 @@ ledger](../../ops/acceptance/README.md#ledger), which describes how to record
 them against the release commit and manifest. The adjacent receipts retain
 partial observations when a ledger row needs more evidence.
 
-A source-built or checkout-built daemon does not count as the published daemon.
-The maintainer decides whether a pass with one of those peers counts toward
-release acceptance. Once arm64 daemon and PostgreSQL images ship, the
+The workflow records the daemon kind and engine on observed rows. It does not
+count a pass with a source-built or checkout-built peer as a pass against the
+published daemon. Once arm64 daemon and PostgreSQL images ship, the
 published-image path needs its own digest and architecture checks. A
 checkout-build observation remains evidence for that installation path.
 The Linux x64 and Windows x64 columns come from their separate disposable-host
