@@ -209,3 +209,11 @@ def logged_served(state, query):
     events = [row for row in _written(state, "retrieval_events", "query_text", query)
               if row["origin"] == "search"]
     return max(events, key=lambda row: row["id"])["served"] if events else None
+
+
+def between_diffs(previous, before):
+    """Writes between two steps: the dump a step starts from must equal the
+    one the previous step ended on, so a write landing after an answer (a
+    second retrieval event, a late flush) differs instead of becoming the
+    next step's baseline."""
+    return dbstate.diff(previous, before)

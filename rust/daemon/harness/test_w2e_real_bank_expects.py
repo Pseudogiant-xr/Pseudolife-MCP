@@ -80,6 +80,8 @@ def holds(conn, query) -> bool:
 @pytest.mark.parametrize("name,expected", [
     ("w2e_queue_seed_rows.json", "ab08f5b5e968a2ecfc23171a1c7900e30afd1634c5c4fbc42510936655d3f719"),
     ("w2e_queue_contract.json", "51f13877fac006b1856fd9dbaf2658898e2a679a0043b6d4de15ae65002002f8"),
+    # The shutdown and commit-loss templates (w2e_shutdown_seed.replay).
+    ("commit_loss_seed_rows.json", "c47cdfb9c0866526e20ef68347a3bb7729a6012208cdedfd61353d47182ddecc"),
 ])
 def test_queue_seed_capture_is_pinned(name, expected):
     import hashlib

@@ -433,6 +433,106 @@ def test_clean_exit_store_is_held_to_its_whole_expected_row(harness, change, exp
         assert any(expected in difference for difference in differences), differences
 
 
+@pytest.mark.parametrize("name, text", [("vector_1", "The backup job runs at 02:00 nightly."),
+                                        ("vector_2", "The cache TTL is 300 seconds.")])
+def test_fixture_vectors_equal_the_captured_seed_vectors(name, text):
+    # The seed rows were captured from the frozen Python daemon running the
+    # graph itself (commit_loss_seed_rows.md), independently of this oracle.
+    from embedding_fixture import mean_unit_vector
+
+    captured = json.loads((Path(__file__).with_name("commit_loss_seed_rows.json"))
+                          .read_text(encoding="utf-8"))["vectors"][name]
+    assert all(abs(a - b) <= 1e-6 for a, b in zip(json.loads(captured), mean_unit_vector(text)))
+    assert len(json.loads(captured)) == 1024
+
+
+def test_fixture_surprises_count_a_text_stored_twice(harness):
+    once = harness.fixture_surprises(["The counters note about the build cache."])
+    assert once == [1.0]
+    # The second copy is an exact duplicate: 0, not dropped.
+    assert harness.fixture_surprises(["The counters note about the build cache."] * 2) == [1.0, 0.0]
+
+
+def _clean_run(harness, monkeypatch, tmp_path, dumps, *, fixture=False):
+    """run_clean_lifecycle over two stores with every bank dump given."""
+    import background_sessions
+    import psycopg
+    import w2e_shutdown_seed
+
+    texts = ["The counters note about the build cache.",
+             "The counters note about the token rotation."]
+    scenario = {"seed": [], "config": None, "env": {},
+                "ops": [harness.store(text, source="pseudolife-mcp") for text in texts]}
+    states = iter(dumps)
+    monkeypatch.setattr(harness.time, "time", lambda: 10.0)
+    monkeypatch.setattr(harness.pg, "name", lambda label: label)
+    monkeypatch.setattr(harness.pg, "create", lambda name, template=None: f"postgresql://x/{name}")
+    monkeypatch.setattr(harness.pg, "base_database", lambda: None)
+    monkeypatch.setattr(w2e_shutdown_seed, "prepare_empty", lambda dsn, name, copied: None)
+    monkeypatch.setattr(harness.daemons, "make_home", lambda root, label, config: tmp_path)
+    monkeypatch.setattr(harness.daemons, "free_port", lambda: 1)
+    monkeypatch.setattr(harness.daemons, "base_env", lambda home, env: env)
+    monkeypatch.setattr(harness.daemons, "rust_daemon", lambda *a: SimpleNamespace(
+        start=lambda timeout: None, stop=lambda: None, port=1))
+    monkeypatch.setattr(harness.w1a, "wait_settled", lambda ports, token: None)
+    monkeypatch.setattr(harness, "warmup_expected", lambda scn: False)
+    monkeypatch.setattr(harness, "offline_fixture_model", lambda env: fixture)
+    monkeypatch.setattr(harness, "Mcp", lambda port: SimpleNamespace(init=lambda: None))
+    monkeypatch.setattr(harness, "run_op", lambda op, port, client, dsn: {
+        "isError": False, "value": {"stored": True}})
+    monkeypatch.setattr(harness.dbstate, "dump", lambda dsn: next(states))
+    monkeypatch.setattr(background_sessions, "graceful_stop", lambda daemon: None)
+    entry = iter([(1, 1.0), (2, 0.0085828)])
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, query, params=()):
+            return SimpleNamespace(fetchone=lambda: next(entry))
+
+    monkeypatch.setattr(psycopg, "connect", lambda dsn, autocommit: Connection())
+    result = harness.run_clean_lifecycle("probe", scenario, "probe", tmp_path / "daemon",
+                                         tmp_path, [], None)
+    return texts, {step["step"]: step["diffs"] for step in result["steps"]}, result
+
+
+@pytest.mark.parametrize("between", [False, True])
+def test_a_write_between_clean_exit_steps_differs(harness, monkeypatch, tmp_path, between):
+    empty = _bank()
+    first = _stored(empty, 1, "The counters note about the build cache.", source="pseudolife-mcp")
+    # Between the first store's last dump and the second store's first one, a
+    # row lands that no step wrote: a late write absorbed into the baseline.
+    start = (_stored(first, 9, "a write after the first answer", source="agent")
+             if between else first)
+    second = _stored(start, 2, "The counters note about the token rotation.",
+                     source="pseudolife-mcp", surprise=0.0085828)
+    texts, diffs, _ = _clean_run(harness, monkeypatch, tmp_path,
+                                 [empty, empty, empty, first, start, second])
+    assert not any("between steps" in d for d in diffs[1])
+    assert any("between steps" in d for d in diffs[2]) is between
+
+
+@pytest.mark.parametrize("surprise, differs", [(1.0, False), (0.5, True)])
+def test_the_first_clean_exit_store_is_pinned_under_any_model(harness, monkeypatch, tmp_path,
+                                                             surprise, differs):
+    empty = _bank()
+    first = _stored(empty, 1, "The counters note about the build cache.",
+                    source="pseudolife-mcp", surprise=surprise)
+    second = _stored(first, 2, "The counters note about the token rotation.",
+                     source="pseudolife-mcp", surprise=0.0085828)
+    _, diffs, result = _clean_run(harness, monkeypatch, tmp_path,
+                                  [empty, empty, empty, first, first, second])
+    assert result["pins"] == {"fixture_values": False, "fixture_vectors": False,
+                              "first_surprise": True}
+    assert any("expected 1.0" in d for d in diffs[1]) is differs
+    # The second store has neighbours under an unknown model: range only.
+    assert not any("expected" in d for d in diffs[2])
+
+
 @pytest.mark.parametrize("scenario", ["counters-restore", "search-after-restart"])
 def test_clean_exit_uses_native_lifecycle_runner(harness, monkeypatch, tmp_path, scenario):
     def reject_oracle(*args, **kwargs):

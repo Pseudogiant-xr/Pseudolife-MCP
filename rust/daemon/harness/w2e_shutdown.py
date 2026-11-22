@@ -20,7 +20,9 @@ from w2e_shutdown_seed import prepare_empty
 
 
 SCENARIO = {"config": "memory:\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n"}
-TEXT = ("A disconnected store must finish before daemon shutdown. " * 160).strip()
+# "memory" is the fixture vocabulary's one word here, so the stored vector
+# is this text's own and not the all-unknown direction other texts share.
+TEXT = ("A disconnected memory store must finish before daemon shutdown. " * 160).strip()
 DRAIN_WITNESS = "shutdown: admitted writes still running; the final save runs beside them"
 # The drain ends 6 s after the signal (HTTP_DRAIN + WRITES_DRAIN in
 # rust/daemon/src/background.rs); the harness releases the paused store only

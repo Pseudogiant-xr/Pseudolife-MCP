@@ -6411,10 +6411,22 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
     if mutant:
         env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
     fixture = offline_fixture_model(env)
+    # Every computed value is pinned only under the offline fixture on an
+    # empty bank. Under another model the first store's surprise is still 1
+    # (the band is empty); a copied bank's neighbours leave it unpinned.
     pinned = fixture and not copied
     daemon = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, env))
     steps = []
     served = Counter()
+    # The dump the previous step ended on: each step starts by comparing the
+    # bank with it, so a write landing after a step's answer still differs.
+    last = {}
+
+    def carried(before):
+        found = [f"between steps: {diff}" for diff in clean.between_diffs(last["state"], before)]
+        last["state"] = before
+        return found
+
     try:
         def start(before, config):
             daemon.start(300)
@@ -6427,17 +6439,23 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
 
         def stop():
             before = dbstate.dump(dsn)
+            found = carried(before)
             graceful_stop(daemon)
             stopped = dbstate.dump(dsn)
-            found = [f"graceful stop: {diff}" for diff in clean.stop_diffs(before, stopped, served)]
+            found += [f"graceful stop: {diff}" for diff in clean.stop_diffs(before, stopped, served)]
             served.clear()
+            last["state"] = stopped
             return stopped, found
 
         client, diffs = start(dbstate.dump(dsn), scn["config"])
+        last["state"] = dbstate.dump(dsn)
         steps.append({"step": 0, "op": {"op": "init"}, "diffs": diffs})
         hit_ids = None
         pre_restart_components = None
         surprises = []
+        # Every stored text in order (a text stored twice counts twice) and
+        # the latest (entry id, expected surprise) of each.
+        texts = []
         stored = {}
         for index, op in enumerate(scn["ops"], 1):
             diffs = []
@@ -6446,7 +6464,9 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                 (home / "data/config.yaml").write_text(op["config"], encoding="utf-8")
                 client, warmup = start(stopped, op["config"])
                 diffs += warmup
-                restarted = w1a.scrub_declared_rows(dbstate.dump(dsn), stopped)["state"]
+                booted = dbstate.dump(dsn)
+                last["state"] = booted
+                restarted = w1a.scrub_declared_rows(booted, stopped)["state"]
                 for row in stopped["rows"]["public.meta"]["rows"]:
                     if row[0] == "writer_lease_epoch":
                         row[1] += 1
@@ -6459,22 +6479,26 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                 count = len(surprises) if op["stop"] else 2
                 # Pinned: the fixture's own surprises; otherwise the values
                 # the stores persisted (a copied bank's neighbours move them).
-                expected = (fixture_surprises(list(stored))[:count] if pinned
-                            else surprises[:count])
+                expected = fixture_surprises(texts)[:count] if pinned else surprises[:count]
                 if not saved_counter_history_matches(value, expected):
                     diffs.append("saved counter history differs from the successful stores")
                 answer = {"isError": False, "value": value}
             elif op["op"] == "tool" and op["name"] in {"memory_store", "memory_search"}:
                 before = dbstate.dump(dsn)
+                diffs += carried(before)
                 began = time.time()
                 answer = run_op(op, daemon.port, client, dsn)
                 window = (began, time.time())
                 after = dbstate.dump(dsn)
+                last["state"] = after
                 if not answer or answer["isError"]:
                     diffs.append(f"{op['name']} did not succeed")
                 elif op["name"] == "memory_store":
                     text = op["args"]["text"]
-                    surprise = fixture_surprises([*stored, text])[-1] if pinned else None
+                    if pinned:
+                        surprise = fixture_surprises([*texts, text])[-1]
+                    else:
+                        surprise = 1.0 if not copied and not texts else None
                     diffs += clean.store_diffs(
                         before, after, text=text, source=op["args"].get("source", "agent"),
                         tags=op["args"].get("tags", []), window=window, surprise=surprise,
@@ -6489,6 +6513,7 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                         # MCP's answer rounds surprise; the history is
                         # compared with the full persisted value.
                         surprises.append(entry[1])
+                        texts.append(text)
                         stored[text] = (entry[0], surprise)
                 else:
                     items = answer["value"].get("entries", [])
@@ -6521,7 +6546,8 @@ def run_clean_lifecycle(name, scn, tag, binary, root, owned, mutant):
                             diffs.append(f"expect rust: {query}")
             steps.append({"step": index, "op": op, "diffs": diffs, "rust": answer})
         return {"scenario": name, "steps": steps, "stats": {},
-                "pins": {"fixture_values": pinned, "fixture_vectors": fixture}}
+                "pins": {"fixture_values": pinned, "fixture_vectors": fixture,
+                         "first_surprise": not copied}}
     finally:
         daemon.stop()
 
@@ -7285,10 +7311,6 @@ def main() -> int:
             _turn_sys.path.remove(_turn_root)
     args = ap.parse_args()
     recording = args.record and args.mode in {"live", "calibrate"}
-    if recording and args.only:
-        clean_only = [name for name in args.only if SCENARIOS.get(name, {}).get("clean_stop")]
-        if clean_only:
-            ap.error(f"clean-exit scenarios use native contract checks: omit --record for {', '.join(clean_only)}")
     if (args.record_candidate or args.write or args.mutant) and args.mode != "golden":
         ap.error("--record-candidate, --write and --mutant belong to golden mode")
     if args.write and not args.record_candidate:
@@ -7296,16 +7318,19 @@ def main() -> int:
     if args.record_candidate and args.mutant:
         ap.error("never record a golden from a mutant")
     names = args.only or list(SCENARIOS)
-    if args.record and args.mode in {"live", "calibrate"}:
+    if recording:
+        # Queue judges and clean-exit scenarios have no Python oracle to
+        # record from: an explicit --only refuses them, a full run skips them.
+        clean_only = [name for name in names if SCENARIOS.get(name, {}).get("clean_stop")]
         native_only = sorted(set(names) & _QUEUE_JUDGES.keys())
+        if args.only and clean_only:
+            ap.error(f"clean-exit scenarios use native contract checks: omit --record for {', '.join(clean_only)}")
         if args.only and native_only:
             ap.error(f"queue judges use native contract checks: omit --record for {', '.join(native_only)}")
-        names = [name for name in names if name not in _QUEUE_JUDGES]
+        names = [name for name in names if name not in _QUEUE_JUDGES and name not in clean_only]
     args.rust_bin = args.rust_bin.resolve()
     root = run_root()
     tol = {} if args.mode == "calibrate" else json.loads(TOLERANCE_FILE.read_text(encoding="utf-8"))
-    if recording and not args.only:
-        names = [name for name in names if not SCENARIOS[name].get("clean_stop")]
     results = []
     if args.mode == "mutants":
         caught = {}
@@ -7347,6 +7372,10 @@ def main() -> int:
         for k, v in r["stats"].items():
             stats[k] = min(stats.get(k, v), v) if k == "min_cosine" else max(stats.get(k, v), v)
     summary = {"scenarios": len(results), "steps": steps, "diff_steps": diff_steps, "stats": stats}
+    # Which computed values a clean-exit run pinned (run_clean_lifecycle).
+    pins = {r["scenario"]: r["pins"] for r in results if "pins" in r}
+    if pins:
+        summary["pins"] = pins
     print(json.dumps(summary))
     if args.out:
         args.out.write_text(json.dumps({"complete": True, "planned_scenarios": names,
