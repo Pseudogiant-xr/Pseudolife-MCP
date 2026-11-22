@@ -165,14 +165,22 @@ reference includes the complete report or refusal, input files and modes,
 and requires the bank to remain unchanged. The closed-stdout bank case
 continues to run both arms for its recorded diagnostic divergence.
 
-Bank stdout export references select the original JSON lines with filters
-specified by the fixture. Three stdout refusals reuse frozen-Python goldens.
+Bank stdout export references select the original JSON lines with filter
+literals from the case table in `rows/audit.py`. Three stdout refusals reuse
+frozen-Python goldens.
 File publication and divergent export cases continue to run both arms.
 
-Automatic CI skips live mode, so the 80 Linux and 85 Windows file references
-and the 14 bank-verify references run only in local or manual-stress live
-runs. CI pins the file hashes and their case registration, and checks exit,
-stdout and stderr against the three shared goldens on both platforms.
+Automatic CI skips live mode, so the 80 Linux and 85 Windows file references,
+14 bank-verify references and 34 stdout export references run only in local
+or manual-stress live runs. Offline tests pin the file hashes and case
+registration and check exit status, stdout and stderr for the three entries
+shared with the goldens on both platforms.
+
+The 41-case automatic CI roster in `rust/ci/audit_golden_cases.json` replays
+committed goldens and compares the full observation, including files, modes
+and database state where applicable. It covers 5 of the 34 converted export
+cases and 7 of the 14 converted bank-verify cases. The other 29 export and
+7 bank-verify cases have no automatic CI output comparison.
 
 The payload fixture covers non-finite floats,
 200-digit integers, nesting beyond 128, Unicode key order and lone surrogates.
