@@ -3285,7 +3285,7 @@ for selected_client in $CLIENTS; do
                 fi
             else
                 if [ -n "$CODEX_CREDENTIAL_FILE" ] || [ -n "${CLIENT_ONLY:-}" ]; then
-                    warn_client_failure codex "Codex authentication requires the stdio shim. Fix the native client install (see above), then rerun the installer."
+                    warn_client_failure codex "Codex authentication requires the stdio shim. HTTP fallback was not registered. Fix the native client install (see above), then rerun the installer."
                 else
                     if ! client_requires_bearer; then
                         echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
@@ -3301,7 +3301,7 @@ for selected_client in $CLIENTS; do
             fi
         else
             if [ -n "$CODEX_CREDENTIAL_FILE" ] || [ -n "${CLIENT_ONLY:-}" ]; then
-                warn_client_failure codex "Codex authentication requires the stdio shim. Rerun the installer with --transport shim."
+                warn_client_failure codex "Codex authentication requires the stdio shim. HTTP transport was not registered. Rerun the installer with --transport shim."
             else
                 register_client codex http pseudolife-memory --url http://127.0.0.1:8765/mcp
                 if [ "$MCP_CODEX" = http ]; then step "Wired into Codex (codex mcp add, HTTP)."; fi

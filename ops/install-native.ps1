@@ -3217,9 +3217,9 @@ function Install-SelectedClient([string]$selectedClient) {
         } else {
             if ($codexCredentialFile -or $ClientOnly) {
                 if ($Transport -eq "shim") {
-                    Write-ClientSetupFailure "codex" "Codex authentication requires the stdio shim. Fix the native client install (see above), then rerun the installer."
+                    Write-ClientSetupFailure "codex" "Codex authentication requires the stdio shim. HTTP fallback was not registered. Fix the native client install (see above), then rerun the installer."
                 } else {
-                    Write-ClientSetupFailure "codex" "Codex authentication requires the stdio shim. Rerun the installer with -Transport shim."
+                    Write-ClientSetupFailure "codex" "Codex authentication requires the stdio shim. HTTP transport was not registered. Rerun the installer with -Transport shim."
                 }
             } else {
                 $codexHttpUrl = if ($codexCredentialUrl) {
