@@ -40,8 +40,12 @@ REAL_LIST_PROCESSES = prune.list_processes
 
 
 def _git(cwd: Path, *args: str) -> str:
+    # Parent Git commands can redirect config writes or override fixture settings.
+    env = os.environ.copy()
+    for name in ("GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"):
+        env.pop(name, None)
     proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, encoding="utf-8")
+                          text=True, encoding="utf-8", env=env)
     assert proc.returncode == 0, f"git {' '.join(args)}: {proc.stderr}"
     return proc.stdout.strip()
 
@@ -217,14 +221,34 @@ def test_backdate_skips_an_entry_that_disappears(tmp_path, monkeypatch):
     assert survivor.stat().st_mtime == pytest.approx(OLD, abs=1, rel=0)
 
 
+def _assert_maintenance_disabled(repo: Path) -> None:
+    for key, value in (("maintenance.auto", "false"), ("gc.auto", "0"),
+                       ("maintenance.autoDetach", "false"), ("gc.autoDetach", "false"),
+                       ("fetch.writeCommitGraph", "false")):
+        assert _git(repo, "config", "--get", key) == value, (repo, key)
+
+
 def test_fixture_repositories_disable_git_auto_maintenance(env):
     clone = _clone(env, "maintenance-config")
     worktree = env.add("maintenance-config-wt", age=False)
     for repo in (env.origin, env.repo, clone, worktree):
-        for key, value in (("maintenance.auto", "false"), ("gc.auto", "0"),
-                           ("maintenance.autoDetach", "false"), ("gc.autoDetach", "false"),
-                           ("fetch.writeCommitGraph", "false")):
-            assert _git(repo, "config", "--local", "--get", key) == value, (repo, key)
+        _assert_maintenance_disabled(repo)
+
+
+@pytest.mark.parametrize("source", ["count", "parameters", "file"])
+def test_fixture_git_ignores_inherited_config_overrides(env, monkeypatch, source):
+    if source == "count":
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "maintenance.auto")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    elif source == "parameters":
+        monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'maintenance.auto'='true'")
+    else:
+        other_config = env.tmp / "other.gitconfig"
+        other_config.write_text("[maintenance]\n\tauto = true\n", encoding="utf-8")
+        monkeypatch.setenv("GIT_CONFIG", str(other_config))
+
+    _assert_maintenance_disabled(env.repo)
 
 
 # --- sweep mode: worktrees -------------------------------------------------
@@ -1535,6 +1559,7 @@ def test_a_clone_that_owns_linked_worktrees_is_kept(env):
     clone = _clone(env, "has-linked")
     linked = env.tmp / "linked-elsewhere"
     _git(clone, "worktree", "add", "-q", "--detach", str(linked))
+    _assert_maintenance_disabled(linked)
     _backdate(clone)
     rc, out = run_clones(env, "--apply")
     assert rc == 0, out
@@ -1812,6 +1837,7 @@ def test_a_bare_repository_in_a_scratch_dir_is_kept(env):
     bare.parent.mkdir(parents=True, exist_ok=True)
     _git(env.tmp, "init", "-q", "--bare", str(bare))
     _configure(bare)
+    _assert_maintenance_disabled(bare)
     _backdate(bare)
     rc, out = run_scratch(env, "--apply")
     assert rc == 0, out
@@ -2337,6 +2363,7 @@ def test_a_clone_another_clone_borrows_objects_from_is_kept(env):
     borrower = env.tmp / "clones" / "borrower"
     _git(env.tmp, "clone", "-q", "--shared", str(lender), str(borrower))
     _configure(borrower)
+    _assert_maintenance_disabled(borrower)
     (borrower / "work.txt").write_text("only here\n", encoding="utf-8")
     _git(borrower, "add", "work.txt")
     _git(borrower, "commit", "-qm", "borrower work")
@@ -2424,7 +2451,10 @@ def test_a_lent_clone_is_kept_when_only_a_linked_worktree_of_the_borrower_is_see
     outside.parent.mkdir()
     _git(env.tmp, "clone", "-q", "--shared", str(lender), str(outside))
     _configure(outside)
-    _git(outside, "worktree", "add", "-q", "--detach", str(env.tmp / "clones" / "borrower-wt"))
+    linked = env.tmp / "clones" / "borrower-wt"
+    _git(outside, "worktree", "add", "-q", "--detach", str(linked))
+    _assert_maintenance_disabled(outside)
+    _assert_maintenance_disabled(linked)
     _backdate(lender)
     rc, out = run_clones(env, "--apply")
     assert rc == 0, out
