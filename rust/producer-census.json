@@ -8,7 +8,7 @@
     "docs/README.md": "344f55f1081ec2899af8136ae9428c6e53ea6b9dd9e3ba43e263ab636b705807",
     "docs/atlas/README.md": "77897a89250cf80f9f3fe707f8f681bc6d8e6233908270cfd1a107471cb82e88",
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
-    "docs/atlas/atlas.json": "9f37ff4233fc85cf7bb9ec26dba1f4f7bb279ea15822b7ad3bc94dbdb8508b25",
+    "docs/atlas/atlas.json": "50c826af5343d66da2eb2375ac307380b318826ec0eac89e7991033064e28327",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
     "docs/dev/dev-machines.md": "fff57f7e87d2bddfd1067483b64f41379d0f5562aeebf9e70b8bfbf48dfd7e34",
@@ -29,7 +29,7 @@
     "docs/guide/coordination-recovery.md": "04425509736ec7e40beb4bc46e7810d32ee0a68d791a969b77876c945ab5cb79",
     "docs/guide/dreaming.md": "4fb3621fa03c6e8b2d98c613b60ed37480fb21554e6f7c15c2512b0653a33bc7",
     "docs/guide/episodes.md": "9b77cc376d2276b6250b608e591ce7dfb2f009b497ee191f87ced2193907c9aa",
-    "docs/guide/install-and-move.md": "36afb8669d8b53073cc17613a15a4652ee3f1cd3961c7a5c9ff33426ce69de51",
+    "docs/guide/install-and-move.md": "d46a6637746b7a5597daa983461a96df7f0ad1ab61ea18b0b73f50615159cf8e",
     "docs/guide/memory-model.md": "17978016840cb2af1fddbb405c436dc473be10ec27da72876f0d8e5617f4db90",
     "docs/guide/providers.md": "75d14c8986be055f9a91d19aa95f628ab7fac7d0ae2f2847a6d1d1a0b0fc434e",
     "docs/guide/remote-bank.md": "5e684c546387ae94f21b7b1350779224ef67324888429094331cf1029f6a8b56",
@@ -798,7 +798,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:338",
+          "location": "docs/guide/install-and-move.md:373",
           "shape": {
             "argv_source": "backup --out \"$HOME/pseudolife-backups\"",
             "channel": "argv",
@@ -2825,7 +2825,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:249",
+          "location": "docs/guide/install-and-move.md:284",
           "shape": {
             "argv_source": "connect http://127.0.0.1:8765 \\",
             "channel": "argv",
@@ -3045,7 +3045,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1615",
+          "location": "docs/atlas/atlas.json:1614",
           "shape": {
             "argv_source": "doctor · read-only diagnostics\",",
             "channel": "argv",
@@ -3424,7 +3424,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:282",
+          "location": "docs/guide/install-and-move.md:317",
           "shape": {
             "argv_source": "doctor",
             "channel": "argv",
@@ -5745,7 +5745,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:201",
+          "location": "docs/guide/install-and-move.md:236",
           "shape": {
             "argv_source": "invite",
             "channel": "argv",
@@ -5993,7 +5993,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1587",
+          "location": "docs/atlas/atlas.json:1586",
           "shape": {
             "argv_source": "lease · named shared-resource holds\",",
             "channel": "argv",
@@ -6681,7 +6681,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1473",
+          "location": "docs/atlas/atlas.json:1472",
           "shape": {
             "argv_source": "move · Python implementation\",",
             "channel": "argv",
@@ -10211,7 +10211,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:291",
+          "location": "docs/guide/install-and-move.md:326",
           "shape": {
             "argv_source": "update --env-file \"$HOME/pseudolife-stack/.env\"",
             "channel": "argv",
@@ -10228,7 +10228,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:323",
+          "location": "docs/guide/install-and-move.md:358",
           "shape": {
             "argv_source": "update --clients-only --tag <that-version>",
             "channel": "argv",
@@ -10318,7 +10318,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1445",
+          "location": "docs/atlas/atlas.json:1444",
           "shape": {
             "argv_source": "update --engine rust | python switches engines on the same bank\",",
             "channel": "argv",
@@ -10335,7 +10335,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1644",
+          "location": "docs/atlas/atlas.json:1643",
           "shape": {
             "argv_source": "update · the Python client's updater\",",
             "channel": "argv",
@@ -10348,7 +10348,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2726",
+          "location": "docs/atlas/atlas.json:2725",
           "shape": {
             "argv_source": "update (ops/update.* wrap its checkout mode): backup → rollback tag → daemon-only --no-deps recreate → health poll → client side (shim runtime, plugin cache, Codex hooks). The distilled E4B model is the one eval artifact baked into a shipped image.\",",
             "channel": "argv",
@@ -12189,7 +12189,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:132",
+          "location": "docs/guide/install-and-move.md:167",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -12211,9 +12211,9 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:308",
+          "location": "docs/guide/install-and-move.md:31",
           "shape": {
-            "argv_source": "update \\",
+            "argv_source": "update",
             "channel": "argv",
             "complete": true,
             "omitted_optional": null,
@@ -12222,9 +12222,9 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:31",
+          "location": "docs/guide/install-and-move.md:343",
           "shape": {
-            "argv_source": "update",
+            "argv_source": "update \\",
             "channel": "argv",
             "complete": true,
             "omitted_optional": null,
@@ -12255,7 +12255,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:88",
+          "location": "docs/guide/install-and-move.md:96",
           "shape": {
             "argv_source": "update --clients-only",
             "channel": "argv",
@@ -13903,7 +13903,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1650",
+          "location": "docs/atlas/atlas.json:1649",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13919,7 +13919,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1677",
+          "location": "docs/atlas/atlas.json:1676",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -25921,7 +25921,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1634",
+          "location": "docs/atlas/atlas.json:1633",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -26169,7 +26169,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1634",
+          "location": "docs/atlas/atlas.json:1633",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -27126,7 +27126,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1620",
+          "location": "docs/atlas/atlas.json:1619",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -27470,7 +27470,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1590",
+          "location": "docs/atlas/atlas.json:1589",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -27482,7 +27482,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2487",
+          "location": "docs/atlas/atlas.json:2486",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -29118,7 +29118,7 @@
         },
         {
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2361",
+          "location": "docs/atlas/atlas.json:2360",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29873,7 +29873,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1564",
+          "location": "docs/atlas/atlas.json:1563",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29886,7 +29886,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2361",
+          "location": "docs/atlas/atlas.json:2360",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30479,7 +30479,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:129",
+          "location": "docs/guide/install-and-move.md:164",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30492,7 +30492,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:165",
+          "location": "docs/guide/install-and-move.md:200",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35099,7 +35099,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:259",
+          "location": "docs/guide/install-and-move.md:294",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35473,7 +35473,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:257",
+          "location": "docs/guide/install-and-move.md:292",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35486,7 +35486,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:267",
+          "location": "docs/guide/install-and-move.md:302",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35499,7 +35499,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:274",
+          "location": "docs/guide/install-and-move.md:309",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -37606,7 +37606,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:258",
+          "location": "docs/guide/install-and-move.md:293",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -37619,7 +37619,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:269",
+          "location": "docs/guide/install-and-move.md:304",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -37845,7 +37845,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:275",
+          "location": "docs/guide/install-and-move.md:310",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38528,7 +38528,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:321",
+          "location": "docs/guide/install-and-move.md:356",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38541,7 +38541,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:326",
+          "location": "docs/guide/install-and-move.md:361",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38644,7 +38644,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:191",
+          "location": "docs/guide/install-and-move.md:226",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -42701,7 +42701,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1447",
+          "location": "docs/atlas/atlas.json:1446",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42714,7 +42714,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1591",
+          "location": "docs/atlas/atlas.json:1590",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42727,7 +42727,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1604",
+          "location": "docs/atlas/atlas.json:1603",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42740,7 +42740,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1694",
+          "location": "docs/atlas/atlas.json:1693",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42753,7 +42753,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1709",
+          "location": "docs/atlas/atlas.json:1708",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46228,7 +46228,7 @@
         },
         {
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1492",
+          "location": "docs/atlas/atlas.json:1491",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -47504,7 +47504,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:204",
+          "location": "docs/guide/install-and-move.md:239",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50964,7 +50964,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:190",
+          "location": "docs/guide/install-and-move.md:225",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -51284,7 +51284,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:204",
+          "location": "docs/guide/install-and-move.md:239",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58251,7 +58251,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:129",
+          "location": "docs/guide/install-and-move.md:164",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58264,7 +58264,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/guide/install-and-move.md:165",
+          "location": "docs/guide/install-and-move.md:200",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59917,7 +59917,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1620",
+          "location": "docs/atlas/atlas.json:1619",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -60158,7 +60158,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1648",
+          "location": "docs/atlas/atlas.json:1647",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -62225,7 +62225,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1839",
+          "location": "docs/atlas/atlas.json:1838",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -65149,7 +65149,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1827",
+          "location": "docs/atlas/atlas.json:1826",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -65161,7 +65161,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1839",
+          "location": "docs/atlas/atlas.json:1838",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -65197,7 +65197,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "docs/atlas/atlas.json:2701",
+          "location": "docs/atlas/atlas.json:2700",
           "method": null,
           "shape": {
             "channel": "body",
@@ -66559,7 +66559,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1634",
+          "location": "docs/atlas/atlas.json:1633",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -66571,7 +66571,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:2445",
+          "location": "docs/atlas/atlas.json:2444",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -68676,7 +68676,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "docs/atlas/atlas.json:1833",
+          "location": "docs/atlas/atlas.json:1832",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -78598,7 +78598,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/guide/install-and-move.md:343",
+      "location": "docs/guide/install-and-move.md:378",
       "name": "restore",
       "shape": {
         "argv_source": "restore --backup-file <dump.sql.gz> --state-archive <state.tgz>",
@@ -80669,7 +80669,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1363",
+      "location": "docs/atlas/atlas.json:1362",
       "name": "on",
       "shape": {
         "argv_source": "on PyPI\",",
@@ -80683,7 +80683,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1457",
+      "location": "docs/atlas/atlas.json:1456",
       "name": "without",
       "shape": {
         "argv_source": "without Python\",",
@@ -80697,7 +80697,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1460",
+      "location": "docs/atlas/atlas.json:1459",
       "name": "binary",
       "shape": {
         "argv_source": "binary : the stdio shim and the CLI in one program, installed as a numbered runtime (runtime.json kind native) behind the same launcher as the Python runtimes\",",
@@ -80711,7 +80711,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1650",
+      "location": "docs/atlas/atlas.json:1649",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup while a bearer-gated daemon has no valid coordination.maintainer name or no active passkey (maintainer_setup.passkeys_set_up); at a terminal it offers to run it (default no) after the update lock is released, passing --yes\"",
@@ -80725,7 +80725,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1680",
+      "location": "docs/atlas/atlas.json:1679",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer enrol-code) stays pending until maintainer confirm; later keys need an enrol-approve signature and sit 24 h in quarantine, cancellable by any older key; a key revokes only itself; host revoke and reset (rotates the secret) via maintainer_cli.py\",",
@@ -80739,7 +80739,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1690",
+      "location": "docs/atlas/atlas.json:1689",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer · host passkey ops\",",
@@ -80753,7 +80753,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "docs/atlas/atlas.json:1705",
+      "location": "docs/atlas/atlas.json:1704",
       "name": "test-login",
       "shape": {
         "argv_source": "test-login · a test-suite login that cannot open the bank\",",
@@ -83132,7 +83132,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "docs/atlas/atlas.json:1650",
+      "location": "docs/atlas/atlas.json:1649",
       "name": "CoordinationConfig.maintainer",
       "shape": {
         "channel": "config",
@@ -83146,7 +83146,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "docs/atlas/atlas.json:1677",
+      "location": "docs/atlas/atlas.json:1676",
       "name": "CoordinationConfig.maintainer",
       "shape": {
         "channel": "config",
@@ -83440,7 +83440,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1404",
+      "location": "docs/atlas/atlas.json:1403",
       "name": "PSEUDOLIFE_TEST_LOGIN_ADMIN_URL",
       "shape": {
         "channel": "environment",
@@ -83454,7 +83454,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1420",
+      "location": "docs/atlas/atlas.json:1419",
       "name": "PSEUDOLIFE_PUBLISH_RUST_DAEMON",
       "shape": {
         "channel": "environment",
@@ -83468,7 +83468,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1463",
+      "location": "docs/atlas/atlas.json:1462",
       "name": "PSEUDOLIFE_MCP_SERVE_COMMAND",
       "shape": {
         "channel": "environment",
@@ -83482,7 +83482,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1591",
+      "location": "docs/atlas/atlas.json:1590",
       "name": "PSEUDOLIFE_DAEMON_EXEC",
       "shape": {
         "channel": "environment",
@@ -83496,7 +83496,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1604",
+      "location": "docs/atlas/atlas.json:1603",
       "name": "PSEUDOLIFE_DAEMON_EXEC",
       "shape": {
         "channel": "environment",
@@ -83510,7 +83510,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1694",
+      "location": "docs/atlas/atlas.json:1693",
       "name": "PSEUDOLIFE_DAEMON_EXEC",
       "shape": {
         "channel": "environment",
@@ -83524,7 +83524,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1710",
+      "location": "docs/atlas/atlas.json:1709",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -83538,7 +83538,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1710",
+      "location": "docs/atlas/atlas.json:1709",
       "name": "PSEUDOLIFE_TEST_PG_USER",
       "shape": {
         "channel": "environment",
@@ -87318,7 +87318,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1506",
+      "location": "docs/atlas/atlas.json:1505",
       "method": "POST",
       "name": "/api/pair",
       "shape": {
@@ -87332,7 +87332,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1590",
+      "location": "docs/atlas/atlas.json:1589",
       "method": "POST",
       "name": "/api/coordination/lease",
       "shape": {
@@ -87346,7 +87346,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1620",
+      "location": "docs/atlas/atlas.json:1619",
       "method": "POST",
       "name": "/api/coordination/context",
       "shape": {
@@ -87360,7 +87360,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1621",
+      "location": "docs/atlas/atlas.json:1620",
       "method": "GET",
       "name": "/api/maintainer",
       "shape": {
@@ -87374,7 +87374,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:1634",
+      "location": "docs/atlas/atlas.json:1633",
       "method": "POST",
       "name": "/health",
       "shape": {
@@ -87388,7 +87388,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:2373",
+      "location": "docs/atlas/atlas.json:2372",
       "method": "POST",
       "name": "/api/coordination",
       "shape": {
@@ -87402,7 +87402,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:2445",
+      "location": "docs/atlas/atlas.json:2444",
       "method": "POST",
       "name": "/health",
       "shape": {
@@ -87416,7 +87416,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:2487",
+      "location": "docs/atlas/atlas.json:2486",
       "method": "POST",
       "name": "/api/coordination/lease",
       "shape": {
@@ -87430,7 +87430,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "docs/atlas/atlas.json:2535",
+      "location": "docs/atlas/atlas.json:2534",
       "method": "POST",
       "name": "/api/pair",
       "shape": {
@@ -88771,7 +88771,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/install-and-move.md:218",
+      "location": "docs/guide/install-and-move.md:253",
       "method": null,
       "name": "/health",
       "shape": {
@@ -88785,7 +88785,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/install-and-move.md:225",
+      "location": "docs/guide/install-and-move.md:260",
       "method": null,
       "name": "/health",
       "shape": {
@@ -88799,7 +88799,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "docs/guide/install-and-move.md:322",
+      "location": "docs/guide/install-and-move.md:357",
       "method": null,
       "name": "/health",
       "shape": {
@@ -94341,7 +94341,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/install-and-move.md:88",
+      "location": "docs/guide/install-and-move.md:96",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -94357,7 +94357,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/guide/install-and-move.md:89",
+      "location": "docs/guide/install-and-move.md:97",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -95692,7 +95692,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "docs/atlas/atlas.json:1464",
+      "location": "docs/atlas/atlas.json:1463",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -97972,61 +97972,61 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1363",
+      "location": "docs/atlas/atlas.json:1362",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:on"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1404",
+      "location": "docs/atlas/atlas.json:1403",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_LOGIN_ADMIN_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1420",
+      "location": "docs/atlas/atlas.json:1419",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_PUBLISH_RUST_DAEMON"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1445",
+      "location": "docs/atlas/atlas.json:1444",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1447",
+      "location": "docs/atlas/atlas.json:1446",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1457",
+      "location": "docs/atlas/atlas.json:1456",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:without"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1460",
+      "location": "docs/atlas/atlas.json:1459",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:binary"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1463",
+      "location": "docs/atlas/atlas.json:1462",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_MCP_SERVE_COMMAND"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1473",
+      "location": "docs/atlas/atlas.json:1472",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:move"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1506",
+      "location": "docs/atlas/atlas.json:1505",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/pair"
     },
@@ -98044,147 +98044,153 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1564",
+      "location": "docs/atlas/atlas.json:1563",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1587",
+      "location": "docs/atlas/atlas.json:1586",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1590",
+      "location": "docs/atlas/atlas.json:1589",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1590",
+      "location": "docs/atlas/atlas.json:1589",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1591",
+      "location": "docs/atlas/atlas.json:1590",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1591",
+      "location": "docs/atlas/atlas.json:1590",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_EXEC"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1604",
+      "location": "docs/atlas/atlas.json:1603",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1604",
+      "location": "docs/atlas/atlas.json:1603",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_EXEC"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1615",
+      "location": "docs/atlas/atlas.json:1614",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:doctor"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1620",
+      "location": "docs/atlas/atlas.json:1619",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:context"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1620",
+      "location": "docs/atlas/atlas.json:1619",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1620",
+      "location": "docs/atlas/atlas.json:1619",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/context"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1621",
+      "location": "docs/atlas/atlas.json:1620",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1634",
+      "location": "docs/atlas/atlas.json:1633",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1634",
+      "location": "docs/atlas/atlas.json:1633",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:UpdatesConfig.unattended_daemon"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1634",
+      "location": "docs/atlas/atlas.json:1633",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/daemon-notice"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1634",
+      "location": "docs/atlas/atlas.json:1633",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1644",
+      "location": "docs/atlas/atlas.json:1643",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1648",
+      "location": "docs/atlas/atlas.json:1647",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1650",
+      "location": "docs/atlas/atlas.json:1649",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1650",
+      "location": "docs/atlas/atlas.json:1649",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1650",
+      "location": "docs/atlas/atlas.json:1649",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:CoordinationConfig.maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1677",
+      "location": "docs/atlas/atlas.json:1676",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1677",
+      "location": "docs/atlas/atlas.json:1676",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:CoordinationConfig.maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/atlas/atlas.json:1679",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
@@ -98194,55 +98200,49 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1680",
+      "location": "docs/atlas/atlas.json:1689",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1690",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:maintainer"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1694",
+      "location": "docs/atlas/atlas.json:1693",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1694",
+      "location": "docs/atlas/atlas.json:1693",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_EXEC"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1705",
+      "location": "docs/atlas/atlas.json:1704",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:test-login"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1709",
+      "location": "docs/atlas/atlas.json:1708",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1710",
+      "location": "docs/atlas/atlas.json:1709",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1710",
+      "location": "docs/atlas/atlas.json:1709",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_USER"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1827",
+      "location": "docs/atlas/atlas.json:1826",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/session-start"
     },
@@ -98254,19 +98254,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1833",
+      "location": "docs/atlas/atlas.json:1832",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/hook/session-end"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1839",
+      "location": "docs/atlas/atlas.json:1838",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/briefing"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:1839",
+      "location": "docs/atlas/atlas.json:1838",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/session-start"
     },
@@ -98320,25 +98320,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2361",
+      "location": "docs/atlas/atlas.json:2360",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2373",
+      "location": "docs/atlas/atlas.json:2372",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2445",
+      "location": "docs/atlas/atlas.json:2444",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/daemon-notice"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2445",
+      "location": "docs/atlas/atlas.json:2444",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -98362,13 +98362,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2487",
+      "location": "docs/atlas/atlas.json:2486",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:lease"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2487",
+      "location": "docs/atlas/atlas.json:2486",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/lease"
     },
@@ -98380,7 +98380,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2535",
+      "location": "docs/atlas/atlas.json:2534",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/pair"
     },
@@ -98392,18 +98392,18 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2701",
+      "location": "docs/atlas/atlas.json:2700",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/session-start"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2701",
+      "location": "docs/atlas/atlas.json:2700",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/atlas/atlas.json:2726",
+      "location": "docs/atlas/atlas.json:2725",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
@@ -102475,137 +102475,137 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:129",
+      "location": "docs/guide/install-and-move.md:164",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:129",
+      "location": "docs/guide/install-and-move.md:164",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:154",
+      "location": "docs/guide/install-and-move.md:189",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:165",
+      "location": "docs/guide/install-and-move.md:200",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:165",
+      "location": "docs/guide/install-and-move.md:200",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:204",
+      "location": "docs/guide/install-and-move.md:239",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TIER_MAP"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:204",
+      "location": "docs/guide/install-and-move.md:239",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:218",
+      "location": "docs/guide/install-and-move.md:253",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:218",
+      "location": "docs/guide/install-and-move.md:253",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:225",
+      "location": "docs/guide/install-and-move.md:260",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:257",
+      "location": "docs/guide/install-and-move.md:292",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:258",
+      "location": "docs/guide/install-and-move.md:293",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_MODEL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:259",
+      "location": "docs/guide/install-and-move.md:294",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_API_KEY"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:267",
+      "location": "docs/guide/install-and-move.md:302",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:269",
+      "location": "docs/guide/install-and-move.md:304",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_MODEL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:274",
+      "location": "docs/guide/install-and-move.md:309",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_BASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:291",
+      "location": "docs/guide/install-and-move.md:326",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:321",
+      "location": "docs/guide/install-and-move.md:356",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:322",
+      "location": "docs/guide/install-and-move.md:357",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:323",
+      "location": "docs/guide/install-and-move.md:358",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:326",
+      "location": "docs/guide/install-and-move.md:361",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:338",
+      "location": "docs/guide/install-and-move.md:373",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:backup"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/guide/install-and-move.md:343",
+      "location": "docs/guide/install-and-move.md:378",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:restore"
     },
