@@ -100,10 +100,14 @@ def download(url, path, digest=None, *, timeout=180):
     result = command(
         ["curl", "--disable", "--fail", "--silent", "--show-error", "--location",
          "--proto", "=https", "--proto-redir", "=https", "--max-time", str(timeout),
+         "--retry", "2", "--retry-all-errors", "--retry-max-time", str(timeout),
+         "--write-out", "%{http_code}",
          "--output", path, url],
-        timeout=timeout + 5,
+        timeout=timeout + 5, stdout_only=True,
     )
-    require(result.code == 0, "A required public download failed.")
+    label = path.name if re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", path.name) else "<asset>"
+    status = result.output[-3:].decode("ascii") if re.fullmatch(rb"[0-9]{3}", result.output[-3:]) else "unknown"
+    require(result.code == 0, f"Public download failed for {label} (curl exit {result.code}, HTTP {status}).")
     if digest is not None:
         require(sha256(path) == digest, "A download disagreed with its published SHA-256.")
 
@@ -203,7 +207,11 @@ def native_path(scratch, tools):
             if re.match(r"(?i)(python|pypy|pip|uv|gh|codex|tailscale|xdg-open|open$|sensible-browser)", name):
                 continue
             destination = public_tools / name
-            if not destination.is_symlink() and item.is_file() and os.access(item, os.X_OK):
+            try:
+                executable = item.is_file() and os.access(item, os.X_OK)
+            except PermissionError:
+                continue
+            if executable and not destination.is_symlink():
                 destination.symlink_to(item)
     return os.pathsep.join(map(str, (tools, public_tools)))
 
