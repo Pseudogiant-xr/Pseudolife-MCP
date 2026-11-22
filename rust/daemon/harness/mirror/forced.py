@@ -137,6 +137,10 @@ REAL_BANK_EXCLUDED = {
         "Python settle timeout (567 s, no OOM kill) and the retry an OOM kill (184 s), while the "
         "synthetic arm passed; accepted by the conductor under the maintainer's delegation of "
         "2026-11-11"),
+    "routes/seeded": (
+        "the fixed continuum capture requires a fresh template, and SeededBank refuses a "
+        "copied real bank before cloning; the synthetic arm still exercises the fixture; "
+        "excluded by the conductor, 2026-11-22"),
     # Maintainer decision, 2026-11-10 (partial run 870fb28fc's findings).
     "routes/stamped": (
         "its template deletes a builtin relation nothing references (no edge, edge proposal or "
