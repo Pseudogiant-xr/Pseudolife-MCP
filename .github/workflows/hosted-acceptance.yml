@@ -40,13 +40,16 @@ jobs:
         with:
           python-version: '3.12'
       - name: Observe installed release
+        timeout-minutes: 68
         run: python3 -m ops.acceptance.hosted run "$RELEASE_TAG" "$COLUMNS" "$PLATFORM" receipts
       - name: Upload allowlisted observations
-        if: ${{ !cancelled() && hashFiles('receipts/*.json', 'receipts/ledger/*.json') != '' }}
+        if: ${{ always() && hashFiles('receipts/*.json', 'receipts/ledger/*.json') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: acceptance-${{ matrix.platform }}
-          path: receipts/
+          path: |
+            receipts/*.json
+            receipts/ledger/*.json
           if-no-files-found: error
 
   summary:

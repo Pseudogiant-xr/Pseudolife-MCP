@@ -4,9 +4,17 @@ set -euo pipefail
 umask 077
 tag=$1
 commit=$2
+published_image=$3
 root="$HOME/.acceptance"
 mkdir "$root" "$root/bin" "$root/home"
 cd "$root"
+
+verify_published_daemon() {
+    local image
+    image=$(sudo -n docker inspect --format '{{.Image}}' pseudolife-mcp-daemon) || return
+    sudo -n docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image" |
+        grep -Fqx -- "$published_image"
+}
 
 sudo -n apt-get -qq update
 sudo -n env DEBIAN_FRONTEND=noninteractive apt-get -qq install -y ca-certificates curl docker.io docker-compose-v2 git
@@ -94,4 +102,8 @@ exec env -i HOME="$root/home" CODEX_HOME="$root/home/.codex" PATH="$root/bin" LC
     PSEUDOLIFE_MCP_NO_SPAWN=1 "$root/home/.local/share/pseudolife-mcp/bin/pseudolife-mcp" "$@"
 EOF
 chmod 700 "$root/owner"
+if ! verify_published_daemon; then
+    printf 'peer-image-unverified\n' >&2
+    exit 1
+fi
 printf 'peer-ready\n%s\n%s\n' "$guest_address" "$token"

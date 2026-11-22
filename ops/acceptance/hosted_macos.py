@@ -102,6 +102,9 @@ def lima_tool(scratch, budget):
 
 @contextmanager
 def lima_peer(release, repo, path, scratch, budget):
+    if release.daemon_digest is None:
+        raise Unavailable("The release does not provide a verified Rust daemon digest.")
+    published_image = f"ghcr.io/pseudogiant-xr/pseudolife-daemon-rust@{release.daemon_digest}"
     tool = lima_tool(scratch, budget)
     config = scratch / "guest.yaml"
     (scratch / "instances").mkdir()
@@ -122,10 +125,12 @@ def lima_peer(release, repo, path, scratch, budget):
         if started.code != 0:
             raise Unavailable("The Intel runner did not start the verified VZ guest.")
         shell = [str(tool), "shell", name]
-        setup = budget.run([*shell, "bash", "-s", "--", release.tag, release.commit],
+        setup = budget.run([*shell, "bash", "-s", "--", release.tag, release.commit, published_image],
                            env=env, data=GUEST_SCRIPT.read_bytes(), timeout=budget.remaining(600),
                            label="limactl shell <guest> <tagged daemon install>")
         if setup.code != 0:
+            if b"peer-image-unverified" in setup.output.splitlines():
+                raise Unavailable("The running guest daemon did not match the published Rust image digest.")
             raise Unavailable("The verified Linux guest did not finish its daemon setup.")
         details = setup.output.splitlines()[-3:]
         if len(details) != 3 or details[0] != b"peer-ready":
@@ -141,7 +146,7 @@ def lima_peer(release, repo, path, scratch, budget):
         remote = 'exec "$HOME/.acceptance/owner" "$@"'
         wrapper.write_text("#!/bin/sh\nexec " + shlex.join([*shell, "bash", "-c", remote, "owner"]) + ' "$@"\n')
         wrapper.chmod(0o700)
-        peer = Peer(DAEMONS[2], url, token_file, str(wrapper), env, repo)
+        peer = Peer(DAEMONS[2], url, token_file, str(wrapper), env, repo, engine="rust")
         if peer.sample()["status"] != 200:
             raise Unavailable("The Intel runner could not reach the private guest as its ordinary user.")
         yield peer
@@ -241,7 +246,7 @@ def apple_peer(release, repo, path, scratch, budget):
                 owner_env = profile.env | profile.registration().get("env", {})
                 owner_env.update({DAEMON_URL: url, TOKEN_FILE: str(token_file),
                                   "PSEUDOLIFE_MCP_DATABASE_URL": env["PSEUDOLIFE_MCP_DATABASE_URL"]})
-                yield Peer(DAEMONS[3], url, token_file, profile.launcher(), owner_env, repo)
+                yield Peer(DAEMONS[3], url, token_file, profile.launcher(), owner_env, repo, engine="rust")
             finally:
                 if daemon.poll() is None:
                     daemon.terminate()
@@ -292,6 +297,7 @@ def mac_upgrade(row, release, repo, profile, peer, scratch):
 def mac_recovery(row, release, repo, profile, peer, scratch):
     if peer.kind != DAEMONS[2]:
         row.daemon = "none"
+        row.daemon_engine = None
         raise Unavailable("No published Docker bank was available on hosted Apple silicon.")
     paired_install(row, repo, profile, peer)
     with registered_session(profile, repo) as mcp:
@@ -329,6 +335,7 @@ def run(tag, platform, output):
     release = None
     cleaned = False
     attempts = []
+    cap = None
     try:
         machine = "x86_64" if platform == "macos-x64" else "arm64"
         require(os.environ.get("GITHUB_ACTIONS") == "true" and os.uname().sysname == "Darwin"
@@ -345,38 +352,46 @@ def run(tag, platform, output):
             launchd = command(["launchctl", "print", f"gui/{os.getuid()}"])
             gui = console.code == launchd.code == 0 and console.output.strip() == str(os.getuid()).encode()
             manager, cap = (lima_peer, 720) if platform == "macos-x64" else (apple_peer, 1500)
+            budget = Budget(cap)
+            ready = False
+            pending_reason = None
             for index in (1, 2):
                 attempt = scratch / f"peer-{index}"
                 attempt.mkdir(mode=0o700)
-                budget = Budget(cap)
-                observation = {"attempt": index, "cap_seconds": cap, "steps": budget.steps}
+                budget.steps = []
+                observation = {"attempt": index, "steps": budget.steps}
                 attempts.append(observation)
                 try:
                     free_space(attempt)
                     with manager(release, repo, path, attempt, budget) as peer:
                         observation["assertion"] = "The real peer became ready."
+                        ready = True
                         for row in rows:
-                            if row.scenario in probes:
-                                observe(row, release, repo, path, peer, scratch, (launchd, gui), probes[row.scenario])
+                            observe(row, release, repo, path, peer, scratch, (launchd, gui), probes[row.scenario])
+                            row.checkpoint(output, release)
                     break
                 except Unavailable as error:
-                    observation["assertion"] = str(error)
-                    if index == 2:
-                        for row in rows:
-                            fallback = fallbacks.get(row.scenario)
-                            if fallback is not None:
-                                observe(row, release, repo, path, None, scratch, (launchd, gui), fallback, str(error))
-                            else:
-                                row.note = str(error)
+                    pending_reason = observation["assertion"] = str(error)
+                    if monotonic() >= budget.deadline:
+                        break
+            if not ready:
+                for row in rows:
+                    fallback = fallbacks.get(row.scenario)
+                    if fallback is not None:
+                        observe(row, release, repo, path, None, scratch, (launchd, gui), fallback, pending_reason)
+                    else:
+                        row.note = pending_reason
+                    row.checkpoint(output, release)
             cleaned = True
     except (Failed, OSError, ValueError, KeyError, IndexError, StopIteration) as error:
         for row in rows:
-            if row.scenario in probes:
+            if row.status != "fail":
                 row.status, row.note = "fail", str(error) if isinstance(error, Failed) else diagnostic_note(error)
     except Unavailable as error:
         for row in rows:
-            row.note = str(error)
-    write_json(output / "peer-setup.json", {"platform": platform, "attempts": attempts})
+            if row.note == "The scenario was not selected.":
+                row.note = str(error)
+    write_json(output / "peer-setup.json", {"platform": platform, "total_budget_seconds": cap, "attempts": attempts})
     for row in rows:
         row.write(output, release, cleaned)
         print(f"{row.scenario}: {row.status}. {row.note}")
@@ -396,6 +411,7 @@ def observe(row, release, repo, path, peer, scratch, launchd, probe, pending_rea
             row.note = pending_reason
         else:
             row.daemon = peer.kind
+            row.daemon_engine = peer.engine
             probe(row, release, repo, profile, peer, scope)
             row.status, row.note = "pass", matrix.SCENARIOS[row.scenario].outcome
     except Failed as error:

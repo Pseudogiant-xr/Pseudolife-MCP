@@ -1,11 +1,13 @@
 """Checks for the hosted acceptance evidence and workflow boundary."""
 
+from contextlib import contextmanager
+from io import BytesIO
 import json
 import os
 from pathlib import Path
 import subprocess
-from contextlib import contextmanager
 from types import SimpleNamespace
+from unittest.mock import Mock, call
 
 import pytest
 import yaml
@@ -17,19 +19,27 @@ def test_hosted_acceptance_is_dispatch_only():
     root = Path(__file__).resolve().parents[2]
     workflow = yaml.safe_load((root / ".github/workflows/hosted-acceptance.yml").read_text(encoding="utf-8"))
     events = workflow.get(True) or workflow["on"]
-    assert "workflow_dispatch" in events
+    assert set(events) == {"workflow_dispatch"}
     assert {"release", "columns"} == set(events["workflow_dispatch"]["inputs"])
     assert workflow["permissions"] == {"contents": "read"}
-    # The authorized hosted rehearsal has a separate branch-limited trigger.
-    if "push" in events:
-        branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=root, text=True,
-        ).strip()
-        assert branch == "acceptance-scratch/w85-hosted"
-        assert set(events) == {"workflow_dispatch", "push"}
-        assert events["push"] == {"branches": [branch]}
-    else:
-        assert set(events) == {"workflow_dispatch"}
+    assert all("permissions" not in job for job in workflow["jobs"].values())
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The hosted subprocess harness is POSIX-only")
+def test_command_timeout_bounds_pipe_drain_and_closes_streams(monkeypatch):
+    process = Mock(pid=123, stdin=BytesIO(), stdout=BytesIO(), stderr=BytesIO(), returncode=None)
+    process.communicate.side_effect = [subprocess.TimeoutExpired("fixture", 1),
+                                       subprocess.TimeoutExpired("fixture", 5, output=b"partial")]
+    process.wait.side_effect = subprocess.TimeoutExpired("fixture", 5)
+    kill = Mock()
+    monkeypatch.setattr(hosted.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(hosted.os, "killpg", kill)
+    result = hosted.command(["fixture"], timeout=1)
+    assert (result.code, result.output) == (124, b"partial")
+    assert process.communicate.call_args_list == [call(None, timeout=1), call(timeout=5)]
+    process.wait.assert_called_once_with(timeout=5)
+    kill.assert_called_once_with(process.pid, hosted.signal.SIGKILL)
+    assert all(pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
 
 def test_pending_receipt_does_not_copy_process_output(tmp_path):
@@ -40,7 +50,7 @@ def test_pending_receipt_does_not_copy_process_output(tmp_path):
     row.write(tmp_path, None, True)
     receipt = json.loads((tmp_path / "ordinary-native-use.json").read_text(encoding="utf-8"))
     assert "fixture raw output" not in json.dumps(receipt)
-    assert receipt["daemon"] == "built on the runner by the tag's installer (native arm64)"
+    assert receipt["daemon"] == "Linux arm64 checkout build"
     assert receipt["steps"][0]["exit_code"] == 0
     record = tmp_path / "ledger" / "ordinary-native-use--linux-arm64.json"
     assert json.loads(record.read_text(encoding="utf-8")) == matrix.pending(row.scenario, row.platform)
@@ -50,15 +60,33 @@ def test_summary_allows_only_known_status_and_peer_names(tmp_path, capsys):
     folder = tmp_path / "acceptance-macos-arm64"
     folder.mkdir()
     (folder / "clean-install.json").write_text(
-        json.dumps({"status": "pass", "daemon": hosted.DAEMONS[3]}), encoding="utf-8")
+        json.dumps({"status": "pass", "daemon": hosted.DAEMONS[3], "daemon_engine": "rust"}), encoding="utf-8")
     (folder / "ordinary-native-use.json").write_text(
-        json.dumps({"status": "pass", "daemon": "fixture raw output"}), encoding="utf-8")
+        json.dumps({"status": "not yet run", "daemon": "fixture raw output"}), encoding="utf-8")
     hosted.summary("macos-arm64", tmp_path)
     rendered = capsys.readouterr().out
-    assert "pass / source-built from the tag" in rendered
+    assert "pass / source-built from the tag / rust" in rendered
     assert "invalid result" in rendered
     assert "fixture raw output" not in rendered
     assert len(rendered.splitlines()) == 2 + len(matrix.SCENARIOS)
+
+
+def test_checkpoint_keeps_pass_pending_until_cleanup_and_records_daemon(tmp_path):
+    (tmp_path / "ledger").mkdir()
+    release = SimpleNamespace(commit="0" * 40, digest="1" * 64,
+                              archive=Path("pseudolife-mcp-0.25.0-aarch64-unknown-linux-gnu.tar.gz"))
+    row = hosted.Receipt("clean-install", "linux-arm64", daemon=hosted.DAEMONS[1], daemon_engine="python")
+    row.commands = [{"command": command, "exit_code": 0} for command in matrix.commands(row.scenario, row.platform)]
+    row.status = "pass"
+    row.note = matrix.SCENARIOS[row.scenario].outcome
+    path = tmp_path / "clean-install.json"
+    row.checkpoint(tmp_path, release)
+    provisional = json.loads(path.read_bytes())
+    assert (provisional["status"], provisional["cleanup_verified"]) == ("not yet run", False)
+    row.write(tmp_path, release, True)
+    assert json.loads(path.read_bytes())["status"] == "pass"
+    recorded = json.loads((tmp_path / "ledger" / "clean-install--linux-arm64.json").read_bytes())
+    assert (recorded["status"], recorded["daemon"], recorded["daemon_engine"]) == ("pass", row.daemon, "python")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
@@ -150,10 +178,45 @@ def test_guest_arguments_have_no_patch_markers():
             assert "+" not in line.split()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="The guest fixture requires Bash")
+@pytest.mark.parametrize("matches", [True, False])
+def test_guest_checks_the_running_image_repository_digest(tmp_path, matches):
+    root = Path(__file__).resolve().parents[2]
+    shell = (root / "ops/acceptance/hosted_lima_guest.sh").read_text(encoding="utf-8")
+    start = shell.index("verify_published_daemon() {")
+    verify = shell[start:shell.index("\n}", start) + 2]
+    repository = "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust"
+    expected = f"{repository}@sha256:{'a' * 64}"
+    observed = expected if matches else f"{repository}@sha256:{'b' * 64}"
+    script = tmp_path / "verify.sh"
+    script.write_text(
+        "set -euo pipefail\n"
+        "sudo() {\n"
+        "  case \"$3\" in\n"
+        "    inspect) test \"$6\" = pseudolife-mcp-daemon || return 2; printf 'running-image\\n';;\n"
+        f"    image) test \"$7\" = running-image || return 2; printf '%s\\n' '{observed}';;\n"
+        "    *) return 2;;\n"
+        "  esac\n"
+        "}\n"
+        f"published_image='{expected}'\n{verify}\nverify_published_daemon\n", encoding="utf-8",
+    )
+    assert subprocess.run(["bash", script], timeout=5, check=False).returncode == (0 if matches else 1)
+
+
 def test_peer_fetch_transport_failure_allows_offline_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(hosted, "command", lambda *_, **__: hosted.Result(22, b"503", 0))
     with pytest.raises(hosted.Unavailable, match="HTTP 503"):
         hosted.download("https://example.com/asset", tmp_path / "fixture.tar.gz", peer_asset=True)
+
+
+@pytest.mark.parametrize(("code", "status", "error"), [
+    (6, b"000", hosted.Unavailable), (22, b"403", hosted.Unavailable),
+    (22, b"429", hosted.Unavailable), (22, b"503", hosted.Unavailable), (22, b"404", hosted.Failed),
+])
+def test_release_metadata_distinguishes_temporary_failure_from_missing_tag(tmp_path, monkeypatch, code, status, error):
+    monkeypatch.setattr(hosted, "command", lambda *_, **__: hosted.Result(code, status, 0))
+    with pytest.raises(error, match=f"HTTP {status.decode()}"):
+        hosted.published_release("v0.25.0", "linux-arm64", tmp_path / "release")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The Mac acceptance harness is POSIX-only")
@@ -166,6 +229,39 @@ def test_offline_installer_rejects_a_false_endpoint_witness(tmp_path, monkeypatc
     row = hosted.Receipt("clean-install", "macos-arm64")
     with pytest.raises(hosted.Failed, match="closed endpoint"):
         hosted_macos.offline(row, None, tmp_path, profile, tmp_path)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Mac acceptance harness is POSIX-only")
+def test_mac_attempts_share_time_and_checkpoint_rows(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_macos as mac
+
+    output = tmp_path / "output"
+    (output / "ledger").mkdir(parents=True)
+    release = SimpleNamespace(commit="0" * 40, digest="1" * 64, archive=Path("release.tar.gz"),
+                              checkout=lambda _: tmp_path)
+    clock, starts = [0], []
+
+    @contextmanager
+    def guest(release, repo, path, scratch, budget):
+        starts.append(budget.remaining(720))
+        clock[0] += 10
+        if len(starts) == 1:
+            raise hosted.Unavailable("Fixture guest failed to start.")
+        yield SimpleNamespace(kind=hosted.DAEMONS[2], engine="rust")
+        assert all((output / f"{scenario}.json").is_file() for scenario in matrix.SCENARIOS)
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(os, "uname", lambda: SimpleNamespace(sysname="Darwin", machine="x86_64"))
+    monkeypatch.setattr(mac, "published_release", lambda *args: release)
+    monkeypatch.setattr(mac, "prepare_codex", lambda *args: tmp_path)
+    monkeypatch.setattr(mac, "native_path", lambda *args: "")
+    monkeypatch.setattr(mac, "free_space", lambda *args: None)
+    monkeypatch.setattr(mac, "command", lambda *args, **kwargs: hosted.Result(1, b"", 0))
+    monkeypatch.setattr(mac, "lima_peer", guest)
+    monkeypatch.setattr(mac, "observe", lambda *args: None)
+    monkeypatch.setattr(mac, "monotonic", lambda: clock[0])
+    assert mac.run("v0.25.0", "macos-x64", output) == 0
+    assert starts == [720, 710]
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
@@ -279,6 +375,21 @@ def test_service_cleanup_failure_cannot_be_marked_verified(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_stock_peer_keeps_installer_failure_when_cleanup_fails(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    release = SimpleNamespace(tag="v0.24.0", checkout=lambda _: tmp_path)
+    row = hosted.Receipt("upgrade-and-rollback", "linux-arm64")
+    monkeypatch.setattr(linux, "DockerFixture", lambda: SimpleNamespace(clean=lambda: False))
+    monkeypatch.setattr(linux, "stop_units", lambda _: False)
+    monkeypatch.setattr(linux, "install", lambda *args, **kwargs: hosted.Result(1, b"", 0))
+    with pytest.raises(hosted.Failed, match="The tagged stock installer left a healthy daemon"):
+        with linux.stock_peer(row, release, "", tmp_path):
+            pytest.fail("the stock installer failed")
+    assert row.cleanup_failed is True
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
 def test_failed_backup_retains_its_ledger_command(tmp_path, monkeypatch):
     from ops.acceptance import hosted_linux as linux
 
@@ -332,3 +443,5 @@ def test_failed_stock_install_does_not_hide_the_upgrade_row(tmp_path, monkeypatc
     assert calls == ["legacy"]
     clean = json.loads((tmp_path / "clean-install.json").read_bytes())
     assert clean["status"] == "fail"
+    upgrade = json.loads((tmp_path / "upgrade-and-rollback.json").read_bytes())
+    assert upgrade["status"] == "not yet run"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -30,16 +30,15 @@ API = f"https://api.github.com/repos/{PROJECT}/releases/tags"
 PLATFORMS = ("linux-arm64", "macos-x64", "macos-arm64")
 SELECTIONS = {**{platform: (platform,) for platform in PLATFORMS},
               "all": PLATFORMS, "macos": PLATFORMS[1:]}
-DAEMONS = ("none", "built on the runner by the tag's installer (native arm64)",
-           "published image in a Linux guest", "source-built from the tag")
+DAEMONS = ("none", *matrix.DAEMON_KINDS)
 OUTCOMES = ("pass", "fail", "not yet run")
 INSTALL = "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh"
 CLIENT = "pseudolife-mcp"
 TOKEN_FILE = "PSEUDOLIFE_MCP_TOKEN_FILE"
 DAEMON_URL = "PSEUDOLIFE_MCP_DAEMON_URL"
 CODEX_ASSETS = {
-    "linux-arm64": ("rust-v0.134.0", "aarch64-unknown-linux-musl",
-                    "8e066f998111eb8b44250ac11df004daa07fadf276c5942a7183cb8e421091a3"),
+    "linux-arm64": ("rust-v0.171.0", "aarch64-unknown-linux-musl",
+                    "bcf50b836385e51bd2976ab2bbe92b1b08a1cbe37712eb8dbe378aa78d24871c"),
     "macos-x64": ("rust-v0.171.0", "x86_64-apple-darwin",
                   "6f9b1144ffaa64aa12bf30f312405b266b84c433bae9f070be10245762c7aa44"),
     "macos-arm64": ("rust-v0.171.0", "aarch64-apple-darwin",
@@ -71,18 +70,31 @@ class Result:
 def command(argv, *, env=None, cwd=None, timeout=60, data=None, stdout_only=False) -> Result:
     """Keep arbitrary subprocess output and argv outside published evidence."""
     started = monotonic()
-    with subprocess.Popen(
+    process = subprocess.Popen(
         argv, cwd=cwd, env=env, start_new_session=True,
         stdin=subprocess.DEVNULL if data is None else subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE if stdout_only else subprocess.STDOUT,
-    ) as process:
+    )
+    try:
         try:
             output, _ = process.communicate(data, timeout=timeout)
             code = process.returncode
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            output, _ = process.communicate()
             code = 124
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            try:
+                output, _ = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired as error:
+                # A detached descendant can keep the pipe open after killpg.
+                output = error.output or b""
+    finally:
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        if process.returncode is None:
+            with suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5)
     return Result(code, output, round(monotonic() - started, 3))
 
 
@@ -96,7 +108,7 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def download(url, path, digest=None, *, timeout=180, peer_asset=False):
+def download(url, path, digest=None, *, timeout=180, peer_asset=False, release_metadata=False):
     result = command(
         ["curl", "--disable", "--fail", "--silent", "--show-error", "--location",
          "--proto", "=https", "--proto-redir", "=https", "--max-time", str(timeout),
@@ -109,7 +121,10 @@ def download(url, path, digest=None, *, timeout=180, peer_asset=False):
     status = result.output[-3:].decode("ascii") if re.fullmatch(rb"[0-9]{3}", result.output[-3:]) else "unknown"
     if result.code != 0:
         message = f"Public download failed for {label} (curl exit {result.code}, HTTP {status})."
-        if peer_asset and result.code in (5, 6, 7, 18, 22, 28, 35, 52, 55, 56, 124):
+        transient = result.code in (5, 6, 7, 18, 28, 35, 52, 55, 56, 124)
+        if result.code == 22:
+            transient = peer_asset or status in ("403", "429") or status.startswith("5")
+        if transient and (peer_asset or release_metadata):
             raise Unavailable(message)
         raise Failed(message)
     if digest is not None:
@@ -124,6 +139,7 @@ class Release:
     commit: str
     archive: Path
     digest: str
+    daemon_digest: str | None = None
 
     @property
     def version(self):
@@ -144,7 +160,7 @@ def published_release(tag, platform, folder):
     require(re.fullmatch(rf"v{matrix.VERSION}", tag), "Release tag has a supported version.")
     folder.mkdir()
     metadata = folder / "release.json"
-    download(f"{API}/{tag}", metadata)
+    download(f"{API}/{tag}", metadata, release_metadata=True)
     release = json.loads(metadata.read_bytes())
     require(release.get("tag_name") == tag and release.get("draft") is False,
             "The selected tag is a published release.")
@@ -175,9 +191,15 @@ def published_release(tag, platform, folder):
     commit = refs.get(f"refs/tags/{tag}^{{}}", refs.get(f"refs/tags/{tag}", ""))
     require(re.fullmatch(r"[a-f0-9]{40}", commit), "Published tag resolved to a full commit.")
     ready = folder / "RELEASE-READY.json"
+    daemon_digest = None
     if ready.is_file():
-        require(json.loads(ready.read_bytes())["commit"] == commit, "Release readiness names the tag commit.")
-    return Release(tag, platform, folder, commit, folder / archive, digests[archive])
+        marker = json.loads(ready.read_bytes())
+        require(marker["commit"] == commit, "Release readiness names the tag commit.")
+        daemon_digest = marker.get("images", {}).get("pseudolife-daemon-rust")
+        require(daemon_digest is None or isinstance(daemon_digest, str)
+                and re.fullmatch(r"sha256:[a-f0-9]{64}", daemon_digest),
+                "Release readiness contains a valid published Rust daemon digest.")
+    return Release(tag, platform, folder, commit, folder / archive, digests[archive], daemon_digest)
 
 
 def prepare_codex(platform, scratch):
@@ -319,6 +341,7 @@ class Peer:
     owner_executable: str
     owner_env: dict[str, str]
     checkout: Path
+    engine: str
 
     def sample(self):
         return get(self.url + "/api/episodes?limit=1", self.token_file.read_text().strip())[0]
@@ -419,6 +442,7 @@ class Receipt:
     scenario: str
     platform: str
     daemon: str = "none"
+    daemon_engine: str | None = None
     steps: list = field(default_factory=list)
     commands: list = field(default_factory=list)
     status: str = "not yet run"
@@ -435,8 +459,17 @@ class Receipt:
         if required:
             require(ok, assertion)
 
+    def checkpoint(self, output, release):
+        self._write_receipt(output, release, False, provisional=True)
+
     def write(self, output, release, cleanup):
         cleanup = cleanup and not self.cleanup_failed
+        identifies_daemon = self.daemon in matrix.DAEMON_KINDS and self.daemon_engine in matrix.DAEMON_ENGINES
+        if self.status == "pass":
+            if release is None or not self.commands or not identifies_daemon:
+                self.status, self.note = "fail", "The scenario lacked release, command or daemon evidence."
+            elif not cleanup:
+                self.status, self.note = "fail", "Fixture cleanup was not verified."
         row = matrix.pending(self.scenario, self.platform)
         if release is not None and self.commands and self.status != "not yet run":
             row.update({
@@ -447,20 +480,32 @@ class Receipt:
                             else matrix.FAILURE_OUTCOMES[3 if self.cleanup_failed else 2]),
                 "cleanup": {"done": cleanup, "verified": cleanup},
             })
+            if identifies_daemon:
+                row.update(daemon=self.daemon, daemon_engine=self.daemon_engine)
         matrix.write_record(output / "ledger", row)
+        self._write_receipt(output, release, cleanup)
+
+    def _write_receipt(self, output, release, cleanup, *, provisional=False):
+        status, note = self.status, self.note
+        if provisional and status == "pass":
+            status, note = "not yet run", "The scenario met its assertions. Fixture cleanup remains unverified."
         receipt = {
             "scenario": self.scenario, "platform": self.platform, "daemon": self.daemon,
-            "status": self.status, "assertion": self.note, "steps": self.steps, "cleanup_verified": cleanup,
+            "daemon_engine": self.daemon_engine, "status": status, "assertion": note,
+            "steps": self.steps, "cleanup_verified": cleanup,
         }
         if release is not None:
             receipt.update(release_commit=release.commit, archive=release.archive.name, archive_sha256=release.digest)
-        write_json(output / f"{self.scenario}.json", receipt)
+        write_json(output / f"{self.scenario}.json", receipt, replace=True)
 
 
-def write_json(path, payload):
-    with path.open("x", encoding="utf-8") as stream:
+def write_json(path, payload, *, replace=False):
+    target = path.with_suffix(".tmp") if replace else path
+    with target.open("x", encoding="utf-8") as stream:
         json.dump(payload, stream, indent=2)
         stream.write("\n")
+    if replace:
+        target.replace(path)
 
 
 def summary(selection, folder):
@@ -478,8 +523,13 @@ def summary(selection, folder):
                 result = json.loads(path.read_bytes())
                 status = result.get("status")
                 daemon = result.get("daemon")
-                statuses.append(f"{status} / {daemon}" if status in OUTCOMES and daemon in DAEMONS
-                                else "invalid result")
+                engine = result.get("daemon_engine")
+                known = status in OUTCOMES and daemon in DAEMONS and (engine in matrix.DAEMON_ENGINES or engine is None)
+                pass_provenance = status != "pass" or (daemon in matrix.DAEMON_KINDS and engine in matrix.DAEMON_ENGINES)
+                if known and pass_provenance:
+                    statuses.append(f"{status} / {daemon}" + (f" / {engine}" if engine else ""))
+                else:
+                    statuses.append("invalid result")
         print(f"| {scenario} | {' | '.join(statuses)} |")
 
 

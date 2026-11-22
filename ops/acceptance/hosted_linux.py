@@ -11,6 +11,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 from threading import Event, Thread
 from time import monotonic, sleep
@@ -257,6 +258,19 @@ def image_observation(container_id, existing_images):
     }
 
 
+def clean_stock(scope, profile, *, remove=()):
+    checks = [lambda: stop_units(profile), scope.clean]
+    for path in remove:
+        checks.append(lambda path=path: shutil.rmtree(path) is None)
+    cleaned = True
+    for check in checks:
+        try:
+            cleaned = check() and cleaned
+        except (Failed, OSError, ValueError):
+            cleaned = False
+    return cleaned
+
+
 @contextmanager
 def baseline(release, path, scratch, output):
     """Observe the tag's stock Docker install before any emulation."""
@@ -310,17 +324,21 @@ def baseline(release, path, scratch, output):
                 "installer_lines": codex_lines,
             },
         }
+        receipt["cleanup_verified"] = False
+        write_json(output / "default-install.json", receipt, replace=True)
         yield receipt, result, repo, profile
     finally:
-        services_clean = stop_units(profile)
-        docker_clean = docker_state.clean()
-        cleaned = services_clean and docker_clean
-        shutil.rmtree(profile.folder)
-        shutil.rmtree(repo)
+        primary = sys.exception()
+        cleaned = clean_stock(docker_state, profile, remove=(profile.folder, repo))
         if receipt is not None:
             receipt["cleanup_verified"] = cleaned
-            write_json(output / "default-install.json", receipt)
-        require(cleaned, "The disposable environment's Docker objects and user services were removed.")
+            try:
+                write_json(output / "default-install.json", receipt, replace=True)
+            except OSError:
+                if primary is None:
+                    raise
+        if primary is None:
+            require(cleaned, "The disposable environment's Docker objects and user services were removed.")
 
 
 def native_images(images):
@@ -332,7 +350,9 @@ def native_images(images):
     )
 
 
-def stock_connection(release, profile, repo, scratch, *, legacy=False):
+def stock_connection(release, profile, repo, scratch, engine, *, legacy=False):
+    if engine not in matrix.DAEMON_ENGINES:
+        raise Unavailable("The stock daemon engine was not identified from the running image.")
     if legacy:
         require(profile.installed_launcher.is_file(), "The stock v0.24.0 installer installed its launcher.")
     else:
@@ -347,7 +367,7 @@ def stock_connection(release, profile, repo, scratch, *, legacy=False):
     env = profile.env | {TOKEN_FILE: str(token_file), DAEMON_URL: LOOPBACK, "PSEUDOLIFE_MCP_NO_SPAWN": "1"}
     if legacy:
         env["PATH"] += os.pathsep + os.environ["PATH"]
-    peer = Peer(DAEMONS[1], LOOPBACK, token_file, str(profile.installed_launcher), env, repo)
+    peer = Peer(DAEMONS[1], LOOPBACK, token_file, str(profile.installed_launcher), env, repo, engine)
     require(peer.sample()["status"] == 200, "The stock daemon accepted its disposable token.")
     return peer
 
@@ -376,14 +396,15 @@ def stock_peer(row, release, path, scratch):
         if not native_images(images):
             raise Unavailable("The stock installation did not supply the identified native arm64 checkout stack.")
         row.daemon = DAEMONS[1]
-        peer = stock_connection(release, profile, repo, scratch, legacy=legacy)
+        row.daemon_engine = next(image["engine_from_image"] for image in images if image["container"] == DAEMON)
+        peer = stock_connection(release, profile, repo, scratch, row.daemon_engine, legacy=legacy)
         yield peer, profile
     finally:
+        primary = sys.exception()
         row.cleanup_failed = True
-        services_clean = stop_units(profile)
-        docker_clean = scope.clean()
-        row.cleanup_failed = not (services_clean and docker_clean)
-        require(not row.cleanup_failed, "The disposable environment's Docker objects and user services were removed.")
+        row.cleanup_failed = not clean_stock(scope, profile)
+        if primary is None and row.status != "fail":
+            require(not row.cleanup_failed, "The disposable environment's Docker objects and user services were removed.")
 
 
 def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=False):
@@ -727,8 +748,10 @@ def failure(receipt, release, repo, profile, peer, scratch):
     require(len(locks) == 1, "The native runtime lock was present.")
     with locks[0].open("r+b") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = install(repo, profile, flags, timeout=600)
-        receipt.observe(f"{INSTALL} <locked-runtime>", result,
+        result = command([profile.installed_launcher, "runtime", "install", "--archive", release.archive,
+                          "--sha256sums", release.folder / "SHA256SUMS", "--version", release.version],
+                         cwd=repo, env=profile.env)
+        receipt.observe(f"{CLIENT} runtime install <locked-runtime>", result,
                         result.code not in (0, 124) and b"another native runtime update" in result.output
                         and unchanged(),
                         "The installed lock prevented concurrent activation.", template=templates[3])
@@ -776,11 +799,12 @@ def bank_recovery(receipt, release, repo, profile, peer, scratch):
     raise Unavailable("Backup and restore were exercised on the stock arm64 bank. Move and legacy import-state witnesses remain pending.")
 
 
-def run_case(row, probe):
+def run_case(row, probe, *, confirm_pass=True):
     try:
         probe()
-        row.status = "pass"
-        row.note = matrix.SCENARIOS[row.scenario].outcome
+        if confirm_pass:
+            row.status = "pass"
+            row.note = matrix.SCENARIOS[row.scenario].outcome
     except Unavailable as error:
         row.note = str(error)
     except Failed as error:
@@ -789,6 +813,10 @@ def run_case(row, probe):
     except (OSError, ValueError, KeyError, IndexError) as error:
         row.status = "fail"
         row.note = diagnostic_note(error)
+    if row.cleanup_failed:
+        if row.status != "fail":
+            row.note = "The disposable environment could not be cleaned up and verified."
+        row.status = "fail"
 
 
 def diagnostic_note(error):
@@ -800,7 +828,7 @@ def diagnostic_note(error):
     return f"The harness could not complete the observation{diagnostic}."
 
 
-def probe_stock(release, provenance, result, repo, profile, scratch, by_name):
+def probe_stock(release, provenance, result, repo, profile, scratch, by_name, output):
     clean = by_name["clean-install"]
     ready = result.code == 0 and provenance["daemon_healthy"]
     clean.observe(f"{INSTALL} <stock Docker>", result, ready,
@@ -818,7 +846,14 @@ def probe_stock(release, provenance, result, repo, profile, scratch, by_name):
             by_name[name].note = "The stock installer did not produce the identified native arm64 checkout stack."
         return
     try:
-        peer = stock_connection(release, profile, repo, scratch)
+        engine = next(image["engine_from_image"] for image in provenance["running_containers"]
+                      if image["container"] == DAEMON)
+        clean.daemon, clean.daemon_engine = DAEMONS[1], engine
+        peer = stock_connection(release, profile, repo, scratch, engine)
+    except Unavailable as error:
+        for name, _ in stock_cases:
+            by_name[name].note = str(error)
+        return
     except Failed as error:
         clean.status, clean.note = "fail", str(error)
         for name, _ in stock_cases[1:]:
@@ -827,9 +862,11 @@ def probe_stock(release, provenance, result, repo, profile, scratch, by_name):
     for name, probe in stock_cases:
         row = by_name[name]
         row.daemon = peer.kind
+        row.daemon_engine = peer.engine
         scope = scratch / name
         scope.mkdir()
         run_case(row, lambda: probe(row, release, repo, profile, peer, scope))
+        row.checkpoint(output, release)
 
 
 def run(tag, platform, output):
@@ -848,7 +885,10 @@ def run(tag, platform, output):
             before_docker = DockerFixture()
             by_name = {row.scenario: row for row in receipts}
             with baseline(release, path, scratch, output) as (provenance, result, repo, profile):
-                probe_stock(release, provenance, result, repo, profile, scratch, by_name)
+                probe_stock(release, provenance, result, repo, profile, scratch, by_name, output)
+                for row in receipts:
+                    if row.scenario != "upgrade-and-rollback" and not (output / f"{row.scenario}.json").is_file():
+                        row.checkpoint(output, release)
 
             def do_upgrade():
                 if release.tag == "v0.24.0":
@@ -859,21 +899,26 @@ def run(tag, platform, output):
                 row = by_name["upgrade-and-rollback"]
                 wait_stock_ports(row)
                 with stock_peer(row, old, path, scope) as (peer, profile):
-                    stock_upgrade(row, release, peer.checkout, profile, peer, scope)
+                    run_case(row, lambda: stock_upgrade(row, release, peer.checkout, profile, peer, scope))
+                    row.checkpoint(output, release)
 
-            run_case(by_name["upgrade-and-rollback"], do_upgrade)
+            run_case(by_name["upgrade-and-rollback"], do_upgrade, confirm_pass=False)
+            by_name["upgrade-and-rollback"].checkpoint(output, release)
             cleaned = before_docker.clean()
     except Unavailable as error:
         for receipt in receipts:
-            receipt.note = str(error)
+            if receipt.note == "The scenario was not selected.":
+                receipt.note = str(error)
     except Failed as error:
         for receipt in receipts:
-            receipt.status = "fail"
-            receipt.note = str(error)
+            if receipt.status != "fail":
+                receipt.status = "fail"
+                receipt.note = str(error)
     except (OSError, ValueError, KeyError, IndexError, matrix.RecordError) as error:
         for receipt in receipts:
-            receipt.status = "fail"
-            receipt.note = diagnostic_note(error)
+            if receipt.status != "fail":
+                receipt.status = "fail"
+                receipt.note = diagnostic_note(error)
     finally:
         for receipt in receipts:
             if receipt.status == "pass" and not cleaned:
