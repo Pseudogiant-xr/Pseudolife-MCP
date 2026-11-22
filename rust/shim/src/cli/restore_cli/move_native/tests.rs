@@ -917,14 +917,18 @@ async fn move_counts_user_audit_rows_in_preflight_and_after_start() {
     tokio::spawn(connection);
     client.batch_execute(
         "CREATE TEMP TABLE coordination_events \
-         (seq bigint, event text, actor text, principal text, agent_id text, payload text)",
+         (seq bigint, event text, actor text, principal text, agent_id text, payload text); \
+         CREATE TABLE public.meta (key text PRIMARY KEY, value jsonb); \
+         INSERT INTO public.meta VALUES ('coordination_bank_id', '\"fixture\"')",
     ).await.unwrap();
     let mut observed = Vec::new();
     for rows in [
         "(1, 'bank_identity', 'daemon', 'daemon', '', '{\"bank_id\":\"fixture\"}')",
         "(1, 'bank_identity', 'agent', 'default', '', '{\"bank_id\":\"fixture\"}')",
-        "(1, 'bank_identity', 'agent', 'default', '', '{}'), (2, 'register', 'agent', 'default', 'agent-id', '{}')",
+        "(1, 'bank_identity', 'agent', 'default', '', '{\"bank_id\":\"fixture\"}'), (2, 'register', 'agent', 'default', 'agent-id', '{}')",
         "(1, 'register', 'daemon', 'daemon', '', '{\"bank_id\":\"fixture\"}')",
+        "(1, 'bank_identity', 'daemon', 'daemon', '', '{\"bank_id\":\"different\"}')",
+        "(1, 'bank_identity', 'daemon', 'daemon', '', '{}')",
     ] {
         client.batch_execute(&format!("TRUNCATE coordination_events; INSERT INTO coordination_events VALUES {rows}")).await.unwrap();
         for filter in [probe::user_filter("coordination_events"), probe::served_filter("coordination_events")] {
@@ -932,7 +936,7 @@ async fn move_counts_user_audit_rows_in_preflight_and_after_start() {
             observed.push(client.query_one(&query, &[]).await.unwrap().get::<_, i64>(0));
         }
     }
-    assert_eq!(observed, [0, 0, 0, 0, 1, 1, 1, 1]);
+    assert_eq!(observed, [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]);
 }
 
 #[test]

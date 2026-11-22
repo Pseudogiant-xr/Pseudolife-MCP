@@ -108,6 +108,7 @@ impl Ready {
 pub struct Snapshot {
     pub init_refusal: Option<String>,
     pub not_ready: Option<String>,
+    pub bank_identity_failed: bool,
     pub storage: Option<Arc<Storage>>,
     pub embedder: Option<Value>,
     /// The published stores' startup state, once an init has completed its
@@ -334,6 +335,17 @@ impl Service {
         f(&mut self.snap.write().expect("snapshot lock"));
     }
 
+    pub(crate) fn publish_board_bank_identity(&self, observed: &Arc<Storage>, id: &str) {
+        observed.remember_bank_id(id);
+        if let Some(current) = self.snapshot().storage
+            && !Arc::ptr_eq(observed, &current)
+        {
+            // The board reply belongs to the old storage. Give the current
+            // storage another lookup without importing that reply's value.
+            current.retry_bank_id_lookup();
+        }
+    }
+
     /// `_arm_retry_backoff`.
     fn arm_backoff(inner: &mut Inner) {
         if crate::mutants::active("no-backoff") {
@@ -380,32 +392,53 @@ impl Service {
             Ok(s) => s,
             Err(OpenError::LeaseHeld(msg)) => {
                 // Retryable: the holder may leave.
-                self.update(|s| s.not_ready = Some(msg.clone()));
+                self.update(|s| {
+                    s.bank_identity_failed = false;
+                    s.not_ready = Some(msg.clone());
+                });
                 Self::arm_backoff(inner);
                 return Err(msg);
             }
             Err(OpenError::Refused(msg)) => {
                 // The embedding-dimension refusal: recorded, no backoff.
-                self.update(|s| s.init_refusal = Some(msg.clone()));
+                self.update(|s| {
+                    s.bank_identity_failed = false;
+                    s.init_refusal = Some(msg.clone());
+                });
                 return Err(msg);
             }
             // A connection failure records nothing (spec L3).
             Err(OpenError::Failed(msg)) => return Err(msg),
         };
-        self.update(|s| {
-            s.init_refusal = None;
-            s.not_ready = None;
-        });
         // A failed search_path check closes the session and records nothing.
-        storage.check_search_path().await?;
-        if !storage.read_only() {
-            storage.initialize_bank_identity().await.map_err(|error| {
-                format!("bank identity initialization failed ({})", error.public().code)
-            })?;
+        if let Err(message) = storage.check_search_path().await {
+            self.update(|s| {
+                s.init_refusal = None;
+                s.not_ready = None;
+                s.bank_identity_failed = false;
+            });
+            return Err(message);
+        }
+        if !storage.read_only()
+            && let Err(error) = storage.initialize_bank_identity().await
+        {
+            let message = format!("bank identity initialization failed ({})", error.public().code);
+            self.update(|s| {
+                s.bank_identity_failed = true;
+                s.init_refusal = None;
+                s.not_ready = Some(message.clone());
+            });
+            Self::arm_backoff(inner);
+            return Err(message);
         }
         let storage = Arc::new(storage);
         inner.storage = Some(storage.clone());
-        self.update(|s| s.storage = Some(storage.clone()));
+        self.update(|s| {
+            s.storage = Some(storage.clone());
+            s.init_refusal = None;
+            s.not_ready = None;
+            s.bank_identity_failed = false;
+        });
         Ok(storage)
     }
 
@@ -1632,7 +1665,7 @@ mod tests {
             service.config.coordination.clone(), dsn.clone(), service.clone(), principals.clone(),
         );
         let second = crate::board::Board::new(
-            service.config.coordination.clone(), dsn, service.clone(), principals.clone(),
+            service.config.coordination.clone(), dsn.clone(), service.clone(), principals.clone(),
         );
         let headers = std::collections::HashMap::new();
         let (first, second) = tokio::join!(
@@ -1648,6 +1681,24 @@ mod tests {
         assert_eq!(rows[0].get::<_, Value>(0), json!({"bank_id": first["bank_id"]}));
         let health = crate::health::payload(&service, &principals, false).await;
         let digest = sha2::Sha256::digest(first["bank_id"].as_str().unwrap().as_bytes());
+        assert_eq!(health["bank"], hex::encode(digest)[..16]);
+
+        // The previous board connection can finish delivering its result
+        // after the writer session has been replaced and the bank restored.
+        let pid: i32 = storage.client().query_one("SELECT pg_backend_pid()", &[]).await.unwrap().get(0);
+        let mut side = crate::board::db::Conn::new(dsn.clone());
+        let side = side.client().await.unwrap();
+        assert!(side.query_one("SELECT pg_terminate_backend($1, 5000)", &[&pid]).await.unwrap().get::<_, bool>(0));
+        side.execute("DELETE FROM meta WHERE key = 'coordination_bank_id'", &[]).await.unwrap();
+        let current = Arc::new(Storage::open(&dsn).await.unwrap());
+        assert_eq!(current.cached_bank_id().await, None);
+        let replacement = "11111111-1111-4111-8111-111111111111";
+        side.execute("INSERT INTO meta (key, value) VALUES ('coordination_bank_id', $1)",
+                     &[&json!(replacement)]).await.unwrap();
+        service.update(|snapshot| snapshot.storage = Some(current));
+        service.publish_board_bank_identity(&storage, first["bank_id"].as_str().unwrap());
+        let health = crate::health::payload(&service, &principals, false).await;
+        let digest = sha2::Sha256::digest(replacement.as_bytes());
         assert_eq!(health["bank"], hex::encode(digest)[..16]);
     }
 

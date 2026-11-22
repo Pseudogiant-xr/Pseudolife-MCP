@@ -879,6 +879,10 @@ impl Storage {
             .get_or_insert_with(|| id.to_owned());
     }
 
+    pub(crate) fn retry_bank_id_lookup(&self) {
+        self.bank_id.lock().unwrap().retry_at = None;
+    }
+
     /// `cached_bank_id` (postgres.py:721-752, spec H9): the coordination
     /// bank id, read on a fresh connection at most once per 60 s (the
     /// window is armed before the attempt) until found, then never again.

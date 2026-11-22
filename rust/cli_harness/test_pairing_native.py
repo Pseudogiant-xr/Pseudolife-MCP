@@ -255,7 +255,8 @@ def new_daemon(binary, home, bank, **overrides):
 def wait_for_daemon_health(daemon, predicate):
     from rust.harness_support.readiness import read_health
 
-    daemon.start(stages=())
+    if daemon.proc is None:
+        daemon.start(stages=())
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline and daemon.proc.poll() is None:
         try:
@@ -298,7 +299,7 @@ def test_fresh_daemon_reports_bank_identity_across_restart(native_daemon, tmp_pa
 
 
 @pytest.mark.parametrize("mode", ["config", "environment"])
-def test_read_only_start_preserves_bank(native_daemon, tmp_path, fresh_bank, mode):
+def test_read_only_start_preserves_bank(candidate, native_daemon, tmp_path, fresh_bank, mode):
     _bank.create(fresh_bank)
     before = _bank.dump(fresh_bank)
     daemon = new_daemon(native_daemon, tmp_path, fresh_bank,
@@ -312,6 +313,11 @@ def test_read_only_start_preserves_bank(native_daemon, tmp_path, fresh_bank, mod
                                         body.get("init_refusal", "").startswith(
                                             "read-only shadow requires SELECT-only bank credentials"))
         assert health["read_only"] is True and health["bank"] is None
+        result = invoke(candidate, tmp_path, fresh_bank, ["laptop"], port=daemon.port)
+        assert result.returncode == 4
+        matches = json.loads(result.stdout)["error"] == (
+            "the local daemon serves a read-only bank: run invite on the writable daemon host")
+        assert matches, "an unhealthy shadow gave the wrong invite remedy"
     finally:
         daemon.stop()
     assert _bank.dump(fresh_bank) == before
@@ -332,6 +338,37 @@ def test_first_invite_uses_fresh_daemon_bank(candidate, native_daemon, tmp_path,
             row = conn.execute("SELECT code_hash FROM principals WHERE principal='laptop'").fetchone()
         matches = row == (hashlib.sha256(code.encode()).hexdigest(),)
         assert matches, "invite did not store the code in the daemon's bank"
+    finally:
+        daemon.stop()
+
+
+def test_transient_bank_identity_failure_retries_startup(candidate, native_daemon, tmp_path, fresh_bank):
+    _bank.create(fresh_bank)
+    with _bank.connect(fresh_bank) as conn:
+        conn.execute("""CREATE FUNCTION block_bank_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NEW.key = 'coordination_bank_id' THEN
+                    RAISE EXCEPTION 'fixture identity lock unavailable' USING ERRCODE = '55P03';
+                END IF;
+                RETURN NEW;
+            END $$;
+            CREATE TRIGGER block_bank_identity BEFORE INSERT ON meta
+                FOR EACH ROW EXECUTE FUNCTION block_bank_identity()""")
+    daemon = new_daemon(native_daemon, tmp_path, fresh_bank)
+    try:
+        health = wait_for_daemon_health(daemon, lambda status, body:
+                                        status == 503 and body.get("bank_identity_failed") is True)
+        assert health["bank"] is None
+        result = invoke(candidate, tmp_path, fresh_bank, ["laptop"], port=daemon.port)
+        assert result.returncode == 4
+        matches = json.loads(result.stdout)["error"] == (
+            "the daemon could not initialize its bank identity: check its startup logs before re-running invite")
+        assert matches, "identity initialization failure gave the wrong invite remedy"
+        with _bank.connect(fresh_bank) as conn:
+            conn.execute("DROP TRIGGER block_bank_identity ON meta")
+        health = health_after_storage_opens(daemon)
+        assert "bank_identity_failed" not in health
+        assert health["bank"] == hashlib.sha256(audit_identity(fresh_bank).encode()).hexdigest()[:16]
     finally:
         daemon.stop()
 

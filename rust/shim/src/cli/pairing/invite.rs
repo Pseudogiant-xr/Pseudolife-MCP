@@ -689,6 +689,21 @@ async fn daemon_check(
 ) -> Result<Result<pyjson::Dict, Vec<u16>>, Refusal> {
     let local = format!("http://127.0.0.1:{port}");
     let health = net::invite_health(&local).await.map_err(|_| Refusal::new("the daemon /health response exceeds the JSON nesting limit; update the daemon before inviting"))?;
+    const READ_ONLY_BANK: &str =
+        "the local daemon serves a read-only bank: run invite on the writable daemon host";
+    if let Some(health) = &health
+        && pyjson::get(health, "status").and_then(J::as_str) == Some("degraded")
+        && !pyjson::get(health, "bank").is_some_and(J::truthy)
+    {
+        if pyjson::get(health, "read_only") == Some(&J::Bool(true)) {
+            return Ok(Err(units(READ_ONLY_BANK)));
+        }
+        if pyjson::get(health, "bank_identity_failed") == Some(&J::Bool(true)) {
+            return Ok(Err(units(
+                "the daemon could not initialize its bank identity: check its startup logs before re-running invite",
+            )));
+        }
+    }
     let Some(health) =
         health.filter(|h| pyjson::get(h, "status").and_then(J::as_str) == Some("ok"))
     else {
@@ -742,7 +757,7 @@ async fn daemon_check(
     }
     if !member("bank").truthy() {
         let message = if member("read_only") == J::Bool(true) {
-            "the local daemon serves a read-only bank: run invite on the writable daemon host"
+            READ_ONLY_BANK
         } else if member("db") == J::Null
             && matches!(member("pending"), J::List(stages) if stages.iter().any(|stage| stage.as_str() == Some("init")))
         {

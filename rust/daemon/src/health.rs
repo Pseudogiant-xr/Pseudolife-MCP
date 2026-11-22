@@ -453,6 +453,9 @@ pub async fn payload(
         p.insert("status".into(), json!("degraded"));
         p.insert("not_ready".into(), json!(r));
     }
+    if snap.bank_identity_failed {
+        p.insert("bank_identity_failed".into(), json!(true));
+    }
     // `migration_partial` and `lesson_reconciliation_required` have no
     // producer here yet (divergences.md, "/health"). The two below, like
     // them, never touch `status`.
