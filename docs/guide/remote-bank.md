@@ -160,16 +160,13 @@ the tailnet address, and `--port` takes ASCII digits only. `tailscale` is
 found only in absolute `PATH` directories (and its usual install
 location), never in the current directory.
 
-`/health` reports the bank fingerprint as `bank`: the first 16 hex
-characters of the SHA-256 of the bank's coordination identity. It is not a
-secret; it tells two daemons' banks apart, which `version` and `schema`
-cannot. It is `null` until the daemon's storage has started and the bank
-identity exists (a freshly started daemon that has not served a call yet,
-a bank whose agent board has never been used, or a file-mode daemon), and
-in any `/health` whose database check failed; callers treat `null` as
-unknown. Once storage has started, `/health` reads the identity after a
-successful database check, at most once a minute, until it exists, then
-keeps it.
+`/health` reports the bank fingerprint as `bank`, the first 16 hex
+characters of the SHA-256 of the bank's coordination identity. The Rust
+daemon creates an identity for a fresh writable bank after opening storage.
+`bank` is `null` until the identity exists and whenever the database check
+fails. If identity setup fails, memory tools can still use the bank and the
+daemon retries setup in the background. Check the daemon's startup logs
+when `/health` reports `bank_identity_failed: true`.
 
 ### 1. Tailscale Serve, TCP mode
 
@@ -316,8 +313,9 @@ The rules:
   the database it writes is the bank the local daemon serves (`/health`'s
   `bank`). If the daemon is still starting its storage, wait a few seconds
   and retry. If the local daemon serves a read-only bank, use the writable
-  daemon host. If a daemon at 0.25.0 or earlier has no bank identity, run
-  `pseudolife-mcp update` on that host before retrying.
+  daemon host. If `invite` reports that the daemon does not create its bank
+  identity at startup, run `pseudolife-mcp update` on that host before
+  retrying.
 - On a Docker install `invite` runs inside the daemon container, so the
   host never handles the database password; elsewhere it uses
   `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded Postgres.

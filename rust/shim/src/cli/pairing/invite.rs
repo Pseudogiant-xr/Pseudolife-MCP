@@ -682,10 +682,9 @@ async fn daemon_check(
     if let Some(health) = &health
         && pyjson::get(health, "status").and_then(J::as_str) == Some("degraded")
         && !pyjson::get(health, "bank").is_some_and(J::truthy)
+        && pyjson::get(health, "read_only") == Some(&J::Bool(true))
     {
-        if pyjson::get(health, "read_only") == Some(&J::Bool(true)) {
-            return Ok(Err(units(READ_ONLY_BANK)));
-        }
+        return Ok(Err(units(READ_ONLY_BANK)));
     }
     let Some(health) =
         health.filter(|h| pyjson::get(h, "status").and_then(J::as_str) == Some("ok"))
