@@ -14,3 +14,9 @@
 # aborted.
 # `rust/shared/entropy_source_tests.rs` fails if this stops reaching aws-lc-sys.
 AWS_LC_SYS_NO_JITTER_ENTROPY = "1"
+
+[target.x86_64-pc-windows-msvc]
+# Use the static CRT for every Windows x64 MSVC build in this workspace,
+# including the client, daemon, tests, and fixtures. Builds without an
+# explicit target also apply the flag to host build scripts and proc macros.
+rustflags = ["-C", "target-feature=+crt-static"]

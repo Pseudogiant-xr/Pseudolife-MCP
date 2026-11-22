@@ -16,6 +16,11 @@ import tempfile
 import tomllib
 import zipfile
 
+if __package__:
+    from .windows_imports import check_windows_imports
+else:
+    from windows_imports import check_windows_imports
+
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = (
     "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu",
@@ -107,6 +112,8 @@ def binary_contents(archive: Path, target: str) -> tuple[str, bytes]:
 
 def smoke(archive: Path, value: str, target: str) -> None:
     name, data = binary_contents(archive, target)
+    if target == "x86_64-pc-windows-msvc":
+        check_windows_imports(data)
     with tempfile.TemporaryDirectory(prefix="native-release-") as directory:
         binary = Path(directory) / name
         binary.write_bytes(data)
