@@ -1,0 +1,74 @@
+name: Hosted release acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Published release tag
+        default: v0.25.0
+        type: string
+        required: true
+      columns:
+        description: Platforms to exercise
+        default: all
+        type: choice
+        options: [all, linux-arm64, macos, macos-x64, macos-arm64]
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: Acceptance / ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.columns == 'all' && '["linux-arm64","macos-x64","macos-arm64"]' || inputs.columns == 'macos' && '["macos-x64","macos-arm64"]' || inputs.columns == 'macos-x64' && '["macos-x64"]' || inputs.columns == 'macos-arm64' && '["macos-arm64"]' || '["linux-arm64"]') }}
+    runs-on: ${{ matrix.platform == 'linux-arm64' && 'ubuntu-22.04-arm' || matrix.platform == 'macos-x64' && 'macos-15-intel' || 'macos-15' }}
+    timeout-minutes: 75
+    env:
+      RELEASE_TAG: ${{ inputs.release || 'v0.25.0' }}
+      COLUMNS: ${{ inputs.columns || 'linux-arm64' }}
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - name: Fetch observation tooling anonymously
+        run: |
+          git init --quiet
+          git fetch --quiet --depth=1 "https://github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Observe installed release
+        run: python3 -m ops.acceptance.hosted run "$RELEASE_TAG" "$COLUMNS" "$PLATFORM" receipts
+      - name: Upload allowlisted observations
+        if: ${{ !cancelled() && hashFiles('receipts/*.json', 'receipts/ledger/*.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-${{ matrix.platform }}
+          path: receipts/
+          if-no-files-found: error
+
+  summary:
+    name: Acceptance matrix
+    needs: acceptance
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 5
+    env:
+      COLUMNS: ${{ inputs.columns || 'linux-arm64' }}
+    steps:
+      - name: Fetch summary tooling anonymously
+        run: |
+          git init --quiet
+          git fetch --quiet --depth=1 "https://github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+          pattern: acceptance-*
+      - name: Summarize observations
+        run: python3 -m ops.acceptance.hosted summary "$COLUMNS" downloaded >> "$GITHUB_STEP_SUMMARY"
