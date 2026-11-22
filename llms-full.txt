@@ -136,6 +136,15 @@ On reruns, the native installer can check a client without changing its
 registration. It uses read-only helpers to inspect the Pseudolife entry in
 Gemini's configuration, verify the existing bearer token with the daemon,
 and identify connection plans that need only credential verification.
+For a current Codex registration on a client-only rerun, it can wait up to
+three minutes for that read. If a grouped client-only check fails, the
+installer checks the clients separately and keeps completed work.
+
+For native client-only setup, use an owner-only regular file with
+`--token-file` / `-TokenFile`. For a new registration on a daemon that
+requires a bearer token, use the default stdio transport. The installer
+preserves existing HTTP registrations and warns when you need to verify
+their credentials in the client.
 
 Release update can refresh existing Codex hook scripts when their approved
 definitions stay the same. If a definition changes, open `/hooks` in the
