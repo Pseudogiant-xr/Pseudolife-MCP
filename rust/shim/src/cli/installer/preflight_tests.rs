@@ -1,6 +1,7 @@
 //! The cases of ops/preflight.py's tests (tests/test_installer_resources.py,
 //! tests/test_installer_lite.py, tests/test_installer_clone_authority.py),
-//! run against the native check with the same fake Docker those tests use.
+//! run against the native check with the same fake Docker those tests use,
+//! then the native pieces, the #1905 port cases among them.
 use super::*;
 use serde_json::json;
 use std::cell::RefCell;
@@ -13,7 +14,13 @@ struct Fake {
     home: PathBuf,
     containers: Vec<Value>,
     volumes: Vec<String>,
+    /// Ports a service listens on.
     busy: BTreeSet<u16>,
+    /// Ports that cannot be bound while no service answers on them.
+    unbindable: BTreeSet<u16>,
+    /// A checked port answered by the real host on another port (the tests
+    /// cannot use the real 8765 and 5433).
+    real: BTreeMap<u16, u16>,
     env: BTreeMap<String, String>,
     calls: RefCell<Vec<Vec<String>>>,
     warnings: RefCell<Vec<String>>,
@@ -33,6 +40,8 @@ impl Fake {
             containers: vec![],
             volumes: vec![],
             busy: BTreeSet::new(),
+            unbindable: BTreeSet::new(),
+            real: BTreeMap::new(),
             env: BTreeMap::new(),
             calls: RefCell::new(vec![]),
             warnings: RefCell::new(vec![]),
@@ -168,8 +177,17 @@ impl Host for Fake {
             other => panic!("unexpected Docker operation: {other:?}"),
         })
     }
-    fn port_busy(&self, port: u16) -> bool {
-        self.busy.contains(&port)
+    fn port_use(&self, port: u16) -> PortUse {
+        if let Some(real) = self.real.get(&port) {
+            return RealHost.port_use(*real);
+        }
+        if self.busy.contains(&port) {
+            PortUse::Listener
+        } else if self.unbindable.contains(&port) {
+            PortUse::Unbindable
+        } else {
+            PortUse::Free
+        }
     }
     fn file_text(&self, path: &Path) -> Option<String> {
         RealHost.file_text(path)
@@ -861,6 +879,372 @@ fn an_env_file_that_is_not_utf8_refuses() {
 fn a_real_listener_makes_the_port_busy() {
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
-    assert!(RealHost.port_busy(port));
+    assert_eq!(RealHost.port_use(port), PortUse::Listener);
+    drop(listener);
+}
+
+// -- #1905: the port decision, every platform row on every platform -----------
+
+fn probes(plain_bind: Bind, reuse_bind: Option<Bind>, loopback_refused: Option<bool>) -> Probes {
+    Probes {
+        plain_bind,
+        reuse_bind,
+        loopback_refused,
+    }
+}
+
+const PLATFORMS: [Platform; 3] = [Platform::Linux, Platform::OtherUnix, Platform::Windows];
+const BINDS: [Option<Bind>; 4] = [
+    None,
+    Some(Bind::Bound),
+    Some(Bind::InUse),
+    Some(Bind::Failed),
+];
+const CONNECTS: [Option<bool>; 3] = [None, Some(false), Some(true)];
+
+#[test]
+fn the_port_decision_for_every_platform_row() {
+    use Bind::{Bound, Failed, InUse};
+    use PortUse::{Free, Listener, Unbindable};
+    let (linux, other, windows) = (Platform::Linux, Platform::OtherUnix, Platform::Windows);
+    let rows = [
+        // A plain bind that succeeds is free everywhere.
+        (linux, probes(Bound, None, None), Free),
+        (other, probes(Bound, None, None), Free),
+        (windows, probes(Bound, None, None), Free),
+        // Linux: the SO_REUSEADDR bind passes over TIME-WAIT, and only there.
+        (linux, probes(InUse, Some(Bound), None), Free),
+        (linux, probes(InUse, Some(InUse), Some(false)), Listener),
+        (linux, probes(InUse, Some(InUse), None), Listener),
+        (linux, probes(InUse, Some(InUse), Some(true)), Unbindable),
+        // Only an address-in-use refusal can be TIME-WAIT.
+        (linux, probes(Failed, Some(Failed), Some(true)), Listener),
+        // macOS and other Unix: a refused plain bind is never a pass, even
+        // were a reuse bind to succeed; only the wording follows the connect.
+        (other, probes(InUse, None, Some(false)), Listener),
+        (other, probes(InUse, None, None), Listener),
+        (other, probes(InUse, None, Some(true)), Unbindable),
+        (other, probes(InUse, Some(Bound), Some(false)), Listener),
+        (other, probes(InUse, Some(Bound), Some(true)), Unbindable),
+        (other, probes(Failed, None, Some(true)), Listener),
+        // Windows: a refused bind is a service, as before #1905.
+        (windows, probes(InUse, None, None), Listener),
+        (windows, probes(Failed, None, None), Listener),
+        (windows, probes(InUse, Some(Bound), Some(true)), Listener),
+    ];
+    for (platform, probe, expected) in rows {
+        assert_eq!(decide(platform, probe), expected, "{platform:?} {probe:?}");
+    }
+}
+
+#[test]
+fn only_linux_turns_a_refused_plain_bind_into_a_pass() {
+    for platform in PLATFORMS {
+        for plain in [Bind::InUse, Bind::Failed] {
+            for reuse in BINDS {
+                for refused in CONNECTS {
+                    let probe = probes(plain, reuse, refused);
+                    let free = decide(platform, probe) == PortUse::Free;
+                    assert_eq!(
+                        free,
+                        platform == Platform::Linux && reuse == Some(Bind::Bound),
+                        "{platform:?} {probe:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn only_an_address_in_use_refused_connect_names_the_rerun() {
+    for platform in PLATFORMS {
+        for plain in [Bind::InUse, Bind::Failed] {
+            for reuse in BINDS {
+                for refused in CONNECTS {
+                    let probe = probes(plain, reuse, refused);
+                    let rerun = decide(platform, probe) == PortUse::Unbindable;
+                    assert_eq!(
+                        rerun,
+                        platform != Platform::Windows
+                            && plain == Bind::InUse
+                            && refused == Some(true)
+                            && !(platform == Platform::Linux && reuse == Some(Bind::Bound)),
+                        "{platform:?} {probe:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_port_no_service_answers_on_names_the_rerun_not_a_service() {
+    for port in [8765, 5433] {
+        let mut fake = Fake::new();
+        fake.unbindable.insert(port);
+        assert_eq!(
+            fake.refused(),
+            format!(
+                "Port {port} cannot be bound yet, and no service answered on it: it was most likely used a moment ago by a service that has stopped. Rerun in about a minute. Nothing changed."
+            )
+        );
+    }
+}
+
+#[test]
+fn our_own_publication_is_not_refused_when_unbindable() {
+    let mut fake = Fake::new();
+    fake.write_env(&format!(
+        "{BEGIN_LINE}\n# extractor: sidecar\n{END_LINE}\nPOSTGRES_PASSWORD=fixture-password\n"
+    ));
+    fake.volumes
+        .extend(["pseudolife-mcp-bank".into(), "pseudolife-mcp-state".into()]);
+    fake.containers.push(ours("daemon"));
+    fake.unbindable.insert(8765);
+    fake.check().unwrap();
+}
+
+#[test]
+fn leftovers_on_the_lite_port_are_not_an_active_lite_bank() {
+    // After a completed migration and a compose down, nothing answering on
+    // 8765 is not a running lite daemon: the port's own refusal applies.
+    let mut fake = lite_fake();
+    initialized_bank(&first_lite_dir(&fake));
+    fake.write_env(&format!("{BEGIN_LINE}\n{END_LINE}\n"));
+    fake.volumes
+        .extend(["pseudolife-mcp-bank".into(), "pseudolife-mcp-state".into()]);
+    fake.unbindable.insert(8765);
+    let message = fake.refused();
+    assert!(!message.contains("backup --data-dir"), "{message}");
+    assert!(message.contains("Rerun in about a minute"), "{message}");
+}
+
+// -- #1905: a stopped service's closed connections are not a service in use ---
+//
+// These open real sockets, so they are compiled for Unix only: on Windows a
+// connection in TIME-WAIT never blocks a bind of its port (measured on the
+// Windows dev VM, 24 November 2026), and that branch is unchanged.
+
+/// 127.0.0.1:`port` as a `sockaddr_in`.
+#[cfg(unix)]
+fn loopback_address(port: u16) -> libc::sockaddr_in {
+    // SAFETY: an all-zero sockaddr_in is a valid value.
+    #[allow(unsafe_code)]
+    let mut address: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+    {
+        address.sin_len = std::mem::size_of::<libc::sockaddr_in>() as u8;
+    }
+    address.sin_family = libc::AF_INET as libc::sa_family_t;
+    address.sin_port = port.to_be();
+    address.sin_addr = libc::in_addr {
+        s_addr: u32::from(std::net::Ipv4Addr::LOCALHOST).to_be(),
+    };
+    address
+}
+
+/// The check before #1905: whether a plain socket (no SO_REUSEADDR) cannot
+/// bind 127.0.0.1:`port`.
+#[cfg(unix)]
+fn plain_bind_refused(port: u16) -> bool {
+    let address = loopback_address(port);
+    // SAFETY: a fresh socket, bound once and closed; the address is a valid
+    // sockaddr_in of the size passed.
+    #[allow(unsafe_code)]
+    unsafe {
+        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+        assert!(fd >= 0);
+        let bound = libc::bind(
+            fd,
+            std::ptr::addr_of!(address).cast::<libc::sockaddr>(),
+            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        );
+        libc::close(fd);
+        bound != 0
+    }
+}
+
+/// A listener on 127.0.0.1 at an ephemeral port: std's, which sets
+/// SO_REUSEADDR on Unix as Go's listeners (the container runtime's port
+/// publisher among them) do, or with `plain` one without that option.
+#[cfg(unix)]
+fn loopback_listener(plain: bool) -> std::net::TcpListener {
+    if !plain {
+        return std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    }
+    use std::os::fd::FromRawFd;
+    let address = loopback_address(0);
+    // SAFETY: a fresh socket bound and listening, then owned by the returned
+    // TcpListener, which closes it.
+    #[allow(unsafe_code)]
+    unsafe {
+        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+        assert!(fd >= 0);
+        let bound = libc::bind(
+            fd,
+            std::ptr::addr_of!(address).cast::<libc::sockaddr>(),
+            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        );
+        assert_eq!(bound, 0);
+        assert_eq!(libc::listen(fd, 8), 0);
+        std::net::TcpListener::from_raw_fd(fd)
+    }
+}
+
+/// The TCP states /proc/net/tcp shows for local port `port`, as hex codes
+/// ("06" TIME-WAIT, "0A" LISTEN).
+#[cfg(target_os = "linux")]
+fn tcp_states(port: u16) -> Vec<String> {
+    std::fs::read_to_string("/proc/net/tcp")
+        .unwrap()
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let local = u16::from_str_radix(fields.get(1)?.rsplit(':').next()?, 16).ok()?;
+            (local == port).then(|| fields.get(3).map(|s| (*s).to_owned()))?
+        })
+        .collect()
+}
+
+/// Leaves `listener`'s port holding only closed connections: one connection
+/// is accepted and closed by the accepting side first (which keeps its
+/// TIME-WAIT), then the client and the listener close. On Linux it returns
+/// once /proc/net/tcp shows that port in TIME-WAIT and nothing else.
+#[cfg(unix)]
+fn time_wait_only(listener: std::net::TcpListener) -> u16 {
+    use std::io::Read;
+    let port = listener.local_addr().unwrap().port();
+    let mut client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let (accepted, _) = listener.accept().unwrap();
+    drop(accepted);
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    assert_eq!(
+        client.read(&mut [0u8; 1]).unwrap(),
+        0,
+        "the close reached the client"
+    );
+    drop(client);
+    drop(listener);
+    #[cfg(target_os = "linux")]
+    {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let states = tcp_states(port);
+            if !states.is_empty() && states.iter().all(|s| s == "06") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "port {port} never held TIME-WAIT alone: {states:?}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    port
+}
+
+/// The state built really made the old check answer "busy" (asserted on
+/// Linux, where it was measured); elsewhere false means the platform's bind
+/// ignores TIME-WAIT, so the case has nothing to prove.
+#[cfg(unix)]
+fn old_check_refused(port: u16) -> bool {
+    let refused = plain_bind_refused(port);
+    #[cfg(target_os = "linux")]
+    assert!(
+        refused,
+        "the old check passes port {port}: the test proves nothing"
+    );
+    refused
+}
+
+#[cfg(unix)]
+#[test]
+fn time_wait_left_by_a_stopped_service_is_not_a_service_in_use() {
+    // The issue's repro: the uninstalled daemon's publisher (SO_REUSEADDR,
+    // as std's listener here) left closed connections and no listener.
+    let port = time_wait_only(loopback_listener(false));
+    if !old_check_refused(port) {
+        return;
+    }
+    let mut fake = Fake::new();
+    fake.real.insert(8765, port);
+    match fake.check() {
+        Ok(()) => {}
+        Err(Refusal(message)) => {
+            assert!(!message.contains("in use by another service"), "{message}");
+            // Only macOS may still refuse, and only with the rerun wording.
+            #[cfg(target_os = "linux")]
+            panic!("refused: {message}");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn time_wait_no_bind_can_reuse_names_the_rerun_not_a_service() {
+    // A server without SO_REUSEADDR leaves leftovers that no publisher can
+    // bind over either (measured on Linux): a refusal, with the true cause.
+    let port = time_wait_only(loopback_listener(true));
+    if !old_check_refused(port) {
+        return;
+    }
+    let mut fake = Fake::new();
+    fake.real.insert(8765, port);
+    let message = fake.refused();
+    assert!(!message.contains("in use by another service"), "{message}");
+    assert!(message.contains("Rerun in about a minute"), "{message}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_listener_beside_time_wait_leftovers_is_still_a_service_in_use() {
+    for address in [
+        std::net::Ipv4Addr::LOCALHOST,
+        std::net::Ipv4Addr::UNSPECIFIED,
+    ] {
+        let port = time_wait_only(loopback_listener(false));
+        let listener = std::net::TcpListener::bind((address, port)).unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            let states = tcp_states(port);
+            assert!(
+                states.iter().any(|s| s == "06") && states.iter().any(|s| s == "0A"),
+                "{address}: {states:?}"
+            );
+        }
+        let mut fake = Fake::new();
+        fake.real.insert(8765, port);
+        let message = fake.refused();
+        assert!(
+            message.starts_with("Port 8765 is already in use by another service. Stop or reconfigure the service listening on 8765"),
+            "{address}: {message}"
+        );
+        drop(listener);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_listener_without_so_reuseaddr_makes_the_port_busy() {
+    // The reuse bind is tried on Linux: it must still fail beside a listener
+    // that never set the option.
+    let listener = loopback_listener(true);
+    let port = listener.local_addr().unwrap().port();
+    assert_eq!(RealHost.port_use(port), PortUse::Listener);
+    drop(listener);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_listener_on_every_address_makes_the_loopback_port_busy() {
+    // std's listener sets SO_REUSEADDR: the shape a loopback bind with that
+    // option would pass on macOS.
+    let listener = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    assert_eq!(RealHost.port_use(port), PortUse::Listener);
     drop(listener);
 }
