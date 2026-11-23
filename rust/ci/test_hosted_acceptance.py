@@ -930,14 +930,15 @@ def _upgrade_with(tmp_path, monkeypatch, first, second):
 
     def live_install(peer, repo, profile, flags, *, overrides=None, engine="native"):
         calls.append(engine)
+        step = len(calls) % 4  # per starting tag: legacy, run 1, run 2, rollback
         config, launcher = profile.codex / "config.toml", profile.installed_launcher
-        if engine == "python" and len(calls) == 1:
+        if step == 1:
             config.write_text(LEGACY_CONFIG, encoding="utf-8")
             return hosted.Result(0, b"legacy installed\n", 1)
-        if engine == "python":  # the rollback
+        if step == 0:  # the rollback
             launcher.unlink()
             return hosted.Result(0, b"rolled back\n", 1)
-        text, output = first if len(calls) == 2 else second
+        text, output = first if step == 2 else second
         config.write_text(text, encoding="utf-8")
         return hosted.Result(0, output, 1)
 
