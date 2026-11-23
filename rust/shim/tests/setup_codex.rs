@@ -2043,6 +2043,11 @@ fn rpc_fixture() {
                     std::io::stdout().flush().unwrap();
                     continue;
                 }
+                "malformed" => {
+                    println!("{}", json!({"id":id,"error":{"message":"no code"}}));
+                    std::io::stdout().flush().unwrap();
+                    continue;
+                }
                 _ => json!({"received":value["params"]}),
             }
         };
@@ -2153,6 +2158,19 @@ async fn rpc_rejection_redacts_child_diagnostics() {
         SetupError::rejected(
             "Codex rejected the setup request; update Codex or review its configuration before retrying."
         )
+    );
+    client.close().await;
+}
+
+/// A reply the client cannot read is a protocol mismatch, not an exit.
+#[tokio::test]
+async fn rpc_unreadable_error_reply_is_not_reported_as_an_exit() {
+    let home = Home::new();
+    let mut client = fixture_client(&home.0, "malformed").await;
+    let error = client.rpc("config/read", json!({})).await.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Codex sent a setup reply this client does not understand; update Codex and retry."
     );
     client.close().await;
 }
