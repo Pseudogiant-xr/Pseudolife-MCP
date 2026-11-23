@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import getpass
 import importlib.util
 import json
 import os
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -587,11 +589,65 @@ def test_merge_docs_refuses_an_incomplete_open_pr_listing(world, capsys, monkeyp
     assert not world.gh.mutations()
 
 
-def test_merge_docs_refuses_a_mismatched_initial_base(world, capsys):
-    _docs_pr(world, baseRefOid="a" * 40)
-    assert integrate.main(["merge-docs", "42"]) == 2
-    assert "master moved while #42 was read" in capsys.readouterr().err
-    assert not world.gh.mutations()
+@pytest.mark.parametrize(("recorded", "preview_base", "change_after_guards", "refusal"), [
+    pytest.param("current", "current", None, None, id="current"),
+    pytest.param("older", "current", None, None, id="older"),
+    pytest.param("older", "older", None, "test merge for #42 has a different base or head",
+                 id="stale-preview"),
+    pytest.param("unrelated", "current", None, "recorded base is not an ancestor of master",
+                 id="unrelated"),
+    pytest.param("older", "current", "master", "master changed after the doc guards",
+                 id="master-moved"),
+    pytest.param("older", "current", "recorded", "base or head of #42 changed during the doc guards",
+                 id="recorded-base-changed"),
+    pytest.param("older", "current", "caught-up", None, id="recorded-base-caught-up"),
+])
+def test_merge_docs_uses_the_preview_base(recorded, preview_base, change_after_guards,
+                                         refusal, monkeypatch, capsys):
+    shas = {"current": "a" * 40, "older": "b" * 40, "unrelated": "c" * 40}
+    master, head, preview, landed = shas["current"], "d" * 40, "e" * 40, "f" * 40
+    view = FakeGh.VIEW_DEFAULTS | {"number": 42, "isDraft": False, "mergeable": "MERGEABLE",
+                                   "baseRefOid": shas[recorded], "headRefOid": head}
+    reported_after = {"recorded": shas["unrelated"], "caught-up": master}
+    current = view | {"baseRefOid": reported_after.get(change_after_guards, shas[recorded])}
+    remote_base = "1" * 40 if change_after_guards == "master" else master
+    gh = Mock(side_effect=[json.dumps(view), json.dumps(current),
+                           json.dumps({"merged": True, "sha": landed})])
+    monkeypatch.setattr(integrate, "gh", gh)
+    monkeypatch.setattr(integrate, "_preflight", lambda **_: ("checkout", master))
+    monkeypatch.setattr(integrate, "_refuse_docs_during_batch", lambda _: None)
+    monkeypatch.setattr(integrate, "_fetch_head", lambda _: head)
+    monkeypatch.setattr(integrate, "git", Mock(return_value=subprocess.CompletedProcess([], 0)))
+    monkeypatch.setattr(integrate, "_is_ancestor", lambda old, new: {
+        (shas[recorded], master): recorded != "unrelated", (landed, "origin/master"): True,
+    }[old, new])
+    monkeypatch.setattr(integrate, "_out", lambda *args: {
+        ("rev-parse", "FETCH_HEAD"): preview,
+        ("rev-list", "--parents", "-n", "1", preview): f"{preview} {shas[preview_base]} {head}",
+        ("ls-remote", "--exit-code", "origin", "refs/heads/master"):
+            f"{remote_base}\trefs/heads/master",
+        ("rev-list", "--parents", "-n", "1", landed): f"{landed} {master} {head}",
+    }[args])
+    monkeypatch.setattr(integrate, "_docs_scope", lambda *_: (True, True))
+    monkeypatch.setattr(integrate, "_tree", lambda _: "tree")
+    guards = Mock(return_value=False)
+    monkeypatch.setattr(integrate, "_docs_guards", guards)
+
+    result = integrate.main(["merge-docs", "42"])
+    if refusal:
+        assert result == 2
+        assert refusal in capsys.readouterr().err
+        if change_after_guards:
+            guards.assert_called_once_with(42, master, preview)
+            assert gh.call_count == 2
+        else:
+            guards.assert_not_called()
+            assert gh.call_count == 1
+    else:
+        assert result == 0, capsys.readouterr().err
+        guards.assert_called_once_with(42, master, preview)
+        gh.assert_called_with("api", "--method", "PUT", "repos/{owner}/{repo}/pulls/42/merge",
+                              "-f", "merge_method=merge", "-f", f"sha={head}")
 
 
 def test_merge_docs_refuses_a_dirty_checkout(world, capsys):
@@ -892,6 +948,29 @@ def test_docs():
 """})
     _docs_preview(world, _docs_pr(world))
     assert integrate.main(["merge-docs", "42"]) == 0, capsys.readouterr()
+
+
+def test_doc_guards_use_a_synthetic_username(monkeypatch):
+    caller = {"USERNAME": "caller-user", "USER": "caller-user", "LOGNAME": "caller-user",
+              "LNAME": "caller-user", "SECRET_X": "planted-value", "PATH": "test-path"}
+    ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    run = Mock(return_value=ok)
+    monkeypatch.setattr(integrate, "git", Mock(return_value=ok))
+    monkeypatch.setattr(integrate, "_run", run)
+    monkeypatch.setattr(integrate, "_census_run", Mock(return_value=ok))
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "environ", caller)
+        integrate._docs_guards(42, "master", "preview")
+    env = run.call_args.kwargs["env"]
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "environ", env)
+        synthetic_user = getpass.getuser() == "docs-guard"
+    assert synthetic_user is True
+    for name in ("USERNAME", "USER", "LOGNAME"):
+        assert env[name] == "docs-guard"
+    assert env["PATH"] == caller["PATH"]
+    assert "SECRET_X" not in env
+    assert "LNAME" not in env
 
 
 def test_merge_docs_refuses_a_hard_census_failure(docs_world, capsys):
