@@ -68,10 +68,15 @@ The twelve refusal references are `redact-already`, `redact-busy`,
 left 27 Linux and 28 Windows cases with live Python comparisons.
 The remaining three refusals now use the unchanged seed as their database
 reference. `redact-abbreviated` and `redact-payload-domain` use the frozen
-refusal diagnostics. `redact-ambiguous-prefix` resolves its two matches
-from the seed's live messages and retained send events and reports their
-ordered shortest distinguishing prefixes. `redact-twin-prefix` resolves
-the longer prefix against that same seed.
+refusal diagnostics. `redact-ambiguous-prefix` had kept both arms because
+its diagnostic lists ordered distinguishing prefixes of the seeded IDs. Its
+reference now takes the matches from the seed's live messages and retained
+send events and applies the frozen `distinguishing_prefixes` rule: the
+first eight matches in ID order, each cut to one character past the longest
+prefix two adjacent matches share, never under eight characters.
+`redact-twin-prefix` resolves the longer prefix against that same seed.
+Each of these references fails with the reason when the seed has fewer
+than two matches for the ambiguous prefix or other than one for the twin.
 The package-deletion change also retires the AST test that reads the frozen
 CLI's nine refusal messages. The table transcribed at `3ac81bc` remains
 the reference for the refusal text.
@@ -94,7 +99,13 @@ their original payload bytes. The closed-stdout reference expects exit 120,
 with the committed database state and the record-head note. PostgreSQL's
 warning instrument on the separate reference copy supplies the notices for
 the vacuum-warning case. The comparison includes the complete database dump
-and the post-run file tree and modes.
+and the post-run file tree and modes. Before projecting, each reference
+checks the seed against what its case declares: a removed send carries a
+`text_commitment` and a stored body, a kept send has none and its live text
+remains, a gone message has no send event, the copied envelope is non-null,
+and the declared fan-out siblings equal the seed's other sends with the same
+sender and `request_id`. A seed that no longer fits fails with the reason.
+The success notes are transcribed from the frozen `_redact` at `3ac81bc`.
 
 The native command has no Python fallback. `application_name` and
 `connect_timeout` use the shared PostgreSQL connector's native support.
@@ -244,8 +255,24 @@ and database state where applicable. It covers 9 of the converted export
 cases (45 on Linux, 46 on Windows), 7 of the 14 converted bank-verify cases
 and the redaction refusal `redact-nolog`. The export
 roster includes `export-agent-unknown-out`, `export-out-exists`,
-`export-stdout-closed` and `export-agent-ambiguous-out`. The three
-direct-removal references have no automatic CI output comparison.
+`export-stdout-closed` and `export-agent-ambiguous-out`. Of the 26
+redaction references, only `redact-nolog` is in that roster. These 25 have
+no automatic CI output comparison: the refusals `redact-already`,
+`redact-busy`, `redact-invalid-id`, `redact-legacy-refused`,
+`redact-prev46`, `redact-reason-blank`, `redact-reason-control`,
+`redact-reason-long`, `redact-reason-secret`, `redact-unknown`,
+`redact-unknown-prefix`, `redact-abbreviated`, `redact-ambiguous-prefix` and
+`redact-payload-domain`; the direct removals `redact-removed`,
+`redact-prefix` and `redact-future-expiry`; and the projected redactions
+`redact-fanout-siblings`, `redact-gone`, `redact-kept-v45`,
+`redact-nonfinite-fanout`, `redact-stdout-closed`, `redact-surrogate-send`,
+`redact-twin-prefix` and `redact-vacuum-warning`. Offline tests pin the
+exit status and both complete streams of two synthetic refusal shapes
+(`invalid_reason`, `busy`), of `redact-abbreviated`,
+`redact-ambiguous-prefix` and `redact-payload-domain`, and of seven
+projected shapes (a synthetic direct removal, then `redact-kept-v45`,
+`redact-fanout-siblings`, `redact-gone`, `redact-vacuum-warning`,
+`redact-stdout-closed` and `redact-twin-prefix`).
 The live row still starts the frozen CLI for `no-bank` and
 `defer-bank-verify-stdout-closed` on each platform.
 

@@ -702,7 +702,11 @@ def _export_stdout_failure_reference(case, kind, diagnostic, home):
     stdout = b""
     if kind == "invalid_payload":
         with _bank.connect(arm.state["name"]) as conn:
-            prefix, tail = _stored_audit_rows(conn)
+            rows = list(_stored_audit_rows(conn))
+            if len(rows) != 2:
+                raise AssertionError("the invalid-payload seed must hold exactly two audit rows, "
+                                     f"found {len(rows)}")
+            prefix, tail = rows
             try:
                 json.loads(tail[_EXPORT_FIELDS.index("payload")])
             except json.JSONDecodeError:
@@ -816,6 +820,8 @@ _REDACT_UNAVAILABLE = {
 
 
 def _redact_prefix_matches(bank, prefix):
+    """The seed's message IDs a redact prefix can name: live messages and
+    retained send events (other audit events never resolve a prefix)."""
     tables = _BASELINE[bank]["tables"]
     messages = {json.loads(text)["message_id"] for text in tables["coordination_messages"]}
     for text in tables["coordination_events"]:
@@ -823,6 +829,17 @@ def _redact_prefix_matches(bank, prefix):
         if row["event"] == "send":
             messages.add(row["message_id"])
     return sorted(message for message in messages if message is not None and message.startswith(prefix))
+
+
+def _distinguishing_prefixes(matches):
+    # The frozen rule (`distinguishing_prefixes` in
+    # pseudolife_memory/storage/coordination.py at 3ac81bc): the first eight
+    # matches in ID order, each cut to the shortest length that tells every
+    # adjacent pair of them apart, never under eight characters.
+    listed = sorted(matches)[:8]
+    shared = max(len(os.path.commonprefix(pair)) for pair in zip(listed, listed[1:]))
+    cut = max(8, shared + 1)
+    return [message[:cut] for message in listed]
 
 
 def _redact_refusal_reference(case, source, original, refusal, home, *, read_only=False):
@@ -839,11 +856,13 @@ def _redact_refusal_reference(case, source, original, refusal, home, *, read_onl
         stdout = json.dumps(result).encode("ascii") + newline
         diagnostic = _REDACT_REFUSALS.get(refusal, refusal)
         if refusal == "ambiguous_message_id":
-            # This fixture has exactly two twins. Resolve the order and
-            # shortest distinguishing length from the original bank.
-            first, second = _redact_prefix_matches(bank, case.argv[3])
-            cut = len(os.path.commonprefix((first, second))) + 1
-            diagnostic += f": {first[:cut]}, {second[:cut]}"
+            # The matches, their order and the distinguishing length come
+            # from the original seed, not from either arm.
+            matches = _redact_prefix_matches(bank, case.argv[3])
+            if len(matches) < 2:
+                raise AssertionError(f"{case.id}: an ambiguous prefix needs two or more seeded "
+                                     f"matches, found {len(matches)}")
+            diagnostic += ": " + ", ".join(_distinguishing_prefixes(matches))
     else:
         code, stdout = 2, b""
         diagnostic = _REDACT_UNAVAILABLE[refusal]
@@ -924,8 +943,11 @@ def _rich(key, index=None, cut=None):
 
 def _fixture_message_prefix(prefix):
     def make():
-        message, = _redact_prefix_matches(ensure("rich"), prefix)
-        return message
+        matches = _redact_prefix_matches(ensure("rich"), prefix)
+        if len(matches) != 1:
+            raise AssertionError(f"the rich seed must hold exactly one message for prefix {prefix}, "
+                                 f"found {len(matches)}")
+        return matches[0]
 
     return _Lazy(make)
 
@@ -941,6 +963,54 @@ def _abbreviated_redact_case():
 _REDACT_REFERENCE_DB = _bank.name(PREFIX + "rd_ref")
 
 
+def _assert_redaction_seed(seed, message_id, audit_copy, siblings):
+    """Fail loudly when the seed no longer has the shape a case declares.
+
+    ``audit_copy`` and ``siblings`` are declared per case; this checks them
+    against the original seed's rows: removed needs one v46 send (its payload
+    carries ``text_commitment``) that still holds a body or salt; kept needs
+    one pre-v46 send and live text; gone needs no send event and one live
+    row. The envelope the projection copies must be non-null. ``siblings``
+    must equal the seed's other sends of one fan-out (the frozen
+    ``_burst_siblings``: same sender and ``request_id``, in ``seq`` order)."""
+    tables = _BASELINE[seed]["tables"]
+    events = [json.loads(text) for text in tables["coordination_events"]]
+    sends = [row for row in events if row["event"] == "send" and row["message_id"] == message_id]
+    live = [row for row in map(json.loads, tables["coordination_messages"])
+            if row["message_id"] == message_id]
+    where = f"{seed} message {message_id}"
+    if audit_copy == "gone":
+        if sends or len(live) != 1:
+            raise AssertionError(f"{where}: a gone redaction needs no send event and one live row, "
+                                 f"found {len(sends)} and {len(live)}")
+        envelope = live[0]["sender_agent_id"], live[0]["project"], live[0]["task"]
+        found = []
+    else:
+        if len(sends) != 1:
+            raise AssertionError(f"{where}: expected exactly one send event, found {len(sends)}")
+        send, = sends
+        payload = json.loads(send["payload"])
+        committed = "text_commitment" in payload
+        if audit_copy == "removed" and not (committed and (send["body"] is not None
+                                                           or send["body_salt"] is not None)):
+            raise AssertionError(f"{where}: a removed redaction needs a v46 send with a stored body")
+        if audit_copy == "kept" and (committed or len(live) != 1 or live[0]["text"] is None):
+            raise AssertionError(f"{where}: a kept redaction needs a pre-v46 send and live text")
+        envelope = send["agent_id"], send["project"], send["task"]
+        found = []
+        request = payload.get("request_id")
+        if "fanout" in payload and request is not None:
+            found = [row["message_id"] for row in sorted(events, key=lambda row: row["seq"])
+                     if row["event"] == "send" and row["message_id"] != message_id
+                     and row["agent_id"] == send["agent_id"]
+                     and json.loads(row["payload"]).get("request_id") == request]
+    if None in envelope:
+        raise AssertionError(f"{where}: the sender, project and task must be non-null")
+    if found != list(siblings):
+        raise AssertionError(f"{where}: declared fan-out siblings {list(siblings)} differ from "
+                             f"the seed's {found}")
+
+
 def _project_redaction(bank, message_id, reason, now, audit_copy, siblings):
     """Apply the fixture's known redaction to a separate, guarded bank copy."""
     from rust.harness_support.fixture_rows import checked_fixture_insert  # noqa: PLC0415
@@ -949,15 +1019,22 @@ def _project_redaction(bank, message_id, reason, now, audit_copy, siblings):
         _assert_audit_database(conn, bank)
         if audit_copy == "gone":
             seq = None
-            live_text, agent, recipient, project, task = conn.execute(
+            live = conn.execute(
                 "SELECT text,sender_agent_id,recipient_agent_id,project,task "
                 "FROM coordination_messages WHERE message_id=%s", (message_id,)).fetchone()
+            if live is None:
+                raise AssertionError(f"{bank}: no live row for the gone message {message_id}")
+            live_text, agent, recipient, project, task = live
         else:
-            [(seq, agent, recipient, project, task)] = conn.execute(
+            sends = conn.execute(
                 "SELECT seq,agent_id,recipient_agent_id,project,task FROM coordination_events "
                 "WHERE event='send' AND message_id=%s", (message_id,)).fetchall()
-            live_text, = conn.execute("SELECT text FROM coordination_messages WHERE message_id=%s",
-                                      (message_id,)).fetchone()
+            if len(sends) != 1:
+                raise AssertionError(f"{bank}: expected one send event for {message_id}, found {len(sends)}")
+            (seq, agent, recipient, project, task), = sends
+            live = conn.execute("SELECT text FROM coordination_messages WHERE message_id=%s",
+                                (message_id,)).fetchone()
+            live_text = None if live is None else live[0]
         head_seq, head_hash = conn.execute(
             "SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
         event = dict(seq=head_seq + 1, event="redact", actor="operator", principal="",
@@ -1006,13 +1083,18 @@ def _redact_fixture_warnings(bank):
 
 def _redact_projected_reference(source, message, reason, audit_copy, siblings, prepare, stdout_closed, home):
     started = time.time()
-    _copy(ensure(source), _REDACT_REFERENCE_DB)
+    seed = ensure(source)
+    _copy(seed, _REDACT_REFERENCE_DB)
     _prepare_redaction_bank(_REDACT_REFERENCE_DB, prepare)
     message_id = message.make() if isinstance(message, _Lazy) else message
     siblings = [other.make() for other in siblings]
+    _assert_redaction_seed(seed, message_id, audit_copy, siblings)
     report = _project_redaction(_REDACT_REFERENCE_DB, message_id, reason, started, audit_copy, siblings)
     warnings = _redact_fixture_warnings(_REDACT_REFERENCE_DB) if prepare else []
     report["vacuumed"] = not warnings
+    # The notes, their order and the result key order are transcribed from
+    # `_redact` in pseudolife_memory/board_audit_cli.py at
+    # 3ac81bcdcb3a6d64a769b40057c02b1c35458225.
     notes = []
     if audit_copy == "kept":
         notes.append("the live copy is blanked and out of delivery, but this message "
