@@ -2192,10 +2192,17 @@ async fn rpc_bounds_silent_or_exited_child() {
         let error = client.rpc("config/read", json!({})).await.unwrap_err();
         assert!(start.elapsed() < std::time::Duration::from_secs(10));
         if mode == "exit" {
-            // An exit is not evidence of an outdated Codex (#1897).
+            // An exit is not evidence of an outdated Codex (#1897): the
+            // recovery names the command this client started instead.
+            let started = format!(
+                "{} --exact rpc_fixture --nocapture",
+                std::env::current_exe().unwrap().display()
+            );
             assert_eq!(
                 error.to_string(),
-                "Codex exited before setup completed; run codex in this terminal to see the error it reports, fix that, then retry."
+                format!(
+                    "Codex exited before setup completed. To see why, run the command setup started, `{started}`, in this terminal: it prints its error and exits (or, if it is healthy, waits for input; stop it then). If it reports an unknown command or option, update Codex; otherwise fix what it reports, then retry."
+                )
             );
         }
         drop(client);

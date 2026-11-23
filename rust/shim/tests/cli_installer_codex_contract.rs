@@ -349,9 +349,10 @@ fn a_codex_home_that_is_a_file_is_refused_naming_the_variable() {
 }
 
 /// An app-server that stops before setup for another reason: the recovery
-/// says what is known (it exited, its exit code, and the program started,
-/// here the CODEX_CLI_PATH launcher rather than a `codex` on PATH) and does
-/// not blame the Codex version, which the client has no evidence for.
+/// says what is known (it exited, its exit code, and the command started,
+/// here the CODEX_CLI_PATH launcher rather than a `codex` on PATH, with the
+/// app-server arguments) and blames the Codex version only if that command
+/// reports an unknown command or option.
 #[test]
 fn an_app_server_that_exits_early_is_reported_with_its_exit_code() {
     let home = Home::new();
@@ -364,12 +365,17 @@ fn an_app_server_that_exits_early_is_reported_with_its_exit_code() {
         assert_eq!(body["status"], "needs-configuration", "{step}: {body}");
         let recovery = body["recovery"].as_str().unwrap();
         assert!(
-            recovery.contains("exited before setup completed")
-                && recovery.contains("exit code 3")
-                && recovery.contains(&format!("run Codex ({launcher})")),
+            recovery.starts_with("Codex exited before setup completed (exit code 3). ")
+                && recovery.contains(&format!(
+                    "run the command setup started, `{launcher} app-server --stdio`, in this terminal"
+                ))
+                && recovery.contains("If it reports an unknown command or option, update Codex;"),
             "{step}: {recovery}"
         );
-        assert!(!recovery.contains("update Codex"), "{step}: {recovery}");
+        assert!(
+            !recovery.contains("update Codex and retry"),
+            "{step}: {recovery}"
+        );
     }
 }
 

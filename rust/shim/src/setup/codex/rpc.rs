@@ -31,18 +31,21 @@ pub struct Client {
     event_bytes: usize,
     /// The app-server's exit status, once `close` has seen it exit.
     status: Option<std::process::ExitStatus>,
-    /// The program started, as the recovery names it.
-    program: PathBuf,
+    /// The command started (program and arguments), as the recovery names it.
+    started: String,
 }
 
 const TIMEOUT: SetupError = SetupError("Codex did not respond within the setup timeout.");
 // The client never reads the app-server's stderr (its error output can quote
 // config.toml lines, a literal token included), so this names no cause: the
-// next step is to run Codex where its own error is shown. During the
-// handshake the recovery also names the executable started and its exit
-// status (`Client::exited_early`).
+// next step is to run the app-server command where its own error is shown.
+// Once a `Client` exists, `Client::exited` replaces this with the exact
+// command it started and, when known, the exit status; this text is left
+// only for an exit before then. Running bare `codex` would start its
+// terminal UI, which shows neither an app-server failure nor an old Codex
+// that lacks the subcommand.
 const EXITED: SetupError = SetupError(
-    "Codex exited before setup completed; run codex in this terminal to see the error it reports, fix that, then retry.",
+    "Codex exited before setup completed. To see why, run `codex app-server --stdio` in this terminal: it prints its error and exits (or, if it is healthy, waits for input; stop it then). If it reports an unknown command or option, update Codex; otherwise fix what it reports, then retry.",
 );
 // A reply the client cannot read means a protocol it does not speak, which
 // is evidence of a version mismatch.
@@ -186,7 +189,11 @@ impl Client {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let program = PathBuf::from(command.as_std().get_program());
+        let started = std::iter::once(command.as_std().get_program())
+            .chain(command.as_std().get_args())
+            .map(|part| part.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ");
         #[cfg(windows)]
         command.creation_flags(0x0800_0000);
         let mut command = CommandWrap::from(command);
@@ -209,9 +216,9 @@ impl Client {
             events: vec![],
             event_bytes: 0,
             status: None,
-            program,
+            started,
         };
-        let initialized = client.rpc("initialize", json!({"clientInfo":{"name":"pseudolife_hook_setup","version":"1"},"capabilities":{"experimentalApi":true}})).await;
+        let initialized = client.call("initialize", json!({"clientInfo":{"name":"pseudolife_hook_setup","version":"1"},"capabilities":{"experimentalApi":true}})).await;
         if let Err(error) = initialized {
             client.close().await;
             return Err(client.exited_early(error));
@@ -224,20 +231,28 @@ impl Client {
     }
 
     /// An app-server that exited during the handshake: its exit status is
-    /// known once `close` has waited for it, so the recovery names it and
-    /// the program that was started (which may not be the `codex` on PATH).
+    /// known once `close` has waited for it, so the recovery names it.
     fn exited_early(&self, error: SetupError) -> SetupError {
-        match self.status {
-            Some(status) if error == EXITED => SetupError::detail(format!(
-                "Codex exited before setup completed ({}); run Codex ({}) in this terminal to see the error it reports, fix that, then retry.",
-                match status.code() {
-                    Some(code) => format!("exit code {code}"),
-                    None => status.to_string(),
-                },
-                self.program.display()
-            )),
-            _ => error,
+        self.named(error)
+    }
+
+    /// `EXITED`, naming the command this client started (which may not be
+    /// the `codex` on PATH) and the exit status when `close` has seen it.
+    fn named(&self, error: SetupError) -> SetupError {
+        if error != EXITED {
+            return error;
         }
+        let status = match self.status {
+            Some(status) => match status.code() {
+                Some(code) => format!(" (exit code {code})"),
+                None => format!(" ({status})"),
+            },
+            None => String::new(),
+        };
+        SetupError::detail(format!(
+            "Codex exited before setup completed{status}. To see why, run the command setup started, `{}`, in this terminal: it prints its error and exits (or, if it is healthy, waits for input; stop it then). If it reports an unknown command or option, update Codex; otherwise fix what it reports, then retry.",
+            self.started
+        ))
     }
 
     async fn send(&mut self, value: &Value) -> Result<(), SetupError> {
@@ -264,6 +279,11 @@ impl Client {
     }
 
     pub async fn receive(&mut self, timeout: Duration) -> Result<Value, SetupError> {
+        let result = self.receive_raw(timeout).await;
+        result.map_err(|error| self.named(error))
+    }
+
+    async fn receive_raw(&mut self, timeout: Duration) -> Result<Value, SetupError> {
         let (value, size) = tokio::time::timeout(timeout, read_message(&mut self.output))
             .await
             .map_err(|_| TIMEOUT)??;
@@ -329,6 +349,15 @@ impl Client {
 
 impl Rpc for Client {
     async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
+        let result = self.call(method, params).await;
+        result.map_err(|error| self.named(error))
+    }
+}
+
+impl Client {
+    /// One request and its correlated reply, with `EXITED` left unnamed so
+    /// the handshake can add the exit status after `close`.
+    async fn call(&mut self, method: &str, params: Value) -> Result<Value, SetupError> {
         self.counter += 1;
         let id = self.counter;
         let deadline = tokio::time::Instant::now() + self.timeout;
@@ -336,7 +365,7 @@ impl Rpc for Client {
             .await?;
         tokio::time::timeout_at(deadline, async {
             loop {
-                let message=self.receive(deadline.saturating_duration_since(tokio::time::Instant::now())).await?;
+                let message=self.receive_raw(deadline.saturating_duration_since(tokio::time::Instant::now())).await?;
                 if message.get("id") != Some(&json!(id)) { continue; }
                 if let Some(error) = message.get("error") {
                     if error.get("code").and_then(Value::as_i64).is_some() {
