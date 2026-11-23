@@ -644,6 +644,81 @@ def bank_export_case(case_id, kind, argv=(), *, recorded=False, **filters):
     return case
 
 
+def _export_observation(arm, code, stdout=b"", diagnostic=""):
+    newline = b"\r\n" if core.WINDOWS else b"\n"
+    stderr = diagnostic.encode("utf-8") + newline if diagnostic else b""
+    return {"home": str(arm.home), "exit": code,
+            "stdout": _encoded(stdout.replace(b"\n", newline)), "stderr": _encoded(stderr),
+            "files": core.snapshot(arm.home), "modes": core.modes(arm.home), "db": "unchanged"}
+
+
+def _frozen_create_refusal(path):
+    # The long Windows path can fail at the path limit or at the component
+    # limit. Use the frozen exporter's exclusive open on the disposable path
+    # so the reference follows the host's actual policy.
+    try:
+        with path.open("x", encoding="utf-8", newline="\n"):
+            pass
+    except OSError as error:
+        return f"board-audit: cannot create {path}: {error.strerror}"
+    raise AssertionError(f"invalid export path was successfully opened: {path}")
+
+
+def _export_file_reference(case, out, task, diagnostic, leftover, home):
+    core._reset(home)
+    arm = core.Arm("reference", home, home / "cwd")
+    arm.cwd.mkdir()
+    case.setup(arm)
+    path = home / out
+    diagnostic = diagnostic(path) if callable(diagnostic) else diagnostic.format(out=path)
+    if not diagnostic:
+        data = export_bytes("rich")
+        with path.open("xb") as stream:
+            stream.write(_filter_export(data, task=task) if task is not None else data)
+    elif leftover:
+        # The frozen exporter opens the destination before resolving --agent.
+        # A lookup refusal leaves its empty file with ordinary umask bits.
+        path.touch(exist_ok=False)
+    return _export_observation(arm, 2 if diagnostic else 0, diagnostic=diagnostic)
+
+
+def export_file_case(case_id, out, *, task=None, agent=None, diagnostic="", leftover=False, **options):
+    argv = ["export"]
+    if agent is not None:
+        argv.extend(["--agent", agent])
+    argv.extend(["--out", _home(out)])
+    if task is not None:
+        argv.extend(["--task", task])
+    case = read_case(case_id, "rich", argv, **options)
+    case.reference = partial(_export_file_reference, case, out, task, diagnostic, leftover)
+    return case
+
+
+def _export_stdout_failure_reference(case, kind, diagnostic, home):
+    core._reset(home)
+    arm = core.Arm("reference", home, home / "cwd")
+    arm.cwd.mkdir()
+    case.setup(arm)
+    stdout = b""
+    if kind == "invalid_payload":
+        with _bank.connect(arm.state["name"]) as conn:
+            prefix, tail = _stored_audit_rows(conn)
+            try:
+                json.loads(tail[_EXPORT_FIELDS.index("payload")])
+            except json.JSONDecodeError:
+                pass
+            else:
+                raise AssertionError("the second audit payload must be malformed")
+            stdout = _export_line(prefix)
+    return _export_observation(arm, 2, stdout, diagnostic)
+
+
+def export_stdout_failure_case(case_id, kind, diagnostic, *, stdout_closed=False):
+    case = read_case(case_id, kind, ["export"], stdout_closed=stdout_closed)
+    case.reference = partial(_export_stdout_failure_reference, case, kind, diagnostic)
+    return case
+
+
 @cache
 def _file_references(platform):
     path = Path(__file__).with_name(f"audit.file.{platform}.json")
@@ -686,6 +761,21 @@ def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False, env=N
                      programs=PROGRAMS, timeout=timeout)
     if (reference := _file_references(core.PLATFORM).get(case_id)) is not None:
         case.reference = partial(_file_reference, case, reference)
+    return case
+
+
+def _no_bank_reference(case, home):
+    newline = "\r\n" if core.WINDOWS else "\n"
+    # Frozen daemon_exec.no_bank_message("board-audit").
+    stderr = ("board-audit: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run "
+              "where the lite tier's data dir holds one (Docker tier: start the daemon, or run "
+              "`docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)" + newline)
+    return _file_reference(case, (2, "", stderr), home)
+
+
+def audit_no_bank_case(case_id, argv):
+    case = file_case(case_id, argv)
+    case.reference = partial(_no_bank_reference, case)
     return case
 
 
@@ -1255,12 +1345,18 @@ def cases() -> list[core.Case]:
         file_case("input-head-digit-limit", ["verify", "--expect-head", "0" * 4301 + "1:" + "a" * 64]),
         file_case("input-windows-leading-dot", ["verify", "--input", "./missing//archive.jsonl/"],
                   platforms=("windows",), note="Windows: pending CI"),
-        read_case("export-output-loop", "rich", ["export", "--out", _home("loop")],
-                  platforms=("linux",), prepare=lambda arm: (arm.home / "loop").symlink_to("loop")),
-        read_case("export-windows-long-name", "rich", ["export", "--out", _home("x" * 260)],
-                  platforms=("windows",), note="Windows: pending CI"),
-        file_case("export-local-minute-no-bank", ["export", "--since", "2026-10-10T12:00"]),
-        read_case("export-invalid-payload-prefix", "invalid_payload", ["export"]),
+        export_file_case("export-output-loop", "loop",
+                         diagnostic="board-audit: cannot create {out}: File exists",
+                         platforms=("linux",), prepare=lambda arm: (arm.home / "loop").symlink_to("loop")),
+        export_file_case("export-windows-long-name", "x" * 260,
+                         diagnostic=_frozen_create_refusal,
+                         platforms=("windows",), note="Windows: pending CI"),
+        audit_no_bank_case("export-local-minute-no-bank", ["export", "--since", "2026-10-10T12:00"]),
+        export_stdout_failure_case(
+            "export-invalid-payload-prefix", "invalid_payload",
+            "board-audit failed; the database error is not shown because it can "
+            "include the connection string. Check PSEUDOLIFE_MCP_DATABASE_URL.",
+        ),
         # verify --input: every event family the seeded chain carries
         archive_case("input-rich", "rich"),
         archive_case("input-rich-expect-head", "rich", "--expect-head", rich_head),
@@ -1339,7 +1435,7 @@ def cases() -> list[core.Case]:
         *[file_case(f"export-bad-numeric-{name}", ["export", "--since=" + value])
           for name, value in [("inf", "inf"), ("negative-inf", "-Infinity"), ("overflow", "1e9999")]],
         file_case("export-invalid-nonnumeric", ["export", "--since", "not-a-time"]),
-        file_case("export-iso-overwritten", ["export", "--since", "2026-W41-1", "--since", "0"]),
+        audit_no_bank_case("export-iso-overwritten", ["export", "--since", "2026-W41-1", "--since", "0"]),
         file_case("audit-missing-action", []),
         file_case("audit-invalid-action", ["other"]),
         file_case("audit-root-unknown", ["--unknown", "verify"]),
@@ -1394,20 +1490,22 @@ def cases() -> list[core.Case]:
         bank_export_case("export-agent-prefix", "rich", ["--agent", _rich("a", cut=8)], agent=_rich("a")),
         bank_export_case("export-agent-literal", "rich", ["--agent", "alice"], agent="alice"),
         bank_export_case("export-agent-unknown", "rich", ["--agent", "ffffffff0"], recorded=True),
-        read_case("export-agent-unknown-out", "rich",
-                  ["export", "--agent", "ffffffff0", "--out", _home("out.jsonl")]),
-        read_case("export-windows-invalid-name", "rich", ["export", "--out", _home("bad<name.jsonl")],
-                  note="Windows: pending CI", platforms=("windows",)),
-        read_case("export-out", "rich", ["export", "--out", _home("out.jsonl")]),
-        read_case("export-out-filtered", "rich",
-                  ["export", "--out", _home("out.jsonl"), "--task", "t3"]),
-        read_case("export-out-exists", "rich", ["export", "--out", _home("out.jsonl")],
-                  files={"out.jsonl": b"keep"}),
+        export_file_case("export-agent-unknown-out", "out.jsonl", agent="ffffffff0", leftover=True,
+                         diagnostic="board-audit: no agent id starts with ffffffff0"),
+        export_file_case("export-windows-invalid-name", "bad<name.jsonl",
+                         diagnostic="board-audit: cannot create {out}: Invalid argument",
+                         note="Windows: pending CI", platforms=("windows",)),
+        export_file_case("export-out", "out.jsonl"),
+        export_file_case("export-out-filtered", "out.jsonl", task="t3"),
+        export_file_case("export-out-exists", "out.jsonl", files={"out.jsonl": b"keep"},
+                         diagnostic="board-audit: {out} exists; export never replaces a file"),
         bank_export_case("export-pruned", "pruned"),
         bank_export_case("export-legacy", "legacy"),
         bank_export_case("export-empty", "empty"),
         bank_export_case("export-nolog", "nolog", recorded=True),
-        read_case("export-stdout-closed", "rich", ["export"], stdout_closed=True),
+        export_stdout_failure_case("export-stdout-closed", "rich",
+                                   "board-audit: the output was closed before the export finished",
+                                   stdout_closed=True),
         # redact, each arm on its own copy
         redact_removed_case("redact-removed", "to_redact", "wrong paste ✓"),
         redact_removed_case("redact-prefix", "to_redact", "wrong paste", cut=10),
@@ -1437,8 +1535,8 @@ def cases() -> list[core.Case]:
         bank_verify_case("defer-dsn-option", "empty",
                          env={"PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name("empty"))
                               + "?application_name=audit"}),
-        read_case("export-out-missing-dir-before-agent", "rich",
-                  ["export", "--agent", "ffffffff0", "--out", _home("missing/out.jsonl")]),
+        export_file_case("export-out-missing-dir-before-agent", "missing/out.jsonl", agent="ffffffff0",
+                         diagnostic="board-audit: cannot create {out}: No such file or directory"),
         file_case("no-bank", ["verify"]),
         file_case("input-not-utf8", ["verify", "--input", _home("archive.jsonl")],
                   files={"archive.jsonl": b'{"seq": 1}\n\xff\n'}),
@@ -1466,8 +1564,11 @@ def cases() -> list[core.Case]:
         # the vacuum-skip path with warnings hidden by default
         redact_removed_case("redact-future-expiry", "future", "wrong paste"),
         bank_export_case("export-agent-ambiguous", "rich", ["--agent", "ab12cd34"], recorded=True),
-        read_case("export-agent-ambiguous-out", "rich",
-                  ["export", "--agent", "ab12cd34ef5", "--out", _home("out.jsonl")]),
+        export_file_case(
+            "export-agent-ambiguous-out", "out.jsonl", agent="ab12cd34ef5", leftover=True,
+            diagnostic="board-audit: --agent ab12cd34ef5 matches several ids: "
+                       "ab12cd34ef56, ab12cd34ef57; give a longer prefix",
+        ),
         bank_export_case("export-agent-twin", "rich", ["--agent", "ab12cd34ef57"],
                          agent="ab12cd34ef57000000000000000000a2"),
         redact_case("redact-ambiguous-prefix", "rich", "cd34ef56", "wrong paste"),
