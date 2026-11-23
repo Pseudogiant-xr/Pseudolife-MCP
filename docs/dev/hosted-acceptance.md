@@ -8,51 +8,97 @@ Select the columns and enter a published release tag. The default is
 Each selected runner checks out the release tag, verifies the native archive
 and Compose bundle against the release's `SHA256SUMS`, and calls
 `PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh` from that checkout.
+The release API's asset digests also check `SHA256SUMS` itself. When the
+anonymous API refuses the request, which shared hosted addresses hit, the
+job takes `SHA256SUMS` from the public release download alone. Every
+receipt records which check applied as `release_verified_by`.
 The installer and native client run with Python and pip off their PATH.
 Legacy start and rollback operations use Python in a separate environment.
 The jobs use signed-out Codex CLI 0.171.0 installations and disposable bank
 credentials. A full dispatch uses up to four hosted slots across the platform
 jobs and the summary, with a maximum of 75 minutes per platform job.
 
-| Column | Daemon peer | Coverage limit |
+## The test peer
+
+Every client row needs a daemon, and hosted jobs cannot reach each other or
+a private daemon. Each macOS job therefore builds the daemon from the tagged source
+(`cargo build --locked --bin pseudolife-daemon` with Rust 1.94.0), starts it
+on a loopback port with its own PostgreSQL 18 and pgvector, and provisions its
+pinned models. This daemon is a test peer, not the published daemon image:
+only the client steps are evidence about the published release. Each receipt
+from it carries that statement as `peer_note`.
+
+| Column | PostgreSQL | ONNX Runtime |
 | --- | --- | --- |
-| Linux arm64 | The Linux arm64 checkout build produced by the tagged installer, with its engine recorded from the running image. | The stock v0.25.0 installer can fall back to a checkout-built Python daemon and PostgreSQL. The published daemon and PostgreSQL images are Linux amd64. The workflow records container image provenance and exercises the real release updater from a stock v0.24.0 install without changing its image selection. |
-| macOS Intel | The published Linux amd64 daemon in a private Lima VZ guest, if the runner can start and reach it. | The running daemon image must match the Rust daemon digest in the verified release readiness marker. The Mac client uses the guest's private address. The Docker backup and restore command runs inside the guest. |
-| macOS Apple silicon | A daemon built from the selected release tag, with a private PostgreSQL cluster, if the runner can compile and start it. | The published Mac client is exercised against the source build. A published Docker daemon and its bank recovery remain open. |
+| macOS Intel | PostgreSQL 18.7 and pgvector 0.8.7 built from their source archives, checked by SHA-256, because Homebrew has no Intel bottle | 1.23.2 PyPI wheel, the last with an Intel macOS build |
+| macOS Apple silicon | Homebrew bottles | 1.27.0 PyPI wheel |
 
-The Ubuntu arm64 runner includes Docker. The macOS Apple silicon runner has no
-nested virtualization, and the Intel runner can deny direct private network
-access to the guest. The Intel peer probe shares a 12-minute budget across
-up to two attempts. The Apple silicon source peer probe shares a 25-minute
-budget across up to two attempts. A Mac job that cannot start and reach its
-peer records offline observations and
-leaves the daemon-dependent results pending. [GitHub runner
+Every wheel is checked against its PyPI SHA-256 before use. Setup shares one
+time budget per job: 25 minutes on Apple silicon, 35 on Intel. Model provisioning is retried up to three times inside that budget,
+without rebuilding the daemon. A job whose peer cannot come up still runs the
+offline refusal probes and leaves the daemon rows pending with the setup
+step's reason.
+
+Every home used with the test peer has a Codex home folder before the
+install, as after a first Codex start. Without it the published v0.25.1
+installer's Codex setup fails. The client rows therefore do not cover a
+never-started Codex, and each of their receipts says so. [Issue
+#1897](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1897)
+
+The daemon is not supported on Linux arm64 for now (the maintainer's
+decision of 23 November 2026): no arm64 daemon image is published. A client
+on arm64 against a daemon on a supported host is not ruled out. The arm64 job
+runs only the two stock rows, as witnesses, in about seven minutes. Their homes have no Codex folder, so the
+clean install row witnesses issue #1897. The clean install runs the tagged
+installer's default Docker install, which can fall back to a checkout-built
+Python daemon. The upgrade runs the real release updater from a stock
+v0.24.0 install and records the missing arm64 image manifest. The three
+client rows count as "cannot run", with that decision as their reason. [Issue
+#1872](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1872)
+
+The Mac receipts record GUI launchd availability. The published native
+update scheduler supports Linux and Windows. [GitHub runner
 specifications](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories)
-· [Lima private networking](https://lima-vm.io/docs/config/network/vznat/)
-· [macOS local network access](https://github.com/actions/runner-images/issues/10924)
 
-Five cells can reach `pass` with the current probes. Those are clean
-install on all three platforms and upgrade and rollback on both Mac
-platforms. The ordinary-use scenario leaves the live tunnel pending in
-every hosted column. The Mac receipts record GUI launchd availability.
-The published native update scheduler in v0.25.0 supports Linux and Windows.
-The signed-out run leaves provider wake and browser sign-in pending.
+## What can pass
+
+Clean install can pass on both Mac columns. Upgrade and rollback can pass on
+Apple silicon. On Intel it cannot start: the v0.23.1 Python client it
+upgrades from no longer installs there, because one of its dependencies has
+no Intel macOS build. The legacy clients install with the job's Python 3.12,
+which those releases supported. The other rows record their observed steps
+and stay pending, each with one sentence naming what is missing:
+
+- Ordinary use needs a live tunnel, which a hosted job may not open.
+- Failure and retry needs the launch and interruption fault probes, which
+  the harness does not yet inject.
+- Bank recovery needs a restore, and restore replaces only a Docker bank.
+  The test peer is not one, and no published daemon image runs as one on
+  these runners.
 
 For releases affected by the fresh-bank pairing bug, the harness makes an
 MCP board update through the installed shim and waits for the bank fingerprint
 before issuing a disposable invite. [Pairing issue
 #1864](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1864)
 
-The workflow summary covers the 15 hosted cells. Download an
-`acceptance-<platform>` artifact for the fixed command labels, observed
-exit codes, deciding assertions, daemon kind and engine. Unavailable prerequisites
-leave a cell pending. An observed assertion failure fails the job. The
-artifact contains no raw command output, pairing codes, tokens or paths.
-The Linux artifact also records the stock install's exit, elapsed time,
-sanitized diagnostics, Codex registration and image provenance. The upgrade
-receipt records whether the original daemon continued serving and whether
-the runtime, configuration and volumes changed. The authenticated HTTP sample
-starts alongside the operation and does not gate it.
+## Reading the results
+
+The summary opens with a verdict. It reads "pass" only when every selected
+cell passed. Otherwise it reads "no pass", with separate counts of passes,
+fails, cells that cannot run and missing receipts. A green job with pending
+cells is still "no pass". Below the table, each cell without a pass has its
+one-sentence reason.
+
+Download an `acceptance-<platform>` artifact for the receipts. Each one has
+the fixed command labels, observed exit codes, deciding assertions, daemon
+kind and engine. `peer-setup.json` records every setup step and the free disk
+around the build. A failed setup or product step also keeps a `failure`
+entry with its step, exit status, error class and its last output lines.
+Those lines pass through `ops/acceptance/sanitize.py` first. That removes every
+token, password and pairing code the job generated, URL credentials and
+query strings, private keys, secret-shaped values, user names in home paths,
+host names and non-loopback addresses. Raw output never reaches a receipt
+or the job log unfiltered.
 
 The `ledger/` folder contains version 1 records for the selected column.
 These records are for the [installed acceptance
@@ -63,7 +109,6 @@ partial observations when a ledger row needs more evidence.
 The workflow records the daemon kind and engine on observed rows. It does not
 count a pass with a source-built or checkout-built peer as a pass against the
 published daemon. Once arm64 daemon and PostgreSQL images ship, the
-published-image path needs its own digest and architecture checks. A
-checkout-build observation remains evidence for that installation path.
+published-image path needs its own digest and architecture checks.
 The Linux x64 and Windows x64 columns come from their separate disposable-host
 runs.

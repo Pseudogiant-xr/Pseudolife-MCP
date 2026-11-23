@@ -13,15 +13,16 @@ import socket
 import subprocess
 import sys
 import tempfile
+import tomllib
 from threading import Event, Thread
 from time import monotonic, sleep
 from traceback import extract_tb
 
 from . import matrix
 from .hosted import (
-    CLIENT, DAEMON_URL, DAEMONS, INSTALL, TOKEN_FILE, Failed, Peer, Profile, Receipt,
-    Result, Unavailable, command, get, native_path, prepare_codex, published_release,
-    registered_session, require, session, sha256, write_json,
+    CLIENT, DAEMON_URL, DAEMONS, INSTALL, REDACTOR, STOCK_CODEX_NOTE, TOKEN_FILE, Failed, Peer, Profile, Receipt,
+    Result, Unavailable, codex_probe, command, explain, get, native_path, prepare_codex, published_release,
+    read_tail, registered_session, require, session, sha256, write_json,
 )
 
 
@@ -101,6 +102,11 @@ OFFICIAL_IMAGE = re.compile(
     r"(?::[A-Za-z0-9_.-]{1,64})?(?:@sha256:[a-f0-9]{64})?"
 )
 SENTINEL = "Hosted acceptance disposable bank marker"
+# A legacy client installs through pipx, whose default Python on the Intel
+# runner has no torch build (trial run 45131084076). The job's Python 3.12
+# is one those releases supported.
+LEGACY_PYTHON = {"PIPX_DEFAULT_PYTHON": sys.executable}
+LEGACY_PYTHON_NOTE = "The legacy Python clients were installed with the job's Python 3.12."
 
 
 def install(repo, profile, flags, *, overrides=None, engine="native", timeout=300):
@@ -149,6 +155,17 @@ class DockerFixture:
                 flags = ["-f"] if kind == "container" else []
                 docker(kind, "rm", *flags, *sorted(names))
         return self.inventory() == self.before
+
+
+def register_settings_secrets(repo):
+    """Register every credential the stock installer wrote, before its output is kept."""
+    settings = repo / "ops" / ".env"
+    if not settings.is_file():
+        return
+    for line in settings.read_text(encoding="utf-8", errors="replace").splitlines():
+        name, separator, value = line.partition("=")
+        if separator and re.search(r"(?i)token|secret|passw|key|credential", name):
+            REDACTOR.secret(value.strip().strip("\"'"))
 
 
 def free_space(path):
@@ -209,7 +226,7 @@ def installer_tail(output):
 
 def binfmt_status(folder=Path("/proc/sys/fs/binfmt_misc")):
     listed = command(["ls", "-1", folder])
-    require(listed.code == 0, "The runner could not list binfmt registrations.")
+    require(listed.code == 0, "The runner listed its binfmt registrations.")
     # Shell output can contain non-ASCII diagnostics. Inspect the kernel
     # entries directly so those bytes cannot hide a registered interpreter.
     handlers = [entry for entry in folder.iterdir() if entry.name not in ("status", "register")]
@@ -226,12 +243,12 @@ def binfmt_status(folder=Path("/proc/sys/fs/binfmt_misc")):
 
 def image_observation(container_id, existing_images):
     result = docker("inspect", container_id)
-    require(result.code == 0, "The runner could not inspect an installed container.")
+    require(result.code == 0, "The runner inspected each installed container.")
     container = result.json()[0]
     if not container["State"]["Running"]:
         return None
     inspected = docker("image", "inspect", container["Image"])
-    require(inspected.code == 0, "The runner could not inspect the running container's image.")
+    require(inspected.code == 0, "The runner inspected the running container's image.")
     image = inspected.json()[0]
     labels = image["Config"].get("Labels") or {}
     reference = container["Config"]["Image"]
@@ -278,14 +295,15 @@ def baseline(release, path, scratch, output):
     if binfmt["amd64_handler_registered"]:
         raise Unavailable("The runner already had an amd64 emulator before the default install.")
     repo = release.checkout(scratch / "baseline-checkout")
-    profile = Profile(scratch / "baseline-home", path)
+    profile = Profile(scratch / "baseline-home", path, codex_started=False)
     docker_state = DockerFixture()
     images_before = docker("image", "ls", "--all", "--quiet", "--no-trunc")
-    require(images_before.code == 0, "The runner could not inventory images before the install.")
+    require(images_before.code == 0, "The runner inventoried its images before the install.")
     existing_images = {item.removeprefix("sha256:") for item in images_before.output.decode().splitlines()}
     receipt = None
     try:
         result = install(repo, profile, DOCKER_FLAGS, timeout=600)
+        register_settings_secrets(repo)
         added = docker_state.added()
         images = [observed for container_id in sorted(added["container"])
                   if (observed := image_observation(container_id, existing_images)) is not None]
@@ -324,6 +342,11 @@ def baseline(release, path, scratch, output):
                 "installer_lines": codex_lines,
             },
         }
+        if result.code != 0:
+            receipt["failure"] = explain(receipt["command"], result)
+        receipt["fixture_notes"] = [STOCK_CODEX_NOTE]
+        if not receipt["codex"]["wrote_configuration"]:
+            receipt["codex"]["diagnostic"] = codex_probe(profile.env, repo)
         receipt["cleanup_verified"] = False
         write_json(output / "default-install.json", receipt, replace=True)
         yield receipt, result, repo, profile
@@ -360,6 +383,7 @@ def stock_connection(release, profile, repo, scratch, engine, *, legacy=False):
     values = (repo / "ops" / ".env").read_text().splitlines()
     token = next((line.split("=", 1)[1] for line in values if line.startswith("PSEUDOLIFE_MCP_TOKEN=")), "")
     require(bool(token), "The installer generated a disposable owner token.")
+    REDACTOR.secret(token)
     token_file = scratch / "peer.token"
     with token_file.open("x", encoding="utf-8") as stream:
         token_file.chmod(0o600)
@@ -377,12 +401,13 @@ def stock_peer(row, release, path, scratch):
     free_space(scratch)
     scope = DockerFixture()
     repo = release.checkout(scratch / "peer-checkout")
-    profile = Profile(scratch / "peer-home", path)
+    profile = Profile(scratch / "peer-home", path, codex_started=False)
     legacy = row.scenario == "upgrade-and-rollback"
     installer_engine = "python" if legacy else "native"
     installer_label = "bash ops/install.sh <stock v0.24.0 Docker install>" if legacy else f"{INSTALL} <stock Docker>"
     try:
         result = install(repo, profile, DOCKER_FLAGS, engine=installer_engine, timeout=600)
+        register_settings_secrets(repo)
         row.observe(installer_label, result, result.code == 0 and readiness(LOOPBACK),
                     "The tagged stock installer left a healthy daemon.",
                     template="<legacy-installer> <0.24-python-fixture>" if legacy else None,
@@ -424,6 +449,8 @@ def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=
     result = command([peer.owner_executable, "invite", f"hosted-{receipt.scenario}", "--json"],
                      env=peer.owner_env, cwd=peer.checkout)
     code = result.json().get("code")
+    if isinstance(code, str):
+        REDACTOR.secret(code)
     receipt.observe(f"{CLIENT} invite <fixture> --json", result,
                     result.code == 0 and isinstance(code, str), "The disposable daemon issued a pairing code.")
     flags = ["--daemon-url", peer.url, "--pairing-code", code]
@@ -435,7 +462,7 @@ def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=
     receipt.steps.append({"command": f"{INSTALL} <codex-hook-verification>", "exit_code": result.code,
                           "assertion": "The installer reported trusted and verified Codex hooks.",
                           "observed": b"Memory hooks         trusted and verified" in result.output})
-    if try_schedule and receipt.platform != "linux-arm64":
+    if try_schedule:
         receipt.steps.append({"command": f"{INSTALL} --client-update-schedule yes", "exit_code": result.code,
                               "assertion": "The installer reported the documented macOS scheduling limit.",
                               "observed": b"the daily job needs systemd (Linux) or Task Scheduler (Windows)" in result.output})
@@ -461,12 +488,33 @@ def first_session(receipt, profile, repo, template=None):
 
 def clean_install(receipt, release, repo, profile, peer, scratch):
     first, session_template = matrix.commands(receipt.scenario, receipt.platform)
-    if receipt.platform == "linux-arm64":
+    if peer.kind == DAEMONS[1]:
         first_session(receipt, profile, repo, session_template)
         return
     paired_install(receipt, repo, profile, peer, template=first)
     require(profile.native_marker(release), "The installed runtime matched the candidate archive.")
     first_session(receipt, profile, repo, session_template)
+
+
+def changed_files(before, after):
+    """Profile-relative names of fingerprinted files a step added, removed or changed."""
+    return sorted(REDACTOR.text(str(name)) for name in set(before) | set(after) if before.get(name) != after.get(name))
+
+
+def changed_settings(before, after):
+    """Dotted names of Codex settings a step added, removed or changed. Values stay out."""
+    def flatten(table, prefix=()):
+        for key, value in table.items():
+            if isinstance(value, dict):
+                yield from flatten(value, (*prefix, key))
+            else:
+                yield ".".join((*prefix, key)), value
+
+    try:
+        old, new = (dict(flatten(tomllib.loads(text))) if text else {} for text in (before, after))
+    except tomllib.TOMLDecodeError:
+        return ["<unreadable Codex configuration>"]
+    return sorted(REDACTOR.text(name) for name in set(old) | set(new) if old.get(name) != new.get(name))
 
 
 def upgrade(receipt, release, repo, path, peer, scratch):
@@ -480,9 +528,16 @@ def upgrade(receipt, release, repo, path, peer, scratch):
         require(checkout.code == 0, "The previous published installer could be checked out.")
         profile = Profile(scratch / f"legacy-{tag}", path)
         flags = ["--daemon-url", peer.url, "--token-file", str(peer.token_file)]
-        result = live_install(peer, previous, profile, flags, engine="python")
+        result = live_install(peer, previous, profile, flags, engine="python", overrides=LEGACY_PYTHON)
+        receipt.fixture_notes.append(LEGACY_PYTHON_NOTE)
         receipt.observe("Published legacy installer <client-only>", result, result.code == 0,
                         "The previous release installed its Python client.", template=next(templates))
+        if b"Error installing pseudolife-mcp from spec" in result.output:
+            # The old installer reports a failed pipx install and still exits
+            # 0. The upgrade then has no starting client to move from (Intel
+            # macOS in trial run 45135001202).
+            raise Unavailable(f"The {tag} Python client could not be installed on this runner, so the upgrade "
+                              "had no starting client.", explain("Published legacy installer <client-only>", result))
         first_session(receipt, profile, repo)
         python_env = profile.env | {"PATH": profile.env["PATH"] + os.pathsep + os.environ["PATH"],
                                     "PSEUDOLIFE_SHIM_ENGINE": "native"}
@@ -494,10 +549,20 @@ def upgrade(receipt, release, repo, path, peer, scratch):
                         "The previous client handed off to the verified native runtime.", template=next(templates))
         first_session(receipt, profile, repo)
         before = profile.fingerprint()
+        config = profile.codex / "config.toml"
+        config_before = config.read_text(encoding="utf-8") if config.is_file() else ""
         result = live_install(peer, repo, profile, flags)
-        receipt.observe(f"{INSTALL} <rerun>", result, result.code == 0 and before == profile.fingerprint(),
-                        "The native installer rerun kept the installed runtime and registration.", template=next(templates))
-        result = live_install(peer, repo, profile, flags, engine="python")
+        after = profile.fingerprint()
+        receipt.observe(f"{INSTALL} <rerun>", result, result.code == 0 and before == after,
+                        "The native installer rerun kept the installed runtime and registration.", template=next(templates),
+                        required=False)
+        receipt.steps[-1]["changed_files"] = changed_files(before, after)
+        if config.is_file():
+            receipt.steps[-1]["changed_codex_settings"] = changed_settings(
+                config_before, config.read_text(encoding="utf-8"))
+        require(result.code == 0 and before == after,
+                "The native installer rerun kept the installed runtime and registration.")
+        result = live_install(peer, repo, profile, flags, engine="python", overrides=LEGACY_PYTHON)
         restored = profile.fingerprint()
         receipt.observe("PSEUDOLIFE_SHIM_ENGINE=python bash ops/install.sh <rollback>", result,
                         result.code == 0 and restored != before and not profile.native_marker(release),
@@ -601,14 +666,14 @@ def stock_upgrade(receipt, release, repo, profile, peer, scratch):
     })
     daemon_changed = after["image"] != previous["image"] or after["version"] != previous["version"]
     if upgraded or daemon_changed or not after["authenticated"]:
-        require(database_unchanged, "The bank volume changed and no database rollback was verified.")
+        require(database_unchanged, "The bank volume was unchanged, so no database rollback was needed.")
         docker_rollback(receipt, peer, previous, report)
-    require(upgraded, "The unmodified v0.24.0 release updater did not reach a healthy selected release.")
+    require(upgraded, "The unmodified v0.24.0 release updater reached a healthy selected release.")
     raise Unavailable("The stock v0.24.0 transition ran. The ledger also requires the separate v0.23.x client start.")
 
 
 def ordinary(receipt, release, repo, profile, peer, scratch):
-    if receipt.platform == "linux-arm64":
+    if peer.kind == DAEMONS[1]:
         start = monotonic()
         with session(peer.owner_executable, [], peer.owner_env, repo) as mcp:
             mcp.tool("memory_agents", action="update", project="hosted-acceptance", status="fixture")
@@ -618,7 +683,7 @@ def ordinary(receipt, release, repo, profile, peer, scratch):
                         "The published shim completed a board write and a memory read.")
         env, launcher = peer.owner_env, peer.owner_executable
     else:
-        paired_install(receipt, repo, profile, peer, try_schedule=True)
+        paired_install(receipt, repo, profile, peer, try_schedule=receipt.platform.startswith("macos"))
         first_session(receipt, profile, repo)
         env, launcher = profile.env | profile.registration().get("env", {}), profile.launcher()
     templates = set(matrix.commands(receipt.scenario, receipt.platform))
@@ -633,14 +698,30 @@ def ordinary(receipt, release, repo, profile, peer, scratch):
     ):
         invoke = lambda: command([launcher, name, *args], cwd=repo, env=env, timeout=180)
         result = peer.during(receipt, invoke) if name == "update" else invoke()
+        if name == "console":
+            # The sign-in link carries a one-time code; register it before
+            # any of this output can reach a receipt.
+            fields = result.json() if isinstance(result.json(), dict) else {}
+            for key, value in fields.items():
+                if isinstance(value, str) and re.search(r"(?i)code|url|link|token|secret", key):
+                    REDACTOR.secret(value)
         label = f"{CLIENT} {name} <fixture-options>"
         receipt.observe(label, result, result.code in allowed, description,
                         template=label if label in templates else None, required=False)
         if result.code not in allowed:
             failures.append(name)
+            if b"docker is installed but did not answer" in result.output:
+                # The updater's own Docker question, asked the same way, so the
+                # receipt shows what Docker answered (trial run 45138027385).
+                asked = command(["docker", "inspect", "-f", "{{.Id}}", DAEMON], cwd=repo, env=env)
+                receipt.steps.append({"command": "docker inspect -f {{.Id}} pseudolife-mcp-daemon <diagnostic>",
+                                      "exit_code": asked.code, "observed": True,
+                                      "assertion": "What Docker answered the updater's daemon check.",
+                                      "failure": explain("docker inspect <diagnostic>", asked)})
     if failures:
         raise Failed("One or more installed ordinary-use commands failed.")
-    raise Unavailable("The hosted run exercises only the ordinary-use operations listed in this receipt.")
+    raise Unavailable("The live tunnel step needs a public tunnel, which these hosted runs may not open; "
+                      "the other ordinary-use steps were observed.")
 
 
 @contextmanager
@@ -678,11 +759,11 @@ def paused_download(release):
 
 def cancel_download(release, repo, profile, flags):
     start = monotonic()
-    with paused_download(release) as (url, requested):
+    with paused_download(release) as (url, requested), tempfile.TemporaryFile() as transcript:
         env = profile.env | {"PSEUDOLIFE_SHIM_ENGINE": "native", "PSEUDOLIFE_NATIVE_ARCHIVE_URL": url}
         with subprocess.Popen(["bash", "ops/install.sh", *flags],
                               cwd=repo, env=env, start_new_session=True, stdin=subprocess.DEVNULL,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as process:
+                              stdout=transcript, stderr=subprocess.STDOUT) as process:
             observed = requested.wait(20)
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGINT if observed else signal.SIGKILL)
@@ -692,7 +773,8 @@ def cancel_download(release, repo, profile, flags):
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
                     observed = False
-    return Result(process.returncode, b"", round(monotonic() - start, 3)), observed
+        output = read_tail(transcript)
+    return Result(process.returncode, output, round(monotonic() - start, 3)), observed
 
 
 @contextmanager
@@ -709,7 +791,7 @@ def displaced_archive(release, profile, scratch):
 
 
 def failure(receipt, release, repo, profile, peer, scratch):
-    local = receipt.platform == "linux-arm64"
+    local = peer.kind == DAEMONS[1]
     if local:
         flags = DOCKER_FLAGS
         docker_before = DockerFixture.inventory()
@@ -763,7 +845,8 @@ def failure(receipt, release, repo, profile, peer, scratch):
         require(peer.sample()["status"] == 200, "The daemon served an authenticated read after retry.")
     else:
         first_session(receipt, profile, repo)
-    raise Unavailable("Unobserved interruption points remain pending after the successful retry.")
+    raise Unavailable("The launch and interruption fault probes are not injected yet; the archive, "
+                      "cancellation, lock and retry steps were observed.")
 
 
 def bank_recovery(receipt, release, repo, profile, peer, scratch):
@@ -799,6 +882,26 @@ def bank_recovery(receipt, release, repo, profile, peer, scratch):
     raise Unavailable("Backup and restore were exercised on the stock arm64 bank. Move and legacy import-state witnesses remain pending.")
 
 
+def source_recovery(receipt, release, repo, profile, peer, scratch):
+    """Back up the test peer's bank with the file-tier backup a client can run."""
+    with session(peer.owner_executable, [], peer.owner_env, repo) as mcp:
+        mcp.tool("memory_store", text=SENTINEL, source="hosted-acceptance")
+    backup = scratch / "backup"
+    backup.mkdir(mode=0o700)
+    env = peer.owner_env | {"PATH": os.pathsep.join((peer.tools, peer.owner_env["PATH"])),
+                            "PSEUDOLIFE_MCP_DATABASE_URL": peer.database_url}
+    result = command([peer.owner_executable, "backup", "--data-dir", peer.data_dir, "--out", backup],
+                     cwd=peer.checkout, env=env, timeout=180)
+    dumps = list(backup.glob("*.sql.gz"))
+    archives = list(backup.glob("*.tar.gz"))
+    receipt.observe(f"{CLIENT} backup <fixture-options>", result,
+                    result.code == 0 and len(dumps) == len(archives) == 1,
+                    "Native backup produced one database dump and one state archive.",
+                    template=matrix.commands(receipt.scenario, receipt.platform)[0])
+    raise Unavailable("Restore replaces only a Docker bank, and no published daemon image runs as one on this "
+                      "runner.")
+
+
 def run_case(row, probe, *, confirm_pass=True):
     try:
         probe()
@@ -807,9 +910,11 @@ def run_case(row, probe, *, confirm_pass=True):
             row.note = matrix.SCENARIOS[row.scenario].outcome
     except Unavailable as error:
         row.note = str(error)
+        row.explain(error)
     except Failed as error:
         row.status = "fail"
         row.note = str(error)
+        row.explain(error)
     except (OSError, ValueError, KeyError, IndexError) as error:
         row.status = "fail"
         row.note = diagnostic_note(error)
@@ -820,7 +925,7 @@ def run_case(row, probe, *, confirm_pass=True):
 
 
 def diagnostic_note(error):
-    sources = ("hosted.py", "hosted_linux.py", "hosted_macos.py", "matrix.py")
+    sources = ("hosted.py", "hosted_linux.py", "hosted_macos.py", "hosted_source.py", "matrix.py", "sanitize.py")
     frame = next((frame for frame in reversed(extract_tb(error.__traceback__))
                   if Path(frame.filename).name in sources), None)
     diagnostic = (f" ({type(error).__name__}, {Path(frame.filename).name} line {frame.lineno})"
@@ -829,21 +934,20 @@ def diagnostic_note(error):
 
 
 def probe_stock(release, provenance, result, repo, profile, scratch, by_name, output):
+    """The stock clean install row. The client rows use the test peer instead."""
     clean = by_name["clean-install"]
+    clean.fixture_notes.append(STOCK_CODEX_NOTE)
     ready = result.code == 0 and provenance["daemon_healthy"]
     clean.observe(f"{INSTALL} <stock Docker>", result, ready,
-                  "The tagged stock installer left a healthy daemon.",
+                  "The tagged stock installer exited 0 and left a healthy daemon.",
                   template=matrix.commands(clean.scenario, clean.platform)[0], required=False)
-    stock_cases = (("clean-install", clean_install), ("ordinary-native-use", ordinary),
-                   ("failure-and-retry", failure), ("bank-recovery", bank_recovery))
     if not ready:
-        clean.status, clean.note = "fail", "The stock installer did not leave a healthy daemon."
-        for name, _ in stock_cases[1:]:
-            by_name[name].note = "The stock daemon was unavailable after setup."
+        clean.status = "fail"
+        clean.note = ("The stock installer exited non-zero." if provenance["daemon_healthy"]
+                      else "The stock installer did not leave a healthy daemon.")
         return
     if not native_images(provenance["running_containers"]):
-        for name, _ in stock_cases:
-            by_name[name].note = "The stock installer did not produce the identified native arm64 checkout stack."
+        clean.note = "The stock installer did not produce the identified native arm64 checkout stack."
         return
     try:
         engine = next(image["engine_from_image"] for image in provenance["running_containers"]
@@ -851,26 +955,34 @@ def probe_stock(release, provenance, result, repo, profile, scratch, by_name, ou
         clean.daemon, clean.daemon_engine = DAEMONS[1], engine
         peer = stock_connection(release, profile, repo, scratch, engine)
     except Unavailable as error:
-        for name, _ in stock_cases:
-            by_name[name].note = str(error)
+        clean.note = str(error)
         return
     except Failed as error:
         clean.status, clean.note = "fail", str(error)
-        for name, _ in stock_cases[1:]:
-            by_name[name].note = "The stock daemon or client did not pass the connection checks."
         return
-    for name, probe in stock_cases:
-        row = by_name[name]
-        row.daemon = peer.kind
-        row.daemon_engine = peer.engine
-        scope = scratch / name
-        scope.mkdir()
-        run_case(row, lambda: probe(row, release, repo, profile, peer, scope))
-        row.checkpoint(output, release)
+    clean.daemon, clean.daemon_engine = peer.kind, peer.engine
+    scope = scratch / clean.scenario
+    scope.mkdir()
+    run_case(clean, lambda: clean_install(clean, release, repo, profile, peer, scope))
+    clean.checkpoint(output, release)
+
+
+# The maintainer's decision of 23 November 2026: the daemon is not supported
+# on Linux arm64 for now (no arm64 daemon image, issue #1872), so these
+# client rows are not run here. A client on arm64 against a daemon on a
+# supported host is not ruled out. The two stock rows stay as witnesses.
+CLIENT_ROWS = ("ordinary-native-use", "failure-and-retry", "bank-recovery")
+NOT_SUPPORTED = ("Not run: the daemon is not supported on Linux arm64 for now, because no arm64 daemon image is "
+                 "published (issue #1872).")
 
 
 def run(tag, platform, output):
     receipts = [Receipt(scenario, platform) for scenario in matrix.SCENARIOS]
+    # Set first, so no later failure can relabel rows that never run.
+    stock = [receipt for receipt in receipts if receipt.scenario not in CLIENT_ROWS]
+    for receipt in receipts:
+        if receipt.scenario in CLIENT_ROWS:
+            receipt.note = NOT_SUPPORTED
     release = None
     cleaned = False
     before_docker = None
@@ -879,6 +991,7 @@ def run(tag, platform, output):
                 and os.uname().machine == "aarch64", "The job ran on the selected disposable Linux arm64 runner.")
         with tempfile.TemporaryDirectory(prefix="acceptance-") as folder:
             scratch = Path(folder)
+            REDACTOR.path(scratch, "<scratch>")
             free_space(scratch)
             release = published_release(tag, platform, scratch / "release")
             path = native_path(scratch, prepare_codex(platform, scratch))
@@ -887,7 +1000,7 @@ def run(tag, platform, output):
             with baseline(release, path, scratch, output) as (provenance, result, repo, profile):
                 probe_stock(release, provenance, result, repo, profile, scratch, by_name, output)
                 for row in receipts:
-                    if row.scenario != "upgrade-and-rollback" and not (output / f"{row.scenario}.json").is_file():
+                    if row.scenario == "clean-install":
                         row.checkpoint(output, release)
 
             def do_upgrade():
@@ -906,16 +1019,23 @@ def run(tag, platform, output):
             by_name["upgrade-and-rollback"].checkpoint(output, release)
             cleaned = before_docker.clean()
     except Unavailable as error:
-        for receipt in receipts:
+        for receipt in stock:
             if receipt.note == "The scenario was not selected.":
                 receipt.note = str(error)
+                receipt.explain(error)
     except Failed as error:
-        for receipt in receipts:
+        for receipt in stock:
             if receipt.status != "fail":
                 receipt.status = "fail"
                 receipt.note = str(error)
+                receipt.explain(error)
     except (OSError, ValueError, KeyError, IndexError, matrix.RecordError) as error:
-        for receipt in receipts:
+        for receipt in stock:
+            if receipt.status != "fail":
+                receipt.status = "fail"
+                receipt.note = diagnostic_note(error)
+    except Exception as error:  # noqa: BLE001 - a traceback would print unfiltered output
+        for receipt in stock:
             if receipt.status != "fail":
                 receipt.status = "fail"
                 receipt.note = diagnostic_note(error)
@@ -926,5 +1046,5 @@ def run(tag, platform, output):
                 receipt.note = "The disposable environment could not be cleaned up and verified."
                 receipt.cleanup_failed = True
             receipt.write(output, release, cleaned)
-            print(f"{receipt.scenario}: {receipt.status}. {receipt.note}")
+            print(REDACTOR.text(f"{receipt.scenario}: {receipt.status}. {receipt.note}"))
     return int(any(receipt.status == "fail" for receipt in receipts))

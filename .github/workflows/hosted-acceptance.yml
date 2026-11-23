@@ -39,6 +39,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # The Mac client rows' test peer is the daemon built from the tag's source.
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ matrix.platform != 'linux-arm64' }}
+        with:
+          toolchain: 1.94.0
       - name: Observe installed release
         timeout-minutes: 68
         run: python3 -m ops.acceptance.hosted run "$RELEASE_TAG" "$COLUMNS" "$PLATFORM" receipts
