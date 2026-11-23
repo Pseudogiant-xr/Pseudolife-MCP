@@ -85,15 +85,30 @@ fn mailbox_mode(config: &Value, home: &Path) -> (Option<Value>, Option<Value>) {
     (current, user)
 }
 
+/// When consent was given but Codex has no Pseudolife server yet.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Unregistered {
+    /// The hook step of a first install, which runs before the installers
+    /// register the server: report "after-registration" and write nothing;
+    /// `codex-runtime-defaults --approve-memory-message` approves it once
+    /// the server is registered (issue #1903).
+    Defer,
+    /// After registration: still no server is a failure ("unavailable").
+    Refuse,
+}
+
 /// Record in `report` whether `memory_message` is approved, approving it
 /// when consent was given (`client`) and nothing is set: "set", "already",
-/// "kept-explicit" (another value stays), "declined" (no consent) or
-/// "unavailable" (why, in `mailbox_approval_detail`). Never fails setup.
+/// "kept-explicit" (another value stays), "declined" (no consent),
+/// "after-registration" (consent, but no server to approve it on yet; see
+/// [`Unregistered::Defer`]) or "unavailable" (why, in
+/// `mailbox_approval_detail`). Never fails setup.
 pub async fn mailbox_approval<R: Rpc>(
     config: &Value,
     home: &Path,
     report: &mut Report,
     client: Option<(&mut R, &Path)>,
+    unregistered: Unregistered,
 ) -> String {
     let result: Result<String, Fail> = async {
         let (config, client) = match client {
@@ -124,6 +139,14 @@ pub async fn mailbox_approval<R: Rpc>(
             .and_then(Value::as_object)
             .is_none_or(|s| s.is_empty())
         {
+            // Only a server no layer registers yet is the installers' to
+            // register; one another layer holds stays a refusal.
+            let effective = &config["config"]["mcp_servers"][SERVER];
+            if unregistered == Unregistered::Defer
+                && effective.as_object().is_none_or(|s| s.is_empty())
+            {
+                return Ok("after-registration".into());
+            }
             return Err(Fail::new(
                 "Codex's user configuration has no pseudolife-memory server.",
             ));
@@ -159,26 +182,40 @@ pub async fn mailbox_approval<R: Rpc>(
 /// The end-of-setup line for ready hooks: what happened to the
 /// `memory_message` approval, and the choice still open where none was set.
 pub fn mailbox_notice(state: &str, detail: Option<&str>) -> String {
+    notice("Hooks ready", state, detail)
+}
+
+/// The same line from `codex-runtime-defaults --approve-memory-message`,
+/// which applies the approval a first install deferred until the server
+/// was registered.
+pub fn registered_mailbox_notice(state: &str, detail: Option<&str>) -> String {
+    notice("Codex server registered", state, detail)
+}
+
+fn notice(subject: &str, state: &str, detail: Option<&str>) -> String {
     let table = format!("[mcp_servers.{SERVER}.tools.{MAILBOX_TOOL}]");
     let see = "\nSee docs/guide/configuration.md (Experimental agent coordination).";
     match state {
         "set" => format!(
-            "Hooks ready; setup approved memory_message (approval_mode = \"approve\" under {table} in Codex config.toml), so a thread woken by board mail can receive, ack and send without an approval prompt. No other tool was approved.{see}"
+            "{subject}; setup approved memory_message (approval_mode = \"approve\" under {table} in Codex config.toml), so a thread woken by board mail can receive, ack and send without an approval prompt. No other tool was approved.{see}"
         ),
         "already" => format!(
-            "Hooks ready; memory_message is already approved (approval_mode = \"approve\"), so a thread woken by board mail can receive, ack and send without an approval prompt.{see}"
+            "{subject}; memory_message is already approved (approval_mode = \"approve\"), so a thread woken by board mail can receive, ack and send without an approval prompt.{see}"
+        ),
+        "after-registration" => format!(
+            "{subject}; setup approves memory_message once Codex has registered the {SERVER} server, later in this install. If that registration fails, rerunning the installer approves it.{see}"
         ),
         _ => {
             let lead = match state {
                 "kept-explicit" => format!(
-                    "Hooks ready; setup kept your memory_message {}. ",
+                    "{subject}; setup kept your memory_message {}. ",
                     detail.unwrap_or_default()
                 ),
                 "unavailable" => format!(
-                    "Hooks ready; setup could not approve memory_message: {} ",
+                    "{subject}; setup could not approve memory_message: {} ",
                     detail.unwrap_or_default()
                 ),
-                _ => "Hooks ready; setup leaves tool approvals unchanged. ".into(),
+                _ => format!("{subject}; setup leaves tool approvals unchanged. "),
             };
             format!(
                 "{lead}For unattended receive, ack and send, choose approval_mode = \"approve\" under {table} in Codex config.toml. Without that approval, a woken thread can stall on an approval prompt.{see}"

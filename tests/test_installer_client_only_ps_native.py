@@ -932,7 +932,8 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
                   runtime_failed: bool = False, gemini_list: str = "",
                   show_ladder: bool = False, transport: str = "shim", hook_report: str = "",
-                  hook_trust: str = "yes", hook_interactive: bool = False, hook_exit: int = 0):
+                  hook_trust: str = "yes", hook_interactive: bool = False, hook_exit: int = 0,
+                  log_runtime: bool = False):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex adds."""
@@ -954,6 +955,11 @@ def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
             """return '{"status":"ready","runtime_defaults":"configured"}'""",
             """$global:LASTEXITCODE = 1; return '{"status":"needs-configuration"}'""",
         )
+    if log_runtime:
+        steps = steps.replace(
+            "    if ($args[0] -eq 'codex-runtime-defaults') {\n",
+            "    if ($args[0] -eq 'codex-runtime-defaults') {\n"
+            f"        Add-Content -LiteralPath '{_q(ps.calls)}' -Value ('runtime-defaults|' + ($args -join ' '))\n", 1)
     if hook_report:
         steps = steps.replace(
             """return '{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}'""",
@@ -1508,3 +1514,20 @@ def test_a_cli_exception_is_reported_as_an_incomplete_requested_client(tmp_path,
         "Requested client setup incomplete (Gemini CLI). MCP setup failed. "
         "the fixture gemini CLI broke Fix the reported problem and rerun the installer."
     )
+
+
+@pytest.mark.parametrize(("state", "switch"), [("after-registration", True), ("set", False),
+                                               ("already", False), ("declined", False)])
+def test_a_deferred_memory_message_approval_follows_the_registration(tmp_path, state, switch):
+    """Issue #1903: the hook step runs before `codex mcp add`, so with
+    consent it defers the memory_message approval ("after-registration");
+    the runtime-defaults step right after the registration applies it."""
+    report = json.dumps({"status": "ready", "source": "manual", "instructions": "covered-by-hooks",
+                         "recovery": None, "mailbox_approval": state})
+    ps = _PowerShell(tmp_path)
+    proc, adds = _codex_wiring(ps, hook_report=report, log_runtime=True)
+    assert proc.returncode == 0, _output(proc)
+    assert len(adds) == 1
+    calls = [call for call in ps.logged() if call.startswith("runtime-defaults|")]
+    expected = "runtime-defaults|codex-runtime-defaults" + (" --approve-memory-message" if switch else "")
+    assert calls == [expected]
