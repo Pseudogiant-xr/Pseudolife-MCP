@@ -157,6 +157,17 @@ class DockerFixture:
         return self.inventory() == self.before
 
 
+def register_settings_secrets(repo):
+    """Register every credential the stock installer wrote, before its output is kept."""
+    settings = repo / "ops" / ".env"
+    if not settings.is_file():
+        return
+    for line in settings.read_text(encoding="utf-8", errors="replace").splitlines():
+        name, separator, value = line.partition("=")
+        if separator and re.search(r"(?i)token|secret|passw|key|credential", name):
+            REDACTOR.secret(value.strip().strip("\"'"))
+
+
 def free_space(path):
     if shutil.disk_usage(path).free < 8 * 1024**3:
         raise Unavailable("The runner had less than 8 GiB of free space.")
@@ -292,6 +303,7 @@ def baseline(release, path, scratch, output):
     receipt = None
     try:
         result = install(repo, profile, DOCKER_FLAGS, timeout=600)
+        register_settings_secrets(repo)
         added = docker_state.added()
         images = [observed for container_id in sorted(added["container"])
                   if (observed := image_observation(container_id, existing_images)) is not None]
@@ -395,6 +407,7 @@ def stock_peer(row, release, path, scratch):
     installer_label = "bash ops/install.sh <stock v0.24.0 Docker install>" if legacy else f"{INSTALL} <stock Docker>"
     try:
         result = install(repo, profile, DOCKER_FLAGS, engine=installer_engine, timeout=600)
+        register_settings_secrets(repo)
         row.observe(installer_label, result, result.code == 0 and readiness(LOOPBACK),
                     "The tagged stock installer left a healthy daemon.",
                     template="<legacy-installer> <0.24-python-fixture>" if legacy else None,
@@ -685,6 +698,13 @@ def ordinary(receipt, release, repo, profile, peer, scratch):
     ):
         invoke = lambda: command([launcher, name, *args], cwd=repo, env=env, timeout=180)
         result = peer.during(receipt, invoke) if name == "update" else invoke()
+        if name == "console":
+            # The sign-in link carries a one-time code; register it before
+            # any of this output can reach a receipt.
+            fields = result.json() if isinstance(result.json(), dict) else {}
+            for key, value in fields.items():
+                if isinstance(value, str) and re.search(r"(?i)code|url|link|token|secret", key):
+                    REDACTOR.secret(value)
         label = f"{CLIENT} {name} <fixture-options>"
         receipt.observe(label, result, result.code in allowed, description,
                         template=label if label in templates else None, required=False)
@@ -955,6 +975,11 @@ NOT_SUPPORTED = ("Not run: Linux arm64 is not supported for now (maintainer deci
 
 def run(tag, platform, output):
     receipts = [Receipt(scenario, platform) for scenario in matrix.SCENARIOS]
+    # Set first, so no later failure can relabel rows that never run.
+    stock = [receipt for receipt in receipts if receipt.scenario not in CLIENT_ROWS]
+    for receipt in receipts:
+        if receipt.scenario in CLIENT_ROWS:
+            receipt.note = NOT_SUPPORTED
     release = None
     cleaned = False
     before_docker = None
@@ -989,22 +1014,20 @@ def run(tag, platform, output):
 
             run_case(by_name["upgrade-and-rollback"], do_upgrade, confirm_pass=False)
             by_name["upgrade-and-rollback"].checkpoint(output, release)
-            for name in CLIENT_ROWS:
-                by_name[name].note = NOT_SUPPORTED
             cleaned = before_docker.clean()
     except Unavailable as error:
-        for receipt in receipts:
+        for receipt in stock:
             if receipt.note == "The scenario was not selected.":
                 receipt.note = str(error)
                 receipt.explain(error)
     except Failed as error:
-        for receipt in receipts:
+        for receipt in stock:
             if receipt.status != "fail":
                 receipt.status = "fail"
                 receipt.note = str(error)
                 receipt.explain(error)
     except (OSError, ValueError, KeyError, IndexError, matrix.RecordError) as error:
-        for receipt in receipts:
+        for receipt in stock:
             if receipt.status != "fail":
                 receipt.status = "fail"
                 receipt.note = diagnostic_note(error)

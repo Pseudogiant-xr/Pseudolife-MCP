@@ -8,7 +8,7 @@ import tempfile
 
 from . import matrix
 from .hosted import (
-    CODEX_HOME_NOTE, INSTALL, PEER_NOTE, REDACTOR, Failed, Profile, Receipt, Unavailable,
+    CODEX_HOME_NOTE, INSTALL, PEER_NOTE, REDACTOR, CleanupFailed, Failed, Profile, Receipt, Unavailable,
     command, native_path, prepare_codex, published_release, write_json,
 )
 from .hosted_linux import (
@@ -87,6 +87,7 @@ def run(tag, platform, output):
             peer_folder = scratch / "peer"
             peer_folder.mkdir(mode=0o700)
             pending_reason = None
+            peer_cleaned = True
             try:
                 build = prepare(release, repo, peer_folder, budget, platform)
                 with source_peer(build, release, repo, path, peer_folder, budget) as peer:
@@ -96,6 +97,8 @@ def run(tag, platform, output):
                         row.checkpoint(output, release)
             except Unavailable as error:
                 pending_reason = setup["assertion"] = str(error)
+                if error.failure is not None:
+                    setup["failure"] = error.failure
                 for row in rows:
                     if row.status == "not yet run" and row.scenario not in OFFLINE:
                         row.note = pending_reason
@@ -103,13 +106,22 @@ def run(tag, platform, output):
                         observe(row, release, repo, path, None, scratch, (launchd, gui),
                                 OFFLINE[row.scenario], pending_reason)
                     row.checkpoint(output, release)
+            except CleanupFailed as error:
+                # The rows' own results stand; none of them can count as a
+                # pass with a fixture left running.
+                peer_cleaned = False
+                setup["cleanup"] = error.failure
+                for row in rows:
+                    row.cleanup_failed = True
+                    if row.status != "fail":
+                        row.status, row.note = "fail", "The disposable environment could not be cleaned up and verified."
             except Failed as error:
                 setup["assertion"] = str(error)
                 for row in rows:
                     if row.status != "fail":
                         row.status, row.note = "fail", str(error)
                         row.explain(error)
-            cleaned = True
+            cleaned = peer_cleaned
     except Failed as error:
         for row in rows:
             if row.status != "fail":

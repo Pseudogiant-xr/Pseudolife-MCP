@@ -20,8 +20,14 @@ import zipfile
 
 from .hosted import (
     CODEX_HOME_NOTE, DAEMON_URL, DAEMONS, REDACTOR, TOKEN_FILE, Failed, Peer, Profile, Result, Unavailable,
-    codex_probe, command, download, explain, read_tail, require,
+    CleanupFailed, codex_probe, command, download, explain, read_tail,
 )
+
+
+def need(ok, reason):
+    """A fixture the runner could not supply leaves its rows unrun, not failed."""
+    if not ok:
+        raise Unavailable(reason)
 
 
 RUST = "1.94.0"
@@ -131,7 +137,7 @@ def source_postgres(env, scratch, budget):
         unpacked = scratch / name.split(".tar.")[0]
         unpacked.mkdir()
         result = budget.run(["tar", "-xf", archive, "-C", unpacked, "--strip-components", "1"], env=env)
-        require(result.code == 0, "The verified PostgreSQL source archive unpacked.")
+        need(result.code == 0, "The verified PostgreSQL source archive did not unpack on this runner.")
         archives.append(unpacked)
     postgres, pgvector = archives
     for label, argv, cwd in (
@@ -162,7 +168,7 @@ def postgres_tools(platform, env, scratch, budget):
         if result.code != 0:
             raise budget.refuse("Homebrew did not install a PostgreSQL 18 or pgvector bottle on this runner.")
     prefix = budget.run(["brew", "--prefix", "postgresql@18"], env=env)
-    require(prefix.code == 0, "Homebrew located its PostgreSQL 18 installation.")
+    need(prefix.code == 0, "Homebrew did not report its PostgreSQL 18 installation.")
     return Path(os.fsdecode(prefix.output.strip())) / "bin"
 
 
@@ -171,10 +177,13 @@ def onnx_library(platform, scratch, budget):
     wheel = scratch / "onnxruntime.whl"
     download(url, wheel, digest, timeout=budget.remaining(180), peer_asset=True)
     library = scratch / name
-    with zipfile.ZipFile(wheel) as archive:
-        members = [member for member in archive.namelist() if Path(member).name == name]
-        require(len(members) == 1, "The ONNX Runtime wheel contained its shared library.")
-        library.write_bytes(archive.read(members[0]))
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            members = [member for member in archive.namelist() if Path(member).name == name]
+            need(len(members) == 1, "The ONNX Runtime wheel did not contain its shared library.")
+            library.write_bytes(archive.read(members[0]))
+    except zipfile.BadZipFile:
+        raise Unavailable("The ONNX Runtime wheel was not a readable archive.") from None
     wheel.unlink()
     budget.note("ONNX Runtime from its PyPI wheel", version=version, verified_sha256=True)
     return version, library
@@ -244,7 +253,8 @@ def daemon_process(build, repo, scratch, env):
                     daemon.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     daemon.kill()
-                    daemon.wait(timeout=10)
+                    with suppress(subprocess.TimeoutExpired):
+                        daemon.wait(timeout=10)
 
 
 def log_tail(path):
@@ -341,5 +351,6 @@ def source_peer(build, release, repo, path, scratch, budget):
         if (database / "postmaster.pid").is_file():
             stopped = command([build.postgres / "pg_ctl", "-D", database, "-w", "stop", "-m", "fast"],
                               env=env, timeout=45)
-            require(stopped.code == 0 and not (database / "postmaster.pid").exists(),
-                    "The owned PostgreSQL fixture stopped.")
+            if stopped.code != 0 or (database / "postmaster.pid").exists():
+                raise CleanupFailed("The owned PostgreSQL fixture did not stop.",
+                                    explain("pg_ctl stop <test peer>", stopped))

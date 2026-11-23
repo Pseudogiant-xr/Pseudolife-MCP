@@ -869,3 +869,89 @@ def test_rerun_names_changed_codex_settings_without_their_values():
     changed = linux.changed_settings(before, after)
     assert changed == ["mcp_servers.pseudolife-memory.command", "mcp_servers.pseudolife-memory.env.B"]
     assert "fixture-secret-path" not in json.dumps(changed)
+
+
+# --- Review fixes ---
+
+@pytest.mark.parametrize(("line", "secret", "kept"), [
+    ('{"url": "http://127.0.0.1:8765/#/signin?code=K7MQ2X9ZRT", "code": "K7MQ2X9ZRT"}', "K7MQ2X9ZRT",
+     '"code": "<redacted>"'),
+    ('{"token": "fixture-token-value", "PSEUDOLIFE_MCP_TOKEN": "other-fixture-value"}', "fixture-token-value",
+     '"token": <redacted>'),
+    ('{"password": "fixture-password-value"}', "fixture-password-value", '"password": <redacted>'),
+    ('{"code": -32603, "message": "Coordination identity is unavailable"}', None, '"code": -32603'),
+    ("authorization failed for the fixture", None, "authorization failed"),
+    ("listening on 2001:db8::7 and ::1", "2001:db8::7", "::1"),
+])
+def test_json_keys_links_and_addresses_are_redacted_without_eating_prose(line, secret, kept):
+    from ops.acceptance.sanitize import Redactor
+
+    cleaned = Redactor().text(line)
+    if secret is not None:
+        assert secret not in cleaned
+    assert kept in cleaned
+
+
+def test_a_registered_secret_is_removed_even_when_no_pattern_would(tmp_path):
+    (tmp_path / "ledger").mkdir()
+    secret = hosted.REDACTOR.secret("plain-words-registered-value")
+    row = hosted.Receipt("clean-install", "macos-arm64")
+    output = "installer printed plain-words-registered-value\nWARNING: Codex setup failed.\n".encode()
+    with pytest.raises(hosted.Failed):
+        row.observe("approved command", hosted.Result(5, output, 0.2), False, "Fixed assertion.")
+    assert secret not in json.dumps(row.steps)
+
+
+def test_a_peer_asset_digest_mismatch_leaves_rows_unrun(tmp_path, monkeypatch):
+    def command(argv, **_):
+        Path(argv[argv.index("--output") + 1]).write_bytes(b"re-packed archive")
+        return hosted.Result(0, b"200", 0)
+
+    monkeypatch.setattr(hosted, "command", command)
+    with pytest.raises(hosted.Unavailable, match="disagreed"):
+        hosted.download("https://example.com/x.tar.gz", tmp_path / "x.tar.gz", "0" * 64, peer_asset=True)
+    with pytest.raises(hosted.Failed, match="disagreed"):
+        hosted.download("https://example.com/y.tar.gz", tmp_path / "y.tar.gz", "0" * 64)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Mac acceptance harness is POSIX-only")
+def test_a_fixture_left_running_fails_cleanup_for_every_mac_row(tmp_path, monkeypatch):
+    mac, output = mac_fixture(tmp_path, monkeypatch, "macos-arm64")
+
+    @contextmanager
+    def peer(*_):
+        try:
+            yield SimpleNamespace(kind=hosted.DAEMONS[3], engine="rust")
+        finally:
+            raise hosted.CleanupFailed("The owned PostgreSQL fixture did not stop.",
+                                       {"step": "pg_ctl stop", "exit_code": 1, "error_class": "exit-status",
+                                        "cause_lines": [], "last_lines": []})
+
+    def passed(row, *_):
+        row.status, row.note = "pass", matrix.SCENARIOS[row.scenario].outcome
+
+    monkeypatch.setattr(mac, "prepare", lambda *a: SimpleNamespace(onnx_version="fixture"))
+    monkeypatch.setattr(mac, "source_peer", peer)
+    monkeypatch.setattr(mac, "observe", passed)
+    assert mac.run("v0.25.0", "macos-arm64", output) == 1
+    receipt = json.loads((output / "clean-install.json").read_bytes())
+    assert (receipt["status"], receipt["cleanup_verified"]) == ("fail", False)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_an_early_arm64_failure_keeps_the_client_rows_not_run(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    def refused(*_):
+        raise hosted.Failed("Published tag checkout succeeded.")
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(os, "uname", lambda: SimpleNamespace(machine="aarch64"))
+    monkeypatch.setattr(linux, "free_space", lambda *_: None)
+    monkeypatch.setattr(linux, "published_release", refused)
+    (tmp_path / "ledger").mkdir()
+    assert linux.run("v0.25.0", "linux-arm64", tmp_path) == 1
+    for name in linux.CLIENT_ROWS:
+        row = json.loads((tmp_path / f"{name}.json").read_bytes())
+        assert (row["status"], row["assertion"]) == ("not yet run", linux.NOT_SUPPORTED)
+    assert json.loads((tmp_path / "clean-install.json").read_bytes())["status"] == "fail"

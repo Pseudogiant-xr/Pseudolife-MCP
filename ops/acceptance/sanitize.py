@@ -44,13 +44,20 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 PEM = re.compile(r"-----BEGIN [A-Z ]*-----.*?(?:-----END [A-Z ]*-----|\Z)", re.DOTALL)
 USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{1,20}://)[^/\s:@]+:[^/\s@]*@")
-AUTHORIZATION = re.compile(r"(?i)\b(authorization|bearer|proxy-authorization)(\s*[:=]?\s*)(?:bearer\s+)?\S+")
+# A header value or a bearer credential, not the words in prose
+# ("authorization failed" keeps its meaning).
+AUTHORIZATION = re.compile(r"(?i)\b((?:proxy-)?authorization\s*:\s*|bearer\s+)(?:(?:bearer|basic)\s+)?"
+                           r"[A-Za-z0-9._~+/=:-]{6,}")
 # Names, not prose: "exit code: 5" keeps its status while "PAIRING_CODE=x",
-# "api_key: x" and "password=x" lose their values.
+# "api_key: x", "password=x" and the quoted JSON key "token": "x" lose their
+# values. A quoted "code" with a string value is a sign-in or pairing code;
+# a JSON-RPC error's numeric "code" stays.
 ASSIGNMENT = re.compile(
-    r"(?i)\b((?:[A-Z0-9]+[_-])*(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key"
-    r"|pairing[_-]?code|credentials?|cookie)(?:[_-][A-Z0-9]+)*)(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+    r"(?i)(?<![A-Za-z0-9])([\"']?(?:[A-Z0-9]+[_-])*(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key"
+    r"|private[_-]?key|pairing[_-]?code|credentials?|cookie)(?:[_-][A-Z0-9]+)*[\"']?)"
+    r"(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;\"']+)"
 )
+QUOTED_CODE = re.compile(r"(\"code\"\s*:\s*)\"[^\"]*\"")
 PREFIXED = re.compile(r"\b(?:gh[opsur]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{16,}"
                       r"|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_.-]+)")
 HEX = re.compile(r"\b[0-9a-fA-F]{32,}\b")
@@ -58,13 +65,15 @@ HEX = re.compile(r"\b[0-9a-fA-F]{32,}\b")
 # and dots end a run, so URL paths and file names stay readable.
 OPAQUE = re.compile(r"(?<![A-Za-z0-9=_-])(?=[A-Za-z0-9=_-]*[0-9])(?=[A-Za-z0-9=_-]*[a-z])"
                     r"(?=[A-Za-z0-9=_-]*[A-Z])[A-Za-z0-9=_-]{32,}(?![A-Za-z0-9=_-])")
-QUERY = re.compile(r"(https?://[^\s?#\"']+)\?[^\s\"'<>)]*")
+# Query strings and fragments: signed URLs and the Console's #/signin?code=.
+QUERY = re.compile(r"(https?://[^\s?#\"']+)[?#][^\s\"'<>)]*")
 EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 HOME_PATH = re.compile(r"(?i)(/Users/|/home/|/var/home/|[A-Z]:\\Users\\|[A-Z]:/Users/)(?!<user>)[^/\\\s:'\"]+")
 ROOT_HOME = re.compile(r"(?<![\w/.-])/root(?=/|\b)")
 MDNS = re.compile(r"\b[A-Za-z0-9][A-Za-z0-9-]*\.(?:local|lan|internal|home\.arpa)\b", re.IGNORECASE)
 IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
-IPV6 = re.compile(r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])")
+# Candidates only, compressed forms included; ip_address() decides.
+IPV6 = re.compile(r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])")
 KEEP_ADDRESSES = {"127.0.0.1", "0.0.0.0", "::1", "::"}
 
 
@@ -117,8 +126,9 @@ class Redactor:
             ("values", self._values),
             ("pem", lambda text: PEM.sub("<private key redacted>", text)),
             ("userinfo", lambda text: USERINFO.sub(r"\1<credentials>@", text)),
-            ("authorization", lambda text: AUTHORIZATION.sub(r"\1\2" + SECRET, text)),
-            ("assignment", lambda text: ASSIGNMENT.sub(r"\1\2" + SECRET, text)),
+            ("authorization", lambda text: AUTHORIZATION.sub(r"\1" + SECRET, text)),
+            ("assignment", lambda text: QUOTED_CODE.sub(r'\1"' + SECRET + '"',
+                                                         ASSIGNMENT.sub(r"\1\2" + SECRET, text))),
             ("prefixed", lambda text: PREFIXED.sub(SECRET, text)),
             ("hex", lambda text: HEX.sub(SECRET, text)),
             ("opaque", lambda text: OPAQUE.sub(SECRET, text)),

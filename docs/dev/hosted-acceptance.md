@@ -8,6 +8,10 @@ Select the columns and enter a published release tag. The default is
 Each selected runner checks out the release tag, verifies the native archive
 and Compose bundle against the release's `SHA256SUMS`, and calls
 `PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh` from that checkout.
+The release API's asset digests also check `SHA256SUMS` itself. When the
+anonymous API refuses the request, which shared hosted addresses hit, the
+job takes `SHA256SUMS` from the public release download alone. Every
+receipt records which check applied as `release_verified_by`.
 The installer and native client run with Python and pip off their PATH.
 Legacy start and rollback operations use Python in a separate environment.
 The jobs use signed-out Codex CLI 0.171.0 installations and disposable bank
@@ -48,7 +52,7 @@ clean install row witnesses issue #1897. The clean install runs the tagged
 installer's default Docker install, which can fall back to a checkout-built
 Python daemon. The upgrade runs the real release updater from a stock
 v0.24.0 install and records the missing arm64 image manifest. The three
-client rows read "not run" with that decision as the reason. [Issue
+client rows count as "cannot run", with that decision as their reason. [Issue
 #1872](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1872)
 
 The Mac receipts record GUI launchd availability. The published native

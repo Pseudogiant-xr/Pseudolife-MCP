@@ -76,6 +76,10 @@ class Failed(Observation):
     """An assertion about the release failed."""
 
 
+class CleanupFailed(Failed):
+    """A fixture the job started could not be stopped and verified."""
+
+
 @dataclass(frozen=True)
 class Result:
     code: int
@@ -190,7 +194,11 @@ def download(url, path, digest=None, *, timeout=180, peer_asset=False, release_m
             raise Unavailable(message)
         raise Failed(message)
     if digest is not None:
-        require(sha256(path) == digest, "A download disagreed with its published SHA-256.")
+        if sha256(path) != digest:
+            # A release asset that disagrees is a release failure. A fixture
+            # download that disagrees (a re-packed tag archive) leaves the
+            # rows it serves unrun.
+            raise (Unavailable if peer_asset else Failed)("A download disagreed with its published SHA-256.")
 
 
 @dataclass(frozen=True)
@@ -568,7 +576,8 @@ class Receipt:
 
     def observe(self, label, result, ok, assertion, *, template=None, required=True):
         # The labels and assertions are fixed call-site strings. Never
-        # interpolate subprocess data, endpoints, paths, or credentials.
+        # interpolate subprocess data, endpoints, paths, or credentials into
+        # them. Output reaches the receipt only through the redactor.
         step = {"command": label, "exit_code": result.code, "observed": bool(ok),
                 "assertion": assertion, "seconds": result.seconds}
         if not ok:
@@ -646,7 +655,7 @@ def write_json(path, payload, *, replace=False):
 LABELS = {"linux-arm64": "Linux arm64", "macos-x64": "macOS Intel", "macos-arm64": "macOS Apple silicon"}
 # A reason is printed only when it is one plain sentence, so a receipt cannot
 # smuggle output or markup into the public summary.
-REASON = re.compile(r"[A-Z][A-Za-z0-9 ,.;:()'/<>#+=-]{8,298}[.]")
+REASON = re.compile(r"[A-Z][A-Za-z0-9 _,.;:()'/#+=-]{8,298}[.]")
 
 
 def cell(path, selected):
