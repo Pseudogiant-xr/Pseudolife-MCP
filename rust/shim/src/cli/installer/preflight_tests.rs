@@ -1,6 +1,7 @@
 //! The cases of ops/preflight.py's tests (tests/test_installer_resources.py,
 //! tests/test_installer_lite.py, tests/test_installer_clone_authority.py),
-//! run against the native check with the same fake Docker those tests use.
+//! run against the native check with the same fake Docker those tests use,
+//! then the native pieces, the #1905 port cases among them.
 use super::*;
 use serde_json::json;
 use std::cell::RefCell;
@@ -884,7 +885,7 @@ fn a_real_listener_makes_the_port_busy() {
 
 // -- #1905: the port decision, every platform row on every platform -----------
 
-fn probes(plain_bind: bool, reuse_bind: Option<bool>, loopback_refused: Option<bool>) -> Probes {
+fn probes(plain_bind: Bind, reuse_bind: Option<Bind>, loopback_refused: Option<bool>) -> Probes {
     Probes {
         plain_bind,
         reuse_bind,
@@ -892,30 +893,44 @@ fn probes(plain_bind: bool, reuse_bind: Option<bool>, loopback_refused: Option<b
     }
 }
 
+const PLATFORMS: [Platform; 3] = [Platform::Linux, Platform::OtherUnix, Platform::Windows];
+const BINDS: [Option<Bind>; 4] = [
+    None,
+    Some(Bind::Bound),
+    Some(Bind::InUse),
+    Some(Bind::Failed),
+];
+const CONNECTS: [Option<bool>; 3] = [None, Some(false), Some(true)];
+
 #[test]
 fn the_port_decision_for_every_platform_row() {
+    use Bind::{Bound, Failed, InUse};
     use PortUse::{Free, Listener, Unbindable};
     let (linux, other, windows) = (Platform::Linux, Platform::OtherUnix, Platform::Windows);
     let rows = [
         // A plain bind that succeeds is free everywhere.
-        (linux, probes(true, None, None), Free),
-        (other, probes(true, None, None), Free),
-        (windows, probes(true, None, None), Free),
+        (linux, probes(Bound, None, None), Free),
+        (other, probes(Bound, None, None), Free),
+        (windows, probes(Bound, None, None), Free),
         // Linux: the SO_REUSEADDR bind passes over TIME-WAIT, and only there.
-        (linux, probes(false, Some(true), None), Free),
-        (linux, probes(false, Some(false), Some(false)), Listener),
-        (linux, probes(false, Some(false), None), Listener),
-        (linux, probes(false, Some(false), Some(true)), Unbindable),
+        (linux, probes(InUse, Some(Bound), None), Free),
+        (linux, probes(InUse, Some(InUse), Some(false)), Listener),
+        (linux, probes(InUse, Some(InUse), None), Listener),
+        (linux, probes(InUse, Some(InUse), Some(true)), Unbindable),
+        // Only an address-in-use refusal can be TIME-WAIT.
+        (linux, probes(Failed, Some(Failed), Some(true)), Listener),
         // macOS and other Unix: a refused plain bind is never a pass, even
         // were a reuse bind to succeed; only the wording follows the connect.
-        (other, probes(false, None, Some(false)), Listener),
-        (other, probes(false, None, None), Listener),
-        (other, probes(false, None, Some(true)), Unbindable),
-        (other, probes(false, Some(true), Some(false)), Listener),
-        (other, probes(false, Some(true), Some(true)), Unbindable),
+        (other, probes(InUse, None, Some(false)), Listener),
+        (other, probes(InUse, None, None), Listener),
+        (other, probes(InUse, None, Some(true)), Unbindable),
+        (other, probes(InUse, Some(Bound), Some(false)), Listener),
+        (other, probes(InUse, Some(Bound), Some(true)), Unbindable),
+        (other, probes(Failed, None, Some(true)), Listener),
         // Windows: a refused bind is a service, as before #1905.
-        (windows, probes(false, None, None), Listener),
-        (windows, probes(false, Some(true), Some(true)), Listener),
+        (windows, probes(InUse, None, None), Listener),
+        (windows, probes(Failed, None, None), Listener),
+        (windows, probes(InUse, Some(Bound), Some(true)), Listener),
     ];
     for (platform, probe, expected) in rows {
         assert_eq!(decide(platform, probe), expected, "{platform:?} {probe:?}");
@@ -924,16 +939,40 @@ fn the_port_decision_for_every_platform_row() {
 
 #[test]
 fn only_linux_turns_a_refused_plain_bind_into_a_pass() {
-    for platform in [Platform::Linux, Platform::OtherUnix, Platform::Windows] {
-        for reuse in [None, Some(false), Some(true)] {
-            for refused in [None, Some(false), Some(true)] {
-                let probe = probes(false, reuse, refused);
-                let free = decide(platform, probe) == PortUse::Free;
-                assert_eq!(
-                    free,
-                    platform == Platform::Linux && reuse == Some(true),
-                    "{platform:?} {probe:?}"
-                );
+    for platform in PLATFORMS {
+        for plain in [Bind::InUse, Bind::Failed] {
+            for reuse in BINDS {
+                for refused in CONNECTS {
+                    let probe = probes(plain, reuse, refused);
+                    let free = decide(platform, probe) == PortUse::Free;
+                    assert_eq!(
+                        free,
+                        platform == Platform::Linux && reuse == Some(Bind::Bound),
+                        "{platform:?} {probe:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn only_an_address_in_use_refused_connect_names_the_rerun() {
+    for platform in PLATFORMS {
+        for plain in [Bind::InUse, Bind::Failed] {
+            for reuse in BINDS {
+                for refused in CONNECTS {
+                    let probe = probes(plain, reuse, refused);
+                    let rerun = decide(platform, probe) == PortUse::Unbindable;
+                    assert_eq!(
+                        rerun,
+                        platform != Platform::Windows
+                            && plain == Bind::InUse
+                            && refused == Some(true)
+                            && !(platform == Platform::Linux && reuse == Some(Bind::Bound)),
+                        "{platform:?} {probe:?}"
+                    );
+                }
             }
         }
     }
@@ -1186,6 +1225,17 @@ fn a_listener_beside_time_wait_leftovers_is_still_a_service_in_use() {
         );
         drop(listener);
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_listener_without_so_reuseaddr_makes_the_port_busy() {
+    // The reuse bind is tried on Linux: it must still fail beside a listener
+    // that never set the option.
+    let listener = loopback_listener(true);
+    let port = listener.local_addr().unwrap().port();
+    assert_eq!(RealHost.port_use(port), PortUse::Listener);
+    drop(listener);
 }
 
 #[cfg(unix)]

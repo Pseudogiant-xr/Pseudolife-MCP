@@ -5,8 +5,9 @@
 //! Names reserve a namespace; they do not prove ownership. Only the Compose
 //! project label plus the recorded local environment permits an installer
 //! rerun. No Docker output (which may contain credentials) reaches an error.
-//! Each refusal is ops/preflight.py's, printed as `FAIL <message>` on stderr
-//! with exit 1; success prints its one `OK` line.
+//! Each refusal is ops/preflight.py's, except the native-only one for a port
+//! that cannot be bound while no service answers on it (#1905), printed as
+//! `FAIL <message>` on stderr with exit 1; success prints its one `OK` line.
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -85,13 +86,24 @@ const PLATFORM: Platform = Platform::OtherUnix;
 #[cfg(not(unix))]
 const PLATFORM: Platform = Platform::Windows;
 
+/// How a bind of 127.0.0.1:`port` ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bind {
+    Bound,
+    /// Refused because the address is in use (EADDRINUSE): a listener, or
+    /// closed connections still in TIME-WAIT.
+    InUse,
+    /// Any other failure (permission, no socket): never a TIME-WAIT sign.
+    Failed,
+}
+
 /// What the raw probes of 127.0.0.1:`port` answered; `None` is not tried.
 #[derive(Clone, Copy, Debug)]
 struct Probes {
-    /// A bind with a plain socket succeeded.
-    plain_bind: bool,
-    /// A bind with SO_REUSEADDR succeeded (Linux only).
-    reuse_bind: Option<bool>,
+    /// The bind of a plain socket.
+    plain_bind: Bind,
+    /// The bind of a socket with SO_REUSEADDR (Linux only).
+    reuse_bind: Option<Bind>,
     /// A loopback connect was refused outright.
     loopback_refused: Option<bool>,
 }
@@ -100,7 +112,7 @@ struct Probes {
 /// with every listener shape and with TIME-WAIT left by listeners with and
 /// without SO_REUSEADDR, on the second Linux dev box and the Windows dev VM).
 fn decide(platform: Platform, probes: Probes) -> PortUse {
-    if probes.plain_bind {
+    if probes.plain_bind == Bind::Bound {
         return PortUse::Free;
     }
     match platform {
@@ -111,11 +123,14 @@ fn decide(platform: Platform, probes: Probes) -> PortUse {
         // A SO_REUSEADDR bind still fails beside every listener shape, and
         // passes over TIME-WAIT whose listener had the option, as the
         // container runtime's own publication does.
-        Platform::Linux if probes.reuse_bind == Some(true) => PortUse::Free,
+        Platform::Linux if probes.reuse_bind == Some(Bind::Bound) => PortUse::Free,
         // On macOS that bind succeeds beside a same-user listener on every
         // address, so it is never tried: nothing there turns a refused bind
-        // into a pass. Only the wording depends on whether a service answers.
-        _ if probes.loopback_refused == Some(true) => PortUse::Unbindable,
+        // into a pass. Only the wording depends on whether a service answers,
+        // and only for an address-in-use refusal, the one TIME-WAIT gives.
+        _ if probes.plain_bind == Bind::InUse && probes.loopback_refused == Some(true) => {
+            PortUse::Unbindable
+        }
         _ => PortUse::Listener,
     }
 }
@@ -123,12 +138,13 @@ fn decide(platform: Platform, probes: Probes) -> PortUse {
 /// The probes `decide` needs for `platform`, each only when the earlier ones
 /// left the answer open.
 fn probe(platform: Platform, port: u16) -> Probes {
-    let plain_bind = bind_succeeds(port, false);
+    let plain_bind = bind(port, false);
     let reuse_bind =
-        (!plain_bind && platform == Platform::Linux).then(|| bind_succeeds(port, true));
-    let loopback_refused =
-        (!plain_bind && platform != Platform::Windows && reuse_bind != Some(true))
-            .then(|| loopback_connect_refused(port));
+        (plain_bind != Bind::Bound && platform == Platform::Linux).then(|| bind(port, true));
+    let loopback_refused = (plain_bind == Bind::InUse
+        && platform != Platform::Windows
+        && reuse_bind != Some(Bind::Bound))
+    .then(|| loopback_connect_refused(port));
     Probes {
         plain_bind,
         reuse_bind,
@@ -136,13 +152,12 @@ fn probe(platform: Platform, port: u16) -> Probes {
     }
 }
 
-/// Whether a socket can bind 127.0.0.1:`port`. On Unix the socket is plain
-/// unless `reuse`, as Python's was: std's bind sets SO_REUSEADDR, which on
-/// macOS lets a loopback bind succeed beside a same-user listener on every
-/// address. On Windows std's plain bind answers as Python's exclusive one
-/// does for every listener shape (probed 14 November 2026); `reuse` is never
-/// asked there.
-fn bind_succeeds(port: u16, reuse: bool) -> bool {
+/// A bind of 127.0.0.1:`port`. On Unix the socket is plain unless `reuse`,
+/// as Python's was: std's bind sets SO_REUSEADDR, which on macOS lets a
+/// loopback bind succeed beside a same-user listener on every address. On
+/// Windows std's plain bind answers as Python's exclusive one does for every
+/// listener shape (probed 14 November 2026); `reuse` is never asked there.
+fn bind(port: u16, reuse: bool) -> Bind {
     #[cfg(unix)]
     {
         // SAFETY: a fresh socket, bound at most once and closed on every
@@ -152,7 +167,7 @@ fn bind_succeeds(port: u16, reuse: bool) -> bool {
         unsafe {
             let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             if fd < 0 {
-                return false;
+                return Bind::Failed;
             }
             if reuse {
                 let on: libc::c_int = 1;
@@ -165,7 +180,7 @@ fn bind_succeeds(port: u16, reuse: bool) -> bool {
                 );
                 if set != 0 {
                     libc::close(fd);
-                    return false;
+                    return Bind::Failed;
                 }
             }
             let mut address: libc::sockaddr_in = std::mem::zeroed();
@@ -183,14 +198,24 @@ fn bind_succeeds(port: u16, reuse: bool) -> bool {
                 std::ptr::addr_of!(address).cast::<libc::sockaddr>(),
                 std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
             );
+            // Read before close, which may set errno again.
+            let error = io::Error::last_os_error().raw_os_error();
             libc::close(fd);
-            bound == 0
+            match (bound, error) {
+                (0, _) => Bind::Bound,
+                (_, Some(libc::EADDRINUSE)) => Bind::InUse,
+                _ => Bind::Failed,
+            }
         }
     }
     #[cfg(not(unix))]
     {
         let _ = reuse;
-        std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+        match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(_) => Bind::Bound,
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => Bind::InUse,
+            Err(_) => Bind::Failed,
+        }
     }
 }
 
