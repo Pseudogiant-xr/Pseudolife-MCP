@@ -523,6 +523,7 @@ function Initialize-NativeClient {
         # tar keeps the archive's 0755; set it again without a PATH lookup.
         try { [System.IO.File]::SetUnixFileMode($script:nativeStaged, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute") } catch { }
     }
+    $answer = $null
     try {
         $answer = Invoke-NativeBounded $script:nativeStaged @("version")
         if ($answer.TimedOut) {
@@ -532,8 +533,17 @@ function Initialize-NativeClient {
         $ran = ($answer.Code -eq 0)
     } catch { $says = $_.Exception.Message; $ran = $false }
     if (-not $ran) {
+        if ($target -like "*windows*" -and $answer.Code -eq -1073741515) {
+            Stop-NativeInstall "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Install the Microsoft Visual C++ Redistributable for x64 before rerunning with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C runtime and rerun that tag's installer with its matching archive."
+        }
         $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
-        Stop-NativeInstall "the downloaded client does not run on this host ($(($says -split "`n")[0]))" $runFix
+        $detail = ($says -split "`n", 2)[0].Trim()
+        if ($null -ne $answer.Code) {
+            $detail = if ($detail) { "exit code $($answer.Code), $detail" } else { "exit code $($answer.Code)" }
+        }
+        $cause = "the downloaded client does not run on this host"
+        if ($detail) { $cause += " ($detail)" }
+        Stop-NativeInstall $cause $runFix
     }
     # The installer steps this script runs belong to the staged release
     # (ops/install-native.sh, NATIVE_INSTALLER_PROTOCOL, says why): exactly

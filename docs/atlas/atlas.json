@@ -1,9 +1,9 @@
 {
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "schema": 59,
-  "verified": "2026-11-21"
+  "verified": "2026-11-23"
  },
  "groups": {
   "clients": {
@@ -1288,12 +1288,12 @@
    "x": 40,
    "y": 1215,
    "t": "ladder_sweep.py",
-   "s": "extractor ladder",
+   "s": "Rust extractor ladder",
    "p": "evals/ladder_sweep.py",
    "d": [
-    "naive-rag → regex floor → e2b → e4b → qwen rungs",
-    "Isolated pseudolife_memory_bench DB — never the live bank",
-    "Picked the shipped guard / confidence-floor defaults"
+    "Measures an explicitly configured extractor through the Rust daemon's dream and search interfaces, with a disposable bank for each run",
+    "Compares gold recovery, stale leakage and context tokens against a frozen raw-turn control with dreaming disabled",
+    "Rung labels identify runs. The extractor endpoint and model are explicit inputs."
    ]
   },
   {
@@ -1302,12 +1302,12 @@
    "x": 40,
    "y": 1310,
    "t": "LongMemEval bench",
-   "s": "flagship external eval",
+   "s": "Rust daemon quality benchmark",
    "p": "evals/longmemeval_bench.py",
    "d": [
-    "78-question knowledge-update subset; rag / cortex / hybrid arms + derived commit-gated cascade (0.12)",
-    "replicate.py: variance-aware — judge noise ≈ 7.7pp spread on single runs",
-    "Resumable JSONL + full bank dumps → offline retrieval sweeps"
+    "Defaults to the full LongMemEval oracle selection across six question types",
+    "Records per-question contexts from public Rust search and uses raw turns from a separate no-dream bank as a control",
+    "Saves contexts and answers so runs can resume and later judging can reuse the recorded answers"
    ]
   },
   {
@@ -1316,13 +1316,12 @@
    "x": 40,
    "y": 1405,
    "t": "regression_gate.ps1",
-   "s": "fact-ranking + answer/judge regression gate",
+   "s": "Rust search and answer/judge regression gate",
    "p": "evals/regression_gate.ps1",
    "d": [
-    "Pinned slice vs committed baseline; exit 1 = regression — default 2 replicates as a drift canary (byte-identical on the reproducible q8_0 server)",
-    "Local + GPU — deliberately NOT wired into CI",
-    "Does not cover extraction: re-run the ladder for dream-path changes",
-    "Scope: offline cortex fact-ranking reconstruction plus the answer/judge path, not CMS candidate selection or MCP rendering; missing pinned bank dumps invalidate the run (exit 2)"
+    "Uses the pinned knowledge-update slice and public Rust search, replaying projected slots without running extraction",
+    "Requires a measured, comparable Rust baseline and at least two replicates. The baseline is pending.",
+    "Uses pinned historical RAG bytes as the raw control and records acquisition, rendering and scoring source digests"
    ]
   },
   {

@@ -39,6 +39,7 @@ pub const PROBE: &str = "--client-handoff-protocols";
 /// [`PROBE`]: it proves the runtime starts before its protocols are read.
 const START_PROBE: &str = "--native-capability";
 const START_PROBE_ANSWER: &str = "pseudolife-mcp native-update-v1";
+const WINDOWS_DLL_NOT_FOUND: i32 = 0xC000_0135_u32 as i32;
 /// Exit code when a client step failed after the daemon side succeeded.
 pub const CLIENT_STEP_FAILED: u8 = 5;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -204,10 +205,9 @@ pub fn hand_off(
         .unwrap_or_default();
     // The same daemon and downgrade grant as this run, so the retry
     // repairs what this one could not.
-    let retry = |version: &str| {
+    let retry = |program: &str, version: &str| {
         format!(
-            "{} update --clients-only --tag {version} --daemon-url {}{} --reinstall",
-            parent.retry_program,
+            "{program} update --clients-only --tag {version} --daemon-url {}{} --reinstall",
             super::super::seams::quote(parent.daemon_url),
             if parent.allow_downgrade {
                 " --allow-downgrade"
@@ -216,10 +216,20 @@ pub fn hand_off(
             }
         )
     };
-    let failed = |name: &str, version: &str, why: &str| -> Value {
+    let failed_with_fix = |name: &str, version: &str, why: &str, fix: &str| -> Value {
         json!({"shim": shim, "handoff": {"state": "failed", "detail": format!(
-            "the new shim runtime {name} ({version}) did not start for the steps after the shim ({why}), so the plugin cache, Codex hook and tunnel steps did not run; the runtime itself is installed. Retry, building the runtime again: {}",
-            retry(version))}, "ok": false})
+            "the new shim runtime {name} ({version}) did not start for the steps after the shim ({why}), so the plugin cache, Codex hook and tunnel steps did not run. The runtime itself is installed. {fix}")}, "ok": false})
+    };
+    let failed = |name: &str, version: &str, why: &str| {
+        failed_with_fix(
+            name,
+            version,
+            why,
+            &format!(
+                "Retry, building the runtime again: {}",
+                retry(&parent.retry_program, version)
+            ),
+        )
     };
     let runtime = match runtime::read_runtime(&path) {
         Ok(runtime) => runtime,
@@ -243,6 +253,20 @@ pub fn hand_off(
     if version == parent.own_version {
         return None;
     }
+    let missing_library = || {
+        Some((
+            failed_with_fix(
+                &name,
+                &version,
+                "Windows could not start the client because a system library is missing (exit code -1073741515, 0xC0000135)",
+                &format!(
+                    "Extract the client from a Windows release ZIP that bundles the C runtime. Open PowerShell in that directory, replace RELEASE_VERSION with that archive's version, and run {}. To use an older archive, first install the Microsoft Visual C++ Redistributable for x64.",
+                    retry(r".\pseudolife-mcp.exe", "RELEASE_VERSION"),
+                ),
+            ),
+            None,
+        ))
+    };
     let executable = runtime.executable();
     let started = probe.run(
         &executable,
@@ -251,6 +275,9 @@ pub fn hand_off(
         PROBE_TIMEOUT,
         &[],
     );
+    if started.code == WINDOWS_DLL_NOT_FOUND {
+        return missing_library();
+    }
     if started.code != 0 || started.text().trim() != START_PROBE_ANSWER {
         let text = started.text();
         let last = text.trim().lines().last().unwrap_or("").trim();
@@ -282,6 +309,7 @@ pub fn hand_off(
         }
         // The usage refusal of an updater that has no such probe.
         2 => true,
+        WINDOWS_DLL_NOT_FOUND => return missing_library(),
         code => {
             return Some((
                 failed(

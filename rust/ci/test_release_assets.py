@@ -27,6 +27,24 @@ def test_binary_archive_has_only_the_installed_executable(tmp_path, target):
             assert stream.getmembers()[0].mode == 0o755
 
 
+def test_windows_smoke_checks_imports_in_the_packaged_bytes_before_running(tmp_path, monkeypatch):
+    target = "x86_64-pc-windows-msvc"
+    binary = tmp_path / "pseudolife-stdio.exe"
+    packed = b"Windows fixture bytes"
+    binary.write_bytes(packed)
+    archive = assets.package(binary, "1.2.3", target, tmp_path / "out")
+    binary.write_bytes(b"changed after packaging")
+
+    def refuse_imports(data):
+        assert data == packed
+        raise ValueError("test import refusal")
+
+    monkeypatch.setattr(assets, "check_windows_imports", refuse_imports)
+    monkeypatch.setattr(assets.subprocess, "run", lambda *args, **kwargs: pytest.fail("executed a refused archive"))
+    with pytest.raises(ValueError, match="test import refusal"):
+        assets.smoke(archive, "1.2.3", target)
+
+
 def test_assemble_hashes_the_complete_set_and_preserves_compose_bytes(tmp_path):
     binary = tmp_path / "binary"
     binary.write_bytes(b"fixture")

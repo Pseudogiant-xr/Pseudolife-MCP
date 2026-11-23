@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "f655902a708fc676",
+  "fingerprint": "74b330783badb465",
+  "reason": "The Windows debug DLL guard runs the same library against the same built executable through the Python shell. No job or build is added."
+}
