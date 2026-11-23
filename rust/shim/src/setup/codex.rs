@@ -273,26 +273,6 @@ fn same_env_value(key: &str, left: Option<&Value>, right: Option<&Value>) -> boo
     false
 }
 
-/// Whether the registered credential file and `requested` hold the same
-/// token, each read through the private-file boundary; anything unreadable
-/// or empty is not the same.
-fn same_token(registered: &Value, requested: &Path) -> bool {
-    let read = |path: PathBuf| {
-        CredentialProvider::new(None, Some(path))
-            .and_then(|provider| provider.snapshot())
-            .ok()
-            .and_then(|snapshot| snapshot.token().map(str::to_owned))
-            .filter(|token| !token.is_empty())
-    };
-    let Some(registered) = registered.as_str().map(PathBuf::from) else {
-        return false;
-    };
-    match (read(registered), read(requested.to_path_buf())) {
-        (Some(left), Some(right)) => left == right,
-        _ => false,
-    }
-}
-
 fn same_setting(path: &[String], left: &Value, right: &Value) -> bool {
     if path
         .iter()
@@ -421,22 +401,7 @@ pub fn plan_replace(
     }
     let mut literal = None;
     if let Some(path) = token_file {
-        let requested = absolute(path)?;
-        // A client-only install copies the token from `--token-file` into
-        // Codex's own copy and registers that; the same command again names
-        // the original file. Keep the copy while it holds the same token, so
-        // an identical rerun changes nothing (issue #1903).
-        let kept = before
-            .get(FILE_KEY)
-            .filter(|current| {
-                same_env_value(
-                    FILE_KEY,
-                    Some(current),
-                    Some(&json!(token_copy_path(&home))),
-                ) && same_token(current, &requested)
-            })
-            .cloned();
-        after.insert(FILE_KEY.to_owned(), kept.unwrap_or_else(|| json!(requested)));
+        after.insert(FILE_KEY.to_owned(), json!(absolute(path)?));
     } else if !before.contains_key(FILE_KEY)
         && let Some(token) = before
             .get(TOKEN_KEY)
