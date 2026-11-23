@@ -465,6 +465,65 @@ mod tests {
         assert!(!report.to_string().contains(TOKEN));
     }
 
+    /// Codex's user layer holding `server` as the Pseudolife registration.
+    fn registered(home: &Home, server: &Value) -> Value {
+        json!({
+            "config": {"mcp_servers": {SERVER: server}},
+            "layers": [{
+                "name": {"type": "user", "file": home.0.join("config.toml")},
+                "version": "fixture-version-2",
+                "config": {"mcp_servers": {SERVER: server}}
+            }]
+        })
+    }
+
+    /// Issue #1903: a client-only install with `--token-file X` stores the
+    /// token in Codex's own copy (`codex-credentials --installer-token-stdin
+    /// < X`, then `codex mcp add` names that copy). The identical command
+    /// again runs `connect --token-file X` first; it must keep the copy, so
+    /// the rerun converges on what the install wrote.
+    #[tokio::test(start_paused = true)]
+    async fn an_identical_rerun_keeps_the_token_copy_the_install_registered() {
+        let home = Home::new();
+        let report = home.configure(async |_, _| Ok(StatusCode::OK)).await.unwrap();
+        let copy = report["credential_file_path"].as_str().unwrap().to_owned();
+        assert_eq!(Path::new(&copy), token_copy_path(&home.0));
+        let operator = home.0.join("operator.token");
+        crate::board::state::atomic_create(&operator, format!("{TOKEN}\n").as_bytes()).unwrap();
+        let env = json!({
+            "PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+            "PSEUDOLIFE_MCP_DAEMON_URL": URL, FILE_KEY: copy,
+        });
+        let server = json!({"command": "/opt/pseudolife-mcp", "args": [], "env": env});
+        let config = registered(&home, &server);
+        for no_spawn in [false, true] {
+            let plan = plan_replace(&config, &home.0, URL, Some(operator.as_path()), no_spawn).unwrap();
+            assert_eq!(
+                plan.env(),
+                env.as_object().unwrap(),
+                "the identical rerun re-pointed the registration"
+            );
+        }
+        // A file holding another token is a new credential: the request
+        // names it, as before.
+        let rotated = home.0.join("rotated.token");
+        crate::board::state::atomic_create(&rotated, b"fixture-rotated-bearer\n").unwrap();
+        let plan = plan_replace(&config, &home.0, URL, Some(rotated.as_path()), true).unwrap();
+        assert_eq!(plan.env()[FILE_KEY], json!(rotated));
+        // A registration naming the operator's own file is not rewritten
+        // to the copy, and one naming another file of theirs still follows
+        // the request.
+        let mut own = env.clone();
+        own[FILE_KEY] = json!(operator);
+        let config = registered(&home, &json!({"command": "/opt/pseudolife-mcp", "env": own}));
+        let plan = plan_replace(&config, &home.0, URL, Some(operator.as_path()), true).unwrap();
+        assert_eq!(plan.env()[FILE_KEY], json!(operator));
+        let other = home.0.join("other.token");
+        crate::board::state::atomic_create(&other, format!("{TOKEN}\n").as_bytes()).unwrap();
+        let plan = plan_replace(&config, &home.0, URL, Some(other.as_path()), true).unwrap();
+        assert_eq!(plan.env()[FILE_KEY], json!(other));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn installer_refuses_http_401_or_403_immediately_without_writes() {
         for status in [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN] {
