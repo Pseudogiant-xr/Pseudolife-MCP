@@ -31,21 +31,19 @@ pub struct Client {
     event_bytes: usize,
     /// The app-server's exit status, once `close` has seen it exit.
     status: Option<std::process::ExitStatus>,
+    /// The program started, as the recovery names it.
+    program: PathBuf,
 }
 
 const TIMEOUT: SetupError = SetupError("Codex did not respond within the setup timeout.");
 // The client never reads the app-server's stderr (its error output can quote
 // config.toml lines, a literal token included), so this names no cause: the
-// next step is to run Codex where its own error is shown.
-macro_rules! exited_next {
-    () => {
-        "run codex in this terminal to see the error it reports, fix that, then retry."
-    };
-}
-const EXITED: SetupError = SetupError(concat!(
-    "Codex exited before setup completed; ",
-    exited_next!()
-));
+// next step is to run Codex where its own error is shown. During the
+// handshake the recovery also names the executable started and its exit
+// status (`Client::exited_early`).
+const EXITED: SetupError = SetupError(
+    "Codex exited before setup completed; run codex in this terminal to see the error it reports, fix that, then retry.",
+);
 // A reply the client cannot read means a protocol it does not speak, which
 // is evidence of a version mismatch.
 const UNREADABLE: SetupError =
@@ -61,36 +59,46 @@ const MAX_MESSAGE: u64 = 4 * 1024 * 1024;
 /// inherited from the parent folder on Windows. A home the user named in
 /// `CODEX_HOME` is created the same way, parents included.
 fn ensure_home(home: &Path, named_by_variable: bool) -> Result<(), SetupError> {
+    use std::io::ErrorKind;
     let shown = home.display();
     let origin = if named_by_variable {
-        format!("CODEX_HOME names {shown}")
+        format!("CODEX_HOME names {shown}, which")
     } else {
-        format!("The Codex home {shown}")
+        format!("The Codex home is {shown}, which")
     };
+    let in_the_way = "move it aside or set CODEX_HOME to another folder, then retry.";
     match std::fs::metadata(home) {
         Ok(metadata) if metadata.is_dir() => return Ok(()),
         Ok(_) => {
             return Err(SetupError::detail(format!(
-                "{origin}, which is not a folder; move that file aside or set CODEX_HOME to a folder, then retry."
+                "{origin} is not a folder; {in_the_way}"
             )));
         }
         // A file where a parent folder should be is NotADirectory on Unix;
         // creating the folder below then fails and says so.
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) => {}
-        Err(_) => {
+        Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {}
+        Err(error) => {
             return Err(SetupError::detail(format!(
-                "{origin}, which this account cannot read; check its permissions, then retry."
+                "{origin} cannot be inspected ({}); check that path and its permissions, then retry.",
+                error.kind()
             )));
         }
     }
-    std::fs::create_dir_all(home).map_err(|_| {
-        SetupError::detail(format!(
-            "{origin}, which does not exist and could not be created; create that folder, then retry."
-        ))
+    std::fs::create_dir_all(home).map_err(|error| {
+        SetupError::detail(match error.kind() {
+            // A file (or a link to nothing) holds a name on the path: on
+            // Unix a parent that is a file is NotADirectory, on Windows the
+            // name already taken is AlreadyExists.
+            ErrorKind::NotADirectory | ErrorKind::AlreadyExists => format!(
+                "{origin} could not be created: something that is not a folder is in the way on that path; {in_the_way}"
+            ),
+            ErrorKind::PermissionDenied => format!(
+                "{origin} could not be created: this account may not create it; create it for this account, or set CODEX_HOME to a folder this account owns, then retry."
+            ),
+            kind => format!(
+                "{origin} could not be created ({kind}); create that folder, then retry."
+            ),
+        })
     })
 }
 
@@ -178,6 +186,7 @@ impl Client {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        let program = PathBuf::from(command.as_std().get_program());
         #[cfg(windows)]
         command.creation_flags(0x0800_0000);
         let mut command = CommandWrap::from(command);
@@ -200,6 +209,7 @@ impl Client {
             events: vec![],
             event_bytes: 0,
             status: None,
+            program,
         };
         let initialized = client.rpc("initialize", json!({"clientInfo":{"name":"pseudolife_hook_setup","version":"1"},"capabilities":{"experimentalApi":true}})).await;
         if let Err(error) = initialized {
@@ -208,21 +218,23 @@ impl Client {
         }
         if let Err(error) = client.send(&json!({"method":"initialized"})).await {
             client.close().await;
-            return Err(error);
+            return Err(client.exited_early(error));
         }
         Ok(client)
     }
 
     /// An app-server that exited during the handshake: its exit status is
-    /// known once `close` has waited for it, so the recovery can name it.
+    /// known once `close` has waited for it, so the recovery names it and
+    /// the program that was started (which may not be the `codex` on PATH).
     fn exited_early(&self, error: SetupError) -> SetupError {
         match self.status {
             Some(status) if error == EXITED => SetupError::detail(format!(
-                concat!("Codex exited before setup completed ({}); ", exited_next!()),
+                "Codex exited before setup completed ({}); run Codex ({}) in this terminal to see the error it reports, fix that, then retry.",
                 match status.code() {
                     Some(code) => format!("exit code {code}"),
                     None => status.to_string(),
-                }
+                },
+                self.program.display()
             )),
             _ => error,
         }
@@ -473,7 +485,7 @@ mod tests {
         std::fs::write(&home, "not a folder").unwrap();
         let default = ensure_home(&home, false).unwrap_err().to_string();
         assert!(
-            default.starts_with(&format!("The Codex home {}", home.display()))
+            default.starts_with(&format!("The Codex home is {}, which", home.display()))
                 && default.contains("not a folder"),
             "{default}"
         );
@@ -494,9 +506,31 @@ mod tests {
         let error = ensure_home(&home, true).unwrap_err().to_string();
         assert!(
             error.starts_with(&format!("CODEX_HOME names {}", home.display()))
-                && error.contains("could not be created"),
+                && error.contains("could not be created")
+                && error.contains("in the way"),
             "{error}"
         );
         assert!(scratch.0.join("blocker").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_home_that_cannot_be_inspected_is_refused_without_creating_anything() {
+        let scratch = Scratch::new();
+        // A link to itself: inspecting it fails with a loop, not NotFound.
+        let home = scratch.0.join("loop");
+        std::os::unix::fs::symlink(&home, &home).unwrap();
+        let error = ensure_home(&home, false).unwrap_err().to_string();
+        assert!(
+            error.starts_with(&format!("The Codex home is {}, which", home.display()))
+                && error.contains("cannot be inspected"),
+            "{error}"
+        );
+        assert!(
+            std::fs::symlink_metadata(&home)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
     }
 }
