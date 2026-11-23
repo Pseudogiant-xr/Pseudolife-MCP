@@ -63,6 +63,22 @@ def test_writer_refuses_identifier(tmp_path, field):
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize(("is_pending", "provenance", "message"), [
+    pytest.param(False, {"daemon": "account@host.example", "daemon_engine": "rust"},
+                 "listed daemon kind and engine", id="unlisted-daemon"),
+    pytest.param(False, {"daemon": "source-built from the tag"},
+                 "fields do not match its status", id="missing-engine"),
+    pytest.param(True, {"daemon": "source-built from the tag", "daemon_engine": "rust"},
+                 "fields do not match its status", id="pending-provenance"),
+])
+def test_writer_refuses_invalid_daemon_provenance(tmp_path, is_pending, provenance, message):
+    record = matrix.pending(*CELL) if is_pending else completed()
+    with pytest.raises(matrix.RecordError, match=message) as error:
+        matrix.write_record(tmp_path, record | provenance)
+    assert provenance["daemon"] not in str(error.value)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_complete_ledger_counts_only_passes(tmp_path, capsys):
     ledger(tmp_path, completed())
     assert matrix.main(["check", str(tmp_path)]) == 0

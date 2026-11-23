@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-11-23 — The Windows native client starts without the Visual C++ Redistributable
+
+### Fixed (2026-11-22 — native client startup on clean Windows) [#1874]
+- The Windows native client includes its C runtime and starts without the Microsoft Visual C++ Redistributable. The build checks the DLL imports of the packaged executable.
+- The native installers report the downloaded client's exit code when it fails to start. On Windows, the installers and native updater explain a missing system library and direct users to a current release.
+
+### Fixed (2026-11-22 — Tunnel guidance when moving to the native client)
+- Explain why a registered tunnel still blocks the client switch and how to run a tunnel in the foreground afterward. For a running Python tunnel, show the retained client's stop command when its path is available.
+- Refuse the native installer's guided tunnel switch before changing the host and give the explicit native profile commands. Unattended native installs with the switch now exit 1. Previously they skipped guided setup and exited 0.
+
+### Fixed (2026-11-22 — Invite the first machine on a fresh daemon) [#1864]
+- The Rust daemon gives a writable bank its identity at startup. Once the identity is available, `pseudolife-mcp invite` works before any agent connects. If the daemon has no usable bank identity, `invite` explains what to do next. Memory tools keep working during identity retries.
+- Native `pseudolife-mcp move` accepts a fresh target with a bank identity audit event and still refuses a target with other audit activity. Finish, roll back or release a paused move before updating the target's native client, because older clients include the event in the saved row count.
+
+### Fixed (2026-11-22 — Codex hook review guidance)
+- Native doctor directs users to review and trust changed Pseudolife hooks in Codex.
+
+### Changed (2026-11-21 — Rust daemon quality evals)
+- LongMemEval drives the Rust daemon's public store, dream, search and history interfaces. The runner records its input and model identities and can resume extraction, answering and independent judging from saved artifacts.
+- The retrieval gate measures public Rust search and requires a Rust baseline, which is still pending. The extractor ladder measures Rust dreams against a frozen raw-turn control.
+- [Rust eval instruments](evals/RUST-DRIVERS.md) describes how retrieval, extraction and judging differ from the frozen Python runs.
+
+### Fixed (2026-11-21 — Installer status when requested client setup is incomplete)
+- The native installers finish the daemon and other client steps before exiting with status 5 when a requested client could not be set up. The last lines name the incomplete clients and their recovery steps. Detected-client and optional setup warnings keep a successful exit.
+
+### Added (2026-11-21 — Native installer verification helpers)
+- The native installer has read-only helpers for inspecting the Pseudolife Gemini registration and verifying an existing bearer token against the daemon. Its `connect-report current` helper identifies plans that only need credential verification.
+
 ## [0.25.0] - 2026-11-22 — The opt-in native client installs without host Python, moves Docker banks, and reconnects compatible foreground tunnels
 
 The Python client remains the installer default. The native client reads

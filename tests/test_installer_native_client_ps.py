@@ -131,10 +131,11 @@ def _release(directory: Path, *, client: str, digest_override: str | None = None
     (directory / "SHA256SUMS").write_text("" if omit else f"{digest}  {asset}\n", encoding="utf-8")
 
 
-def _run(client: str, tmp_path: Path, body: str, *, release: bool = True,
+def _run(client: str, tmp_path: Path, body: str, *, release: bool = True, host_only: bool = False,
          extra_env: dict[str, str] | None = None, **release_kwargs) -> subprocess.CompletedProcess:
     """``body`` run after the installer's native-client block; ``client``
-    ("stub" or "real") is the release ``_release`` packs."""
+    ("stub" or "real") is the release ``_release`` packs. A host-only
+    control runs the body with the same sandbox setup and no installer code."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
@@ -155,16 +156,17 @@ def _run(client: str, tmp_path: Path, body: str, *, release: bool = True,
             stub.chmod(0o755)
     runtimes = home / "runtimes"
     launcher = home / "bin" / ("pseudolife-mcp.exe" if WINDOWS else "pseudolife-mcp")
-    script = "\n".join([
-        '$ErrorActionPreference = "Stop"',
-        "function Step($msg) { Write-Host \"==> $msg\" }",
-        f"$repo = '{repo}'",
-        _block("# >>> native client >>>", "# <<< native client <<<"),
-        _block("$script:shimInstallResult = $null\n", "\n# Two env pairs ride each shim registration"),
-        body,
-    ])
+    if not host_only:
+        body = "\n".join([
+            '$ErrorActionPreference = "Stop"',
+            "function Step($msg) { Write-Host \"==> $msg\" }",
+            f"$repo = '{repo}'",
+            _block("# >>> native client >>>", "# <<< native client <<<"),
+            _block("$script:shimInstallResult = $null\n", "\n# Two env pairs ride each shim registration"),
+            body,
+        ])
     script_file = tmp_path / "run.ps1"
-    script_file.write_text(script, encoding="utf-8")
+    script_file.write_text(body, encoding="utf-8")
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("PSEUDOLIFE_", "XDG_"))}
     env.update({
@@ -200,6 +202,69 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
     assert second.returncode == 0, second.stderr + second.stdout
     assert f"Native client {VERSION} already installed at" in second.stdout, second.stdout
     assert "nothing changed" in second.stdout
+
+
+@pytest.mark.parametrize(("code", "output", "diagnostic"), [
+    (-1073741515, "", "Windows could not start the downloaded client because a system library is missing "
+     "(exit code -1073741515, 0xC0000135). Install the Microsoft Visual C++ Redistributable for x64 before rerunning "
+     "with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C "
+     "runtime and rerun that tag's installer with its matching archive."),
+    (1, "version probe failed\nmore detail", "the downloaded client does not run on this host "
+     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+])
+def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_path, code, output, diagnostic):
+    control = tmp_path / "host-control"
+    control_temp = control / "probe-temp"
+    control_temp.mkdir(parents=True)
+    probe_temp = tmp_path / "probe-temp"
+    probe_temp.mkdir()
+    body = '''
+function Get-NativeTarget { 'x86_64-pc-windows-msvc' }
+function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
+    if (($Arguments -join ' ') -ne 'version') { throw "Unexpected probe $Arguments" }
+    [pscustomobject]@{ TimedOut = $false; Code = [int]$env:STUB_VERSION_CODE; Out = ''; Err = $env:STUB_VERSION_OUTPUT }
+}
+Install-ShimOnce | Out-Null
+Write-Host 'INSTALLED'
+'''
+    # Only the process result is stubbed. Stage and verify a real ZIP on
+    # both platforms so the refusal also has to remove the staging directory.
+    assets = tmp_path / "release"
+    assets.mkdir()
+    name = f"pseudolife-mcp-{VERSION}-x86_64-pc-windows-msvc.zip"
+    archive = assets / name
+    with zipfile.ZipFile(archive, "w") as stream:
+        stream.writestr("pseudolife-mcp.exe", b"version probe stand-in")
+    (assets / "SHA256SUMS").write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {name}\n", encoding="utf-8")
+    probe_env = {"STUB_VERSION_CODE": str(code), "STUB_VERSION_OUTPUT": output}
+    temp_keys = ("TEMP", "TMP", "TMPDIR")
+    host = _run("stub", control, "$null = 0", release=False, host_only=True, extra_env={
+        **probe_env, **dict.fromkeys(temp_keys, str(control_temp)),
+    })
+    assert host.returncode == 0, host.stdout + host.stderr
+    result = _run("stub", tmp_path, body, release=False, extra_env={
+        **probe_env, **dict.fromkeys(temp_keys, str(probe_temp)),
+    })
+    home = tmp_path / "home"
+    downloads = home / ".pseudolife-mcp" / "downloads" / VERSION
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "INSTALLED" not in result.stdout
+    assert result.stderr.strip() == (
+        f"The native pseudolife-mcp client cannot be installed: {diagnostic} "
+        f"Nothing else was changed: the download in {downloads} is kept for a rerun (delete it to free the space)."
+    )
+    # Subtract exact host-only entries. Extra files inside an existing host
+    # directory still show up in the installer's remainder.
+    host_home = control / "home"
+    host_entries = {path.relative_to(host_home) for path in host_home.rglob("*")}
+    installed_entries = {path.relative_to(home) for path in home.rglob("*")}
+    assert installed_entries - host_entries == {
+        path.relative_to(home)
+        for path in (downloads / name, downloads / "SHA256SUMS", downloads, downloads.parent, downloads.parent.parent)
+    }
+    assert {path.relative_to(probe_temp) for path in probe_temp.rglob("*")} <= {
+        path.relative_to(control_temp) for path in control_temp.rglob("*")
+    }
 
 
 def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):

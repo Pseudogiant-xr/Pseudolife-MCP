@@ -42,6 +42,10 @@ JOB_PROGRAMS = {
     "stress-report": {"rust/ci/stress.py", "rust/ci/stress_history.py"},
 }
 JOB_MODULES = {"scope": {"ops.ci_push_passed", "rust.ci.docs_scope"}, "stress": {"evals.rust_port.oracle_selection"}}
+# These artifact checks need a built Windows binary. Their synthetic reader
+# tests are already in RUST_HARNESS via rust/ci. Python-shell source also
+# keeps the probes readable by controllers from before this classification.
+WINDOWS_IMPORT_PROFILES = {"rust": "debug", "candidate": "release"}
 
 
 class SelectionError(ValueError):
@@ -254,6 +258,23 @@ def _classify_line(job, text, words, *, directory="."):
         raise SelectionError("unclassified unittest arguments to a workflow helper")
 
 
+def _classify_windows_import_guard(job, step, directory):
+    run = step.get("run")
+    if not isinstance(run, str) or "rust.ci.windows_imports" not in run:
+        return
+    profile = WINDOWS_IMPORT_PROFILES.get(job)
+    expected = [
+        "from pathlib import Path",
+        "from rust.ci.windows_imports import check_windows_imports",
+        f'check_windows_imports(Path("rust/target/{profile}/pseudolife-stdio.exe").read_bytes())',
+    ]
+    if (profile is None or step.get("shell") != "python"
+            or directory != "." or step.get("if") != "runner.os == 'Windows'"
+            or step.get("env") != {"PYTHONPATH": "."}
+            or [line for line in run.splitlines() if line.strip()] != expected):
+        raise SelectionError("line 1: unclassified Windows DLL import guard")
+
+
 def _audit_jobs(workflow):
     try:
         jobs = workflow["jobs"]
@@ -282,6 +303,7 @@ def _audit_jobs(workflow):
             try:
                 directory = step.get("working-directory", _default_directory(
                     value, _default_directory(workflow, ".")))
+                _classify_windows_import_guard(job, step, directory)
                 for number, text, words in _numbered_lines(step):
                     location = f"{where}, line {number}"
                     try:
