@@ -955,3 +955,16 @@ def test_an_early_arm64_failure_keeps_the_client_rows_not_run(tmp_path, monkeypa
         row = json.loads((tmp_path / f"{name}.json").read_bytes())
         assert (row["status"], row["assertion"]) == ("not yet run", linux.NOT_SUPPORTED)
     assert json.loads((tmp_path / "clean-install.json").read_bytes())["status"] == "fail"
+
+
+def test_disk_floor_is_checked_again_before_each_heavy_writer(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_source as source
+
+    budget = source.Budget(60)
+    monkeypatch.setattr(source, "free_bytes", lambda _: source.FLOOR)
+    source.enough_disk(tmp_path, budget, "the daemon build")
+    monkeypatch.setattr(source, "free_bytes", lambda _: source.FLOOR - 1)
+    with pytest.raises(hosted.Unavailable, match="less than 8 GiB free before model provisioning"):
+        source.enough_disk(tmp_path, budget, "model provisioning")
+    assert [step["command"] for step in budget.steps] == ["free disk before the daemon build",
+                                                          "free disk before model provisioning"]

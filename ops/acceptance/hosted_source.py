@@ -117,6 +117,16 @@ def free_bytes(path):
     return shutil.disk_usage(path).free
 
 
+FLOOR = 8 * 1024**3
+
+
+def enough_disk(path, budget, step):
+    """The 8 GiB floor, checked again just before each heavy writer starts."""
+    free = free_bytes(path)
+    budget.note(f"free disk before {step}", free_bytes=free)
+    need(free >= FLOOR, f"The runner had less than 8 GiB free before {step}.")
+
+
 @dataclass(frozen=True)
 class Build:
     platform: str
@@ -210,6 +220,7 @@ def prepare(release, repo, scratch, budget, platform):
                           env=env, timeout=300, label=f"rustup toolchain install {RUST} --profile minimal")
     if compiler.code != 0:
         raise budget.refuse("The pinned Rust toolchain could not be installed on the runner.")
+    enough_disk(scratch, budget, "the daemon build")
     compiled = budget.run(
         ["cargo", f"+{RUST}", "build", "--manifest-path", str(repo / "rust/Cargo.toml"),
          "--locked", "--bin", "pseudolife-daemon", "-j", str(max(2, os.cpu_count() or 2))],
@@ -227,6 +238,7 @@ def prepare(release, repo, scratch, budget, platform):
         "PSEUDOLIFE_BUILD_GIT_SHA": release.commit, "PSEUDOLIFE_BUILD_SOURCE": "checkout",
     })
     for attempt in range(1, PROVISION_ATTEMPTS + 1):
+        enough_disk(scratch, budget, "model provisioning")
         models = budget.run([executable, "provision", "models", "--if-missing"], env=env,
                             timeout=budget.remaining(1200),
                             label=f"pseudolife-daemon provision models --if-missing <attempt {attempt}>")
