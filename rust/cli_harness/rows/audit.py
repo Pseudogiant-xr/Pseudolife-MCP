@@ -427,7 +427,10 @@ def audit_stdout_closed_trailer(obs: dict) -> None:
     committed redaction whose result line stdout refused, CPython's
     interpreter-shutdown flush fails, prints an ignored-exception trailer
     and exits 120. The native CLI keeps exit 120 and prints no synthetic
-    trailer. Only that exact trailer, with exit 120, is removed."""
+    trailer. Only that exact trailer, with exit 120, is removed. No live
+    comparison starts the frozen CLI any more, but `--record` still records
+    it, and replaying such a recording needs this rule; it retires with that
+    path."""
     stderr = base64.b64decode(obs["stderr"])
     if obs["exit"] == 120 and _TRAILER.search(stderr):
         obs["stderr"] = base64.b64encode(_TRAILER.sub(b"", stderr)).decode()
@@ -556,6 +559,39 @@ def _bank_verify_reference(case, kind, home):
         stdout = json.dumps(report).encode("utf-8") + newline
     return {"home": str(home), "exit": code, "stdout": _encoded(stdout), "stderr": _encoded(stderr),
             "files": arm.state["before"], "modes": core.modes(home), "db": "unchanged"}
+
+
+# The frozen CLI's `verify` against a bank whose report stdout refuses,
+# captured from the frozen arm of the live audit row at master ffbad904b on
+# 23 November 2026: CPython 3.11.17 on the Linux dev box, 3.11.9 on the
+# Windows dev VM in ordinary and 8.3 short TEMP alike. The frozen `verify`
+# printed its report and returned 0; CPython's shutdown flush to the closed
+# stdout then failed, printed this ignored-exception trailer and exited 120.
+# The native CLI refuses instead (exit 2 and a diagnostic), so the case
+# stays one of the row's known differences.
+_FROZEN_CLOSED_STDOUT_VERIFY = {
+    "linux": ("Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\n"
+              "BrokenPipeError: [Errno 32] Broken pipe\n"),
+    "windows": ("Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\r\n"
+                "OSError: [Errno 22] Invalid argument\r\n"),
+}
+
+
+def _frozen_closed_stdout_verify_reference(case, kind, home):
+    """The frozen capture above, for a seed whose report the frozen CLI printed."""
+    verified = _bank_verify_reference(case, kind, home)
+    if verified["exit"] != 0 or not core.decode(verified, "stdout"):
+        raise AssertionError(f"{case.id}: the frozen capture is of a bank that verifies and prints its "
+                             f"report; the {kind} seed now verifies with exit {verified['exit']} and "
+                             f"{len(core.decode(verified, 'stdout'))} bytes of report")
+    stderr = _FROZEN_CLOSED_STDOUT_VERIFY[core.PLATFORM].encode("utf-8")
+    return dict(verified, exit=120, stdout=_encoded(b""), stderr=_encoded(stderr))
+
+
+def frozen_closed_stdout_verify_case(case_id, kind):
+    case = read_case(case_id, kind, ["verify"], stdout_closed=True)
+    case.reference = partial(_frozen_closed_stdout_verify_reference, case, kind)
+    return case
 
 
 def bank_verify_case(case_id, kind, *, expect_head=None, env=None):
@@ -987,8 +1023,9 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
     return case
 
 
-# Test instrument for the vacuum-skip path (the test login owns every table,
-# so Postgres never skips a step for it): ANALYZE evaluates an expression
+# Test instrument for the vacuum-skip path (the test login owns every table
+# and the database, so Postgres never skips a step for it, `VACUUM
+# pg_catalog.pg_statistic` included): ANALYZE evaluates an expression
 # index on each sampled row, and this expression raises a WARNING there,
 # which `_vacuum` collects exactly as it collects a permission skip. The
 # database default also hides warnings, as a role or database setting can.
@@ -1179,11 +1216,12 @@ def _redact_projected_reference(source, message, reason, audit_copy, siblings, p
     siblings = [other.make() for other in siblings]
     _assert_redaction_seed(seed, message_id, audit_copy, siblings, seed_property)
     report = _project_redaction(_REDACT_REFERENCE_DB, message_id, reason, started, audit_copy, siblings)
-    warnings = _redact_fixture_warnings(_REDACT_REFERENCE_DB, bool(prepare))
+    instrumented = prepare == VACUUM_WARNING
+    warnings = _redact_fixture_warnings(_REDACT_REFERENCE_DB, instrumented)
     # Only the ANALYZE instrument may leave the clean-up incomplete (checked
     # above), so the flag follows the case's declaration: literally True
     # without it, False with it.
-    report["vacuumed"] = not prepare
+    report["vacuumed"] = not instrumented
     # The notes, their order and the result key order are transcribed from
     # `_redact` in pseudolife_memory/board_audit_cli.py at
     # 3ac81bcdcb3a6d64a769b40057c02b1c35458225.
@@ -1221,6 +1259,9 @@ def _redact_projected_reference(source, message, reason, audit_copy, siblings, p
 def redact_projected_case(case_id, source, message, reason, *, resolved_id=None, audit_copy="removed",
                           siblings=(), prepare=(), stdout_closed=False, rules=("audit-redact-clock",),
                           seed_property=None):
+    if prepare not in ((), VACUUM_WARNING):
+        # The reference would read any other preparation as no instrument.
+        raise ValueError(f"{case_id}: a projected redaction's only preparation is VACUUM_WARNING")
     case = redact_case(case_id, source, message, reason, prepare=prepare, rules=rules, stdout_closed=stdout_closed)
     case.reference = partial(_redact_projected_reference, source, resolved_id or message, reason,
                              audit_copy, siblings, prepare, stdout_closed, seed_property=seed_property)
@@ -1808,7 +1849,7 @@ def cases() -> list[core.Case]:
                               + "?application_name=audit"}),
         export_file_case("export-out-missing-dir-before-agent", "missing/out.jsonl", agent="ffffffff0",
                          diagnostic="board-audit: cannot create {out}: No such file or directory"),
-        file_case("no-bank", ["verify"]),
+        audit_no_bank_case("no-bank", ["verify"]),
         file_case("input-not-utf8", ["verify", "--input", _home("archive.jsonl")],
                   files={"archive.jsonl": b'{"seq": 1}\n\xff\n'}),
         file_case("input-partial-utf8-after-cr", ["verify", "--input", _home("archive.jsonl")],
@@ -1826,8 +1867,7 @@ def cases() -> list[core.Case]:
                   ["verify", "--input", "C:.\\missing-audit-archive.jsonl"],
                   platforms=("windows",)),
         # (O2) a stdout that refuses the report
-        read_case("defer-bank-verify-stdout-closed", "rich", ["verify"],
-                  stdout_closed=True),
+        frozen_closed_stdout_verify_case("defer-bank-verify-stdout-closed", "rich"),
         redact_projected_case("redact-stdout-closed", "rich", _rich("to_redact"), "wrong paste",
                               rules=("audit-redact-clock", "audit-stdout-closed-trailer"),
                               stdout_closed=True),
