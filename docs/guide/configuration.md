@@ -2626,9 +2626,10 @@ someone types into it.
 A host that unloads idle Codex threads ends the doorbell with them, because
 unloading a thread stops its MCP servers and with them the shim that watches
 it. T3 Code does this about two minutes after the last turn it started
-itself (as of T3 Code 0.1.12); after that a sender's receipt is `no_path`
-with `listener_expired`, and the mail waits for the session's next turn, so
-a Codex session parked under T3 Code says `next-turn-only`. A turn the
+itself (as of T3 Code 0.1.12); once the shim's board attachment then lapses,
+within about a minute, a sender's receipt is `no_path` with
+`listener_expired` and the mail waits for the session's next turn, so a
+Codex session parked under T3 Code says `next-turn-only`. A turn the
 doorbell does start under T3 Code runs, but T3's thread view does not show
 it (`pingdotgg/t3code#23919`).
 
