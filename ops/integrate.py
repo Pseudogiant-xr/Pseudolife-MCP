@@ -67,6 +67,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -4490,6 +4491,15 @@ def _docs_scope(master: str, head: str, preview: str) -> tuple[bool, bool]:
     return pull, merged
 
 
+def _docs_guard_env(home: Path, parent_env: Mapping[str, str]) -> dict[str, str]:
+    env = {key: value for key, value in parent_env.items() if key.upper() in CENSUS_ENV}
+    env.update({name: str(home) for name in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA")})
+    # Torch uses getpass.getuser() for its cache path. Windows has no pwd fallback.
+    env.update(USERNAME="docs-guard", USER="docs-guard", LOGNAME="docs-guard")
+    env["PSEUDOLIFE_TEST_PG_HOST_PORT"] = "127.0.0.1:1"
+    return env
+
+
 def _docs_guards(number: int, master: str, preview: str) -> bool:
     with tempfile.TemporaryDirectory(prefix="integrate-docs-") as temporary:
         root = Path(temporary) / "tree"
@@ -4498,11 +4508,8 @@ def _docs_guards(number: int, master: str, preview: str) -> bool:
         try:
             home = Path(temporary) / "home"
             home.mkdir()
-            env = {key: value for key, value in os.environ.items() if key.upper() in CENSUS_ENV}
-            env.update({name: str(home) for name in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA")})
-            env["PSEUDOLIFE_TEST_PG_HOST_PORT"] = "127.0.0.1:1"
             result = _run([sys.executable, "-I", "-S", "-c", _DOCS_TEST_RUNNER, master],
-                          cwd=root, env=env, check=False)
+                          cwd=root, env=_docs_guard_env(home, os.environ), check=False)
             if result.returncode:
                 raise Refusal(f"doc guards failed on the test merge of #{number} (pytest exit "
                               f"{result.returncode}); fix the failure below and retry\n"
@@ -4521,8 +4528,16 @@ def merge_docs(args: argparse.Namespace) -> int:
     number = args.pr
     view = _docs_pr_view(number)
     _, master = _preflight(require_master=False)
-    if view.get("baseRefOid") != master:
-        raise Refusal(f"{BASE} moved while #{number} was read; retry against the new base")
+    recorded_base = view.get("baseRefOid")
+    # GitHub can report an older baseRefOid after master advances.
+    # The preview's parents below establish which base and head will be tested.
+    if recorded_base != master and not (
+        isinstance(recorded_base, str)
+        and re.fullmatch(r"[0-9a-f]{40}", recorded_base)
+        and _is_ancestor(recorded_base, master)
+    ):
+        raise Refusal(f"#{number}'s recorded base is not an ancestor of {BASE}; update the branch "
+                      f"with `gh pr update-branch {number}` and retry")
     _refuse_docs_during_batch(master)
     head = _fetch_head(number)
     if view.get("headRefOid") != head:
@@ -4537,7 +4552,9 @@ def merge_docs(args: argparse.Namespace) -> int:
     census_drift = _docs_guards(number, master, preview)
     _refuse_docs_during_batch(master)
     current = _docs_pr_view(number)
-    if (current.get("baseRefOid"), current.get("headRefOid")) != (master, head):
+    # GitHub's metadata may catch up to the base we tested while the guards run.
+    if (current.get("baseRefOid") not in (recorded_base, master)
+            or current.get("headRefOid") != head):
         raise Refusal(f"the base or head of #{number} changed during the doc guards; retry on the new tree")
     master_ref = f"refs/heads/{BASE}"
     if _out("ls-remote", "--exit-code", REMOTE, master_ref) != f"{master}\t{master_ref}":
