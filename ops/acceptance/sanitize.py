@@ -44,8 +44,9 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 PEM = re.compile(r"-----BEGIN [A-Z ]*-----.*?(?:-----END [A-Z ]*-----|\Z)", re.DOTALL)
 # A whole line of base64 is key or certificate material even without its
-# header, as a tail cut after a BEGIN line would leave it.
-KEY_LINE = re.compile(r"(?m)^[ \t]*[A-Za-z0-9+/]{40,}={0,2}[ \t]*$")
+# header, as a tail cut after a BEGIN line would leave it. A line of hex only
+# (a digest or commit) is left to the hex rule and its plain marker.
+KEY_LINE = re.compile(r"(?m)^[ \t]*(?![0-9A-Fa-f]+={0,2}[ \t]*$)[A-Za-z0-9+/]{40,}={0,2}[ \t]*$")
 USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{1,20}://)[^/\s:@]+:[^/\s@]*@")
 # A header value or a bearer credential, not the words in prose
 # ("authorization failed" keeps its meaning).

@@ -1080,3 +1080,49 @@ def test_an_unexpected_mac_error_still_writes_redacted_receipts(tmp_path, monkey
         receipt = json.loads((output / f"{scenario}.json").read_bytes())
         assert receipt["status"] == "fail"
         assert "RuntimeError" in receipt["assertion"]
+
+
+# Failure reasons the harness raises as written, each already worded as a failure.
+FAILURE_WORDED = {
+    "The update changed the daemon without a structured rollback record.",
+    "The updater did not identify a usable rollback tag.",
+    "The recorded rollback did not match a documented Compose route.",
+    "One or more installed ordinary-use commands failed.",
+    "The published client-only installer did not register Codex against the healthy test peer.",
+    "The owned PostgreSQL fixture did not stop.",
+}
+# The one call whose reason is computed: `download` builds "Public download
+# failed for ..." (`require` and the direct raises add the NOT_MET prefix).
+COMPUTED_REASONS = {("hosted.py", "download")}
+
+
+def test_every_failure_reason_reads_as_a_failure():
+    import ast
+
+    root = Path(__file__).resolve().parents[2] / "ops" / "acceptance"
+    computed = set()
+    for path in sorted(root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for function in [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]:
+            for node in ast.walk(function):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id in ("Failed", "CleanupFailed") and node.args):
+                    continue
+                reason = node.args[0]
+                if isinstance(reason, ast.Constant) and isinstance(reason.value, str):
+                    assert reason.value in FAILURE_WORDED, (path.name, reason.value)
+                elif (isinstance(reason, ast.BinOp) and isinstance(reason.left, ast.Name)
+                      and reason.left.id == "NOT_MET"):
+                    continue
+                else:
+                    computed.add((path.name, function.name))
+    assert computed == COMPUTED_REASONS
+
+
+def test_a_digest_line_keeps_the_plain_marker_and_is_not_called_key_material():
+    from ops.acceptance.sanitize import Redactor
+
+    digest = "441dfae4280cae3e0425e5f876f80559fb0731c140f1aae22b3e5a54d0411bfd"
+    cleaned = Redactor().text(f"expected\n{digest}\n")
+    assert digest not in cleaned
+    assert "<redacted>" in cleaned and "key material" not in cleaned

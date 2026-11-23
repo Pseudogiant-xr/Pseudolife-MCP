@@ -8,7 +8,7 @@ import tempfile
 
 from . import matrix
 from .hosted import (
-    CODEX_HOME_NOTE, INSTALL, PEER_NOTE, REDACTOR, CleanupFailed, Failed, Profile, Receipt, Unavailable,
+    CODEX_HOME_NOTE, INSTALL, NOT_MET, PEER_NOTE, REDACTOR, CleanupFailed, Failed, Profile, Receipt, Unavailable,
     command, native_path, prepare_codex, published_release, write_json,
 )
 from .hosted_linux import (
@@ -73,7 +73,7 @@ def run(tag, platform, output):
         require_runner = (os.environ.get("GITHUB_ACTIONS") == "true" and os.uname().sysname == "Darwin"
                           and os.uname().machine == machine)
         if not require_runner:
-            raise Failed("The job ran on the selected disposable macOS runner.")
+            raise Failed(NOT_MET + "The job ran on the selected disposable macOS runner.")
         with tempfile.TemporaryDirectory(prefix="pla-", dir="/tmp") as temporary:
             scratch = Path(temporary).resolve()
             REDACTOR.path(scratch, "<scratch>")

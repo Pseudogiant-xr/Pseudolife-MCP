@@ -381,7 +381,7 @@ class Profile:
         config = self.codex / "config.toml"
         if config.is_file():
             return tomllib.loads(config.read_text())["mcp_servers"]["pseudolife-memory"]
-        raise Failed("Codex registered the installed launcher.")
+        raise Failed(NOT_MET + "Codex registered the installed launcher.")
 
     def launcher(self):
         return self.registration()["command"]
@@ -502,7 +502,7 @@ class Mcp:
             self.process.stdin.write(json.dumps(message).encode() + b"\n")
             self.process.stdin.flush()
         except OSError:
-            raise Failed("The installed stdio shim accepted the request.") from None
+            raise Failed(NOT_MET + "The installed stdio shim accepted the request.") from None
         if notification:
             return None
         deadline = monotonic() + 40
@@ -516,7 +516,7 @@ class Mcp:
                             mcp_failure(f"MCP {method} {params.get('name', '')}".strip(), answer.get("error")))
                     return answer["result"]
         except (Empty, ValueError):
-            raise Failed("The installed stdio shim answered with valid MCP JSON before its deadline.") from None
+            raise Failed(NOT_MET + "The installed stdio shim answered with valid MCP JSON before its deadline.") from None
 
     def tool(self, name, **arguments):
         result = self.send("tools/call", {"name": name, "arguments": arguments,
@@ -528,7 +528,7 @@ class Mcp:
         try:
             return json.loads(result["content"][0]["text"])
         except (IndexError, KeyError, ValueError):
-            raise Failed("The MCP response contained the tool's structured result.") from None
+            raise Failed(NOT_MET + "The MCP response contained the tool's structured result.") from None
 
 
 @contextmanager
