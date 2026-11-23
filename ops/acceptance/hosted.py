@@ -15,13 +15,16 @@ import shutil
 import signal
 import subprocess
 import tarfile
+import tempfile
 from threading import Thread
 from time import monotonic
 import tomllib
+import uuid
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from . import matrix
+from .sanitize import runner_redactor
 
 
 PROJECT = "Pseudogiant-xr/Pseudolife-MCP"
@@ -31,6 +34,12 @@ PLATFORMS = ("linux-arm64", "macos-x64", "macos-arm64")
 SELECTIONS = {**{platform: (platform,) for platform in PLATFORMS},
               "all": PLATFORMS, "macos": PLATFORMS[1:]}
 DAEMONS = ("none", *matrix.DAEMON_KINDS)
+CODEX_HOME_NOTE = ("The Codex home folder existed before each install, as after a first Codex start, so this row "
+                   "does not cover a never-started Codex (issue #1897).")
+STOCK_CODEX_NOTE = ("The home had no Codex folder, as before a first Codex start. Issue #1897 is the Codex setup "
+                    "failure that follows.")
+PEER_NOTE = ("The daemon is a test peer built from the tagged source on this runner. Only the client "
+             "steps are evidence about the published release artifact.")
 OUTCOMES = ("pass", "fail", "not yet run")
 INSTALL = "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh"
 CLIENT = "pseudolife-mcp"
@@ -46,11 +55,24 @@ CODEX_ASSETS = {
 }
 
 
-class Unavailable(Exception):
+# Every value a job generates (tokens, passwords, pairing codes) and every
+# private directory is registered here before anything can print it.
+REDACTOR = runner_redactor()
+
+
+class Observation(Exception):
+    """A reason sentence, plus the sanitised output that explains it."""
+
+    def __init__(self, reason, failure=None):
+        super().__init__(reason)
+        self.failure = failure
+
+
+class Unavailable(Observation):
     """The runner cannot supply a prerequisite for an observation."""
 
 
-class Failed(Exception):
+class Failed(Observation):
     """An assertion about the release failed."""
 
 
@@ -98,9 +120,49 @@ def command(argv, *, env=None, cwd=None, timeout=60, data=None, stdout_only=Fals
     return Result(code, output, round(monotonic() - started, 3))
 
 
-def require(ok, reason):
+def require(ok, reason, failure=None):
     if not ok:
-        raise Failed(reason)
+        raise Failed(reason, failure)
+
+
+def read_tail(stream, limit=65536):
+    """The last bytes of a private output file, for the redactor."""
+    stream.seek(0, os.SEEK_END)
+    stream.seek(max(0, stream.tell() - limit))
+    return stream.read()
+
+
+CODEX_PROBE = b"".join(json.dumps(message).encode() + b"\n" for message in (
+    {"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "hosted_acceptance_probe", "version": "1"},
+                                                  "capabilities": {"experimentalApi": True}}},
+    {"method": "initialized"},
+    {"id": 2, "method": "config/read", "params": {"includeLayers": True, "cwd": "."}},
+))
+
+
+def codex_probe(env, cwd, hold=8):
+    """After the installer reports a Codex setup failure, ask Codex itself.
+
+    The installer keeps Codex's own output out of its diagnostics, so this
+    replays the setup's first app-server requests in the same environment
+    and keeps Codex's sanitised answer and stderr in the receipt.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".jsonl") as requests:
+        requests.write(CODEX_PROBE)
+        requests.flush()
+        # Stdin stays open while Codex answers, as the installer's client keeps it.
+        result = command(["sh", "-c", '{ cat "$1"; sleep "$2"; } | codex app-server --stdio', "probe",
+                          requests.name, str(hold)], env=env, cwd=cwd, timeout=45)
+    answered = [line for line in result.output.splitlines() if line.startswith(b'{"id":2,') and b'"result"' in line]
+    probe = explain("codex app-server --stdio <setup requests replayed>", result)
+    probe["config_read_answered"] = bool(answered)
+    probe["last_lines"] = [line[:200] for line in probe["last_lines"]]
+    return probe
+
+
+def explain(label, result):
+    """The receipt entry for a step whose exit or output decided a failure."""
+    return REDACTOR.failure(label, result.code, result.output)
 
 
 def sha256(path):
@@ -140,6 +202,7 @@ class Release:
     archive: Path
     digest: str
     daemon_digest: str | None = None
+    verified_by: str = "release API and SHA256SUMS"
 
     @property
     def version(self):
@@ -160,13 +223,25 @@ def published_release(tag, platform, folder):
     require(re.fullmatch(rf"v{matrix.VERSION}", tag), "Release tag has a supported version.")
     folder.mkdir()
     metadata = folder / "release.json"
-    download(f"{API}/{tag}", metadata, release_metadata=True)
-    release = json.loads(metadata.read_bytes())
-    require(release.get("tag_name") == tag and release.get("draft") is False,
-            "The selected tag is a published release.")
-    assets = {asset["name"]: asset.get("digest", "") for asset in release["assets"]}
+    try:
+        download(f"{API}/{tag}", metadata, release_metadata=True)
+    except Unavailable:
+        # Hosted Mac runners share addresses, so the anonymous API limit can
+        # refuse the metadata (HTTP 403 in trial run 45128102045). The public
+        # download path serves only published releases, and every archive is
+        # still checked against the release's SHA256SUMS below.
+        metadata.unlink(missing_ok=True)
+    assets = None
+    if metadata.is_file():
+        release = json.loads(metadata.read_bytes())
+        require(release.get("tag_name") == tag and release.get("draft") is False,
+                "The selected tag is a published release.")
+        assets = {asset["name"]: asset.get("digest", "") for asset in release["assets"]}
 
     def fetch(name, digest=None):
+        if assets is None:
+            download(f"{RELEASE}/{tag}/{name}", folder / name, digest, release_metadata=digest is None)
+            return
         official = assets.get(name) or ""
         require(re.fullmatch(r"sha256:[a-f0-9]{64}", official),
                 "Release asset has a published digest.")
@@ -181,7 +256,7 @@ def published_release(tag, platform, folder):
     for name in (archive, bundle):
         require(name in digests, "SHA256SUMS contains the required release asset.")
         fetch(name, digests[name])
-    if "RELEASE-READY.json" in assets:
+    if assets is not None and "RELEASE-READY.json" in assets:
         fetch("RELEASE-READY.json")
     remote = command(["git", "ls-remote", "--exit-code", f"https://github.com/{PROJECT}.git",
                       f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"], stdout_only=True)
@@ -199,7 +274,8 @@ def published_release(tag, platform, folder):
         require(daemon_digest is None or isinstance(daemon_digest, str)
                 and re.fullmatch(r"sha256:[a-f0-9]{64}", daemon_digest),
                 "Release readiness contains a valid published Rust daemon digest.")
-    return Release(tag, platform, folder, commit, folder / archive, digests[archive], daemon_digest)
+    return Release(tag, platform, folder, commit, folder / archive, digests[archive], daemon_digest,
+                   "release API and SHA256SUMS" if assets is not None else "SHA256SUMS only (release API refused)")
 
 
 def prepare_codex(platform, scratch):
@@ -246,11 +322,17 @@ def native_path(scratch, tools):
 class Profile:
     folder: Path
     path: str
+    # A Codex that has started once has its home folder. The published
+    # v0.25.1 installer fails Codex setup without it (trial run 45125267933),
+    # so only the stock rows, which witness that, start without one.
+    codex_started: bool = True
 
     def __post_init__(self):
         self.folder.mkdir(mode=0o700)
         for name in ("tmp", ".local/bin", "config", "cache", "data"):
             (self.folder / name).mkdir(parents=True)
+        if self.codex_started:
+            self.codex.mkdir(mode=0o700)
 
     @property
     def codex(self):
@@ -342,6 +424,10 @@ class Peer:
     owner_env: dict[str, str]
     checkout: Path
     engine: str
+    # A source-built peer's bank, for the client's file-tier backup.
+    database_url: str | None = None
+    data_dir: Path | None = None
+    tools: str | None = None
 
     def sample(self):
         return get(self.url + "/api/episodes?limit=1", self.token_file.read_text().strip())[0]
@@ -360,11 +446,26 @@ class Peer:
         return result
 
 
+def mcp_failure(step, payload):
+    """A sanitised MCP error or error result, for the row that met it."""
+    text = json.dumps(payload, indent=1) if not isinstance(payload, str) else payload
+    failure = REDACTOR.failure(step, None, text.encode(), lines=TAIL_MCP)
+    failure["error_class"] = "mcp-error"
+    return failure
+
+
+TAIL_MCP = 16
+
+
 class Mcp:
     def __init__(self, process):
         self.process = process
         self.lines = Queue()
         self.id = 0
+        # Codex names its thread in each tool call's _meta, and a shim
+        # registered for Codex refuses board calls without one (trial run
+        # 45131084076), so the harness speaks for one thread per session.
+        self.thread = str(uuid.uuid4())
         Thread(target=self.read, daemon=True).start()
 
     def read(self):
@@ -391,14 +492,17 @@ class Mcp:
                 require(line is not None, "The installed stdio shim returned a response.")
                 answer = json.loads(line)
                 if answer.get("id") == self.id:
-                    require("result" in answer, "The MCP request returned a result.")
+                    require("result" in answer, "The MCP request returned a result.",
+                            mcp_failure(f"MCP {method} {params.get('name', '')}".strip(), answer.get("error")))
                     return answer["result"]
         except (Empty, ValueError):
             raise Failed("The installed stdio shim answered with valid MCP JSON before its deadline.") from None
 
     def tool(self, name, **arguments):
-        result = self.send("tools/call", {"name": name, "arguments": arguments})
-        require(not result.get("isError"), "The MCP tool completed successfully.")
+        result = self.send("tools/call", {"name": name, "arguments": arguments,
+                                          "_meta": {"threadId": self.thread}})
+        require(not result.get("isError"), "The MCP tool completed successfully.",
+                mcp_failure(f"MCP tools/call {name}", result.get("content")))
         if "structuredContent" in result:
             return result["structuredContent"]
         try:
@@ -409,9 +513,11 @@ class Mcp:
 
 @contextmanager
 def session(executable, args, env, cwd):
-    with subprocess.Popen([executable, *args], env=env, cwd=cwd, start_new_session=True,
-                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL) as process:
+    # The shim's stderr is the only place its refusals appear. It goes to a
+    # private file and reaches a receipt only through the redactor.
+    with tempfile.TemporaryFile() as errors, subprocess.Popen(
+            [executable, *args], env=env, cwd=cwd, start_new_session=True,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors) as process:
         try:
             mcp = Mcp(process)
             result = mcp.send("initialize", {
@@ -421,8 +527,18 @@ def session(executable, args, env, cwd):
             require("protocolVersion" in result, "The installed shim negotiated the MCP protocol.")
             mcp.send("notifications/initialized", {}, notification=True)
             yield mcp
+        except Failed as error:
+            if error.failure is None:
+                with suppress(OSError):
+                    process.stdin.close()
+                with suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=5)
+                error.failure = explain("installed stdio shim <stderr>",
+                                        Result(process.returncode, read_tail(errors), 0))
+            raise
         finally:
-            process.stdin.close()
+            with suppress(OSError):
+                process.stdin.close()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -448,16 +564,30 @@ class Receipt:
     status: str = "not yet run"
     note: str = "The scenario was not selected."
     cleanup_failed: bool = False
+    fixture_notes: list = field(default_factory=list)
 
     def observe(self, label, result, ok, assertion, *, template=None, required=True):
         # The labels and assertions are fixed call-site strings. Never
         # interpolate subprocess data, endpoints, paths, or credentials.
-        self.steps.append({"command": label, "exit_code": result.code, "observed": bool(ok),
-                           "assertion": assertion, "seconds": result.seconds})
+        step = {"command": label, "exit_code": result.code, "observed": bool(ok),
+                "assertion": assertion, "seconds": result.seconds}
+        if not ok:
+            step["failure"] = explain(label, result)
+        elif warnings := REDACTOR.cause_lines(result.output):
+            # A step that met its assertion can still warn about what a later
+            # step then fails on (a client the installer did not register).
+            step["warning_lines"] = warnings
+        self.steps.append(step)
         if template is not None:
             self.commands.append({"command": template, "exit_code": result.code})
         if required:
             require(ok, assertion)
+
+    def explain(self, error):
+        """Keep the sanitised output an exception carried into this row."""
+        if getattr(error, "failure", None) is not None:
+            self.steps.append({"command": error.failure["step"], "exit_code": error.failure["exit_code"],
+                               "observed": False, "assertion": str(error), "failure": error.failure})
 
     def checkpoint(self, output, release):
         self._write_receipt(output, release, False, provisional=True)
@@ -491,11 +621,16 @@ class Receipt:
             status, note = "not yet run", "The scenario met its assertions. Fixture cleanup remains unverified."
         receipt = {
             "scenario": self.scenario, "platform": self.platform, "daemon": self.daemon,
-            "daemon_engine": self.daemon_engine, "status": status, "assertion": note,
+            "daemon_engine": self.daemon_engine, "status": status, "assertion": REDACTOR.text(note),
             "steps": self.steps, "cleanup_verified": cleanup,
         }
+        if self.fixture_notes:
+            receipt["fixture_notes"] = list(dict.fromkeys(self.fixture_notes))
+        if self.daemon in matrix.DAEMON_KINDS[2:]:
+            receipt["peer_note"] = PEER_NOTE
         if release is not None:
-            receipt.update(release_commit=release.commit, archive=release.archive.name, archive_sha256=release.digest)
+            receipt.update(release_commit=release.commit, archive=release.archive.name, archive_sha256=release.digest,
+                           release_verified_by=getattr(release, "verified_by", None))
         write_json(output / f"{self.scenario}.json", receipt, replace=True)
 
 
@@ -508,29 +643,69 @@ def write_json(path, payload, *, replace=False):
         target.replace(path)
 
 
+LABELS = {"linux-arm64": "Linux arm64", "macos-x64": "macOS Intel", "macos-arm64": "macOS Apple silicon"}
+# A reason is printed only when it is one plain sentence, so a receipt cannot
+# smuggle output or markup into the public summary.
+REASON = re.compile(r"[A-Z][A-Za-z0-9 ,.;:()'/<>#+=-]{8,298}[.]")
+
+
+def cell(path, selected):
+    """One summary cell: its display text, its count category and its reason."""
+    if not selected:
+        return "not selected", None, None
+    if not path.is_file():
+        return "result unavailable", "missing", "The job uploaded no receipt for this cell."
+    try:
+        result = json.loads(path.read_bytes())
+    except ValueError:
+        return "invalid result", "missing", "The receipt was not valid JSON."
+    status = result.get("status") if isinstance(result, dict) else None
+    daemon = result.get("daemon") if isinstance(result, dict) else None
+    engine = result.get("daemon_engine") if isinstance(result, dict) else None
+    known = status in OUTCOMES and daemon in DAEMONS and (engine in matrix.DAEMON_ENGINES or engine is None)
+    pass_provenance = status != "pass" or (daemon in matrix.DAEMON_KINDS and engine in matrix.DAEMON_ENGINES)
+    if not (known and pass_provenance):
+        return "invalid result", "missing", "The receipt used values outside the published vocabulary."
+    shown = "cannot run" if status == "not yet run" else status
+    text = f"{shown} / {daemon}" + (f" / {engine}" if engine else "")
+    reason = result.get("assertion")
+    if status == "pass":
+        reason = None
+    elif not (isinstance(reason, str) and REASON.fullmatch(reason)):
+        reason = "The receipt's reason was not a plain sentence."
+    return text, {"pass": "pass", "fail": "fail"}.get(status, "cannot run"), reason
+
+
 def summary(selection, folder):
-    print("| Scenario | Linux arm64 | macOS Intel | macOS Apple silicon |")
-    print("| --- | --- | --- | --- |")
+    rows, counts, reasons = [], dict.fromkeys(("pass", "fail", "cannot run", "missing"), 0), []
     for scenario in matrix.SCENARIOS:
         statuses = []
         for platform in PLATFORMS:
-            path = folder / f"acceptance-{platform}" / f"{scenario}.json"
-            if platform not in SELECTIONS[selection]:
-                statuses.append("not selected")
-            elif not path.is_file():
-                statuses.append("result unavailable")
-            else:
-                result = json.loads(path.read_bytes())
-                status = result.get("status")
-                daemon = result.get("daemon")
-                engine = result.get("daemon_engine")
-                known = status in OUTCOMES and daemon in DAEMONS and (engine in matrix.DAEMON_ENGINES or engine is None)
-                pass_provenance = status != "pass" or (daemon in matrix.DAEMON_KINDS and engine in matrix.DAEMON_ENGINES)
-                if known and pass_provenance:
-                    statuses.append(f"{status} / {daemon}" + (f" / {engine}" if engine else ""))
-                else:
-                    statuses.append("invalid result")
-        print(f"| {scenario} | {' | '.join(statuses)} |")
+            text, category, reason = cell(folder / f"acceptance-{platform}" / f"{scenario}.json",
+                                          platform in SELECTIONS[selection])
+            statuses.append(text)
+            if category is not None:
+                counts[category] += 1
+            if reason is not None:
+                reasons.append(f"- {LABELS[platform]}, {scenario} ({category}): {reason}")
+        rows.append(f"| {scenario} | {' | '.join(statuses)} |")
+    selected = sum(counts.values())
+    verdict = "pass" if selected and counts["pass"] == selected else "no pass"
+    # A green job is not a pass: only every selected cell passing is.
+    print(f"**Verdict: {verdict}.** {counts['pass']} pass, {counts['fail']} fail, "
+          f"{counts['cannot run']} cannot run and {counts['missing']} missing, of {selected} selected cells.")
+    print()
+    print("| Scenario | Linux arm64 | macOS Intel | macOS Apple silicon |")
+    print("| --- | --- | --- | --- |")
+    for row in rows:
+        print(row)
+    if reasons:
+        print()
+        print("Cells without a pass, one reason each:")
+        print()
+        for reason in reasons:
+            print(reason)
+    return verdict
 
 
 def main():
