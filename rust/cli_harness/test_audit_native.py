@@ -1248,14 +1248,90 @@ def test_audit_vacuum_reference_requires_its_warning_instrument(monkeypatch, ins
 
 
 @pytest.mark.parametrize("platform", ["linux", "windows"])
-def test_audit_live_row_starts_python_only_for_no_bank_and_closed_stdout_verify(monkeypatch, platform):
-    """Slice 3 converts these two on purpose; nothing else may start the frozen CLI."""
+def test_audit_live_row_starts_no_frozen_python_cli(monkeypatch, platform):
+    """Every case has a reference, so the live row never launches the frozen CLI."""
     from .rows import audit
 
     monkeypatch.setattr(audit.core, "PLATFORM", platform)
     monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
     roster = [case for case in audit.cases() if platform in case.platforms]
-    assert {case.id for case in roster if case.reference is None} == {"no-bank", "defer-bank-verify-stdout-closed"}
+    assert roster
+    assert [case.id for case in roster if case.reference is None] == []
+
+
+# The frozen CLI's closed-stdout `verify`, as its live arm printed it at
+# master ffbad904b on the Linux dev box and the Windows dev VM.
+_FROZEN_TRAILER = {
+    "linux": b"Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\n"
+             b"BrokenPipeError: [Errno 32] Broken pipe\n",
+    "windows": b"Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\r\n"
+               b"OSError: [Errno 22] Invalid argument\r\n",
+}
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_audit_closed_stdout_verify_reference_is_the_frozen_capture(monkeypatch, tmp_path, platform):
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(audit.core, "PLATFORM", platform)
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        case = next(case for case in audit.cases() if case.id == "defer-bank-verify-stdout-closed")
+        assert case.stdout_closed and case.rules == ()
+        report = b'{"ok": true}\n'
+        verified = {"home": "h", "exit": 0, "stdout": base64.b64encode(report).decode(), "stderr": "",
+                    "files": {"cwd": "dir"}, "modes": {"cwd": "0o755"}, "db": "unchanged"}
+        seen = []
+        monkeypatch.setattr(audit, "_bank_verify_reference",
+                            lambda *args: seen.append(args) or dict(verified))
+        want = case.reference(tmp_path / "case")
+        assert seen == [(case, "rich", tmp_path / "case")]
+        assert want == {"home": "h", "exit": 120, "stdout": "",
+                        "stderr": base64.b64encode(_FROZEN_TRAILER[platform]).decode(),
+                        "files": {"cwd": "dir"}, "modes": {"cwd": "0o755"}, "db": "unchanged"}
+
+
+@pytest.mark.parametrize("exit_code,stdout", [(1, b'{"ok": false}\n'), (0, b"")])
+def test_audit_closed_stdout_verify_reference_refuses_a_seed_unlike_the_capture(
+        monkeypatch, tmp_path, exit_code, stdout):
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        case = next(case for case in audit.cases() if case.id == "defer-bank-verify-stdout-closed")
+        monkeypatch.setattr(audit, "_bank_verify_reference", lambda *args: {
+            "home": "h", "exit": exit_code, "stdout": base64.b64encode(stdout).decode(), "stderr": "",
+            "files": {}, "modes": {}, "db": "unchanged"})
+        with pytest.raises(AssertionError, match="a bank that verifies and prints its report"):
+            case.reference(tmp_path / "case")
+
+
+def test_audit_no_bank_reference_is_the_frozen_diagnostic(monkeypatch, tmp_path):
+    # daemon_exec.no_bank_message("board-audit") in the frozen package.
+    newline = b"\r\n" if os.name == "nt" else b"\n"
+    frozen = (b"board-audit: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, "
+              b"or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run "
+              b"`docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)" + newline)
+    with _cold_audit(monkeypatch) as audit:
+        case = next(case for case in audit.cases() if case.id == "no-bank")
+        assert case.argv == ["board-audit", "verify"] and "PSEUDOLIFE_MCP_DATABASE_URL" not in {
+            key for key, value in case.env.items() if value is not None}
+        previous_umask = audit.core.pin_umask()
+        try:
+            want = case.reference(tmp_path / "case")
+        finally:
+            if previous_umask is not None:
+                os.umask(previous_umask)
+        assert want["exit"] == 2
+        assert audit.core.decode(want, "stdout") == b""
+        assert audit.core.decode(want, "stderr") == frozen
+        assert want["files"] == {"cwd": "dir"}
+        assert "db" not in want
+
+
+def test_audit_projected_redaction_accepts_only_the_analyze_instrument(monkeypatch):
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        for prepare in ((), audit.VACUUM_WARNING):
+            audit.redact_projected_case("probe", "rich", _TARGET, "why", prepare=prepare)
+        with pytest.raises(ValueError, match="only preparation is VACUUM_WARNING"):
+            audit.redact_projected_case("probe", "rich", _TARGET, "why", prepare=("SELECT 1",))
 
 
 def test_audit_redaction_prefix_references_refuse_a_changed_seed(monkeypatch, tmp_path):
