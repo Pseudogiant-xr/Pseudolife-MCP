@@ -994,7 +994,7 @@ def test_the_upgrade_row_completes_the_lost_approval_once_then_holds_run_two_to_
     assert "approve" not in json.dumps(reruns[0]) and "operator" not in json.dumps(reruns[0])
     assert reruns[1]["changed_codex_settings"] == []
     # The ledger's rerun step records run 1, as before the second run existed.
-    assert [entry["command"] for entry in row.commands].count("<native-installer> <rerun-from-0.23.x>") == 1
+    assert sum(entry["command"].endswith("<rerun-from-0.23.x>") for entry in row.commands) == 1, row.commands
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")

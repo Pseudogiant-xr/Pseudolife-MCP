@@ -157,7 +157,9 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
         assert "startup_timeout_sec = 240" not in text, rel
         assert "tool_timeout_sec = 180" not in text, rel
         assert "runtime defaults were not confirmed" in text, rel
-    assert sh.count("configure_codex_runtime_defaults") == 3
+    # The definition and its three fresh-registration calls: the shim
+    # registration, the HTTP fallback and the explicit --transport http (#1903).
+    assert sh.count("configure_codex_runtime_defaults") == 4
     assert ps.count("Set-CodexRuntimeDefaults") == 3
     assert "configure_codex_runtime_defaults" not in sh.split(
         'if existing_codex=$(codex mcp get pseudolife-memory', 1)[1].split(
