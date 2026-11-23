@@ -1492,7 +1492,7 @@ async fn first_install(world: &World, trust: &str) -> (Report, Value, Option<Str
     register_as_codex_mcp_add(
         world,
         "/opt/pseudolife-mcp",
-        "/home/u/.codex/pseudolife/token",
+        "/home/<user>/.codex/pseudolife/token",
     );
     let approve = hooks.mailbox_approval.as_deref() == Some("after-registration");
     let launcher = world.host.codex(&world.home, &world.home).unwrap();
@@ -1622,8 +1622,8 @@ async fn a_fresh_install_without_consent_approves_nothing_and_reruns_quietly() {
 fn legacy_registration_after_the_handoff(world: &World) {
     register_as_codex_mcp_add(
         world,
-        "/home/u/.local/share/pseudolife-mcp/bin/pseudolife-mcp",
-        "/home/u/.codex/pseudolife/token",
+        "/home/<user>/.local/share/pseudolife-mcp/bin/pseudolife-mcp",
+        "/home/<user>/.codex/pseudolife/token",
     );
     let mut codex = world.codex();
     let server = codex.user["mcp_servers"]["pseudolife-memory"]
@@ -1634,7 +1634,7 @@ fn legacy_registration_after_the_handoff(world: &World) {
     server.insert("required".into(), json!(true));
     server.insert(
         "command".into(),
-        json!("/home/u/.local/bin/pseudolife-mcp"),
+        json!("/home/<user>/.local/bin/pseudolife-mcp"),
     );
 }
 
