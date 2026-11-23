@@ -315,7 +315,9 @@ def _run_extractor_fixture(runner, *, mode="", answer=None, locked=False, macos=
             registrar_output += "exit 19\n"
         _stub(launcher, registrar_output)
         _stub(runner.bin / "systemctl", "exit 1\n")
+        system = "Darwin" if macos else "Linux"
         setup = (
+            f"uname() {{ printf '%s\\n' '{system}'; }}\n"
             f"env_file='{runner.path(env_file)}' ENV_BEGIN='{BEGIN}' ENV_END='{END}'\n"
             f"EXTRACTOR='{mode}' EXTRACTOR_URL='' DAEMON_URL='' CLIENT='' EXPLICIT_ARGS=''\n"
             f"CLIENTS='' CLIENT_ONLY='' MODEL=haiku SHIM_PORT=0 SHIM_OK=1 SHIM_PATH='{runner.path(launcher)}'\n"
@@ -332,8 +334,6 @@ def _run_extractor_fixture(runner, *, mode="", answer=None, locked=False, macos=
                 "function [ { if [[ $* == '! -t 0 ]' ]]; then return 1; fi; builtin [ \"$@\"; }\n"
                 f"read() {{ if [[ $* == '-r choice' ]]; then choice='{answer}'; else builtin read \"$@\"; fi; }}\n"
             )
-        if macos:
-            setup += "uname() { printf 'Darwin\\n'; }\n"
         continued = "echo REMAINING_STEPS_FINISHED\n"
     source = _read(path)
     return runner.run(
