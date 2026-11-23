@@ -1454,8 +1454,15 @@ fn approval_writes(world: &World, from: usize) -> usize {
 /// user layer: both native installers run it after the hook step on a first
 /// install (`install-native.sh` "client registrations", `install-native.ps1`
 /// the same), and so did the Python installers of v0.23.1 and v0.24.0
-/// (`ops/install.sh`, its first `codex mcp add` line).
-fn register_as_codex_mcp_add(world: &World, command: &str, token_file: &str) {
+/// (`ops/install.sh`, its first `codex mcp add` line). The token file is
+/// Codex's own private copy, which their credential step wrote first.
+fn register_as_codex_mcp_add(world: &World, command: &str) {
+    let copy = crate::setup::codex::token_copy_path(&world.home);
+    if !copy.exists() {
+        fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        crate::board::state::atomic_create(&copy, b"fixture-installer-bearer\n").unwrap();
+    }
+    let token_file = copy.to_string_lossy().into_owned();
     let server = json!({
         "command": command, "args": [],
         "env": {
@@ -1489,11 +1496,7 @@ fn new_session(world: &World) {
 /// exactly when the hook step reported "after-registration".
 async fn first_install(world: &World, trust: &str) -> (Report, Value, Option<String>) {
     let hooks = world.run("manual", trust, "auto").await;
-    register_as_codex_mcp_add(
-        world,
-        "/opt/pseudolife-mcp",
-        "/home/<user>/.codex/pseudolife/token",
-    );
+    register_as_codex_mcp_add(world, "/opt/pseudolife-mcp");
     let approve = hooks.mailbox_approval.as_deref() == Some("after-registration");
     let launcher = world.host.codex(&world.home, &world.home).unwrap();
     let mut session = launcher.open(&json!({}), &[]).await.unwrap();
@@ -1623,7 +1626,6 @@ fn legacy_registration_after_the_handoff(world: &World) {
     register_as_codex_mcp_add(
         world,
         "/home/<user>/.local/share/pseudolife-mcp/bin/pseudolife-mcp",
-        "/home/<user>/.codex/pseudolife/token",
     );
     let mut codex = world.codex();
     let server = codex.user["mcp_servers"]["pseudolife-memory"]
