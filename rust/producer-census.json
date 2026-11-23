@@ -13,6 +13,7 @@
     "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
     "docs/dev/dev-machines.md": "fff57f7e87d2bddfd1067483b64f41379d0f5562aeebf9e70b8bfbf48dfd7e34",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
+    "docs/dev/hosted-acceptance.md": "da9a304213e0777e11984d1f5777c84fe0d91f94d53c69085be8e4f9372d45b6",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
     "docs/dev/merge-batches.md": "aa47377ce1b8d0ab236e75622f7d036a0097fc1e73ca12acfe69585284bc510e",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
@@ -231,8 +232,12 @@
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.mirror-runner": "b71046c9947e25a2c63cb95c6675621e2f3b6ba935853f73b283c89efa304342",
     "ops/Dockerfile.pg": "ff8b83d3a569807d851eed7219063514d7f5405c8280fe7b6d3e40e56ab2b401",
-    "ops/acceptance/README.md": "62cb8331b3ff706d635cea9c86cf52ed29a6b5936a73c1da315ba8c6d9861a27",
-    "ops/acceptance/matrix.py": "9fbfef67203a65b046c4841f60ddb5812f65e6fd2d31e05486c20b6de08f70a4",
+    "ops/acceptance/README.md": "4c1e898d427799990c99bb81f10861e6096c6b50d0a2e3afe2986e25a9972d52",
+    "ops/acceptance/hosted.py": "da5dc47a311fd0e42e6718b1e45949db89edf0337e6b2fed06e55b61887cb2aa",
+    "ops/acceptance/hosted_lima_guest.sh": "9c99ba59ea1b6b64a5537547da41d675036bd22deb2c584f6dca67d1e418149d",
+    "ops/acceptance/hosted_linux.py": "2c2817fd237847e7a04cfbf94942195982814bd91cb5f95b8f57b4b4b20e2d94",
+    "ops/acceptance/hosted_macos.py": "55b61bc240413ba3a8616f9c47aec9bbe01e17b97e88e87e5a002ea55d2f4215",
+    "ops/acceptance/matrix.py": "adbb7715662aa570089c2b4a2cc4cc8e4b07dbfb40af940117f26d08d6be259c",
     "ops/acceptance/runner.py": "48e0647674b0551f57a82620d043c1b6d36ac4603b36a11ed65cf12847163dc8",
     "ops/add-user-path.ps1": "4ec89d4411fd4a2275313193d96682d76b20c7dd4bddf15a57f4acfcc58d7822",
     "ops/assemble_changelog.py": "5462bfcb97a59e280311f0a1628e406fd3a47a45ed3ef39418e1e263b422fb38",
@@ -278,7 +283,7 @@
     "ops/install.sh": "f67642f0544f56604dd6c25646699629c35ce7dfa3653669bde846a12c107281",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "19715309f5eb8b8c3f4f65ceab12713cd1c034168a152f2c907349058bded616",
+    "ops/integrate.py": "826236a8f77b4ee5b924f3e79a61f3e2730892382a18c72e08a02ca484204b1a",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -8317,6 +8322,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/acceptance/hosted_linux.py:96",
+          "shape": {
+            "argv_source": "shim \", \"Wired into Codex via the pseudolife-mcp shim.\"),",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\", \"Wired into Codex via the pseudolife-mcp shim.\"),",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/install-native.ps1:2410",
           "shape": {
             "argv_source": "shim is unavailable (see above). One that names another daemon stays as it is.\"",
@@ -9368,6 +9386,19 @@
                 "expression": "<name>"
               }
             }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_linux.py:85",
+          "shape": {
+            "argv_source": "tunnel setup (guided private key and app setup; docs/guide/tunnels.md).\"),",
+            "channel": "argv",
+            "complete": false,
+            "expression": "setup (guided private key and app setup; docs/guide/tunnels.md).\"),",
+            "omitted_optional": null,
+            "parameters": {}
           }
         },
         {
@@ -30544,7 +30575,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/matrix.py:119",
+          "location": "ops/acceptance/matrix.py:126",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31050,6 +31081,21 @@
             }
           },
           "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:200",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "release.commit"
+              }
+            }
+          },
+          "usage": "assignment"
         }
       ]
     },
@@ -31084,6 +31130,21 @@
             "parameters": {
               "value": {
                 "expression": "$BUILD_SOURCE"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:200",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "checkout"
               }
             }
           },
@@ -38567,6 +38628,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/acceptance/hosted_linux.py:552",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/docker-compose.ghcr.yml:12",
           "shape": {
             "channel": "environment",
@@ -40204,6 +40278,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/acceptance/hosted.py:38",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/install-native.ps1:1041",
           "shape": {
             "channel": "environment",
@@ -41558,6 +41645,21 @@
         {
           "evidence": "static",
           "location": "examples/.mcp.json:7",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "http://127.0.0.1:8765"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_lima_guest.sh:101",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -44162,6 +44264,36 @@
         },
         {
           "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:227",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "f"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:248",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "env["
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
           "location": "ops/install-autostart.ps1:38",
           "shape": {
             "channel": "environment",
@@ -45074,6 +45206,21 @@
         },
         {
           "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:228",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "str(state"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
           "location": "ops/install-autostart.ps1:39",
           "shape": {
             "channel": "environment",
@@ -45306,6 +45453,21 @@
             "parameters": {
               "value": {
                 "literal": "0.0.0.0"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:229",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "127.0.0.1"
               }
             }
           },
@@ -46229,6 +46391,36 @@
         {
           "evidence": "static",
           "location": "docs/atlas/atlas.json:1491",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_lima_guest.sh:102",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_linux.py:367",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -47255,6 +47447,21 @@
             "parameters": {
               "value": {
                 "literal": "8765"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:229",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "str(port"
               }
             }
           },
@@ -50979,6 +51186,51 @@
         },
         {
           "evidence": "static",
+          "location": "ops/acceptance/hosted_lima_guest.sh:79",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "//p"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_linux.py:361",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": ")), "
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:228",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "token"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
           "location": "ops/install-autostart.ps1:41",
           "shape": {
             "channel": "environment",
@@ -53136,6 +53388,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/acceptance/hosted.py:37",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/install-native.ps1:1000",
           "shape": {
             "channel": "environment",
@@ -54822,6 +55087,21 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_lima_guest.sh:101",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "\"$root/owner.token\""
+              }
+            }
+          },
+          "usage": "assignment"
         },
         {
           "evidence": "static",
@@ -56750,6 +57030,21 @@
             }
           },
           "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_macos.py:199",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "str(repo"
+              }
+            }
+          },
+          "usage": "assignment"
         }
       ]
     },
@@ -58290,7 +58585,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/matrix.py:120",
+          "location": "ops/acceptance/matrix.py:127",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59724,7 +60019,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:3639",
+          "location": "ops/integrate.py:3640",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -59739,7 +60034,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:3660",
+          "location": "ops/integrate.py:3661",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -60171,7 +60466,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/integrate.py:4503",
+          "location": "ops/integrate.py:4499",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -62909,6 +63204,22 @@
             "parameters": {
               "limit": {
                 "literal": ""
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/acceptance/hosted.py:356",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {
+              "limit": {
+                "literal": "1"
               }
             }
           }
@@ -71842,6 +72153,27 @@
         {
           "evidence": "documented",
           "location": "plugin/commands/memory-status.md:37",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "apply",
+              "commit_token",
+              "cursor",
+              "limit",
+              "run_id",
+              "snippets"
+            ],
+            "parameters": {
+              "action": {
+                "literal": "status"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "static",
+          "location": "ops/acceptance/hosted_linux.py:78",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -83580,7 +83912,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/acceptance/matrix.py:137",
+      "location": "ops/acceptance/matrix.py:144",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -84630,7 +84962,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:178",
+      "location": "ops/integrate.py:179",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -90903,6 +91235,20 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
+      "location": "ops/acceptance/hosted_linux.py:66",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
       "location": "ops/docker-compose.stack-extractor.yml:26",
       "method": null,
       "name": "/health",
@@ -93797,6 +94143,22 @@
     {
       "evidence": "documented",
       "kind": "environment",
+      "location": "docs/dev/hosted-acceptance.md:10",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "native"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "documented",
+      "kind": "environment",
       "location": "docs/dev/merge-batches.md:562",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
@@ -94853,7 +95215,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "ops/integrate.py:174",
+      "location": "ops/integrate.py:175",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -95812,6 +96174,246 @@
         "parameters": {
           "value": {
             "literal": "3"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted.py:270",
+      "name": "PSEUDOLIFE_UNATTENDED",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "1"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted.py:35",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "native"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_lima_guest.sh:44",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "native"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_lima_guest.sh:44",
+      "name": "PSEUDOLIFE_UNATTENDED",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "1"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_linux.py:107",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "engine"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_linux.py:488",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "native"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_linux.py:502",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "python"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_linux.py:57",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "native"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_linux.py:577",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "native"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_linux.py:682",
+      "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "url"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_linux.py:682",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "native"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_linux.py:737",
+      "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "expression": "str(assets"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_macos.py:197",
+      "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "expression": "str(scratch"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_macos.py:198",
+      "name": "PSEUDOLIFE_DAEMON_STATIC_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "expression": "str(repo"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted_macos.py:286",
+      "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "expression": "str(assets"
           }
         }
       },
@@ -97100,7 +97702,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:3650",
+      "location": "ops/integrate.py:3651",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -97116,7 +97718,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/integrate.py:3661",
+      "location": "ops/integrate.py:3662",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -114084,19 +114686,101 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/matrix.py:119",
+      "location": "ops/acceptance/hosted.py:123",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:169",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:177",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:183",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:185",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:347",
+      "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:356",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/episodes"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:37",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:38",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted_lima_guest.sh:20",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted_lima_guest.sh:34",
+      "reason": "request target supplied dynamically or external"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted_linux.py:552",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted_linux.py:66",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted_linux.py:85",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:tunnel"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted_linux.py:96",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:shim"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/matrix.py:126",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/matrix.py:120",
+      "location": "ops/acceptance/matrix.py:127",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/matrix.py:137",
+      "location": "ops/acceptance/matrix.py:144",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
     },
@@ -119929,13 +120613,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/integrate.py:178",
+      "location": "ops/integrate.py:179",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_RUST_CHECK_WHERE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/integrate.py:4503",
+      "location": "ops/integrate.py:4499",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
