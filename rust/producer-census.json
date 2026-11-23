@@ -677,7 +677,7 @@
     "rust/shim/src/setup/codex.rs": "9212baec9129adf2a45159d85aaffbd5a5d47bb41676bf664c25c7c6b5cc5b1a",
     "rust/shim/src/setup/codex/credentials.rs": "3669c8b4c7f3248fd6779565a9e2c502a373ba650fc1386a883e62468b8f5417",
     "rust/shim/src/setup/codex/outcome.rs": "90e02f436771a9a98126c961794aa073a679e8f6761d0aeb97f7bbda7f9bce04",
-    "rust/shim/src/setup/codex/rpc.rs": "f34b24cd56b219020fd6e33c7c5fe1e055055f3c11b86bbf4f9f05cb42775bbe",
+    "rust/shim/src/setup/codex/rpc.rs": "e1527043f234d36741a3bde83be43a74765364fc525f7bd217b623cc089fbe7a",
     "rust/shim/src/setup/files.rs": "2fee5450911d8b26c973f3b46584789c66c8834da1d48306e056e0fe5addefff",
     "rust/shim/src/setup/files/removal.rs": "04043c7892167877dc824ef9fc465cc8d918d7fb73549799f44a3fbf6962e891",
     "rust/shim/src/setup/mod.rs": "5e9a310c806fa7eb20539c495a7f1928e7b09f542d54a51d621179e8388b70d1",
