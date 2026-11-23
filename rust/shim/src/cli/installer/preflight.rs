@@ -44,7 +44,7 @@ fn refuse<T>(message: impl Into<String>) -> Result<T> {
 pub(super) trait Host {
     /// `docker(*args, input=..., failure=...)`: stdout, or the refusal.
     fn docker(&self, args: &[&str], input: Option<&str>, failure: Option<&str>) -> Result<String>;
-    fn port_busy(&self, port: u16) -> bool;
+    fn port_use(&self, port: u16) -> PortUse;
     fn file_text(&self, path: &Path) -> Option<String>;
     fn is_file(&self, path: &Path) -> bool;
     fn is_dir(&self, path: &Path) -> bool;
@@ -54,21 +54,119 @@ pub(super) trait Host {
     fn warn(&self, line: &str);
 }
 
-/// `port_busy`: whether 127.0.0.1:`port` cannot be bound. On Unix the socket
-/// is plain, as Python's was: std's bind sets SO_REUSEADDR, which on macOS
-/// lets a loopback bind succeed beside a same-user listener on every
+/// What 127.0.0.1:`port` is to the installer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PortUse {
+    /// The daemon's publication can bind it now.
+    Free,
+    /// A service holds it: the refusal names a service to stop.
+    Listener,
+    /// It cannot be bound, yet no service answered a loopback connect: most
+    /// likely a stopped service's closed connections still in TIME-WAIT
+    /// (#1905), which clear by themselves.
+    Unbindable,
+}
+
+/// The platform rows of `decide`. Each build probes as its own row; the
+/// tests run every row on every platform.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+enum Platform {
+    Linux,
+    /// macOS and any other Unix.
+    OtherUnix,
+    Windows,
+}
+
+#[cfg(target_os = "linux")]
+const PLATFORM: Platform = Platform::Linux;
+#[cfg(all(unix, not(target_os = "linux")))]
+const PLATFORM: Platform = Platform::OtherUnix;
+#[cfg(not(unix))]
+const PLATFORM: Platform = Platform::Windows;
+
+/// What the raw probes of 127.0.0.1:`port` answered; `None` is not tried.
+#[derive(Clone, Copy, Debug)]
+struct Probes {
+    /// A bind with a plain socket succeeded.
+    plain_bind: bool,
+    /// A bind with SO_REUSEADDR succeeded (Linux only).
+    reuse_bind: Option<bool>,
+    /// A loopback connect was refused outright.
+    loopback_refused: Option<bool>,
+}
+
+/// The answer, a pure function of the probes (measured 24 November 2026
+/// with every listener shape and with TIME-WAIT left by listeners with and
+/// without SO_REUSEADDR, on the second Linux dev box and the Windows dev VM).
+fn decide(platform: Platform, probes: Probes) -> PortUse {
+    if probes.plain_bind {
+        return PortUse::Free;
+    }
+    match platform {
+        // TIME-WAIT never blocks a bind here, and std's plain bind answers as
+        // an exclusive one does for every listener shape: a refused bind is
+        // a service, as it always was.
+        Platform::Windows => PortUse::Listener,
+        // A SO_REUSEADDR bind still fails beside every listener shape, and
+        // passes over TIME-WAIT whose listener had the option, as the
+        // container runtime's own publication does.
+        Platform::Linux if probes.reuse_bind == Some(true) => PortUse::Free,
+        // On macOS that bind succeeds beside a same-user listener on every
+        // address, so it is never tried: nothing there turns a refused bind
+        // into a pass. Only the wording depends on whether a service answers.
+        _ if probes.loopback_refused == Some(true) => PortUse::Unbindable,
+        _ => PortUse::Listener,
+    }
+}
+
+/// The probes `decide` needs for `platform`, each only when the earlier ones
+/// left the answer open.
+fn probe(platform: Platform, port: u16) -> Probes {
+    let plain_bind = bind_succeeds(port, false);
+    let reuse_bind =
+        (!plain_bind && platform == Platform::Linux).then(|| bind_succeeds(port, true));
+    let loopback_refused =
+        (!plain_bind && platform != Platform::Windows && reuse_bind != Some(true))
+            .then(|| loopback_connect_refused(port));
+    Probes {
+        plain_bind,
+        reuse_bind,
+        loopback_refused,
+    }
+}
+
+/// Whether a socket can bind 127.0.0.1:`port`. On Unix the socket is plain
+/// unless `reuse`, as Python's was: std's bind sets SO_REUSEADDR, which on
+/// macOS lets a loopback bind succeed beside a same-user listener on every
 /// address. On Windows std's plain bind answers as Python's exclusive one
-/// does for every listener shape (probed 14 November 2026).
-fn port_taken(port: u16) -> bool {
+/// does for every listener shape (probed 14 November 2026); `reuse` is never
+/// asked there.
+fn bind_succeeds(port: u16, reuse: bool) -> bool {
     #[cfg(unix)]
     {
-        // SAFETY: a fresh socket, bound once and closed on every path; the
-        // address is a zeroed sockaddr_in of the size passed.
+        // SAFETY: a fresh socket, bound at most once and closed on every
+        // path; the option value is a c_int of the size passed and the
+        // address a zeroed sockaddr_in of the size passed.
         #[allow(unsafe_code)]
         unsafe {
             let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             if fd < 0 {
-                return true;
+                return false;
+            }
+            if reuse {
+                let on: libc::c_int = 1;
+                let set = libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEADDR,
+                    std::ptr::addr_of!(on).cast::<libc::c_void>(),
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+                if set != 0 {
+                    libc::close(fd);
+                    return false;
+                }
             }
             let mut address: libc::sockaddr_in = std::mem::zeroed();
             #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
@@ -86,13 +184,25 @@ fn port_taken(port: u16) -> bool {
                 std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
             );
             libc::close(fd);
-            bound != 0
+            bound == 0
         }
     }
     #[cfg(not(unix))]
     {
-        std::net::TcpListener::bind(("127.0.0.1", port)).is_err()
+        let _ = reuse;
+        std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
     }
+}
+
+/// Whether a loopback connect to `port` is refused outright. Accepted, timed
+/// out (a full backlog) or any other error counts as a service answering,
+/// so only a refusal can change the answer, and only its wording.
+fn loopback_connect_refused(port: u16) -> bool {
+    let address = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port));
+    matches!(
+        std::net::TcpStream::connect_timeout(&address, Duration::from_secs(1)),
+        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused
+    )
 }
 
 struct RealHost;
@@ -156,8 +266,8 @@ impl Host for RealHost {
     }
     /// Both shipped publications bind IPv4 loopback only; an IPv6-only
     /// listener on ::1 can coexist and is not an installer collision.
-    fn port_busy(&self, port: u16) -> bool {
-        port_taken(port)
+    fn port_use(&self, port: u16) -> PortUse {
+        decide(PLATFORM, probe(PLATFORM, port))
     }
     fn file_text(&self, path: &Path) -> Option<String> {
         let bytes = std::fs::read(path).ok()?;
@@ -553,10 +663,12 @@ fn lite_refusal(
         .collect();
     let own_listener = own_daemons.iter().any(|c| publishes(c, "8765"));
     // A completed Docker migration can leave a stopped lite cluster behind:
-    // it must not prevent an ordinary rerun.
+    // it must not prevent an ordinary rerun. Only a service answering on the
+    // port can be an active lite daemon; leftovers nobody answers on get the
+    // port check's own refusal.
     if configured
         && (!own_daemons.is_empty() || recorded_volumes)
-        && (own_listener || !host.port_busy(8765))
+        && (own_listener || host.port_use(8765) != PortUse::Listener)
     {
         return None;
     }
@@ -715,10 +827,21 @@ pub(super) fn check(host: &dyn Host, repo: &Path, env_file: &Path) -> Result<()>
         let bound_by_us = containers.iter().any(|c| {
             label(c, "com.docker.compose.project") == Some(PROJECT) && publishes(c, &text)
         });
-        if host.port_busy(port) && !bound_by_us {
-            return refuse(format!(
-                "Port {port} is already in use by another service. Stop or reconfigure the service listening on {port}, then rerun. Nothing changed."
-            ));
+        if bound_by_us {
+            continue;
+        }
+        match host.port_use(port) {
+            PortUse::Free => {}
+            PortUse::Listener => {
+                return refuse(format!(
+                    "Port {port} is already in use by another service. Stop or reconfigure the service listening on {port}, then rerun. Nothing changed."
+                ));
+            }
+            PortUse::Unbindable => {
+                return refuse(format!(
+                    "Port {port} cannot be bound yet, and no service answered on it: it was most likely used a moment ago by a service that has stopped. Rerun in about a minute. Nothing changed."
+                ));
+            }
         }
     }
     Ok(())
