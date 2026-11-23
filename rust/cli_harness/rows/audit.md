@@ -48,7 +48,12 @@ lite bank is refused with the Docker migration instruction.
   validating the window, recomputing `audit_hash` with the oracle, and checking
   that every printed hash reference is that arm's own validated hash.
 - CPython's ignored-exception trailer after a refused stdout (exit 120 kept):
-  named substitution `audit-stdout-closed-trailer`.
+  named substitution `audit-stdout-closed-trailer`. No live comparison starts
+  the frozen CLI any more and the redaction reference expects no trailer, but
+  `--record` still records the frozen arm, and replaying such a recording
+  needs the rule; it retires with that path. The closed-stdout verify case is
+  different: its reference is the frozen result itself, trailer included, and
+  the case stays a known difference.
 - Snapshot mechanics (one transaction instead of commit-then-reopen; database
   rows collected before encoding instead of a server-side cursor);
   `extra_float_digits` (binary float8). Encoded stdout remains streamed.
@@ -173,8 +178,9 @@ Six cases without recorded goldens were removed in favor of these direct tests:
   receiver and checks count, order and draining. Other sessions retain only the
   newest 4096 notices; dropping an undrained collection restores that bound.
   Reintroducing a cap at the receiver is the completeness counterexample.
-- Vacuum skips: the test login owns every table, so Postgres never skips for
-  it; the harness drives the same path with an expression index whose
+- Vacuum skips: the test login owns every table and the database, so
+  Postgres never skips for it (`VACUUM pg_catalog.pg_statistic` included);
+  the harness drives the same path with an expression index whose
   ANALYZE-time `RAISE WARNING` arrives exactly like a skip, with the database
   hiding warnings by default (`redact-vacuum-warning`). The restored
   `client_min_messages` itself is session state and not observable.
@@ -225,7 +231,13 @@ Bank verify references read the seeded rows in sequence order and feed their
 stored payload text to the frozen chain rules in `audit_oracle.py`. The
 reference includes the complete report or refusal, input files and modes,
 and requires the bank to remain unchanged. The closed-stdout bank case
-continues to run both arms for its recorded diagnostic divergence.
+`defer-bank-verify-stdout-closed` expects the frozen CLI's own result,
+captured from its live arm at master `ffbad904b` on both platforms: the
+report it could not deliver, exit 120 and CPython's ignored-exception
+trailer (`BrokenPipeError` on Linux, `OSError: [Errno 22]` on Windows). The
+reference first checks that the seed verifies and prints a report, as it did
+for the capture. The case stays a known difference against the native
+refusal (exit 2 and a diagnostic), which its committed golden pins.
 
 Bank stdout export references select the original JSON lines with filter
 literals from the case table in `rows/audit.py`. Three stdout refusals reuse
@@ -254,7 +266,8 @@ Automatic CI skips live mode, so the 80 Linux and 85 Windows file references,
 14 bank-verify references, 34 original stdout export references, 11 further
 export references on Linux and 12 on Windows, 12 redaction refusal references
 and 3 direct removal references, plus the 11 newer redaction references,
-run only in local or manual-stress live runs.
+the `no-bank` reference and the closed-stdout verify capture, run only in
+local or manual-stress live runs.
 Offline tests pin the file hashes and case
 registration and check exit status, stdout and stderr for the three
 entries shared with the goldens on both platforms.
@@ -263,7 +276,9 @@ The 41-case automatic CI roster in `rust/ci/audit_golden_cases.json` replays
 committed goldens and compares the full observation, including files, modes
 and database state where applicable. It covers 9 of the converted export
 cases (45 on Linux, 46 on Windows), 7 of the 14 converted bank-verify cases
-and the redaction refusal `redact-nolog`. The export
+and the redaction refusal `redact-nolog`. It also holds `no-bank` and
+`defer-bank-verify-stdout-closed`, whose goldens pin the native results that
+their frozen references knowingly differ from. The export
 roster includes `export-agent-unknown-out`, `export-out-exists`,
 `export-stdout-closed` and `export-agent-ambiguous-out`. Of the 26
 redaction references, only `redact-nolog` is in that roster. These 25 have
@@ -283,10 +298,17 @@ exit status and both complete streams of two synthetic refusal shapes
 projected shapes (a synthetic direct removal, then `redact-kept-v45`,
 `redact-fanout-siblings`, `redact-gone`, `redact-vacuum-warning`,
 `redact-stdout-closed` and `redact-twin-prefix`).
-The live row still starts the frozen CLI for `no-bank` and
-`defer-bank-verify-stdout-closed` on each platform, and
-`test_audit_live_row_starts_python_only_for_no_bank_and_closed_stdout_verify`
-holds that set on both platforms' rosters.
+No case of the live row starts the frozen CLI any more.
+`no-bank` expects the frozen `daemon_exec.no_bank_message("board-audit")`
+diagnostic, and `defer-bank-verify-stdout-closed` the frozen capture above;
+both remain known differences, and their committed goldens pin the native
+results. `test_audit_live_row_starts_no_frozen_python_cli` holds that every
+case on both platforms' rosters has a reference. The transport cases' docker
+stand-in is a fixture script run by the harness's own interpreter and imports
+nothing from the package. Two things still depend on the frozen package and
+retire with it: the historical `--record` path, which runs the frozen Python
+to record goldens and is not converted, and the AST test of the nine refusal
+messages, which reads `pseudolife_memory/board_audit_cli.py`.
 
 The payload fixture covers non-finite floats,
 200-digit integers, nesting beyond 128, Unicode key order and lone surrogates.
