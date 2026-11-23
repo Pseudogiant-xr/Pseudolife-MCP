@@ -417,6 +417,25 @@ def audit_redact_clock(obs: dict) -> None:
         obs[field] = base64.b64encode(data.replace(digest.encode(), b"<redact-hash>")).decode()
 
 
+_TRAILER = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'"
+                      rb"[^\r\n]*\r?\n(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
+
+
+@normalize.rule("audit-stdout-closed-trailer")
+def audit_stdout_closed_trailer(obs: dict) -> None:
+    """Declared substitution ``audit-stdout-closed-trailer``: after a
+    committed redaction whose result line stdout refused, CPython's
+    interpreter-shutdown flush fails, prints an ignored-exception trailer
+    and exits 120. The native CLI keeps exit 120 and prints no synthetic
+    trailer. Only that exact trailer, with exit 120, is removed. No live
+    comparison starts the frozen CLI any more, but `--record` still records
+    it, and replaying such a recording needs this rule; it retires with that
+    path."""
+    stderr = base64.b64decode(obs["stderr"])
+    if obs["exit"] == 120 and _TRAILER.search(stderr):
+        obs["stderr"] = base64.b64encode(_TRAILER.sub(b"", stderr)).decode()
+
+
 @normalize.rule("audit-stats-clock")
 def stats_clock(obs):
     """Validate runtime fields before substituting only clock/version tokens.
@@ -563,7 +582,8 @@ def _frozen_closed_stdout_verify_reference(case, kind, home):
     verified = _bank_verify_reference(case, kind, home)
     if verified["exit"] != 0 or not core.decode(verified, "stdout"):
         raise AssertionError(f"{case.id}: the frozen capture is of a bank that verifies and prints its "
-                             f"report; the {kind} seed now verifies with exit {verified['exit']}")
+                             f"report; the {kind} seed now verifies with exit {verified['exit']} and "
+                             f"{len(core.decode(verified, 'stdout'))} bytes of report")
     stderr = _FROZEN_CLOSED_STDOUT_VERIFY[core.PLATFORM].encode("utf-8")
     return dict(verified, exit=120, stdout=_encoded(b""), stderr=_encoded(stderr))
 
@@ -1240,7 +1260,7 @@ def redact_projected_case(case_id, source, message, reason, *, resolved_id=None,
                           siblings=(), prepare=(), stdout_closed=False, rules=("audit-redact-clock",),
                           seed_property=None):
     if prepare not in ((), VACUUM_WARNING):
-        # The reference reads any preparation as the ANALYZE instrument.
+        # The reference would read any other preparation as no instrument.
         raise ValueError(f"{case_id}: a projected redaction's only preparation is VACUUM_WARNING")
     case = redact_case(case_id, source, message, reason, prepare=prepare, rules=rules, stdout_closed=stdout_closed)
     case.reference = partial(_redact_projected_reference, source, resolved_id or message, reason,
@@ -1849,6 +1869,7 @@ def cases() -> list[core.Case]:
         # (O2) a stdout that refuses the report
         frozen_closed_stdout_verify_case("defer-bank-verify-stdout-closed", "rich"),
         redact_projected_case("redact-stdout-closed", "rich", _rich("to_redact"), "wrong paste",
+                              rules=("audit-redact-clock", "audit-stdout-closed-trailer"),
                               stdout_closed=True),
         # (O4) coverage: LEAST(expires_at, now), ambiguous prefixes, pre-v46,
         # the vacuum-skip path with warnings hidden by default

@@ -48,10 +48,12 @@ lite bank is refused with the Docker migration instruction.
   validating the window, recomputing `audit_hash` with the oracle, and checking
   that every printed hash reference is that arm's own validated hash.
 - CPython's ignored-exception trailer after a refused stdout (exit 120 kept):
-  the frozen CLI printed it after the redaction's notes and the native CLI
-  does not. The redaction reference expects no trailer; the substitution that
-  removed it from the frozen arm (`audit-stdout-closed-trailer`) was dropped
-  once no case of the live row started the frozen CLI.
+  named substitution `audit-stdout-closed-trailer`. No live comparison starts
+  the frozen CLI any more and the redaction reference expects no trailer, but
+  `--record` still records the frozen arm, and replaying such a recording
+  needs the rule; it retires with that path. The closed-stdout verify case is
+  different: its reference is the frozen result itself, trailer included, and
+  the case stays a known difference.
 - Snapshot mechanics (one transaction instead of commit-then-reopen; database
   rows collected before encoding instead of a server-side cursor);
   `extra_float_digits` (binary float8). Encoded stdout remains streamed.
@@ -177,7 +179,8 @@ Six cases without recorded goldens were removed in favor of these direct tests:
   newest 4096 notices; dropping an undrained collection restores that bound.
   Reintroducing a cap at the receiver is the completeness counterexample.
 - Vacuum skips: the test login owns every table and the database, so
-  Postgres never skips for it (`VACUUM pg_catalog.pg_statistic` included); the harness drives the same path with an expression index whose
+  Postgres never skips for it (`VACUUM pg_catalog.pg_statistic` included);
+  the harness drives the same path with an expression index whose
   ANALYZE-time `RAISE WARNING` arrives exactly like a skip, with the database
   hiding warnings by default (`redact-vacuum-warning`). The restored
   `client_min_messages` itself is session state and not observable.
@@ -263,7 +266,8 @@ Automatic CI skips live mode, so the 80 Linux and 85 Windows file references,
 14 bank-verify references, 34 original stdout export references, 11 further
 export references on Linux and 12 on Windows, 12 redaction refusal references
 and 3 direct removal references, plus the 11 newer redaction references,
-run only in local or manual-stress live runs.
+the `no-bank` reference and the closed-stdout verify capture, run only in
+local or manual-stress live runs.
 Offline tests pin the file hashes and case
 registration and check exit status, stdout and stderr for the three
 entries shared with the goldens on both platforms.
@@ -272,7 +276,9 @@ The 41-case automatic CI roster in `rust/ci/audit_golden_cases.json` replays
 committed goldens and compares the full observation, including files, modes
 and database state where applicable. It covers 9 of the converted export
 cases (45 on Linux, 46 on Windows), 7 of the 14 converted bank-verify cases
-and the redaction refusal `redact-nolog`. The export
+and the redaction refusal `redact-nolog`. It also holds `no-bank` and
+`defer-bank-verify-stdout-closed`, whose goldens pin the native results that
+their frozen references knowingly differ from. The export
 roster includes `export-agent-unknown-out`, `export-out-exists`,
 `export-stdout-closed` and `export-agent-ambiguous-out`. Of the 26
 redaction references, only `redact-nolog` is in that roster. These 25 have

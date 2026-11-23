@@ -1304,11 +1304,12 @@ def test_audit_closed_stdout_verify_reference_refuses_a_seed_unlike_the_capture(
 
 def test_audit_no_bank_reference_is_the_frozen_diagnostic(monkeypatch, tmp_path):
     # daemon_exec.no_bank_message("board-audit") in the frozen package.
-    newline = b"\r\n" if os.name == "nt" else b"\n"
     frozen = (b"board-audit: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, "
               b"or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run "
-              b"`docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)" + newline)
+              b"`docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)")
     with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+        newline = b"\r\n" if audit.core.WINDOWS else b"\n"
         case = next(case for case in audit.cases() if case.id == "no-bank")
         assert case.argv == ["board-audit", "verify"] and "PSEUDOLIFE_MCP_DATABASE_URL" not in {
             key for key, value in case.env.items() if value is not None}
@@ -1320,8 +1321,9 @@ def test_audit_no_bank_reference_is_the_frozen_diagnostic(monkeypatch, tmp_path)
                 os.umask(previous_umask)
         assert want["exit"] == 2
         assert audit.core.decode(want, "stdout") == b""
-        assert audit.core.decode(want, "stderr") == frozen
+        assert audit.core.decode(want, "stderr") == frozen + newline
         assert want["files"] == {"cwd": "dir"}
+        assert want["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755"})
         assert "db" not in want
 
 
