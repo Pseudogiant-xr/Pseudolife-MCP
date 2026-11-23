@@ -358,6 +358,12 @@ fn an_app_server_that_exits_early_is_reported_with_its_exit_code() {
     let home = Home::new();
     home.seed(registered(json!({})));
     let launcher = home.launcher().display().to_string();
+    // Quoted when it holds a space, as the recovery quotes it.
+    let launcher = if launcher.contains(' ') {
+        format!("\"{launcher}\"")
+    } else {
+        launcher
+    };
     for step in ["codex-credentials", "codex-runtime-defaults"] {
         let output = home.run_with(&[step], None, &[(EXIT, "3")]);
         let body = report(&output);

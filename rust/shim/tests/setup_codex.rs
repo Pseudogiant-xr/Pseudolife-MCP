@@ -2195,7 +2195,7 @@ async fn rpc_bounds_silent_or_exited_child() {
             // An exit is not evidence of an outdated Codex (#1897): the
             // recovery names the command this client started instead.
             let started = format!(
-                "{} --exact rpc_fixture --nocapture",
+                "{} app-server --stdio",
                 std::env::current_exe().unwrap().display()
             );
             assert_eq!(

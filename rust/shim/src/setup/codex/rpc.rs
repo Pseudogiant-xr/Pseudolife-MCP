@@ -31,7 +31,7 @@ pub struct Client {
     event_bytes: usize,
     /// The app-server's exit status, once `close` has seen it exit.
     status: Option<std::process::ExitStatus>,
-    /// The command started (program and arguments), as the recovery names it.
+    /// The app-server command the recovery tells the user to run.
     started: String,
 }
 
@@ -125,6 +125,48 @@ fn app_server(
     Ok(command)
 }
 
+/// [`app_server`] with the `-c key=value` overrides and explicit environment
+/// of `Client::open_with_environment`.
+fn app_server_with(
+    executable: &Path,
+    home: &Path,
+    cwd: &Path,
+    overrides: &Value,
+    environment: &[(String, Option<String>)],
+) -> Result<tokio::process::Command, SetupError> {
+    let mut command = app_server(executable, home, cwd)?;
+    for (key, value) in environment {
+        match value {
+            Some(value) => {
+                command.env(key, value);
+            }
+            None => {
+                command.env_remove(key);
+            }
+        }
+    }
+    for (key, value) in overrides
+        .as_object()
+        .ok_or(SetupError("Codex overrides must be a table."))?
+    {
+        command.args(["-c", &format!("{key}={}", toml_value(value)?)]);
+    }
+    Ok(command)
+}
+
+/// The command the recovery names: the program started and the fixed
+/// `app-server --stdio`, never the `-c` overrides (long, TOML, naming the
+/// user's other servers and hooks, and not runnable as pasted). A program
+/// path holding whitespace is quoted, as a Windows profile path can be.
+fn started_command(command: &tokio::process::Command) -> String {
+    let program = command.as_std().get_program().to_string_lossy();
+    if program.chars().any(char::is_whitespace) {
+        format!("\"{program}\" app-server --stdio")
+    } else {
+        format!("{program} app-server --stdio")
+    }
+}
+
 impl Client {
     pub async fn open(executable: &Path, home: &Path, cwd: &Path) -> Result<Self, SetupError> {
         Self::open_with_timeout(executable, home, cwd, Duration::from_secs(20)).await
@@ -150,23 +192,7 @@ impl Client {
         overrides: &Value,
         environment: &[(String, Option<String>)],
     ) -> Result<Self, SetupError> {
-        let mut command = app_server(executable, home, cwd)?;
-        for (key, value) in environment {
-            match value {
-                Some(value) => {
-                    command.env(key, value);
-                }
-                None => {
-                    command.env_remove(key);
-                }
-            }
-        }
-        for (key, value) in overrides
-            .as_object()
-            .ok_or(SetupError("Codex overrides must be a table."))?
-        {
-            command.args(["-c", &format!("{key}={}", toml_value(value)?)]);
-        }
+        let command = app_server_with(executable, home, cwd, overrides, environment)?;
         Self::spawn(command, Duration::from_secs(20)).await
     }
 
@@ -189,11 +215,7 @@ impl Client {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let started = std::iter::once(command.as_std().get_program())
-            .chain(command.as_std().get_args())
-            .map(|part| part.to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let started = started_command(&command);
         #[cfg(windows)]
         command.creation_flags(0x0800_0000);
         let mut command = CommandWrap::from(command);
@@ -475,7 +497,8 @@ pub fn resolve_codex() -> Result<PathBuf, SetupError> {
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_home;
+    use super::{app_server_with, ensure_home, started_command};
+    use serde_json::json;
     use std::path::PathBuf;
 
     struct Scratch(PathBuf);
@@ -540,6 +563,49 @@ mod tests {
             "{error}"
         );
         assert!(scratch.0.join("blocker").is_file());
+    }
+
+    /// The hook verification session passes `-c` overrides naming a fixture
+    /// provider and the user's other servers: the recovery names only the
+    /// program and `app-server --stdio`.
+    #[test]
+    fn the_named_command_never_carries_the_overrides() {
+        let scratch = Scratch::new();
+        let home = scratch.0.join(".codex");
+        let program = scratch.0.join("codex");
+        let overrides = json!({
+            "model_provider": "fixture",
+            "mcp_servers": {"other-server": {"command": "other"}},
+            "notice": "Local hook verification",
+        });
+        let command = app_server_with(&program, &home, &scratch.0, &overrides, &[]).unwrap();
+        let args = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(args.iter().any(|arg| arg == "-c"), "{args:?}");
+        let started = started_command(&command);
+        let shown = program.display().to_string();
+        let shown = if shown.contains(char::is_whitespace) {
+            format!("\"{shown}\"")
+        } else {
+            shown
+        };
+        assert_eq!(started, format!("{shown} app-server --stdio"));
+        for leaked in [
+            " -c ",
+            "model_provider",
+            "other-server",
+            "Local hook verification",
+        ] {
+            assert!(!started.contains(leaked), "{started}");
+        }
+        let spaced = tokio::process::Command::new("C:/Program Files/Codex/codex.exe");
+        assert_eq!(
+            started_command(&spaced),
+            "\"C:/Program Files/Codex/codex.exe\" app-server --stdio"
+        );
     }
 
     #[cfg(unix)]
