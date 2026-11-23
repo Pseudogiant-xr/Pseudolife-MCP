@@ -474,7 +474,7 @@
     "rust/shim/src/cli/installer/helpers.rs": "2e826e6c9df110cb3046fe69412ea5a8eb5f8a05d171cfb0ac8cab6b272b483b",
     "rust/shim/src/cli/installer/hook_settings.rs": "046e7cb819076f0149fa1de845ff4827e4061887b3a5c4773d0f429ffc4d672b",
     "rust/shim/src/cli/installer/mod.rs": "e9827f5ec12ba4db185de2717bb1896ebe1c4ac2f5275078ebd32572dc4f0a65",
-    "rust/shim/src/cli/installer/preflight.rs": "2987be1f9a2786ec356527569ac4dd8e2d688e92a1bbaa5d717c99dbac4c6144",
+    "rust/shim/src/cli/installer/preflight.rs": "01463d97247a7e160069f125e9d0341f6caf4a9d18ad0c31f92bdf218c021a66",
     "rust/shim/src/cli/installer/state.rs": "2d012fbcfae3b10f35219332a11a2bcf354126dafd14b96ba2b7d6f7780815e2",
     "rust/shim/src/cli/installer/volumes.rs": "6c19be131bc0a190bcd3c762f3602cde1b853ead044b4882edf18040a31dde4f",
     "rust/shim/src/cli/lease/args.rs": "db400d0c3dccf356a5dd7aaa4f47a590a8a5647a523fbe6db8fc5f1c054e3e2a",
@@ -884,7 +884,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:565",
+          "location": "rust/shim/src/cli/installer/preflight.rs:702",
           "shape": {
             "argv_source": "backup --data-dir \\\"{bank}\\\" --out <new-backup-dir-outside-lite-data>, verify its Postgres is stopped, move only embedded_pg to a preserved sibling, install Docker, then explicitly restore both artifacts; the complete sequence is docs/guide/configuration.md#move-a-lite-bank-to-docker (https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/docs/guide/configuration.md#move-a-lite-bank-to-docker). Keep the lite bank and its backups until the Docker bank is verified. Nothing changed.\"",
             "channel": "argv",
@@ -11193,7 +11193,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:420",
+          "location": "rust/shim/src/cli/installer/preflight.rs:555",
           "shape": {
             "argv_source": "update , which retains that Compose context, instead of this single-env-file installer. Nothing changed.\",",
             "channel": "argv",
@@ -30732,7 +30732,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:24",
+          "location": "rust/shim/src/cli/installer/preflight.rs:25",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30745,7 +30745,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:300",
+          "location": "rust/shim/src/cli/installer/preflight.rs:435",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30758,7 +30758,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:663",
+          "location": "rust/shim/src/cli/installer/preflight.rs:800",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30771,7 +30771,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:674",
+          "location": "rust/shim/src/cli/installer/preflight.rs:811",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30784,7 +30784,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:701",
+          "location": "rust/shim/src/cli/installer/preflight.rs:838",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44951,7 +44951,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:522",
+          "location": "rust/shim/src/cli/installer/preflight.rs:657",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50796,7 +50796,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:27",
+          "location": "rust/shim/src/cli/installer/preflight.rs:28",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50809,7 +50809,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:368",
+          "location": "rust/shim/src/cli/installer/preflight.rs:503",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -52749,7 +52749,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:28",
+          "location": "rust/shim/src/cli/installer/preflight.rs:29",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -52762,7 +52762,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:361",
+          "location": "rust/shim/src/cli/installer/preflight.rs:496",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58634,7 +58634,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:25",
+          "location": "rust/shim/src/cli/installer/preflight.rs:26",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58647,7 +58647,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:301",
+          "location": "rust/shim/src/cli/installer/preflight.rs:436",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58660,7 +58660,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/preflight.rs:675",
+          "location": "rust/shim/src/cli/installer/preflight.rs:812",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -126214,91 +126214,91 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:24",
+      "location": "rust/shim/src/cli/installer/preflight.rs:25",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:25",
+      "location": "rust/shim/src/cli/installer/preflight.rs:26",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:27",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
       "location": "rust/shim/src/cli/installer/preflight.rs:28",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/preflight.rs:29",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:300",
+      "location": "rust/shim/src/cli/installer/preflight.rs:435",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:301",
+      "location": "rust/shim/src/cli/installer/preflight.rs:436",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:361",
+      "location": "rust/shim/src/cli/installer/preflight.rs:496",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:368",
+      "location": "rust/shim/src/cli/installer/preflight.rs:503",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:420",
+      "location": "rust/shim/src/cli/installer/preflight.rs:555",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:522",
+      "location": "rust/shim/src/cli/installer/preflight.rs:657",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:565",
+      "location": "rust/shim/src/cli/installer/preflight.rs:702",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:backup"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:663",
+      "location": "rust/shim/src/cli/installer/preflight.rs:800",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:674",
+      "location": "rust/shim/src/cli/installer/preflight.rs:811",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:675",
+      "location": "rust/shim/src/cli/installer/preflight.rs:812",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_STATE_VOLUME"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/preflight.rs:701",
+      "location": "rust/shim/src/cli/installer/preflight.rs:838",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_BANK_VOLUME"
     },
