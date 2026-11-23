@@ -716,6 +716,18 @@ pub(super) async fn approve_registered_mailbox(
     (fields, notice)
 }
 
+/// The report fields and the stderr line when `codex-runtime-defaults
+/// --approve-memory-message` could not reach Codex at all (no Codex home,
+/// scratch folder, executable or session), so the deferred approval was
+/// not applied: "unavailable" with `detail` as the reason.
+pub(super) fn unapplied_mailbox(detail: &str) -> (Map<String, Value>, String) {
+    let mut fields = Map::new();
+    fields.insert("mailbox_approval".into(), json!("unavailable"));
+    fields.insert("mailbox_approval_detail".into(), json!(detail));
+    let line = trust::registered_mailbox_notice("unavailable", Some(detail));
+    (fields, line)
+}
+
 /// What the step says on stderr after its report.
 fn stderr_lines(report: &Report) -> Vec<String> {
     let mut lines = Vec::new();

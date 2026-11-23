@@ -1552,11 +1552,16 @@ server in Codex's user configuration, through Codex's own config writer and
 after a backup. A no, or `--trust no`, leaves it as it is. A value you chose
 yourself (`"prompt"`, say) is kept, and an existing `"approve"` is left
 alone. The JSON report's `mailbox_approval` says which happened: `set`,
-`already`, `kept-explicit`, `declined`, or `unavailable` (no
-`pseudolife-memory` server in the user configuration, or Codex refused the
-write; `mailbox_approval_detail` gives the reason, and hook setup still
-completes). When the approval is not set, the end-of-setup notice says how to
-choose it. The reason is the doorbell: a board ring wakes a thread only when it
+`already`, `kept-explicit`, `declined`, `after-registration`, or
+`unavailable` (no `pseudolife-memory` server in the user configuration, or
+Codex refused the write; `mailbox_approval_detail` gives the reason, and hook
+setup still completes). `after-registration` is a first install's: the
+installer's Codex step runs before it registers the server, so the approval
+waits, and the runtime-defaults step right after `codex mcp add`
+(`installer codex-runtime-defaults --approve-memory-message`) applies it and
+reports its own `mailbox_approval`. If that install does not register the
+server, the approval waits for an installer run that does. When the approval
+is not set, the end-of-setup notice says how to choose it. The reason is the doorbell: a board ring wakes a thread only when it
 has mail it needs, and a woken thread that must ask before calling
 `memory_message` stalls on that prompt. A recipient running with approval
 policy `never` cannot execute a tool that still requires approval.

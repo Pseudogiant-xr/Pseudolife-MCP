@@ -203,7 +203,7 @@ fn notice(subject: &str, state: &str, detail: Option<&str>) -> String {
             "{subject}; memory_message is already approved (approval_mode = \"approve\"), so a thread woken by board mail can receive, ack and send without an approval prompt.{see}"
         ),
         "after-registration" => format!(
-            "{subject}; setup approves memory_message once Codex has registered the {SERVER} server, later in this install. If that registration fails, rerunning the installer approves it.{see}"
+            "{subject}; setup approves memory_message once Codex has registered the {SERVER} server, later in this install. If this install does not register it, the approval waits for an installer run that does.{see}"
         ),
         _ => {
             let lead = match state {
