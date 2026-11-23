@@ -340,7 +340,7 @@ function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
     return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
 }
 # The installer-protocol level the staged release must answer (Initialize-NativeClient).
-$NativeInstallerProtocol = 4
+$NativeInstallerProtocol = 5
 # The client side (the stdio MCP shim every agent registers, and the
 # pseudolife-mcp CLI) is the native binary published with this checkout's
 # release, so no Python is looked for or installed (docs/dev/native-runtimes.md,

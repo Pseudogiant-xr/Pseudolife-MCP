@@ -719,10 +719,10 @@ pub(super) async fn approve_registered_mailbox(
 /// What the step says on stderr after its report.
 fn stderr_lines(report: &Report) -> Vec<String> {
     let mut lines = Vec::new();
-    // A deferred approval's line comes from the step that applies it, once
-    // the server is registered, so the last line says what happened.
+    // A deferred approval's line says it follows the registration; the step
+    // that applies it prints the outcome, and if no registration follows,
+    // the next run with consent approves it.
     if report.status == "ready"
-        && report.mailbox_approval.as_deref() != Some("after-registration")
         && let Some(notice) = &report.mailbox_approval_notice
     {
         lines.push(notice.clone());

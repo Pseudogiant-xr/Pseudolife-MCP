@@ -29,7 +29,7 @@ const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--cl
 /// ops/install-native.sh `NATIVE_INSTALLER_PROTOCOL`). Raise it when a step the
 /// installers call is added or changes meaning, and raise the installers'
 /// required level with it.
-pub const INSTALLER_PROTOCOL: u32 = 4;
+pub const INSTALLER_PROTOCOL: u32 = 5;
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 
 /// Arguments follow `installer`. Exit 0 when every selected registration

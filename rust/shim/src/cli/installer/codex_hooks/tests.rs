@@ -1506,8 +1506,7 @@ async fn first_install(world: &World, trust: &str) -> (Report, Value, Option<Str
         &world.home,
         approve,
     )
-    .await
-    .unwrap();
+    .await;
     (hooks, registered, line)
 }
 
@@ -1526,10 +1525,17 @@ async fn consent_before_the_server_is_registered_defers_the_approval_quietly() {
     assert_eq!(report.mailbox_approval_detail, None);
     assert_eq!(approval_writes(&world, 0), 0);
     assert!(approval(&world.codex().user).is_null());
-    // The hook step prints no approval line; the step that applies it does.
+    // The hook step says the approval follows the registration, not that it
+    // failed; the step that applies it prints the outcome.
     let lines = stderr_lines(&report);
     assert!(
-        !lines.iter().any(|l| l.contains("memory_message")),
+        lines.iter().any(|l| l.starts_with(
+            "Hooks ready; setup approves memory_message once Codex has registered the pseudolife-memory server"
+        )),
+        "{lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("could not approve")),
         "{lines:?}"
     );
     // Without consent nothing is deferred.
@@ -1577,7 +1583,10 @@ async fn a_fresh_consented_install_ends_approved_and_an_identical_rerun_changes_
     // The finished form: the server, its runtime defaults and the approval.
     let installed = world.codex().user.clone();
     assert_eq!(approval(&installed), "approve");
-    assert_eq!(installed["mcp_servers"]["pseudolife-memory"]["required"], true);
+    assert_eq!(
+        installed["mcp_servers"]["pseudolife-memory"]["required"],
+        true
+    );
     // The same command again: the registration exists, so the installers
     // keep it ("registration preserved", no runtime-defaults step) and only
     // the hook step runs. It must change nothing and say so.
@@ -1586,7 +1595,11 @@ async fn a_fresh_consented_install_ends_approved_and_an_identical_rerun_changes_
     let rerun = world.run("manual", "yes", "auto").await;
     assert_eq!(rerun.status, "ready", "{:?}", rerun.recovery);
     assert_eq!(rerun.mailbox_approval.as_deref(), Some("already"));
-    assert_eq!(world.codex().writes().len(), writes, "the rerun wrote config");
+    assert_eq!(
+        world.codex().writes().len(),
+        writes,
+        "the rerun wrote config"
+    );
     assert_eq!(
         world.codex().user,
         installed,

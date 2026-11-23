@@ -259,13 +259,11 @@ pub(super) fn run_runtime_defaults(arguments: &[String]) -> u8 {
         let runtime = runtime().ok_or(SetupError("The setup runtime could not start."))?;
         runtime.block_on(async {
             let mut client = Client::open(&executable, &home, &neutral.0).await?;
-            let result =
+            let (report, line) =
                 registered_setup(&mut client, &home, &neutral.0, approve_mailbox).await;
             client.close().await;
-            result.map(|(report, line)| {
-                notice = line;
-                report
-            })
+            notice = line;
+            Ok(report)
         })
     })();
     let report = report.unwrap_or_else(
@@ -280,21 +278,26 @@ pub(super) fn run_runtime_defaults(arguments: &[String]) -> u8 {
 }
 
 /// The steps after `codex mcp add`: the runtime defaults, then (when the
-/// hook step deferred it) the `memory_message` approval, with its line.
+/// hook step deferred it) the `memory_message` approval, with its line. The
+/// approval is attempted even when the defaults were refused, since the
+/// consent was given and it reads Codex's configuration afresh.
 pub(super) async fn registered_setup(
     client: &mut impl Rpc,
     home: &Path,
     cwd: &Path,
     approve_mailbox: bool,
-) -> Result<(Value, Option<String>), SetupError> {
-    let mut report = configure_runtime_defaults(client, home, cwd).await?;
+) -> (Value, Option<String>) {
+    let mut report = configure_runtime_defaults(client, home, cwd)
+        .await
+        .unwrap_or_else(
+            |error| json!({"status":"needs-configuration","recovery":error.to_string()}),
+        );
     if !approve_mailbox {
-        return Ok((report, None));
+        return (report, None);
     }
-    let (fields, line) =
-        super::codex_hooks::approve_registered_mailbox(client, home, cwd).await;
+    let (fields, line) = super::codex_hooks::approve_registered_mailbox(client, home, cwd).await;
     report.as_object_mut().unwrap().extend(fields);
-    Ok((report, Some(line)))
+    (report, Some(line))
 }
 
 /// The defaults Codex has no value for. Codex's typed API reports an omitted
@@ -531,9 +534,7 @@ mod tests {
             &home.0,
             registered(json!({"tools": {"memory_message": {"approval_mode": "prompt"}}})),
         );
-        let (report, line) = registered_setup(&mut codex, &home.0, &home.0, true)
-            .await
-            .unwrap();
+        let (report, line) = registered_setup(&mut codex, &home.0, &home.0, true).await;
         assert_eq!(report["status"], "ready");
         assert_eq!(report["mailbox_approval"], "kept-explicit");
         assert_eq!(
@@ -547,14 +548,35 @@ mod tests {
         );
         // Without the switch the step is the runtime defaults alone.
         let mut codex = FakeCodex::new(&home.0, registered(json!({})));
-        let (report, line) = registered_setup(&mut codex, &home.0, &home.0, false)
-            .await
-            .unwrap();
+        let (report, line) = registered_setup(&mut codex, &home.0, &home.0, false).await;
         assert!(report.get("mailbox_approval").is_none());
         assert_eq!(line, None);
         assert!(
             codex.user["mcp_servers"][SERVER]["tools"].is_null(),
             "no approval without the switch"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_default_still_applies_the_deferred_approval() {
+        let home = TempHome::new();
+        let mut codex = FakeCodex::new(&home.0, registered(json!({})));
+        // A stronger layer wins over the defaults, so they are rolled back
+        // and refused; the approval is its own write and still lands.
+        codex.shadow = Some((
+            vec!["mcp_servers".into(), SERVER.into(), "required".into()],
+            Value::Null,
+        ));
+        let (report, line) = registered_setup(&mut codex, &home.0, &home.0, true).await;
+        assert_eq!(report["status"], "needs-configuration");
+        assert_eq!(report["mailbox_approval"], "set");
+        assert_eq!(
+            codex.user["mcp_servers"][SERVER]["tools"]["memory_message"]["approval_mode"],
+            "approve"
+        );
+        assert!(
+            line.unwrap()
+                .starts_with("Codex server registered; setup approved memory_message")
         );
     }
 

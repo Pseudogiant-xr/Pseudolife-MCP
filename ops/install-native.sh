@@ -423,7 +423,7 @@ if [ -n "$native_probe_setting" ]; then
         *) echo "PSEUDOLIFE_NATIVE_PROBE_SECONDS='$native_probe_setting' is not a whole number of seconds from 1 to 99999; the probe waits 30 s." >&2 ;;
     esac
 fi
-NATIVE_INSTALLER_PROTOCOL=4
+NATIVE_INSTALLER_PROTOCOL=5
 NATIVE_VERSION=""
 NATIVE_TARGET=""
 NATIVE_ARCHIVE=""
@@ -3426,7 +3426,12 @@ for selected_client in $CLIENTS; do
                 warn_client_failure codex "Codex authentication requires the stdio shim. HTTP transport was not registered. Rerun the installer with --transport shim."
             else
                 register_client codex http pseudolife-memory --url http://127.0.0.1:8765/mcp
-                if [ "$MCP_CODEX" = http ]; then step "Wired into Codex (codex mcp add, HTTP)."; fi
+                # As install-native.ps1 does: the runtime defaults, and the
+                # memory_message approval the hook step deferred (#1903).
+                if [ "$MCP_CODEX" = http ]; then
+                    step "Wired into Codex (codex mcp add, HTTP)."
+                    configure_codex_runtime_defaults
+                fi
             fi
         fi
     elif [ "$selected_client" = gemini ]; then
