@@ -226,7 +226,7 @@ def installer_tail(output):
 
 def binfmt_status(folder=Path("/proc/sys/fs/binfmt_misc")):
     listed = command(["ls", "-1", folder])
-    require(listed.code == 0, "The runner could not list binfmt registrations.")
+    require(listed.code == 0, "The runner listed its binfmt registrations.")
     # Shell output can contain non-ASCII diagnostics. Inspect the kernel
     # entries directly so those bytes cannot hide a registered interpreter.
     handlers = [entry for entry in folder.iterdir() if entry.name not in ("status", "register")]
@@ -243,12 +243,12 @@ def binfmt_status(folder=Path("/proc/sys/fs/binfmt_misc")):
 
 def image_observation(container_id, existing_images):
     result = docker("inspect", container_id)
-    require(result.code == 0, "The runner could not inspect an installed container.")
+    require(result.code == 0, "The runner inspected each installed container.")
     container = result.json()[0]
     if not container["State"]["Running"]:
         return None
     inspected = docker("image", "inspect", container["Image"])
-    require(inspected.code == 0, "The runner could not inspect the running container's image.")
+    require(inspected.code == 0, "The runner inspected the running container's image.")
     image = inspected.json()[0]
     labels = image["Config"].get("Labels") or {}
     reference = container["Config"]["Image"]
@@ -298,7 +298,7 @@ def baseline(release, path, scratch, output):
     profile = Profile(scratch / "baseline-home", path, codex_started=False)
     docker_state = DockerFixture()
     images_before = docker("image", "ls", "--all", "--quiet", "--no-trunc")
-    require(images_before.code == 0, "The runner could not inventory images before the install.")
+    require(images_before.code == 0, "The runner inventoried its images before the install.")
     existing_images = {item.removeprefix("sha256:") for item in images_before.output.decode().splitlines()}
     receipt = None
     try:
@@ -561,7 +561,7 @@ def upgrade(receipt, release, repo, path, peer, scratch):
             receipt.steps[-1]["changed_codex_settings"] = changed_settings(
                 config_before, config.read_text(encoding="utf-8"))
         require(result.code == 0 and before == after,
-                "The native installer rerun changed the installed runtime or registration.")
+                "The native installer rerun kept the installed runtime and registration.")
         result = live_install(peer, repo, profile, flags, engine="python", overrides=LEGACY_PYTHON)
         restored = profile.fingerprint()
         receipt.observe("PSEUDOLIFE_SHIM_ENGINE=python bash ops/install.sh <rollback>", result,
@@ -666,9 +666,9 @@ def stock_upgrade(receipt, release, repo, profile, peer, scratch):
     })
     daemon_changed = after["image"] != previous["image"] or after["version"] != previous["version"]
     if upgraded or daemon_changed or not after["authenticated"]:
-        require(database_unchanged, "The bank volume changed and no database rollback was verified.")
+        require(database_unchanged, "The bank volume was unchanged, so no database rollback was needed.")
         docker_rollback(receipt, peer, previous, report)
-    require(upgraded, "The unmodified v0.24.0 release updater did not reach a healthy selected release.")
+    require(upgraded, "The unmodified v0.24.0 release updater reached a healthy selected release.")
     raise Unavailable("The stock v0.24.0 transition ran. The ledger also requires the separate v0.23.x client start.")
 
 
@@ -967,12 +967,13 @@ def probe_stock(release, provenance, result, repo, profile, scratch, by_name, ou
     clean.checkpoint(output, release)
 
 
-# The maintainer's decision of 23 November 2026: Linux arm64 has no known
-# users, so its client rows are not run until the published images support
-# it. The two stock rows above stay as witnesses.
+# The maintainer's decision of 23 November 2026: the daemon is not supported
+# on Linux arm64 for now (no arm64 daemon image, issue #1872), so these
+# client rows are not run here. A client on arm64 against a daemon on a
+# supported host is not ruled out. The two stock rows stay as witnesses.
 CLIENT_ROWS = ("ordinary-native-use", "failure-and-retry", "bank-recovery")
-NOT_SUPPORTED = ("Not run: Linux arm64 is not supported for now (maintainer decision, 23 November 2026; "
-                 "issue #1872).")
+NOT_SUPPORTED = ("Not run: the daemon is not supported on Linux arm64 for now, because no arm64 daemon image is "
+                 "published (issue #1872).")
 
 
 def run(tag, platform, output):
@@ -1029,6 +1030,11 @@ def run(tag, platform, output):
                 receipt.note = str(error)
                 receipt.explain(error)
     except (OSError, ValueError, KeyError, IndexError, matrix.RecordError) as error:
+        for receipt in stock:
+            if receipt.status != "fail":
+                receipt.status = "fail"
+                receipt.note = diagnostic_note(error)
+    except Exception as error:  # noqa: BLE001 - a traceback would print unfiltered output
         for receipt in stock:
             if receipt.status != "fail":
                 receipt.status = "fail"

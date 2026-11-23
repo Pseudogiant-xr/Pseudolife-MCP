@@ -414,6 +414,7 @@ def planted_output():
         "prefixed": github,
         "hex": token,
         "opaque": "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+        "keyline": "kfixtureBaseSixtyFourKEYmaterialLineWithoutAHeaderXYZ",
         "query": "X-Amz-Signature=fixture",
         "email": "fixture.person@example.com",
         "home": "fixture-person",
@@ -426,6 +427,7 @@ def planted_output():
         "-----BEGIN PRIVATE KEY-----",
         "MIIEfixtureprivatekeybody",
         "-----END PRIVATE KEY-----",
+        "kfixtureBaseSixtyFourKEYmaterialLineWithoutAHeaderXYZ",
         "connecting to postgresql://acceptance:fixture-db-password@127.0.0.1:5432/postgres",
         "Authorization: Bearer fixture.bearer.value",
         "PSEUDOLIFE_MCP_TOKEN=fixture-assigned-secret",
@@ -443,7 +445,7 @@ def planted_output():
 KEPT = ("HTTP status client error (429 Too Many Requests)", "No space left on device",
         "huggingface.co/onnx-community/ONNX_Qwen3-Embedding-0.6B/resolve/main/model.onnx_data",
         "exit code: 5", "127.0.0.1:5432", "model provisioning phase")
-RULES = ("values", "pem", "userinfo", "authorization", "assignment", "prefixed", "hex", "opaque", "query",
+RULES = ("values", "pem", "keyline", "userinfo", "authorization", "assignment", "prefixed", "hex", "opaque", "query",
          "email", "home", "mdns", "address")
 
 
@@ -968,3 +970,113 @@ def test_disk_floor_is_checked_again_before_each_heavy_writer(tmp_path, monkeypa
         source.enough_disk(tmp_path, budget, "model provisioning")
     assert [step["command"] for step in budget.steps] == ["free disk before the daemon build",
                                                           "free disk before model provisioning"]
+
+
+# --- Conductor fix round ---
+
+def test_a_failed_expectation_reads_as_a_failure_in_the_summary(tmp_path, capsys):
+    with pytest.raises(hosted.Failed) as raised:
+        hosted.require(False, "The MCP tool completed successfully.")
+    assert str(raised.value) == "Not met: The MCP tool completed successfully."
+    write_cells(tmp_path, "macos-arm64", {"clean-install": ("fail", str(raised.value))})
+    hosted.summary("macos-arm64", tmp_path)
+    assert ("- macOS Apple silicon, clean-install (fail): Not met: The MCP tool completed successfully."
+            in capsys.readouterr().out.splitlines())
+
+
+def test_the_workflow_holds_no_secret_environment_or_identity_token():
+    root = Path(__file__).resolve().parents[2]
+    text = (root / ".github/workflows/hosted-acceptance.yml").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(text)
+    assert "secrets." not in text
+    assert "id-token" not in text
+
+    def keys(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                yield key
+                yield from keys(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from keys(value)
+
+    assert "environment" not in set(keys(workflow))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The peer harness is POSIX-only")
+def test_the_test_peer_and_its_postgres_listen_on_loopback_only(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_source as source
+
+    calls, envs = [], []
+
+    def run(argv, **options):
+        calls.append(argv)
+        return hosted.Result(0, b"", 0)
+
+    @contextmanager
+    def daemon(build, repo, scratch, env):
+        envs.append(env)
+        raise hosted.Unavailable("Fixture daemon stopped here.")
+        yield
+
+    monkeypatch.setattr(source, "daemon_process", daemon)
+    build = source.Build("macos-arm64", tmp_path / "daemon", tmp_path, {}, "1.27.0")
+    budget = SimpleNamespace(run=run, refuse=hosted.Unavailable, steps=[{}])
+    with pytest.raises(hosted.Unavailable, match="Fixture daemon"):
+        with source.source_peer(build, None, None, None, tmp_path, budget):
+            pytest.fail("the fixture daemon stops before the peer is ready")
+    options = calls[1][calls[1].index("-o") + 1]
+    assert options.split()[:2] == ["-h", "127.0.0.1"]
+    assert envs[0]["PSEUDOLIFE_MCP_HOST"] == "127.0.0.1"
+    assert envs[0]["PSEUDOLIFE_MCP_DATABASE_URL"].split("@", 1)[1].startswith("127.0.0.1:")
+
+
+def test_the_checkout_must_be_the_tag_commit(tmp_path, monkeypatch):
+    def command(argv, **_):
+        if argv[:2] == ["git", "clone"]:
+            return hosted.Result(0, b"", 0)
+        return hosted.Result(0, b"b" * 40 + b"\n", 0)
+
+    monkeypatch.setattr(hosted, "command", command)
+    release = hosted.Release("v0.25.1", "macos-arm64", tmp_path, "a" * 40, tmp_path / "x.tar.gz", "0" * 64)
+    with pytest.raises(hosted.Failed, match="Checkout matched the release commit"):
+        release.checkout(tmp_path / "checkout")
+
+
+def test_every_peer_receipt_says_what_it_is_and_how_the_release_was_checked(tmp_path):
+    (tmp_path / "ledger").mkdir()
+    release = hosted.Release("v0.25.1", "macos-arm64", tmp_path, "a" * 40,
+                             Path("pseudolife-mcp-0.25.1-aarch64-apple-darwin.tar.gz"), "0" * 64,
+                             verified_by="SHA256SUMS only (release API refused)")
+    row = hosted.Receipt("ordinary-native-use", "macos-arm64", daemon=hosted.DAEMONS[3], daemon_engine="rust")
+    row.write(tmp_path, release, True)
+    receipt = json.loads((tmp_path / "ordinary-native-use.json").read_bytes())
+    assert receipt["peer_note"] == hosted.PEER_NOTE
+    assert receipt["release_verified_by"] == "SHA256SUMS only (release API refused)"
+
+
+def test_a_tail_cut_inside_a_secret_leaves_no_fragment(tmp_path):
+    secret = hosted.REDACTOR.secret("Zq" + "w9x" * 30)
+    with (tmp_path / "out").open("w+b") as stream:
+        stream.write(b"line before\n" + secret.encode() + b"\nWARNING: the cause\n")
+        stream.flush()
+        tail = hosted.read_tail(stream, limit=len(secret) // 2 + len(b"\nWARNING: the cause\n"))
+    assert tail == b"WARNING: the cause\n"
+    assert not any(secret[index:index + 12] in tail.decode() for index in range(len(secret) - 12))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Mac acceptance harness is POSIX-only")
+def test_an_unexpected_mac_error_still_writes_redacted_receipts(tmp_path, monkeypatch, capsys):
+    mac, output = mac_fixture(tmp_path, monkeypatch, "macos-arm64")
+
+    def prepare(*_):
+        raise RuntimeError("raw output that must not reach the log")
+
+    monkeypatch.setattr(mac, "prepare", prepare)
+    assert mac.run("v0.25.0", "macos-arm64", output) == 1
+    assert "raw output" not in capsys.readouterr().out
+    assert (output / "peer-setup.json").is_file()
+    for scenario in matrix.SCENARIOS:
+        receipt = json.loads((output / f"{scenario}.json").read_bytes())
+        assert receipt["status"] == "fail"
+        assert "RuntimeError" in receipt["assertion"]

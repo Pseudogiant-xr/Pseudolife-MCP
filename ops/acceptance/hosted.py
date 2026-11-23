@@ -124,16 +124,28 @@ def command(argv, *, env=None, cwd=None, timeout=60, data=None, stdout_only=Fals
     return Result(code, output, round(monotonic() - started, 3))
 
 
-def require(ok, reason, failure=None):
+NOT_MET = "Not met: "
+
+
+def require(ok, expectation, failure=None):
+    """Fail with the expectation that was not met, worded as a failure."""
     if not ok:
-        raise Failed(reason, failure)
+        raise Failed(NOT_MET + expectation, failure)
 
 
 def read_tail(stream, limit=65536):
-    """The last bytes of a private output file, for the redactor."""
+    """The last bytes of a private output file, for the redactor.
+
+    A cut inside a line could split a registered token or a key block into a
+    fragment no rule recognises, so a partial first line is dropped.
+    """
     stream.seek(0, os.SEEK_END)
-    stream.seek(max(0, stream.tell() - limit))
-    return stream.read()
+    size = stream.tell()
+    stream.seek(max(0, size - limit))
+    data = stream.read()
+    if size > limit:
+        data = data.partition(b"\n")[2]
+    return data
 
 
 CODEX_PROBE = b"".join(json.dumps(message).encode() + b"\n" for message in (

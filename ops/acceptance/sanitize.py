@@ -43,6 +43,9 @@ CLASSES = (
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 PEM = re.compile(r"-----BEGIN [A-Z ]*-----.*?(?:-----END [A-Z ]*-----|\Z)", re.DOTALL)
+# A whole line of base64 is key or certificate material even without its
+# header, as a tail cut after a BEGIN line would leave it.
+KEY_LINE = re.compile(r"(?m)^[ \t]*[A-Za-z0-9+/]{40,}={0,2}[ \t]*$")
 USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{1,20}://)[^/\s:@]+:[^/\s@]*@")
 # A header value or a bearer credential, not the words in prose
 # ("authorization failed" keeps its meaning).
@@ -125,6 +128,7 @@ class Redactor:
         return (
             ("values", self._values),
             ("pem", lambda text: PEM.sub("<private key redacted>", text)),
+            ("keyline", lambda text: KEY_LINE.sub("<key material redacted>", text)),
             ("userinfo", lambda text: USERINFO.sub(r"\1<credentials>@", text)),
             ("authorization", lambda text: AUTHORIZATION.sub(r"\1" + SECRET, text)),
             ("assignment", lambda text: QUOTED_CODE.sub(r'\1"' + SECRET + '"',

@@ -45,9 +45,10 @@ installer's Codex setup fails. The client rows therefore do not cover a
 never-started Codex, and each of their receipts says so. [Issue
 #1897](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1897)
 
-Linux arm64 is not supported for now (the maintainer's decision of 23
-November 2026: no known users). Its job runs only the two stock rows, as
-witnesses, in about seven minutes. Their homes have no Codex folder, so the
+The daemon is not supported on Linux arm64 for now (the maintainer's
+decision of 23 November 2026): no arm64 daemon image is published. A client
+on arm64 against a daemon on a supported host is not ruled out. The arm64 job
+runs only the two stock rows, as witnesses, in about seven minutes. Their homes have no Codex folder, so the
 clean install row witnesses issue #1897. The clean install runs the tagged
 installer's default Docker install, which can fall back to a checkout-built
 Python daemon. The upgrade runs the real release updater from a stock

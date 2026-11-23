@@ -136,10 +136,21 @@ def run(tag, platform, output):
             if row.note == "The scenario was not selected.":
                 row.note = str(error)
                 row.explain(error)
-    write_json(output / "peer-setup.json", setup)
-    for row in rows:
-        row.write(output, release, cleaned)
-        print(REDACTOR.text(f"{row.scenario}: {row.status}. {row.note}"))
+    except Exception as error:  # noqa: BLE001 - a traceback would print unfiltered output
+        setup["assertion"] = diagnostic_note(error)
+        for row in rows:
+            if row.status != "fail":
+                row.status, row.note = "fail", diagnostic_note(error)
+    finally:
+        # As on Linux: every receipt and the setup record are written, and
+        # only redacted text reaches the job log.
+        write_json(output / "peer-setup.json", setup, replace=True)
+        for row in rows:
+            if row.status == "pass" and not cleaned:
+                row.status, row.note = "fail", "The disposable environment could not be cleaned up and verified."
+                row.cleanup_failed = True
+            row.write(output, release, cleaned)
+            print(REDACTOR.text(f"{row.scenario}: {row.status}. {row.note}"))
     return int(any(row.status == "fail" for row in rows))
 
 
