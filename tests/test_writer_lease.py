@@ -125,6 +125,15 @@ def test_failed_open_releases_the_lease_for_its_own_retry(pg_conn, pg_url,
     # `failed` still holds the traceback, and with it the half-built
     # instance, so only an explicit close can have released the lease.
     assert failed.value is not None
+    # The close returns once the client has sent it; the server process
+    # drops the session's lock as it exits, a moment later. On a loaded
+    # Linux dev box the failed open's own closed backend was still listed
+    # in 375 of 2000 tries, for at most 19 ms (#1858, 24 November 2026).
+    # Wait for it as the reconnect tests below do: a lease the failed open
+    # kept never goes, so this still fails.
+    deadline = time.monotonic() + 5
+    while _lease_holder_pids(pg_conn) and time.monotonic() < deadline:
+        time.sleep(0.05)
     assert _lease_holder_pids(pg_conn) == []
     retry = PostgresStorage(pg_url)
     retry.close()
