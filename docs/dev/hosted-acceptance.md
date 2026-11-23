@@ -63,9 +63,15 @@ specifications](https://docs.github.com/en/actions/reference/runners/github-host
 ## What can pass
 
 Clean install can pass on both Mac columns. Upgrade and rollback can pass on
-Apple silicon. On Intel it cannot start: the v0.23.1 Python client it
-upgrades from no longer installs there, because one of its dependencies has
-no Intel macOS build. The legacy clients install with the job's Python 3.12,
+Apple silicon. After the hand-off it runs the native installer twice with the
+inputs of the legacy install. The first run may change only the Codex settings
+the harness expects for that starting release: for v0.23.1 and v0.24.0, the
+`memory_message` approval those installers lost ([issue
+#1903](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1903)). The
+second run must leave every fingerprinted file byte-identical and print the
+installer's "nothing changed" line. On Intel the upgrade cannot start: the
+v0.23.1 Python client it upgrades from no longer installs there, because one
+of its dependencies has no Intel macOS build. The legacy clients install with the job's Python 3.12,
 which those releases supported. The other rows record their observed steps
 and stay pending, each with one sentence naming what is missing:
 

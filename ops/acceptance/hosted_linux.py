@@ -496,6 +496,32 @@ def clean_install(receipt, release, repo, profile, peer, scratch):
     first_session(receipt, profile, repo, session_template)
 
 
+# Issue #1903: the Python installers of v0.23.1 and v0.24.0 ran their Codex
+# hook step before `codex mcp add`, so the memory_message approval their hook
+# consent asked for was never written, and an update never grants one. The
+# first consented native installer run after the hand-off completes it and
+# may change nothing else. A starting release whose installer carries the fix
+# expects the empty set.
+LOST_APPROVAL = "mcp_servers.pseudolife-memory.tools.memory_message.approval_mode"
+FIRST_RERUN_SETTINGS = {"v0.23.1": (LOST_APPROVAL,), "v0.24.0": (LOST_APPROVAL,)}
+FIRST_RERUN_ASSERTION = ("The first native installer rerun changed only the Codex settings expected for its "
+                         "starting release (#1903) and kept the installed runtime.")
+SECOND_RERUN_ASSERTION = "The second identical native installer run changed nothing and said so."
+UNCHANGED_LINE = re.compile(rb"Native client \S+ already installed at [^\n]+; nothing changed")
+
+
+def first_rerun_kept(tag, before, after, settings, config):
+    """Whether run 1 after the hand-off changed exactly the Codex settings
+    FIRST_RERUN_SETTINGS expects for `tag`, and no fingerprinted file but the
+    Codex configuration `config` (profile-relative)."""
+    expected = sorted(FIRST_RERUN_SETTINGS[tag])
+
+    def others(prints):
+        return {name: digest for name, digest in prints.items() if name != config}
+
+    return settings == expected and others(before) == others(after) and (bool(expected) or before == after)
+
+
 def changed_files(before, after):
     """Profile-relative names of fingerprinted files a step added, removed or changed."""
     return sorted(REDACTOR.text(str(name)) for name in set(before) | set(after) if before.get(name) != after.get(name))
@@ -548,24 +574,38 @@ def upgrade(receipt, release, repo, path, peer, scratch):
                         result.code == 0 and profile.native_marker(release),
                         "The previous client handed off to the verified native runtime.", template=next(templates))
         first_session(receipt, profile, repo)
-        before = profile.fingerprint()
         config = profile.codex / "config.toml"
-        config_before = config.read_text(encoding="utf-8") if config.is_file() else ""
+
+        def config_text():
+            return config.read_text(encoding="utf-8") if config.is_file() else ""
+
+        # Run 1 after the hand-off may change only what FIRST_RERUN_SETTINGS
+        # expects for this start; any other change fails the row.
+        before, config_before = profile.fingerprint(), config_text()
         result = live_install(peer, repo, profile, flags)
-        after = profile.fingerprint()
-        receipt.observe(f"{INSTALL} <rerun>", result, result.code == 0 and before == after,
-                        "The native installer rerun kept the installed runtime and registration.", template=next(templates),
-                        required=False)
+        after, config_after = profile.fingerprint(), config_text()
+        settings = changed_settings(config_before, config_after)
+        kept = result.code == 0 and first_rerun_kept(tag, before, after, settings,
+                                                     config.relative_to(profile.folder))
+        receipt.observe(f"{INSTALL} <rerun>", result, kept, FIRST_RERUN_ASSERTION, required=False)
         receipt.steps[-1]["changed_files"] = changed_files(before, after)
-        if config.is_file():
-            receipt.steps[-1]["changed_codex_settings"] = changed_settings(
-                config_before, config.read_text(encoding="utf-8"))
-        require(result.code == 0 and before == after,
-                "The native installer rerun kept the installed runtime and registration.")
+        receipt.steps[-1]["changed_codex_settings"] = settings
+        receipt.steps[-1]["expected_codex_settings"] = sorted(FIRST_RERUN_SETTINGS[tag])
+        require(kept, FIRST_RERUN_ASSERTION)
+        # Run 2, the same inputs: byte-identical to run 1, and it says so.
+        result = live_install(peer, repo, profile, flags)
+        again, config_again = profile.fingerprint(), config_text()
+        quiet = (result.code == 0 and again == after and config_again == config_after
+                 and UNCHANGED_LINE.search(result.output) is not None)
+        receipt.observe(f"{INSTALL} <second rerun>", result, quiet, SECOND_RERUN_ASSERTION,
+                        template=next(templates), required=False)
+        receipt.steps[-1]["changed_files"] = changed_files(after, again)
+        receipt.steps[-1]["changed_codex_settings"] = changed_settings(config_after, config_again)
+        require(quiet, SECOND_RERUN_ASSERTION)
         result = live_install(peer, repo, profile, flags, engine="python", overrides=LEGACY_PYTHON)
         restored = profile.fingerprint()
         receipt.observe("PSEUDOLIFE_SHIM_ENGINE=python bash ops/install.sh <rollback>", result,
-                        result.code == 0 and restored != before and not profile.native_marker(release),
+                        result.code == 0 and restored != again and not profile.native_marker(release),
                         "The documented installer rollback replaced the native runtime.", template=next(templates))
         first_session(receipt, profile, repo)
 

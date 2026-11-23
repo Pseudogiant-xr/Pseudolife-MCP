@@ -873,6 +873,41 @@ def test_rerun_names_changed_codex_settings_without_their_values():
     assert "fixture-secret-path" not in json.dumps(changed)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_first_rerun_after_the_handoff_may_change_only_the_expected_settings(monkeypatch):
+    # Issue #1903: from v0.23.1 and v0.24.0 exactly the lost memory_message
+    # approval; anything else, or nothing, fails the row.
+    from ops.acceptance import hosted_linux as linux
+
+    config, runtime = Path(".codex/config.toml"), Path("data/runtime.json")
+    before = {config: "a", runtime: "r"}
+    approved = {config: "b", runtime: "r"}
+    for tag in ("v0.23.1", "v0.24.0"):
+        assert linux.first_rerun_kept(tag, before, approved, [linux.LOST_APPROVAL], config)
+        token_file = "mcp_servers.pseudolife-memory.env.PSEUDOLIFE_MCP_TOKEN_FILE"
+        assert not linux.first_rerun_kept(tag, before, approved, sorted([linux.LOST_APPROVAL, token_file]),
+                                          config)
+        assert not linux.first_rerun_kept(tag, before, before, [], config)
+        assert not linux.first_rerun_kept(tag, before, {config: "b", runtime: "s"}, [linux.LOST_APPROVAL],
+                                          config)
+    # A start whose installer carries the fix expects no change at all.
+    monkeypatch.setitem(linux.FIRST_RERUN_SETTINGS, "v9.9.9", ())
+    assert linux.first_rerun_kept("v9.9.9", before, dict(before), [], config)
+    assert not linux.first_rerun_kept("v9.9.9", before, approved, [], config)
+    assert not linux.first_rerun_kept("v9.9.9", before, approved, [linux.LOST_APPROVAL], config)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_second_rerun_needs_the_installers_own_nothing_changed_line():
+    from ops.acceptance import hosted_linux as linux
+
+    installer = (Path(__file__).resolve().parents[2] / "ops" / "install-native.sh").read_text(encoding="utf-8")
+    assert 'step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"' in installer
+    line = b"==> Native client 0.25.1 already installed at /tmp/home/data/pseudolife-mcp/bin/pseudolife-mcp; nothing changed\n"
+    assert linux.UNCHANGED_LINE.search(b"Installing\n" + line)
+    assert not linux.UNCHANGED_LINE.search(b"==> Native client 0.25.1 installed at /tmp/x (running sessions keep it)\n")
+
+
 # --- Review fixes ---
 
 @pytest.mark.parametrize(("line", "secret", "kept"), [
