@@ -561,7 +561,7 @@ def upgrade(receipt, release, repo, path, peer, scratch):
             receipt.steps[-1]["changed_codex_settings"] = changed_settings(
                 config_before, config.read_text(encoding="utf-8"))
         require(result.code == 0 and before == after,
-                "The native installer rerun kept the installed runtime and registration.")
+                "The native installer rerun changed the installed runtime or registration.")
         result = live_install(peer, repo, profile, flags, engine="python", overrides=LEGACY_PYTHON)
         restored = profile.fingerprint()
         receipt.observe("PSEUDOLIFE_SHIM_ENGINE=python bash ops/install.sh <rollback>", result,
@@ -720,7 +720,8 @@ def ordinary(receipt, release, repo, profile, peer, scratch):
                                       "failure": explain("docker inspect <diagnostic>", asked)})
     if failures:
         raise Failed("One or more installed ordinary-use commands failed.")
-    raise Unavailable("The hosted run exercises only the ordinary-use operations listed in this receipt.")
+    raise Unavailable("The live tunnel step needs a public tunnel, which these hosted runs may not open; "
+                      "the other ordinary-use steps were observed.")
 
 
 @contextmanager
@@ -844,7 +845,8 @@ def failure(receipt, release, repo, profile, peer, scratch):
         require(peer.sample()["status"] == 200, "The daemon served an authenticated read after retry.")
     else:
         first_session(receipt, profile, repo)
-    raise Unavailable("Unobserved interruption points remain pending after the successful retry.")
+    raise Unavailable("The launch and interruption fault probes are not injected yet; the archive, "
+                      "cancellation, lock and retry steps were observed.")
 
 
 def bank_recovery(receipt, release, repo, profile, peer, scratch):

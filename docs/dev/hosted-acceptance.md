@@ -62,8 +62,11 @@ specifications](https://docs.github.com/en/actions/reference/runners/github-host
 ## What can pass
 
 Clean install can pass on both Mac columns. Upgrade and rollback can pass on
-both Mac columns. The other rows record their observed steps and stay
-pending, each with one sentence naming what is missing:
+Apple silicon. On Intel it cannot start: the v0.23.1 Python client it
+upgrades from no longer installs there, because one of its dependencies has
+no Intel macOS build. The legacy clients install with the job's Python 3.12,
+which those releases supported. The other rows record their observed steps
+and stay pending, each with one sentence naming what is missing:
 
 - Ordinary use needs a live tunnel, which a hosted job may not open.
 - Failure and retry needs the launch and interruption fault probes, which
