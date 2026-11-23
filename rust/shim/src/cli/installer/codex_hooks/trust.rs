@@ -185,6 +185,15 @@ pub fn mailbox_notice(state: &str, detail: Option<&str>) -> String {
     notice("Hooks ready", state, detail)
 }
 
+/// The line when `codex-runtime-defaults --approve-memory-message` could
+/// not reach Codex at all: the registration is unverified, so it names the
+/// fix and the rerun, never a hand edit of `config.toml`.
+pub fn unreached_mailbox_notice(reason: &str) -> String {
+    format!(
+        "Codex server registered; setup could not reach Codex to approve memory_message: {reason} Fix that, then rerun the installer interactively or with --codex-hook-trust yes (install.ps1: -CodexHookTrust yes).\nSee docs/guide/configuration.md (Experimental agent coordination)."
+    )
+}
+
 /// The same line from `codex-runtime-defaults --approve-memory-message`,
 /// which applies the approval a first install deferred until the server
 /// was registered.
@@ -203,7 +212,7 @@ fn notice(subject: &str, state: &str, detail: Option<&str>) -> String {
             "{subject}; memory_message is already approved (approval_mode = \"approve\"), so a thread woken by board mail can receive, ack and send without an approval prompt.{see}"
         ),
         "after-registration" => format!(
-            "{subject}; setup approves memory_message once Codex has registered the {SERVER} server, later in this install. If this install does not register it, the approval waits for an installer run that does.{see}"
+            "{subject}; setup approves memory_message once Codex has registered the {SERVER} server, later in this install. If this install does not register it, rerun the installer once it can, interactively or with --codex-hook-trust yes (install.ps1: -CodexHookTrust yes): that run approves it.{see}"
         ),
         _ => {
             let lead = match state {

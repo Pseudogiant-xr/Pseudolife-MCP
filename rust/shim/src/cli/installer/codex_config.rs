@@ -287,8 +287,7 @@ fn unstarted_report(error: &SetupError, approve_mailbox: bool) -> (Value, Option
     if !approve_mailbox {
         return (report, None);
     }
-    let detail = format!("Codex could not be started to apply it: {error}");
-    let (fields, line) = super::codex_hooks::unapplied_mailbox(&detail);
+    let (fields, line) = super::codex_hooks::unapplied_mailbox(&error.to_string());
     report.as_object_mut().unwrap().extend(fields);
     (report, Some(line))
 }
@@ -605,14 +604,16 @@ mod tests {
         assert_eq!(report["mailbox_approval"], "unavailable");
         assert_eq!(
             report["mailbox_approval_detail"],
-            "Codex could not be started to apply it: The setup runtime could not start."
+            "Codex could not be reached: The setup runtime could not start."
         );
-        let line = line.unwrap();
-        assert!(
-            line.starts_with(
-                "Codex server registered; setup could not approve memory_message: Codex could not be started to apply it: The setup runtime could not start. For unattended receive, ack and send, choose approval_mode = \"approve\""
-            ),
-            "{line}"
+        // The registration is unverified here, so the line names the fix
+        // and the rerun, never a hand edit of config.toml.
+        assert_eq!(
+            line.unwrap(),
+            "Codex server registered; setup could not reach Codex to approve memory_message: \
+             The setup runtime could not start. Fix that, then rerun the installer \
+             interactively or with --codex-hook-trust yes (install.ps1: -CodexHookTrust yes).\n\
+             See docs/guide/configuration.md (Experimental agent coordination)."
         );
         // Without the switch nothing about the approval is said.
         let (report, line) = unstarted_report(&error, false);

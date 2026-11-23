@@ -1532,7 +1532,9 @@ async fn consent_before_the_server_is_registered_defers_the_approval_and_says_so
         lines.iter().any(|l| l
             == "Hooks ready; setup approves memory_message once Codex has registered the \
                 pseudolife-memory server, later in this install. If this install does not \
-                register it, the approval waits for an installer run that does.\n\
+                register it, rerun the installer once it can, interactively or with \
+                --codex-hook-trust yes (install.ps1: -CodexHookTrust yes): that run \
+                approves it.\n\
                 See docs/guide/configuration.md (Experimental agent coordination)."),
         "{lines:?}"
     );
