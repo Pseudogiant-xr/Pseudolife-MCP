@@ -842,6 +842,44 @@ def _distinguishing_prefixes(matches):
     return [message[:cut] for message in listed]
 
 
+def _seed_payload(text, where):
+    """A seeded send payload as the JSON object the references read."""
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError) as error:
+        raise AssertionError(f"{where}: the send payload is not JSON ({error})") from None
+    if not isinstance(payload, dict):
+        raise AssertionError(f"{where}: the send payload is not a JSON object")
+    return payload
+
+
+def _has_lone_surrogate(value):
+    # json.loads joins a valid surrogate pair into one code point, so any
+    # surrogate left in a string is a lone one.
+    if isinstance(value, str):
+        return any(0xD800 <= ord(char) <= 0xDFFF for char in value)
+    if isinstance(value, dict):
+        return any(_has_lone_surrogate(key) or _has_lone_surrogate(item) for key, item in value.items())
+    return isinstance(value, list) and any(map(_has_lone_surrogate, value))
+
+
+def _has_nonfinite(value):
+    if isinstance(value, float):
+        return value != value or value in (float("inf"), float("-inf"))
+    if isinstance(value, dict):
+        return any(map(_has_nonfinite, value.values()))
+    return isinstance(value, list) and any(map(_has_nonfinite, value))
+
+
+# The payload property a case is named for; a reseed without it fails.
+_SEED_PROPERTIES = {
+    "lone-surrogate": ("a lone surrogate in the send payload", _has_lone_surrogate),
+    "nonfinite-fanout": ("a non-finite number in a fan-out send payload with a string request_id",
+                         lambda payload: _has_nonfinite(payload) and "fanout" in payload
+                         and isinstance(payload.get("request_id"), str)),
+}
+
+
 def _assert_refusal_seed(seed, value, refusal):
     """Fail loudly when the seed no longer refuses the way a case declares.
 
@@ -865,7 +903,8 @@ def _assert_refusal_seed(seed, value, refusal):
         raise AssertionError(f"{where}: a hashed-payload refusal needs one named message, found {len(named)}")
     first = next((row for row in sends if row["message_id"] == named[0]), None)
     texts = [row["text"] for row in live if row["message_id"] == named[0]]
-    if first is None or "text_commitment" in json.loads(first["payload"]) or any(t is not None for t in texts):
+    if first is None or "text_commitment" in _seed_payload(first["payload"], where) or any(
+            t is not None for t in texts):
         raise AssertionError(f"{where}: a hashed-payload refusal needs a pre-v46 send and no live text")
 
 
@@ -992,7 +1031,7 @@ def _abbreviated_redact_case():
 _REDACT_REFERENCE_DB = _bank.name(PREFIX + "rd_ref")
 
 
-def _assert_redaction_seed(seed, message_id, audit_copy, siblings):
+def _assert_redaction_seed(seed, message_id, audit_copy, siblings, seed_property=None):
     """Fail loudly when the seed no longer has the shape a case declares.
 
     ``audit_copy`` and ``siblings`` are declared per case; this checks them
@@ -1001,7 +1040,9 @@ def _assert_redaction_seed(seed, message_id, audit_copy, siblings):
     one pre-v46 send and live text; gone needs no send event and one live
     row. The envelope the projection copies must be non-null. ``siblings``
     must equal the seed's other sends of one fan-out (the frozen
-    ``_burst_siblings``: same sender and ``request_id``, in ``seq`` order)."""
+    ``_burst_siblings``: same sender and ``request_id``, in ``seq`` order).
+    ``seed_property`` names the payload property a case is named for
+    (``_SEED_PROPERTIES``)."""
     tables = _BASELINE[seed]["tables"]
     events = [json.loads(text) for text in tables["coordination_events"]]
     sends = [row for row in events if row["event"] == "send" and row["message_id"] == message_id]
@@ -1020,7 +1061,12 @@ def _assert_redaction_seed(seed, message_id, audit_copy, siblings):
         if len(sends) != 1:
             raise AssertionError(f"{where}: expected exactly one send event, found {len(sends)}")
         send, = sends
-        payload = json.loads(send["payload"])
+        payload = _seed_payload(send["payload"], where)
+        if seed_property is not None:
+            description, holds = _SEED_PROPERTIES[seed_property]
+            if not holds(payload):
+                raise AssertionError(f"{where}: this case is named for {description}, "
+                                     "which the seed no longer has")
         committed = "text_commitment" in payload
         if audit_copy == "removed" and not (committed and len(live) == 1 and (
                 send["body"] is not None or send["body_salt"] is not None)):
@@ -1035,7 +1081,8 @@ def _assert_redaction_seed(seed, message_id, audit_copy, siblings):
             found = [row["message_id"] for row in sorted(events, key=lambda row: row["seq"])
                      if row["event"] == "send" and row["message_id"] != message_id
                      and row["agent_id"] == send["agent_id"]
-                     and json.loads(row["payload"]).get("request_id") == request]
+                     and _seed_payload(row["payload"], f"{seed} send {row['seq']}").get("request_id")
+                     == request]
     if None in envelope:
         raise AssertionError(f"{where}: the sender, project and task must be non-null")
     if found != list(siblings):
@@ -1069,8 +1116,10 @@ def _project_redaction(bank, message_id, reason, now, audit_copy, siblings):
             if live is None:
                 raise AssertionError(f"{bank}: no live row for {message_id}")
             live_text, = live
-        head_seq, head_hash = conn.execute(
-            "SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
+        head = conn.execute("SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
+        if head is None:
+            raise AssertionError(f"{bank}: the reference copy has no audit event to chain the redaction to")
+        head_seq, head_hash = head
         event = dict(seq=head_seq + 1, event="redact", actor="operator", principal="",
                      agent_id=agent, recipient_agent_id=recipient, project=project, task=task,
                      message_id=message_id, hlc="", created_at=now, prev_hash=head_hash,
@@ -1097,9 +1146,10 @@ def _project_redaction(bank, message_id, reason, now, audit_copy, siblings):
 
 def _redact_fixture_warnings(bank, instrument):
     # Run the CLI's clean-up statements on the reference copy, so PostgreSQL
-    # in this environment supplies the warnings, their count and order (a
-    # role that may not vacuum shows here too). With the ANALYZE instrument
-    # prepared, its warning must be among them.
+    # in this environment supplies the warnings, their count and order. With
+    # the ANALYZE instrument prepared, its warning must be among them; without
+    # it the clean-up must be complete, so a test login that starts skipping
+    # a step fails here instead of moving the expected result.
     warnings = []
     with _bank.connect(bank, autocommit=True) as conn:
         _assert_audit_database(conn, bank)
@@ -1114,20 +1164,26 @@ def _redact_fixture_warnings(bank, instrument):
         conn.execute("VACUUM pg_catalog.pg_statistic")
     if instrument and "audit test warning" not in warnings:
         raise AssertionError("the redaction reference's ANALYZE instrument produced no warning")
+    if not instrument and warnings:
+        raise AssertionError("the test login skipped clean-up: " + "; ".join(warnings))
     return warnings
 
 
-def _redact_projected_reference(source, message, reason, audit_copy, siblings, prepare, stdout_closed, home):
+def _redact_projected_reference(source, message, reason, audit_copy, siblings, prepare, stdout_closed, home,
+                                *, seed_property=None):
     started = time.time()
     seed = ensure(source)
     _copy(seed, _REDACT_REFERENCE_DB)
     _prepare_redaction_bank(_REDACT_REFERENCE_DB, prepare)
     message_id = message.make() if isinstance(message, _Lazy) else message
     siblings = [other.make() for other in siblings]
-    _assert_redaction_seed(seed, message_id, audit_copy, siblings)
+    _assert_redaction_seed(seed, message_id, audit_copy, siblings, seed_property)
     report = _project_redaction(_REDACT_REFERENCE_DB, message_id, reason, started, audit_copy, siblings)
     warnings = _redact_fixture_warnings(_REDACT_REFERENCE_DB, bool(prepare))
-    report["vacuumed"] = not warnings
+    # Only the ANALYZE instrument may leave the clean-up incomplete (checked
+    # above), so the flag follows the case's declaration: literally True
+    # without it, False with it.
+    report["vacuumed"] = not prepare
     # The notes, their order and the result key order are transcribed from
     # `_redact` in pseudolife_memory/board_audit_cli.py at
     # 3ac81bcdcb3a6d64a769b40057c02b1c35458225.
@@ -1163,10 +1219,11 @@ def _redact_projected_reference(source, message, reason, audit_copy, siblings, p
 
 
 def redact_projected_case(case_id, source, message, reason, *, resolved_id=None, audit_copy="removed",
-                          siblings=(), prepare=(), stdout_closed=False, rules=("audit-redact-clock",)):
+                          siblings=(), prepare=(), stdout_closed=False, rules=("audit-redact-clock",),
+                          seed_property=None):
     case = redact_case(case_id, source, message, reason, prepare=prepare, rules=rules, stdout_closed=stdout_closed)
     case.reference = partial(_redact_projected_reference, source, resolved_id or message, reason,
-                             audit_copy, siblings, prepare, stdout_closed)
+                             audit_copy, siblings, prepare, stdout_closed, seed_property=seed_property)
     return case
 
 
@@ -1661,9 +1718,11 @@ def cases() -> list[core.Case]:
         bank_verify_case("bank-verify-surrogate-send", "surrogate_send"),
         bank_export_case("export-surrogate-send", "surrogate_send"),
         redact_projected_case("redact-surrogate-send", "surrogate_send",
-                              _Lazy(lambda: ids("surrogate_send")["message"]), "old paste"),
+                              _Lazy(lambda: ids("surrogate_send")["message"]), "old paste",
+                              seed_property="lone-surrogate"),
         redact_projected_case("redact-nonfinite-fanout", "payload_send",
-                              _Lazy(lambda: ids("payload_send")["message"]), "old paste"),
+                              _Lazy(lambda: ids("payload_send")["message"]), "old paste",
+                              seed_property="nonfinite-fanout"),
         redact_case("redact-payload-domain", "payload", _Lazy(lambda: ids("payload")["legacy"]),
                     "old paste", refusal="body_in_hashed_payload"),
         file_case("input-payload-domain", ["verify", "--input", _home("archive.jsonl")],

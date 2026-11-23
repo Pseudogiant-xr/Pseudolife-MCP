@@ -10,6 +10,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 from types import SimpleNamespace
@@ -1074,10 +1075,17 @@ def test_audit_projected_redaction_references_pin_exit_and_both_streams(monkeypa
     ("gone-already-redacted", "a gone redaction needs a live row not already redacted"),
     ("undeclared-sibling", "declared fan-out siblings \\[\\] differ from the seed's"),
     ("missing-sibling", "declared fan-out siblings .* differ from the seed's \\[\\]"),
+    ("surrogate-lost", "this case is named for a lone surrogate in the send payload"),
+    ("surrogate-paired", "this case is named for a lone surrogate in the send payload"),
+    ("nonfinite-without-fanout", "named for a non-finite number in a fan-out send payload"),
+    ("nonfinite-finite", "named for a non-finite number in a fan-out send payload"),
+    ("nonfinite-null-request", "named for a non-finite number in a fan-out send payload"),
+    ("payload-not-object", "the send payload is not a JSON object"),
+    ("payload-not-json", "the send payload is not JSON"),
 ])
 def test_audit_redaction_reference_refuses_a_changed_seed(monkeypatch, change, message):
     target = _TARGET
-    copy, siblings = "removed", []
+    copy, siblings, prop = "removed", [], None
     events, live = [_seed_send(target, 4, "sender")], [_seed_live(target, "live text", "sender")]
     if change.startswith("kept"):
         copy = "kept"
@@ -1102,6 +1110,11 @@ def test_audit_redaction_reference_refuses_a_changed_seed(monkeypatch, change, m
         events = [_seed_send(target, 4, "sender", project=None)]
     elif change == "undeclared-sibling":
         events = [_seed_send(target, 4, "sender", payload=_FANOUT), _seed_send(_SIBLING, 5, "sender", payload=_FANOUT)]
+    elif change in _PROPERTY_SEEDS:
+        prop, payload = _PROPERTY_SEEDS[change]
+        events = [_seed_send(target, 4, "sender", payload=payload)]
+    elif change.startswith("payload-"):
+        events = [_seed_send(target, 4, "sender", payload="[]" if change == "payload-not-object" else "not json")]
     else:
         siblings = [_SIBLING]
     with _cold_audit(monkeypatch) as audit:
@@ -1109,7 +1122,33 @@ def test_audit_redaction_reference_refuses_a_changed_seed(monkeypatch, change, m
             "coordination_events": [json.dumps(row) for row in events],
             "coordination_messages": [json.dumps(row) for row in live]}}})
         with pytest.raises(AssertionError, match=message):
-            audit._assert_redaction_seed("seed", target, copy, siblings)
+            audit._assert_redaction_seed("seed", target, copy, siblings, prop)
+
+
+# The property a case is named for, removed or nearly kept: (property, send payload).
+_PROPERTY_SEEDS = {
+    "surrogate-lost": ("lone-surrogate", '{"request_id":"historical","text_commitment":"c"}'),
+    "surrogate-paired": ("lone-surrogate", '{"odd":"\\ud83d\\ude00","text_commitment":"c"}'),
+    "nonfinite-without-fanout": ("nonfinite-fanout", '{"odd":NaN,"request_id":"historical","text_commitment":"c"}'),
+    "nonfinite-finite": ("nonfinite-fanout",
+                         '{"fanout":{"recipients":1},"odd":1.5,"request_id":"historical","text_commitment":"c"}'),
+    "nonfinite-null-request": ("nonfinite-fanout",
+                               '{"fanout":{"recipients":1},"odd":NaN,"request_id":null,"text_commitment":"c"}'),
+}
+
+
+@pytest.mark.parametrize("prop,payload", [
+    ("lone-surrogate", '{"odd":"\\ud800","request_id":"historical","text_commitment":"c"}'),
+    ("lone-surrogate", '{"nested":["x\\udc00"],"text_commitment":"c"}'),
+    ("nonfinite-fanout", '{"fanout":{"recipients":1},"odd":NaN,"request_id":"historical","text_commitment":"c"}'),
+    ("nonfinite-fanout", '{"fanout":{"recipients":1},"odd":[-Infinity],"request_id":"r","text_commitment":"c"}'),
+])
+def test_audit_redaction_seed_property_accepts_the_named_payload(monkeypatch, prop, payload):
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(audit, "_BASELINE", {"seed": {"tables": {
+            "coordination_events": [json.dumps(_seed_send(_TARGET, 4, "sender", payload=payload))],
+            "coordination_messages": [json.dumps(_seed_live(_TARGET, "live text", "sender"))]}}})
+        audit._assert_redaction_seed("seed", _TARGET, "removed", [], prop)
 
 
 @pytest.mark.parametrize("audit_copy,reads,message", [
@@ -1117,6 +1156,8 @@ def test_audit_redaction_reference_refuses_a_changed_seed(monkeypatch, change, m
     ("removed", [SimpleNamespace(fetchall=lambda: [])], "expected one send event for .*, found 0"),
     ("kept", [SimpleNamespace(fetchall=lambda: [(4, "s", "r", "p", "t")]), SimpleNamespace(fetchone=lambda: None)],
      "no live row for"),
+    ("removed", [SimpleNamespace(fetchall=lambda: [(4, "s", "r", "p", "t")]), SimpleNamespace(fetchone=lambda: ("x",)),
+                 SimpleNamespace(fetchone=lambda: None)], "no audit event to chain the redaction to"),
 ])
 def test_audit_redaction_projection_refuses_a_changed_reference_copy(monkeypatch, audit_copy, reads, message):
     with _cold_audit(monkeypatch) as audit:
@@ -1153,15 +1194,68 @@ def test_audit_refusal_reference_refuses_a_changed_seed(monkeypatch, value, refu
             audit._assert_refusal_seed("seed", value, refusal)
 
 
-def test_audit_vacuum_reference_requires_its_warning_instrument(monkeypatch):
+class _NoticeConnection:
+    """Sends the given (severity, message) notices while the first VACUUM runs."""
+
+    def __init__(self, notices):
+        self.notices, self.statements, self.handlers = notices, [], []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def add_notice_handler(self, handler):
+        self.handlers.append(handler)
+
+    def execute(self, sql):
+        self.statements.append(sql)
+        if sql.startswith("VACUUM (ANALYZE)"):
+            for severity, message in self.notices:
+                for handler in self.handlers:
+                    handler(SimpleNamespace(severity_nonlocalized=severity, message_primary=message))
+
+
+# The clean-up statements of the frozen `_redact` (3ac81bc), in order.
+_CLEANUP = ["SET client_min_messages TO warning",
+            "VACUUM (ANALYZE) coordination_events, coordination_messages",
+            "VACUUM pg_catalog.pg_statistic"]
+
+
+@pytest.mark.parametrize("instrument,notices,result", [
+    (False, [], []),
+    (False, [("NOTICE", "nothing to do")], []),
+    (True, [("NOTICE", "nothing to do"), ("WARNING", "audit test warning"), ("WARNING", "audit test warning")],
+     ["audit test warning", "audit test warning"]),
+    (False, [("WARNING", 'permission denied to vacuum "coordination_events"')],
+     'the test login skipped clean-up: permission denied to vacuum "coordination_events"'),
+    (True, [("NOTICE", "audit test warning"), ("WARNING", "other")], "ANALYZE instrument produced no warning"),
+])
+def test_audit_vacuum_reference_requires_its_warning_instrument(monkeypatch, instrument, notices, result):
     with _cold_audit(monkeypatch) as audit:
-        conn = MagicMock()
-        conn.__enter__.return_value = conn
-        monkeypatch.setattr(_bank, "connect", lambda *args, **kwargs: conn)
+        conn = _NoticeConnection(notices)
+        connected = []
+        monkeypatch.setattr(_bank, "connect", lambda *args, **kwargs: connected.append((args, kwargs)) or conn)
         monkeypatch.setattr(audit, "_assert_audit_database", MagicMock())
-        assert audit._redact_fixture_warnings("reference", False) == []
-        with pytest.raises(AssertionError, match="ANALYZE instrument produced no warning"):
-            audit._redact_fixture_warnings("reference", True)
+        if isinstance(result, list):
+            assert audit._redact_fixture_warnings("reference", instrument) == result
+        else:
+            with pytest.raises(AssertionError, match=re.escape(result)):
+                audit._redact_fixture_warnings("reference", instrument)
+        assert connected == [(("reference",), {"autocommit": True})]
+        assert conn.statements == _CLEANUP
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_audit_live_row_starts_python_only_for_no_bank_and_closed_stdout_verify(monkeypatch, platform):
+    """Slice 3 converts these two on purpose; nothing else may start the frozen CLI."""
+    from .rows import audit
+
+    monkeypatch.setattr(audit.core, "PLATFORM", platform)
+    monkeypatch.setattr(_bank, "url", lambda name: f"postgresql://localhost/{name}")
+    roster = [case for case in audit.cases() if platform in case.platforms]
+    assert {case.id for case in roster if case.reference is None} == {"no-bank", "defer-bank-verify-stdout-closed"}
 
 
 def test_audit_redaction_prefix_references_refuse_a_changed_seed(monkeypatch, tmp_path):

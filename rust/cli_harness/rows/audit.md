@@ -97,17 +97,21 @@ live row and appends the chained event in all three cases. It preserves the
 fan-out sibling and lists its seeded ID. The malformed-domain sends retain
 their original payload bytes. The closed-stdout reference expects exit 120,
 with the committed database state and the record-head note. Each
-reference runs the CLI's clean-up statements on its separate copy and
-reports the warnings PostgreSQL raises there, so the `vacuumed` flag and
-the skip note follow the environment; the vacuum-warning case also requires
-its instrument's warning. The comparison includes the complete database dump
+reference runs the CLI's clean-up statements on its separate copy. Without
+the vacuum-warning instrument the clean-up must raise no warning, so a test
+login that starts skipping a step fails the reference instead of moving it,
+and `vacuumed` is `true`. With the instrument its warning must be among the
+ones PostgreSQL raises, which the skip note then lists, and `vacuumed` is
+`false`. The comparison includes the complete database dump
 and the post-run file tree and modes. Before projecting, each reference
 checks the seed against what its case declares: a removed send carries a
 `text_commitment` and a stored body or salt and has one live row, a kept
 send has none and its live text remains, a gone message has no send event
 and a live row not already redacted, the copied envelope is non-null, and
 the declared fan-out siblings equal the seed's other sends with the same
-sender and `request_id`. The not-found and hashed-payload refusal
+sender and `request_id`. `redact-surrogate-send` also needs a lone
+surrogate in the send payload, and `redact-nonfinite-fanout` a non-finite
+number in a fan-out payload with a string `request_id`. The not-found and hashed-payload refusal
 references check that the seed names no such message, or names one whose
 first send has no `text_commitment` and no live text. A seed that no longer
 fits fails with the reason. The success notes are transcribed from the
@@ -280,7 +284,9 @@ projected shapes (a synthetic direct removal, then `redact-kept-v45`,
 `redact-fanout-siblings`, `redact-gone`, `redact-vacuum-warning`,
 `redact-stdout-closed` and `redact-twin-prefix`).
 The live row still starts the frozen CLI for `no-bank` and
-`defer-bank-verify-stdout-closed` on each platform.
+`defer-bank-verify-stdout-closed` on each platform, and
+`test_audit_live_row_starts_python_only_for_no_bank_and_closed_stdout_verify`
+holds that set on both platforms' rosters.
 
 The payload fixture covers non-finite floats,
 200-digit integers, nesting beyond 128, Unicode key order and lone surrogates.
