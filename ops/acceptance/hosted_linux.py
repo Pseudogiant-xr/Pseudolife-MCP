@@ -496,30 +496,46 @@ def clean_install(receipt, release, repo, profile, peer, scratch):
     first_session(receipt, profile, repo, session_template)
 
 
-# Issue #1903: the Python installers of v0.23.1 and v0.24.0 ran their Codex
-# hook step before `codex mcp add`, so the memory_message approval their hook
-# consent asked for was never written, and an update never grants one. The
-# first consented native installer run after the hand-off completes it and
-# may change nothing else. A starting release whose installer carries the fix
-# expects the empty set.
+# What the first native installer run after the hand-off may change, per
+# starting release: each setting's change kind and, where it is not None, the
+# value it must end with (checked, never recorded). Any other change fails.
+# - Issue #1903: the Python installers of v0.23.1 and v0.24.0 ran their Codex
+#   hook step before `codex mcp add`, so the memory_message approval their hook
+#   consent asked for was never written, and an update never grants one. The
+#   first consented native run adds it.
+# - Issue #1908, not fixed yet: those installers register Codex's own token
+#   copy, and a rerun with the install's own --token-file re-points the
+#   registration at that file once. Remove this entry when a candidate
+#   carries #1908's fix; run 1 must then leave the token file alone.
+# A starting release whose installer carries both fixes expects no change.
 LOST_APPROVAL = "mcp_servers.pseudolife-memory.tools.memory_message.approval_mode"
-FIRST_RERUN_SETTINGS = {"v0.23.1": (LOST_APPROVAL,), "v0.24.0": (LOST_APPROVAL,)}
+REPOINTED_TOKEN_FILE = "mcp_servers.pseudolife-memory.env.PSEUDOLIFE_MCP_TOKEN_FILE"
+LEGACY_FIRST_RERUN = {LOST_APPROVAL: ("added", "approve"), REPOINTED_TOKEN_FILE: ("changed", None)}
+FIRST_RERUN_SETTINGS = {"v0.23.1": LEGACY_FIRST_RERUN, "v0.24.0": LEGACY_FIRST_RERUN}
 FIRST_RERUN_ASSERTION = ("The first native installer rerun changed only the Codex settings expected for its "
                          "starting release (#1903) and kept the installed runtime.")
 SECOND_RERUN_ASSERTION = "The second identical native installer run changed nothing and said so."
 UNCHANGED_LINE = re.compile(rb"Native client \S+ already installed at [^\n]+; nothing changed")
 
 
-def first_rerun_kept(tag, before, after, settings, config):
+def first_rerun_kept(tag, before, after, changes, config_after, config):
     """Whether run 1 after the hand-off changed exactly the Codex settings
-    FIRST_RERUN_SETTINGS expects for `tag`, and no fingerprinted file but the
-    Codex configuration `config` (profile-relative)."""
-    expected = sorted(FIRST_RERUN_SETTINGS[tag])
+    FIRST_RERUN_SETTINGS expects for `tag`, each the expected way and to the
+    expected value, and no fingerprinted file but the Codex configuration
+    `config` (profile-relative). `changes` is setting_changes' answer and
+    `config_after` the configuration text after the run."""
+    expected = FIRST_RERUN_SETTINGS[tag]
 
     def others(prints):
         return {name: digest for name, digest in prints.items() if name != config}
 
-    return settings == expected and others(before) == others(after) and (bool(expected) or before == after)
+    if set(changes) != set(expected) or others(before) != others(after):
+        return False
+    if not expected:
+        return before == after
+    values = settings_values(config_after)
+    return all(changes[name] == kind and (value is None or values.get(name) == value)
+               for name, (kind, value) in expected.items())
 
 
 def changed_files(before, after):
@@ -532,9 +548,8 @@ def changed_settings(before, after):
     return sorted(setting_changes(before, after))
 
 
-def setting_changes(before, after):
-    """Each changed Codex setting's dotted name and whether the step added,
-    removed or changed it. Values stay out."""
+def settings_values(text):
+    """Codex configuration text as dotted setting names and their values."""
     def flatten(table, prefix=()):
         for key, value in table.items():
             if isinstance(value, dict):
@@ -542,8 +557,14 @@ def setting_changes(before, after):
             else:
                 yield ".".join((*prefix, key)), value
 
+    return dict(flatten(tomllib.loads(text))) if text else {}
+
+
+def setting_changes(before, after):
+    """Each changed Codex setting's dotted name and whether the step added,
+    removed or changed it. Values stay out."""
     try:
-        old, new = (dict(flatten(tomllib.loads(text))) if text else {} for text in (before, after))
+        old, new = settings_values(before), settings_values(after)
     except tomllib.TOMLDecodeError:
         return {"<unreadable Codex configuration>": "unreadable"}
     return {REDACTOR.text(name): "added" if name not in old else "removed" if name not in new else "changed"
@@ -591,22 +612,23 @@ def upgrade(receipt, release, repo, path, peer, scratch):
         before, config_before = profile.fingerprint(), config_text()
         result = live_install(peer, repo, profile, flags)
         after, config_after = profile.fingerprint(), config_text()
-        settings = changed_settings(config_before, config_after)
-        kept = result.code == 0 and first_rerun_kept(tag, before, after, settings,
+        changes = setting_changes(config_before, config_after)
+        kept = result.code == 0 and first_rerun_kept(tag, before, after, changes, config_after,
                                                      config.relative_to(profile.folder))
-        receipt.observe(f"{INSTALL} <rerun>", result, kept, FIRST_RERUN_ASSERTION, required=False)
+        receipt.observe(f"{INSTALL} <rerun>", result, kept, FIRST_RERUN_ASSERTION,
+                        template=next(templates), required=False)
         receipt.steps[-1]["changed_files"] = changed_files(before, after)
-        receipt.steps[-1]["changed_codex_settings"] = settings
-        receipt.steps[-1]["codex_setting_changes"] = setting_changes(config_before, config_after)
-        receipt.steps[-1]["expected_codex_settings"] = sorted(FIRST_RERUN_SETTINGS[tag])
+        receipt.steps[-1]["changed_codex_settings"] = sorted(changes)
+        receipt.steps[-1]["codex_setting_changes"] = changes
+        receipt.steps[-1]["expected_codex_settings"] = {name: kind for name, (kind, _) in
+                                                        sorted(FIRST_RERUN_SETTINGS[tag].items())}
         require(kept, FIRST_RERUN_ASSERTION)
         # Run 2, the same inputs: byte-identical to run 1, and it says so.
         result = live_install(peer, repo, profile, flags)
         again, config_again = profile.fingerprint(), config_text()
         quiet = (result.code == 0 and again == after and config_again == config_after
                  and UNCHANGED_LINE.search(result.output) is not None)
-        receipt.observe(f"{INSTALL} <second rerun>", result, quiet, SECOND_RERUN_ASSERTION,
-                        template=next(templates), required=False)
+        receipt.observe(f"{INSTALL} <second rerun>", result, quiet, SECOND_RERUN_ASSERTION, required=False)
         receipt.steps[-1]["changed_files"] = changed_files(after, again)
         receipt.steps[-1]["changed_codex_settings"] = changed_settings(config_after, config_again)
         require(quiet, SECOND_RERUN_ASSERTION)
