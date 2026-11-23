@@ -534,7 +534,7 @@ def _seed_send(message_id, seq, agent, *, payload='{"text_commitment":"c"}', bod
 
 
 def _seed_live(message_id, text, agent):
-    return {"message_id": message_id, "text": text, "sender_agent_id": agent,
+    return {"message_id": message_id, "text": text, "fingerprint": "f" * 64, "sender_agent_id": agent,
             "recipient_agent_id": "recipient", "project": "p", "task": "t"}
 
 
@@ -574,6 +574,7 @@ def test_audit_removed_redaction_reference_uses_a_separate_seed_copy(monkeypatch
         }}})
         monkeypatch.setattr(audit, "_copy", copy_bank)
         monkeypatch.setattr(audit, "_assert_audit_database", guard)
+        monkeypatch.setattr(audit, "_redact_fixture_warnings", MagicMock(return_value=[]))
         monkeypatch.setattr(audit, "time", SimpleNamespace(time=lambda: now))
         monkeypatch.setattr(_bank, "connect", lambda _: conn)
         monkeypatch.setattr(_bank, "dump", dump)
@@ -604,16 +605,16 @@ def test_audit_removed_redaction_reference_uses_a_separate_seed_copy(monkeypatch
         assert want["exit"] == 0 and want["db"] == expected_db
         assert want["files"] == {"cwd": "dir"}
         assert want["modes"] == ({} if audit.core.WINDOWS else {"cwd": "0o755"})
-        report = json.loads(audit.core.decode(want, "stdout"))
-        assert report == {"ok": True, "message_id": message_id, "seq": 3, "redact_seq": 8,
-                          "redact_hash": expected_event["hash"], "expect_head": "8:" + expected_event["hash"],
-                          "live_body_cleared": True, "audit_copy": "removed", "other_copies": [], "vacuumed": True}
         newline = b"\r\n" if audit.core.WINDOWS else b"\n"
+        report = {"ok": True, "message_id": message_id, "seq": 3, "redact_seq": 8,
+                  "redact_hash": expected_event["hash"], "expect_head": "8:" + expected_event["hash"],
+                  "live_body_cleared": True, "audit_copy": "removed", "other_copies": [], "vacuumed": True}
+        assert audit.core.decode(want, "stdout") == json.dumps(report).encode() + newline
         assert audit.core.decode(want, "stderr") == (
             b"board-audit: record this head outside the bank; `pseudolife-mcp board-audit verify "
             b"--expect-head 8:" + expected_event["hash"].encode() + b"` later shows the redaction "
             b"record is still there" + newline)
-        stale ={"tables": dict(expected_db["tables"], coordination_messages=[
+        stale = {"tables": dict(expected_db["tables"], coordination_messages=[
             json.dumps({"message_id": message_id, "expires_at": now, "text": "synthetic text"})])}
         assert compare.diff(want, dict(want, db=stale), case.rules)[0] == "db differ:"
 
@@ -835,10 +836,12 @@ def test_audit_remaining_redact_refusals_use_seed_observations(monkeypatch, tmp_
     right = "cd34ef56ab1300000000000000000002"
     legacy = "ef12ab34cd5600000000000000000001"
     rows = {
-        "coordination_messages": [json.dumps({"message_id": right})],
+        "coordination_messages": [json.dumps({"message_id": right, "text": "live"})],
         "coordination_events": [
-            json.dumps({"event": "send", "message_id": message}) for message in (right, left)
-        ] + [json.dumps({"event": "redact", "message_id": "cd34ef56a00000000000000000000003"})],
+            json.dumps({"event": "send", "message_id": message, "seq": seq, "payload": '{"text_commitment":"c"}'})
+            for seq, message in ((2, right), (3, left))
+        ] + [json.dumps({"event": "redact", "message_id": "cd34ef56a00000000000000000000003", "seq": 4}),
+             json.dumps({"event": "send", "message_id": legacy, "seq": 5, "payload": "{}"})],
     }
     with _cold_audit(monkeypatch) as audit:
         rich, payload = audit._name("rich"), audit._name("payload")
@@ -1004,7 +1007,7 @@ def test_audit_projected_redaction_references_pin_exit_and_both_streams(monkeypa
             "pruned": {"old": _TARGET}}[kind])
         conn = _SeedConnection(events, live)
         copy_bank, prepare, dump = MagicMock(), MagicMock(), MagicMock(return_value={"tables": "after"})
-        warnings = MagicMock(return_value=["audit test warning", "audit test warning"])
+        warnings = MagicMock(side_effect=lambda bank, instrument: ["audit test warning"] * 2 if instrument else [])
         insert = MagicMock(return_value=("synthetic insert", ()))
         monkeypatch.setattr(audit, "_copy", copy_bank)
         monkeypatch.setattr(audit, "_prepare_redaction_bank", prepare)
@@ -1027,7 +1030,7 @@ def test_audit_projected_redaction_references_pin_exit_and_both_streams(monkeypa
         copy_bank.assert_called_once_with(seed, reference_bank)
         prepare.assert_called_once_with(
             reference_bank, audit.VACUUM_WARNING if case_id == "redact-vacuum-warning" else ())
-        assert warnings.call_count == (case_id == "redact-vacuum-warning")
+        warnings.assert_called_once_with(reference_bank, case_id == "redact-vacuum-warning")
         dump.assert_called_once_with(reference_bank)
         expected_event = event(seq=9, event="redact", actor="operator", principal="",
                                agent_id="sender", recipient_agent_id="recipient", project="p", task="t",
@@ -1067,6 +1070,8 @@ def test_audit_projected_redaction_references_pin_exit_and_both_streams(monkeypa
     ("two-sends", "expected exactly one send event, found 2"),
     ("gone-with-send", "a gone redaction needs no send event and one live row, found 1 and 1"),
     ("null-project", "the sender, project and task must be non-null"),
+    ("removed-without-live-row", "a removed redaction needs a v46 send with a stored body or salt and one live row"),
+    ("gone-already-redacted", "a gone redaction needs a live row not already redacted"),
     ("undeclared-sibling", "declared fan-out siblings \\[\\] differ from the seed's"),
     ("missing-sibling", "declared fan-out siblings .* differ from the seed's \\[\\]"),
 ])
@@ -1088,6 +1093,11 @@ def test_audit_redaction_reference_refuses_a_changed_seed(monkeypatch, change, m
         events.append(_seed_send(target, 5, "sender"))
     elif change == "gone-with-send":
         copy = "gone"
+    elif change == "gone-already-redacted":
+        copy, events = "gone", []
+        live = [dict(_seed_live(target, None, "sender"), fingerprint="redacted")]
+    elif change == "removed-without-live-row":
+        live = []
     elif change == "null-project":
         events = [_seed_send(target, 4, "sender", project=None)]
     elif change == "undeclared-sibling":
@@ -1105,6 +1115,8 @@ def test_audit_redaction_reference_refuses_a_changed_seed(monkeypatch, change, m
 @pytest.mark.parametrize("audit_copy,reads,message", [
     ("gone", [SimpleNamespace(fetchone=lambda: None)], "no live row for the gone message"),
     ("removed", [SimpleNamespace(fetchall=lambda: [])], "expected one send event for .*, found 0"),
+    ("kept", [SimpleNamespace(fetchall=lambda: [(4, "s", "r", "p", "t")]), SimpleNamespace(fetchone=lambda: None)],
+     "no live row for"),
 ])
 def test_audit_redaction_projection_refuses_a_changed_reference_copy(monkeypatch, audit_copy, reads, message):
     with _cold_audit(monkeypatch) as audit:
@@ -1117,14 +1129,39 @@ def test_audit_redaction_projection_refuses_a_changed_reference_copy(monkeypatch
             audit._project_redaction("reference", _TARGET, "why", 1700000000.0, audit_copy, [])
 
 
+@pytest.mark.parametrize("value,refusal,events,live,message", [
+    ("x", "message_not_found", [], [{"message_id": "x", "text": None}], "a not-found refusal needs no seeded message"),
+    ("cd34ef56", "message_not_found", [_seed_send(_TARGET, 4, "sender")], [], "a not-found refusal needs no seeded"),
+    (_TARGET, "body_in_hashed_payload", [_seed_send(_TARGET, 4, "sender")], [],
+     "a hashed-payload refusal needs a pre-v46 send and no live text"),
+    (_TARGET, "body_in_hashed_payload", [_seed_send(_TARGET, 4, "sender", payload="{}", body=None)],
+     [{"message_id": _TARGET, "text": "live"}], "a hashed-payload refusal needs a pre-v46 send and no live text"),
+    ("cd34ef56", "body_in_hashed_payload", [_seed_send(_TARGET, 4, "sender", payload="{}"),
+                                            _seed_send(_TWIN, 3, "sender", payload="{}")], [],
+     "a hashed-payload refusal needs one named message, found 2"),
+])
+def test_audit_refusal_reference_refuses_a_changed_seed(monkeypatch, value, refusal, events, live, message):
+    with _cold_audit(monkeypatch) as audit:
+        monkeypatch.setattr(audit, "_BASELINE", {"seed": {"tables": {
+            "coordination_events": [json.dumps(row) for row in events],
+            "coordination_messages": [json.dumps(row) for row in live]}}})
+        with pytest.raises(AssertionError, match=message):
+            audit._assert_refusal_seed("seed", value, refusal)
+        if refusal == "message_not_found":
+            monkeypatch.setattr(audit, "_BASELINE", {"seed": {"tables": {
+                "coordination_events": [], "coordination_messages": []}}})
+            audit._assert_refusal_seed("seed", value, refusal)
+
+
 def test_audit_vacuum_reference_requires_its_warning_instrument(monkeypatch):
     with _cold_audit(monkeypatch) as audit:
         conn = MagicMock()
         conn.__enter__.return_value = conn
         monkeypatch.setattr(_bank, "connect", lambda *args, **kwargs: conn)
         monkeypatch.setattr(audit, "_assert_audit_database", MagicMock())
+        assert audit._redact_fixture_warnings("reference", False) == []
         with pytest.raises(AssertionError, match="ANALYZE instrument produced no warning"):
-            audit._redact_fixture_warnings("reference")
+            audit._redact_fixture_warnings("reference", True)
 
 
 def test_audit_redaction_prefix_references_refuse_a_changed_seed(monkeypatch, tmp_path):

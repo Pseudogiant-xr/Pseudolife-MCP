@@ -96,16 +96,22 @@ row and records a null send sequence. The projection clears the selected
 live row and appends the chained event in all three cases. It preserves the
 fan-out sibling and lists its seeded ID. The malformed-domain sends retain
 their original payload bytes. The closed-stdout reference expects exit 120,
-with the committed database state and the record-head note. PostgreSQL's
-warning instrument on the separate reference copy supplies the notices for
-the vacuum-warning case. The comparison includes the complete database dump
+with the committed database state and the record-head note. Each
+reference runs the CLI's clean-up statements on its separate copy and
+reports the warnings PostgreSQL raises there, so the `vacuumed` flag and
+the skip note follow the environment; the vacuum-warning case also requires
+its instrument's warning. The comparison includes the complete database dump
 and the post-run file tree and modes. Before projecting, each reference
 checks the seed against what its case declares: a removed send carries a
-`text_commitment` and a stored body, a kept send has none and its live text
-remains, a gone message has no send event, the copied envelope is non-null,
-and the declared fan-out siblings equal the seed's other sends with the same
-sender and `request_id`. A seed that no longer fits fails with the reason.
-The success notes are transcribed from the frozen `_redact` at `3ac81bc`.
+`text_commitment` and a stored body or salt and has one live row, a kept
+send has none and its live text remains, a gone message has no send event
+and a live row not already redacted, the copied envelope is non-null, and
+the declared fan-out siblings equal the seed's other sends with the same
+sender and `request_id`. The not-found and hashed-payload refusal
+references check that the seed names no such message, or names one whose
+first send has no `text_commitment` and no live text. A seed that no longer
+fits fails with the reason. The success notes are transcribed from the
+frozen `_redact` at `3ac81bc`.
 
 The native command has no Python fallback. `application_name` and
 `connect_timeout` use the shared PostgreSQL connector's native support.

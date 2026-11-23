@@ -842,6 +842,33 @@ def _distinguishing_prefixes(matches):
     return [message[:cut] for message in listed]
 
 
+def _assert_refusal_seed(seed, value, refusal):
+    """Fail loudly when the seed no longer refuses the way a case declares.
+
+    ``message_not_found`` needs no live message or send event that the value
+    names (by prefix when it is 8-31 lowercase hex, else exactly);
+    ``body_in_hashed_payload`` needs the named message's first send to carry
+    no ``text_commitment`` and no live text to remain."""
+    tables = _BASELINE[seed]["tables"]
+    sends = sorted((row for row in map(json.loads, tables["coordination_events"]) if row["event"] == "send"),
+                   key=lambda row: row["seq"])
+    live = list(map(json.loads, tables["coordination_messages"]))
+    prefix = 8 <= len(value) < 32 and all(c in "0123456789abcdef" for c in value)
+    named = _redact_prefix_matches(seed, value) if prefix else [
+        value for row in [*sends, *live] if row["message_id"] == value][:1]
+    where = f"{seed} message {value}"
+    if refusal == "message_not_found":
+        if named:
+            raise AssertionError(f"{where}: a not-found refusal needs no seeded message, found {named}")
+        return
+    if len(named) != 1:
+        raise AssertionError(f"{where}: a hashed-payload refusal needs one named message, found {len(named)}")
+    first = next((row for row in sends if row["message_id"] == named[0]), None)
+    texts = [row["text"] for row in live if row["message_id"] == named[0]]
+    if first is None or "text_commitment" in json.loads(first["payload"]) or any(t is not None for t in texts):
+        raise AssertionError(f"{where}: a hashed-payload refusal needs a pre-v46 send and no live text")
+
+
 def _redact_refusal_reference(case, source, original, refusal, home, *, read_only=False):
     """A refusal leaves the candidate's template copy equal to the seed bank."""
     started = time.time()
@@ -855,6 +882,8 @@ def _redact_refusal_reference(case, source, original, refusal, home, *, read_onl
         result = {"ok": False, "message_id": case.argv[3], "reason": refusal}
         stdout = json.dumps(result).encode("ascii") + newline
         diagnostic = _REDACT_REFUSALS.get(refusal, refusal)
+        if refusal in ("message_not_found", "body_in_hashed_payload"):
+            _assert_refusal_seed(bank, case.argv[3], refusal)
         if refusal == "ambiguous_message_id":
             # The matches, their order and the distinguishing length come
             # from the original seed, not from either arm.
@@ -983,6 +1012,8 @@ def _assert_redaction_seed(seed, message_id, audit_copy, siblings):
         if sends or len(live) != 1:
             raise AssertionError(f"{where}: a gone redaction needs no send event and one live row, "
                                  f"found {len(sends)} and {len(live)}")
+        if live[0]["text"] is None and live[0]["fingerprint"] == "redacted":
+            raise AssertionError(f"{where}: a gone redaction needs a live row not already redacted")
         envelope = live[0]["sender_agent_id"], live[0]["project"], live[0]["task"]
         found = []
     else:
@@ -991,9 +1022,10 @@ def _assert_redaction_seed(seed, message_id, audit_copy, siblings):
         send, = sends
         payload = json.loads(send["payload"])
         committed = "text_commitment" in payload
-        if audit_copy == "removed" and not (committed and (send["body"] is not None
-                                                           or send["body_salt"] is not None)):
-            raise AssertionError(f"{where}: a removed redaction needs a v46 send with a stored body")
+        if audit_copy == "removed" and not (committed and len(live) == 1 and (
+                send["body"] is not None or send["body_salt"] is not None)):
+            raise AssertionError(f"{where}: a removed redaction needs a v46 send with a stored body "
+                                 "or salt and one live row")
         if audit_copy == "kept" and (committed or len(live) != 1 or live[0]["text"] is None):
             raise AssertionError(f"{where}: a kept redaction needs a pre-v46 send and live text")
         envelope = send["agent_id"], send["project"], send["task"]
@@ -1034,7 +1066,9 @@ def _project_redaction(bank, message_id, reason, now, audit_copy, siblings):
             (seq, agent, recipient, project, task), = sends
             live = conn.execute("SELECT text FROM coordination_messages WHERE message_id=%s",
                                 (message_id,)).fetchone()
-            live_text = None if live is None else live[0]
+            if live is None:
+                raise AssertionError(f"{bank}: no live row for {message_id}")
+            live_text, = live
         head_seq, head_hash = conn.execute(
             "SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
         event = dict(seq=head_seq + 1, event="redact", actor="operator", principal="",
@@ -1061,9 +1095,11 @@ def _project_redaction(bank, message_id, reason, now, audit_copy, siblings):
     return report
 
 
-def _redact_fixture_warnings(bank):
-    # Exercise the reference copy's ANALYZE instrument directly. PostgreSQL
-    # supplies the notice count and order for the actual fixture rows.
+def _redact_fixture_warnings(bank, instrument):
+    # Run the CLI's clean-up statements on the reference copy, so PostgreSQL
+    # in this environment supplies the warnings, their count and order (a
+    # role that may not vacuum shows here too). With the ANALYZE instrument
+    # prepared, its warning must be among them.
     warnings = []
     with _bank.connect(bank, autocommit=True) as conn:
         _assert_audit_database(conn, bank)
@@ -1076,7 +1112,7 @@ def _redact_fixture_warnings(bank):
         conn.execute("SET client_min_messages TO warning")
         conn.execute("VACUUM (ANALYZE) coordination_events, coordination_messages")
         conn.execute("VACUUM pg_catalog.pg_statistic")
-    if "audit test warning" not in warnings:
+    if instrument and "audit test warning" not in warnings:
         raise AssertionError("the redaction reference's ANALYZE instrument produced no warning")
     return warnings
 
@@ -1090,7 +1126,7 @@ def _redact_projected_reference(source, message, reason, audit_copy, siblings, p
     siblings = [other.make() for other in siblings]
     _assert_redaction_seed(seed, message_id, audit_copy, siblings)
     report = _project_redaction(_REDACT_REFERENCE_DB, message_id, reason, started, audit_copy, siblings)
-    warnings = _redact_fixture_warnings(_REDACT_REFERENCE_DB) if prepare else []
+    warnings = _redact_fixture_warnings(_REDACT_REFERENCE_DB, bool(prepare))
     report["vacuumed"] = not warnings
     # The notes, their order and the result key order are transcribed from
     # `_redact` in pseudolife_memory/board_audit_cli.py at

@@ -30,6 +30,7 @@
         "test_audit_projected_redaction_references_pin_exit_and_both_streams",
         "test_audit_redaction_reference_refuses_a_changed_seed",
         "test_audit_redaction_projection_refuses_a_changed_reference_copy",
+        "test_audit_refusal_reference_refuses_a_changed_seed",
         "test_audit_vacuum_reference_requires_its_warning_instrument",
         "test_audit_redaction_prefix_references_refuse_a_changed_seed",
         "test_audit_redaction_diagnostics_match_frozen_source_by_ast",
