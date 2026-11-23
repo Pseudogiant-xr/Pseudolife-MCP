@@ -52,8 +52,12 @@ def _record_marketplace(home: Path) -> None:
 class Scenario:
     def __init__(self, *, clients="claude", flag="auto", cli=True, marketplace=False,
                  plugin=False, marketplace_exit=0, install_exit=0, install_records=True,
-                 help_has_yes=True, helper_out="", helper_exit=0):
+                 help_has_yes=True, helper_out="", helper_exit=0, requested=None, profile_var=None,
+                 profile_dir="active [profile]"):
         self.clients, self.flag, self.cli = clients, flag, cli
+        self.requested = requested
+        self.profile_var = profile_var
+        self.profile_dir = profile_dir
         # The native client's plugin-marketplace step as the installer runs
         # it (native_helper / Invoke-NativeHelper): a stub that records its
         # call and answers with ``helper_out`` / ``helper_exit``.
@@ -67,12 +71,16 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
     block = _between("ops/install-native.sh", "# >>> claude plugin >>>", "# <<< claude plugin <<<")
     env = _fixture_env(tmp_path / "bash-env")
     home = Path(env["HOME"])
+    if sc.profile_var:
+        env[sc.profile_var] = _bash_fixture_path(bash, tmp_path / sc.profile_dir, env)
+        if sc.profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
+            env["CLAUDE_CONFIG_DIR"] = _bash_fixture_path(bash, tmp_path / "separate config", env)
     if sc.marketplace:
         _record_marketplace(home)
     if sc.plugin:
         _record_plugin(home)
     fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    fake_bin.mkdir(exist_ok=True)
     call_log = tmp_path / "calls.txt"
     if sc.cli:
         # Writes the same registry files the real CLI does, pretty-printed
@@ -80,7 +88,7 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
         (fake_bin / "claude").write_text(
             "#!/bin/sh\n"
             "printf 'claude|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-            "plugins=\"$HOME/.claude/plugins\"\n"
+            'plugins="${CLAUDE_CODE_PLUGIN_CACHE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins}"\n'
             "if [ \"$1\" = plugin ] && [ \"$2\" = install ] && [ \"$3\" = --help ]; then\n"
             "  [ \"$FAKE_HELP_YES\" = yes ] && echo '  -y, --yes   Accept the displayed command'\n"
             # Pads past the pipe buffer and, like a real CLI, dies when the
@@ -109,6 +117,18 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
     call_log_shell = _bash_fixture_path(bash, call_log, env).replace("'", "'\\''")
     helper_log_shell = _bash_fixture_path(bash, tmp_path / "helper-calls.txt", env).replace("'", "'\\''")
     repo_shell = _bash_fixture_path(bash, ROOT, env).replace("'", "'\\''")
+    finish = ""
+    if sc.requested is not None:
+        finish = (
+            f"REQUESTED_CLIENTS={'claude' if sc.requested else ''}\n"
+            + _between("ops/install-native.sh", 'instruction_choice="${INSTRUCTIONS:', '\nHOOK_CLAUDE=')
+            + "\n"
+            "echo REMAINING_STEPS_FINISHED\n"
+            + _between("ops/install-native.sh", "# >>> client registration state >>>",
+                       "# <<< client registration state <<<")
+            + "\n" + _between("ops/install-native.sh", "# >>> client setup result >>>",
+                              "# <<< client setup result <<<")
+        )
     # The installer's own strict mode: an abort in the block must fail here.
     script = f"""set -euo pipefail
 PATH='{fake_bin_shell}:/usr/bin:/bin'
@@ -125,6 +145,7 @@ step() {{ printf 'STEP: %s\\n' "$*"; }}
 install_claude_plugin
 printf 'STATE=%s\\n' "$PLUGIN_CLAUDE"
 printf 'LINE=%s\\n' "$(describe_plugin "$PLUGIN_CLAUDE")"
+{finish}
 """
     proc = subprocess.run([bash], input=script.encode(), capture_output=True, check=False,
                           timeout=20, env=env)
@@ -139,6 +160,10 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     block = _between("ops/install-native.ps1", "# >>> claude plugin >>>", "# <<< claude plugin <<<")
     env = _fixture_env(tmp_path / "powershell-env")
     home = Path(env["USERPROFILE"])
+    if sc.profile_var:
+        env[sc.profile_var] = str(tmp_path / sc.profile_dir)
+        if sc.profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
+            env["CLAUDE_CONFIG_DIR"] = str(tmp_path / "separate config")
     if sc.marketplace:
         _record_marketplace(home)
     if sc.plugin:
@@ -146,25 +171,41 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     call_log = tmp_path / "calls.txt"
     escaped_helper_log = str(tmp_path / "helper-calls.txt").replace("'", "''")
     escaped_log = str(call_log).replace("'", "''")
+    finish = ""
+    if sc.requested is not None:
+        requested = "'claude'" if sc.requested else ""
+        finish = (
+            f"$requestedClients = @({requested})\n"
+            "$hookState = @{}; $instrState = @{}\n"
+            + _between("ops/install-native.ps1", '$installedPlugins =', '\n$hookState =')
+            + "\n"
+            "Write-Output REMAINING_STEPS_FINISHED\n"
+            + _between("ops/install-native.ps1", "# >>> client registration state >>>",
+                       "# <<< client registration state <<<")
+            + "\n" + _between("ops/install-native.ps1", "# >>> client setup result >>>",
+                              "# <<< client setup result <<<")
+        )
     fake = "" if not sc.cli else f"""function global:claude {{
     $callArgs = @($args)
     Add-Content -LiteralPath '{escaped_log}' -Value ('claude|' + ($callArgs -join ' '))
-    $plugins = Join-Path $env:USERPROFILE '.claude\\plugins'
+    $plugins = if ($env:CLAUDE_CODE_PLUGIN_CACHE_DIR) {{ $env:CLAUDE_CODE_PLUGIN_CACHE_DIR }}
+               elseif ($env:CLAUDE_CONFIG_DIR) {{ Join-Path $env:CLAUDE_CONFIG_DIR 'plugins' }}
+               else {{ Join-Path $env:USERPROFILE '.claude\\plugins' }}
     if ($callArgs[0] -eq 'plugin' -and $callArgs[1] -eq 'install' -and $callArgs[2] -eq '--help') {{
         if ($env:FAKE_HELP_YES -eq 'yes') {{ Write-Output '  -y, --yes   Accept the displayed command' }}
         $global:LASTEXITCODE = 0; return
     }}
     if ($callArgs[0] -eq 'plugin' -and $callArgs[1] -eq 'marketplace' -and $callArgs[2] -eq 'add') {{
         if ($env:FAKE_MARKET_EXIT -eq '0') {{
-            New-Item -ItemType Directory -Force $plugins | Out-Null
-            @{{ 'pseudolife-mcp' = @{{ source = @{{ source = 'github'; repo = $callArgs[3] }} }} }} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $plugins 'known_marketplaces.json')
+            [IO.Directory]::CreateDirectory($plugins) | Out-Null
+            @{{ 'pseudolife-mcp' = @{{ source = @{{ source = 'github'; repo = $callArgs[3] }} }} }} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $plugins 'known_marketplaces.json')
         }}
         $global:LASTEXITCODE = [int]$env:FAKE_MARKET_EXIT; return
     }}
     if ($callArgs[0] -eq 'plugin' -and $callArgs[1] -eq 'install') {{
         if ($env:FAKE_INSTALL_EXIT -eq '0' -and $env:FAKE_INSTALL_RECORD -eq 'yes') {{
-            New-Item -ItemType Directory -Force $plugins | Out-Null
-            @{{ version = 2; plugins = @{{ '{PLUGIN_ID}' = @(@{{ scope = 'user'; version = $env:FAKE_VERSION }}) }} }} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $plugins 'installed_plugins.json')
+            [IO.Directory]::CreateDirectory($plugins) | Out-Null
+            @{{ version = 2; plugins = @{{ '{PLUGIN_ID}' = @(@{{ scope = 'user'; version = $env:FAKE_VERSION }}) }} }} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $plugins 'installed_plugins.json')
         }}
         $global:LASTEXITCODE = [int]$env:FAKE_INSTALL_EXIT; return
     }}
@@ -206,6 +247,7 @@ function Step($message) {{ Write-Output "STEP: $message" }}
 Install-ClaudePlugin
 Write-Output "STATE=$($script:pluginClaude)"
 Write-Output ("LINE=" + (Describe-Plugin $script:pluginClaude))
+{finish}
 """
     runner = tmp_path / "run-plugin.ps1"
     runner.write_text(script, encoding="utf-8")
@@ -316,6 +358,96 @@ def test_install_failure_is_reported_not_fatal(variant, tmp_path):
     assert state == "failed"
     assert line.startswith("[!] Plugin") and "plugin install" in line
     assert "WARNING" in _all_output(proc)
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+@pytest.mark.parametrize("requested", [True, False], ids=["requested", "detected"])
+def test_plugin_failure_is_reported_at_completion(variant, tmp_path, requested):
+    kind, bash = variant
+    scenario = Scenario(install_exit=19, requested=requested)
+    proc, calls = (_run_bash(bash, tmp_path, scenario) if kind == "bash"
+                   else _run_powershell(tmp_path, scenario))
+    assert f"claude|plugin install --yes {PLUGIN_ID}" in calls
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout.decode()
+    assert proc.returncode == (5 if requested else 0), _all_output(proc)
+    lines = proc.stderr.decode().splitlines()
+    label = "Requested" if requested else "Detected"
+    assert lines[-1] == (
+        f"{label} client setup incomplete (Claude Code). Plugin was not installed. "
+        f"'claude plugin install {PLUGIN_ID}' failed. Fix the reported error and rerun the installer."
+    )
+    if not requested:
+        assert lines[-2] == "Warnings"
+
+
+@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
+@pytest.mark.parametrize("profile_var", ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR"])
+def test_plugin_in_active_profile_is_installed_and_preserved(variant, tmp_path, profile_var):
+    root = tmp_path / "active [profile]"
+    if profile_var == "CLAUDE_CODE_PLUGIN_CACHE_DIR":
+        # The override is the root. A record in the nested cache cannot stand
+        # in for installed_plugins.json beside the marketplaces and cache.
+        cache = root / "cache"
+        cache.mkdir(parents=True)
+        (cache / "installed_plugins.json").write_text(
+            json.dumps({"plugins": {PLUGIN_ID: [{"version": "decoy"}]}}), encoding="utf-8")
+        registry = root / "installed_plugins.json"
+    else:
+        registry = root / "plugins" / "installed_plugins.json"
+    scenario = Scenario(requested=True, profile_var=profile_var)
+    state, _, calls, proc = _run(variant, tmp_path, scenario)
+    assert state == f"installed:{FAKE_VERSION}"
+    assert PLUGIN_ID in json.loads(registry.read_text(encoding="utf-8-sig"))["plugins"]
+    assert "plugin detected" in proc.stdout.decode()
+    assert f"claude|plugin install --yes {PLUGIN_ID}" in calls
+    state, _, rerun_calls, proc = _run(variant, tmp_path, scenario)
+    assert state == f"present:{FAKE_VERSION}"
+    assert "plugin detected" in proc.stdout.decode()
+    assert rerun_calls == calls
+
+
+@pytest.mark.parametrize("clients,status", [("claude", 5), ("codex", 0)])
+def test_powershell_unreadable_plugin_registry_does_not_abort(tmp_path, clients, status):
+    registry = tmp_path / "unreadable profile" / "installed_plugins.json"
+    registry.mkdir(parents=True)
+    proc, calls = _run_powershell(
+        tmp_path, Scenario(clients=clients, requested=True, profile_var="CLAUDE_CODE_PLUGIN_CACHE_DIR",
+                           profile_dir=registry.parent.name))
+    assert proc.returncode == status, _all_output(proc)
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout.decode()
+    assert calls == []
+    if clients == "claude":
+        assert proc.stderr.decode().splitlines()[-1] == (
+            f"Requested client setup incomplete (Claude Code). Plugin was not installed. "
+            f"Could not read the Claude Code plugin registry at {registry}. Fix its permissions and rerun the installer."
+        )
+    else:
+        assert proc.stderr == b""
+        assert "Could not read the Claude Code plugin registry" not in proc.stdout.decode()
+
+
+@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda name: Path(name).name)
+@pytest.mark.parametrize("requested", [True, False], ids=["requested", "detected"])
+def test_bash_unreadable_plugin_registry_does_not_abort(tmp_path, bash, requested):
+    registry = tmp_path / "unreadable profile" / "installed_plugins.json"
+    registry.mkdir(parents=True)
+    proc, calls = _run_bash(
+        bash, tmp_path, Scenario(requested=requested, install_records=False,
+                                 profile_var="CLAUDE_CODE_PLUGIN_CACHE_DIR",
+                                 profile_dir=registry.parent.name))
+    assert "REMAINING_STEPS_FINISHED" in proc.stdout.decode()
+    assert proc.returncode == (5 if requested else 0), _all_output(proc)
+    registry_path = _bash_fixture_path(bash, registry, _fixture_env(tmp_path / "bash-env"))
+    lines = proc.stderr.decode().splitlines()
+    label = "Requested" if requested else "Detected"
+    assert lines[-1] == (
+        f"{label} client setup incomplete (Claude Code). Plugin was not installed. "
+        f"Could not read the Claude Code plugin registry at {registry_path}. "
+        "Fix its permissions and rerun the installer."
+    )
+    if not requested:
+        assert lines[-2] == "Warnings"
+    assert calls == []
 
 
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
