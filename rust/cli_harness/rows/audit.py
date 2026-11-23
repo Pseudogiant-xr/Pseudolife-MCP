@@ -702,7 +702,11 @@ def _export_stdout_failure_reference(case, kind, diagnostic, home):
     stdout = b""
     if kind == "invalid_payload":
         with _bank.connect(arm.state["name"]) as conn:
-            prefix, tail = _stored_audit_rows(conn)
+            rows = list(_stored_audit_rows(conn))
+            if len(rows) != 2:
+                raise AssertionError("the invalid-payload seed must hold exactly two audit rows, "
+                                     f"found {len(rows)}")
+            prefix, tail = rows
             try:
                 json.loads(tail[_EXPORT_FIELDS.index("payload")])
             except json.JSONDecodeError:
@@ -815,7 +819,96 @@ _REDACT_UNAVAILABLE = {
 }
 
 
-def _redact_refusal_reference(case, source, original, refusal, home):
+def _redact_prefix_matches(bank, prefix):
+    """The seed's message IDs a redact prefix can name: live messages and
+    retained send events (other audit events never resolve a prefix)."""
+    tables = _BASELINE[bank]["tables"]
+    messages = {json.loads(text)["message_id"] for text in tables["coordination_messages"]}
+    for text in tables["coordination_events"]:
+        row = json.loads(text)
+        if row["event"] == "send":
+            messages.add(row["message_id"])
+    return sorted(message for message in messages if message is not None and message.startswith(prefix))
+
+
+def _distinguishing_prefixes(matches):
+    # The frozen rule (`distinguishing_prefixes` in
+    # pseudolife_memory/storage/coordination.py at 3ac81bc): the first eight
+    # matches in ID order, each cut to the shortest length that tells every
+    # adjacent pair of them apart, never under eight characters.
+    listed = sorted(matches)[:8]
+    shared = max(len(os.path.commonprefix(pair)) for pair in zip(listed, listed[1:]))
+    cut = max(8, shared + 1)
+    return [message[:cut] for message in listed]
+
+
+def _seed_payload(text, where):
+    """A seeded send payload as the JSON object the references read."""
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError) as error:
+        raise AssertionError(f"{where}: the send payload is not JSON ({error})") from None
+    if not isinstance(payload, dict):
+        raise AssertionError(f"{where}: the send payload is not a JSON object")
+    return payload
+
+
+def _has_lone_surrogate(value):
+    # json.loads joins a valid surrogate pair into one code point, so any
+    # surrogate left in a string is a lone one.
+    if isinstance(value, str):
+        return any(0xD800 <= ord(char) <= 0xDFFF for char in value)
+    if isinstance(value, dict):
+        return any(_has_lone_surrogate(key) or _has_lone_surrogate(item) for key, item in value.items())
+    return isinstance(value, list) and any(map(_has_lone_surrogate, value))
+
+
+def _has_nonfinite(value):
+    if isinstance(value, float):
+        return value != value or value in (float("inf"), float("-inf"))
+    if isinstance(value, dict):
+        return any(map(_has_nonfinite, value.values()))
+    return isinstance(value, list) and any(map(_has_nonfinite, value))
+
+
+# The payload property a case is named for; a reseed without it fails.
+_SEED_PROPERTIES = {
+    "lone-surrogate": ("a lone surrogate in the send payload", _has_lone_surrogate),
+    "nonfinite-fanout": ("a non-finite number in a fan-out send payload with a string request_id",
+                         lambda payload: _has_nonfinite(payload) and "fanout" in payload
+                         and isinstance(payload.get("request_id"), str)),
+}
+
+
+def _assert_refusal_seed(seed, value, refusal):
+    """Fail loudly when the seed no longer refuses the way a case declares.
+
+    ``message_not_found`` needs no live message or send event that the value
+    names (by prefix when it is 8-31 lowercase hex, else exactly);
+    ``body_in_hashed_payload`` needs the named message's first send to carry
+    no ``text_commitment`` and no live text to remain."""
+    tables = _BASELINE[seed]["tables"]
+    sends = sorted((row for row in map(json.loads, tables["coordination_events"]) if row["event"] == "send"),
+                   key=lambda row: row["seq"])
+    live = list(map(json.loads, tables["coordination_messages"]))
+    prefix = 8 <= len(value) < 32 and all(c in "0123456789abcdef" for c in value)
+    named = _redact_prefix_matches(seed, value) if prefix else [
+        value for row in [*sends, *live] if row["message_id"] == value][:1]
+    where = f"{seed} message {value}"
+    if refusal == "message_not_found":
+        if named:
+            raise AssertionError(f"{where}: a not-found refusal needs no seeded message, found {named}")
+        return
+    if len(named) != 1:
+        raise AssertionError(f"{where}: a hashed-payload refusal needs one named message, found {len(named)}")
+    first = next((row for row in sends if row["message_id"] == named[0]), None)
+    texts = [row["text"] for row in live if row["message_id"] == named[0]]
+    if first is None or "text_commitment" in _seed_payload(first["payload"], where) or any(
+            t is not None for t in texts):
+        raise AssertionError(f"{where}: a hashed-payload refusal needs a pre-v46 send and no live text")
+
+
+def _redact_refusal_reference(case, source, original, refusal, home, *, read_only=False):
     """A refusal leaves the candidate's template copy equal to the seed bank."""
     started = time.time()
     bank = ensure(source)
@@ -823,18 +916,37 @@ def _redact_refusal_reference(case, source, original, refusal, home):
     core._reset(home)
     (home / "cwd").mkdir()
     newline = b"\r\n" if core.WINDOWS else b"\n"
-    if refusal in _REDACT_REFUSALS:
+    if refusal in _REDACT_REFUSALS or refusal == "ambiguous_message_id":
         code = 1
         result = {"ok": False, "message_id": case.argv[3], "reason": refusal}
         stdout = json.dumps(result).encode("ascii") + newline
-        diagnostic = _REDACT_REFUSALS[refusal]
+        diagnostic = _REDACT_REFUSALS.get(refusal, refusal)
+        if refusal in ("message_not_found", "body_in_hashed_payload"):
+            _assert_refusal_seed(bank, case.argv[3], refusal)
+        if refusal == "ambiguous_message_id":
+            # The matches, their order and the distinguishing length come
+            # from the original seed, not from either arm.
+            matches = _redact_prefix_matches(bank, case.argv[3])
+            if len(matches) < 2:
+                raise AssertionError(f"{case.id}: an ambiguous prefix needs two or more seeded "
+                                     f"matches, found {len(matches)}")
+            diagnostic += ": " + ", ".join(_distinguishing_prefixes(matches))
     else:
         code, stdout = 2, b""
         diagnostic = _REDACT_UNAVAILABLE[refusal]
     stderr = f"board-audit: {diagnostic}".encode("utf-8") + newline
     return {"home": str(home), "window": [started, time.time()], "exit": code,
             "stdout": _encoded(stdout), "stderr": _encoded(stderr), "files": core.snapshot(home),
-            "modes": core.modes(home), "db": _BASELINE[bank]}
+            "modes": core.modes(home), "db": "unchanged" if read_only else _BASELINE[bank]}
+
+
+def _prepare_redaction_bank(bank, statements):
+    if not statements:
+        return
+    with _bank.connect(bank, autocommit=True) as conn:
+        _assert_audit_database(conn, bank)
+        for statement in statements:
+            conn.execute(statement.replace("{DB}", bank))
 
 
 def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock",),
@@ -847,11 +959,7 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
 
     def setup(arm):
         _copy(ensure(source), REDACT_DB)
-        if prepare:
-            with _bank.connect(REDACT_DB, autocommit=True) as conn:
-                _assert_audit_database(conn, REDACT_DB)
-                for statement in prepare:
-                    conn.execute(statement.replace("{DB}", REDACT_DB))
+        _prepare_redaction_bank(REDACT_DB, prepare)
         _resolve_argv(case, original)
         if hold:
             import psycopg  # noqa: PLC0415
@@ -901,34 +1009,126 @@ def _rich(key, index=None, cut=None):
     return _Lazy(make)
 
 
-def _pruned(key):
-    return _Lazy(lambda: ids("pruned")[key])
+def _fixture_message_prefix(prefix):
+    def make():
+        matches = _redact_prefix_matches(ensure("rich"), prefix)
+        if len(matches) != 1:
+            raise AssertionError(f"the rich seed must hold exactly one message for prefix {prefix}, "
+                                 f"found {len(matches)}")
+        return matches[0]
+
+    return _Lazy(make)
+
+
+def _abbreviated_redact_case():
+    original = ["board-audit", "redact", "--m", "x", "--r", "why"]
+    case = read_case("redact-abbreviated", "rich", original[1:])
+    case.reference = partial(_redact_refusal_reference, case, "rich", original,
+                             "message_not_found", read_only=True)
+    return case
 
 
 _REDACT_REFERENCE_DB = _bank.name(PREFIX + "rd_ref")
 
 
-def _project_removed_redaction(bank, message_id, reason, now):
-    """Apply the direct v46 removal contract to a private reference copy."""
+def _assert_redaction_seed(seed, message_id, audit_copy, siblings, seed_property=None):
+    """Fail loudly when the seed no longer has the shape a case declares.
+
+    ``audit_copy`` and ``siblings`` are declared per case; this checks them
+    against the original seed's rows: removed needs one v46 send (its payload
+    carries ``text_commitment``) that still holds a body or salt; kept needs
+    one pre-v46 send and live text; gone needs no send event and one live
+    row. The envelope the projection copies must be non-null. ``siblings``
+    must equal the seed's other sends of one fan-out (the frozen
+    ``_burst_siblings``: same sender and ``request_id``, in ``seq`` order).
+    ``seed_property`` names the payload property a case is named for
+    (``_SEED_PROPERTIES``)."""
+    tables = _BASELINE[seed]["tables"]
+    events = [json.loads(text) for text in tables["coordination_events"]]
+    sends = [row for row in events if row["event"] == "send" and row["message_id"] == message_id]
+    live = [row for row in map(json.loads, tables["coordination_messages"])
+            if row["message_id"] == message_id]
+    where = f"{seed} message {message_id}"
+    if audit_copy == "gone":
+        if sends or len(live) != 1:
+            raise AssertionError(f"{where}: a gone redaction needs no send event and one live row, "
+                                 f"found {len(sends)} and {len(live)}")
+        if live[0]["text"] is None and live[0]["fingerprint"] == "redacted":
+            raise AssertionError(f"{where}: a gone redaction needs a live row not already redacted")
+        envelope = live[0]["sender_agent_id"], live[0]["project"], live[0]["task"]
+        found = []
+    else:
+        if len(sends) != 1:
+            raise AssertionError(f"{where}: expected exactly one send event, found {len(sends)}")
+        send, = sends
+        payload = _seed_payload(send["payload"], where)
+        if seed_property is not None:
+            description, holds = _SEED_PROPERTIES[seed_property]
+            if not holds(payload):
+                raise AssertionError(f"{where}: this case is named for {description}, "
+                                     "which the seed no longer has")
+        committed = "text_commitment" in payload
+        if audit_copy == "removed" and not (committed and len(live) == 1 and (
+                send["body"] is not None or send["body_salt"] is not None)):
+            raise AssertionError(f"{where}: a removed redaction needs a v46 send with a stored body "
+                                 "or salt and one live row")
+        if audit_copy == "kept" and (committed or len(live) != 1 or live[0]["text"] is None):
+            raise AssertionError(f"{where}: a kept redaction needs a pre-v46 send and live text")
+        envelope = send["agent_id"], send["project"], send["task"]
+        found = []
+        request = payload.get("request_id")
+        if "fanout" in payload and request is not None:
+            found = [row["message_id"] for row in sorted(events, key=lambda row: row["seq"])
+                     if row["event"] == "send" and row["message_id"] != message_id
+                     and row["agent_id"] == send["agent_id"]
+                     and _seed_payload(row["payload"], f"{seed} send {row['seq']}").get("request_id")
+                     == request]
+    if None in envelope:
+        raise AssertionError(f"{where}: the sender, project and task must be non-null")
+    if found != list(siblings):
+        raise AssertionError(f"{where}: declared fan-out siblings {list(siblings)} differ from "
+                             f"the seed's {found}")
+
+
+def _project_redaction(bank, message_id, reason, now, audit_copy, siblings):
+    """Apply the fixture's known redaction to a separate, guarded bank copy."""
     from rust.harness_support.fixture_rows import checked_fixture_insert  # noqa: PLC0415
 
     with _bank.connect(bank) as conn:
         _assert_audit_database(conn, bank)
-        [(seq, agent, recipient, project, task)] = conn.execute(
-            "SELECT seq,agent_id,recipient_agent_id,project,task FROM coordination_events "
-            "WHERE event='send' AND message_id=%s", (message_id,)).fetchall()
-        (head_seq, head_hash) = conn.execute(
-            "SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
-        live_text, = conn.execute("SELECT text FROM coordination_messages WHERE message_id=%s",
-                                  (message_id,)).fetchone()
+        if audit_copy == "gone":
+            seq = None
+            live = conn.execute(
+                "SELECT text,sender_agent_id,recipient_agent_id,project,task "
+                "FROM coordination_messages WHERE message_id=%s", (message_id,)).fetchone()
+            if live is None:
+                raise AssertionError(f"{bank}: no live row for the gone message {message_id}")
+            live_text, agent, recipient, project, task = live
+        else:
+            sends = conn.execute(
+                "SELECT seq,agent_id,recipient_agent_id,project,task FROM coordination_events "
+                "WHERE event='send' AND message_id=%s", (message_id,)).fetchall()
+            if len(sends) != 1:
+                raise AssertionError(f"{bank}: expected one send event for {message_id}, found {len(sends)}")
+            (seq, agent, recipient, project, task), = sends
+            live = conn.execute("SELECT text FROM coordination_messages WHERE message_id=%s",
+                                (message_id,)).fetchone()
+            if live is None:
+                raise AssertionError(f"{bank}: no live row for {message_id}")
+            live_text, = live
+        head = conn.execute("SELECT seq,hash FROM coordination_events ORDER BY seq DESC LIMIT 1").fetchone()
+        if head is None:
+            raise AssertionError(f"{bank}: the reference copy has no audit event to chain the redaction to")
+        head_seq, head_hash = head
         event = dict(seq=head_seq + 1, event="redact", actor="operator", principal="",
                      agent_id=agent, recipient_agent_id=recipient, project=project, task=task,
                      message_id=message_id, hlc="", created_at=now, prev_hash=head_hash,
                      payload=canonical_payload({"message_id": message_id, "seq": seq,
-                                                "reason": reason, "audit_copy": "removed"}),
+                                                "reason": reason, "audit_copy": audit_copy}),
                      body=None, body_salt=None)
         event["hash"] = audit_hash(head_hash, event)
-        conn.execute("UPDATE coordination_events SET body=NULL,body_salt=NULL WHERE seq=%s", (seq,))
+        if audit_copy == "removed":
+            conn.execute("UPDATE coordination_events SET body=NULL,body_salt=NULL WHERE seq=%s", (seq,))
         conn.execute("UPDATE coordination_messages SET text=NULL,fingerprint='redacted',"
                      "expires_at=LEAST(expires_at,%s) WHERE message_id=%s", (now, message_id))
         insert, values = checked_fixture_insert(conn, "coordination_events", [event])
@@ -936,35 +1136,100 @@ def _project_removed_redaction(bank, message_id, reason, now):
 
     redact_seq = event["seq"]
     digest = event["hash"]
-    return {"ok": True, "message_id": message_id, "seq": seq, "redact_seq": redact_seq,
-            "redact_hash": digest, "expect_head": f"{redact_seq}:{digest}",
-            "live_body_cleared": live_text is not None, "audit_copy": "removed",
-            "other_copies": [], "vacuumed": True}
+    report = {"ok": True, "message_id": message_id, "seq": seq, "redact_seq": redact_seq,
+              "redact_hash": digest, "expect_head": f"{redact_seq}:{digest}",
+              "live_body_cleared": live_text is not None, "audit_copy": audit_copy}
+    if audit_copy != "gone":
+        report["other_copies"] = siblings
+    return report
 
 
-def _redact_removed_reference(key, reason, home):
+def _redact_fixture_warnings(bank, instrument):
+    # Run the CLI's clean-up statements on the reference copy, so PostgreSQL
+    # in this environment supplies the warnings, their count and order. With
+    # the ANALYZE instrument prepared, its warning must be among them; without
+    # it the clean-up must be complete, so a test login that starts skipping
+    # a step fails here instead of moving the expected result.
+    warnings = []
+    with _bank.connect(bank, autocommit=True) as conn:
+        _assert_audit_database(conn, bank)
+
+        def note(diag):
+            if diag.severity_nonlocalized == "WARNING":
+                warnings.append(diag.message_primary or "")
+
+        conn.add_notice_handler(note)
+        conn.execute("SET client_min_messages TO warning")
+        conn.execute("VACUUM (ANALYZE) coordination_events, coordination_messages")
+        conn.execute("VACUUM pg_catalog.pg_statistic")
+    if instrument and "audit test warning" not in warnings:
+        raise AssertionError("the redaction reference's ANALYZE instrument produced no warning")
+    if not instrument and warnings:
+        raise AssertionError("the test login skipped clean-up: " + "; ".join(warnings))
+    return warnings
+
+
+def _redact_projected_reference(source, message, reason, audit_copy, siblings, prepare, stdout_closed, home,
+                                *, seed_property=None):
     started = time.time()
-    _copy(ensure("rich"), _REDACT_REFERENCE_DB)
-    message_id = ids("rich")[key]
-    report = _project_removed_redaction(_REDACT_REFERENCE_DB, message_id, reason, started)
+    seed = ensure(source)
+    _copy(seed, _REDACT_REFERENCE_DB)
+    _prepare_redaction_bank(_REDACT_REFERENCE_DB, prepare)
+    message_id = message.make() if isinstance(message, _Lazy) else message
+    siblings = [other.make() for other in siblings]
+    _assert_redaction_seed(seed, message_id, audit_copy, siblings, seed_property)
+    report = _project_redaction(_REDACT_REFERENCE_DB, message_id, reason, started, audit_copy, siblings)
+    warnings = _redact_fixture_warnings(_REDACT_REFERENCE_DB, bool(prepare))
+    # Only the ANALYZE instrument may leave the clean-up incomplete (checked
+    # above), so the flag follows the case's declaration: literally True
+    # without it, False with it.
+    report["vacuumed"] = not prepare
+    # The notes, their order and the result key order are transcribed from
+    # `_redact` in pseudolife_memory/board_audit_cli.py at
+    # 3ac81bcdcb3a6d64a769b40057c02b1c35458225.
+    notes = []
+    if audit_copy == "kept":
+        notes.append("the live copy is blanked and out of delivery, but this message "
+                     "was sent before schema v46: the audit log keeps its body until audit "
+                     "retention removes the send event")
+    if siblings:
+        notes.append(f"this message was one of {len(siblings) + 1} copies "
+                     "of one send to a project or the whole board; each keeps its own copy of the "
+                     "body until it is redacted too: " + " ".join(siblings))
+    if audit_copy == "gone":
+        notes.append("audit retention had already removed this message's send event, "
+                     "so the audit log held no copy of it; its live request fingerprint (and any "
+                     "live text) is blanked")
+    if warnings:
+        notes.append("the redaction is committed, but Postgres skipped part of the "
+                     "clean-up (" + "; ".join(warnings) + "), so the old row versions or the "
+                     "statistics may still hold the body; run `VACUUM (ANALYZE) coordination_events, "
+                     "coordination_messages` and `VACUUM pg_statistic` as the tables' owner or a superuser")
+    notes.append("record this head outside the bank; `pseudolife-mcp board-audit "
+                 f"verify --expect-head {report['expect_head']}` later shows the redaction record is still there")
+
     core._reset(home)
     (home / "cwd").mkdir()
     newline = b"\r\n" if core.WINDOWS else b"\n"
-    stderr = ("board-audit: record this head outside the bank; `pseudolife-mcp board-audit "
-              f"verify --expect-head {report['expect_head']}` later shows the redaction record "
-              "is still there")
-    return {"home": str(home), "window": [started, time.time()], "exit": 0,
-            "stdout": _encoded(json.dumps(report).encode("ascii") + newline),
-            "stderr": _encoded(stderr.encode("utf-8") + newline),
-            "files": core.snapshot(home), "modes": core.modes(home),
-            "db": _bank.dump(_REDACT_REFERENCE_DB)}
+    stdout = b"" if stdout_closed else json.dumps(report).encode("ascii") + newline
+    stderr = b"".join(f"board-audit: {note}".encode("utf-8") + newline for note in notes)
+    return {"home": str(home), "window": [started, time.time()], "exit": 120 if stdout_closed else 0,
+            "stdout": _encoded(stdout), "stderr": _encoded(stderr),
+            "files": core.snapshot(home), "modes": core.modes(home), "db": _bank.dump(_REDACT_REFERENCE_DB)}
+
+
+def redact_projected_case(case_id, source, message, reason, *, resolved_id=None, audit_copy="removed",
+                          siblings=(), prepare=(), stdout_closed=False, rules=("audit-redact-clock",),
+                          seed_property=None):
+    case = redact_case(case_id, source, message, reason, prepare=prepare, rules=rules, stdout_closed=stdout_closed)
+    case.reference = partial(_redact_projected_reference, source, resolved_id or message, reason,
+                             audit_copy, siblings, prepare, stdout_closed, seed_property=seed_property)
+    return case
 
 
 def redact_removed_case(case_id, key, reason, *, cut=None):
     """A direct v46 send with a full fixture ID for the reference."""
-    case = redact_case(case_id, "rich", _rich(key, cut=cut), reason)
-    case.reference = partial(_redact_removed_reference, key, reason)
-    return case
+    return redact_projected_case(case_id, "rich", _rich(key, cut=cut), reason, resolved_id=_rich(key))
 
 
 def stats_events():
@@ -1430,7 +1695,7 @@ def cases() -> list[core.Case]:
         file_case("input-unknown-option", ["verify", "--unknown=x"]),
         file_case("input-unrecognized", ["verify", "extra", "--unknown", "x"]),
         file_case("redact-required", ["redact"]),
-        read_case("redact-abbreviated", "rich", ["redact", "--m", "x", "--r", "why"]),
+        _abbreviated_redact_case(),
         file_case("export-bad-time", ["export", "--since", "NaN"]),
         *[file_case(f"export-bad-numeric-{name}", ["export", "--since=" + value])
           for name, value in [("inf", "inf"), ("negative-inf", "-Infinity"), ("overflow", "1e9999")]],
@@ -1452,9 +1717,14 @@ def cases() -> list[core.Case]:
         bank_verify_case("bank-verify-payload-domain", "payload"),
         bank_verify_case("bank-verify-surrogate-send", "surrogate_send"),
         bank_export_case("export-surrogate-send", "surrogate_send"),
-        redact_case("redact-surrogate-send", "surrogate_send", _Lazy(lambda: ids("surrogate_send")["message"]), "old paste"),
-        redact_case("redact-nonfinite-fanout", "payload_send", _Lazy(lambda: ids("payload_send")["message"]), "old paste"),
-        redact_case("redact-payload-domain", "payload", _Lazy(lambda: ids("payload")["legacy"]), "old paste"),
+        redact_projected_case("redact-surrogate-send", "surrogate_send",
+                              _Lazy(lambda: ids("surrogate_send")["message"]), "old paste",
+                              seed_property="lone-surrogate"),
+        redact_projected_case("redact-nonfinite-fanout", "payload_send",
+                              _Lazy(lambda: ids("payload_send")["message"]), "old paste",
+                              seed_property="nonfinite-fanout"),
+        redact_case("redact-payload-domain", "payload", _Lazy(lambda: ids("payload")["legacy"]),
+                    "old paste", refusal="body_in_hashed_payload"),
         file_case("input-payload-domain", ["verify", "--input", _home("archive.jsonl")],
                   files={"archive.jsonl": lambda: export_bytes("payload")}),
         # verify against the bank
@@ -1509,10 +1779,11 @@ def cases() -> list[core.Case]:
         # redact, each arm on its own copy
         redact_removed_case("redact-removed", "to_redact", "wrong paste ✓"),
         redact_removed_case("redact-prefix", "to_redact", "wrong paste", cut=10),
-        redact_case("redact-fanout-siblings", "rich", _rich("hello", index=0),
-                    "sent to everyone by mistake"),
-        redact_case("redact-kept-v45", "rich", _rich("v45"), "pasted by mistake"),
-        redact_case("redact-gone", "pruned", _pruned("old"), "pasted by mistake"),
+        redact_projected_case("redact-fanout-siblings", "rich", _rich("hello", index=0),
+                              "sent to everyone by mistake", siblings=(_rich("hello", index=1),)),
+        redact_projected_case("redact-kept-v45", "rich", _rich("v45"), "pasted by mistake", audit_copy="kept"),
+        redact_projected_case("redact-gone", "pruned", _Lazy(lambda: ids("pruned")["old"]),
+                              "pasted by mistake", audit_copy="gone"),
         redact_case("redact-legacy-refused", "rich", _rich("legacy"), "too old", refusal="body_in_hashed_payload"),
         redact_case("redact-already", "rich", _rich("redacted"), "again", refusal="already_redacted"),
         redact_case("redact-unknown", "rich", "0" * 32, "unknown", refusal="message_not_found"),
@@ -1557,9 +1828,9 @@ def cases() -> list[core.Case]:
         # (O2) a stdout that refuses the report
         read_case("defer-bank-verify-stdout-closed", "rich", ["verify"],
                   stdout_closed=True),
-        redact_case("redact-stdout-closed", "rich", _rich("to_redact"), "wrong paste",
-                    rules=("audit-redact-clock", "audit-stdout-closed-trailer"),
-                    stdout_closed=True),
+        redact_projected_case("redact-stdout-closed", "rich", _rich("to_redact"), "wrong paste",
+                              rules=("audit-redact-clock", "audit-stdout-closed-trailer"),
+                              stdout_closed=True),
         # (O4) coverage: LEAST(expires_at, now), ambiguous prefixes, pre-v46,
         # the vacuum-skip path with warnings hidden by default
         redact_removed_case("redact-future-expiry", "future", "wrong paste"),
@@ -1571,12 +1842,14 @@ def cases() -> list[core.Case]:
         ),
         bank_export_case("export-agent-twin", "rich", ["--agent", "ab12cd34ef57"],
                          agent="ab12cd34ef57000000000000000000a2"),
-        redact_case("redact-ambiguous-prefix", "rich", "cd34ef56", "wrong paste"),
-        redact_case("redact-twin-prefix", "rich", "cd34ef56ab13", "wrong paste"),
+        redact_case("redact-ambiguous-prefix", "rich", "cd34ef56", "wrong paste",
+                    refusal="ambiguous_message_id"),
+        redact_projected_case("redact-twin-prefix", "rich", "cd34ef56ab13", "wrong paste",
+                              resolved_id=_fixture_message_prefix("cd34ef56ab13")),
         bank_verify_case("bank-verify-prev46", "prev46"),
         bank_export_case("export-prev46", "prev46"),
         redact_case("redact-prev46", "prev46", _Lazy(lambda: ids("legacy")["legacy"]), "why", refusal="prev46"),
-        redact_case("redact-vacuum-warning", "rich", _rich("to_redact"), "wrong paste",
-                    prepare=VACUUM_WARNING),
+        redact_projected_case("redact-vacuum-warning", "rich", _rich("to_redact"), "wrong paste",
+                              prepare=VACUUM_WARNING),
     ]
     return out

@@ -66,8 +66,17 @@ The twelve refusal references are `redact-already`, `redact-busy`,
 `redact-reason-blank`, `redact-reason-control`, `redact-reason-long`,
 `redact-reason-secret`, `redact-unknown` and `redact-unknown-prefix`. This
 left 27 Linux and 28 Windows cases with live Python comparisons.
-`redact-ambiguous-prefix` keeps both arms because its diagnostic lists
-ordered distinguishing prefixes from the matching seeded message IDs.
+The remaining three refusals now use the unchanged seed as their database
+reference. `redact-abbreviated` and `redact-payload-domain` use the frozen
+refusal diagnostics. `redact-ambiguous-prefix` had kept both arms because
+its diagnostic lists ordered distinguishing prefixes of the seeded IDs. Its
+reference now takes the matches from the seed's live messages and retained
+send events and applies the frozen `distinguishing_prefixes` rule: the
+first eight matches in ID order, each cut to one character past the longest
+prefix two adjacent matches share, never under eight characters.
+`redact-twin-prefix` resolves the longer prefix against that same seed.
+Each of these references fails with the reason when the seed has fewer
+than two matches for the ambiguous prefix or other than one for the twin.
 The package-deletion change also retires the AST test that reads the frozen
 CLI's nine refusal messages. The table transcribed at `3ac81bc` remains
 the reference for the refusal text.
@@ -79,6 +88,34 @@ reference nulls the send event's `body` and `body_salt` and the live message's
 at the reference clock, and appends the expected audit record. The clock
 rule validates each arm's own head before normalizing it. These three
 references left 24 Linux and 25 Windows cases with live Python comparisons.
+
+The remaining successful redactions also use a guarded copy of the original
+seed. Removing an audit copy nulls the send's body and salt. A v45 send
+keeps its hashed body, and a pruned send takes its envelope from the live
+row and records a null send sequence. The projection clears the selected
+live row and appends the chained event in all three cases. It preserves the
+fan-out sibling and lists its seeded ID. The malformed-domain sends retain
+their original payload bytes. The closed-stdout reference expects exit 120,
+with the committed database state and the record-head note. Each
+reference runs the CLI's clean-up statements on its separate copy. Without
+the vacuum-warning instrument the clean-up must raise no warning, so a test
+login that starts skipping a step fails the reference instead of moving it,
+and `vacuumed` is `true`. With the instrument its warning must be among the
+ones PostgreSQL raises, which the skip note then lists, and `vacuumed` is
+`false`. The comparison includes the complete database dump
+and the post-run file tree and modes. Before projecting, each reference
+checks the seed against what its case declares: a removed send carries a
+`text_commitment` and a stored body or salt and has one live row, a kept
+send has none and its live text remains, a gone message has no send event
+and a live row not already redacted, the copied envelope is non-null, and
+the declared fan-out siblings equal the seed's other sends with the same
+sender and `request_id`. `redact-surrogate-send` also needs a lone
+surrogate in the send payload, and `redact-nonfinite-fanout` a non-finite
+number in a fan-out payload with a string `request_id`. The not-found and hashed-payload refusal
+references check that the seed names no such message, or names one whose
+first send has no `text_commitment` and no live text. A seed that no longer
+fits fails with the reason. The success notes are transcribed from the
+frozen `_redact` at `3ac81bc`.
 
 The native command has no Python fallback. `application_name` and
 `connect_timeout` use the shared PostgreSQL connector's native support.
@@ -216,7 +253,8 @@ mode observation is POSIX-only.
 Automatic CI skips live mode, so the 80 Linux and 85 Windows file references,
 14 bank-verify references, 34 original stdout export references, 11 further
 export references on Linux and 12 on Windows, 12 redaction refusal references
-and 3 direct removal references run only in local or manual-stress live runs.
+and 3 direct removal references, plus the 11 newer redaction references,
+run only in local or manual-stress live runs.
 Offline tests pin the file hashes and case
 registration and check exit status, stdout and stderr for the three
 entries shared with the goldens on both platforms.
@@ -225,12 +263,30 @@ The 41-case automatic CI roster in `rust/ci/audit_golden_cases.json` replays
 committed goldens and compares the full observation, including files, modes
 and database state where applicable. It covers 9 of the converted export
 cases (45 on Linux, 46 on Windows), 7 of the 14 converted bank-verify cases
-and 1 of the 12 converted redaction refusals (`redact-nolog`). The export
+and the redaction refusal `redact-nolog`. The export
 roster includes `export-agent-unknown-out`, `export-out-exists`,
-`export-stdout-closed` and `export-agent-ambiguous-out`. The three
-direct-removal references have no automatic CI output comparison.
-The live row still starts the frozen CLI for 13 cases on each platform:
-`no-bank`, `defer-bank-verify-stdout-closed` and the 11 remaining redactions.
+`export-stdout-closed` and `export-agent-ambiguous-out`. Of the 26
+redaction references, only `redact-nolog` is in that roster. These 25 have
+no automatic CI output comparison: the refusals `redact-already`,
+`redact-busy`, `redact-invalid-id`, `redact-legacy-refused`,
+`redact-prev46`, `redact-reason-blank`, `redact-reason-control`,
+`redact-reason-long`, `redact-reason-secret`, `redact-unknown`,
+`redact-unknown-prefix`, `redact-abbreviated`, `redact-ambiguous-prefix` and
+`redact-payload-domain`; the direct removals `redact-removed`,
+`redact-prefix` and `redact-future-expiry`; and the projected redactions
+`redact-fanout-siblings`, `redact-gone`, `redact-kept-v45`,
+`redact-nonfinite-fanout`, `redact-stdout-closed`, `redact-surrogate-send`,
+`redact-twin-prefix` and `redact-vacuum-warning`. Offline tests pin the
+exit status and both complete streams of two synthetic refusal shapes
+(`invalid_reason`, `busy`), of `redact-abbreviated`,
+`redact-ambiguous-prefix` and `redact-payload-domain`, and of seven
+projected shapes (a synthetic direct removal, then `redact-kept-v45`,
+`redact-fanout-siblings`, `redact-gone`, `redact-vacuum-warning`,
+`redact-stdout-closed` and `redact-twin-prefix`).
+The live row still starts the frozen CLI for `no-bank` and
+`defer-bank-verify-stdout-closed` on each platform, and
+`test_audit_live_row_starts_python_only_for_no_bank_and_closed_stdout_verify`
+holds that set on both platforms' rosters.
 
 The payload fixture covers non-finite floats,
 200-digit integers, nesting beyond 128, Unicode key order and lone surrogates.
