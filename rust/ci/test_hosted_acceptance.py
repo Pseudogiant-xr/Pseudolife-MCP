@@ -871,6 +871,12 @@ def test_rerun_names_changed_codex_settings_without_their_values():
     changed = linux.changed_settings(before, after)
     assert changed == ["mcp_servers.pseudolife-memory.command", "mcp_servers.pseudolife-memory.env.B"]
     assert "fixture-secret-path" not in json.dumps(changed)
+    kinds = linux.setting_changes(after, before.replace('A = "1"', ''))
+    assert kinds == {"mcp_servers.pseudolife-memory.command": "changed",
+                     "mcp_servers.pseudolife-memory.env.A": "removed",
+                     "mcp_servers.pseudolife-memory.env.B": "removed"}
+    assert linux.setting_changes(before, after)["mcp_servers.pseudolife-memory.env.B"] == "added"
+    assert "fixture-secret-path" not in json.dumps(kinds)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")

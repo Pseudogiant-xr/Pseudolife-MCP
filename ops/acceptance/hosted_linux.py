@@ -529,6 +529,12 @@ def changed_files(before, after):
 
 def changed_settings(before, after):
     """Dotted names of Codex settings a step added, removed or changed. Values stay out."""
+    return sorted(setting_changes(before, after))
+
+
+def setting_changes(before, after):
+    """Each changed Codex setting's dotted name and whether the step added,
+    removed or changed it. Values stay out."""
     def flatten(table, prefix=()):
         for key, value in table.items():
             if isinstance(value, dict):
@@ -539,8 +545,9 @@ def changed_settings(before, after):
     try:
         old, new = (dict(flatten(tomllib.loads(text))) if text else {} for text in (before, after))
     except tomllib.TOMLDecodeError:
-        return ["<unreadable Codex configuration>"]
-    return sorted(REDACTOR.text(name) for name in set(old) | set(new) if old.get(name) != new.get(name))
+        return {"<unreadable Codex configuration>": "unreadable"}
+    return {REDACTOR.text(name): "added" if name not in old else "removed" if name not in new else "changed"
+            for name in sorted(set(old) | set(new)) if old.get(name) != new.get(name)}
 
 
 def upgrade(receipt, release, repo, path, peer, scratch):
@@ -590,6 +597,7 @@ def upgrade(receipt, release, repo, path, peer, scratch):
         receipt.observe(f"{INSTALL} <rerun>", result, kept, FIRST_RERUN_ASSERTION, required=False)
         receipt.steps[-1]["changed_files"] = changed_files(before, after)
         receipt.steps[-1]["changed_codex_settings"] = settings
+        receipt.steps[-1]["codex_setting_changes"] = setting_changes(config_before, config_after)
         receipt.steps[-1]["expected_codex_settings"] = sorted(FIRST_RERUN_SETTINGS[tag])
         require(kept, FIRST_RERUN_ASSERTION)
         # Run 2, the same inputs: byte-identical to run 1, and it says so.
