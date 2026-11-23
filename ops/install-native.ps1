@@ -2612,6 +2612,9 @@ $codexConnectionConfigured = $false
 $codexCredentialBootstrapFailed = $false
 $codexCredentialFailure = $null
 $codexRuntimeDefaults = $null
+# The hook step's consent came before the Codex server existed; the
+# runtime-defaults step applies the memory_message approval (issue #1903).
+$codexMailboxAfterRegistration = $false
 $codexRuntimeRecovery = $null
 $briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 foreach ($selectedClient in $clients) {
@@ -2739,6 +2742,7 @@ foreach ($selectedClient in $clients) {
                 }
                 $codexSetup = $result
                 $codexSetupValid = $true
+                $script:codexMailboxAfterRegistration = ($result.mailbox_approval -eq "after-registration")
             } catch {
                 $codexSetup.recovery = "Codex setup did not return a valid result. Rerun this installer to retry."
             }
@@ -2972,7 +2976,9 @@ function Register-Result($provider, $okState, $okMessage) {
 }
 function Set-CodexRuntimeDefaults {
     try {
-        $runtimeOutput = Invoke-NativeHelper codex-runtime-defaults
+        $runtimeArgs = @("codex-runtime-defaults")
+        if ($script:codexMailboxAfterRegistration) { $runtimeArgs += "--approve-memory-message" }
+        $runtimeOutput = Invoke-NativeHelper @runtimeArgs
         $runtimeExit = $LASTEXITCODE
         $runtimeResult = ($runtimeOutput -join "`n") | ConvertFrom-Json
         if (($runtimeExit -ne 0) -or ($runtimeResult.status -ne "ready") -or
