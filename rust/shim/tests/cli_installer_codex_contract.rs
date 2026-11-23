@@ -11,6 +11,8 @@ use std::{
 };
 
 const STATE: &str = "W7_FAKE_CODEX_STATE";
+/// When set, the fake app-server exits at once with this status.
+const EXIT: &str = "W95_FAKE_CODEX_EXIT";
 const SERVER: &str = "pseudolife-memory";
 
 struct Home(PathBuf);
@@ -78,6 +80,17 @@ impl Home {
         self.run_with(args, stdin, &[])
     }
     fn run_with(&self, args: &[&str], stdin: Option<&[u8]>, extra: &[(&str, &str)]) -> Output {
+        self.run_env(args, stdin, extra, &[])
+    }
+    /// `run_with`, with the variables in `removed` unset in the binary's
+    /// environment (and so in the fake app-server's).
+    fn run_env(
+        &self,
+        args: &[&str],
+        stdin: Option<&[u8]>,
+        extra: &[(&str, &str)],
+        removed: &[&str],
+    ) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
         command.env_clear();
         for key in ["SystemRoot", "WINDIR", "TEMP", "TMP", "PATHEXT", "ComSpec"] {
@@ -95,7 +108,11 @@ impl Home {
             .env(STATE, self.0.join("fake-state.json"))
             .env("PATH", self.0.join("empty-path"))
             .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
-            .envs(extra.iter().copied())
+            .envs(extra.iter().copied());
+        for key in removed {
+            command.env_remove(key);
+        }
+        command
             .arg("installer")
             .args(args)
             .current_dir(&self.0)
@@ -250,6 +267,82 @@ fn credentials_refuse_a_bad_installer_token_and_write_nothing() {
     assert!(usage.stdout.is_empty());
 }
 
+/// Seed the fake with a registration whose literal token setup moves into a
+/// private file below `codex`, a Codex home that does not exist yet.
+fn seed_uncreated(home: &Home, codex: &std::path::Path) {
+    let state = json!({
+        "user": registered(json!({
+            "PSEUDOLIFE_MCP_TOKEN": "fixture-token-abc",
+            "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9",
+        })),
+        "overlay": {}, "version": 1,
+        "file": codex.join("config.toml"),
+    });
+    fs::write(home.0.join("fake-state.json"), state.to_string()).unwrap();
+}
+
+/// #1897: Codex installed but never started has no `~/.codex` yet, and
+/// Codex refuses a CODEX_HOME naming a missing folder. Setup creates the
+/// folder before it starts the app-server, and finishes there.
+#[test]
+fn credentials_finish_in_a_default_codex_home_that_was_never_created() {
+    let home = Home::new();
+    let default = home.0.join(".codex");
+    assert!(!default.exists());
+    seed_uncreated(&home, &default);
+    let output = home.run_env(&["codex-credentials"], None, &[], &["CODEX_HOME"]);
+    let body = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{body}");
+    assert_eq!(body["status"], "ready", "{body}");
+    assert!(default.is_dir());
+    let file = PathBuf::from(body["credential_file_path"].as_str().unwrap());
+    assert!(file.starts_with(&default), "{body}");
+    assert_eq!(fs::read(&file).unwrap(), b"fixture-token-abc");
+}
+
+/// A CODEX_HOME the user set to a folder that does not exist yet is the
+/// home they chose for Codex: setup creates it (parents included) as it
+/// creates the default one.
+#[test]
+fn credentials_finish_in_a_chosen_codex_home_that_does_not_exist_yet() {
+    let home = Home::new();
+    let chosen = home.0.join("config-root").join("codex");
+    assert!(!chosen.parent().unwrap().exists());
+    seed_uncreated(&home, &chosen);
+    let output = home.run_with(
+        &["codex-credentials"],
+        None,
+        &[("CODEX_HOME", chosen.to_str().unwrap())],
+    );
+    let body = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{body}");
+    assert_eq!(body["status"], "ready", "{body}");
+    assert!(chosen.is_dir());
+    let file = PathBuf::from(body["credential_file_path"].as_str().unwrap());
+    assert!(file.starts_with(&chosen), "{body}");
+}
+
+/// An app-server that stops before setup for another reason: the recovery
+/// says what is known (it exited, and its exit code) and does not blame the
+/// Codex version, which the client has no evidence for.
+#[test]
+fn an_app_server_that_exits_early_is_reported_with_its_exit_code() {
+    let home = Home::new();
+    home.seed(registered(json!({})));
+    for step in ["codex-credentials", "codex-runtime-defaults"] {
+        let output = home.run_with(&[step], None, &[(EXIT, "3")]);
+        let body = report(&output);
+        assert_eq!(output.status.code(), Some(1), "{step}: {body}");
+        assert_eq!(body["status"], "needs-configuration", "{step}: {body}");
+        let recovery = body["recovery"].as_str().unwrap();
+        assert!(
+            recovery.contains("exited before setup completed") && recovery.contains("exit code 3"),
+            "{step}: {recovery}"
+        );
+        assert!(!recovery.contains("update Codex"), "{step}: {recovery}");
+    }
+}
+
 fn checkout() -> String {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -334,6 +427,19 @@ fn fake_codex_app_server() {
         return;
     };
     let path = PathBuf::from(path);
+    // As Codex 0.171.0 does: a CODEX_HOME naming a folder that does not
+    // exist stops the app-server before it reads a request. An unset or
+    // empty CODEX_HOME is Codex's default home, which Codex creates itself.
+    if let Some(home) = std::env::var_os("CODEX_HOME").filter(|home| !home.is_empty())
+        && !PathBuf::from(&home).is_dir()
+    {
+        eprintln!("Error: CODEX_HOME points to {home:?}, but that path does not exist");
+        std::process::exit(1);
+    }
+    // An app-server that stops at once for some other reason.
+    if let Some(code) = std::env::var(EXIT).ok().and_then(|code| code.parse().ok()) {
+        std::process::exit(code);
+    }
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
     // libtest has printed "test fake_codex_app_server ... " without a newline;
