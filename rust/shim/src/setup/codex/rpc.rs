@@ -99,6 +99,21 @@ fn home_named_by_variable() -> bool {
     std::env::var_os("CODEX_HOME").is_some_and(|value| !value.is_empty())
 }
 
+/// `codex app-server --stdio` for `home`, which exists once this returns.
+fn app_server(
+    executable: &Path,
+    home: &Path,
+    cwd: &Path,
+) -> Result<tokio::process::Command, SetupError> {
+    ensure_home(home, home_named_by_variable())?;
+    let mut command = tokio::process::Command::new(executable);
+    command
+        .args(["app-server", "--stdio"])
+        .current_dir(cwd)
+        .env("CODEX_HOME", home);
+    Ok(command)
+}
+
 impl Client {
     pub async fn open(executable: &Path, home: &Path, cwd: &Path) -> Result<Self, SetupError> {
         Self::open_with_timeout(executable, home, cwd, Duration::from_secs(20)).await
@@ -124,12 +139,7 @@ impl Client {
         overrides: &Value,
         environment: &[(String, Option<String>)],
     ) -> Result<Self, SetupError> {
-        ensure_home(home, home_named_by_variable())?;
-        let mut command = tokio::process::Command::new(executable);
-        command
-            .args(["app-server", "--stdio"])
-            .current_dir(cwd)
-            .env("CODEX_HOME", home);
+        let mut command = app_server(executable, home, cwd)?;
         for (key, value) in environment {
             match value {
                 Some(value) => {
@@ -155,13 +165,7 @@ impl Client {
         cwd: &Path,
         timeout: Duration,
     ) -> Result<Self, SetupError> {
-        ensure_home(home, home_named_by_variable())?;
-        let mut command = tokio::process::Command::new(executable);
-        command
-            .args(["app-server", "--stdio"])
-            .current_dir(cwd)
-            .env("CODEX_HOME", home);
-        Self::spawn(command, timeout).await
+        Self::spawn(app_server(executable, home, cwd)?, timeout).await
     }
 
     /// Start an explicit app-server command, including a bundled CLI launcher.

@@ -2048,6 +2048,11 @@ fn rpc_fixture() {
                     std::io::stdout().flush().unwrap();
                     continue;
                 }
+                "noresult" => {
+                    println!("{}", json!({"id":id}));
+                    std::io::stdout().flush().unwrap();
+                    continue;
+                }
                 _ => json!({"received":value["params"]}),
             }
         };
@@ -2165,14 +2170,17 @@ async fn rpc_rejection_redacts_child_diagnostics() {
 /// A reply the client cannot read is a protocol mismatch, not an exit.
 #[tokio::test]
 async fn rpc_unreadable_error_reply_is_not_reported_as_an_exit() {
-    let home = Home::new();
-    let mut client = fixture_client(&home.0, "malformed").await;
-    let error = client.rpc("config/read", json!({})).await.unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "Codex sent a setup reply this client does not understand; update Codex and retry."
-    );
-    client.close().await;
+    for mode in ["malformed", "noresult"] {
+        let home = Home::new();
+        let mut client = fixture_client(&home.0, mode).await;
+        let error = client.rpc("config/read", json!({})).await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Codex sent a setup reply this client does not understand; update Codex and retry.",
+            "{mode}"
+        );
+        client.close().await;
+    }
 }
 
 #[tokio::test]
@@ -2181,8 +2189,15 @@ async fn rpc_bounds_silent_or_exited_child() {
         let home = Home::new();
         let mut client = fixture_client(&home.0, mode).await;
         let start = std::time::Instant::now();
-        assert!(client.rpc("config/read", json!({})).await.is_err());
+        let error = client.rpc("config/read", json!({})).await.unwrap_err();
         assert!(start.elapsed() < std::time::Duration::from_secs(10));
+        if mode == "exit" {
+            // An exit is not evidence of an outdated Codex (#1897).
+            assert_eq!(
+                error.to_string(),
+                "Codex exited before setup completed; run codex in this terminal to see the error it reports, fix that, then retry."
+            );
+        }
         drop(client);
     }
 }

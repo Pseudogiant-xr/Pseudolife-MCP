@@ -322,6 +322,32 @@ fn credentials_finish_in_a_chosen_codex_home_that_does_not_exist_yet() {
     assert!(file.starts_with(&chosen), "{body}");
 }
 
+/// A CODEX_HOME naming a file cannot become a Codex home: setup refuses
+/// before Codex starts, naming the variable and the path, and leaves the
+/// file as it was.
+#[test]
+fn a_codex_home_that_is_a_file_is_refused_naming_the_variable() {
+    let home = Home::new();
+    let file = home.0.join("codex-home-file");
+    fs::write(&file, "not a folder").unwrap();
+    seed_uncreated(&home, &file);
+    let output = home.run_with(
+        &["codex-credentials"],
+        None,
+        &[("CODEX_HOME", file.to_str().unwrap())],
+    );
+    let body = report(&output);
+    assert_eq!(output.status.code(), Some(1), "{body}");
+    assert_eq!(body["status"], "needs-configuration", "{body}");
+    let recovery = body["recovery"].as_str().unwrap();
+    assert!(
+        recovery.starts_with(&format!("CODEX_HOME names {}", file.display()))
+            && recovery.contains("not a folder"),
+        "{recovery}"
+    );
+    assert_eq!(fs::read(&file).unwrap(), b"not a folder");
+}
+
 /// An app-server that stops before setup for another reason: the recovery
 /// says what is known (it exited, and its exit code) and does not blame the
 /// Codex version, which the client has no evidence for.
