@@ -487,6 +487,9 @@ def test_audit_invalid_payload_reference_requires_a_malformed_second_row(monkeyp
         case = next(case for case in audit.cases() if case.id == "export-invalid-payload-prefix")
         with pytest.raises(AssertionError, match="second audit payload must be malformed"):
             case.reference(tmp_path / "export")
+        monkeypatch.setattr(audit, "_stored_audit_rows", lambda conn: iter([valid] * 3))
+        with pytest.raises(AssertionError, match="must hold exactly two audit rows, found 3"):
+            case.reference(tmp_path / "export-three")
 
 
 @pytest.mark.parametrize(("code", "message"), [
@@ -1097,6 +1100,31 @@ def test_audit_redaction_reference_refuses_a_changed_seed(monkeypatch, change, m
             "coordination_messages": [json.dumps(row) for row in live]}}})
         with pytest.raises(AssertionError, match=message):
             audit._assert_redaction_seed("seed", target, copy, siblings)
+
+
+@pytest.mark.parametrize("audit_copy,reads,message", [
+    ("gone", [SimpleNamespace(fetchone=lambda: None)], "no live row for the gone message"),
+    ("removed", [SimpleNamespace(fetchall=lambda: [])], "expected one send event for .*, found 0"),
+])
+def test_audit_redaction_projection_refuses_a_changed_reference_copy(monkeypatch, audit_copy, reads, message):
+    with _cold_audit(monkeypatch) as audit:
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.side_effect = reads
+        monkeypatch.setattr(_bank, "connect", lambda _: conn)
+        monkeypatch.setattr(audit, "_assert_audit_database", MagicMock())
+        with pytest.raises(AssertionError, match=message):
+            audit._project_redaction("reference", _TARGET, "why", 1700000000.0, audit_copy, [])
+
+
+def test_audit_vacuum_reference_requires_its_warning_instrument(monkeypatch):
+    with _cold_audit(monkeypatch) as audit:
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        monkeypatch.setattr(_bank, "connect", lambda *args, **kwargs: conn)
+        monkeypatch.setattr(audit, "_assert_audit_database", MagicMock())
+        with pytest.raises(AssertionError, match="ANALYZE instrument produced no warning"):
+            audit._redact_fixture_warnings("reference")
 
 
 def test_audit_redaction_prefix_references_refuse_a_changed_seed(monkeypatch, tmp_path):
