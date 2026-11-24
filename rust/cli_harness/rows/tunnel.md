@@ -160,8 +160,8 @@ these cases are recorded from the candidate, not the oracle:
 ## Refused natively (before any effect)
 
 These shapes once deferred; each is now a one-line refusal (exit 2) that
-names its cause and the next step, and changes nothing (`refuse-*` cases;
-`help-status` prints help):
+names its cause and the next step, and changes nothing (the `defer-*` cases
+keep their recorded ids; `defer-status-help` prints help):
 
 - `verify` of a launch this client did not start, or with a Windows `DPAPI`
   key this session cannot unseal. With a key that unseals and no record it

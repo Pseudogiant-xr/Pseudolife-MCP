@@ -179,7 +179,15 @@ fn option(command: Command, name: &str) -> Option<Takes> {
 
 /// An argument as a refusal shows it.
 fn shown(text: &str) -> String {
-    super::quote_tunnel_arg(text)
+    let plain = !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '='));
+    if plain {
+        text.to_owned()
+    } else {
+        super::quote_tunnel_arg(text)
+    }
 }
 
 fn usage_hint(command: &str) -> String {

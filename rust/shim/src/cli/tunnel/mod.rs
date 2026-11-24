@@ -1807,6 +1807,31 @@ mod tests {
     }
 
     #[test]
+    fn verify_names_a_launch_another_client_started() {
+        let store = Store::new();
+        store.profile("dot", true);
+        #[cfg(windows)]
+        {
+            let Some(key) = sealed(b"fixture-tunnel-key") else {
+                return;
+            };
+            store.put("dot.key", &key);
+        }
+        #[cfg(not(windows))]
+        store.key("dot");
+        store.record("dot", u64::from(std::process::id()), &own_exe());
+        let options = parse(&argv(&["verify"])).unwrap();
+        match verify(&options, &store.0) {
+            Err(Fail::Detail(message)) => assert!(
+                message.starts_with("tunnel verify checks only a launch this client started")
+                    && message.contains("pseudolife-mcp tunnel run --profile dot"),
+                "{message}"
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
     fn every_argv_this_client_does_not_run_is_refused_with_its_cause() {
         let refused = |values: &[&str]| match argv::read(&argv(values)) {
             Err(message) => message,
@@ -1814,7 +1839,7 @@ mod tests {
         };
         for (shape, says) in [
             (&[][..], "tunnel needs a command: setup, status"),
-            (&["bogus"], "unknown tunnel command "),
+            (&["bogus"], "unknown tunnel command bogus; the commands are"),
             (&["doctor"], "tunnel doctor is not in the native client yet"),
             (
                 &["start"],

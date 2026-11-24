@@ -782,42 +782,46 @@ def cases() -> list[core.Case]:
                    _home("token")),
         case("setup-invalid-name", ["setup", "--profile-dir", DIR, "--profile", "bad.name",
                                     *explicit()]),
-        # shapes that once deferred: the candidate refuses with the cause
-        # and the fix (or prints help) and changes nothing
-        refuse("refuse-verify-process-record", ["verify", "--profile-dir", DIR], ready(), key(),
-              private("tunnels/dot.process.json", json.dumps(
-                  {"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode())),
-        refuse("refuse-status-seven-digit-fraction", ["status", "--profile-dir", DIR],
+        # shapes that once deferred (the ids keep their recorded names): the
+        # candidate refuses with the cause and the fix (or prints help) and
+        # changes nothing
+        # Linux only: seeding the Windows key needs DPAPI, which a key-based
+        # SSH logon cannot seal; a unit test covers the refusal on Windows.
+        refuse("defer-verify-process-record", ["verify", "--profile-dir", DIR], ready(), key(),
+               private("tunnels/dot.process.json", json.dumps(
+                   {"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode()),
+               platforms=("linux",)),
+        refuse("defer-status-seven-digit-fraction", ["status", "--profile-dir", DIR],
               profile(runtime_key_expires_at="2099-12-31T00:00:00.1234567Z")),
-        refuse("refuse-status-one-digit-fraction", ["status", "--profile-dir", DIR],
+        refuse("defer-status-one-digit-fraction", ["status", "--profile-dir", DIR],
               profile(runtime_key_expires_at="2099-12-31T00:00:00.5Z")),
         # hour 24: refused by the 3.11 oracle, admitted by CPython 3.14
-        refuse("refuse-status-hour-24-expiry", ["status", "--profile-dir", DIR],
+        refuse("defer-status-hour-24-expiry", ["status", "--profile-dir", DIR],
               profile(raw_edit=edit(runtime_key_expires_at="2099-12-31T24:00:00Z"))),
-        refuse("refuse-status-deep-challenge", ["status", "--profile-dir", DIR], ready(),
+        refuse("defer-status-deep-challenge", ["status", "--profile-dir", DIR], ready(),
               private("tunnels/dot-verification/challenge.json", DEEP)),
-        refuse("refuse-status-refresh-reserved-id", ["status", "--profile-dir", DIR], profile(),
+        refuse("defer-status-refresh-reserved-id", ["status", "--profile-dir", DIR], profile(),
               private("tunnels/dot.reload.json", RESERVED_ID + b"}")),
-        refuse("refuse-status-result-reserved-id", ["status", "--profile-dir", DIR], ready(),
+        refuse("defer-status-result-reserved-id", ["status", "--profile-dir", DIR], ready(),
               private("tunnels/dot.reload.result.json",
                       RESERVED_ID + b', "state": "failed"}')),
-        refuse("refuse-profile-dangling-junction", ["status", "--profile-dir", DIR], prepared(),
+        refuse("defer-profile-dangling-junction", ["status", "--profile-dir", DIR], prepared(),
               junction("tunnels/dot.profile.json", "gone", dangling=True),
               platforms=("windows",), skip_if=no_junctions),
         # setup resuming a saved profile (its token reference is missing, so
         # the oracle stops at check_token_file, before any handshake process)
-        refuse("refuse-setup-existing-profile", ["setup", "--profile-dir", DIR],
+        refuse("defer-setup-existing-profile", ["setup", "--profile-dir", DIR],
               profile(token_file="missing-token")),
         # a Codex registration file: its env block is not read natively (the
         # oracle reads it, finds no server block and refuses)
-        refuse("refuse-setup-codex-registration", ["setup", "--profile-dir", DIR],
+        refuse("defer-setup-codex-registration", ["setup", "--profile-dir", DIR],
               plain(".codex/config.toml", b"[other]\nx = 1\n")),
-        refuse("refuse-setup-claude-registration", ["setup", "--profile-dir", DIR],
+        refuse("defer-setup-claude-registration", ["setup", "--profile-dir", DIR],
               plain(".claude.json", b'{"mcpServers": {}}')),
-        refuse("help-status", ["status", "--help"]),
-        refuse("refuse-no-subcommand", []),
-        refuse("refuse-joined-option", ["status", "--profile=dot", "--profile-dir", DIR],
+        refuse("defer-status-help", ["status", "--help"]),
+        refuse("defer-no-subcommand", []),
+        refuse("defer-joined-option", ["status", "--profile=dot", "--profile-dir", DIR],
               profile()),
-        refuse("refuse-repeated-option", ["status", "--json", "--json", "--profile-dir", DIR],
+        refuse("defer-repeated-option", ["status", "--json", "--json", "--profile-dir", DIR],
               profile()),
     ]
