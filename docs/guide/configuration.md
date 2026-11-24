@@ -1015,24 +1015,27 @@ sources, and a lower one never replaces a name a higher one set:
 
 1. **`agent`**: `memory_agents(action="update", name=...)`. It outranks the
    harness title, so a session whose row shows a stale title (after `/clear`
-   the Claude Code shim still reads the old transcript) can correct it, and
+   the Python Claude Code shim still reads the old transcript) can correct it, and
    it serves any harness that keeps no title file of its own. `name=""`
    clears the agent's own name and brings back the newest harness title,
    which the daemon keeps meanwhile.
-2. **`harness`**: the title the harness already shows for the session. The
-   Claude Code shim reads it from the session transcript,
+2. **`harness`**: the title the harness already shows for the session, sent
+   only by the Python client; the native client reads no harness title, so on
+   it a row is named by the agent, then the session title, then its label
+   and short id. The Python Claude Code shim reads it from the session transcript,
    `<config>/projects/*/<CLAUDE_CODE_SESSION_ID>.jsonl` (`config` is
    `CLAUDE_CONFIG_DIR`, else `~/.claude`): the latest `custom-title` line
    (the Desktop app's title or a rename), else the latest `agent-name`, else
-   the latest `ai-title` (the CLI's generated title). The Codex shim reads
+   the latest `ai-title` (the CLI's generated title). The Python Codex shim reads
    each thread's name from `session_index.jsonl` under `CODEX_HOME` (else
    `~/.codex`). The adapter sends it with its next heartbeat when it
    changed, so a rename reaches the board within about 20 seconds, without
    restarting the session. The reader looks at the end of the transcript
    first, then reads at most 1 MiB per heartbeat and nothing at all while
    the file is unchanged; any read or parse error just sends no name.
-   A generated title (`ai-title`) is written from your first prompt, so it
-   reaches the roster and the coordination audit log.
+   A generated title (`ai-title`) is written from your first prompt, so when
+   the Python client sends it, it reaches the roster and the coordination
+   audit log.
 3. **`title`**: a `memory_session_title` rename names the rows registered
    under that session (their `episode` is its session key) when neither a
    harness nor an agent has named them, and only rows of the retitling
