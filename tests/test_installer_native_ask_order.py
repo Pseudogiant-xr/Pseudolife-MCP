@@ -49,7 +49,6 @@ def _version() -> str:
 def _copy(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     shutil.copytree(ROOT / "ops", repo / "ops", ignore=shutil.ignore_patterns(".env", "__pycache__", "*.log"))
-    shutil.copy2(ROOT / "pyproject.toml", repo / "pyproject.toml")
     (repo / "rust" / "shim").mkdir(parents=True)
     shutil.copy2(ROOT / "rust/shim/Cargo.toml", repo / "rust/shim/Cargo.toml")
     if (ROOT / "examples").is_dir():

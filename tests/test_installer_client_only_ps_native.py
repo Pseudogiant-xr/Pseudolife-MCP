@@ -1324,7 +1324,7 @@ def _copy_repo(tmp_path: Path) -> Path:
     # runs from a checkout, where the file is always beside it.
     for rel in ("ops/install-native.ps1", "ops/install-hook.ps1", "ops/scheduled_task_lock.ps1",
                 "ops/client_credentials.py", "ops/.env.example", "examples/CLAUDE.memory.md",
-                "pyproject.toml", "rust/shim/Cargo.toml"):
+                "rust/shim/Cargo.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)
     return repo

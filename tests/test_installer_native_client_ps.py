@@ -132,14 +132,18 @@ def _release(directory: Path, *, client: str, digest_override: str | None = None
 
 
 def _write_crate(repo: Path, manifest: str | None = None) -> None:
+    """The checkout's native client crate, with near misses around its
+    version: other tables' `version` keys before and after it, an inline
+    table, a capitalised key and a comment after the table header."""
     crate = repo / "rust" / "shim" / "Cargo.toml"
     crate.parent.mkdir(parents=True, exist_ok=True)
     if manifest == "":
         crate.unlink(missing_ok=True)
         return
-    crate.write_text(manifest if manifest is not None else
-                     f'[package]\nname = "pseudolife-stdio"\nversion = "{VERSION}"\n\n[dependencies]\nversion = "0.0.1"\n',
-                     encoding="utf-8", newline="\n")
+    default = ('[lints]\nversion = "0.0.2"\n[package] # the native client\nname = "pseudolife-stdio"\n'
+               f'Version = "0.0.3"\nrmcp = {{ version = "0.0.4" }}\nversion = "{VERSION}"\n\n'
+               '[dependencies]\nversion = "0.0.1"\n')
+    crate.write_text(manifest if manifest is not None else default, encoding="utf-8", newline="\n")
 
 
 def _run(client: str, tmp_path: Path, body: str, *, release: bool = True, host_only: bool = False,
@@ -372,6 +376,17 @@ def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case
     assert "STAGED" not in result.stdout
     assert not (tmp_path / "home" / "runtimes").exists()
     assert not (tmp_path / "home" / "bin").exists()
+
+
+@pytest.mark.parametrize("manifest", [
+    f'﻿[package]\r\nname = "pseudolife-stdio"\r\nversion = "{VERSION}"\r\n',
+    f"[package]\nversion = '{VERSION}' # cut\n",
+], ids=["byte-order-mark-crlf", "literal-string"])
+def test_every_one_line_string_version_is_read(tmp_path, manifest):
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host "VERSION=$($script:nativeVersion)"',
+                  manifest=manifest)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"VERSION={VERSION}" in result.stdout
 
 
 @pytest.mark.parametrize("manifest", ["", '[package]\nname = "pseudolife-stdio"\nversion.workspace = true\n'],
@@ -668,7 +683,6 @@ def _whole_repo(tmp_path: Path) -> Path:
     shutil.copytree(ROOT / "ops", repo / "ops", ignore=shutil.ignore_patterns(".env", "__pycache__", "*.log"))
     if (ROOT / "examples").is_dir():
         shutil.copytree(ROOT / "examples", repo / "examples")
-    shutil.copy2(ROOT / "pyproject.toml", repo / "pyproject.toml")
     _write_crate(repo)
     return repo
 

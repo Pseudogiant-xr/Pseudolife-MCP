@@ -448,15 +448,16 @@ function Get-NativeAsset([string]$Base, [string]$Name, [string]$Destination) {
 function Initialize-NativeClient {
     # Fetch, verify, extract and run the release binary; refuses on any failure.
     # The release version is the native client crate's: `version` in the
-    # [package] table of rust/shim/Cargo.toml (rust/ci/release_version.py).
+    # [package] table of rust/shim/Cargo.toml (rust/ci/release_version.py),
+    # a one-line basic or literal string, matched case-sensitively as TOML is.
     $manifest = Get-Content -LiteralPath (Join-Path $repo "rust/shim/Cargo.toml") -ErrorAction SilentlyContinue
     $table = $null
     $script:nativeVersion = $null
     foreach ($line in @($manifest)) {
         if ("$line" -match '^\s*\[') {
             $table = (("$line" -replace '#.*$', '') -replace '\s', '')
-        } elseif ($table -eq '[package]' -and "$line" -match '^\s*version\s*=\s*"([^"]+)"') {
-            $script:nativeVersion = $Matches[1]
+        } elseif ($table -ceq '[package]' -and "$line" -cmatch '^\s*version\s*=\s*(?:"([^"]+)"|''([^'']+)'')') {
+            $script:nativeVersion = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
             break
         }
     }

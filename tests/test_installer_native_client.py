@@ -155,6 +155,15 @@ def _release(directory: Path, *, sums_override: str | None = None, extra_line: b
     (directory / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _crate_text(version: str) -> str:
+    """The checkout's native client crate, with near misses around its
+    version: other tables' `version` keys before and after it, an inline
+    table, a capitalised key and a comment after the table header."""
+    return ('[lints]\nversion = "0.0.2"\n[package] # the native client\nname = "pseudolife-stdio"\n'
+            f'Version = "0.0.3"\nrmcp = {{ version = "0.0.4" }}\nversion = "{version}"\n\n'
+            '[dependencies]\nversion = "0.0.1"\n')
+
+
 def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, release: bool = True, host_only: bool = False,
          version: str = VERSION, manifest: str | None = None, **release_kwargs) -> subprocess.CompletedProcess:
     """Use the same sandbox for either the installer or its host-only control.
@@ -170,9 +179,7 @@ def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, releas
     if manifest == "":
         crate.unlink(missing_ok=True)
     else:
-        crate.write_text(manifest if manifest is not None else
-                         f'[package]\nname = "pseudolife-stdio"\nversion = "{version}"\n\n[dependencies]\nversion = "0.0.1"\n',
-                         encoding="utf-8", newline="\n")
+        crate.write_text(manifest if manifest is not None else _crate_text(version), encoding="utf-8", newline="\n")
     (repo / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.9"\n', encoding="utf-8")
     base = tmp_path / "release"
     if release:
@@ -250,6 +257,16 @@ def test_a_checkout_without_a_native_release_version_is_refused_naming_the_crate
     assert ("The native pseudolife-mcp client cannot be installed: this checkout's rust/shim/Cargo.toml "
             "names no version. Check out a release tag (git checkout v<version>) and rerun.") in result.stderr
     assert _calls(tmp_path) == []
+
+
+@pytest.mark.parametrize("manifest", [
+    f'﻿[package]\r\nname = "pseudolife-stdio"\r\nversion = "{VERSION}"\r\n',
+    f"[package]\nversion = '{VERSION}' # cut\n",
+], ids=["byte-order-mark-crlf", "literal-string"])
+def test_every_one_line_string_version_is_read(tmp_path, manifest):
+    result = _run(tmp_path, 'native_stage; echo "VERSION=$NATIVE_VERSION"', manifest=manifest)
+    assert result.returncode == 0, result.stderr
+    assert f"VERSION={VERSION}" in result.stdout
 
 
 def test_rerun_on_a_native_host_says_nothing_changed(tmp_path):

@@ -1335,7 +1335,7 @@ def _copy_repo(tmp_path: Path) -> Path:
     wrote ops/.env or the compose override must not touch the real tree."""
     repo = tmp_path / "repo"
     for rel in ("ops/install-native.sh", "ops/install-hook-native.sh", "ops/client_credentials.py",
-                "ops/.env.example", "examples/CLAUDE.memory.md", "pyproject.toml",
+                "ops/.env.example", "examples/CLAUDE.memory.md",
                 "rust/shim/Cargo.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)

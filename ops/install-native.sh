@@ -616,12 +616,15 @@ native_refuse() {  # $1 = cause, $2 = fix
 }
 native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
     # The release version is the native client crate's: `version` in the
-    # [package] table of rust/shim/Cargo.toml (rust/ci/release_version.py).
-    NATIVE_VERSION="$(awk '
+    # [package] table of rust/shim/Cargo.toml (rust/ci/release_version.py),
+    # a one-line basic or literal string; a leading byte-order mark is ignored.
+    NATIVE_VERSION="$(awk -v bom="$(printf '\357\273\277')" '
+        NR == 1 { sub("^" bom, "") }
         { sub(/\r$/, "") }
         /^[[:space:]]*\[/ { t = $0; sub(/#.*/, "", t); gsub(/[[:space:]]/, "", t); next }
-        t == "[package]" && /^[[:space:]]*version[[:space:]]*=[[:space:]]*"[^"]+"/ {
-            v = $0; sub(/^[^"]*"/, "", v); sub(/".*/, "", v); print v; exit
+        t == "[package]" && /^[[:space:]]*version[[:space:]]*=[[:space:]]*("[^"]+"|\047[^\047]+\047)/ {
+            v = $0; sub(/^[^=]*=[[:space:]]*/, "", v); q = substr(v, 1, 1); v = substr(v, 2)
+            sub(q ".*", "", v); print v; exit
         }' "$repo/rust/shim/Cargo.toml" 2>/dev/null)" || NATIVE_VERSION=""
     [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's rust/shim/Cargo.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
     NATIVE_TARGET="$(native_target)"
