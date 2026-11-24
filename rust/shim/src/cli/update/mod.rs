@@ -375,10 +375,14 @@ pub(crate) const RELEASE_MANIFEST: &str = "rust/shim/Cargo.toml";
 pub(crate) const RELEASE_MANIFEST_NO_VERSION_FIX: &str = "its [package] table needs a plain `version = \"<x.y.z>\"` line: restore it (git checkout -- rust/shim/Cargo.toml) or update the checkout, then retry";
 
 /// Why a checkout's release manifest could not be read, and its fix: a
-/// checkout from before the native release version (`pyproject.toml` but
-/// no manifest) is updated, any other is repaired.
+/// checkout from before the native client crate (no `rust/shim/` at all;
+/// the crate dates from 4 October 2026) is updated, any other, a current
+/// checkout whose manifest was deleted included, is repaired.
 pub(crate) fn release_manifest_unreadable(repo: &Path, error: &std::io::Error) -> String {
-    if error.kind() == std::io::ErrorKind::NotFound && repo.join("pyproject.toml").is_file() {
+    let crate_dir = Path::new(RELEASE_MANIFEST)
+        .parent()
+        .unwrap_or(Path::new("rust/shim"));
+    if error.kind() == std::io::ErrorKind::NotFound && !repo.join(crate_dir).is_dir() {
         format!(
             "this checkout has no {RELEASE_MANIFEST}, so it predates the native release version; update the checkout (git pull, or check out a newer release tag) and retry"
         )

@@ -267,17 +267,18 @@ fn checkout_version(repo: &Path) -> Result<String> {
     })?;
     match version {
         Some(version) if plain_release(&version) => Ok(version),
-        found => {
-            let why = match found {
-                Some(version) => format!("its [package] version is {version}, not a plain release"),
-                None => "its [package] table names no plain version".to_owned(),
-            };
-            // A defaulted install falls back to Python on this alone, and the
-            // fallback line keeps the text before the first ';' (cause()).
-            Err(unavailable(format!(
-                "Cannot read a release version from this checkout's {RELEASE_MANIFEST} ({why}); check out a release tag (git checkout v<version>) and rerun, or rerun with --engine python. Nothing was started."
-            )))
-        }
+        // A defaulted install falls back to Python on either alone, and the
+        // fallback line keeps the text before the first ';' (cause()).
+        Some(version) => Err(unavailable(format!(
+            "Cannot read a release version from this checkout's {RELEASE_MANIFEST} (its [package] version is {version}, not a plain release); check out a release tag (git checkout v<version>) and rerun, or rerun with --engine python. Nothing was started."
+        ))),
+        // No plain version line at all: the file needs repair, which a
+        // checkout of a release tag would not do (it refuses the local
+        // change, or keeps it where the tag has the same file).
+        None => Err(unavailable(format!(
+            "Cannot read a release version from this checkout's {RELEASE_MANIFEST} (its [package] table names no plain version); {}. Nothing was started.",
+            crate::cli::update::RELEASE_MANIFEST_NO_VERSION_FIX
+        ))),
     }
 }
 
@@ -1091,6 +1092,24 @@ mod tests {
                 .message
                 .contains("check out a release tag (git checkout v<version>) and rerun, or rerun with --engine python")
         );
+        // No plain version at all (a deleted line, version.workspace): the
+        // message names the line it needs and the repair, not a release tag
+        // (a checkout of a tag would refuse the local change or keep it).
+        fs::write(&manifest, "[package]\nname = \"pseudolife-stdio\"\n").unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(refused.unavailable, "{}", refused.message);
+        assert!(
+            refused.message.contains(
+                "its [package] table needs a plain `version = \"<x.y.z>\"` line: restore it (git checkout -- rust/shim/Cargo.toml) or update the checkout"
+            ),
+            "{}",
+            refused.message
+        );
+        assert!(
+            !refused.message.contains("git checkout v<version>"),
+            "{}",
+            refused.message
+        );
         // Invalid TOML is a broken checkout too: refused without the
         // fallback, with the parse error and the repair.
         fs::write(&manifest, "[package]\nversion = \"0.26.0\"\nnot toml [\n").unwrap();
@@ -1110,9 +1129,21 @@ mod tests {
             "{}",
             refused.message
         );
-        // No manifest beside pyproject.toml: a checkout from before the
-        // native release version, told to update rather than to restore.
+        // The manifest deleted from a current checkout (rust/shim/ is still
+        // there): restore it; pulling would not bring it back.
         fs::remove_file(&manifest).unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(!refused.unavailable, "{}", refused.message);
+        assert!(
+            refused.message.ends_with(
+                "restore it (git checkout -- rust/shim/Cargo.toml) and retry. Nothing was started."
+            ),
+            "{}",
+            refused.message
+        );
+        // No rust/shim/ at all: a checkout from before the native client
+        // crate, told to update rather than to restore.
+        fs::remove_dir_all(manifest.parent().unwrap()).unwrap();
         let refused = checkout_version(&repo).unwrap_err();
         assert!(!refused.unavailable, "{}", refused.message);
         assert_eq!(

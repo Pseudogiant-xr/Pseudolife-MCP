@@ -733,28 +733,44 @@ fn checkout_schema_names_a_missing_release_manifest() {
     let (repo, plan) = checkout_schema_fixture();
     fs::write(plan, br#"{"format":1,"schema_version":71,"steps":[]}"#).unwrap();
     fs::remove_file(repo.0.join(super::RELEASE_MANIFEST)).unwrap();
-    // Beside pyproject.toml: a checkout from before the native release
-    // version, which never had the manifest, is told to update.
+    let restore = |refused: &UpdateError| {
+        refused
+            .message
+            .starts_with("cannot read rust/shim/Cargo.toml in this checkout (")
+            && refused
+                .message
+                .ends_with("restore it (git checkout -- rust/shim/Cargo.toml) and retry.")
+    };
+    // A current checkout (rust/shim/ is there) whose manifest was deleted:
+    // restore it, even beside pyproject.toml; a pull would not bring it back.
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(restore(&refused), "{}", refused.message);
+    // No rust/shim/ at all: a checkout from before the native client
+    // crate, which never had the manifest, is told to update.
+    fs::remove_dir_all(repo.0.join("rust/shim")).unwrap();
     let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
     assert_eq!(refused.exit_code, 2);
     assert_eq!(
         refused.message,
         "this checkout has no rust/shim/Cargo.toml, so it predates the native release version; update the checkout (git pull, or check out a newer release tag) and retry."
     );
-    // Without it, the manifest went missing: restore it.
+    // The same without pyproject.toml.
     fs::remove_file(repo.0.join("pyproject.toml")).unwrap();
     let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
     assert_eq!(refused.exit_code, 2);
     assert!(
         refused
             .message
-            .starts_with("cannot read rust/shim/Cargo.toml in this checkout (")
-            && refused
-                .message
-                .ends_with("restore it (git checkout -- rust/shim/Cargo.toml) and retry."),
+            .starts_with("this checkout has no rust/shim/Cargo.toml"),
         "{}",
         refused.message
     );
+    // rust/shim/ back without its manifest, and no pyproject.toml: restore.
+    fs::create_dir_all(repo.0.join("rust/shim")).unwrap();
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(restore(&refused), "{}", refused.message);
 }
 
 #[test]
