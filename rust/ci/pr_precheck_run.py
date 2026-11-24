@@ -99,10 +99,16 @@ def golden_postgres(private: Path, candidate: Path):
     rust/cli_harness/lease_ci.py: disposable_postgres starts it (the pg0
     wheel, not the Python package) and the candidate's own native
     ``test-login create`` provisions the login. Stopped on the way out."""
-    from disposable_postgres import create_test_login, failure_reason, start
+    from disposable_postgres import SetupError, create_test_login, failure_reason, start
     # Under the home directory, as lease_ci keeps it: on hosted Windows the
     # runner's staging root carries a group ACL that denies initdb's chmod.
-    server = start(Path.home(), "pl-precheck-postgres-")
+    try:
+        server = start(Path.home(), "pl-precheck-postgres-")
+    except SetupError as error:
+        # start()'s refusals carry no credentials and name their fix: the
+        # step log gets that text, the published summary the type only.
+        print(f"owned golden PostgreSQL did not start: {error}", file=sys.stderr)
+        raise
     left = (f"owned golden PostgreSQL in {server.data_dir} could not be confirmed stopped; "
             "it is left running: stop it by that directory")
     try:
@@ -111,18 +117,30 @@ def golden_postgres(private: Path, candidate: Path):
         if result.returncode:
             # The native report's reason (it redacts credentials) goes to the
             # step log; the published summary keeps the exception type only.
-            print(f"test-login create failed (exit {result.returncode}): {failure_reason(result)}", file=sys.stderr)
+            # Without a report the reason is the child's stderr, and the child
+            # had the password in PGPASSWORD: it never reaches the log.
+            reason = failure_reason(result).replace(server.password, "***")
+            print(f"test-login create failed (exit {result.returncode}): {reason}", file=sys.stderr)
             raise RuntimeError("owned golden test-role provisioning failed")
         env = dict(os.environ, PSEUDOLIFE_TEST_PG_HOST_PORT=f"{server.host}:{server.port}",
                    PSEUDOLIFE_TEST_PG_LOGIN_FILE=str(login))
         env.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
         yield env
     except BaseException:
-        # Report a failed stop beside the error already on its way out.
-        if not server.stop():
+        # Report a failed stop beside the error already on its way out,
+        # which stays the one raised.
+        try:
+            stopped = server.stop()
+        except Exception as cleanup:  # noqa: BLE001
+            stopped = False
+            print(f"cleanup failed ({type(cleanup).__name__})", file=sys.stderr)
+        if not stopped:
             print(left, file=sys.stderr)
         raise
     if not server.stop():
+        # run() publishes the exception type only: the directory to stop
+        # goes to the step log.
+        print(left, file=sys.stderr)
         raise RuntimeError(left)
 
 

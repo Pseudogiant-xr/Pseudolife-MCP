@@ -253,9 +253,10 @@ def test_start_refuses_a_prefix_that_is_not_one_path_component(fakes, prefix):
         fakes.home, fakes.parent} and fakes.pg0.instances == []
 
 
-@pytest.mark.parametrize("prefix", ["pl.ci-", "pl-cli-lease-postgres-", "-_"])
+@pytest.mark.parametrize("prefix", ["pl.ci-", "pl-cli-lease-postgres-", "pl-precheck-postgres-", "-_"])
 def test_start_takes_a_plain_prefix(fakes, prefix):
-    """The near misses: one dot, the lease fixture's own prefix, an empty one."""
+    """The near misses: one dot, the lease fixture's and the precheck's own
+    prefixes, an empty one."""
     assert postgres.start(fakes.parent, prefix).owned
 
 

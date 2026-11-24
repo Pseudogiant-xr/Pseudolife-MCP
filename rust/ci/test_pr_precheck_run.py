@@ -146,6 +146,8 @@ class _Server:
 
     def stop(self):
         self.events.append("stop")
+        if isinstance(self.stops, BaseException):
+            raise self.stops
         return self.stops
 
 
@@ -196,6 +198,9 @@ def test_owned_golden_fixture_fails_its_cleanup_when_the_stop_is_unconfirmed(tmp
     with pytest.raises(RuntimeError, match="could not be confirmed stopped"):
         with replay.golden_postgres(tmp_path, Path("candidate")):
             pass
+    # run() publishes the type only, so the directory to stop is in the step log.
+    first = capsys.readouterr().err
+    assert "left running" in first and "pl-precheck-postgres-fixture" in first
     monkeypatch.setattr(disposable_postgres, "create_test_login",
                         lambda candidate, server, login: subprocess.CompletedProcess([], 3, '{"exit": 3, "error": "refused"}', ""))
     with pytest.raises(RuntimeError, match="test-role provisioning failed"):
@@ -205,9 +210,69 @@ def test_owned_golden_fixture_fails_its_cleanup_when_the_stop_is_unconfirmed(tmp
     assert "test-login create failed (exit 3): refused" in err and "left running" in err
 
 
+def test_a_stop_that_raises_keeps_the_setup_error(tmp_path, monkeypatch, capsys):
+    import disposable_postgres
+    events = []
+    monkeypatch.setattr(disposable_postgres, "start",
+                        lambda parent, prefix: _Server(events, stops=PermissionError("in use")))
+    monkeypatch.setattr(disposable_postgres, "create_test_login",
+                        lambda candidate, server, login: subprocess.CompletedProcess([], 3, "", ""))
+    with pytest.raises(RuntimeError, match="test-role provisioning failed"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    err = capsys.readouterr().err
+    assert events == ["stop"] and "cleanup failed (PermissionError)" in err and "left running" in err
+
+
+def test_a_refused_start_names_its_reason_in_the_step_log(tmp_path, monkeypatch, capsys):
+    import disposable_postgres
+    def start(parent, prefix):
+        raise disposable_postgres.SetupError("pg0 reported a server on another host; install the pinned pg0")
+    monkeypatch.setattr(disposable_postgres, "start", start)
+    with pytest.raises(disposable_postgres.SetupError):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    assert "did not start: pg0 reported a server on another host; install the pinned pg0" in capsys.readouterr().err
+
+
+def test_a_failed_login_without_a_report_never_logs_the_password(tmp_path, monkeypatch, capsys):
+    """The child had the password in PGPASSWORD; its raw stderr is redacted."""
+    import disposable_postgres
+    events = []
+    monkeypatch.setattr(disposable_postgres, "start", lambda parent, prefix: _Server(events))
+    monkeypatch.setattr(disposable_postgres, "create_test_login", lambda candidate, server, login:
+                        subprocess.CompletedProcess([], 101, "", "panicked: PGPASSWORD=synthetic-secret"))
+    with pytest.raises(RuntimeError, match="test-role provisioning failed"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    err = capsys.readouterr().err
+    assert "synthetic-secret" not in err and "test-login create failed (exit 101): panicked: PGPASSWORD=***" in err
+
+
+def test_an_unconfirmed_stop_after_the_rows_fails_the_cleanup_phase(tmp_path, monkeypatch):
+    mock_summary_replace(monkeypatch)
+    @contextmanager
+    def postgres(private, candidate):
+        yield {"owned": "fixture"}
+        raise RuntimeError("owned golden PostgreSQL in somewhere could not be confirmed stopped")
+    monkeypatch.setattr(replay, "golden_postgres", postgres)
+    monkeypatch.setattr(replay, "execute", lambda phase, *args, **kwargs: {
+        "phase": phase, "exit_code": 0, "seconds": 0, "failed_cases": [], "diagnostic_errors": []})
+    assert replay.run(plan(linux=["lease"], windows=["lease"]), Path("candidate"),
+                      tmp_path / "private", tmp_path / "public") == 1
+    text = (tmp_path / "public/summary.json").read_text()
+    phases = {row["phase"]: row for row in json.loads(text)["phases"]}
+    assert phases["golden-postgres"]["exit_code"] == 0 and phases["golden/lease"]["exit_code"] == 0
+    assert phases["golden-postgres-cleanup"]["exit_code"] == 1
+    assert phases["golden-postgres-cleanup"]["diagnostic_errors"] == ["owned PostgreSQL scope failed (RuntimeError)"]
+    assert "somewhere" not in text
+
+
 def test_precheck_runner_imports_nothing_from_the_package_outside_the_frozen_judges():
-    """The golden path is package-free; PROCESS_BOOTSTRAP's import is a string
-    the frozen merge-base oracle's own runtime runs (--only judges)."""
+    """The golden PostgreSQL and lease check are package-free (a recorded
+    row's record/ phase still runs the frozen package through
+    rust/cli_harness); PROCESS_BOOTSTRAP's import is a string the frozen
+    merge-base oracle's own runtime runs (--only judges)."""
     import ast
     source = Path(replay.__file__).read_text(encoding="utf-8")
     imports = [node for node in ast.walk(ast.parse(source)) if isinstance(node, (ast.Import, ast.ImportFrom))]
