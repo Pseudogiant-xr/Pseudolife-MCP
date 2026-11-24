@@ -14,7 +14,7 @@ use super::{
 use crate::{
     board::state,
     cli::tunnel::{
-        Fail, KEY_RENEWAL, Options, Output, Setup, absolute_token, bridge::status_command, record,
+        Fail, KEY_RENEWAL, Options, Output, absolute_token, bridge::status_command, record,
         runtime, setup_command, store,
     },
     credentials::{CredentialProvider, MAX_TOKEN_BYTES, decode_token},
@@ -27,9 +27,26 @@ const KEY_INPUT: &str = "could not read a private runtime key; supply --key-file
 
 pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path) -> Output {
     check_directory(root)?;
-    let original = store::private_read(path, PROFILE_LIMIT).map_err(|_| Fail::Defer)?;
+    // A file in a form this client does not open stays `Defer`, which names
+    // it; a saved profile it can read but not use names the field at fault.
+    let save = format!(
+        "`{} --daemon-url <url> --token-file <owner-only file> --accept-access`",
+        setup_command(&options.profile, options.profile_dir.as_deref())
+    );
+    let broken = |fail: Fail| match fail {
+        Fail::Defer => Fail::Defer,
+        Fail::Tunnel(reason) => Fail::Detail(format!(
+            "{reason}: {}; fix that file or move it aside and save the profile again with {save}",
+            path.display()
+        )),
+        Fail::Detail(reason) => Fail::Detail(format!(
+            "{reason} ({}); fix that file or move it aside and save the profile again with {save}",
+            path.display()
+        )),
+    };
+    let original = store::private_read(path, PROFILE_LIMIT).map_err(broken)?;
     let (mut saved, profile) =
-        store::decode_profile(&original, &options.profile).map_err(|_| Fail::Defer)?;
+        store::decode_profile(&original, &options.profile).map_err(broken)?;
     let setup = &options.setup;
     let directory = root.display().to_string();
     let status = status_command(
@@ -44,10 +61,12 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
                     "save a tunnel ID with tunnel setup --tunnel-id before importing its runtime key",
                 )
             } else {
-                Fail::Defer
+                Fail::Detail(format!(
+                    "profile {} is not ready to take a runtime key (its saved state is {}); `{status}` shows the step it still needs. Finish that step with tunnel setup, then import the key",
+                    profile.name, profile.state
+                ))
             });
         }
-        require_no_autostart(&saved)?;
         let key_path = store::key_path(root, &profile.name);
         let old_key = if store::occupied(&key_path)? {
             require_stopped_record(root, &profile.name, "renew the key")?;
@@ -56,7 +75,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
                 renewal::KEY_LIMIT,
             )?))
         } else {
-            require_inactive(root, &profile.name)?;
+            require_inactive(root, &profile.name, true, &status)?;
             None
         };
         let replacement_profile = if old_key.is_some() {
@@ -136,7 +155,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
         let encoded = encode_key(&key.0);
         let (_lock, _) = commit_lock(root, path, &original)?;
         renewal::check_pending(root, &profile.name)?;
-        recheck_inactive(root, &profile.name, &status)?;
+        recheck_inactive(root, &profile.name, &status, true)?;
         let encoded = encoded?;
         publish_new(&store::key_path(root, &profile.name), |file| {
             file.write_all(&encoded.0)
@@ -155,6 +174,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     match (&setup.daemon_url, &setup.token_file) {
         (None, None) => {}
         (Some(url), Some(token)) if !url.is_empty() && !token.is_empty() => {
+            crate::cli::tunnel::checked_url(url, "--daemon-url")?;
             desired.insert("daemon_url".into(), Value::from(url.clone()));
             desired.insert("token_file".into(), Value::from(absolute_token(token)?));
         }
@@ -191,23 +211,15 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             0,
         ));
     }
-    if matches!(
-        setup,
-        Setup {
-            key_expires_at: Some(_),
-            daemon_url: None,
-            token_file: None,
-            tunnel_id: None,
-            organization_id: None,
-            catalog: None,
-            ..
-        }
-    ) && store::occupied(&store::key_path(root, &profile.name))?
-    {
+    // A key saved before setup started stays; one that appears during the
+    // handshake belongs to another setup, so the commit refuses it.
+    let had_key = store::occupied(&store::key_path(root, &profile.name))?;
+    // The saved key's expiry changes only with a renewal of that key, alone
+    // or beside other settings.
+    if had_key && saved.get("runtime_key_expires_at") != desired.get("runtime_key_expires_at") {
         return Err(Fail::Tunnel(KEY_RENEWAL));
     }
-    require_no_autostart(&saved)?;
-    require_inactive(root, &profile.name)?;
+    require_inactive(root, &profile.name, false, &status)?;
     let updated = store::validate(&desired)?;
     if needs_consent && !setup.accept_access {
         return Err(consent_required(&updated));
@@ -217,8 +229,24 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     if needs_consent && disclose(&updated).is_err() {
         return Ok((String::new(), crate::cli::tunnel::STDOUT_REFUSED));
     }
+    // With a saved key a launch or a renewal may be starting: hold their
+    // locks, then check again that neither left anything behind.
+    let _runtime = if had_key {
+        Some(runtime::key_change_locks(root, &updated.name)?)
+    } else {
+        None
+    };
     let (_lock, expected) = commit_lock(root, path, &original)?;
-    recheck_inactive(root, &updated.name, &status)?;
+    recheck_inactive(root, &updated.name, &status, !had_key)?;
+    if had_key {
+        renewal::check_pending(root, &updated.name)?;
+        if renewal::validate_previous_key(root, &updated.name)? {
+            return Err(Fail::Detail(format!(
+                "a key renewal of profile {} began during setup and still retains its previous key; finish it with tunnel setup --restore-key or --discard-previous-key, then change the settings",
+                updated.name
+            )));
+        }
+    }
     stage_and_publish(
         path,
         |file| file.write_all(&bytes),
@@ -266,22 +294,34 @@ fn require_stopped_record(root: &Path, name: &str, action: &str) -> Result<(), F
     Ok(())
 }
 
-pub(super) fn require_no_autostart(saved: &serde_json::Map<String, Value>) -> Result<(), Fail> {
-    if saved.get("autostart_consent") == Some(&Value::Bool(true)) {
-        return Err(Fail::Defer);
+/// Before a first key import (`key`), or a settings change: no process
+/// record, and for a settings change no renewal still retaining its
+/// previous key. A saved key does not block a settings change: the tunnel
+/// reads the profile again at its next launch.
+fn require_inactive(root: &Path, name: &str, key: bool, status: &str) -> Result<(), Fail> {
+    if let Some((path, kind)) = runtime_conflict(root, name, key)? {
+        return Err(Fail::Detail(if kind == "runtime key" {
+            format!(
+                "a runtime key is already saved at {}; renew it with tunnel setup --read-key or --key-file and --key-expires-at",
+                path.display()
+            )
+        } else {
+            format!(
+                "cannot change profile {name} while a process record exists at {}. Check `{status}`; once it reports the tunnel stopped, move that record aside, then retry setup",
+                path.display()
+            )
+        }));
+    }
+    if !key && renewal::validate_previous_key(root, name)? {
+        return Err(Fail::Detail(format!(
+            "a key renewal of profile {name} still retains its previous key; finish it with tunnel setup --restore-key or --discard-previous-key, then change the settings"
+        )));
     }
     Ok(())
 }
 
-fn require_inactive(root: &Path, name: &str) -> Result<(), Fail> {
-    if runtime_conflict(root, name)?.is_some() {
-        return Err(Fail::Defer);
-    }
-    Ok(())
-}
-
-fn recheck_inactive(root: &Path, name: &str, status: &str) -> Result<(), Fail> {
-    if let Some((path, kind)) = runtime_conflict(root, name)? {
+fn recheck_inactive(root: &Path, name: &str, status: &str, key: bool) -> Result<(), Fail> {
+    if let Some((path, kind)) = runtime_conflict(root, name, key)? {
         return Err(Fail::Detail(format!(
             "a {kind} appeared during setup at {}. Check `{status}` before retrying",
             path.display(),
@@ -290,11 +330,17 @@ fn recheck_inactive(root: &Path, name: &str, status: &str) -> Result<(), Fail> {
     Ok(())
 }
 
-fn runtime_conflict(root: &Path, name: &str) -> Result<Option<(PathBuf, &'static str)>, Fail> {
-    for (path, kind) in [
-        (store::key_path(root, name), "runtime key"),
-        (record::path(root, name), "process record"),
-    ] {
+/// The runtime key (only when `key`) or process record that blocks setup.
+fn runtime_conflict(
+    root: &Path,
+    name: &str,
+    key: bool,
+) -> Result<Option<(PathBuf, &'static str)>, Fail> {
+    let key_path = key.then(|| (store::key_path(root, name), "runtime key"));
+    for (path, kind) in key_path
+        .into_iter()
+        .chain([(record::path(root, name), "process record")])
+    {
         if store::occupied(&path)? {
             return Ok(Some((path, kind)));
         }

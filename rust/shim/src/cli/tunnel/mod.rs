@@ -12,11 +12,13 @@ use serde_json::{Map, Value};
 
 use super::hook_json::quoted;
 
+mod argv;
 mod bridge;
 mod doctor_section;
 #[cfg(windows)]
 mod dpapi;
 mod record;
+mod refusal;
 mod runtime;
 mod setup;
 mod store;
@@ -28,8 +30,8 @@ use record::Liveness;
 use store::{Profile, exists, occupied};
 use syntax::{Admit, json_loads, refresh_id};
 
-/// Why a ported command stops: a sanitized `TunnelError` (exit 2), or a
-/// shape this leaf does not decide (the dispatcher's deferral, exit 1).
+/// Why a command stops: a refusal (exit 2), or a file in a form this client
+/// does not read, which `outcome` turns into a refusal naming it.
 #[derive(Debug, PartialEq)]
 pub(super) enum Fail {
     Tunnel(&'static str),
@@ -40,15 +42,6 @@ pub(super) enum Fail {
 /// A command's answer: its stdout and exit, or a refusal for stderr
 /// (exit 2), which may name the file it is about.
 type Answer = Result<(String, u8), String>;
-
-fn answer(output: Output) -> Option<Answer> {
-    match output {
-        Ok(printed) => Some(Ok(printed)),
-        Err(Fail::Tunnel(message)) => Some(Err(message.to_owned())),
-        Err(Fail::Detail(message)) => Some(Err(message)),
-        Err(Fail::Defer) => None,
-    }
-}
 
 const NO_PROFILES: &str = "No saved tunnel profiles; update does not start new setup.";
 const AMBIGUOUS: &str = "daemon connection is missing or ambiguous; pass --daemon-url and --token-file explicitly (an owner-only credential file)";
@@ -123,74 +116,26 @@ struct Options {
     setup: Setup,
 }
 
-/// Canonical argv only: the subcommand, then its own options in any order,
-/// each at most once, values as the next argument and never `-`-led.
+/// The options of an argv `argv::read` admits, for tests.
+#[cfg(test)]
 fn parse(values: &[OsString]) -> Option<Options> {
-    let values: Vec<&str> = values.iter().map(|v| v.to_str()).collect::<Option<_>>()?;
-    let (command, rest) = values.split_first()?;
-    let command = match *command {
-        "status" => Command::Status,
-        "update" => Command::Update,
-        "verify" => Command::Verify,
-        "setup" => Command::Setup,
-        "run" => Command::Run,
-        "stop" => Command::Stop,
-        _ => return None,
-    };
-    let mut options = Options {
-        command,
-        profile: "dot".into(),
-        profile_dir: None,
-        json: false,
-        setup: Setup::default(),
-    };
-    let mut seen: Vec<&str> = Vec::new();
-    let mut rest = rest.iter();
-    while let Some(option) = rest.next() {
-        if seen.contains(option) {
-            return None;
-        }
-        seen.push(option);
-        match (*option, command) {
-            ("--json", Command::Status) => options.json = true,
-            ("--accept-access", Command::Setup) => options.setup.accept_access = true,
-            ("--read-key", Command::Setup) => options.setup.read_key = true,
-            ("--restore-key", Command::Setup) => options.setup.restore_key = true,
-            ("--discard-previous-key", Command::Setup) => options.setup.discard_previous_key = true,
-            _ => {
-                let value = rest.next().filter(|value| !value.starts_with('-'))?;
-                let value = Some((*value).to_owned());
-                let s = &mut options.setup;
-                match (*option, command) {
-                    ("--profile", _) => options.profile = value?,
-                    ("--profile-dir", _) => options.profile_dir = value,
-                    ("--daemon-url", Command::Setup) => s.daemon_url = value,
-                    ("--token-file", Command::Setup) => s.token_file = value,
-                    ("--key-file", Command::Setup) => s.key_file = value,
-                    ("--tunnel-id", Command::Setup) => s.tunnel_id = value,
-                    ("--organization-id", Command::Setup) => s.organization_id = value,
-                    ("--key-expires-at", Command::Setup) => s.key_expires_at = value,
-                    ("--catalog", Command::Setup)
-                        if matches!(value.as_deref(), Some("current" | "full")) =>
-                    {
-                        s.catalog = value
-                    }
-                    _ => return None,
-                }
-            }
-        }
+    match argv::read(values) {
+        Ok(argv::Parsed::Run(options)) => Some(*options),
+        _ => None,
     }
-    Some(options)
 }
 
-pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
+pub(super) fn run(values: Vec<OsString>) -> ExitCode {
     // The hidden bridge the vendor's tunnel-client starts (`tunnel shim`).
     if values.first().is_some_and(|command| command == "shim") {
-        return Some(bridge::run(&values[1..]));
+        return bridge::run(&values[1..]);
     }
-    let options = parse(&values)?;
-    let (stdout, stderr, code) = match outcome(&options)? {
-        Ok((text, code)) => (text, String::new(), code),
+    let (stdout, stderr, code) = match argv::read(&values) {
+        Ok(argv::Parsed::Help(text)) => (text, String::new(), 0),
+        Ok(argv::Parsed::Run(options)) => match outcome(&options) {
+            Ok((text, code)) => (text, String::new(), code),
+            Err(message) => (String::new(), format!("{message}\n"), 2),
+        },
         Err(message) => (String::new(), format!("{message}\n"), 2),
     };
     // The oracle's stdout is block-buffered: a refused stdout fails only its
@@ -203,49 +148,129 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         .is_err();
     drop(out);
     let written = io::stderr().lock().write_all(&super::text_bytes(&stderr));
-    Some(if stdout_refused {
+    if stdout_refused {
         ExitCode::from(STDOUT_REFUSED)
     } else if written.is_ok() {
         ExitCode::from(code)
     } else {
         ExitCode::FAILURE
-    })
+    }
 }
 
-/// The command's answer; `None` when the store root cannot be opened and
-/// the command defers.
-fn outcome(options: &Options) -> Option<Answer> {
-    let root = store::store_root(options.profile_dir.as_deref());
-    // `update` runs unattended inside `pseudolife-mcp update`, which shows
-    // its refusal: a root it cannot open is named, never deferred.
-    let root = match root {
-        Err(_)
-            if matches!(
-                options.command,
-                Command::Update | Command::Run | Command::Stop
-            ) =>
-        {
-            return Some(Err(store::UNSAFE_ROOT.to_owned()));
-        }
-        root => root.ok()?,
+/// The command's answer. A store root that cannot be opened, or a file in
+/// a form this client does not read, is a refusal naming it.
+fn outcome(options: &Options) -> Answer {
+    let Ok(root) = store::store_root(options.profile_dir.as_deref()) else {
+        return Err(store::UNSAFE_ROOT.to_owned());
     };
     if matches!(options.command, Command::Status | Command::Setup) {
         setup::warn_for_stages(&root);
     }
-    answer(match options.command {
+    let output = match options.command {
         Command::Status => status(options, &root),
-        Command::Update => return Some(update(&root)),
+        Command::Update => return update(&root),
         Command::Verify => verify(options, &root),
         Command::Setup => setup(options, &root),
         Command::Run => runtime::run(&root, &options.profile),
         Command::Stop => runtime::stop(&root, &options.profile),
-    })
+    };
+    match output {
+        Ok(printed) => Ok(printed),
+        Err(Fail::Tunnel(message)) => Err(message.to_owned()),
+        Err(Fail::Detail(message)) => Err(message),
+        Err(Fail::Defer) => Err(refusal::unread(options, &root)),
+    }
 }
 
 /// CPython's exit when its shutdown flush of a refused stdout fails.
 const STDOUT_REFUSED: u8 = 120;
 
 type Output = Result<(String, u8), Fail>;
+
+/// What to do about a refresh outcome the Python client recorded, as the
+/// tail of the status line: every step this client needs before its own
+/// `tunnel run` of this profile and store succeeds, in that order.
+fn python_refresh_next(
+    profile: &Profile,
+    key: &KeyStatus,
+    record: Option<&record::Record>,
+    expired: bool,
+    setup: &str,
+    options: &Options,
+) -> String {
+    let name = &profile.name;
+    let dir = options.profile_dir.as_deref();
+    let run = tunnel_command("run", name, dir);
+    let status = tunnel_command("status", name, dir);
+    if let Some(record) = record.filter(|record| record.native) {
+        let root = record.path.parent().unwrap_or(Path::new(""));
+        return format!(
+            ", and this client's own launch does not use it; move {} or {} aside to clear it",
+            root.join(format!("{name}.reload.json")).display(),
+            root.join(format!("{name}.reload.result.json")).display()
+        );
+    }
+    let mut steps = Vec::new();
+    // Another client's process record blocks both the key import and the
+    // run until it is moved aside, and only a stopped launch's may be.
+    match record {
+        None => {}
+        Some(record) if record.liveness == Liveness::Gone => {
+            steps.push(format!(
+                "move the process record {} aside",
+                record.path.display()
+            ));
+        }
+        Some(record) => {
+            steps
+                .push("stop any tunnel of this profile with the client that started it".to_owned());
+            steps.push(format!(
+                "move the process record {} aside once `{status}` reports it stopped",
+                record.path.display()
+            ));
+        }
+    }
+    if profile.state != "ready" {
+        // Setup refuses a tunnel ID without consent the profile lacks, and
+        // ignores --accept-access when consent stands.
+        if profile.tunnel_id.is_none() {
+            steps.push(format!(
+                "save its tunnel ID with `{setup} --tunnel-id <tunnel_id> --accept-access`"
+            ));
+        } else {
+            steps.push(format!("consent to access with `{setup} --accept-access`"));
+        }
+    }
+    let import = format!("import its runtime key with `{setup} --read-key`");
+    if !key.saved {
+        steps.push(import);
+    } else {
+        match key.readable {
+            Some(true) if expired => steps.push(format!(
+                "renew its runtime key with `{setup} --read-key --key-expires-at <ISO timestamp>`"
+            )),
+            Some(true) => {}
+            // A file that is no usable key is replaced, not renewed.
+            Some(false) => {
+                steps.push(format!(
+                    "move the unusable key file {} aside",
+                    key.path.display()
+                ));
+                steps.push(import);
+            }
+            // A Windows key this session cannot unseal.
+            None => steps.push(
+                "use a desktop session of the Windows account that saved its runtime key"
+                    .to_owned(),
+            ),
+        }
+    }
+    steps.push(format!("start it with `{run}`"));
+    format!(
+        "; to run the tunnel on this client, {}",
+        steps.join(", then ")
+    )
+}
 
 fn bool_text(value: bool) -> &'static str {
     if value { "true" } else { "false" }
@@ -366,6 +391,7 @@ fn status(options: &Options, root: &Path) -> Output {
     setup::check_pending(root, &profile.name)?;
     let key = KeyStatus {
         readable: key,
+        path: store::key_path(root, &profile.name),
         saved: occupied(&store::key_path(root, &profile.name))?,
         retained: setup::validate_previous_key(root, &profile.name)?,
     };
@@ -404,6 +430,7 @@ fn status(options: &Options, root: &Path) -> Output {
 
 struct KeyStatus {
     readable: Option<bool>,
+    path: PathBuf,
     saved: bool,
     retained: bool,
 }
@@ -658,8 +685,9 @@ fn report(
     text.push_str(&format!("API key expiry: {shown}.\n"));
     if refresh.needs_attention() && native_refresh.is_none() {
         text.push_str(&format!(
-            "Last tunnel refresh: {}; needs attention. Inspect tunnel doctor before retrying the update.\n",
-            refresh.state()
+            "Last tunnel refresh: {}; needs attention. The Python client recorded it{}.\n",
+            refresh.state(),
+            python_refresh_next(profile, &key, record, expired, &command, options)
         ));
     }
     if let Some((_, detail)) = native_refresh {
@@ -981,11 +1009,30 @@ fn verify(options: &Options, root: &Path) -> Output {
     // A native challenge needs an active native record. Legacy launch
     // identities are outside this path.
     if occupied(&root.join(format!("{}.process.json", profile.name)))? {
-        if record::read(record::path(root, &profile.name), None).is_some_and(|record| record.native)
-        {
+        let path = record::path(root, &profile.name);
+        let record = record::read(path.clone(), None);
+        if record.as_ref().is_some_and(|record| record.native) {
             return runtime::restart::verify(root, &profile.name);
         }
-        return Err(Fail::Defer);
+        if record.is_none_or(|record| {
+            matches!(
+                record.why,
+                Some(record::Why::Unreadable | record::Why::NoProcessId)
+            )
+        }) {
+            return Err(Fail::Detail(format!(
+                "cannot tell which launch the process record {} belongs to: it cannot be read or names no process. Check `{}`; once it reports the tunnel stopped, move that record aside, start the tunnel with `{}`, then retry",
+                path.display(),
+                tunnel_command("status", &profile.name, options.profile_dir.as_deref()),
+                tunnel_command("run", &profile.name, options.profile_dir.as_deref())
+            )));
+        }
+        return Err(Fail::Detail(format!(
+            "tunnel verify checks only a launch this client started, and {} is not one. Check `{}`: if that tunnel still runs, stop it with the client that started it; once it reports the tunnel stopped, move the record aside, start the tunnel with `{}`, then retry",
+            record::path(root, &profile.name).display(),
+            tunnel_command("status", &profile.name, options.profile_dir.as_deref()),
+            tunnel_command("run", &profile.name, options.profile_dir.as_deref())
+        )));
     }
     Err(Fail::Tunnel(store::UNAVAILABLE))
 }
@@ -996,7 +1043,11 @@ fn environment(key: &str) -> Result<Option<String>, Fail> {
         Some(value) => value
             .into_string()
             .map(|value| Some(value).filter(|value| !value.is_empty()))
-            .map_err(|_| Fail::Defer),
+            .map_err(|_| {
+                Fail::Detail(format!(
+                    "the environment variable {key} is not valid text; unset it, or pass --daemon-url and --token-file explicitly"
+                ))
+            }),
     }
 }
 
@@ -1006,8 +1057,11 @@ fn truthy(value: &Option<String>) -> Option<&str> {
 
 /// `Path(token).expanduser().absolute()`, as text, for the shapes decided here.
 fn absolute_token(token: &str) -> Result<String, Fail> {
+    const ABSOLUTE: Fail = Fail::Tunnel(
+        "pass the daemon credential file as an absolute path (on Windows with its drive letter, such as C:\\Users\\<user>\\token)",
+    );
     if token.starts_with('~') || token.contains('\0') {
-        return Err(Fail::Defer);
+        return Err(ABSOLUTE);
     }
     if cfg!(windows) {
         let b = token.as_bytes();
@@ -1015,20 +1069,22 @@ fn absolute_token(token: &str) -> Result<String, Fail> {
         let rooted = b.first().is_some_and(|c| matches!(c, b'\\' | b'/'));
         let absolute = drive && b.get(2).is_some_and(|c| matches!(c, b'\\' | b'/'));
         if rooted || (drive && !absolute) {
-            return Err(Fail::Defer);
+            return Err(ABSOLUTE);
         }
     }
     crate::credentials::absolute_expanded(Path::new(token))
         .ok()
         .and_then(|path| path.to_str().map(str::to_owned))
-        .ok_or(Fail::Defer)
+        .ok_or(ABSOLUTE)
 }
 
 fn home() -> Result<PathBuf, Fail> {
     crate::credentials::expand_user(Path::new("~"))
         .ok()
         .filter(|home| !home.as_os_str().is_empty())
-        .ok_or(Fail::Defer)
+        .ok_or(Fail::Tunnel(
+            "cannot find your home directory to look for a registered daemon; pass --daemon-url and --token-file explicitly",
+        ))
 }
 
 /// `_discover`: the daemon connection setup would save.
@@ -1036,24 +1092,44 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
     let (url, token) = (truthy(&setup.daemon_url), truthy(&setup.token_file));
     if let (Some(url), Some(token)) = (url, token) {
         // The returned tuple validates the URL before resolving the path.
-        syntax::validate_url(url)?;
+        checked_url(url, "--daemon-url")?;
         return Ok((url.to_owned(), absolute_token(token)?));
     }
     let env_file = environment("PSEUDOLIFE_MCP_TOKEN_FILE")?;
     let env_token = environment("PSEUDOLIFE_MCP_TOKEN")?;
     if env_file.is_none() && env_token.is_none() {
         // Registration env blocks: only their absence is decided here.
-        let claude = match environment("CLAUDE_CONFIG_DIR")? {
+        let claude_dir = environment("CLAUDE_CONFIG_DIR")?;
+        let claude_named = claude_dir.is_some();
+        let claude = match claude_dir {
             Some(directory) => PathBuf::from(directory).join(".claude.json"),
             None => home()?.join(".claude.json"),
         };
-        let codex = match environment("CODEX_HOME")? {
+        let codex_dir = environment("CODEX_HOME")?;
+        let codex_named = codex_dir.is_some();
+        let codex = match codex_dir {
             Some(directory) => PathBuf::from(directory),
             None => home()?.join(".codex"),
         }
         .join("config.toml");
-        if occupied(&claude)? || occupied(&codex)? {
-            return Err(Fail::Defer);
+        // The variable is named only when the path that failed came from it.
+        let inspect = |path: &Path, variable: Option<&str>| {
+            occupied(path).map_err(|_| {
+                let named = variable
+                    .map(|variable| format!(" ({variable} must name a directory)"))
+                    .unwrap_or_default();
+                Fail::Detail(format!(
+                    "cannot inspect {} to look for a client registration{named}; fix that path, or pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
+                    path.display()
+                ))
+            })
+        };
+        if inspect(&claude, claude_named.then_some("CLAUDE_CONFIG_DIR"))?
+            || inspect(&codex, codex_named.then_some("CODEX_HOME"))?
+        {
+            return Err(Fail::Tunnel(
+                "this client does not read the daemon connection from a Claude Code or Codex registration; pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
+            ));
         }
         return Err(Fail::Tunnel(AMBIGUOUS));
     }
@@ -1062,12 +1138,27 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
         return Err(Fail::Tunnel(AMBIGUOUS));
     };
     let token = absolute_token(&file)?;
-    let selected = match url {
-        Some(url) => url.to_owned(),
-        None => environment("PSEUDOLIFE_MCP_DAEMON_URL")?.unwrap_or_else(|| DEFAULT_URL.into()),
+    let (selected, source) = match url {
+        Some(url) => (url.to_owned(), "--daemon-url"),
+        None => (
+            environment("PSEUDOLIFE_MCP_DAEMON_URL")?.unwrap_or_else(|| DEFAULT_URL.into()),
+            "PSEUDOLIFE_MCP_DAEMON_URL",
+        ),
     };
-    syntax::validate_url(&selected)?;
+    checked_url(&selected, source)?;
     Ok((selected, token))
+}
+
+/// `validate_url`, naming where an http(s) URL in a spelling this client
+/// does not accept came from and the spellings it does. The URL itself is
+/// not echoed: it may carry credentials.
+fn checked_url(url: &str, source: &str) -> Result<(), Fail> {
+    match syntax::validate_url(url) {
+        Err(Fail::Defer) => Err(Fail::Detail(format!(
+            "the URL in {source} is a spelling this client does not accept; use http://127.0.0.1:<port> or http://localhost:<port> in lower case, or an https:// URL with a plain host name"
+        ))),
+        other => other,
+    }
 }
 
 const KEY_RENEWAL: &str = "renew the runtime key with tunnel setup --read-key or --key-file and an optional new --key-expires-at";
@@ -1111,7 +1202,9 @@ fn setup(options: &Options, root: &Path) -> Output {
             || (!saved && settings.key_expires_at.is_some()))
     {
         return Err(if saved {
-            Fail::Defer
+            Fail::Tunnel(
+                "import the private key with --read-key or --key-file by itself (with --key-expires-at for a renewal); save other settings in a separate tunnel setup invocation",
+            )
         } else {
             Fail::Tunnel(
                 "save profile settings first, then use --read-key or --key-file in a separate setup invocation",
@@ -1121,7 +1214,11 @@ fn setup(options: &Options, root: &Path) -> Output {
     if saved {
         if !settings.has_profile_settings() && !settings.has_key_input() && !settings.accept_access
         {
-            return Err(Fail::Defer);
+            return Err(Fail::Detail(format!(
+                "profile {name} is saved; guided setup is not part of the native client. `{status}` shows what it still needs; resume it with that option of tunnel setup (--tunnel-id, --organization-id, --catalog, --key-expires-at, --daemon-url with --token-file, or --read-key or --key-file)",
+                name = options.profile,
+                status = tunnel_command("status", &options.profile, options.profile_dir.as_deref()),
+            )));
         }
         return setup::resume(options, root, &path);
     }
@@ -1140,8 +1237,12 @@ fn setup(options: &Options, root: &Path) -> Output {
     if explicit {
         setup::save(options, root, &path, payload)
     } else {
-        store::validate(&payload)?;
-        Err(Fail::Defer)
+        let profile = store::validate(&payload)?;
+        Err(Fail::Detail(format!(
+            "guided setup is not part of the native client. To use the daemon this environment names, run tunnel setup with --daemon-url {} --token-file {} --accept-access",
+            quote_tunnel_arg(&profile.daemon_url),
+            quote_tunnel_arg(&profile.token_file)
+        )))
     }
 }
 
@@ -1590,7 +1691,7 @@ mod tests {
                 ]))
                 .unwrap()
             ),
-            Some(Err(refused))
+            Err(refused)
         );
         #[cfg(windows)]
         {
@@ -1725,11 +1826,16 @@ mod tests {
 
     #[test]
     fn update_refuses_a_store_root_it_cannot_open_with_the_cause() {
-        // An empty --profile-dir: update names it, status still defers.
+        // An empty --profile-dir: every command names it.
         let answer =
             |command: &str| outcome(&parse(&argv(&[command, "--profile-dir", ""])).unwrap());
-        assert_eq!(answer("update"), Some(Err(store::UNSAFE_ROOT.to_owned())));
-        assert_eq!(answer("status"), None);
+        for command in ["update", "status", "verify", "setup", "run", "stop"] {
+            assert_eq!(
+                answer(command),
+                Err(store::UNSAFE_ROOT.to_owned()),
+                "{command}"
+            );
+        }
         // A store root reached through a link.
         let store = Store::new();
         let link = store.0.parent().unwrap().join("link");
@@ -1742,7 +1848,7 @@ mod tests {
         let link = link.to_str().unwrap();
         assert_eq!(
             outcome(&parse(&argv(&["update", "--profile-dir", link])).unwrap()),
-            Some(Err(store::UNSAFE_ROOT.to_owned()))
+            Err(store::UNSAFE_ROOT.to_owned())
         );
     }
 
@@ -1828,25 +1934,252 @@ mod tests {
             "--tunnel-id",
             "x"
         ]));
-        for shape in [
-            &[][..],
-            &["doctor"],
-            &["status", "--json", "--json"],
-            &["status", "--profile"],
-            &["status", "--profile", "-x"],
-            &["status", "--profile=dot"],
-            &["status", "--prof", "dot"],
-            &["status", "extra"],
-            &["update", "--json"],
-            &["verify", "--accept-access"],
-            &["setup", "--catalog", "all"],
-            &["setup", "--read-key", "--read-key"],
-            &["setup", "--key-file"],
-            &["setup", "--start"],
-            &["setup", "--open-browser", "keys"],
-            &["status", "-h"],
+        // The joined form is the same option.
+        assert_eq!(
+            parse(&argv(&["status", "--profile=alpha", "--profile-dir=d"]))
+                .map(|o| (o.profile, o.profile_dir)),
+            Some(("alpha".to_owned(), Some("d".to_owned())))
+        );
+    }
+
+    #[test]
+    fn a_python_refresh_line_names_this_profiles_commands_and_its_first_step() {
+        let result = r#"{"id": "0123456789abcdef0123456789abcdef", "state": "failed"}"#;
+        let dir = |store: &Store| store.0.to_str().unwrap().to_owned();
+        let text = |store: &Store| {
+            let options = parse(&argv(&[
+                "status",
+                "--profile",
+                "work-2",
+                "--profile-dir",
+                &dir(store),
+            ]))
+            .unwrap();
+            status(&options, &store.0).unwrap().0
+        };
+        // The whole advice: these steps, then this profile's own run command.
+        let advice = |store: &Store, steps: &str| {
+            let run = tunnel_command("run", "work-2", Some(&dir(store)));
+            let steps = if steps.is_empty() {
+                String::new()
+            } else {
+                format!("{steps}, then ")
+            };
+            format!(
+                "The Python client recorded it; to run the tunnel on this client, {steps}start it with `{run}`.\n"
+            )
+        };
+        let setup = |store: &Store| tunnel_command("setup", "work-2", Some(&dir(store)));
+        let replace = |store: &Store, rel: &str, data: &[u8]| {
+            std::fs::remove_file(store.0.join(rel)).unwrap();
+            store.put(rel, data);
+        };
+
+        // Pending: save the tunnel ID, then import the key, then run.
+        let store = Store::new();
+        store.profile("work-2", false);
+        store.put("work-2.reload.result.json", result.as_bytes());
+        let setup_command = setup(&store);
+        let pending = text(&store);
+        let expected = advice(
+            &store,
+            &format!(
+                "save its tunnel ID with `{setup_command} --tunnel-id <tunnel_id> --accept-access`, then import its runtime key with `{setup_command} --read-key`"
+            ),
+        );
+        assert!(pending.contains(&expected), "{pending}");
+
+        // Ready without a key: import it first.
+        let store = Store::new();
+        store.profile("work-2", true);
+        store.put("work-2.reload.result.json", result.as_bytes());
+        let setup_command = setup(&store);
+        let import = format!("import its runtime key with `{setup_command} --read-key`");
+        let keyless = text(&store);
+        assert!(keyless.contains(&advice(&store, &import)), "{keyless}");
+
+        // A stopped launch's record from the Python client goes aside first,
+        // since it blocks the import and the run.
+        store.record("work-2", DEAD_PID, Path::new("/nonexistent/tunnel-client"));
+        let record = store.0.join("work-2.process.json");
+        let stale = text(&store);
+        let expected = advice(
+            &store,
+            &format!(
+                "move the process record {} aside, then {import}",
+                record.display()
+            ),
+        );
+        assert!(stale.contains(&expected), "{stale}");
+
+        // A running launch of another client is stopped before its record
+        // goes aside.
+        std::fs::remove_file(&record).unwrap();
+        store.record("work-2", u64::from(std::process::id()), &own_exe());
+        let live = text(&store);
+        let status_command = tunnel_command("status", "work-2", Some(&dir(&store)));
+        let expected = advice(
+            &store,
+            &format!(
+                "stop any tunnel of this profile with the client that started it, then move the process record {} aside once `{status_command}` reports it stopped, then {import}",
+                record.display()
+            ),
+        );
+        assert!(live.contains(&expected), "{live}");
+        std::fs::remove_file(&record).unwrap();
+
+        // A key file that holds no usable key is moved aside and imported
+        // again, never renewed.
+        store.put("work-2.key", b"NOPE\0not-a-key");
+        let unusable = text(&store);
+        let expected = advice(
+            &store,
+            &format!(
+                "move the unusable key file {} aside, then {import}",
+                store.0.join("work-2.key").display()
+            ),
+        );
+        assert!(unusable.contains(&expected), "{unusable}");
+
+        // A usable key: just run it, never "stop".
+        #[cfg(windows)]
+        {
+            let Some(key) = sealed(b"fixture-tunnel-key") else {
+                return;
+            };
+            replace(&store, "work-2.key", &key);
+        }
+        #[cfg(not(windows))]
+        replace(&store, "work-2.key", b"PLAIN\0fixture-tunnel-key");
+        let idle = text(&store);
+        assert!(idle.contains(&advice(&store, "")), "{idle}");
+        assert!(!idle.contains("stop"), "{idle}");
+
+        // An expired key is renewed before the run.
+        let token = serde_json::to_string(&store.0.join("token")).unwrap();
+        replace(
+            &store,
+            "work-2.profile.json",
+            format!("{{\"name\": \"work-2\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}, \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true, \"runtime_key_expires_at\": \"2026-01-01T00:00:00+00:00\"}}").as_bytes(),
+        );
+        let expired = text(&store);
+        let expected = advice(
+            &store,
+            &format!(
+                "renew its runtime key with `{setup_command} --read-key --key-expires-at <ISO timestamp>`"
+            ),
+        );
+        assert!(expired.contains(&expected), "{expired}");
+    }
+
+    #[test]
+    fn verify_names_a_launch_another_client_started() {
+        let store = Store::new();
+        store.profile("dot", true);
+        #[cfg(windows)]
+        {
+            let Some(key) = sealed(b"fixture-tunnel-key") else {
+                return;
+            };
+            store.put("dot.key", &key);
+        }
+        #[cfg(not(windows))]
+        store.key("dot");
+        store.record("dot", u64::from(std::process::id()), &own_exe());
+        let options = parse(&argv(&["verify"])).unwrap();
+        match verify(&options, &store.0) {
+            Err(Fail::Detail(message)) => assert!(
+                message.starts_with("tunnel verify checks only a launch this client started")
+                    && message.contains("pseudolife-mcp tunnel run --profile dot"),
+                "{message}"
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_argv_this_client_does_not_run_is_refused_with_its_cause() {
+        let refused = |values: &[&str]| match argv::read(&argv(values)) {
+            Err(message) => message,
+            Ok(_) => panic!("{values:?} was admitted"),
+        };
+        for (shape, says) in [
+            (&[][..], "tunnel needs a command: setup, status"),
+            (&["sk-fixture"], "unknown tunnel command; the commands are"),
+            (
+                &["doctor"],
+                "tunnel doctor is not part of the native client",
+            ),
+            (
+                &["start"],
+                "tunnel start is not part of the native client. Run `pseudolife-mcp tunnel run`",
+            ),
+            (
+                &["service", "install"],
+                "tunnel service is not part of the native client",
+            ),
+            (&["status", "--json", "--json"], "--json is given twice"),
+            (&["status", "--profile"], "--profile needs a value"),
+            (&["status", "--profile", "-x"], "--profile needs a value"),
+            (
+                &["status", "--prof", "dot"],
+                "tunnel status does not take --prof",
+            ),
+            (
+                &["status", "extra"],
+                "tunnel status takes no positional arguments",
+            ),
+            (
+                &["setup", "--read-key", "sk-fixture"],
+                "tunnel setup takes no positional arguments",
+            ),
+            (
+                &["setup", "-k=sk-fixture"],
+                "tunnel setup does not take -k;",
+            ),
+            (&["update", "--json"], "tunnel update does not take --json"),
+            (
+                &["verify", "--accept-access"],
+                "tunnel verify does not take --accept-access",
+            ),
+            (
+                &["setup", "--catalog", "all"],
+                "--catalog takes current or full",
+            ),
+            (
+                &["setup", "--read-key", "--read-key"],
+                "--read-key is given twice",
+            ),
+            (&["setup", "--read-key=yes"], "--read-key takes no value"),
+            (&["setup", "--key-file"], "--key-file needs a value"),
+            (
+                &["setup", "--start"],
+                "tunnel setup --start is not part of the native client",
+            ),
+            (
+                &["setup", "--open-browser", "keys"],
+                "tunnel setup --open-browser is not part of the native client",
+            ),
         ] {
-            assert!(!ok(shape), "{shape:?}");
+            let message = refused(shape);
+            assert!(message.starts_with(says), "{shape:?}: {message}");
+            assert!(!message.contains("candidate"), "{shape:?}: {message}");
+            // A word typed in the wrong place may be a secret: never echoed.
+            assert!(!message.contains("sk-fixture"), "{shape:?}: {message}");
+        }
+        for help in [&["--help"][..], &["-h"], &["help"]] {
+            assert!(
+                matches!(argv::read(&argv(help)), Ok(argv::Parsed::Help(text)) if text == argv::OVERVIEW)
+            );
+        }
+        for command in ["setup", "status", "verify", "run", "stop", "update"] {
+            let Ok(argv::Parsed::Help(text)) = argv::read(&argv(&[command, "-h"])) else {
+                panic!("{command} -h");
+            };
+            assert!(
+                text.starts_with(&format!("usage: pseudolife-mcp tunnel {command}")),
+                "{text}"
+            );
         }
     }
 
@@ -1940,7 +2273,7 @@ mod tests {
         assert_eq!(
             recovery,
             format!(
-                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside; this client cannot set a tunnel up yet.",
+                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside and save it again with tunnel setup --daemon-url and --token-file.",
                 store.0.join("bad.profile.json").display()
             )
         );
@@ -2062,10 +2395,13 @@ mod tests {
         let options = parse(&argv(&["status", "--json"])).unwrap();
         let report = report_of(status(&options, &store.0));
         assert_eq!(report["private_key_present"], "not_verified", "{report}");
-        // verify cannot tell whether the key is finished: it defers,
-        // never "finish tunnel setup".
+        // verify cannot tell whether the key is finished: it names the
+        // session as the cause, never "finish tunnel setup".
         let verify_options = parse(&argv(&["verify"])).unwrap();
-        assert_eq!(verify(&verify_options, &store.0).unwrap_err(), Fail::Defer);
+        assert_eq!(
+            verify(&verify_options, &store.0).unwrap_err(),
+            Fail::Tunnel(store::SEALED)
+        );
         let (entry, next) = doctor_entry(&store);
         assert_eq!(entry["private_key_present"], "not_verified", "{entry}");
         assert_eq!(
