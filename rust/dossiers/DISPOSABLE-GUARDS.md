@@ -92,7 +92,7 @@ Behavioral pins:
 - `tests/test_disposable_database_guard.py::test_an_implicit_daemon_dsn_fails_every_check_closed`
 - `tests/test_disposable_database_guard.py::test_an_explicit_empty_dbname_is_the_user_name_not_pgdatabase`
 - `tests/test_disposable_database_guard.py::test_an_unresolved_record_fails_every_check_closed`
-- `tests/test_disposable_database_guard.py::test_every_harness_guard_allows_a_replay_copy`
+- `tests/test_eval_reset_guards.py::test_every_harness_guard_allows_a_replay_copy`
 
 Implementation/inventory pins:
 

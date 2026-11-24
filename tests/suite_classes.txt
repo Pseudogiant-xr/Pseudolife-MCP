@@ -245,6 +245,7 @@ live test_eval_evidence.py
 live test_eval_ladder_sweep.py
 live test_eval_lesson_bench.py
 live test_eval_replicate.py
+live test_eval_reset_guards.py
 live test_events_pass.py
 frozen test_eviction_nonstring_source.py
 frozen test_expose_cli.py
