@@ -1,10 +1,13 @@
-"""The update bridge (pseudolife_memory/update_bridge.py): a client update
-that asks for it (PSEUDOLIFE_SHIM_ENGINE=native) moves to this release's
-native client; otherwise, or when it cannot, it keeps Python and says why. The native binary is faked behind the ``run`` / ``popen`` seams;
-the downloads are real HTTP against a loopback server named by the same
-override the native installer uses."""
+"""The update bridge (pseudolife_memory/update_bridge.py): since 0.26.0 an
+attended client update moves to this release's native client by default;
+PSEUDOLIFE_SHIM_ENGINE=python, a recorded Python install, an unattended run,
+or a machine the native client cannot serve keeps Python and says why. The
+native binary is faked behind the ``run`` / ``popen`` seams and the hand-off
+parent's argv behind ``parent_argv``; the downloads are real HTTP against a
+loopback server named by the same override the native installer uses."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import io
 import os
@@ -27,6 +30,17 @@ HANDOFF = {"PSEUDOLIFE_UPDATE_HANDOFF": "4242",
            "PSEUDOLIFE_UPDATE_HANDOFF_RUNTIME": "/runtimes/000003"}
 URL = "http://127.0.0.1:8765"
 ARGS = ["--clients-only", "--tag", __version__, "--daemon-url", URL]
+
+
+@pytest.fixture(autouse=True)
+def _own_home(tmp_path_factory, monkeypatch):
+    # The bridge reads ~/.pseudolife-mcp/client-engine and the shim layout
+    # under the home: never the real ones.
+    home = tmp_path_factory.mktemp("home")
+    for key in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(key, str(home))
+    for key in ("XDG_DATA_HOME", "LOCALAPPDATA", "PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER"):
+        monkeypatch.delenv(key, raising=False)
 
 
 class Release:
@@ -94,7 +108,9 @@ class Native:
 
     def __init__(self, version: str = __version__, protocols: str = "client-handoff-v1", exit_code: int = 7):
         self.answers = {"--native-capability": (0, "pseudolife-mcp native-update-v1\n", ""),
-                        "--client-handoff-protocols": (0, f"{version}\n{protocols}\n", "")}
+                        "--client-handoff-protocols": (0, f"{version}\n{protocols}\n", ""),
+                        # runtime install --check: no tunnel autostart here.
+                        "install": (0, "", "")}
         self.probes: list[list[str]] = []
         self.started: list[tuple[list[str], dict, dict]] = []
         self.binary_seen: bytes | None = None
@@ -120,10 +136,15 @@ class Native:
         return Proc()
 
 
-def bridge(env, native=None, args=ARGS, lines=None):
+# What a person's `pseudolife-mcp update` looks like from its hand-off child.
+ATTENDED = ["/home/u/.local/share/pseudolife-mcp/runtimes/000002/bin/python", "-m", "pseudolife_memory.cli", "update"]
+
+
+def bridge(env, native=None, args=ARGS, lines=None, parent=ATTENDED):
     native = native or Native()
     return update_bridge.bridge(list(args), update_cli.build_parser, env=env, run=native.run,
-                                popen=native.popen, out=(lines.append if lines is not None else lambda _l: None))
+                                popen=native.popen, out=(lines.append if lines is not None else lambda _l: None),
+                                parent_argv=lambda pid: parent)
 
 
 def handed(release, **extra):
@@ -155,7 +176,8 @@ def test_the_bridge_runs_the_native_client_steps_with_the_handoff_unchanged(rele
     assert "moving this machine to the native client" in lines[0]
     # A failed native run says what keeps Python while the machine is still
     # on it; the native updater reads no setting (Opus reviews).
-    assert len(lines) == 2 and "an update without PSEUDOLIFE_SHIM_ENGINE=native keeps it" in lines[1]
+    assert len(lines) == 2 and "an update with PSEUDOLIFE_SHIM_ENGINE=python keeps it" in lines[1]
+    assert "without PSEUDOLIFE_SHIM_ENGINE=native" not in lines[1]
     # The private scratch copy is gone once the child ended.
     assert not Path(argv[0]).exists()
 
@@ -463,50 +485,283 @@ def test_only_an_ascii_pid_and_the_exact_engine_value_count(release, monkeypatch
     monkeypatch.setattr(update_bridge, "_python_shim_runtime", lambda: True)
     release.publish()
     native = Native()
-    # Not a hand-off, and not asked for: untouched.
-    assert bridge({**handed(release, PSEUDOLIFE_SHIM_ENGINE=None),
-                   "PSEUDOLIFE_UPDATE_HANDOFF": "\u0664\u0662"}, native) is None
-    # Not a hand-off but asked for: a hand-run, whose child sees no
-    # hand-off variable at all.
-    assert bridge({**handed(release), "PSEUDOLIFE_UPDATE_HANDOFF": "\u0664\u0662"}, native) == 7
-    (_, child_env, _), = native.started
-    assert not any(key.startswith("PSEUDOLIFE_UPDATE_HANDOFF") for key in child_env)
+    # Not a hand-off: a hand-run, whose child sees no hand-off variable at
+    # all, and which moves by default as when asked for.
+    for engine in (None, update_bridge.NATIVE):
+        native = Native()
+        assert bridge({**handed(release, PSEUDOLIFE_SHIM_ENGINE=engine),
+                       "PSEUDOLIFE_UPDATE_HANDOFF": "\u0664\u0662"}, native) == 7
+        (_, child_env, _), = native.started
+        assert not any(key.startswith("PSEUDOLIFE_UPDATE_HANDOFF") for key in child_env)
+    # Only the exact "python" keeps Python (runtimes.py honours exactly
+    # that); any other value is no choice and takes the default, the move.
+    for value in ("Python", "PYTHON", " python", "python ", "Native", ""):
+        native = Native()
+        assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=value), native) == 7, value
+        assert len(native.started) == 1
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE="python"), Native()).startswith(
+        "PSEUDOLIFE_SHIM_ENGINE=python keeps the Python client")
+
+
+def test_by_default_an_attended_handoff_moves_to_the_native_client(release):
+    # 0.26.0: a person's update moves the machine unless told otherwise; the
+    # default first asks the staged binary about a tunnel autostart.
+    release.publish(b"the native binary")
     native = Native()
-    before = len(release.seen)
-    # Only the exact "native" asks for the move; "Python" is no choice of
-    # Python either (runtimes.py honours exactly "python"), so it keeps the
-    # default, which is Python.
-    for value in ("Python", "Native", "NATIVE", " native", "native ", ""):
-        note = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=value), native)
-        assert note.startswith("the native client is opt-in in"), (value, note)
-    assert release.seen[before:] == [] and native.started == []
-    assert bridge(handed(release), Native()) == 7
+    lines: list[str] = []
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native, lines=lines) == 7
+    assert [p[1:] for p in native.probes] == [["update", "--native-capability"],
+                                              ["update", "--client-handoff-protocols"],
+                                              ["runtime", "install", "--check"]]
+    (argv, _, _), = native.started
+    assert argv[1:] == ["update", "--clients-only", "--tag", __version__, "--daemon-url", URL]
+    assert "moving this machine to the native client" in lines[0]
 
 
-def test_by_default_a_handoff_keeps_python_and_says_how_to_opt_in(release):
-    # 0.24.0: the move to the native client happens only when asked for, so
-    # nothing is downloaded and the Python child finishes the client steps.
+def test_asked_for_the_native_client_skips_the_tunnel_check(release):
+    # The native updater refuses a tunnel autostart itself, naming the fix.
     release.publish()
     native = Native()
-    note = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native)
-    # The command is given as typed, in both shells: "set X and run" is no
-    # command an agent can run literally (Opus review).
-    assert note == (
-        f"the native client is opt-in in {__version__}: this machine keeps the Python client, and this "
-        f"run's own code finishes the client steps; to move it to the native client, run "
-        f"`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (in PowerShell: "
-        f"`$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update --clients-only`)")
+    native.answers["install"] = (3, "", "this machine stays on the Python client: a tunnel is registered\n")
+    assert bridge(handed(release), native) == 7
+    assert ["runtime", "install", "--check"] not in [p[1:] for p in native.probes]
+
+
+def test_a_platform_with_no_native_build_keeps_python_and_says_so(release, monkeypatch):
+    release.publish()
+    monkeypatch.setattr(update_bridge, "target", lambda *a: None)
+    for engine in (None, update_bridge.NATIVE):
+        native = Native()
+        assert "no native client is built for" in kept(bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=engine), native))
+        assert native.started == []
+    assert release.seen == []
+
+
+UNATTENDED_NOTE = ("this update ran unattended (or its starting command could not be read), so this machine keeps "
+                   "the Python client, and this run's own code finishes the client steps; to move it to the native "
+                   "client, run `pseudolife-mcp update --clients-only`")
+
+
+@pytest.mark.parametrize("parent", [
+    ["/x/pseudolife-mcp", "update", "--unattended"],                                 # the scheduled run
+    ["/x/pseudolife-mcp.exe", "update", "--unattended", "--daemon-url", URL],
+    ["/x/python", "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", "9.9.9",
+     "--result-file", "/s/update-clients.9.9.9.result"],                             # the shim's session start
+    ["/x/python", "update", "--clients-only", "--result-file=/s/r"],
+    ["/x/pseudolife-mcp", "update", "--unattend"],                                   # argparse abbreviations
+    ["/x/python", "update", "--clients-only", "--result-f=/s/r"],
+    ["/x/python", "-m", "pseudolife_memory.cli"],                                    # no update word
+    ["/x/pseudolife-mcp", "update", "--tag"],                                        # does not parse
+    None,                                                                            # cannot be read
+    [],
+], ids=["scheduled", "scheduled-windows", "session-start", "result-file-equals", "abbreviated", "abbreviated-equals",
+        "no-update", "unparsable", "unreadable", "empty"])
+@pytest.mark.parametrize("engine", [None, "native"])
+def test_an_unattended_update_never_changes_the_client(release, parent, engine):
+    release.publish()
+    native = Native()
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=engine), native, parent=parent) == UNATTENDED_NOTE
+    # Nothing downloaded, nothing run.
     assert release.seen == [] and native.probes == [] and native.started == []
 
 
-def test_a_platform_with_no_native_build_is_never_told_to_opt_in(release, monkeypatch):
+@pytest.mark.parametrize("parent", [
+    ATTENDED,
+    ["/opt/--unattended/bin/pseudolife-mcp", "update"],          # a path, not the flag
+    ["--unattended", "update"],                                  # argv[0] is the program
+    ["/x/pseudolife-mcp", "update", "--unattended-x"],
+    ["/x/pseudolife-mcp", "update", "--result-files"],
+], ids=["person", "path-holds-the-word", "program-name", "longer-flag", "other-flag"])
+def test_an_attended_update_moves_even_beside_near_miss_words(release, parent):
     release.publish()
-    monkeypatch.setattr(update_bridge, "target", lambda *a: None)
     native = Native()
-    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native) is None
-    # Near miss: asked for, it says why it kept Python.
-    assert "no native client is built for" in bridge(handed(release), native)
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native, parent=parent) == 7
+
+
+def test_the_parent_is_read_by_the_handoff_pid_and_a_hand_run_reads_none(release, monkeypatch):
+    monkeypatch.setattr(update_bridge, "_python_shim_runtime", lambda: True)
+    release.publish()
+    asked: list[int] = []
+
+    def parent(pid):
+        asked.append(pid)
+        return ATTENDED
+
+    native = Native()
+    update_bridge.bridge(list(ARGS), update_cli.build_parser, env=handed(release, PSEUDOLIFE_SHIM_ENGINE=None),
+                         run=native.run, popen=native.popen, out=lambda _l: None, parent_argv=parent)
+    assert asked == [4242]
+    asked.clear()
+    env = {update_bridge.ARCHIVE_URL_ENV: release.base}
+    update_bridge.bridge(["--clients-only"], update_cli.build_parser, env=env, run=Native().run,
+                         popen=Native().popen, out=lambda _l: None, parent_argv=parent)
+    assert asked == []
+
+
+def test_a_process_argv_is_read_in_place_word_for_word():
+    if not (sys.platform.startswith("linux") or sys.platform == "darwin" or os.name == "nt"):
+        pytest.skip("no reader for this platform")
+    # A child of known argv reads its own: quoting, spaces and an empty word
+    # survive, and nothing is started to read it.
+    words = ["update", "--clients-only", "two words", "", 'a "quoted" word', "--unattended"]
+    code = ("import os, sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory import update_bridge; "
+            "print(repr(update_bridge.process_argv(os.getpid())))")
+    root = str(Path(__file__).resolve().parents[1])
+    done = subprocess.run([sys.executable, "-c", code, root, *words], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    argv = ast.literal_eval(done.stdout.strip())
+    assert argv[-len(words) - 1:] == [root, *words], argv
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the /proc reader")
+def test_any_failure_inside_the_reader_is_an_argv_that_cannot_be_read(monkeypatch):
+    def broken(self):
+        raise IndexError("a reader bug")
+
+    monkeypatch.setattr(update_bridge.Path, "read_bytes", broken)
+    assert update_bridge.process_argv(os.getpid()) is None
+
+
+def test_an_argv_that_cannot_be_read_counts_as_unattended():
+    assert update_bridge.ran_unattended("4242", update_cli.build_parser, lambda pid: None) is True
+    assert update_bridge.ran_unattended("4242", update_cli.build_parser, lambda pid: ATTENDED) is False
+    if sys.platform.startswith("linux") or os.name == "nt":
+        assert update_bridge.process_argv(0) is None
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    assert update_bridge.engine_record() == tmp_path / ".pseudolife-mcp" / "client-engine"
+    return tmp_path
+
+
+def _record(home, text):
+    record = home / ".pseudolife-mcp" / "client-engine"
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(text, encoding="utf-8")
+    return record
+
+
+def test_a_recorded_python_install_keeps_python_by_default(release, home):
+    record = _record(home, "python\n")
+    release.publish()
+    native = Native()
+    note = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native)
+    assert note == (
+        f"{record} records an earlier PSEUDOLIFE_SHIM_ENGINE=python install, so this machine keeps the Python "
+        f"client, and this run's own code finishes the client steps; to move it to the native client, run "
+        f"`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (in PowerShell: "
+        f"`$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update --clients-only`)")
     assert release.seen == [] and native.started == []
+    assert record.exists()
+
+
+@pytest.mark.parametrize("code, moved", [(0, True), (5, True), (0, False), (7, False)])
+def test_asked_for_native_ends_the_record_only_once_the_launcher_moved(release, home, code, moved, monkeypatch):
+    # The launcher, not the exit code, is what a later run reads: an update
+    # that activated it and then failed a client step still moved, and one
+    # that ended 0 with nothing to move did not.
+    monkeypatch.setattr(update_bridge, "_launcher_moved", lambda: moved)
+    record = _record(home, "python\n")
+    release.publish()
+    assert bridge(handed(release), Native(exit_code=code)) == code
+    assert record.exists() is not moved
+
+
+def test_a_record_that_cannot_be_removed_is_said(release, home, monkeypatch):
+    monkeypatch.setattr(update_bridge, "_launcher_moved", lambda: True)
+    record = _record(home, "python\n")
+    release.publish()
+    real_unlink = Path.unlink
+
+    def unlink(self, *args, **kwargs):
+        if self == record:
+            raise PermissionError(13, "Access is denied")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    lines: list[str] = []
+    assert bridge(handed(release), Native(exit_code=0), lines=lines) == 0
+    [said] = [line for line in lines if "still records the Python client" in line]
+    assert str(record) in said and "PSEUDOLIFE_SHIM_ENGINE=native" in said
+
+
+def test_a_record_that_cannot_be_read_keeps_python_unless_native_is_asked_for(release, home):
+    record = home / ".pseudolife-mcp" / "client-engine"
+    record.mkdir(parents=True)          # read_text fails: not FileNotFoundError
+    release.publish()
+    native = Native()
+    note = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native)
+    assert note.startswith(f"{record} could not be read (") and "may record a Python install" in note, note
+    assert "make that file readable or delete it" in note
+    assert native.started == []
+    assert bridge(handed(release), Native()) == 7
+
+
+@pytest.mark.parametrize("text", ["native\n", "", "Python\n", "python python\n"])
+def test_a_record_that_does_not_say_exactly_python_is_no_choice(release, home, text):
+    _record(home, text)
+    release.publish()
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), Native()) == 7
+
+
+def test_by_default_a_tunnel_autostart_keeps_python_and_names_the_update_that_explains(release):
+    release.publish()
+    native = Native()
+    # The check's own refusal is worded for the installer: not repeated in
+    # an update, which names the update command that refuses for an update.
+    native.answers["install"] = (3, "", "this machine stays on the Python client: ... rerun the installer ...\n")
+    lines: list[str] = []
+    note = kept(bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native, lines=lines))
+    assert lines == []
+    assert ("a tunnel the Python client registered to start by itself keeps it; "
+            "`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (in PowerShell: "
+            "`$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update --clients-only`) says how to remove that "
+            "autostart without changing anything, and moves the machine once it is gone") in note
+    assert "installer" not in note
+    assert native.started == []
+
+
+@pytest.mark.parametrize("answer, moves", [((0, "", ""), True), ((1, "", "usage"), True),
+                                           ("timeout", False), ("oserror", False)])
+def test_the_tunnel_check_keeps_python_only_on_its_refusal_or_when_it_cannot_run(release, answer, moves):
+    release.publish()
+    native = Native()
+    plain_run = native.run
+
+    def run(argv, **kwargs):
+        if argv[1:] == ["runtime", "install", "--check"]:
+            if answer == "timeout":
+                raise subprocess.TimeoutExpired(argv, 120)
+            if answer == "oserror":
+                raise OSError(8, "Exec format error")
+        return plain_run(argv, **kwargs)
+
+    native.run = run
+    if isinstance(answer, tuple):
+        native.answers["install"] = answer
+    result = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native)
+    assert (result == 7) is moves, result
+
+
+def test_python_comes_before_unattended_and_unattended_before_the_record(release, home):
+    _record(home, "python\n")
+    release.publish()
+    unattended = ["/x/pseudolife-mcp", "update", "--unattended"]
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE="python"), Native(), parent=unattended).startswith(
+        "PSEUDOLIFE_SHIM_ENGINE=python keeps")
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), Native(), parent=unattended) == UNATTENDED_NOTE
+
+
+@pytest.mark.parametrize("kind, moved", [("native", True), ("unknown", True), ("python", False),
+                                         ("unreadable", False), ("missing", False)])
+def test_the_launcher_counts_as_moved_only_when_it_is_not_the_python_one(kind, moved, monkeypatch):
+    from pseudolife_memory import runtimes
+    monkeypatch.setattr(runtimes, "default_layout", lambda *a, **k: object())
+    monkeypatch.setattr(runtimes, "_launcher_kind", lambda layout: kind)
+    assert update_bridge._launcher_moved() is moved
 
 
 def test_a_hand_run_moves_only_from_a_python_shim_runtime(release, monkeypatch):
@@ -539,13 +794,16 @@ def test_the_setting_never_doubles_help_or_a_usage_error(monkeypatch, capsys):
     ARGS,
     ARGS + ["--allow-downgrade"],
 ])
-def test_a_hand_run_clients_update_moves_when_the_native_client_is_asked_for(release, args, monkeypatch):
+@pytest.mark.parametrize("engine", [None, "native"])
+def test_a_hand_run_clients_update_moves_by_default_and_when_asked_for(release, args, engine, monkeypatch):
     # A machine that kept Python at this release moves without waiting for
-    # the next one: its own `update --clients-only`, with the opt-in set.
+    # the next one: its own `update --clients-only`.
     monkeypatch.delenv("PSEUDOLIFE_MCP_DAEMON_URL", raising=False)
     monkeypatch.setattr(update_bridge, "_python_shim_runtime", lambda: True)
     release.publish(b"the native binary")
-    env = {update_bridge.ARCHIVE_URL_ENV: release.base, update_bridge.ENGINE_ENV: update_bridge.NATIVE}
+    env = {update_bridge.ARCHIVE_URL_ENV: release.base}
+    if engine:
+        env[update_bridge.ENGINE_ENV] = engine
     native = Native(exit_code=0)
     lines: list[str] = []
     assert bridge(env, native, args=args, lines=lines) == 0
@@ -563,9 +821,9 @@ def test_a_hand_run_clients_update_moves_when_the_native_client_is_asked_for(rel
 
 
 @pytest.mark.parametrize("args, engine", [
-    (["--clients-only"], None),                                       # not asked for
-    (["--clients-only"], "Native"),
+    (["--clients-only"], "python"),                                   # asked for Python
     (["--tag", __version__, "--daemon-url", URL], "native"),          # a full update
+    (["--tag", __version__, "--daemon-url", URL], None),
     (["--clients-only", "--reinstall"], "native"),
     (["--clients-only", "--json"], "native"),
     (["--clients-only", "--tag", "0.0.1"], "native"),                 # another release
@@ -574,6 +832,8 @@ def test_a_hand_run_clients_update_moves_when_the_native_client_is_asked_for(rel
     (["--check"], "native"),
     (["--daemon-only"], "native"),
     (["--clients-only", "--result-file", "r"], "native"),
+    (["--clients-only", "--result-file", "r"], None),                 # the shim's own unattended run
+    (["--unattended"], None),
 ])
 def test_other_hand_runs_stay_python_and_say_nothing(release, args, engine, monkeypatch):
     monkeypatch.setattr(update_bridge, "_python_shim_runtime", lambda: True)
