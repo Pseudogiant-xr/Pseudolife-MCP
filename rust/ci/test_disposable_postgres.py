@@ -1049,8 +1049,12 @@ def test_command_line_exports_a_superuser_url_and_leaves_the_cluster_running(com
     assert started.parent.parent == command_line.tmp  # under home, not RUNNER_TEMP
 
 
-@pytest.mark.parametrize("argv", [["--github-env", "lower"], ["--github-env", "A=B"],
-                                  ["--github-env", "OK", "--database", "Bad-Name"], []])
+@pytest.mark.parametrize("argv", [["--github-env", "lower", "--database", "ok_db"],
+                                  ["--github-env", "A=B", "--database", "ok_db"],
+                                  ["--github-env", "OK", "--database", "Bad-Name"],
+                                  ["--github-env", "OK"],
+                                  ["--github-env", "OK", "--database", "postgres"],
+                                  ["--github-env", "OK", "--database", "template1"], []])
 def test_command_line_refuses_bad_arguments_before_starting(command_line, argv):
     with pytest.raises(SystemExit) as refused:
         postgres.main(argv)
@@ -1061,12 +1065,31 @@ def test_command_line_refuses_bad_arguments_before_starting(command_line, argv):
 def test_command_line_refuses_outside_github_actions(command_line, monkeypatch):
     monkeypatch.delenv("GITHUB_ENV")
     with pytest.raises(SystemExit):
-        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL"])
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"])
     assert command_line.fakes.pg0.instances == []
 
 
 def test_command_line_stops_the_cluster_when_it_cannot_export(command_line, monkeypatch):
     monkeypatch.setenv("GITHUB_ENV", str(command_line.tmp / "missing-dir" / "github-env"))
     with pytest.raises(OSError):
-        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL"])
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"])
     assert len(command_line.fakes.stops) == 1
+
+
+def test_command_line_keeps_the_export_error_when_cleanup_raises(command_line, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ENV", str(command_line.tmp / "missing-dir" / "github-env"))
+
+    def stop(self):
+        raise RuntimeError("cleanup broke")
+
+    monkeypatch.setattr(postgres.Server, "stop", stop)
+    with pytest.raises(OSError):  # the export's error, not the cleanup's
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"])
+    err = capsys.readouterr().err
+    assert "cleanup failed (RuntimeError)" in err and "is still running" in err
+
+
+def test_command_line_masks_only_under_github_actions(command_line, monkeypatch, capsys):
+    monkeypatch.delenv("GITHUB_ACTIONS")
+    assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
+    assert "::add-mask::" not in capsys.readouterr().out

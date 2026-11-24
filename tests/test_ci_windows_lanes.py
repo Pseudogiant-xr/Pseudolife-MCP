@@ -198,6 +198,7 @@ def test_both_lanes_run_their_postgres_tests_instead_of_skipping_them():
                      if "pytest" in s.get("run", "") or WRAPPER in s.get("run", ""))
         assert start < tests, job_id
         assert "--github-env PSEUDOLIFE_TEST_DATABASE_URL" in steps[start]["run"], job_id
+        assert "--database pseudolife_memory_test" in steps[start]["run"], job_id
         assert steps[tests]["env"]["PSEUDOLIFE_REQUIRE_TEST_POSTGRES"] == "1", job_id
 
 

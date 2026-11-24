@@ -505,26 +505,32 @@ def native_binary(root: Path) -> Path:
 
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
 _DATABASE = re.compile(r"[a-z_][a-z0-9_]*")
+# The cluster's own databases: tests that took one for their test database
+# would truncate and reap the connections of the admin database itself.
+_RESERVED_DATABASES = frozenset({"postgres", "template0", "template1"})
 
 
 def main(argv: list[str] | None = None) -> int:
     """Start a cluster for a CI job's later steps and export its URL.
 
-    ``python rust/ci/disposable_postgres.py --github-env NAME [--database DB]``
+    ``python rust/ci/disposable_postgres.py --github-env NAME --database DB``
     starts a cluster under the home directory (initdb's chmod; see
     ``start``), leaves it running for the rest of the job (the runner is
     discarded afterwards), masks its superuser password in the job log and
     appends ``NAME=<superuser URL of DB>`` to ``$GITHUB_ENV``.
     """
-    parser = argparse.ArgumentParser(description=main.__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description="Start a disposable PostgreSQL for a CI job's later steps and export its URL.")
     parser.add_argument("--github-env", required=True, metavar="NAME",
                         help="the variable later steps read the superuser URL from")
-    parser.add_argument("--database", default="postgres", help="the database the URL names")
+    parser.add_argument("--database", required=True,
+                        help="the test database the URL names (not postgres or a template)")
     options = parser.parse_args(argv)
     if not _ENV_NAME.fullmatch(options.github_env):
         parser.error("--github-env takes an environment variable name (A-Z, 0-9, _)")
-    if not _DATABASE.fullmatch(options.database):
-        parser.error("--database takes a lowercase identifier (a-z, 0-9, _)")
+    if not _DATABASE.fullmatch(options.database) or options.database in _RESERVED_DATABASES:
+        parser.error("--database takes a lowercase identifier (a-z, 0-9, _) naming a test database, "
+                     "not postgres, template0 or template1")
     github_env = os.environ.get("GITHUB_ENV")
     if not github_env:
         parser.error("GITHUB_ENV is not set: run this as a GitHub Actions step")
@@ -535,7 +541,14 @@ def main(argv: list[str] | None = None) -> int:
         with open(github_env, "a", encoding="utf-8", newline="") as stream:
             stream.write(f"{options.github_env}={server.url(options.database)}\n")
     except BaseException:
-        if not server.stop():
+        # A cleanup that fails is reported beside the export error, which
+        # stays the one raised.
+        try:
+            stopped = server.stop()
+        except Exception as cleanup:  # noqa: BLE001
+            stopped = False
+            print(f"cleanup failed ({type(cleanup).__name__})", file=sys.stderr)
+        if not stopped:
             print(f"the disposable PostgreSQL in {server.data_dir} is still running", file=sys.stderr)
         raise
     print(f"Disposable PostgreSQL is ready on {server.host}:{server.port}; {options.github_env} names "
