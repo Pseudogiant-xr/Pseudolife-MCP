@@ -270,9 +270,10 @@ def test_the_install_records_an_explicit_python_choice_and_accepts_rust(tmp_path
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("flag,installed", [("", "none"), ("rust", "none"), ("python", "rust-unaccepted"),
-                                            ("", "rust"), ("python", "rust")],
-                         ids=["default", "explicit-rust", "unfinished-rust-asks-python", "rust-installed",
+@pytest.mark.parametrize("flag,installed", [("", "none"), ("rust", "none"), ("", "rust-unaccepted"),
+                                            ("python", "rust-unaccepted"), ("", "rust"), ("python", "rust")],
+                         ids=["default", "explicit-rust", "unfinished-rust", "unfinished-rust-asks-python",
+                              "rust-installed",
                               "rust-installed-asks-python"])
 def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, flag, installed):
     # Conductor round-4 delta: with the shim transport, no token set and no
@@ -318,13 +319,13 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
         assert proc.returncode == 0, output
         assert "RESULT:python" in output
         assert [call for call in prepares if "--engine rust" in call] == []
-    elif flag == "rust" or installed == "rust":
+    elif flag == "rust" or installed in ("rust-unaccepted", "rust"):
         # A Rust install that is not a default refuses before it pulls anything.
         assert proc.returncode == 2, output
         assert "cannot mint one" in output and "Nothing was pulled or started" in output
         assert prepares == []
         # Where an accepted Rust daemon is installed, the engine stays what
-        # detection found (`rust`, rust/shim/src/cli/installer/engine.rs) and
+        # detection found (`rust`, ops/installer_engine.py `detect`) and
         # the Python engine is only switched to later, so a rerun with it meets
         # this same refusal: the text offers it only where detection found no
         # accepted Rust daemon.
@@ -340,7 +341,8 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
 @pytest.mark.parametrize("token_state,defaulted,expected,installed", [
     ("minted", True, "rust", "none"), ("present", True, "rust", "none"), ("no-shim", True, "python", "none"),
     ("failed", True, "python", "none"), ("no-shim", False, "refused", "none"), ("present", False, "rust", "none"),
-    ("no-shim", False, "refused", "rust"), ("failed", False, "refused", "rust"),
+    ("no-shim", False, "refused", "rust-unaccepted"), ("no-shim", False, "refused", "rust"),
+    ("failed", False, "refused", "rust"),
 ])
 def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, defaulted, expected,
                                                                 installed):
