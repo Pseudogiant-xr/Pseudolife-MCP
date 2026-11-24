@@ -32,7 +32,6 @@ import base64
 import contextlib
 import hashlib
 import hmac
-import ipaddress
 import json
 import os
 from pathlib import Path
@@ -42,7 +41,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 SUPERUSER = "postgres"
 # Variables libpq and the native client read; the native client refuses
@@ -64,6 +63,15 @@ TEST_LOGIN_TIMEOUT = 240
 # How long a failed start waits for a launched server to answer as ours
 # before leaving it running (pg0's own readiness wait failed first).
 ABANDON_WAIT = 30
+# The one address every connection here pins, and the only one exported.
+HOST = "127.0.0.1"
+# What pg0's own URI may name for it.
+_URI_HOSTS = frozenset({"127.0.0.1", "localhost"})
+# How long a postmaster.pid that exists but does not parse yet (the
+# postmaster writes it in steps) is re-read before it counts as unreadable.
+PIDFILE_SETTLE = 2.0
+# ERROR_PIPE_BUSY: the postmaster serves one signal-pipe client at a time.
+_PIPE_BUSY = 231
 
 
 class SetupError(RuntimeError):
@@ -92,10 +100,23 @@ def _pidfile(pgdata: Path) -> tuple[int, int] | None:
         return None
 
 
+def _pidfile_settled(pgdata: Path) -> tuple[tuple[int, int] | None, bool]:
+    """(record, present): the pid file's record, re-read for up to
+    PIDFILE_SETTLE seconds while it exists but does not parse yet, and
+    whether a pid file is there at all."""
+    deadline = time.monotonic() + PIDFILE_SETTLE
+    while True:
+        record = _pidfile(pgdata)
+        present = (pgdata / "postmaster.pid").exists()
+        if record is not None or not present or time.monotonic() >= deadline:
+            return record, present
+        time.sleep(0.1)
+
+
 def _connect(port: int, password: str, dbname: str = "postgres"):
     import psycopg  # noqa: PLC0415 - a CI dependency, not the package's
     with _without_libpq_environment():
-        return psycopg.connect(host="127.0.0.1", hostaddr="127.0.0.1", port=port, user=SUPERUSER,
+        return psycopg.connect(host=HOST, hostaddr=HOST, port=port, user=SUPERUSER,
                                password=password, dbname=dbname, sslmode="disable", options="",
                                connect_timeout=10, autocommit=True)
 
@@ -143,25 +164,16 @@ def scram_verifier(password: str, salt: bytes | None = None, iterations: int = 4
     return f"SCRAM-SHA-256${iterations}:{b64(salt)}${b64(stored_key)}:{b64(server_key)}"
 
 
-def loopback_host(host: str) -> str:
-    """The IPv4 loopback address ``host`` names, or SetupError."""
-    host = "127.0.0.1" if host == "localhost" else host.strip("[]")
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        raise SetupError("PostgreSQL did not provide a loopback TCP endpoint") from None
-    if address.version != 4 or not address.is_loopback:
-        raise SetupError("PostgreSQL did not provide a loopback TCP endpoint")
-    return str(address)
-
-
 class Server:
     """A started cluster; only ``owned`` servers are ever stopped."""
 
+    # Every check here connects to HOST, so HOST is all that is exported.
+    host = HOST
+
     def __init__(self, *, name: str, data_dir: Path, pgdata: Path, port: int, pid: int,
-                 password: str, owned: bool, host: str = "127.0.0.1", started: str = ""):
+                 password: str, owned: bool, started: str = ""):
         self.name, self.data_dir, self.pgdata = name, data_dir, pgdata
-        self.host, self.port, self.pid = host, port, pid
+        self.port, self.pid = port, pid
         self.password, self.owned, self.started = password, owned, started
 
     def __repr__(self) -> str:  # never the password
@@ -170,10 +182,6 @@ class Server:
     def admin_conninfo(self, dbname: str = "postgres") -> str:
         """Key/value conninfo without the password (PGPASSWORD carries it)."""
         return f"host={self.host} port={self.port} user={SUPERUSER} dbname={dbname}"
-
-    def url(self, dbname: str) -> str:
-        """A superuser URL with the password, for a test runner's environment."""
-        return f"postgresql://{SUPERUSER}:{quote(self.password, safe='')}@{self.host}:{self.port}/{dbname}"
 
     def stop(self) -> bool:
         """Stop and remove the server if this process started it and it is
@@ -202,7 +210,16 @@ def _signal_shutdown(pid: int) -> None:
     -D``, which signals whatever pid the file names when it runs, this reaches
     only the process just verified."""
     if os.name == "nt":
-        with open(rf"\\.\pipe\pgsignal_{pid}", "r+b", buffering=0) as pipe:
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                pipe = open(rf"\\.\pipe\pgsignal_{pid}", "r+b", buffering=0)
+                break
+            except OSError as error:
+                if getattr(error, "winerror", None) != _PIPE_BUSY or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.1)
+        with pipe:
             pipe.write(bytes([_FAST_SHUTDOWN]))
             pipe.read(1)
     else:
@@ -215,20 +232,32 @@ def _exited(pgdata: Path, pid: int, wait: float) -> bool:
     removes as the last step of a clean shutdown."""
     deadline = time.monotonic() + wait
     while True:
+        if not (pgdata / "postmaster.pid").exists():
+            return True
         record = _pidfile(pgdata)
-        if record is None or record[0] != pid:
-            return record is None
+        if record is not None and record[0] != pid:
+            return False  # another server holds the directory now
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.2)
 
 
+def _registry_record(name: str) -> Path:
+    """pg0's record of instance ``name`` (pg0 keeps ~/.pg0/instances/<name>)."""
+    return Path.home() / ".pg0" / "instances" / name
+
+
 def _deregister(name: str, pgdata: Path) -> None:
-    """Remove pg0's registry record of a server already stopped (pg0 finds
-    instances by name, so its drop is no proof that anything stopped)."""
-    import pg0  # noqa: PLC0415
-    with _without_libpq_environment():
-        pg0.Pg0(name=name, data_dir=str(pgdata)).drop(force=True)
+    """Remove pg0's registry record of a server already stopped, by hand:
+    ``pg0 drop`` would run pg0's own stop by the pid it recorded, which is
+    dead by now and may be reused. Only a record naming ``pgdata`` goes."""
+    record = _registry_record(name)
+    try:
+        data_dir = json.loads((record / "instance.json").read_text(encoding="utf-8")).get("data_dir", "")
+    except (OSError, ValueError):
+        return
+    if os.path.normcase(os.path.abspath(data_dir)) == os.path.normcase(os.path.abspath(pgdata)):
+        shutil.rmtree(record, ignore_errors=True)
 
 
 def _stop_verified(name: str, pgdata: Path, port: int, pid: int, passwords: list[str], *,
@@ -265,11 +294,31 @@ def _abandon(name: str, data_dir: Path, pgdata: Path, passwords: list[str]) -> N
     """Undo a start that failed: stop a server pg0 launched in our fresh
     directory once it answers as ours, then remove the directory once
     nothing runs in it. A server that never answers is left running."""
-    record = _pidfile(pgdata)
+    record, present = _pidfile_settled(pgdata)
+    if present and record is None:
+        print(f"disposable PostgreSQL in {pgdata} has a pid file that cannot be read; left as it is", file=sys.stderr)
+        return
     if record is not None and not _stop_verified(name, pgdata, record[1], record[0], passwords, wait=ABANDON_WAIT):
         print(f"disposable PostgreSQL in {pgdata} did not answer as ours; left running", file=sys.stderr)
         return
+    _deregister(name, pgdata)  # also a record pg0 wrote before failing
     shutil.rmtree(data_dir, ignore_errors=True)
+
+
+def _scrub(error: BaseException, secrets_: list[str]) -> None:
+    """Remove ``secrets_`` from the text of ``error`` and its chain (pg0's
+    stderr can carry the start-up password it was given on its argv)."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        args = list(error.args)
+        for index, arg in enumerate(args):
+            if isinstance(arg, str):
+                for secret in secrets_:
+                    arg = arg.replace(secret, "***")
+                args[index] = arg
+        error.args = tuple(args)
+        error = error.__cause__ or error.__context__
 
 
 def start(parent: Path, prefix: str) -> Server:
@@ -277,14 +326,23 @@ def start(parent: Path, prefix: str) -> Server:
 
     ``parent`` is where initdb may chmod: on hosted Windows the runner's
     staging root (RUNNER_TEMP) carries a group ACL that denies it, so CI
-    passes the user profile.
+    passes the user profile. No exception leaves with a password in it.
     """
+    first = secrets.token_hex(16)
+    holder = []
+    try:
+        return _start(parent, prefix, first, holder)
+    except BaseException as error:
+        _scrub(error, [first, *(server.password for server in holder)])
+        raise
+
+
+def _start(parent: Path, prefix: str, first: str, holder: list) -> Server:
     import pg0  # noqa: PLC0415
     data_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
     pgdata = data_dir / "pgdata"
     pgdata.mkdir()
     name = f"{prefix.strip('-_') or 'pl-ci'}-{secrets.token_hex(6)}"
-    first = secrets.token_hex(16)
     instance = pg0.Pg0(name=name, data_dir=str(pgdata), username=SUPERUSER, password=first,
                        config=SERVER_SETTINGS)
     try:
@@ -298,7 +356,7 @@ def start(parent: Path, prefix: str) -> Server:
         # server in this fresh directory is ours and must not outlive this.
         _abandon(name, data_dir, pgdata, [first])
         raise
-    record = _pidfile(pgdata)
+    record, _ = _pidfile_settled(pgdata)
     if record is None:
         # pg0 reports a server, but none runs in our fresh directory: it
         # attached to something else, which is not ours to use or stop.
@@ -310,10 +368,14 @@ def start(parent: Path, prefix: str) -> Server:
         if (info.port and info.port != port) or (info.pid and info.pid != pid):
             raise SetupError("pg0 reported another server than the one in its fresh directory; refusing it")
         # pg0 may omit the URI when its own health probe failed; the server
-        # in our directory still answers below or the start fails.
-        host = loopback_host(urlsplit(info.uri).hostname or "") if info.uri else "127.0.0.1"
+        # in our directory still answers below or the start fails. A URI
+        # naming any other host than the one every check connects to is
+        # refused: only HOST is verified, so only HOST is exported.
+        if info.uri and (urlsplit(info.uri).hostname or "") not in _URI_HOSTS:
+            raise SetupError(f"pg0 reported a server on another host than {HOST}; refusing it")
         server = Server(name=name, data_dir=data_dir, pgdata=pgdata, port=port, pid=pid,
-                        password=first, owned=True, host=host)
+                        password=first, owned=True)
+        holder.append(server)
         rotate_password(server)
     except BaseException:
         passwords = [first] if server is None or server.password == first else [server.password, first]
@@ -365,9 +427,11 @@ def create_test_login(binary: Path, server: Server, login_file: Path, *,
                "--admin-url", server.admin_conninfo()]
     with tempfile.TemporaryDirectory(prefix="pl-test-login-profile-") as profile:
         env = dict(child_environment(server), HOME=profile, USERPROFILE=profile, APPDATA=profile)
+        # No console window on Windows (tooling code; its output is captured).
+        flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
         return subprocess.run(command, env=env, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, encoding="utf-8", errors="replace",
-                              timeout=timeout)
+                              timeout=timeout, creationflags=flags)
 
 
 def failure_reason(result: subprocess.CompletedProcess) -> str:

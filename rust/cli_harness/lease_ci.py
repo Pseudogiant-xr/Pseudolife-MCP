@@ -83,6 +83,8 @@ def main() -> int:
             reason = postgres.failure_reason(result)
             print(diagnostic(RuntimeError(reason), f"password={secret}"), file=sys.stderr)
             return result.returncode
+        if not login_file.is_file():
+            raise postgres.SetupError(f"test-login create reported success but wrote no login file at {login_file}")
 
         with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="") as env_file:
             env_file.write(f"PSEUDOLIFE_TEST_PG_HOST_PORT={host_port}\n")

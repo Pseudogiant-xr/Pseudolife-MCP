@@ -45,7 +45,7 @@ class FakePg0:
         self.already_running = self.fail_after_launch = False
         self.pidfile = self.answers = True
         self.info_pid = self.info_port = None
-        self.instances, self.drops = [], []
+        self.instances = []
         self.Pg0AlreadyRunningError = _AlreadyRunning
         fake = self
 
@@ -59,6 +59,10 @@ class FakePg0:
                 if fake.already_running:
                     raise _AlreadyRunning("instance already running")
                 data_dir = Path(self.kwargs["data_dir"])
+                record = Path.home() / ".pg0" / "instances" / self.kwargs["name"]
+                record.mkdir(parents=True)
+                (record / "instance.json").write_text(json.dumps({"data_dir": str(data_dir), "pid": fake.pid}),
+                                                      encoding="utf-8")
                 if fake.pidfile:
                     (data_dir / "postmaster.pid").write_text(
                         f"{fake.pid}\n{data_dir}\n0\n{fake.port}\n", encoding="utf-8")
@@ -72,10 +76,9 @@ class FakePg0:
                     uri=f"postgresql://postgres:{self.kwargs['password']}@{fake.uri_host}:{port}/postgres")
 
             def drop(self, force=True):
-                # pg0 drop: stop the server, delete its data directory.
-                fake.drops.append(self.kwargs["name"])
-                fake.server.running = False
-                shutil.rmtree(self.kwargs["data_dir"], ignore_errors=True)
+                # pg0 drop stops by the pid pg0 recorded, which may be dead and
+                # reused by now: the helper must never call it.
+                raise AssertionError("pg0 drop was called")
 
         self.Pg0 = Pg0
 
@@ -142,6 +145,23 @@ def fakes(monkeypatch, tmp_path):
     monkeypatch.setattr(postgres, "_connect", server.connect)
     monkeypatch.setattr(postgres, "ABANDON_WAIT", 0)
     monkeypatch.setattr(postgres, "STOP_WAIT", 0)
+    monkeypatch.setattr(postgres, "PIDFILE_SETTLE", 0)
+    home = tmp_path / "home"
+    home.mkdir()
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    deregistered = []
+    real_deregister = postgres._deregister
+
+    def deregister(name, pgdata):
+        had = postgres._registry_record(name).exists()
+        real_deregister(name, pgdata)
+        if had and not postgres._registry_record(name).exists():
+            deregistered.append(name)
+
+    monkeypatch.setattr(postgres, "_deregister", deregister)
+    pg0.drops = deregistered  # what the old pg0 drop calls recorded: a record removed
     stops = []
 
     def signal_shutdown(pid):
@@ -153,7 +173,7 @@ def fakes(monkeypatch, tmp_path):
         server.running = False
 
     monkeypatch.setattr(postgres, "_signal_shutdown", signal_shutdown)
-    return types.SimpleNamespace(pg0=pg0, server=server, parent=tmp_path, stops=stops)
+    return types.SimpleNamespace(pg0=pg0, server=server, parent=parent, stops=stops, home=home)
 
 
 def test_start_owns_a_fresh_loopback_cluster(fakes):
@@ -208,7 +228,8 @@ def test_start_refuses_a_server_outside_its_fresh_directory(fakes):
     fakes.pg0.pidfile = False
     with pytest.raises(postgres.SetupError, match="refusing to adopt it"):
         postgres.start(fakes.parent, "pl-test-")
-    assert fakes.pg0.drops == []  # nothing of ours runs
+    assert fakes.stops == []  # nothing of ours runs
+    assert not list((fakes.home / ".pg0" / "instances").iterdir())  # and pg0's record of it goes
     assert list(fakes.parent.iterdir()) == []
 
 
@@ -218,7 +239,7 @@ def test_start_removes_its_directory_when_pg0_fails_before_launching(fakes):
     fakes.pg0.pidfile, fakes.pg0.fail_after_launch = False, True
     with pytest.raises(_Pg0Error):
         postgres.start(fakes.parent, "pl-test-")
-    assert fakes.pg0.drops == []
+    assert fakes.stops == []
     assert list(fakes.parent.iterdir()) == []
 
 
@@ -262,22 +283,22 @@ def test_start_uses_its_own_server_when_pg0_omits_the_uri(fakes):
     assert (server.port, server.pid, server.host) == (55432, 4242, "127.0.0.1")
 
 
-def test_start_refuses_a_non_loopback_endpoint(fakes):
-    fakes.pg0.uri_host = "10.0.0.5"
-    with pytest.raises(postgres.SetupError, match="loopback"):
+@pytest.mark.parametrize("host", ["10.0.0.5", "127.0.0.2", "0.0.0.0", "::1", "example.com"])
+def test_start_refuses_a_uri_host_other_than_the_verified_one(fakes, host):
+    """Every check connects to 127.0.0.1, so only 127.0.0.1 is exported:
+    pg0 naming any other host, loopback or not, is refused."""
+    fakes.pg0.uri_host = f"[{host}]" if ":" in host else host
+    with pytest.raises(postgres.SetupError, match="another host than 127.0.0.1"):
         postgres.start(fakes.parent, "pl-test-")
-    assert len(fakes.pg0.drops) == 1
+    assert len(fakes.stops) == 1  # our own server is stopped
 
 
-@pytest.mark.parametrize("host", ["10.0.0.5", "0.0.0.0", "::1", "example.com", ""])
-def test_loopback_host_refuses_everything_but_ipv4_loopback(host):
-    with pytest.raises(postgres.SetupError):
-        postgres.loopback_host(host)
-
-
-@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "127.0.0.2"])
-def test_loopback_host_accepts_ipv4_loopback(host):
-    assert postgres.loopback_host(host).startswith("127.")
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
+def test_start_exports_only_the_verified_host(fakes, host):
+    fakes.pg0.uri_host = host
+    server = postgres.start(fakes.parent, "pl-test-")
+    assert server.host == "127.0.0.1"
+    assert server.admin_conninfo().startswith("host=127.0.0.1 ")
 
 
 def test_pg0_and_connections_never_see_the_runners_libpq_variables(fakes, monkeypatch):
@@ -460,6 +481,139 @@ def test_stop_leaves_a_server_it_cannot_identify(fakes, change):
     assert fakes.pg0.drops == []
 
 
+def test_no_exception_leaves_start_with_the_start_up_password(fakes):
+    """pg0's stderr can carry the password it was given on its argv."""
+    fakes.pg0.fail_after_launch = True
+    original = fakes.pg0.Pg0.start
+
+    def start(self):
+        try:
+            original(self)
+        except _Pg0Error as error:
+            raise _Pg0Error(f"pg0 start --password {self.kwargs['password']} failed") from error
+
+    fakes.pg0.Pg0.start = start
+    with pytest.raises(_Pg0Error) as raised:
+        postgres.start(fakes.parent, "pl-test-")
+    password = fakes.pg0.instances[0]["password"]
+    assert password not in str(raised.value) and "***" in str(raised.value)
+
+
+def test_a_partly_written_pid_file_is_not_an_exit(tmp_path, monkeypatch):
+    monkeypatch.setattr(postgres, "PIDFILE_SETTLE", 0)
+    (tmp_path / "postmaster.pid").write_text("42", encoding="utf-8")  # the postmaster mid-write
+    assert postgres._exited(tmp_path, 4242, 0) is False
+    (tmp_path / "postmaster.pid").unlink()
+    assert postgres._exited(tmp_path, 4242, 0) is True
+
+
+def test_a_failed_start_leaves_a_directory_whose_pid_file_cannot_be_read(fakes):
+    fakes.pg0.pidfile, fakes.pg0.fail_after_launch = False, True
+    original = fakes.pg0.Pg0.start
+
+    def start(self):
+        (Path(self.kwargs["data_dir"]) / "postmaster.pid").write_text("42", encoding="utf-8")
+        original(self)
+
+    fakes.pg0.Pg0.start = start
+    with pytest.raises(_Pg0Error):
+        postgres.start(fakes.parent, "pl-test-")
+    assert fakes.stops == []
+    (data_dir,) = fakes.parent.iterdir()  # something may run there: kept
+    assert (data_dir / "pgdata" / "postmaster.pid").is_file()
+
+
+def test_pid_file_settle_waits_for_a_complete_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(postgres, "PIDFILE_SETTLE", 5)
+    (tmp_path / "postmaster.pid").write_text("42", encoding="utf-8")
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        (tmp_path / "postmaster.pid").write_text("4242\nx\n0\n55432\n", encoding="utf-8")
+
+    monkeypatch.setattr(postgres.time, "sleep", sleep)
+    assert postgres._pidfile_settled(tmp_path) == ((4242, 55432), True)
+    assert sleeps
+
+
+def test_deregister_removes_only_the_record_of_its_own_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    ours, theirs = tmp_path / "ours" / "pgdata", tmp_path / "theirs" / "pgdata"
+    for name, data_dir in (("mine", ours), ("other", theirs)):
+        record = tmp_path / ".pg0" / "instances" / name
+        record.mkdir(parents=True)
+        (record / "instance.json").write_text(json.dumps({"data_dir": str(data_dir)}), encoding="utf-8")
+    postgres._deregister("mine", ours)
+    postgres._deregister("other", ours)  # a record naming another directory stays
+    assert not (tmp_path / ".pg0" / "instances" / "mine").exists()
+    assert (tmp_path / ".pg0" / "instances" / "other").exists()
+
+
+def test_a_busy_signal_pipe_is_retried(monkeypatch):
+    monkeypatch.setattr(postgres.os, "name", "nt")
+    monkeypatch.setattr(postgres.time, "sleep", lambda seconds: None)
+    attempts, written = [], []
+
+    class Pipe:
+        def __init__(self, name, mode, buffering):
+            attempts.append(name)
+            if len(attempts) < 3:
+                error = OSError("All pipe instances are busy")
+                error.winerror = 231
+                raise error
+
+        def write(self, data):
+            written.append(data)
+
+        def read(self, size):
+            return b"\x02"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(postgres, "open", Pipe, raising=False)
+    postgres._signal_shutdown(4242)
+    assert len(attempts) == 3 and written == [b"\x02"]
+
+
+def test_another_pipe_error_is_not_retried(monkeypatch):
+    monkeypatch.setattr(postgres.os, "name", "nt")
+    attempts = []
+
+    def refuse(name, mode, buffering):
+        attempts.append(name)
+        raise FileNotFoundError(name)
+
+    monkeypatch.setattr(postgres, "open", refuse, raising=False)
+    with pytest.raises(FileNotFoundError):
+        postgres._signal_shutdown(4242)
+    assert len(attempts) == 1
+
+
+def test_the_native_child_opens_no_console_window_on_windows(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(postgres.subprocess, "run", lambda command, **kwargs: seen.update(kwargs) or
+                        subprocess.CompletedProcess(command, 0, "", ""))
+    server = postgres.Server(name="n", data_dir=tmp_path, pgdata=tmp_path, port=55432, pid=1,
+                             password="synthetic-secret", owned=True)
+    binary, login, real = Path("bin/pseudolife-stdio"), tmp_path / "test-pg.env", os.name
+    flags = {}
+    # pathlib cannot make paths while os.name is patched: every path exists
+    # before, and os.name is restored before anything is asserted.
+    for name in ("nt", "posix"):
+        monkeypatch.setattr(postgres.os, "name", name)
+        try:
+            postgres.create_test_login(binary, server, login)
+        finally:
+            monkeypatch.setattr(postgres.os, "name", real)
+        flags[name] = seen["creationflags"]
+    assert flags == {"nt": 0x08000000, "posix": 0}
+
+
 def test_child_environment_drops_libpq_controls_and_the_daemon_url():
     server = postgres.Server(name="n", data_dir=Path("d"), pgdata=Path("d/p"), port=1, pid=1,
                              password="synthetic-secret", owned=False)
@@ -568,6 +722,9 @@ def lease_ci(monkeypatch, tmp_path, fakes):
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
+        login = Path(command[command.index("--file") + 1])
+        login.parent.mkdir(parents=True, exist_ok=True)
+        login.write_text("PSEUDOLIFE_TEST_PG_USER=pseudolife_test\n", encoding="utf-8")
         return subprocess.CompletedProcess(command, 0, json.dumps({"exit": 0, "error": None}), "")
 
     monkeypatch.setattr(postgres.subprocess, "run", run)
@@ -597,6 +754,14 @@ def test_lease_fixture_runs_the_binary_it_checked(lease_ci, monkeypatch):
     assert lease_ci.module.main() == 0
     (command, _), = lease_ci.calls
     assert Path(command[0]).is_absolute() and Path(command[0]) == lease_ci.binary
+
+
+def test_lease_fixture_refuses_a_login_it_cannot_find(lease_ci, monkeypatch, capsys):
+    monkeypatch.setattr(postgres.subprocess, "run", lambda command, **kwargs:
+                        subprocess.CompletedProcess(command, 0, json.dumps({"exit": 0, "error": None}), ""))
+    assert lease_ci.module.main() == 1
+    assert "wrote no login file" in capsys.readouterr().err
+    assert not lease_ci.env_file.exists() and len(lease_ci.fakes.stops) == 1
 
 
 def test_lease_fixture_refuses_without_the_native_client(lease_ci, capsys):
