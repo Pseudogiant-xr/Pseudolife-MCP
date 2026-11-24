@@ -2832,13 +2832,14 @@ PYTHON_UPDATER_HOSTS = json.loads(
     (Path(__file__).with_name("fixtures") / "python-updater-hosts.json").read_text(encoding="utf-8"))["hosts"]
 
 
-def _as_python_updater_left_it(state_path, round_name):
+def _as_python_updater_left_it(state_path, round_name, platform=None):
     """Make the fixture host what the frozen Python updater left after one
     release round (``round_name``, captured in python-updater-hosts.json):
     its changed fixture state and the files it wrote under the data
-    directory. The calls it made are not replayed; the next updater starts
-    a fresh call log."""
-    captured = PYTHON_UPDATER_HOSTS["windows" if os.name == "nt" else "linux"][round_name]
+    directory, byte for byte. The calls it made are not replayed; the next
+    updater starts a fresh call log."""
+    platform = platform or ("windows" if os.name == "nt" else "linux")
+    captured = PYTHON_UPDATER_HOSTS[platform][round_name]
     home = state_path.parent
     spelled = json.dumps(str(home))[1:-1]
     state = json.loads(state_path.read_text())
@@ -2848,9 +2849,30 @@ def _as_python_updater_left_it(state_path, round_name):
         target = home / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         # Inside a JSON file the home is spelled as a JSON string's content.
-        target.write_text(body.replace("{HOME}", spelled if relative.endswith(".json") else str(home)),
-                          encoding="utf-8")
+        # Bytes, not text: the captured bodies keep the line endings the
+        # updater wrote (CRLF on Windows), which a text write would double.
+        target.write_bytes(body.replace("{HOME}", spelled if relative.endswith(".json") else str(home))
+                           .encode("utf-8"))
     return captured
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+@pytest.mark.parametrize("round_name", ["engine-rust", "engine-rust-then-plain", "plain"])
+def test_python_updater_host_files_are_written_byte_for_byte(tmp_path, platform, round_name):
+    home = tmp_path / "home"
+    home.mkdir()
+    state_path = home / "fixture-state.json"
+    state_path.write_text(json.dumps({"calls": []}))
+    captured = _as_python_updater_left_it(state_path, round_name, platform)
+    spelled = json.dumps(str(home))[1:-1]
+    # A plain round writes no data files (its update lock is left out of the capture).
+    assert bool(captured["files"]) is (round_name != "plain")
+    for relative, body in captured["files"].items():
+        expected = body.replace("{HOME}", spelled if relative.endswith(".json") else str(home))
+        assert (home / relative).read_bytes() == expected.encode("utf-8"), relative
+    if platform == "windows" and captured["files"]:
+        assert any("\r\n" in body for body in captured["files"].values())
+    assert not any("\r\r\n" in body for body in captured["files"].values())
 
 
 def test_python_updater_host_capture_is_the_round_it_names():
