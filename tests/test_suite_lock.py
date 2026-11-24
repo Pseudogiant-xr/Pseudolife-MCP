@@ -2322,8 +2322,19 @@ def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick
 
 
 def suite_lock_is_free(directory):
-    from pseudolife_memory import os_lock
-    return os_lock.probe(directory / suite_lock.LOCK_FILE) is False
+    """Whether the suite lock file in ``directory`` exists and nobody holds
+    it, probed with the lock's own primitives (the frozen package's os_lock
+    probe made the same flock / msvcrt call). A free lock is taken for an
+    instant and let go; a missing file is never created."""
+    try:
+        handle = open(directory / suite_lock.LOCK_FILE, "rb")  # not "a": no create
+    except FileNotFoundError:
+        return False
+    with handle:
+        if not suite_lock._try_lock(handle):
+            return False
+        suite_lock._unlock(handle)
+        return True
 
 
 @pytest.mark.parametrize("abort", [suite_lock.TreeChanged("changed"), KeyboardInterrupt()],
