@@ -149,7 +149,10 @@ fn every_tunnel_argv_answers_or_refuses_with_its_cause_without_effect() {
             &[][..],
             "tunnel needs a command: setup, status, verify, run, stop or update",
         ),
-        (&["doctor"], "tunnel doctor is not part of the native client"),
+        (
+            &["doctor"],
+            "tunnel doctor is not part of the native client",
+        ),
         (
             &["doctor", "--profile-dir", &dir],
             "tunnel doctor is not part of the native client",

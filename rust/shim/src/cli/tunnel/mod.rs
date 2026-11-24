@@ -1840,7 +1840,10 @@ mod tests {
         for (shape, says) in [
             (&[][..], "tunnel needs a command: setup, status"),
             (&["bogus"], "unknown tunnel command bogus; the commands are"),
-            (&["doctor"], "tunnel doctor is not part of the native client"),
+            (
+                &["doctor"],
+                "tunnel doctor is not part of the native client",
+            ),
             (
                 &["start"],
                 "tunnel start is not part of the native client. Run `pseudolife-mcp tunnel run`",
