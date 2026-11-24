@@ -3,7 +3,9 @@
 # before changing what this script asks or prints.
 # >>> usage >>>
 # The native client's installer: ops/install.sh runs it, with the same
-# flags, when PSEUDOLIFE_SHIM_ENGINE=native asks for the native client.
+# flags, by default (the native client is the default client) and when
+# PSEUDOLIFE_SHIM_ENGINE=native asks for it; PSEUDOLIFE_SHIM_ENGINE=python
+# or a recorded Python choice takes the Python client's path instead.
 #
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: provider selection -> preflight ->
@@ -67,7 +69,7 @@
 #                                    or a published image); naming the other engine
 #                                    switches it through pseudolife-mcp update
 #   --tunnel                         guided Secure MCP Tunnel setup needs the
-#                                    Python client
+#                                    Python client (PSEUDOLIFE_SHIM_ENGINE=python)
 #   --test-login                     also give the test suite its own Postgres
 #                                    login, which cannot open the bank
 #                                    (`pseudolife-mcp test-login create`): for
@@ -224,7 +226,7 @@ if [ -n "$TUNNEL" ]; then
         'The native client has no guided tunnel setup yet. Nothing was changed. Rerun without --tunnel.' \
         'After install, prepare a native tunnel profile with pseudolife-mcp tunnel setup --daemon-url "<daemon-url>" --token-file "<owner-only token file>" --accept-access.' \
         'Save its ID with pseudolife-mcp tunnel setup --tunnel-id "<tunnel-id>", import the key with pseudolife-mcp tunnel setup --read-key, then run pseudolife-mcp tunnel run in a terminal you keep open. See docs/guide/tunnels.md.' \
-        'For guided setup, unset PSEUDOLIFE_SHIM_ENGINE and rerun bash ops/install.sh --tunnel with your other install options.' >&2
+        'For guided setup with the Python client, rerun PSEUDOLIFE_SHIM_ENGINE=python bash ops/install.sh --tunnel with your other install options.' >&2
     exit 1
 fi
 # >>> unattended mode >>>
@@ -236,7 +238,7 @@ if [ -n "$YES" ] || [ "${PSEUDOLIFE_UNATTENDED:-}" = 1 ] || [ ! -t 0 ]; then
     echo "Unattended install: no prompts; documented defaults apply (explicit flags override)."
 fi
 # <<< unattended mode <<<
-echo "Native client install (PSEUDOLIFE_SHIM_ENGINE=native): rerun it with that variable set; without it, ops/install.sh installs the Python client."
+echo "Native client install (the default client; PSEUDOLIFE_SHIM_ENGINE=python installs the Python client instead)."
 # >>> extractor modes >>>
 # The dream extractor modes, named for the extractor family, and the models
 # the CLI shim modes offer. tests/test_extractor_model_lists.py keeps these
@@ -614,6 +616,21 @@ native_refuse() {  # $1 = cause, $2 = fix
     echo "The native pseudolife-mcp client cannot be installed: $1. $2$native_left" >&2
     exit 1
 }
+native_fallback() {  # $1 = cause, $2 = fix: a refusal, unless the native client was the default
+    # ops/install.sh chose the native client by default and made the file
+    # PSEUDOLIFE_INSTALLER_FALLBACK_FILE names: before anything on the host
+    # changed, the line for it goes there and ops/install.sh carries on with
+    # the Python client. An explicit PSEUDOLIFE_SHIM_ENGINE=native, or a
+    # step after the first host change, refuses as before.
+    if [ -n "${PSEUDOLIFE_INSTALLER_FALLBACK_FILE:-}" ] && [ -f "$PSEUDOLIFE_INSTALLER_FALLBACK_FILE" ] && [ -z "$NATIVE_HOST_CHANGING" ]; then
+        if printf '%s\n' "the native client cannot serve this machine ($1), so this install uses the Python client; PSEUDOLIFE_SHIM_ENGINE=native makes this a refusal, and PSEUDOLIFE_SHIM_ENGINE=python chooses the Python client for later runs too" >"$PSEUDOLIFE_INSTALLER_FALLBACK_FILE"; then
+            native_unstage
+            trap - EXIT
+            exit 0
+        fi
+    fi
+    native_refuse "$1" "$2"
+}
 native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
     NATIVE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" 2>/dev/null | head -1)" || NATIVE_VERSION=""
     [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
@@ -621,7 +638,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     if [ -z "$NATIVE_TARGET" ] && [ -n "${PSEUDOLIFE_NATIVE_TARGET:-}" ]; then
         native_refuse "PSEUDOLIFE_NATIVE_TARGET names $PSEUDOLIFE_NATIVE_TARGET, which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
     fi
-    [ -n "$NATIVE_TARGET" ] || native_refuse "no native client is published for this platform ($(uname -s 2>/dev/null) $(uname -m 2>/dev/null)); releases carry Linux x86_64 and aarch64, macOS Intel and Apple silicon, and Windows x86_64" "Run this installer on one of those (a machine there can use a daemon elsewhere with --client-only)."
+    [ -n "$NATIVE_TARGET" ] || native_fallback "no native client is published for this platform ($(uname -s 2>/dev/null) $(uname -m 2>/dev/null)); releases carry Linux x86_64 and aarch64, macOS Intel and Apple silicon, and Windows x86_64" "Run this installer on one of those (a machine there can use a daemon elsewhere with --client-only), or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client."
     case "$NATIVE_TARGET" in
         *windows*) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.zip"; native_binary=pseudolife-mcp.exe ;;
         *) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.tar.gz"; native_binary=pseudolife-mcp ;;
@@ -718,7 +735,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
         native_refuse "the downloaded client did not answer version within $NATIVE_PROBE_SECONDS s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
     if [ "$native_says_status" != 0 ]; then
         if [ "$NATIVE_TARGET" = x86_64-pc-windows-msvc ] && [ "$native_says_status" = -1073741515 ]; then
-            native_refuse "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Install the Microsoft Visual C++ Redistributable for x64 before rerunning with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C runtime and rerun that tag's installer with its matching archive."
+            native_fallback "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Install the Microsoft Visual C++ Redistributable for x64 before rerunning with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C runtime and rerun that tag's installer with its matching archive."
         fi
         case "$NATIVE_TARGET" in
             *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;
@@ -730,7 +747,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
         if [ -n "$native_says_status" ]; then
             native_detail="exit code $native_says_status${native_detail:+, $native_detail}"
         fi
-        native_refuse "the downloaded client does not run on this host${native_detail:+ ($native_detail)}" "$native_run_fix"
+        native_fallback "the downloaded client does not run on this host${native_detail:+ ($native_detail)}" "$native_run_fix Or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client."
     fi
     native_protocol_status=0
     native_protocol="$(native_bounded out "$NATIVE_STAGED" installer --capability)" || native_protocol_status=$?
@@ -746,7 +763,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     # `[ -lt ]` below never sees a number it cannot compare.
     case "$native_level" in ""|*[!0-9]*|0?*|??????????*) native_level=-1 ;; esac
     if [ "$native_level" -lt "$NATIVE_INSTALLER_PROTOCOL" ]; then
-        native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE, then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only; this native installer itself works from a checkout of a release that carries it."
+        native_fallback "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Install the Python client by rerunning the installer with PSEUDOLIFE_SHIM_ENGINE=python, then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only; this native installer itself works from a checkout of a release that carries it."
     fi
     # A tunnel registered to start by itself through this machine's Python
     # client keeps it on that client (issue #1632): refused here, before the
@@ -757,7 +774,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     native_check_says="$(native_bounded both "$NATIVE_STAGED" runtime install --check)" || native_check_status=$?
     if [ "$native_check_status" = 3 ]; then
         printf '%s\n' "$native_check_says" >&2
-        native_refuse "a tunnel is registered to start by itself through this machine's Python client. The native client has no tunnel service command to manage that registration after the move. It can run the tunnel in the foreground with pseudolife-mcp tunnel run" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native to keep the Python client. To move to the native client, run the autostart removal command above, then rerun. Removing autostart means the tunnel will no longer start on its own."
+        native_fallback "a tunnel is registered to start by itself through this machine's Python client. The native client has no tunnel service command to manage that registration after the move. It can run the tunnel in the foreground with pseudolife-mcp tunnel run" "Rerun the installer with PSEUDOLIFE_SHIM_ENGINE=python in place of PSEUDOLIFE_SHIM_ENGINE=native to keep the Python client. To move to the native client, remove the autostart as the line above says, then rerun. Removing autostart means the tunnel will no longer start on its own."
     elif [ "$native_check_status" = 124 ]; then
         echo "  the tunnel-service check did not answer in $NATIVE_PROBE_SECONDS s; runtime install checks again later" >&2
     elif [ "$native_check_status" = 0 ] && [ -n "$native_check_says" ]; then
@@ -791,6 +808,16 @@ native_install() {
     [ -n "$native_launcher" ] && [ -f "$native_launcher" ] || return 1
     SHIM_PATH="$native_launcher"
     NATIVE_INSTALLED_AT="$SHIM_PATH"
+    # An explicit native choice ends a recorded Python one (ops/install.sh,
+    # client engine): a defaulted run never gets here with that record.
+    native_engine_record="$HOME/.pseudolife-mcp/client-engine"
+    if [ -f "$native_engine_record" ]; then
+        if rm -f "$native_engine_record"; then
+            echo "  The recorded Python client choice ($native_engine_record) is removed: later installer runs and updates keep the native client."
+        else
+            echo "WARNING: the recorded Python client choice $native_engine_record could not be removed, so a later installer run without PSEUDOLIFE_SHIM_ENGINE=native installs the Python client; delete that file." >&2
+        fi
+    fi
     if [ -n "$native_sum_before" ] && [ "$native_sum_before" = "$(native_sha256 "$SHIM_PATH" 2>/dev/null)" ]; then
         step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"
     else

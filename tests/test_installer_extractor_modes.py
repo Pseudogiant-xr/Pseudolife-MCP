@@ -104,7 +104,7 @@ def test_a_blank_model_is_refused(bash, tmp_path, model):
 @BASH
 def test_an_empty_model_flag_is_refused(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install.sh')}' "
+    proc = shell.run(f"PSEUDOLIFE_SHIM_ENGINE=python exec '{shell.path(ROOT / 'ops' / 'install.sh')}' "
                      "--extractor claude-only --model '' --no-art\n")
     assert proc.returncode == 2
     assert "--model" in proc.stderr
@@ -266,7 +266,7 @@ def test_endpoint_preflight_refuses_an_unreachable_server(bash, tmp_path):
 @BASH
 def test_the_script_refuses_an_endpoint_mode_without_its_url(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install.sh')}' "
+    proc = shell.run(f"PSEUDOLIFE_SHIM_ENGINE=python exec '{shell.path(ROOT / 'ops' / 'install.sh')}' "
                      "--extractor endpoint --model m --no-art\n")
     assert proc.returncode == 2
     assert "--extractor-url" in proc.stderr
@@ -276,7 +276,7 @@ def test_the_script_refuses_an_endpoint_mode_without_its_url(bash, tmp_path):
 @BASH
 def test_client_only_refuses_an_extractor_url(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install.sh')}' "
+    proc = shell.run(f"PSEUDOLIFE_SHIM_ENGINE=python exec '{shell.path(ROOT / 'ops' / 'install.sh')}' "
                      "--daemon-url http://100.64.0.2:8765 "
                      "--extractor-url http://pl.example.invalid:1234/v1 --no-art\n")
     assert proc.returncode == 2
@@ -596,7 +596,7 @@ def test_an_ipv6_subnet_beside_the_ipv4_one_is_ignored(bash, tmp_path):
 @BASH
 def test_an_invalid_firewall_rule_value_is_refused_before_anything_runs(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"\"$BASH\" '{shell.path(ROOT / 'ops' / 'install.sh')}' --firewall-rule maybe\n")
+    proc = shell.run(f"PSEUDOLIFE_SHIM_ENGINE=python \"$BASH\" '{shell.path(ROOT / 'ops' / 'install.sh')}' --firewall-rule maybe\n")
     assert proc.returncode == 2
     assert "invalid --firewall-rule 'maybe' (ask|yes|no)" in proc.stderr
     assert not _calls(shell, "docker")

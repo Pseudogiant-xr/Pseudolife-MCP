@@ -32,10 +32,10 @@
 #   --yes                         no prompts; take documented defaults (not broad consent)
 #   PSEUDOLIFE_UNATTENDED=1        the same explicit signal for agents under a pty
 #                                  (also enabled when stdin is not a terminal)
-#   PSEUDOLIFE_SHIM_ENGINE=native  install the native pseudolife-mcp client
-#                                  (ops/install-native.sh) instead of the Python
-#                                  client; python, the default, installs the Python
-#                                  client, or brings it back over a native one
+#   PSEUDOLIFE_SHIM_ENGINE=python  install the Python client instead of the native
+#                                  pseudolife-mcp client (ops/install-native.sh, the
+#                                  default), or bring it back over a native one; the
+#                                  choice is remembered until PSEUDOLIFE_SHIM_ENGINE=native
 #   Omitted --client detects installed CLIs; omitted --extractor uses sidecar.
 #   --codex-hooks auto|manual|plugin|skip  hook owner (default: auto)
 #   --codex-hook-trust ask|yes|no     approve PseudoLife hooks and the memory_message
@@ -149,22 +149,63 @@
 # <<< usage <<<
 set -euo pipefail
 # >>> client engine >>>
-# Which client this installer installs, decided before anything changes: the
-# Python client (the rest of this script) by default and with
-# PSEUDOLIFE_SHIM_ENGINE=python, and the native client, which
-# ops/install-native.sh installs, only when PSEUDOLIFE_SHIM_ENGINE=native asks
-# for it (the variable pseudolife-mcp update reads).
-case "${PSEUDOLIFE_SHIM_ENGINE:-}" in
-    ""|python) ;;
-    native)
+# Which client this installer installs, decided before anything changes (the
+# variable pseudolife-mcp update reads too):
+# - PSEUDOLIFE_SHIM_ENGINE=native: the native client, which
+#   ops/install-native.sh installs; a machine it cannot serve is refused.
+# - PSEUDOLIFE_SHIM_ENGINE=python: the Python client (the rest of this
+#   script), and the choice is recorded in ~/.pseudolife-mcp/client-engine,
+#   which later reruns and updates honour until an explicit native choice.
+# - Unset: the Python client when that record says so, else the native
+#   client by default. The native installer then falls back to the Python
+#   client, with one line saying why, when the native client cannot serve
+#   this machine (no client for the platform, one that does not run here,
+#   a checkout whose release predates this installer, a tunnel the Python
+#   client registered to start by itself): it writes that line to the file
+#   PSEUDOLIFE_INSTALLER_FALLBACK_FILE names, which this script made, before
+#   anything changed, and this script carries on below with the Python client.
+CLIENT_ENGINE_RECORD="$HOME/.pseudolife-mcp/client-engine"
+RECORD_PYTHON_CHOICE=""
+record_client_engine() {  # an explicit PSEUDOLIFE_SHIM_ENGINE=python install is remembered at its end
+    [ -n "$RECORD_PYTHON_CHOICE" ] || return 0
+    [ "$(cat "$CLIENT_ENGINE_RECORD" 2>/dev/null)" != python ] || return 0
+    if mkdir -p "$(dirname "$CLIENT_ENGINE_RECORD")" 2>/dev/null && printf 'python\n' >"$CLIENT_ENGINE_RECORD" 2>/dev/null; then
+        echo "Python client chosen: recorded in $CLIENT_ENGINE_RECORD, so later installer runs and pseudolife-mcp update keep the Python client until you set PSEUDOLIFE_SHIM_ENGINE=native."
+    else
+        echo "WARNING: the Python client choice could not be recorded in $CLIENT_ENGINE_RECORD, so a later installer run or update without PSEUDOLIFE_SHIM_ENGINE=python moves this machine to the native client." >&2
+    fi
+}
+client_engine="${PSEUDOLIFE_SHIM_ENGINE:-}"
+if [ -z "$client_engine" ] && [ -f "$CLIENT_ENGINE_RECORD" ] && [ "$(cat "$CLIENT_ENGINE_RECORD" 2>/dev/null)" = python ]; then
+    echo "Python client install: $CLIENT_ENGINE_RECORD records an earlier PSEUDOLIFE_SHIM_ENGINE=python install; set PSEUDOLIFE_SHIM_ENGINE=native to move this machine to the native client."
+    client_engine=python
+elif [ "$client_engine" = python ]; then
+    RECORD_PYTHON_CHOICE=1
+fi
+case "$client_engine" in
+    python) ;;
+    ""|native)
         native_installer="$(cd "$(dirname "$0")" && pwd)/install-native.sh"
         if [ ! -f "$native_installer" ]; then
-            echo "PSEUDOLIFE_SHIM_ENGINE=native asks for the native client, but this checkout has no $native_installer (it predates the native installer): update the checkout (git pull), or unset PSEUDOLIFE_SHIM_ENGINE for the Python client. Nothing was changed." >&2
+            echo "This checkout has no $native_installer, which installs the native client (it predates the native installer): update the checkout (git pull), or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client. Nothing was changed." >&2
             exit 1
         fi
-        exec bash "$native_installer" "$@" ;;
+        if [ "$client_engine" = native ]; then
+            exec bash "$native_installer" "$@"
+        fi
+        native_fallback_file="$(mktemp "${TMPDIR:-/tmp}/pseudolife-client-engine.XXXXXX")" || {
+            echo "No temporary file could be made in ${TMPDIR:-/tmp} for the client choice: free space there and rerun. Nothing was changed." >&2
+            exit 1
+        }
+        native_status=0
+        PSEUDOLIFE_INSTALLER_FALLBACK_FILE="$native_fallback_file" bash "$native_installer" "$@" || native_status=$?
+        native_fallback="$(cat "$native_fallback_file" 2>/dev/null || true)"
+        rm -f "$native_fallback_file"
+        [ -n "$native_fallback" ] || exit "$native_status"
+        echo "==> $native_fallback"
+        ;;
     *)
-        echo "PSEUDOLIFE_SHIM_ENGINE=${PSEUDOLIFE_SHIM_ENGINE} is not a client this installer installs: use python (the Python client, the default) or native (the native client), or unset it. Nothing was changed." >&2
+        echo "PSEUDOLIFE_SHIM_ENGINE=${PSEUDOLIFE_SHIM_ENGINE} is not a client this installer installs: use native (the native client, the default) or python (the Python client), or unset it. Nothing was changed." >&2
         exit 2 ;;
 esac
 # <<< client engine <<<
@@ -4005,6 +4046,7 @@ offer_client_update_schedule() {
 # <<< client update schedule offer <<<
 if [ -n "$CLIENT_ONLY" ]; then offer_client_update_schedule; fi
 print_update_line
+record_client_engine
 if [ -n "$TUNNEL" ] && [ -n "${INSTALLER_UNATTENDED:-}" ]; then
     echo "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
 elif [ -n "$TUNNEL" ]; then

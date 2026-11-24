@@ -1,8 +1,9 @@
 # Native client runtimes
 
 The native runtime installer installs a new Rust CLI beside existing runtimes and
-selects it for the next session. This is opt-in work; it does not change the
-daemon engine default or remove the Python oracle or existing Python installs.
+selects it for the next session. The installers select it by default since
+0.26.0; it does not change the daemon engine default or remove the Python
+oracle or existing Python installs.
 
 [Finish the move to Rust](python-retirement.md) maps the work after the 0.24
 cut: the open installer stack, remaining client workflows, package-deletion
@@ -256,10 +257,26 @@ old client left on disk. A rerun that changes nothing prints one line.
 
 ## Installers
 
-`ops/install.sh` and `ops/install.ps1` install the Python client unless
-`PSEUDOLIFE_SHIM_ENGINE=native` asks for the native one (`python`, the
-default, also brings a native machine back; any other value is refused
-before anything changes). Asked for native, they hand their arguments to
+`ops/install.sh` and `ops/install.ps1` install the native client by default
+and with `PSEUDOLIFE_SHIM_ENGINE=native`. `PSEUDOLIFE_SHIM_ENGINE=python`
+installs the Python client, which also brings a native machine back, and
+records the choice as `python` in `~/.pseudolife-mcp/client-engine` once
+the install has run to its end. A later run without the variable honours
+that file when it says exactly `python`, and a native install removes it.
+Any other value of the variable is refused before anything changes.
+
+A defaulted run gives the native installer a hand-back channel the wrapper
+made: in bash a file named by `PSEUDOLIFE_INSTALLER_FALLBACK_FILE`, in
+PowerShell the global `PseudolifeClientFallback` (cleared again with
+`PseudolifeClientDefaulted` after the run). When the native client cannot
+serve the machine, the native installer writes its one-line reason there
+before anything on the host changes, and the wrapper carries on with the
+Python client. Four causes qualify: no target for the platform, a client
+that does not run there, a release older than the installer's protocol, and
+the tunnel check's exit 3. Each refuses as before under an explicit
+`=native`, or after the first host change.
+
+For the native client, the wrappers hand their arguments to
 `ops/install-native.sh` / `ops/install-native.ps1`, which install the client
 from the release their checkout names (`pyproject.toml`'s version) in their
 native-client block, before anything on the host changes: they download that version's
@@ -274,9 +291,10 @@ client that hangs is refused rather than stalling an unattended run. It must ans
 installer-protocol <N>` with N at least the installer's level
 (`NATIVE_INSTALLER_PROTOCOL`, the binary's `INSTALLER_PROTOCOL`), because the
 installer runs that release's `installer` steps. A release older than the
-installer (0.24.0 answers with a usage error) is refused, naming the route that
-works today: install the default client (the installer without
-`PSEUDOLIFE_SHIM_ENGINE`), then move the machine with
+installer (0.24.0 answers with a usage error) hands a defaulted run back to the
+Python client, and under an explicit `=native` is refused, naming the route that
+works today: install the Python client (the installer with
+`PSEUDOLIFE_SHIM_ENGINE=python`), then move the machine with
 `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`; the
 native installer itself works from a checkout of a release that carries it. An
 interactive first install stages, verifies and probes the release before its

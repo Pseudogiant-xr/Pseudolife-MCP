@@ -363,8 +363,9 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
     # The true cause and the one fix: which release, from which checkout.
     assert f"the native client {VERSION} predates this installer" in line
     assert "installer --capability" in line and f"installer-protocol {LEVEL} or newer" in line
-    # The route that works today: the default client, then update moves it.
-    assert "without PSEUDOLIFE_SHIM_ENGINE" in line
+    # The route that works today: the Python client, then update moves it.
+    assert "rerunning the installer with PSEUDOLIFE_SHIM_ENGINE=python" in line
+    assert "without PSEUDOLIFE_SHIM_ENGINE" not in line
     assert "PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only" in line
     assert "release_assets" not in line and "PSEUDOLIFE_NATIVE_ARCHIVE_URL" not in line
     # What a refusal after the download leaves: the verified download only.
@@ -440,6 +441,83 @@ def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
     assert "Nothing else was changed: the download in" in result.stderr
     assert not any(c.startswith("runtime install --archive") for c in _calls(tmp_path))
     assert not (tmp_path / "home" / "runtimes").exists()
+
+
+FALLBACK_CAUSES = [
+    ("platform", "native_target() { :; }; ", {}, "no native client is published for this platform"),
+    ("does-not-run", "", {"STUB_BROKEN": "1"}, "the downloaded client does not run on this host"),
+    ("old-release", "", {"STUB_V0240": "1"}, f"the native client {VERSION} predates this installer"),
+    ("tunnel", "", {"STUB_REFUSE_TUNNEL": "1"}, "a tunnel is registered to start by itself"),
+]
+
+
+@pytest.mark.parametrize("case, prefix, env, cause", FALLBACK_CAUSES, ids=[c[0] for c in FALLBACK_CAUSES])
+def test_a_defaulted_run_the_native_client_cannot_serve_hands_back_to_the_python_client(tmp_path, case, prefix, env,
+                                                                                        cause):
+    # ops/install.sh chose the native client by default and made the file:
+    # the cause goes there, the run ends 0 before anything changed, and the
+    # wrapper carries on with the Python client.
+    handback = tmp_path / "fallback"
+    handback.write_text("", encoding="utf-8")
+    result = _run(tmp_path, prefix + 'native_stage; echo "STAGED"',
+                  env={**env, "PSEUDOLIFE_INSTALLER_FALLBACK_FILE": _p(handback)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert "cannot be installed" not in result.stderr
+    line = handback.read_text(encoding="utf-8")
+    assert line.startswith(f"the native client cannot serve this machine ({cause}"), line
+    assert line.rstrip("\n").endswith(
+        "so this install uses the Python client; PSEUDOLIFE_SHIM_ENGINE=native makes this a refusal, and "
+        "PSEUDOLIFE_SHIM_ENGINE=python chooses the Python client for later runs too"), line
+    assert line.count("\n") == 1
+    assert not any(c.startswith("runtime install --archive") for c in _calls(tmp_path))
+    assert not (tmp_path / "home" / "share").exists()
+    assert not list((tmp_path / "tmp").glob("pseudolife-native.*")), "the staged copy is removed"
+
+
+@pytest.mark.parametrize("case, prefix, env, cause", FALLBACK_CAUSES, ids=[c[0] for c in FALLBACK_CAUSES])
+def test_an_explicit_native_run_still_refuses_what_it_cannot_serve(tmp_path, case, prefix, env, cause):
+    # No hand-back file: PSEUDOLIFE_SHIM_ENGINE=native asked for this client.
+    result = _run(tmp_path, prefix + 'native_stage; echo "STAGED"', env=env)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert cause in line
+    assert "PSEUDOLIFE_SHIM_ENGINE=python" in line, line
+    assert "without PSEUDOLIFE_SHIM_ENGINE" not in line
+
+
+def test_no_hand_back_once_the_host_has_changed(tmp_path):
+    handback = tmp_path / "fallback"
+    handback.write_text("", encoding="utf-8")
+    result = _run(tmp_path, 'NATIVE_HOST_CHANGING=1; native_fallback "a cause" "A fix."; echo "GONE ON"',
+                  env={"PSEUDOLIFE_INSTALLER_FALLBACK_FILE": _p(handback)})
+    assert result.returncode == 1
+    assert "The install stopped part way: a cause. A fix." in result.stderr
+    assert handback.read_text(encoding="utf-8") == ""
+
+
+def test_a_hand_back_file_that_is_not_there_is_no_hand_back(tmp_path):
+    # Only the file the wrapper made counts; a variable naming nothing refuses.
+    result = _run(tmp_path, 'native_target() { :; }; native_stage',
+                  env={"PSEUDOLIFE_INSTALLER_FALLBACK_FILE": _p(tmp_path / "never-made")})
+    assert result.returncode == 1
+    assert "cannot be installed: no native client is published for this platform" in result.stderr
+    assert not (tmp_path / "never-made").exists()
+
+
+def test_installing_the_native_client_ends_a_recorded_python_choice(tmp_path):
+    record = tmp_path / "home" / ".pseudolife-mcp" / "client-engine"
+    record.parent.mkdir(parents=True)
+    record.write_text("python\n", encoding="utf-8")
+    result = _run(tmp_path, 'native_stage; ensure_shim; echo "OK=$SHIM_OK"')
+    assert result.returncode == 0, result.stderr
+    assert "OK=1" in result.stdout
+    assert not record.exists()
+    assert f"The recorded Python client choice ({_p(record)}) is removed" in result.stdout
+    # A rerun says nothing more about it.
+    again = _run(tmp_path, "native_stage; ensure_shim")
+    assert "recorded Python client choice" not in again.stdout + again.stderr
 
 
 def test_a_refused_move_keeps_the_python_client_and_says_so(tmp_path):

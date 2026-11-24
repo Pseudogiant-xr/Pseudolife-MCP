@@ -34,9 +34,11 @@ Carry these decisions forward:
 - Lite, embedded and file mode are retired in the native client. Preserve the
   documented old-bank upgrade route through a release that still opens them;
   do not rebuild those engines or discard their state.
-- The 0.24 client move is opt-in. The installer-default change and subsequent
-  retirement need their installed proof; publishing archives alone does not
-  prove a supported native client.
+- The installers select the native client by default on master (the 0.26.0
+  change); `update` from a Python client still moves only on request. The
+  update default, the release and the retirement after it need their
+  installed proof; publishing archives alone does not prove a supported
+  native client.
 - Merge, publication, deploy and live-bank changes retain their existing
   user-owned gates. A previous conductor's delegation is not transferred by
   this handoff.
@@ -65,7 +67,7 @@ head updates and completed work do not inherit an older CI claim.
 | Existing work | Order or hold | What the conductor must establish |
 |---|---|---|
 | #1588 in #1589: 0.24 cut | Merged; 0.24.0 released | Done: see step 1 of the dependency order. |
-| #1541 → #1556 → #1560: native installers, native helpers, preflight/hooks without Python | Merged. Native install is opt-in. | Reuse the installer paths for the installed acceptance matrix. |
+| #1541 → #1556 → #1560: native installers, native helpers, preflight/hooks without Python | Merged. Native install is the installers' default on master (the 0.26.0 change). | Reuse the installer paths for the installed acceptance matrix. |
 | #1568: terminal connect and unattended schedule retargeting | Merged in #1613 (16 November 2026) | Preserve a declined prompt, hidden input, unrelated configuration and the existing schedule's time/kind. |
 | #1559 → #1577; #1579, #1580, #1584 | At the time of writing #1559, #1579, #1580 and #1584 are in integration batch [#1591](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/1591); #1577 is stacked on #1559 and follows it | Reuse release/batch preparation and CI fixes; do not merge policy edits on assumed delegation. |
 | #1586: Windows Codex backup-path reporting | At the time of writing in batch #1591; check overlap with the installer stack | Keep normal user-visible paths and long-path support. |

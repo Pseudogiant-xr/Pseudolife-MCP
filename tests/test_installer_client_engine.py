@@ -1,11 +1,13 @@
-"""Which client the installers install: the Python client unless asked.
+"""Which client the installers install: the native client unless told.
 
-In 0.24.x the move to the native client is opt-in: ``ops/install.sh`` and
-``ops/install.ps1`` install the Python client (``ops/shim_runtime.py install``,
-then pipx and pip) unless ``PSEUDOLIFE_SHIM_ENGINE=native`` asks for the native
-client, which ``ops/install-native.sh`` / ``ops/install-native.ps1`` install.
-``PSEUDOLIFE_SHIM_ENGINE=python`` is the default spelled out, and the way back
-the 0.24.0 release notes name; any other value is refused before anything
+Since 0.26.0 ``ops/install.sh`` and ``ops/install.ps1`` install the native
+client (``ops/install-native.sh`` / ``ops/install-native.ps1``) by default and
+with ``PSEUDOLIFE_SHIM_ENGINE=native``. ``PSEUDOLIFE_SHIM_ENGINE=python``
+installs the Python client (``ops/shim_runtime.py install``, then pipx and
+pip) and records that choice in ``~/.pseudolife-mcp/client-engine``, which a
+later run without the variable honours. A defaulted run whose native installer
+hands back (the native client cannot serve the machine) carries on with the
+Python client and records nothing. Any other value is refused before anything
 changes. Each case runs a copy of the real script whose native installer is a
 stub that logs its arguments.
 """
@@ -65,14 +67,22 @@ def _env(tmp_path: Path, engine: str | None) -> dict[str, str]:
     return env
 
 
-SH_STUB = '#!/usr/bin/env bash\nprintf "%s\\n" "$@" >"$NATIVE_ARGS"\nexit 7\n'
+SH_STUB = ('#!/usr/bin/env bash\nprintf "%s\\n" "$@" >"$NATIVE_ARGS"\n'
+           # Says whether the wrapper handed it a file to hand back through,
+           # and hands back when the test asks it to.
+           '[ -z "${PSEUDOLIFE_INSTALLER_FALLBACK_FILE:-}" ] || '
+           '{ [ -f "$PSEUDOLIFE_INSTALLER_FALLBACK_FILE" ] && echo file >"$NATIVE_ARGS.handback"; }\n'
+           'if [ -n "${STUB_HAND_BACK:-}" ]; then printf "%s\\n" "$STUB_HAND_BACK" >"$PSEUDOLIFE_INSTALLER_FALLBACK_FILE"; '
+           'exit 0; fi\n'
+           'exit 7\n')
 
 
-def _sh(tmp_path: Path, engine: str | None, *args: str) -> subprocess.CompletedProcess[str]:
+def _sh(tmp_path: Path, engine: str | None, *args: str,
+        extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     if BASH is None:
         pytest.skip("needs bash")
     repo = _repo(tmp_path, "install.sh", SH_STUB, "install-native.sh")
-    env = _env(tmp_path, engine)
+    env = dict(_env(tmp_path, engine), **(extra or {}))
     with user_path_unchanged(tmp_path):
         return subprocess.run([BASH, _bash_path(repo / "ops" / "install.sh"), *args], env=env,
                               capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
@@ -108,12 +118,128 @@ def _native_args(tmp_path: Path) -> list[str] | None:
 
 # -- ops/install.sh ------------------------------------------------------------
 
-@pytest.mark.parametrize("engine", [None, "", "python"])
-def test_sh_default_and_python_run_the_python_installer(tmp_path, engine):
-    proc = _sh(tmp_path, engine, "--help")
+def test_sh_python_runs_the_python_installer(tmp_path):
+    proc = _sh(tmp_path, "python", "--help")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _native_args(tmp_path) is None
     assert "--client-only" in proc.stdout
+    # Help installs nothing, so nothing is recorded.
+    assert not (tmp_path / "home" / ".pseudolife-mcp" / "client-engine").exists()
+
+
+@pytest.mark.parametrize("engine", [None, ""])
+def test_sh_default_runs_the_native_installer_with_a_hand_back_file(tmp_path, engine):
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    proc = _sh(tmp_path, engine, "--client-only", "--daemon-url", "http://pl.example.invalid:8765", "--yes",
+               extra={"TMPDIR": _bash_path(scratch)})
+    # Its own exit is the run's, and the Python installer never starts.
+    assert proc.returncode == 7, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) == ["--client-only", "--daemon-url", "http://pl.example.invalid:8765", "--yes"]
+    assert (tmp_path / "native-args.handback").read_text(encoding="utf-8").strip() == "file"
+    assert "==>" not in proc.stdout
+    assert not list(scratch.iterdir()), "the hand-back file is removed"
+
+
+def test_sh_explicit_native_gets_no_hand_back_file(tmp_path):
+    proc = _sh(tmp_path, "native", "--yes")
+    assert proc.returncode == 7, proc.stdout + proc.stderr
+    assert not (tmp_path / "native-args.handback").exists()
+
+
+HAND_BACK = ("the native client cannot serve this machine (no native client is published for this platform), so "
+             "this install uses the Python client; PSEUDOLIFE_SHIM_ENGINE=native makes this a refusal, and "
+             "PSEUDOLIFE_SHIM_ENGINE=python chooses the Python client for later runs too")
+
+
+def test_sh_a_hand_back_carries_on_with_the_python_installer_and_records_nothing(tmp_path):
+    proc = _sh(tmp_path, None, "--help", extra={"STUB_HAND_BACK": HAND_BACK})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) == ["--help"]
+    assert f"==> {HAND_BACK}" in proc.stdout.splitlines()
+    assert "--client-only" in proc.stdout, "the Python installer's usage"
+    assert not (tmp_path / "home" / ".pseudolife-mcp" / "client-engine").exists()
+
+
+def _record(tmp_path: Path, text: str) -> Path:
+    record = tmp_path / "home" / ".pseudolife-mcp" / "client-engine"
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(text, encoding="utf-8", newline="\n")
+    return record
+
+
+def test_sh_a_recorded_python_choice_is_honoured_without_the_variable(tmp_path):
+    _record(tmp_path, "python\n")
+    proc = _sh(tmp_path, None, "--help")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) is None
+    assert "--client-only" in proc.stdout
+    [line] = [text for text in proc.stdout.splitlines() if "records an earlier" in text]
+    assert line.startswith("Python client install: ") and "PSEUDOLIFE_SHIM_ENGINE=native" in line
+
+
+@pytest.mark.parametrize("text", ["native\n", "", "Python\n", "python python\n"])
+def test_sh_a_record_that_does_not_say_exactly_python_is_no_choice(tmp_path, text):
+    _record(tmp_path, text)
+    proc = _sh(tmp_path, None, "--yes")
+    assert proc.returncode == 7, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) == ["--yes"]
+
+
+def test_sh_explicit_native_overrides_a_recorded_python_choice(tmp_path):
+    _record(tmp_path, "python\n")
+    proc = _sh(tmp_path, "native", "--yes")
+    assert proc.returncode == 7, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) == ["--yes"]
+
+
+def _record_function(shell: str) -> str:
+    text = (ROOT / "ops" / ("install.sh" if shell == "bash" else "install.ps1")).read_text(encoding="utf-8")
+    start = "record_client_engine() {" if shell == "bash" else "function Save-ClientEngineChoice {"
+    assert text.count(start) == 1
+    return start + text.split(start, 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_an_explicit_python_install_records_its_choice_at_its_end(tmp_path, shell):
+    record = tmp_path / "home" / ".pseudolife-mcp" / "client-engine"
+    if shell == "bash":
+        if BASH is None:
+            pytest.skip("needs bash")
+        body = (f"CLIENT_ENGINE_RECORD='{_bash_path(record)}'\n" + _record_function("bash")
+                + "RECORD_PYTHON_CHOICE=\nrecord_client_engine; echo ONE\n"
+                + "RECORD_PYTHON_CHOICE=1\nrecord_client_engine; record_client_engine; echo TWO\n")
+        script = tmp_path / "record.sh"
+        script.write_text(body, encoding="utf-8", newline="\n")
+        command = [BASH, _bash_path(script)]
+    else:
+        if PWSH is None:
+            pytest.skip("needs pwsh")
+        body = (f"$clientEngineRecord = '{str(record)}'\n" + _record_function("pwsh")
+                + "$script:recordPythonChoice = $false\nSave-ClientEngineChoice; 'ONE'\n"
+                + "$script:recordPythonChoice = $true\nSave-ClientEngineChoice; Save-ClientEngineChoice; 'TWO'\n")
+        script = tmp_path / "record.ps1"
+        script.write_text(body, encoding="utf-8")
+        command = [PWSH, "-NoProfile", "-NonInteractive", "-File", str(script)]
+    proc = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False,
+                          env=_env(tmp_path, None), stdin=subprocess.DEVNULL)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    out = proc.stdout.splitlines()
+    # Not chosen: nothing written. Chosen: written once, said once.
+    assert out.index("ONE") == 0
+    assert record.read_text(encoding="utf-8").strip() == "python"
+    said = [line for line in out if line.startswith("Python client chosen: recorded in ")]
+    assert len(said) == 1 and out.index(said[0]) < out.index("TWO")
+
+
+@pytest.mark.parametrize("script, call, before, after", [
+    ("install.sh", "\nrecord_client_engine\n", "\nprint_update_line\n", 'echo "Done.'),
+    ("install.ps1", "\nSave-ClientEngineChoice\n", "\nWrite-UpdateLine ", 'Write-Host "Done.'),
+])
+def test_the_python_choice_is_recorded_once_after_the_install_steps(script, call, before, after):
+    text = (ROOT / "ops" / script).read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert text.count(call) == 1
+    assert text.index(before) < text.index(call) < text.index(after)
 
 
 def test_sh_native_hands_every_argument_to_the_native_installer(tmp_path):
@@ -135,13 +261,62 @@ def test_sh_any_other_engine_is_refused_before_anything_changes(tmp_path, engine
 
 # -- ops/install.ps1 -----------------------------------------------------------
 
-@pytest.mark.parametrize("engine", [None, "", "python"])
-def test_ps_default_and_python_run_the_python_installer(tmp_path, engine):
-    proc = _ps(tmp_path, engine, "-ClientOnly", "-NoArt")
+def test_ps_python_runs_the_python_installer(tmp_path):
+    proc = _ps(tmp_path, "python", "-ClientOnly", "-NoArt")
     # Master's own refusal, from the Python installer's parameter checks.
     assert proc.returncode == 2, proc.stdout + proc.stderr
     assert "-ClientOnly needs" in proc.stdout + proc.stderr
     assert _native_args(tmp_path) is None
+
+
+PS_LOG_DEFAULTED = "Add-Content -LiteralPath $env:NATIVE_ARGS -Value \"defaulted=$($global:PseudolifeClientDefaulted)\"\n"
+
+
+@pytest.mark.parametrize("engine, defaulted", [(None, "True"), ("", "True"), ("native", "False")])
+def test_ps_default_and_native_run_the_native_installer(tmp_path, engine, defaulted):
+    proc = _ps(tmp_path, engine, "-ClientOnly", "-NoArt", ending=PS_LOG_DEFAULTED + "exit 7\n")
+    assert proc.returncode == 7, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) == ["started", "ClientOnly=True", "NoArt=True", f"defaulted={defaulted}"]
+
+
+def test_ps_a_hand_back_carries_on_with_the_python_installer_and_records_nothing(tmp_path):
+    hand_back = HAND_BACK.replace("PSEUDOLIFE_SHIM_ENGINE=native", "$env:PSEUDOLIFE_SHIM_ENGINE = 'native'")
+    ending = f"$global:PseudolifeClientFallback = '{hand_back.replace(chr(39), chr(39) * 2)}'\nexit 0\n"
+    proc = _ps(tmp_path, None, "-ClientOnly", "-NoArt", ending=ending)
+    # The Python installer's own refusal follows the hand-back line.
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert f"==> {hand_back}" in proc.stdout.splitlines()
+    assert "-ClientOnly needs" in proc.stdout + proc.stderr
+    assert not (tmp_path / "home" / ".pseudolife-mcp" / "client-engine").exists()
+
+
+def test_ps_the_shared_globals_do_not_outlive_the_run(tmp_path):
+    # Run as from an open pwsh session: the wrapper's globals are gone after.
+    if PWSH is None:
+        pytest.skip("needs pwsh")
+    repo = _repo(tmp_path, "install.ps1", _ps_stub("exit 7\n"), "install-native.ps1")
+    command = (f"& '{str(repo / 'ops' / 'install.ps1')}' -NoArt; "
+               "'left=' + (@(Get-Variable -Name PseudolifeClient* -Scope Global -ErrorAction SilentlyContinue).Count)")
+    with user_path_unchanged(tmp_path):
+        proc = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", command], env=_env(tmp_path, None),
+                              capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
+    assert "left=0" in proc.stdout.splitlines(), proc.stdout + proc.stderr
+
+
+def test_ps_a_recorded_python_choice_is_honoured_without_the_variable(tmp_path):
+    _record(tmp_path, "python\n")
+    proc = _ps(tmp_path, None, "-ClientOnly", "-NoArt")
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert "-ClientOnly needs" in proc.stdout + proc.stderr
+    assert _native_args(tmp_path) is None
+    [line] = [text for text in proc.stdout.splitlines() if "records an earlier" in text]
+    assert line.startswith("Python client install: ") and "'native'" in line
+
+
+def test_ps_explicit_native_overrides_a_recorded_python_choice(tmp_path):
+    _record(tmp_path, "python\n")
+    proc = _ps(tmp_path, "native", "-NoArt")
+    assert proc.returncode == 7, proc.stdout + proc.stderr
 
 
 def test_ps_native_hands_every_parameter_to_the_native_installer(tmp_path):
@@ -152,8 +327,8 @@ def test_ps_native_hands_every_parameter_to_the_native_installer(tmp_path):
 
 
 @pytest.mark.parametrize("engine, tunnel", [
-    ("native", True), ("native", False), ("python", True),
-], ids=["native-with-tunnel", "native-without-tunnel", "python-with-tunnel"])
+    ("native", True), (None, True), ("native", False), ("python", True),
+], ids=["native-with-tunnel", "default-with-tunnel", "native-without-tunnel", "python-with-tunnel"])
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
 def test_tunnel_switch_is_only_for_the_python_installer(tmp_path, engine, tunnel, shell):
     # Exercise the actual routing and argument prologues, stopping the native
@@ -190,7 +365,7 @@ def test_tunnel_switch_is_only_for_the_python_installer(tmp_path, engine, tunnel
         proc = subprocess.run([*command, *([switch] if tunnel else [])], env=env,
                               capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
     output = proc.stdout + proc.stderr
-    if engine == "native" and tunnel:
+    if engine in ("native", None) and tunnel:
         assert proc.returncode == 1, output
         assert _native_args(tmp_path) is None
         # PowerShell can create its own cache before the script is entered.
@@ -201,10 +376,14 @@ def test_tunnel_switch_is_only_for_the_python_installer(tmp_path, engine, tunnel
         assert "The native client has no guided tunnel setup yet" in output
         assert "Nothing was changed" in output
         assert f"Rerun without {switch}" in output
+        # The route that works: the Python client's guided setup.
+        assert ("PSEUDOLIFE_SHIM_ENGINE=python bash ops/install.sh --tunnel" if shell == "bash"
+                else "$env:PSEUDOLIFE_SHIM_ENGINE = 'python' and rerun .\\ops\\install.ps1 -Tunnel") in output
+        assert "unset PSEUDOLIFE_SHIM_ENGINE" not in output and "Remove-Item Env:" not in output
         assert "pseudolife-mcp tunnel setup --daemon-url" in output
         assert "--token-file" in output and "--accept-access" in output
     else:
-        expected = "native install reached" if engine == "native" else "tunnel setup"
+        expected = "native install reached" if engine in ("native", None) else "tunnel setup"
         assert proc.returncode == 0, output
         assert _native_args(tmp_path) == [expected]
 
@@ -263,10 +442,10 @@ def test_ps_any_other_engine_is_refused_before_anything_changes(tmp_path, engine
     assert "python" in line and "native" in line and "Nothing was changed" in line
 
 
-# -- the default path is master's: Python, and nothing moves to native ---------
+# -- the Python client's path moves nothing to native --------------------------
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-def test_the_default_installer_installs_the_python_client_and_moves_nothing_to_native(script):
+def test_the_python_path_installs_the_python_client_and_moves_nothing_to_native(script):
     text = (ROOT / "ops" / script).read_text(encoding="utf-8")
     engine = text.split("# >>> client engine >>>", 1)[1].split("# <<< client engine <<<", 1)
     assert len(engine) == 2, "the client engine block is missing"
@@ -286,13 +465,12 @@ def test_the_native_installer_is_the_one_that_moves_registrations(script, native
 
 
 @pytest.mark.parametrize("native,line", [
-    ("install-native.sh", 'echo "Native client install (PSEUDOLIFE_SHIM_ENGINE=native): rerun it with that variable set;'),
-    ("install-native.ps1", 'Write-Host "Native client install (PSEUDOLIFE_SHIM_ENGINE=native): rerun it with that variable set;'),
+    ("install-native.sh", 'echo "Native client install (the default client; PSEUDOLIFE_SHIM_ENGINE=python installs the Python client instead)."'),
+    ("install-native.ps1", 'Write-Host "Native client install (the default client; PSEUDOLIFE_SHIM_ENGINE=python installs the Python client instead)."'),
 ])
-def test_the_native_installer_says_a_rerun_needs_the_variable(native, line):
-    # A rerun without the variable takes the Python client's path, so every
-    # native run says how to rerun it, once, near its start, and its usage
-    # names the variable.
+def test_the_native_installer_says_it_is_the_default_and_names_the_other_client(native, line):
+    # Every native run says, once, near its start, that it is the default
+    # and how to get the Python client instead; its usage names the variable.
     text = (ROOT / "ops" / native).read_text(encoding="utf-8")
     assert text.count(line) == 1
     assert text.index(line) < text.index("# >>> extractor modes >>>")
