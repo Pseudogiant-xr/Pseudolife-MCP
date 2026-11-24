@@ -63,6 +63,8 @@ def main() -> int:
     # otherwise be looked up on PATH).
     binary = Path(os.environ.get("PSEUDOLIFE_LEASE_CI_BINARY") or postgres.native_binary(_ROOT)).absolute()
     secret = ""
+    server = None
+    exported = False
 
     try:
         if not binary.is_file():
@@ -85,10 +87,15 @@ def main() -> int:
         with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="") as env_file:
             env_file.write(f"PSEUDOLIFE_TEST_PG_HOST_PORT={host_port}\n")
             env_file.write(f"PSEUDOLIFE_TEST_PG_LOGIN_FILE={login_file}\n")
+        exported = True
     except Exception as exc:  # noqa: BLE001 - never expose a connection string
         print(f"lease PostgreSQL fixture setup failed ({type(exc).__name__})", file=sys.stderr)
         print(diagnostic(exc, f"password={secret}" if secret else ""), file=sys.stderr)
         return 1
+    finally:
+        # The cluster outlives this step only when the next steps can use it.
+        if server is not None and not exported:
+            server.stop()
 
     print("Disposable PostgreSQL and isolated test login are ready for the lease row.")
     return 0

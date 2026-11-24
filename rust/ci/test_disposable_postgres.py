@@ -386,6 +386,22 @@ def test_stop_leaves_an_attached_server_running(fakes, tmp_path):
     assert fakes.pg0.drops == []
 
 
+def test_stop_leaves_a_server_that_took_the_pid_file_after_answering(fakes, monkeypatch):
+    """The pid file pg_ctl signals must still name the server that just
+    answered: a restart between the check and the stop is left alone."""
+    server = postgres.start(fakes.parent, "pl-test-")
+    real = postgres._identity
+
+    def answer_then_restart(port, password):
+        identity = real(port, password)
+        (server.pgdata / "postmaster.pid").write_text("5151\nx\n0\n55432\n", encoding="utf-8")
+        return identity
+
+    monkeypatch.setattr(postgres, "_identity", answer_then_restart)
+    assert server.stop() is False
+    assert fakes.stops == [] and fakes.pg0.drops == []
+
+
 def test_stop_leaves_a_server_that_replaced_its_own(fakes):
     server = postgres.start(fakes.parent, "pl-test-")
     (server.pgdata / "postmaster.pid").write_text("5151\nx\n0\n55432\n", encoding="utf-8")
@@ -419,14 +435,23 @@ def test_child_environment_drops_libpq_controls_and_the_daemon_url():
 
 def test_create_test_login_runs_the_native_client_without_the_password_on_argv(monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(postgres.subprocess, "run",
-                        lambda command, **kwargs: calls.append((command, kwargs)) or
-                        subprocess.CompletedProcess(command, 0, "", ""))
+
+    def run(command, **kwargs):
+        profile = Path(kwargs["env"]["HOME"])
+        calls.append((command, kwargs, profile.is_dir() and not any(profile.iterdir())))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(postgres.subprocess, "run", run)
     server = postgres.Server(name="n", data_dir=tmp_path, pgdata=tmp_path, port=55432, pid=1,
                              password="synthetic-secret", owned=True)
     login = tmp_path / "test-pg.env"
     postgres.create_test_login(Path("bin/pseudolife-stdio"), server, login)
-    (command, kwargs), = calls
+    (command, kwargs, empty_profile), = calls
+    # An empty profile of its own: the runner's ~/.postgresql (or APPDATA's
+    # postgresql) client files cannot refuse the admin URL.
+    env = kwargs["env"]
+    assert empty_profile and env["HOME"] == env["USERPROFILE"] == env["APPDATA"]
+    assert Path(env["HOME"]) != Path.home() and not Path(env["HOME"]).exists()
     assert command == [str(Path("bin/pseudolife-stdio")), "test-login", "create", "--rotate", "--json",
                        "--file", str(login), "--admin-url",
                        "host=127.0.0.1 port=55432 user=postgres dbname=postgres"]
@@ -520,6 +545,7 @@ def lease_ci(monkeypatch, tmp_path, fakes):
 
 def test_lease_fixture_exports_the_cluster_and_login(lease_ci, capsys):
     assert lease_ci.module.main() == 0
+    assert lease_ci.fakes.stops == []  # the next steps use it
     lines = lease_ci.env_file.read_text(encoding="utf-8").splitlines()
     login = lease_ci.tmp / "runner-temp" / "test-pg.env"
     assert lines == ["PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:55432", f"PSEUDOLIFE_TEST_PG_LOGIN_FILE={login}"]
@@ -562,6 +588,19 @@ def test_lease_fixture_reports_why_the_login_failed_without_its_secret(lease_ci,
     assert "admin connection refused for ***" in err
     assert not lease_ci.env_file.exists()
     assert seen and seen[0] not in err
+    # Nobody can use a cluster with no login: it is stopped and removed.
+    assert len(lease_ci.fakes.stops) == 1
+    assert not list(lease_ci.tmp.glob("pl-cli-lease-postgres-*"))
+
+
+def test_lease_fixture_stops_the_cluster_when_the_native_client_cannot_run(lease_ci, monkeypatch, capsys):
+    def run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, 240)
+
+    monkeypatch.setattr(postgres.subprocess, "run", run)
+    assert lease_ci.module.main() == 1
+    assert "TimeoutExpired" in capsys.readouterr().err
+    assert len(lease_ci.fakes.stops) == 1 and not lease_ci.env_file.exists()
 
 
 def test_lease_fixture_refuses_values_github_env_cannot_hold_before_starting(lease_ci, monkeypatch, capsys):

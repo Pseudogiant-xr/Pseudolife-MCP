@@ -187,7 +187,7 @@ class Server:
         # A pid in a stale postmaster.pid can belong to another process by
         # now: the server must still answer with this start time, for this
         # data directory, to our password.
-        if not _stop_verified(self.name, self.pgdata, self.port, [self.password], started=self.started):
+        if not _stop_verified(self.name, self.pgdata, self.port, self.pid, [self.password], started=self.started):
             return False
         shutil.rmtree(self.data_dir, ignore_errors=True)
         self.owned = False
@@ -225,12 +225,13 @@ def _deregister(name: str, pgdata: Path) -> None:
         pg0.Pg0(name=name, data_dir=str(pgdata)).drop(force=True)
 
 
-def _stop_verified(name: str, pgdata: Path, port: int, passwords: list[str], *,
+def _stop_verified(name: str, pgdata: Path, port: int, pid: int, passwords: list[str], *,
                    started: str | None = None, wait: float = 0) -> bool:
-    """Stop the postmaster of ``pgdata`` only once the server on ``port``
-    answers one of ``passwords`` as the server of that directory (with
-    ``started`` as its start time, when known), and report success only once
-    it has exited. Anything unconfirmed is left running."""
+    """Stop the postmaster ``pid`` of ``pgdata`` only once the server on
+    ``port`` answers one of ``passwords`` as the server of that directory
+    (with ``started`` as its start time, when known) and ``pid`` still holds
+    the directory's pid file, and report success only once it has exited.
+    Anything unconfirmed is left running."""
     deadline = time.monotonic() + wait
     while True:
         identity = next(filter(None, (_identity(port, password) for password in passwords)), None)
@@ -239,6 +240,11 @@ def _stop_verified(name: str, pgdata: Path, port: int, passwords: list[str], *,
         if time.monotonic() >= deadline:
             return False
         time.sleep(1)
+    # pg_ctl signals whichever pid the file names when it runs: it must still
+    # be the one that just answered (a restart in between leaves it alone).
+    record = _pidfile(pgdata)
+    if record is None or record[0] != pid:
+        return False
     _pg_ctl_stop(pgdata)
     if _pidfile(pgdata) is not None:
         return False
@@ -251,7 +257,7 @@ def _abandon(name: str, data_dir: Path, pgdata: Path, passwords: list[str]) -> N
     directory once it answers as ours, then remove the directory once
     nothing runs in it. A server that never answers is left running."""
     record = _pidfile(pgdata)
-    if record is not None and not _stop_verified(name, pgdata, record[1], passwords, wait=ABANDON_WAIT):
+    if record is not None and not _stop_verified(name, pgdata, record[1], record[0], passwords, wait=ABANDON_WAIT):
         print(f"disposable PostgreSQL in {pgdata} did not answer as ours; left running", file=sys.stderr)
         return
     shutil.rmtree(data_dir, ignore_errors=True)
@@ -340,12 +346,19 @@ def child_environment(server: Server | None = None, base: dict | None = None) ->
 
 def create_test_login(binary: Path, server: Server, login_file: Path, *,
                       timeout: float = TEST_LOGIN_TIMEOUT) -> subprocess.CompletedProcess:
-    """``test-login create`` through the native client, against ``server``."""
+    """``test-login create`` through the native client, against ``server``.
+
+    The client runs with an empty profile of its own (HOME, USERPROFILE,
+    APPDATA): it refuses an admin URL while a client certificate, key or CRL
+    sits in the default PostgreSQL directory those name, and a self-hosted
+    runner's own files must not decide a throwaway cluster's setup."""
     command = [str(binary), "test-login", "create", "--rotate", "--json", "--file", str(login_file),
                "--admin-url", server.admin_conninfo()]
-    return subprocess.run(command, env=child_environment(server), stdin=subprocess.DEVNULL,
-                          capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          timeout=timeout)
+    with tempfile.TemporaryDirectory(prefix="pl-test-login-profile-") as profile:
+        env = dict(child_environment(server), HOME=profile, USERPROFILE=profile, APPDATA=profile)
+        return subprocess.run(command, env=env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=timeout)
 
 
 def failure_reason(result: subprocess.CompletedProcess) -> str:
