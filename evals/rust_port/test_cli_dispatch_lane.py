@@ -218,8 +218,11 @@ PINNED_USAGE_SHA256 = "5806d34185cdd94f2c83af42426d2954a6202abd10aba75d6dcfd9e53
 # The native help is Python's usage with two modes the native client refuses
 # (14 November 2026: serve is the separate pseudolife-daemon, embedded was
 # retired with file mode) and move's target, an installed release (21
-# November 2026: native move refuses checkout targets); Python is frozen, so
-# only these lines differ.
+# November 2026: native move refuses checkout targets), and two passages that
+# named steps the native client lacks (#1609, 25 November 2026: the tunnel
+# line lists only the native tunnel commands, and the token-file note names
+# the installers' Claude Desktop step, not ops/register_claude_desktop.py);
+# Python is frozen, so only these lines differ.
 NATIVE_HELP_LINES = (
     (b"  serve          run the HTTP memory daemon (deployment mode)\n",
      b"  serve          refused: the daemon is pseudolife-daemon, in the Docker tier\n"),
@@ -229,6 +232,17 @@ NATIVE_HELP_LINES = (
      b"                 checkout host over key-based ssh (`move --to <ssh-target>`):\n",
      b"  move           move this host's Docker-tier bank to an installed release on\n"
      b"                 another host over key-based ssh (`move --to <ssh-target>`):\n"),
+    (b"  tunnel         guided optional Secure MCP Tunnel setup, cloud verification,\n"
+     b"                 status/doctor, private key renewal and opted-in autostart\n"
+     b"                 (`tunnel setup` resumes saved steps; `tunnel --help`)\n",
+     b"  tunnel         optional Secure MCP Tunnel for a ChatGPT developer app: save\n"
+     b"                 or resume a profile and import or renew its runtime key, show\n"
+     b"                 status, print a prompt that proves cloud access, run it in\n"
+     b"                 this terminal, stop it, and check saved tunnels after a client\n"
+     b"                 update (`tunnel --help`)\n"),
+    (b"  are set. ops/register_claude_desktop.py probes this text for the file form.\n",
+     b"  are set. The installers' Claude Desktop step reads this text to find the\n"
+     b"  file form.\n"),
 )
 
 

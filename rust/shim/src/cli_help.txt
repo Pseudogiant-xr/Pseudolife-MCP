@@ -20,9 +20,11 @@ modes:
                  session's last one (installs without the plugin)
   doctor         check runtime, health, MCP and coordination (read-only by default;
                  --disposable-proof writes only to an explicit fixture server)
-  tunnel         guided optional Secure MCP Tunnel setup, cloud verification,
-                 status/doctor, private key renewal and opted-in autostart
-                 (`tunnel setup` resumes saved steps; `tunnel --help`)
+  tunnel         optional Secure MCP Tunnel for a ChatGPT developer app: save
+                 or resume a profile and import or renew its runtime key, show
+                 status, print a prompt that proves cloud access, run it in
+                 this terminal, stop it, and check saved tunnels after a client
+                 update (`tunnel --help`)
   connect        point this machine's client registrations at a daemon URL
                  (`connect <url>`): replaces the old URL and, with
                  --token-file, the token file; verifies the daemon accepts
@@ -103,6 +105,7 @@ modes:
 credentials (token-gated daemon): PSEUDOLIFE_MCP_TOKEN=<bearer>, or
   PSEUDOLIFE_MCP_TOKEN_FILE=<owner-only file holding it> for hosts that
   sanitize the launch environment (Claude Desktop); the file wins when both
-  are set. ops/register_claude_desktop.py probes this text for the file form.
+  are set. The installers' Claude Desktop step reads this text to find the
+  file form.
 
 docs: https://github.com/Pseudogiant-xr/Pseudolife-MCP

@@ -20,15 +20,37 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(0));
-        // SHA-256 of cli_help.txt (cli.py::_USAGE with serve and embedded refused and move's
-        // installed-release target), with Windows CRLF.
+        // SHA-256 of cli_help.txt (cli.py::_USAGE with serve and embedded refused, move's
+        // installed-release target, and the native installer and tunnel steps), with
+        // Windows CRLF.
         let expected = if cfg!(windows) {
-            "d345d2272d96edf8a4fed77201eac20640cb9af773cdb5e181dbacd42d2827b7"
+            "e89720a67b9b6fef9b096b6f16f6587e7e06eb89b332130707b5a0f535877496"
         } else {
-            "f4d45df2afdc8add3fe62fe87aab841c31abc0c18a4f9b6c64707c65f5bf05ca"
+            "ed92593d31b0e0c75b9997c85b14456fb9de6d7a2b1437230aadc010156dd9da"
         };
         assert_eq!(format!("{:x}", Sha256::digest(&output.stdout)), expected);
         assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn the_tunnel_help_line_names_only_the_native_tunnel_commands() {
+    // #1609: `tunnel --help` lists setup, status, verify, run, stop and
+    // update; the native client refuses guided setup, tunnel doctor and the
+    // autostart service, so the overview must not advertise them.
+    // cli_help.txt is LF everywhere (rust/.gitattributes); this file may be
+    // checked out CRLF, so the lines are joined explicitly.
+    let help = include_str!("../src/cli_help.txt");
+    let lines = [
+        "  tunnel         optional Secure MCP Tunnel for a ChatGPT developer app: save",
+        "                 or resume a profile and import or renew its runtime key, show",
+        "                 status, print a prompt that proves cloud access, run it in",
+        "                 this terminal, stop it, and check saved tunnels after a client",
+        "                 update (`tunnel --help`)",
+    ];
+    assert!(help.contains(&(lines.join("\n") + "\n")), "{help}");
+    for gone in ["guided optional", "status/doctor", "opted-in autostart"] {
+        assert!(!help.contains(gone), "{gone}");
     }
 }
 

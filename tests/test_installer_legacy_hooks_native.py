@@ -458,7 +458,13 @@ def test_codex_hooks_are_left_to_the_codex_setup_helper(variant, tmp_path):
     original = path.read_bytes()
     proc = _run_hook(variant, env, path, client="codex")
     assert proc.returncode == 2, _out(proc)
-    assert "setup-codex-hooks.py" in _out(proc)
+    if variant[0] == "bash":
+        # #1609: the native hook script names a step an installed client has.
+        assert _out(proc) == ("--remove-legacy is for Claude Code; for Codex hooks, rerun the installer "
+                              "with --client codex and PSEUDOLIFE_SHIM_ENGINE=native.\n")
+    else:
+        # ops/install-hook.ps1 is shared with the default (Python client) installer.
+        assert "setup-codex-hooks.py" in _out(proc)
     assert path.read_bytes() == original
 
 
