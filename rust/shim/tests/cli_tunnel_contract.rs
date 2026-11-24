@@ -1799,6 +1799,49 @@ fn file_free_answers_and_refusals_match_the_oracle_text() {
     assert!(!home.path("tunnels").exists());
 }
 
+#[test]
+fn setup_names_an_absolute_token_path_and_a_profile_not_ready_for_its_key() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--daemon-url",
+            &daemon.url(),
+            "--token-file",
+            "~/token",
+            "--accept-access",
+        ],
+        &[],
+        "pass the daemon credential file as an absolute path",
+    );
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "pending", "consent": true,
+        }),
+    );
+    let input = home.path("key-input");
+    pseudolife_stdio::board::state::atomic_create(&input, b"fixture-runtime-key").unwrap();
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-file",
+            input.to_str().unwrap(),
+        ],
+        &[],
+        "profile dot is not ready to take a runtime key (its saved state is pending)",
+    );
+    daemon.assert_untouched();
+}
+
 #[cfg(unix)]
 mod seeded {
     use super::*;
@@ -2005,5 +2048,60 @@ mod seeded {
                     .contains("cannot read the verification challenge")
             );
         }
+    }
+
+    #[test]
+    fn a_key_file_in_a_form_it_does_not_read_is_named() {
+        let home = Home::new();
+        let dir = home.dir();
+        profile(&home, "dot", true);
+        let key = home.path("tunnels/dot.key");
+        let made = Command::new("mkfifo").arg(&key).status();
+        if !made.is_ok_and(|status| status.success()) {
+            return; // no mkfifo on this host
+        }
+        let output = run_bounded(&home, &["status", "--profile-dir", &dir]);
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("cannot read the key file {}", key.display())),
+            "{stderr}"
+        );
+    }
+
+    #[test]
+    fn non_text_arguments_and_environment_are_refused_with_the_cause() {
+        use std::os::unix::ffi::OsStringExt;
+        let home = Home::new();
+        let dir = home.dir();
+        let listener = Listener::new();
+        let before = tree(&home.0);
+        let output = command(&home, &listener)
+            .arg("status")
+            .arg(std::ffi::OsString::from_vec(vec![b'-', b'-', 0xff]))
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .starts_with("tunnel arguments must be valid text"),
+        );
+        let output = command(&home, &listener)
+            .args(["setup", "--profile-dir", &dir])
+            .env(
+                "PSEUDOLIFE_MCP_TOKEN_FILE",
+                std::ffi::OsString::from_vec(vec![b'/', 0xff]),
+            )
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("the environment variable PSEUDOLIFE_MCP_TOKEN_FILE is not valid text"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(tree(&home.0) == before);
+        listener.assert_untouched();
     }
 }
