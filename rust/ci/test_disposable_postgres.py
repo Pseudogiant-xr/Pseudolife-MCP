@@ -139,7 +139,9 @@ class FakeServer:
 class FakeWinApi:
     """The _winapi calls the Windows signal pipe makes, on a fake clock:
     ``busy`` CreateFile attempts fail with ERROR_PIPE_BUSY first, and each
-    WaitNamedPipe advances the clock by ``wait_takes`` seconds."""
+    WaitNamedPipe advances the clock by ``wait_takes`` seconds, but never by
+    more than the timeout it was given: as the real call, it then fails with
+    ERROR_SEM_TIMEOUT."""
     GENERIC_READ, GENERIC_WRITE, OPEN_EXISTING, NULL = 0x80000000, 0x40000000, 3, 0
     ERROR_PIPE_BUSY, ERROR_SEM_TIMEOUT = 231, 121
 
@@ -168,9 +170,11 @@ class FakeWinApi:
 
     def WaitNamedPipe(self, name, timeout_ms):
         self.calls.append(("WaitNamedPipe", name, timeout_ms))
-        self.now += self.wait_takes
+        self.now += min(self.wait_takes, timeout_ms / 1000)
         if self.wait_error is not None:
             raise self._error(self.wait_error, "wait failed")
+        if self.wait_takes > timeout_ms / 1000:
+            raise self._error(self.ERROR_SEM_TIMEOUT, "The semaphore timeout period has expired")
 
     def WriteFile(self, handle, data):
         self.calls.append(("WriteFile", handle, data))
@@ -240,7 +244,7 @@ def test_start_owns_a_fresh_loopback_cluster(fakes):
     assert server.password not in server.admin_conninfo() and server.password not in repr(server)
 
 
-@pytest.mark.parametrize("prefix", ["../pl-", "pl/../", "a/b-", "a\\b-", "pl..x-"])
+@pytest.mark.parametrize("prefix", ["../pl-", "pl/../", "a/b-", "a\\b-", "pl..x-", "C:", "C:pl-", "pl:x-"])
 def test_start_refuses_a_prefix_that_is_not_one_path_component(fakes, prefix):
     with pytest.raises(postgres.SetupError, match="one path component"):
         postgres.start(fakes.parent, prefix)
@@ -249,9 +253,10 @@ def test_start_refuses_a_prefix_that_is_not_one_path_component(fakes, prefix):
         fakes.home, fakes.parent} and fakes.pg0.instances == []
 
 
-@pytest.mark.parametrize("prefix", ["pl.ci-", "pl-cli-lease-postgres-", "-_"])
+@pytest.mark.parametrize("prefix", ["pl.ci-", "pl-cli-lease-postgres-", "pl-precheck-postgres-", "-_"])
 def test_start_takes_a_plain_prefix(fakes, prefix):
-    """The near misses: one dot, the lease fixture's own prefix, an empty one."""
+    """The near misses: one dot, the lease fixture's and the precheck's own
+    prefixes, an empty one."""
     assert postgres.start(fakes.parent, prefix).owned
 
 
@@ -734,8 +739,9 @@ def test_a_signal_pipe_busy_for_five_seconds_gives_up(monkeypatch):
     with pytest.raises(OSError) as raised:
         postgres._signal_shutdown(4242)
     assert raised.value.winerror == api.ERROR_PIPE_BUSY
-    assert api.now - started == pytest.approx(postgres.PIPE_GIVE_UP + 1.0)  # three waits of 2 s
-    assert api.names().count("WaitNamedPipe") == 3 and "WriteFile" not in api.names()
+    assert api.now - started == pytest.approx(postgres.PIPE_GIVE_UP)  # 2 s, 2 s, then the last 1 s
+    waits = [call[2] for call in api.calls if call[0] == "WaitNamedPipe"]
+    assert waits == [5000, 3000, 1000] and "WriteFile" not in api.names()
     assert "CloseHandle" not in api.names()  # nothing was opened
 
 
