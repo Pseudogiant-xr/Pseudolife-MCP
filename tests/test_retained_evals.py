@@ -473,13 +473,48 @@ def test_endpoint_refuses_another_file_and_names_both_files_without_the_path(mod
         assert "<user>" not in message and "llama.cpp" not in message
 
 
-def test_endpoint_without_a_served_name_still_needs_the_request_model():
+def test_endpoint_pinned_by_a_path_matches_the_file_and_prints_only_its_name():
+    pinned = "D:\\Users\\<user>\\models\\" + SERVED_GGUF
     with llama_cpp_server(SERVED_PATH) as (url, _):
-        endpoint = retained_daemon.Endpoint(url, SERVED_GGUF + "-other", "fixture-profile")
+        endpoint = retained_daemon.Endpoint(url, "bench", "fixture-profile", pinned)
+        endpoint.verify()
+        assert endpoint.chat("Reply with one word.", "Say ok.", max_tokens=8) == "ok"
+    with llama_cpp_server(SERVED_PATH.replace("Q4_K_XL", "Q8_K_XL")) as (url, _):
+        endpoint = retained_daemon.Endpoint(url, "bench", "fixture-profile", pinned)
+        with pytest.raises(BenchError) as refused:
+            endpoint.verify()
+        with pytest.raises(BenchError) as served:
+            endpoint.chat("Reply with one word.", "Say ok.", max_tokens=8)
+    for message in (str(refused.value), str(served.value)):
+        assert f"not the expected {SERVED_GGUF!r}" in message and "<user>" not in message
+
+
+@pytest.mark.parametrize(("request_model", "served_model", "model_id"), [
+    ("bench", None, "/any/dir/bench"),
+    ("bench", "Qwen3-8B", "someorg/Qwen3-8B"),
+    ("bench", None, "C:\\Users\\<user>\\models\\bench"),
+], ids=["request model under a directory", "repo id ending in the pinned name", "windows directory"])
+def test_endpoint_keeps_exact_matching_for_ids_that_are_not_gguf_files(request_model, served_model, model_id):
+    with llama_cpp_server(model_id) as (url, _):
+        endpoint = retained_daemon.Endpoint(url, request_model, "fixture-profile", served_model)
         with pytest.raises(BenchError, match="not the expected"):
             endpoint.verify()
-    with llama_cpp_server("bench") as (url, _):
-        retained_daemon.Endpoint(url, "bench", "fixture-profile").verify()
+        with pytest.raises(BenchError, match="not the expected"):
+            endpoint.chat("Reply with one word.", "Say ok.", max_tokens=8)
+    with llama_cpp_server(served_model or request_model) as (url, _):
+        retained_daemon.Endpoint(url, request_model, "fixture-profile", served_model).verify()
+
+
+@pytest.mark.parametrize("primary", [SERVED_PATH, SERVED_GGUF, "/home/<user>/models/" + SERVED_GGUF])
+def test_rejudge_refuses_the_primary_judge_pinned_by_path_or_file_name(tmp_path, monkeypatch, primary):
+    monkeypatch.setattr(lme, "validated_scores",
+                        lambda source: ({}, {"judge": {"served_model": primary}}, []))
+    judge = retained_daemon.Endpoint("http://127.0.0.1:9/v1", "bench", "fixture-profile", SERVED_GGUF)
+    with pytest.raises(BenchError, match="choose a different judge model"):
+        lme_rejudge.run(tmp_path / "primary", tmp_path / "rejudge", judge)
+    other = retained_daemon.Endpoint("http://127.0.0.1:9/v1", "bench", "fixture-profile", "other-judge.gguf")
+    with pytest.raises(BenchError, match="separate directory"):
+        lme_rejudge.run(tmp_path / "same", tmp_path / "same", other)
 
 
 def test_extractor_readback_accepts_the_served_file_by_its_path(monkeypatch):

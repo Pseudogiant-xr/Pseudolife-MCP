@@ -100,6 +100,16 @@ def served_name(model_id):
     return re.split(r"[\\/]", model_id)[-1] if isinstance(model_id, str) else None
 
 
+def model_identity(model_id):
+    """A model id as compared: a GGUF file by its file name, every other id exactly.
+
+    Only a .gguf file is named by a filesystem path, so an id like `org/model` stays
+    distinct from `model`.
+    """
+    name = served_name(model_id)
+    return name if name is not None and name.lower().endswith(".gguf") else model_id
+
+
 @dataclass(frozen=True)
 class Endpoint:
     url: str
@@ -128,8 +138,9 @@ class Endpoint:
                 "profile": self.profile, "chat_timeout_seconds": CHAT_TIMEOUT_SECONDS}
 
     def serves(self, model_id):
-        """Whether a reported model id is the expected one, exactly or as a path to that file."""
-        return model_id == self.expected_model or served_name(model_id) == self.expected_model
+        """Whether a reported model id is the expected one: exactly, or the same GGUF file."""
+        return model_id == self.expected_model or (
+            isinstance(model_id, str) and model_identity(model_id) == model_identity(self.expected_model))
 
     def verify(self):
         origin = urlsplit(self.url)
@@ -139,7 +150,7 @@ class Endpoint:
         if not any(self.serves(model_id) for model_id in ids):
             advertised = ", ".join(repr(served_name(model_id)) for model_id in ids) or "no model"
             raise BenchError(f"the model endpoint advertises {advertised}, not the expected "
-                             f"{self.expected_model!r}. Serve that model file, or pass the served "
+                             f"{served_name(self.expected_model)!r}. Serve that model file, or pass the served "
                              "file name as the endpoint's --<role>-served-model (-ServedModel in "
                              "regression_gate.ps1).")
 
@@ -153,7 +164,7 @@ class Endpoint:
                                                  {"role": "user", "content": user}]})
         if not self.serves(result.get("model")):
             raise BenchError(f"chat completion was served by {served_name(result.get('model'))!r}, "
-                             f"not the expected {self.expected_model!r}")
+                             f"not the expected {served_name(self.expected_model)!r}")
         try:
             text = result["choices"][0]["message"]["content"]
         except (IndexError, KeyError, TypeError):
