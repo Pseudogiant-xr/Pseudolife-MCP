@@ -472,6 +472,9 @@ def test_gate_replay_records_a_compression_echo_the_daemon_kept():
                        "written": "Plans to sign up", "kept": "Planning to sign up"}]
     assert bank.versions == ["Planning to sign up", "Signed up"]
     assert gate.replay_slots(SlotBank(), scalar("old", "old", "new"), "q8") == []
+    # A case-only rewrite is the same value to the daemon: kept, and listed the same way.
+    assert gate.replay_slots(SlotBank(echo={"ACME"}), scalar("Acme", "ACME"), "q9") == [
+        {"question_id": "q9", "entity": "user", "attribute": "plan", "written": "ACME", "kept": "Acme"}]
 
 
 @pytest.mark.parametrize("bank", [
@@ -567,27 +570,66 @@ def test_gate_parallel_contexts_keep_question_order_and_match_serial():
 
 
 def test_gate_parallel_contexts_stop_on_the_first_failed_cell():
+    import itertools
+    import threading
     import time
     from evals import regression_gate as gate
 
     questions = [{**question(), "question_id": f"q{index}"} for index in range(12)]
-    opened = []
+    counter, opened, lock = itertools.count(), [], threading.Lock()
 
     @contextmanager
     def open_bank():
-        opened.append(1)
-        if len(opened) == 1:
+        with lock:
+            number = next(counter)
+            opened.append(number)
+        if number == 1:  # a later cell fails while the first is still slow
             raise BenchError("cell failed")
-        time.sleep(0.05)  # a cell takes longer than the failure takes to reach the caller
+        time.sleep(0.05 if number else 0.5)
         yield Bank(True)
 
+    started = time.monotonic()
     with pytest.raises(BenchError, match="cell failed"):
         gate.build_contexts(questions, {q["question_id"]: "raw" for q in questions},
                             {q["question_id"]: [] for q in questions}, open_bank, 2)
     assert len(opened) < len(questions)
+    assert time.monotonic() - started < 2
 
 
-def test_gate_context_workers_follow_the_request_or_free_memory():
+def test_gate_parallel_contexts_tell_running_cells_to_stop_at_their_next_turn():
+    import threading
+    import time
+    from evals import regression_gate as gate
+
+    long = {**question(), "question_id": "long",
+            "haystack_dates": ["2024/01/01 (Mon) 00:00"],
+            "haystack_sessions": [[{"role": "user", "content": f"turn {i}"} for i in range(40)]]}
+    failing = {**question(), "question_id": "failing"}
+    stored, began, opened, lock = [], threading.Event(), [], threading.Lock()
+
+    class SlowBank(Bank):
+        def store(self, text):
+            began.set()
+            stored.append(text)
+            time.sleep(0.05)
+
+    @contextmanager
+    def open_bank():
+        with lock:
+            opened.append(1)
+            second = len(opened) == 2
+        if second:  # fail only once the other cell is storing
+            assert began.wait(5)
+            raise BenchError("cell failed")
+        yield SlowBank(True)
+
+    with pytest.raises(BenchError, match="cell failed"):
+        gate.build_contexts([long, failing], {"long": "raw", "failing": "raw"},
+                            {"long": [], "failing": []}, open_bank, 2)
+    assert 0 < len(stored) < 40
+
+
+def test_gate_context_workers_follow_the_request_or_free_memory(monkeypatch):
     from evals import regression_gate as gate
 
     cell, reserve = gate.CELL_MEMORY_BYTES, gate.MEMORY_RESERVE_BYTES
@@ -596,15 +638,29 @@ def test_gate_context_workers_follow_the_request_or_free_memory():
     assert gate.context_workers(0, available=reserve + 3 * cell, cpus=32) == 3
     assert gate.context_workers(0, available=reserve + 20 * cell, cpus=4) == 2
     assert gate.context_workers(0, available=0, cpus=32) == 1
+    monkeypatch.setattr(gate, "available_memory", lambda: None)
+    assert gate.context_workers(0, cpus=32) == 1
     with pytest.raises(BenchError, match="context-workers"):
         gate.context_workers(-1)
 
 
 def test_parallel_daemons_never_share_a_reserved_port(monkeypatch):
-    probes = iter([41000, 41000, 41001])
+    probes = iter([41000, 41000, 41001, 41000])
     monkeypatch.setattr(retained_daemon.daemons, "free_port", lambda: next(probes))
     monkeypatch.setattr(retained_daemon, "_RESERVED_PORTS", set())
     assert [retained_daemon._reserve_port(), retained_daemon._reserve_port()] == [41000, 41001]
+    retained_daemon._RESERVED_PORTS.clear()
+
+    seen = []
+
+    def serve_on(home, dsn, extractor, port, token):
+        seen.append(port in retained_daemon._RESERVED_PORTS)
+        yield "bank"
+
+    serving = retained_daemon.DaemonSetup._serve(SimpleNamespace(_serve_on=serve_on), None, None, None)
+    assert next(serving) == "bank" and seen == [True]
+    serving.close()
+    assert retained_daemon._RESERVED_PORTS == set()
 
 
 def test_gate_detects_row_level_replica_drift_even_when_averages_match():

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from pathlib import Path
 import re
 import sys
+import threading
 
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -69,9 +70,12 @@ def replay_slots(bank, slots, question_id):
     """Write the fixture's public inputs and return the writes the daemon kept as echoes.
 
     A write the daemon answers with action "confirmed" while returning the slot's
-    previous value unchanged is its compression-echo rule keeping the standing
-    value (issue #1924). That write is recorded, not counted as a version; any
-    other difference from the fixture's history is still an incomplete cell.
+    previous value unchanged kept the standing value: by its compression-echo rule
+    (a shorter rewrite repeating most of its words, issue #1924) or because the
+    two are equal after its case and space normalisation. The response does not
+    say which, so the gate records every such write and does not count it as a
+    version; any other difference from the fixture's history is still an
+    incomplete cell.
     """
     echoes = []
     for slot in slots:
@@ -101,10 +105,12 @@ def replay_slots(bank, slots, question_id):
     return echoes
 
 
-def contexts_for(question, frozen_context, slots, open_bank):
+def contexts_for(question, frozen_context, slots, open_bank, stop=None):
     with open_bank() as bank:
         for session in lme.chronological_turns(question):
             for turn in session:
+                if stop is not None and stop.is_set():
+                    raise BenchError("gate context build stopped after another cell failed")
                 bank.store(turn)
         echoes = replay_slots(bank, slots, question["question_id"])
         hits = bank.search(question["question"], lme.ENTRY_WIDTH)
@@ -119,7 +125,11 @@ def contexts_for(question, frozen_context, slots, open_bank):
 
 
 def available_memory():
-    """Bytes of physical memory available now, or None where it cannot be read."""
+    """Bytes a new process can use now, or None where it cannot be read.
+
+    On Windows that is the smaller of available physical memory and the
+    remaining commit budget, since a daemon's model allocation needs both.
+    """
     if os.name == "nt":
         import ctypes
 
@@ -133,7 +143,7 @@ def available_memory():
         status = Status(length=ctypes.sizeof(Status))
         if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
             return None
-        return status.avail_phys
+        return min(status.avail_phys, status.avail_page)
     try:
         for line in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
             if line.startswith("MemAvailable:"):
@@ -143,16 +153,29 @@ def available_memory():
     return None
 
 
+def usable_cpus():
+    """Cores this process may run on (its affinity where the platform reports one)."""
+    if hasattr(os, "process_cpu_count"):
+        return os.process_cpu_count() or 1
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0)) or 1
+    return os.cpu_count() or 1
+
+
 def context_workers(requested, available=None, cpus=None):
-    """How many context cells run at once: the request, else what memory and cores allow."""
+    """How many context cells run at once: the request, else what memory and cores allow.
+
+    Unreadable memory means one cell at a time, never the maximum.
+    """
     if requested < 0:
         raise BenchError("--context-workers must be 0 (size to this machine) or a positive count")
     if requested:
         return requested
-    cpus = cpus if cpus is not None else os.cpu_count() or 1
+    cpus = cpus if cpus is not None else usable_cpus()
     available = available if available is not None else available_memory()
-    by_memory = MAX_CONTEXT_WORKERS if available is None else (
-        (available - MEMORY_RESERVE_BYTES) // CELL_MEMORY_BYTES)
+    if available is None:
+        return 1
+    by_memory = (available - MEMORY_RESERVE_BYTES) // CELL_MEMORY_BYTES
     return max(1, min(MAX_CONTEXT_WORKERS, cpus // 2, by_memory))
 
 
@@ -161,16 +184,22 @@ def build_contexts(questions, controls, slots, open_bank, workers):
 
     Cells share nothing: a fresh test database and daemon each, one ORT thread per
     daemon. Running several at once changes only the wall time, never a context.
+    The first failure, or an interrupt, stops queued cells and tells running ones
+    to stop at their next turn, so the run ends within one stored turn.
     """
     if workers == 1:
         return [contexts_for(q, controls[q["question_id"]], slots[q["question_id"]], open_bank)
                 for q in questions]
+    stop = threading.Event()
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gate-cell")
+    futures = {pool.submit(contexts_for, q, controls[q["question_id"]], slots[q["question_id"]],
+                           open_bank, stop): index for index, q in enumerate(questions)}
+    rows = [None] * len(questions)
     try:
-        futures = [pool.submit(contexts_for, q, controls[q["question_id"]], slots[q["question_id"]],
-                               open_bank) for q in questions]
-        rows = [future.result() for future in futures]
+        for future in as_completed(futures):
+            rows[futures[future]] = future.result()
     except BaseException:
+        stop.set()
         pool.shutdown(wait=True, cancel_futures=True)
         raise
     pool.shutdown(wait=True)

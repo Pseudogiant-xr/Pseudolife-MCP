@@ -92,6 +92,24 @@ def test_gate_records_the_daemons_compression_echo_over_mcp(setup):
         kept, "Signed up for the autumn triathlon in Sydney"]
 
 
+def test_gate_parallel_cells_match_serial_cells_over_mcp(setup):
+    questions, controls, slots = [], {}, {}
+    for index, (old, new) in enumerate([("maple", "cedar"), ("Planning to sign up for a triathlon in the fall",
+                                                              "Plans to sign up for a triathlon in the fall")]):
+        qid = f"cell{index}"
+        questions.append({"question_id": qid, "question_type": "knowledge-update", "answer": new,
+                          "question": "What is the build tool?", "question_date": "2024/11/02",
+                          "haystack_dates": ["2024/11/01"],
+                          "haystack_sessions": [[{"role": "user", "content": f"The build tool is {new}."}]]})
+        controls[qid] = f"frozen raw {index}"
+        slots[qid] = [{"entity": "build", "attribute": "tool", "kind": "scalar", "values": [old, new]}]
+    config = fixture_config()
+    serial = gate.build_contexts(questions, controls, slots, lambda: setup.bank(config), 1)
+    parallel = gate.build_contexts(questions, controls, slots, lambda: setup.bank(config), 2)
+    assert parallel == serial
+    assert [len(row["echo_confirmed"]) for row in serial] == [0, 1]
+
+
 def test_ladder_uses_rust_dream_results_and_separate_raw_control(setup, monkeypatch):
     old_line = "[2024/11/01] user: The build tool is maple by default."
     new_line = "[2024/11/02] user: The build tool has been cedar since the migration."
