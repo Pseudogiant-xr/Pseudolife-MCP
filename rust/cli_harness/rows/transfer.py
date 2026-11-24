@@ -29,17 +29,13 @@ import time
 import zipfile
 from pathlib import Path
 
-from rust.harness_support.schema import load_plan
-
 from .. import core, normalize
 from . import _bank
 from ._builtin_relations import _BUILTIN_RELATIONS
 from ._transfer_seed import _seed_bank
 
-# The committed schema plan's version: the candidate's refusal names the one
-# it was built for (tests/test_schema_version.py pins the frozen constant to
-# the same plan).
-SCHEMA_META_VERSION = load_plan()[0]["schema_version"]
+# The input archives (rebuilt after a schema bump by
+# rust/cli_harness/regenerate_transfer_archives.py).
 ARCHIVE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "transfer-archives"
 
 ROW = "transfer"
