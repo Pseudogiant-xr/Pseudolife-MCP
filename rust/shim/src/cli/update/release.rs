@@ -2786,6 +2786,46 @@ fn storage_pg(no_backup: bool, resolve: impl FnOnce() -> Result<String>) -> Resu
 }
 
 #[cfg(test)]
+mod checkout_marker_tests {
+    use super::*;
+
+    #[test]
+    fn a_checkout_compose_file_is_known_by_the_native_crate() {
+        let root = std::env::temp_dir().join(format!(
+            "pl-release-checkout-marker-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let compose = root.join("ops").join("docker-compose.yml");
+        let manifest = root.join(RELEASE_MANIFEST);
+        fs::create_dir_all(compose.parent().unwrap()).unwrap();
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        fs::write(&compose, "services: {}\n").unwrap();
+        // No pyproject.toml: the checkout after the Python package is gone.
+        fs::write(
+            &manifest,
+            "[package]\nname = \"pseudolife-stdio\"\nversion = \"0.26.0\"\n",
+        )
+        .unwrap();
+        assert!(packaged_compose(&compose));
+        // The near miss: another project's crate beside a stack's ops/.
+        fs::write(
+            &manifest,
+            "[package]\nname = \"another-shim\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        assert!(!packaged_compose(&compose));
+        // A checkout from before the native release version.
+        fs::write(root.join("pyproject.toml"), "[project]\n").unwrap();
+        assert!(packaged_compose(&compose));
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
 mod disk_review_tests {
     use super::*;
 
