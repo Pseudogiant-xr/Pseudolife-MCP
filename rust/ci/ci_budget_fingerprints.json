@@ -3,7 +3,7 @@
   "workflows": {
     "ci.yml": {
       "frontend": "a44cb313ac27cab7",
-      "guards": "941fbe66291a2ded",
+      "guards": "9fc8b117ea3d158f",
       "lock-resolve": "9202b1100550c092",
       "scope": "cd3a6fa994792606",
       "test": "492e9b9ddbe2b98f",
