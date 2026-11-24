@@ -3758,35 +3758,36 @@ would.
 The update keeps the Python client, finishes the client steps with it and
 says why in one line in each of these cases:
 
-- **An unattended update.** The update ran without a person: the scheduled
-  run, the shim's session-start client update, or a run the update cannot
-  tell (it reads its starting command's own arguments). It says
-  `==> this update ran unattended, so this machine keeps the Python client,
-  and this run's own code finishes the client steps; to move it to the
-  native client, run `pseudolife-mcp update --clients-only``. This holds
-  even with `PSEUDOLIFE_SHIM_ENGINE=native` set.
+- **An unattended update.** The scheduled run (`update --unattended`) and
+  the shim's session-start client update (`--result-file`) keep the client,
+  even with `PSEUDOLIFE_SHIM_ENGINE=native` set. The update reads its
+  starting command's own arguments, as the updater parses them, and a
+  command it cannot read counts as unattended too. It says that this update
+  ran unattended (or its starting command could not be read) and names
+  `pseudolife-mcp update --clients-only` as the command that moves the
+  machine.
 - **A recorded Python choice.** `~/.pseudolife-mcp/client-engine` records
-  an installer run with `PSEUDOLIFE_SHIM_ENGINE=python`. The line names the
-  file and the move command,
+  an installer run with `PSEUDOLIFE_SHIM_ENGINE=python`, or exists and cannot
+  be read. The line names the file and the move command,
   `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (in
   PowerShell, `$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update
-  --clients-only`). A successful move with that setting removes the record.
+  --clients-only`). An update with that setting removes the record once it
+  has moved the launcher.
 - **When it cannot move.** Nothing about the move has changed:
   `==> the native client was not installed (<cause>); the Python client was
   kept and this run's own code finishes the client steps`. The causes are no
   archive for this platform, a download or digest failure, a binary that
   does not run here, or a tunnel the Python client registered to start by
-  itself. For the tunnel, the guard's own line comes first and names how to
-  remove that autostart. With `PSEUDOLIFE_SHIM_ENGINE=native`, the native
-  updater refuses that autostart itself and changes nothing.
+  itself. For the tunnel, the line names the update command above, which
+  prints how to remove that autostart and changes nothing while it is
+  registered.
 - **`PSEUDOLIFE_SHIM_ENGINE=python`.** It says
   `==> PSEUDOLIFE_SHIM_ENGINE=python keeps the Python client; this run's own
   code finishes the client steps`.
-
-If the native client steps start and fail, the native part ends with
-`==> the native client steps ended with exit <code> (see above); while this
-machine still runs the Python client, an update with
-PSEUDOLIFE_SHIM_ENGINE=python keeps it`, and its exit code is the run's.
+- **If the native client steps start and fail**, the native part ends with
+  `==> the native client steps ended with exit <code> (see above); while
+  this machine still runs the Python client, an update with
+  PSEUDOLIFE_SHIM_ENGINE=python keeps it`, and its exit code is the run's.
 - **Not moved:** a pip, pipx or lite install, which `update` upgrades in
   place; a checkout's environment and a checkout deploy; an update started
   from 0.22.0 or earlier, which has no client hand-off; and a machine
@@ -3805,7 +3806,9 @@ PSEUDOLIFE_SHIM_ENGINE=python keeps it`, and its exit code is the run's.
   a daemon that answers and a Python 3.10 or newer that can make a
   virtualenv, and it prints `native or unverified launcher replaced with
   Python: <launcher>`. The registrations name the launcher, so they follow
-  it back; later updates keep the Python client unless you opt in again.
+  it back. The installer records that choice, so later installer runs and
+  updates keep the Python client until `PSEUDOLIFE_SHIM_ENGINE=native` asks
+  again.
 
 **What the native client refuses.** Each refusal names the way forward:
 
@@ -4764,7 +4767,7 @@ print.
 
 | command | what it does |
 |---|---|
-| `pseudolife-mcp update` | On a Docker host, the native updater discovers the latest ready GitHub release and the Python updater discovers the latest release on PyPI. Update backs up the bank, tags the previous image `…-pre-update-<stamp>` for rollback, recreates the daemon, checks `/health`, and then updates clients. The Python updater also checks the managed PostgreSQL image against the release's definition. See [Daemon engine](install-and-move.md#daemon-engine) for engine selection and [The native client](#the-native-client) for client opt-in. Pip and lite installs upgrade the package in place and leave restarts to the operator. |
+| `pseudolife-mcp update` | On a Docker host, the native updater discovers the latest ready GitHub release and the Python updater discovers the latest release on PyPI. Update backs up the bank, tags the previous image `…-pre-update-<stamp>` for rollback, recreates the daemon, checks `/health`, and then updates clients. The Python updater also checks the managed PostgreSQL image against the release's definition. See [Daemon engine](install-and-move.md#daemon-engine) for engine selection and [The native client](#the-native-client) for the client it selects. Pip and lite installs upgrade the package in place and leave restarts to the operator. |
 | `pseudolife-mcp update --tag <version>` | Use the specified published release and bypass latest-release discovery. |
 | `pseudolife-mcp update --check` | Report only. Exit 0 when a newer release exists, 3 when there is no newer eligible release, or 2 when the check fails. |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |

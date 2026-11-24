@@ -7,6 +7,7 @@ parent's argv behind ``parent_argv``; the downloads are real HTTP against a
 loopback server named by the same override the native installer uses."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import io
 import os
@@ -536,9 +537,9 @@ def test_a_platform_with_no_native_build_keeps_python_and_says_so(release, monke
     assert release.seen == []
 
 
-UNATTENDED_NOTE = ("this update ran unattended, so this machine keeps the Python client, and this run's own code "
-                   "finishes the client steps; to move it to the native client, run "
-                   "`pseudolife-mcp update --clients-only`")
+UNATTENDED_NOTE = ("this update ran unattended (or its starting command could not be read), so this machine keeps "
+                   "the Python client, and this run's own code finishes the client steps; to move it to the native "
+                   "client, run `pseudolife-mcp update --clients-only`")
 
 
 @pytest.mark.parametrize("parent", [
@@ -597,13 +598,19 @@ def test_the_parent_is_read_by_the_handoff_pid_and_a_hand_run_reads_none(release
     assert asked == []
 
 
-def test_this_process_argv_is_read_in_place():
+def test_a_process_argv_is_read_in_place_word_for_word():
     if not (sys.platform.startswith("linux") or sys.platform == "darwin" or os.name == "nt"):
         pytest.skip("no reader for this platform")
-    argv = update_bridge.process_argv(os.getpid())
-    assert argv, argv
-    # The interpreter's own arguments are there, word for word.
-    assert all(word in argv for word in sys.argv[1:]), (argv, sys.argv)
+    # A child of known argv reads its own: quoting, spaces and an empty word
+    # survive, and nothing is started to read it.
+    words = ["update", "--clients-only", "two words", "", 'a "quoted" word', "--unattended"]
+    code = ("import os, sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory import update_bridge; "
+            "print(repr(update_bridge.process_argv(os.getpid())))")
+    root = str(Path(__file__).resolve().parents[1])
+    done = subprocess.run([sys.executable, "-c", code, root, *words], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    argv = ast.literal_eval(done.stdout.strip())
+    assert argv[-len(words) - 1:] == [root, *words], argv
 
 
 def test_an_argv_that_cannot_be_read_counts_as_unattended():
@@ -691,18 +698,61 @@ def test_a_record_that_does_not_say_exactly_python_is_no_choice(release, home, t
     assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), Native()) == 7
 
 
-def test_by_default_a_tunnel_autostart_keeps_python_and_prints_the_guards_line(release):
+def test_by_default_a_tunnel_autostart_keeps_python_and_names_the_update_that_explains(release):
     release.publish()
     native = Native()
-    guard = ("this machine stays on the Python client: a tunnel is registered to start by itself. "
-             "Nothing was changed; to stay on it, rerun the installer with PSEUDOLIFE_SHIM_ENGINE=python")
-    native.answers["install"] = (3, "", guard + "\n")
+    # The check's own refusal is worded for the installer: not repeated in
+    # an update, which names the update command that refuses for an update.
+    native.answers["install"] = (3, "", "this machine stays on the Python client: ... rerun the installer ...\n")
     lines: list[str] = []
     note = kept(bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native, lines=lines))
-    assert lines == [guard]
-    assert ("a tunnel the Python client registered to start by itself keeps it; the line above says how to "
-            "remove that autostart, then run `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`") in note
+    assert lines == []
+    assert ("a tunnel the Python client registered to start by itself keeps it; "
+            "`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (in PowerShell: "
+            "`$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update --clients-only`) says how to remove that "
+            "autostart without changing anything, and moves the machine once it is gone") in note
+    assert "installer" not in note
     assert native.started == []
+
+
+@pytest.mark.parametrize("answer, moves", [((0, "", ""), True), ((1, "", "usage"), True),
+                                           ("timeout", False), ("oserror", False)])
+def test_the_tunnel_check_keeps_python_only_on_its_refusal_or_when_it_cannot_run(release, answer, moves):
+    release.publish()
+    native = Native()
+    plain_run = native.run
+
+    def run(argv, **kwargs):
+        if argv[1:] == ["runtime", "install", "--check"]:
+            if answer == "timeout":
+                raise subprocess.TimeoutExpired(argv, 120)
+            if answer == "oserror":
+                raise OSError(8, "Exec format error")
+        return plain_run(argv, **kwargs)
+
+    native.run = run
+    if isinstance(answer, tuple):
+        native.answers["install"] = answer
+    result = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native)
+    assert (result == 7) is moves, result
+
+
+def test_python_comes_before_unattended_and_unattended_before_the_record(release, home):
+    _record(home, "python\n")
+    release.publish()
+    unattended = ["/x/pseudolife-mcp", "update", "--unattended"]
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE="python"), Native(), parent=unattended).startswith(
+        "PSEUDOLIFE_SHIM_ENGINE=python keeps")
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), Native(), parent=unattended) == UNATTENDED_NOTE
+
+
+@pytest.mark.parametrize("kind, moved", [("native", True), ("unknown", True), ("python", False),
+                                         ("unreadable", False), ("missing", False)])
+def test_the_launcher_counts_as_moved_only_when_it_is_not_the_python_one(kind, moved, monkeypatch):
+    from pseudolife_memory import runtimes
+    monkeypatch.setattr(runtimes, "default_layout", lambda *a, **k: object())
+    monkeypatch.setattr(runtimes, "_launcher_kind", lambda layout: kind)
+    assert update_bridge._launcher_moved() is moved
 
 
 def test_a_hand_run_moves_only_from_a_python_shim_runtime(release, monkeypatch):
