@@ -14,7 +14,7 @@ def text(script):
 @BASH
 def test_sh_yes_is_accepted_before_invalid_client_refuses(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"'{shell.path(ROOT / 'ops/install.sh')}' --yes --client invalid --extractor sidecar --no-art\n")
+    proc = shell.run(f"PSEUDOLIFE_SHIM_ENGINE=python '{shell.path(ROOT / 'ops/install.sh')}' --yes --client invalid --extractor sidecar --no-art\n")
     assert proc.returncode == 2
     assert "Unattended install" in proc.stdout
     assert "invalid --client" in proc.stderr
@@ -22,7 +22,7 @@ def test_sh_yes_is_accepted_before_invalid_client_refuses(bash, tmp_path):
 
 
 def test_ps_yes_is_accepted_before_invalid_client_refuses(tmp_path):
-    proc = _PowerShell(tmp_path).run(f"& '{_q(ROOT / 'ops/install.ps1')}' -Yes -Client invalid -Extractor sidecar -NoArt\nexit $LASTEXITCODE\n")
+    proc = _PowerShell(tmp_path).run(f"$env:PSEUDOLIFE_SHIM_ENGINE = 'python'\n& '{_q(ROOT / 'ops/install.ps1')}' -Yes -Client invalid -Extractor sidecar -NoArt\nexit $LASTEXITCODE\n")
     assert proc.returncode == 2, _output(proc)
     assert "Unattended install" in _output(proc)
     assert "invalid -Client" in _output(proc)

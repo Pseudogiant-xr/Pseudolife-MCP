@@ -3,7 +3,9 @@
 #   garbles the first key of ops/.env and can break settings.json parsing —
 #   run this under pwsh 7+ (winget install Microsoft.PowerShell).
 # The native client's installer: ops\install.ps1 runs it, with the same
-# parameters, when PSEUDOLIFE_SHIM_ENGINE=native asks for the native client.
+# parameters, by default (the native client is the default client) and when
+# PSEUDOLIFE_SHIM_ENGINE=native asks for it; PSEUDOLIFE_SHIM_ENGINE=python or
+# a recorded Python choice takes the Python client's path instead.
 # Prompt, rerun and refusal behaviour follow docs/dev/install-ux.md; read it
 # before changing what this script asks or prints.
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
@@ -165,7 +167,7 @@ if ($Tunnel) {
     [Console]::Error.WriteLine('The native client has no guided tunnel setup yet. Nothing was changed. Rerun without -Tunnel.')
     [Console]::Error.WriteLine('After install, prepare a native tunnel profile with pseudolife-mcp tunnel setup --daemon-url "<daemon-url>" --token-file "<owner-only token file>" --accept-access.')
     [Console]::Error.WriteLine('Save its ID with pseudolife-mcp tunnel setup --tunnel-id "<tunnel-id>", import the key with pseudolife-mcp tunnel setup --read-key, then run pseudolife-mcp tunnel run in a terminal you keep open. See docs/guide/tunnels.md.')
-    [Console]::Error.WriteLine('For guided setup, run Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE and rerun .\ops\install.ps1 -Tunnel with your other install options.')
+    [Console]::Error.WriteLine("For guided setup with the Python client, run `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' and rerun .\ops\install.ps1 -Tunnel with your other install options.")
     exit 1
 }
 $ErrorActionPreference = "Stop"
@@ -188,7 +190,7 @@ if (-not $interactive -or $script:installerRerun) {
     Write-Host "Unattended install: no prompts; documented defaults apply (explicit flags override)."
 }
 # <<< unattended mode <<<
-Write-Host "Native client install (PSEUDOLIFE_SHIM_ENGINE=native): rerun it with that variable set; without it, ops\install.ps1 installs the Python client."
+Write-Host "Native client install (the default client; PSEUDOLIFE_SHIM_ENGINE=python installs the Python client instead)."
 # >>> client update schedule flag >>>
 if ("$ClientUpdateSchedule" -notmatch '^(ask|yes|no|([01]?[0-9]|2[0-3]):[0-5][0-9])$') {
     Write-Host "invalid -ClientUpdateSchedule '$ClientUpdateSchedule' (ask|yes|no, or a time of day as HH:MM)"
@@ -410,8 +412,33 @@ function Stop-NativeInstall([string]$Cause, [string]$Fix) {
                 $script:nativeSums -and (Test-Path -LiteralPath $script:nativeSums)) { $kept = "SHA256SUMS" }
         $left = " Nothing else was changed: $kept in $($script:nativeDownloads) is kept for a rerun (delete it to free the space)."
     }
-    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix$left")
+    $pythonRoute = ""
+    if ($global:PseudolifeClientDefaulted -eq $true) {
+        $pythonRoute = " To install the Python client instead, rerun after `$env:PSEUDOLIFE_SHIM_ENGINE = 'python'."
+    }
+    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix$left$pythonRoute")
     exit 1
+}
+function Stop-NativeOrFallBack([string]$Cause, [string]$Fix) {
+    # A refusal, unless ops\install.ps1 chose the native client by default:
+    # before anything on the host changed, the line goes to the global it
+    # reads and it carries on with the Python client. An explicit
+    # PSEUDOLIFE_SHIM_ENGINE=native, or a step after the first host change,
+    # refuses as before.
+    # Never where the native client is installed already: a rerun must not
+    # swap a working native client for the Python one.
+    if (($global:PseudolifeClientDefaulted -eq $true) -and -not $script:nativeHostChanging -and
+            -not (Get-NativeInstalledLauncher)) {
+        Remove-NativeStage
+        $kept = ""
+        if ($script:nativeDownloads -and (Test-Path -LiteralPath $script:nativeDownloads) -and
+                @(Get-ChildItem -LiteralPath $script:nativeDownloads -Force -ErrorAction SilentlyContinue).Count) {
+            $kept = "; what it downloaded stays in $($script:nativeDownloads) for a later run"
+        }
+        $global:PseudolifeClientFallback = "the native client cannot serve this machine ($Cause), so this install uses the Python client$kept; `$env:PSEUDOLIFE_SHIM_ENGINE = 'native' makes this a refusal, and `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' chooses the Python client for later runs too"
+        exit 0
+    }
+    Stop-NativeInstall $Cause $Fix
 }
 function Remove-NativeStage {
     # This run's staging directory; the verified download is kept.
@@ -469,7 +496,7 @@ function Initialize-NativeClient {
         if ($env:PSEUDOLIFE_NATIVE_TARGET) {
             Stop-NativeInstall "PSEUDOLIFE_NATIVE_TARGET names $($env:PSEUDOLIFE_NATIVE_TARGET), which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
         }
-        Stop-NativeInstall "no native client is published for this platform ($env:PROCESSOR_ARCHITECTURE); releases carry Windows x86_64, Linux x86_64 and aarch64, and macOS Intel and Apple silicon" "Run this installer on one of those (a machine there can use a daemon elsewhere with -ClientOnly)."
+        Stop-NativeOrFallBack "no native client is published for this platform ($env:PROCESSOR_ARCHITECTURE); releases carry Windows x86_64, Linux x86_64 and aarch64, and macOS Intel and Apple silicon" "Run this installer on one of those (a machine there can use a daemon elsewhere with -ClientOnly), or set `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' for the Python client."
     }
     $isZip = $target -like "*windows*"
     $name = "pseudolife-mcp-$($script:nativeVersion)-$target." + $(if ($isZip) { "zip" } else { "tar.gz" })
@@ -487,6 +514,11 @@ function Initialize-NativeClient {
     $script:nativeSums = Join-Path $downloads "SHA256SUMS"
     $script:nativeArchive = Join-Path $downloads $name
     $sumsFetch = Get-NativeAsset $base "SHA256SUMS" $script:nativeSums
+    if (($sumsFetch -eq "missing") -and -not $env:PSEUDOLIFE_NATIVE_ARCHIVE_URL) {
+        # This checkout's release is not published yet (a version cut before
+        # its assets), or predates the native client.
+        Stop-NativeOrFallBack "release v$($script:nativeVersion) has no SHA256SUMS at $base (it is not published yet, or predates the native client)" "Update this checkout to a published release (git pull, or git checkout of a newer tag) and rerun."
+    }
     if ($sumsFetch -eq "missing") {
         Stop-NativeInstall "release v$($script:nativeVersion) has no SHA256SUMS at $base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
     } elseif ($sumsFetch -ne "ok") {
@@ -499,6 +531,17 @@ function Initialize-NativeClient {
     # (binary mode, as sha256sum writes under Git Bash); nothing looser.
     $pattern = '^[0-9a-f]{64} [ *]' + [regex]::Escape($name) + '$'
     $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
+    # A line ending in the name after a blank or an asterisk names the
+    # archive in no standard form: that release does carry this platform.
+    $named = @(Get-Content -LiteralPath $script:nativeSums | Where-Object {
+            $_.Length -gt $name.Length -and $_.EndsWith($name, [System.StringComparison]::Ordinal) -and
+            " `t*".Contains([string] $_[$_.Length - $name.Length - 1]) })
+    if ($lines.Count -eq 0 -and $named.Count -gt 0) {
+        Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name 0 times, not once (a line names it in no standard checksum form)" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    }
+    if ($lines.Count -eq 0) {
+        Stop-NativeOrFallBack "release v$($script:nativeVersion) publishes no native client for $target (its SHA256SUMS lists no $name)" "Run this installer on a platform the release carries, or set `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' for the Python client."
+    }
     if ($lines.Count -ne 1) {
         Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name $($lines.Count) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
     }
@@ -546,7 +589,7 @@ function Initialize-NativeClient {
     } catch { $says = $_.Exception.Message; $ran = $false }
     if (-not $ran) {
         if ($target -like "*windows*" -and $answer.Code -eq -1073741515) {
-            Stop-NativeInstall "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Install the Microsoft Visual C++ Redistributable for x64 before rerunning with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C runtime and rerun that tag's installer with its matching archive."
+            Stop-NativeOrFallBack "Windows could not start the downloaded client because a system library is missing (exit code -1073741515, 0xC0000135)" "Install the Microsoft Visual C++ Redistributable for x64 before rerunning with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C runtime and rerun that tag's installer with its matching archive."
         }
         $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
         $detail = ($says -split "`n", 2)[0].Trim()
@@ -555,7 +598,7 @@ function Initialize-NativeClient {
         }
         $cause = "the downloaded client does not run on this host"
         if ($detail) { $cause += " ($detail)" }
-        Stop-NativeInstall $cause $runFix
+        Stop-NativeOrFallBack $cause "$runFix Or set `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' for the Python client."
     }
     # The installer steps this script runs belong to the staged release
     # (ops/install-native.sh, NATIVE_INSTALLER_PROTOCOL, says why): exactly
@@ -572,7 +615,7 @@ function Initialize-NativeClient {
         if (($probe.Code -eq 0) -and ($answer.Count -eq 1) -and ($answer[0] -cmatch '^pseudolife-mcp installer-protocol (0|[1-9][0-9]{0,8})$')) { $level = [int]$Matches[1] }
     } catch { $level = -1 }
     if ($level -lt $NativeInstallerProtocol) {
-        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first), then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only (PowerShell: `$env:PSEUDOLIFE_SHIM_ENGINE = 'native'; pseudolife-mcp update --clients-only); this native installer itself works from a checkout of a release that carries it."
+        Stop-NativeOrFallBack "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Install the Python client by rerunning the installer after `$env:PSEUDOLIFE_SHIM_ENGINE = 'python', then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only (PowerShell: `$env:PSEUDOLIFE_SHIM_ENGINE = 'native'; pseudolife-mcp update --clients-only); this native installer itself works from a checkout of a release that carries it."
     }
     # A tunnel registered to start by itself through this machine's Python
     # client keeps it on that client (issue #1632): refused here, before the
@@ -587,7 +630,7 @@ function Initialize-NativeClient {
         $says = "$($check.Err)$($check.Out)".Trim()
         if ($check.Code -eq 3) {
             if ($says) { [Console]::Error.WriteLine($says) }
-            Stop-NativeInstall "a tunnel is registered to start by itself through this machine's Python client. The native client has no tunnel service command to manage that registration after the move. It can run the tunnel in the foreground with pseudolife-mcp tunnel run" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first) to keep the Python client. To move to the native client, run the autostart removal command above, then rerun. Removing autostart means the tunnel will no longer start on its own."
+            Stop-NativeOrFallBack "a tunnel is registered to start by itself through this machine's Python client. The native client has no tunnel service command to manage that registration after the move. It can run the tunnel in the foreground with pseudolife-mcp tunnel run" "Rerun the installer after `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' to keep the Python client. To move to the native client, remove the autostart as the line above says, then rerun. Removing autostart means the tunnel will no longer start on its own."
         } elseif (($check.Code -eq 0) -and $says) {
             [Console]::Error.WriteLine($says)
         }
@@ -656,6 +699,18 @@ function Install-NativeClient {
     $launcher = "$launcher".Trim()
     if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return $null }
     $script:nativeInstalledAt = $launcher
+    # An explicit native choice ends a recorded Python one (ops\install.ps1,
+    # client engine): a defaulted run never gets here with that record.
+    $engineHome = if ($IsWindows -and $env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+    $engineRecord = Join-Path (Join-Path $engineHome '.pseudolife-mcp') 'client-engine'
+    if (Test-Path -LiteralPath $engineRecord -PathType Leaf) {
+        try {
+            Remove-Item -LiteralPath $engineRecord -Force
+            Write-Host "  The recorded Python client choice ($engineRecord) is removed: later installer runs and updates keep the native client."
+        } catch {
+            [Console]::Error.WriteLine("WARNING: the recorded Python client choice $engineRecord could not be removed ($($_.Exception.Message)), so a later installer run without PSEUDOLIFE_SHIM_ENGINE=native installs the Python client; delete that file.")
+        }
+    }
     # The installer steps now run the launcher just installed: the same
     # release as the staged copy, which is removed.
     $script:nativeHelper = $launcher
@@ -1804,7 +1859,10 @@ if (-not $ClientOnly) {
     $defaultArgs = @()
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if ($composeEngine -eq 'rust' -and -not $engineDefaulted -and -not (Test-RustTokenExpected)) {
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false; or rerun with -Engine python. Nothing was pulled or started.")
+        # An accepted Rust install keeps its engine (-Engine python only
+        # schedules the switch), so a Python rerun is offered only without one.
+        $pythonWay = if ($installedEngine -eq 'rust') { '' } else { '; or rerun with -Engine python' }
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false$pythonWay. Nothing was pulled or started.")
         exit 2
     }
     if ($engineDefaulted) { $defaultArgs = @('--default') }
@@ -1979,7 +2037,9 @@ if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
         $engineFiles = @()
         Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
     } else {
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one; or rerun with -Engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
+        # As at stage 4b: no Python rerun where an accepted Rust install keeps its engine.
+        $pythonWay = if ($installedEngine -eq 'rust') { '' } else { '; or rerun with -Engine python' }
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one$pythonWay. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
         exit 2
     }
 }
