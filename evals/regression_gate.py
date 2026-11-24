@@ -179,7 +179,7 @@ def context_workers(requested, available=None, cpus=None):
     return max(1, min(MAX_CONTEXT_WORKERS, cpus // 2, by_memory))
 
 
-def build_contexts(questions, controls, slots, open_bank, workers):
+def build_contexts(questions, controls, slots, open_bank, workers, stop=None):
     """Build every cell, each in its own bank and daemon, returned in question order.
 
     Cells share nothing: a fresh test database and daemon each, one ORT thread per
@@ -190,7 +190,7 @@ def build_contexts(questions, controls, slots, open_bank, workers):
     if workers == 1:
         return [contexts_for(q, controls[q["question_id"]], slots[q["question_id"]], open_bank)
                 for q in questions]
-    stop = threading.Event()
+    stop = stop if stop is not None else threading.Event()
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gate-cell")
     futures = {pool.submit(contexts_for, q, controls[q["question_id"]], slots[q["question_id"]],
                            open_bank, stop): index for index, q in enumerate(questions)}

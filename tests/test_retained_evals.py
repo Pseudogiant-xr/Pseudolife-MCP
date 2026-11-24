@@ -569,6 +569,20 @@ def test_gate_parallel_contexts_keep_question_order_and_match_serial():
     assert [row["question_id"] for row in parallel] == [q["question_id"] for q in questions]
 
 
+class HeldBank(Bank):
+    """A cell whose first stored turn holds until the build's stop flag is set."""
+
+    def __init__(self, stop, stored=None):
+        super().__init__(True)
+        self.stop, self.stored, self.held = stop, stored if stored is not None else [], False
+
+    def store(self, text):
+        self.stored.append(text)
+        if not self.held:
+            self.held = True
+            self.stop.wait(10)
+
+
 def test_gate_parallel_contexts_stop_on_the_first_failed_cell():
     import itertools
     import threading
@@ -576,42 +590,36 @@ def test_gate_parallel_contexts_stop_on_the_first_failed_cell():
     from evals import regression_gate as gate
 
     questions = [{**question(), "question_id": f"q{index}"} for index in range(12)]
-    counter, opened, lock = itertools.count(), [], threading.Lock()
+    counter, opened, lock, stop = itertools.count(), [], threading.Lock(), threading.Event()
 
     @contextmanager
     def open_bank():
         with lock:
             number = next(counter)
             opened.append(number)
-        if number == 1:  # a later cell fails while the first is still slow
+        if number == 1:  # a later cell fails while the first is still running
             raise BenchError("cell failed")
-        time.sleep(0.05 if number else 0.5)
-        yield Bank(True)
+        yield HeldBank(stop)
 
     started = time.monotonic()
     with pytest.raises(BenchError, match="cell failed"):
         gate.build_contexts(questions, {q["question_id"]: "raw" for q in questions},
-                            {q["question_id"]: [] for q in questions}, open_bank, 2)
+                            {q["question_id"]: [] for q in questions}, open_bank, 2, stop=stop)
+    assert stop.is_set()
     assert len(opened) < len(questions)
-    assert time.monotonic() - started < 2
+    # The failure is seen when it completes, not after the held first cell's 10 s hold.
+    assert time.monotonic() - started < 5
 
 
 def test_gate_parallel_contexts_tell_running_cells_to_stop_at_their_next_turn():
     import threading
-    import time
     from evals import regression_gate as gate
 
     long = {**question(), "question_id": "long",
             "haystack_dates": ["2024/01/01 (Mon) 00:00"],
             "haystack_sessions": [[{"role": "user", "content": f"turn {i}"} for i in range(40)]]}
     failing = {**question(), "question_id": "failing"}
-    stored, began, opened, lock = [], threading.Event(), [], threading.Lock()
-
-    class SlowBank(Bank):
-        def store(self, text):
-            began.set()
-            stored.append(text)
-            time.sleep(0.05)
+    stored, opened, lock, stop = [], [], threading.Lock(), threading.Event()
 
     @contextmanager
     def open_bank():
@@ -619,14 +627,17 @@ def test_gate_parallel_contexts_tell_running_cells_to_stop_at_their_next_turn():
             opened.append(1)
             second = len(opened) == 2
         if second:  # fail only once the other cell is storing
-            assert began.wait(5)
+            for _ in range(500):
+                if stored:
+                    break
+                threading.Event().wait(0.01)
             raise BenchError("cell failed")
-        yield SlowBank(True)
+        yield HeldBank(stop, stored)
 
     with pytest.raises(BenchError, match="cell failed"):
         gate.build_contexts([long, failing], {"long": "raw", "failing": "raw"},
-                            {"long": [], "failing": []}, open_bank, 2)
-    assert 0 < len(stored) < 40
+                            {"long": [], "failing": []}, open_bank, 2, stop=stop)
+    assert len(stored) == 1  # released by the stop flag, it stored no further turn
 
 
 def test_gate_context_workers_follow_the_request_or_free_memory(monkeypatch):
