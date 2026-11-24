@@ -1214,7 +1214,7 @@ async fn diagnose(
                 put(
                     &mut report,
                     "recovery",
-                    json!(proxy_hint(HANDSHAKE_FAILED_RECOVERY)),
+                    json!(proxy_hint(&handshake_failed_recovery(env!("CARGO_PKG_VERSION")))),
                 );
             }
         }
@@ -1295,8 +1295,14 @@ fn version_recovery(installed: &str, daemon_version: &str) -> String {
 }
 
 /// What doctor says when its own stdio shim, this executable started with
-/// the daemon spawn off, does not finish the MCP handshake.
-const HANDSHAKE_FAILED_RECOVERY: &str = "Check daemon health and the shim's stderr above: doctor started this pseudolife-mcp as a stdio shim and it did not finish the MCP handshake. If the daemon is healthy, rerun the installer to reinstall this client, then retry.";
+/// the daemon spawn off, cannot be started or does not finish the MCP
+/// handshake. An installer rerun reuses a runtime that matches its release,
+/// so the reinstall is the updater's.
+fn handshake_failed_recovery(installed: &str) -> String {
+    format!(
+        "Check daemon health and the shim's stderr above: doctor could not start this pseudolife-mcp as a stdio shim or finish its MCP handshake. If the daemon is healthy, reinstall this client with pseudolife-mcp update --clients-only --reinstall --tag {installed}, then start a new session and retry."
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -1318,8 +1324,11 @@ mod tests {
 
     #[test]
     fn a_failed_handshake_names_no_python_interpreter() {
-        let text = HANDSHAKE_FAILED_RECOVERY;
-        assert!(text.contains("rerun the installer"), "{text}");
+        let text = handshake_failed_recovery("0.25.0");
+        assert!(
+            text.contains("pseudolife-mcp update --clients-only --reinstall --tag 0.25.0"),
+            "{text}"
+        );
         assert!(
             !text.contains("pip") && !text.contains("interpreter"),
             "{text}"

@@ -299,11 +299,24 @@ fn register_command(client: &str, ctx: &Ctx) -> Result<String, Refusal> {
             "gemini mcp add -s user {} {SERVER} {shim}",
             flags("-e", "gemini")
         ),
-        _ => format!(
-            "rerun the installer with --client claude-desktop (ops/install.sh --client claude-desktop, or ops\\install.ps1 -Client claude-desktop on Windows), adding --daemon-url {} (-DaemonUrl) when the daemon runs on another machine",
-            ctx.url
-        ),
+        _ => desktop_install_command(ctx.remote, &ctx.url, token),
     })
+}
+
+/// The installer run that registers Claude Desktop with the native client:
+/// on a machine without the daemon it needs the daemon's URL and token file.
+fn desktop_install_command(remote: bool, url: &str, token: &str) -> String {
+    let (sh, ps) = if remote {
+        (
+            format!(" --daemon-url {url} --token-file {token}"),
+            format!(" -DaemonUrl {url} -TokenFile {token}"),
+        )
+    } else {
+        (String::new(), String::new())
+    };
+    format!(
+        "rerun the native installer for Claude Desktop: PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh --client claude-desktop{sh} (Windows: $env:PSEUDOLIFE_SHIM_ENGINE='native'; ops\\install.ps1 -Client claude-desktop{ps})"
+    )
 }
 
 pub(super) fn absent(client: &'static str, ctx: &Ctx) -> Result<Row, Refusal> {
@@ -507,7 +520,7 @@ fn settings_row(ctx: &Ctx, registration: &Row) -> Result<Row, Refusal> {
 /// old server name.
 fn legacy_desktop_note() -> String {
     format!(
-        "the entry's old name {SERVER}: the Desktop registrar moves it to {DESKTOP_SERVER} (rerun ops/install.* with --client claude-desktop); re-run connect after that"
+        "the entry's old name {SERVER}: the Desktop registrar moves it to {DESKTOP_SERVER} (rerun ops/install.* with --client claude-desktop and PSEUDOLIFE_SHIM_ENGINE=native); re-run connect after that"
     )
 }
 
@@ -696,9 +709,25 @@ mod tests {
     fn the_legacy_desktop_note_names_the_installer_step() {
         let note = legacy_desktop_note();
         assert!(
-            note.contains("(rerun ops/install.* with --client claude-desktop)"),
+            note.contains(
+                "(rerun ops/install.* with --client claude-desktop and PSEUDOLIFE_SHIM_ENGINE=native)"
+            ),
             "{note}"
         );
         assert!(!note.contains("register_claude_desktop.py"), "{note}");
+    }
+
+    #[test]
+    fn the_desktop_install_command_selects_the_native_client_and_carries_the_credential() {
+        assert_eq!(
+            desktop_install_command(false, "http://127.0.0.1:8765", "<token file>"),
+            "rerun the native installer for Claude Desktop: PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh --client claude-desktop (Windows: $env:PSEUDOLIFE_SHIM_ENGINE='native'; ops\\install.ps1 -Client claude-desktop)"
+        );
+        let remote = desktop_install_command(true, "http://10.0.0.5:8765", "/t/desktop.token");
+        assert_eq!(
+            remote,
+            "rerun the native installer for Claude Desktop: PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh --client claude-desktop --daemon-url http://10.0.0.5:8765 --token-file /t/desktop.token (Windows: $env:PSEUDOLIFE_SHIM_ENGINE='native'; ops\\install.ps1 -Client claude-desktop -DaemonUrl http://10.0.0.5:8765 -TokenFile /t/desktop.token)"
+        );
+        assert!(!remote.contains(".py"), "{remote}");
     }
 }

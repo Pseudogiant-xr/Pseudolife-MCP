@@ -252,7 +252,7 @@ fn dim_refusal(value: Option<&Value>, live: Option<i64>) -> Result<Option<String
     };
     Ok(match live {
         Some(live) if !equal => Some(format!(
-            "export embeddings are {spelled}-dimensional but this bank's columns are vector({live}) — the vectors cannot load verbatim. Import into a bank whose embedding columns are vector({spelled}); this client has no step that re-embeds a bank."
+            "export embeddings are {spelled}-dimensional but this bank's columns are vector({live}) — the vectors cannot load verbatim, and this client has no step that re-embeds them. Import an export taken from a bank at vector({live})."
         )),
         _ => None,
     })
@@ -1041,7 +1041,7 @@ mod tests {
             .expect("a 384-d export into a 1024-d bank is refused");
         assert_eq!(
             refusal,
-            "export embeddings are 384-dimensional but this bank's columns are vector(1024) — the vectors cannot load verbatim. Import into a bank whose embedding columns are vector(384); this client has no step that re-embeds a bank."
+            "export embeddings are 384-dimensional but this bank's columns are vector(1024) — the vectors cannot load verbatim, and this client has no step that re-embeds them. Import an export taken from a bank at vector(1024)."
         );
         assert!(!refusal.contains(".py"), "{refusal}");
     }
