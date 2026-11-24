@@ -1189,10 +1189,19 @@ mod tunnel_profiles {
         );
         assert!(!entry.to_string().contains("Python"), "{entry}");
         // Doctor names the file because `tunnel status` really does not
-        // answer while it is a pipe.
+        // answer while it is a pipe: status refuses with the same cause and
+        // fix for the same file.
         let output = tunnel_status(&home);
-        assert_eq!(output.status.code(), Some(1));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("deferred"));
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!(
+                "cannot read the key file {}; check that it is a plain owner-only file, not a pipe or a link",
+                root(&home).join("dot.key").display()
+            )),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("deferred"), "{stderr}");
     }
 
     #[test]
