@@ -401,10 +401,19 @@ def test_shutdown_signals_the_verified_pid_itself(monkeypatch):
 def test_exited_waits_for_the_pid_file_to_go(tmp_path):
     (tmp_path / "postmaster.pid").write_text("4242\nx\n0\n55432\n", encoding="utf-8")
     assert postgres._exited(tmp_path, 4242, 0) is False
-    (tmp_path / "postmaster.pid").write_text("5151\nx\n0\n55432\n", encoding="utf-8")
-    assert postgres._exited(tmp_path, 4242, 0) is False  # another server holds the directory now
     (tmp_path / "postmaster.pid").unlink()
     assert postgres._exited(tmp_path, 4242, 0) is True
+
+
+def test_exited_answers_at_once_when_another_server_holds_the_directory(tmp_path, monkeypatch):
+    """Not an exit, and no point waiting for one: the answer is immediate."""
+    (tmp_path / "postmaster.pid").write_text("5151\nx\n0\n55432\n", encoding="utf-8")
+
+    def sleep(seconds):
+        raise AssertionError("waited for a pid file another server holds")
+
+    monkeypatch.setattr(postgres.time, "sleep", sleep)
+    assert postgres._exited(tmp_path, 4242, 60) is False
 
 
 def test_stop_reports_failure_when_the_signal_cannot_be_sent(fakes, monkeypatch):
