@@ -231,7 +231,13 @@ impl Registered {
             // bootout fails only for a job not loaded (already stopped), which
             // must not keep its plist: `;`, not `&&`.
             Kind::LaunchAgent => format!("launchctl bootout gui/$(id -u)/{name} ; rm {file}"),
-            Kind::Task => format!("{}schtasks /Delete /TN {name} /F", powershell_note(&name)),
+            // /Delete does not stop a running task's program: end it first,
+            // as the Python client's removal does. Two commands, not joined
+            // by a separator, since cmd.exe and PowerShell 5.1 share none.
+            Kind::Task => format!(
+                "{}schtasks /End /TN {name} and then schtasks /Delete /TN {name} /F",
+                powershell_note(&name)
+            ),
         }
     }
     /// For a service the user wrote: the service manager's commands that
@@ -279,7 +285,7 @@ impl Registered {
                 "systemctl disable --now <unit> && rm <unit file> && systemctl daemon-reload"
             }
             Kind::LaunchAgent => "launchctl bootout gui/$(id -u)/<label> ; rm <plist file>",
-            Kind::Task => "schtasks /Delete /TN <task> /F",
+            Kind::Task => "schtasks /End /TN <task> and then schtasks /Delete /TN <task> /F",
         }
     }
 }
@@ -387,6 +393,7 @@ pub(crate) fn decide(
             &affected,
             matches!(host, Host::Windows { .. }),
             mover,
+            home,
         ))
     }
 }
@@ -997,7 +1004,8 @@ fn quote(path: &str, powershell: bool) -> String {
 
 fn unchecked(what: &str, kind: Kind) -> String {
     format!(
-        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you find a service, disable it with {}. To remove the registration, run {} (see {NATIVE_CLIENT_DOCS})",
+        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you find a service whose definition carries the {} marker and starts this machine's pseudolife-mcp launcher with tunnel run, disable it with {}; to remove that registration, run {} (see {NATIVE_CLIENT_DOCS}). Leave any other service alone",
+        OWNER.trim_end_matches(':'),
         Registered::stop_hint(kind),
         Registered::remove_hint(kind)
     )
@@ -1044,19 +1052,29 @@ fn made_by_hand(service: &Registered, native: bool, mover: Mover) -> String {
     )
 }
 
-fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
+fn refusal(found: &[Registered], windows: bool, mover: Mover, home: &Path) -> String {
     let places = found
         .iter()
         .map(|r| r.place.as_str())
         .collect::<Vec<_>>()
         .join(", ");
     // The service manager's own commands need no Python client; the Python
-    // client's command, which also deletes its records of the service, is
-    // the alternative while this machine still runs it (it does here: the
-    // refusal keeps it on that client).
+    // client's command is the alternative while this machine still runs it
+    // (it does here: the refusal keeps it on that client).
     let native_removes = found
         .iter()
-        .map(|r| format!("{}{}", r.root_note(), r.remove_native()))
+        .map(|r| {
+            // A unit or plist gone while the Python client's record of it
+            // stays makes that client's later `tunnel service` commands
+            // refuse the profile, so the record goes with it. A task leaves
+            // its saved definition beside the record, a pair that client
+            // still accepts.
+            let record = match r.kind {
+                Kind::Task => String::new(),
+                _ => format!(" && rm {}", r.records(home)),
+            };
+            format!("{}{}{record}", r.root_note(), r.remove_native())
+        })
         .collect::<Vec<_>>()
         .join(" ; ");
     let removes = found
@@ -1069,9 +1087,9 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
     // the machine, while an unset variable means the release's default.
     let python = python_first(windows);
     let move_now = if windows {
-        format!("$env:{ENGINE}='native'; pseudolife-mcp update --clients-only")
+        format!("in PowerShell with $env:{ENGINE}='native'; pseudolife-mcp update --clients-only")
     } else {
-        format!("{ENGINE}=native pseudolife-mcp update --clients-only")
+        format!("with {ENGINE}=native pseudolife-mcp update --clients-only")
     };
     // Cause and fix first: a 0.23.x hand-off parent keeps 400 characters.
     let (stay, again) = match mover {
@@ -1087,11 +1105,11 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
         // to move: a person moves the machine.
         Mover::Unattended => (
             "Nothing was changed; this unattended run leaves the client as it is".to_owned(),
-            format!("move it with {move_now}"),
+            format!("move it {move_now}"),
         ),
         Mover::UnattendedDaemon => (
             "This unattended run updates the daemon alone and leaves this machine's client as it is".to_owned(),
-            format!("move it with {move_now}"),
+            format!("move it {move_now}"),
         ),
         Mover::Installer => (
             format!("Nothing was changed; to stay on it, rerun the installer {python}"),
@@ -1104,12 +1122,13 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
 }
 
 /// How to rerun a command with the Python client selected, in the shell the
-/// platform's commands are printed for.
+/// platform's commands are printed for. The command being rerun may set
+/// =native itself (the documented move command does), which would win.
 fn python_first(windows: bool) -> String {
     if windows {
-        format!("after $env:{ENGINE}='python' in PowerShell")
+        format!("after $env:{ENGINE}='python' in PowerShell, without setting it to native again")
     } else {
-        format!("with {ENGINE}=python in front of it")
+        format!("with {ENGINE}=python in front of it, in place of any {ENGINE}=native")
     }
 }
 
