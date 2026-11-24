@@ -1,10 +1,11 @@
 """CLI-PAIRING (invite): ``pseudolife-mcp invite`` (invite_cli.py) over an
 explicit ``PSEUDOLIFE_MCP_DATABASE_URL``.
 
-Banks are disposable (``_bank``): one seeded bank per kind, filled once by
-the oracle's own writers (``principal_store.create_invite`` / ``redeem`` /
-``revoke``, and the meta row as ``tests/test_invite_cli.py``'s ``bank``
-fixture inserts it). Read-only cases share the seeded bank and check it
+Banks are disposable (``_bank``): one seeded bank per kind, filled once with
+the rows the frozen store's writers leave (``principal_store.create_invite``
+/ ``redeem`` / ``revoke``: their statements, on the database clock, in
+``seed_states``), and the meta row as ``tests/test_invite_cli.py``'s
+``bank`` fixture inserts it. Read-only cases share the seeded bank and check it
 unchanged after each arm; a case that may write gets, per arm, a fresh bank
 whose seeded rows are copied verbatim from the seed (DML only: this row runs
 no reap, TRUNCATE, DROP or DDL of its own, and calls
@@ -36,8 +37,11 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from rust.harness_support.database_guard import assert_disposable_database
+
 from .. import core, normalize
 from . import _bank
+from . import _invite_sql as invite_sql
 
 PREFIX = "pl_cf_w1c_pairing_"
 ARM_DB = _bank.name(PREFIX + "arm")
@@ -50,34 +54,66 @@ SEP = "\\" if core.WINDOWS else "/"
 # ── seeds ───────────────────────────────────────────────────────────────────
 
 def _guarded(conn) -> None:
-    from pseudolife_memory.storage.schema import assert_disposable_database  # noqa: PLC0415
     assert_disposable_database(conn)
 
 
 def _meta(conn) -> None:
-    from pseudolife_memory.storage.coordination import BANK_ID_META_KEY  # noqa: PLC0415
     _guarded(conn)
     conn.execute("INSERT INTO meta (key, value) VALUES (%s, to_jsonb(%s::text))",
-                 (BANK_ID_META_KEY, BANK_ID))
+                 (invite_sql.BANK_ID_META_KEY, BANK_ID))
+
+
+# The database clock, as the frozen store reads it (principal_store._NOW).
+_NOW = invite_sql._NOW_SQL
+# A pairing code as the frozen store draws one (principals.PAIRING_CODE_*):
+# only its SHA-256 is stored, and no case reads a seeded code back.
+_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _invite(conn, name: str, *, tier=None, board=True, owned=None, ttl_seconds: float) -> None:
+    """A new name's row as ``principal_store.create_invite`` inserts it: a
+    pending code's hash, its expiry ``ttl_seconds`` after creation, both on
+    the database clock; ``owned`` only when given (the column's default
+    otherwise)."""
+    import secrets  # noqa: PLC0415
+    code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(12))
+    column, value = (", owned", ", %(owned)s") if owned is not None else ("", "")
+    _guarded(conn)
+    conn.execute(
+        f"INSERT INTO public.principals AS p (principal, tier, board{column}, code_hash, "
+        f"code_expires_at, created_at) VALUES (%(name)s, %(tier)s, %(board)s{value}, %(code)s, "
+        f"{_NOW} + %(ttl)s, {_NOW})",
+        {"name": name, "tier": tier, "board": board, "owned": owned,
+         "code": hashlib.sha256(code.encode()).hexdigest(), "ttl": float(ttl_seconds)})
 
 
 def seed_states(conn, name: str) -> None:
-    """One principal in each state ``describe_rows`` names."""
-    from pseudolife_memory import principal_store as store  # noqa: PLC0415
-    from pseudolife_memory.principals import secret_sha256  # noqa: PLC0415
+    """One principal in each state ``describe_rows`` names, as the frozen
+    store's create, redeem and revoke statements leave them."""
     _meta(conn)
-    store.create_invite(conn, "alpha", ttl_seconds=900, replace=False)
-    bravo = store.create_invite(conn, "bravo", tier="core", ttl_seconds=900, replace=False)
-    if store.redeem(_bank.url(name), secret_sha256(bravo["code"]),
-                    secret_sha256("seed-token-bravo")) is None:
+    _invite(conn, "alpha", ttl_seconds=900)
+    _invite(conn, "bravo", tier="core", ttl_seconds=900)
+    # principal_store.redeem: the pending code is spent and the token's hash
+    # stored, on the database clock.
+    _guarded(conn)
+    paired = conn.execute(
+        f"UPDATE public.principals SET token_hash = %s, paired_at = {_NOW}, "
+        "paired_code_hash = code_hash, code_hash = NULL, code_expires_at = NULL "
+        f"WHERE principal = 'bravo' AND code_expires_at > {_NOW} RETURNING principal",
+        (hashlib.sha256(b"seed-token-bravo").hexdigest(),)).fetchall()
+    if len(paired) != 1:
         raise RuntimeError("seed: bravo was not paired")
-    store.create_invite(conn, "charlie", ttl_seconds=900, replace=False)
-    store.revoke(conn, "charlie")
-    store.create_invite(conn, "delta", board=False, ttl_seconds=-60, replace=False)
-    store.create_invite(conn, "a-rather-long-principal-name.x", tier="full", ttl_seconds=3600,
-                        replace=False)
+    _invite(conn, "charlie", ttl_seconds=900)
+    # principal_store.revoke.
+    _guarded(conn)
+    conn.execute(
+        f"UPDATE public.principals SET revoked_at = COALESCE(revoked_at, {_NOW}), "
+        "code_hash = NULL, code_expires_at = NULL, paired_code_hash = NULL "
+        "WHERE principal = 'charlie'")
+    _invite(conn, "delta", board=False, ttl_seconds=-60)
+    _invite(conn, "a-rather-long-principal-name.x", tier="full", ttl_seconds=3600)
     # v59: a machine invited as someone else's.
-    store.create_invite(conn, "echo", owned=False, ttl_seconds=900, replace=False)
+    _invite(conn, "echo", owned=False, ttl_seconds=900)
 
 
 def seed_activity(conn, name: str) -> None:
@@ -569,16 +605,16 @@ def _transport_cases():
                 assert obs['exit'] == (exit_code if exit_code in (0, 1, 2, 4) else 1)
                 assert core.decode(obs, 'stdout') in (b'container-invite\n', b'container-invite\r\n')
             else:
-                from pseudolife_memory import invite_cli
+                # The SQL the frozen invite command sends (_invite_sql).
                 psql = calls[1:]
                 for call in psql:
-                    assert call['argv'] == invite_cli._PSQL[1:]
+                    assert call['argv'] == invite_sql._PSQL[1:]
                 if '--list' in argv:
-                    assert psql[0]['stdin'] == invite_cli.ACTIVITY_SQL + '\n'
-                    expected = invite_cli.LIST_SQL if activity == 't' else invite_cli.LIST_SQL_V53
+                    assert psql[0]['stdin'] == invite_sql.ACTIVITY_SQL + '\n'
+                    expected = invite_sql.LIST_SQL if activity == 't' else invite_sql.LIST_SQL_V53
                     assert psql[1]['stdin'] == expected + '\n'
                 else:
-                    assert psql[0]['stdin'] == invite_cli.revoke_sql('laptop') + '\n'
+                    assert psql[0]['stdin'] == invite_sql.REVOKE_LAPTOP_SQL + '\n'
                 assert obs['exit'] == 0
             lease_transport._remove_inputs(arm)
         return check
