@@ -410,10 +410,16 @@ def test_the_checkout_version_is_the_native_crate_not_pyproject(helper):
     (repo / "rust" / "shim" / "Cargo.toml").write_text('[package]\nname = "pseudolife-stdio"\n')
     with pytest.raises(module.Unavailable, match=message):
         module.checkout_version(repo)
-    # A missing crate file means a broken checkout: refused, never the
-    # default's fallback to Python.
+    # A missing or undecodable crate file means a broken checkout: refused
+    # with the step that repairs it, never the default's fallback to Python.
+    restore = r"restore it \(git checkout -- rust/shim/Cargo.toml\) and rerun"
+    (repo / "rust" / "shim" / "Cargo.toml").write_bytes(b"[package]\nversion = \"\xff\"\n")
+    with pytest.raises(module.Refusal, match=r"Cannot read rust/shim/Cargo.toml in this checkout \(not UTF-8 text\); "
+                       + restore) as refused:
+        module.checkout_version(repo)
+    assert not isinstance(refused.value, module.Unavailable)
     (repo / "rust" / "shim" / "Cargo.toml").unlink()
-    with pytest.raises(module.Refusal, match=message) as refused:
+    with pytest.raises(module.Refusal, match=restore) as refused:
         module.checkout_version(repo)
     assert not isinstance(refused.value, module.Unavailable)
 

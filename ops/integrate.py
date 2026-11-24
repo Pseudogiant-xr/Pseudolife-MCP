@@ -1268,13 +1268,15 @@ def _native_version(rev: str) -> str | None:
 
 def _changes_release_version(base: str, head: str) -> bool:
     """Whether `head` changes the release version against `base`: the native
-    one (only where both revisions carry it, so a revision before the crate
-    existed is no signal), or pyproject.toml's, read as before while the
-    wheel is published."""
-    native = _native_version(base), _native_version(head)
-    if None not in native and native[0] != native[1]:
-        return True
-    return _project_version(head) != _project_version(base)
+    one, or pyproject.toml's while the wheel is published. Each counts only
+    where both revisions carry it, so a revision before the crate existed is
+    no signal, and neither is the pull request that deletes pyproject.toml
+    with the package (it changes no version)."""
+    for read in (_native_version, _project_version):
+        versions = read(base), read(head)
+        if None not in versions and versions[0] != versions[1]:
+            return True
+    return False
 
 
 def _fragments(rev: str) -> set[str]:

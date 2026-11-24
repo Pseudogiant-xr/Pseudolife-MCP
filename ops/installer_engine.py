@@ -130,18 +130,20 @@ def checkout_version(repo: Path) -> str:
     (rust/ci/release_version.py). An unreadable crate file is a refusal, not
     unavailability: the checkout is broken, so the default does not fall
     back (as the native installer engine decides)."""
-    message = (f"Cannot read a release version from this checkout's {release_version.AUTHORITY}; "
-               "rerun with --engine python. Nothing was started.")
+    manifest = release_version.AUTHORITY
     try:
-        text = (repo / release_version.AUTHORITY).read_text(encoding="utf-8-sig")
-    except OSError:
-        raise Refusal(message) from None
+        text = (repo / manifest).read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as error:
+        why = error.strerror if isinstance(error, OSError) and error.strerror else "not UTF-8 text"
+        raise Refusal(f"Cannot read {manifest} in this checkout ({why}); restore it (git checkout -- "
+                      f"{manifest}) and rerun. Nothing was started.") from None
     try:
         version = release_version.from_manifest(text)
     except release_version.VersionError:
         version = None
     if not version or not up.plain_release(version):
-        raise Unavailable(message)
+        raise Unavailable(f"Cannot read a release version from this checkout's {manifest}; "
+                          "rerun with --engine python. Nothing was started.")
     return version
 
 
