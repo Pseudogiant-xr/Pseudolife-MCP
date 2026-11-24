@@ -62,6 +62,10 @@ def main(argv: list[str] | None = None) -> int:
                              "run that exits 1 if anything would change, unless --write")
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     args = parser.parse_args(argv)
+    # Retired modes refuse first: before the database turn and any check.
+    if args.record_goldens:
+        import candidate_record
+        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -72,9 +76,6 @@ def main(argv: list[str] | None = None) -> int:
             require_turn(holder="standalone database harness", contain=True)
         finally:
             _turn_sys.path.remove(_turn_root)
-    if args.record_goldens:
-        import candidate_record
-        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if args.write and not args.record_candidate:
         parser.error("--write needs --record-candidate")
     if args.record_candidate:

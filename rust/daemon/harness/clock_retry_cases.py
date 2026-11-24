@@ -217,6 +217,9 @@ def main(argv=None):
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed golden")
     parser.add_argument("--dump-db", choices=PHASES, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    # Retired modes refuse first: before the database turn and any check.
+    if args.record_goldens:
+        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -232,8 +235,6 @@ def main(argv=None):
     if args.dump_db:
         dump_phase(args.dump_db)
         return 0
-    if args.record_goldens:
-        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
     if args.write and not args.record_candidate:

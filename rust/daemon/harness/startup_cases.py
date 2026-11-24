@@ -201,7 +201,7 @@ def start_delta(before, state, rules):
     first column (the key) of each template row it rewrote or removed, and
     each catalog row it added or removed. Rows are counted as multisets, so a
     duplicated row is a change. A table's rows sit under ``rows`` so that a
-    difference reads like the live comparison's
+    difference reads like a full state comparison's
     (``/rows/public.entries/rows: ...``).
     """
     from collections import Counter
@@ -385,6 +385,9 @@ def main(argv=None):
                                   "run unless --write")
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     args = parser.parse_args(argv)
+    # Retired modes refuse first: before the database turn and any check.
+    if args.record_goldens:
+        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -397,8 +400,6 @@ def main(argv=None):
             _turn_sys.path.remove(_turn_root)
     if pg.SLICE != "pgs":
         parser.error("startup cells require PL_HARNESS_SLICE=pgs")
-    if args.record_goldens:
-        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
     if args.only and args.part:

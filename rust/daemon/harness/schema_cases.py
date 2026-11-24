@@ -41,8 +41,7 @@ GOLDEN_FILE = HERE / "goldens" / "schema-startup.json"
 def golden_state(state):
     state = json.loads(json.dumps(state))
     # The schema installs the server's available extension version, so the
-    # golden binds only the DDL-controlled names and namespaces. A recording
-    # (both arms) still compares extversion exactly; checking does not.
+    # golden binds only the DDL-controlled names and namespaces.
     state["catalog"]["extensions"] = [[name, "<server-version>", namespace]
                                        for name, version, namespace in state["catalog"]["extensions"]]
     return golden_scrub(state)
@@ -191,6 +190,9 @@ def main(argv=None):
     ap.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args(argv)
+    # Retired modes refuse first: before the database turn and any check.
+    if args.record_goldens:
+        ap.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -203,8 +205,6 @@ def main(argv=None):
             _turn_sys.path.remove(_turn_root)
     if pg.SLICE != "pgs":
         ap.error("schema cells require PL_HARNESS_SLICE=pgs")
-    if args.record_goldens:
-        ap.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if args.write and not args.record_candidate:
         ap.error("--write needs --record-candidate")
     if args.record_candidate:
@@ -212,10 +212,16 @@ def main(argv=None):
             ap.error("--record-candidate records the golden's cases only; check the result with "
                      "--check-goldens --refusals --mutants")
         return record_candidate(args)
+    goldens = json.loads(GOLDEN_FILE.read_text())
+    unknown = [commit for commit in args.commit if commit not in goldens["cases"]]
+    if unknown:
+        # Checked before any database work: replay covers the fresh schema and
+        # the commits schema_history.json lists, each with its golden.
+        ap.error("--commit " + ", ".join(unknown) + " has no golden in schema-startup.json; add it to "
+                 "schema_history.json, then record it with --record-candidate --commit <commit> --write")
     from test_schema_executor import check_equivalence
     equivalence = check_equivalence(args.rust_test_bin.resolve(), pg)
     results = []
-    goldens = json.loads(GOLDEN_FILE.read_text())
     number = time.time_ns() // 1000
     sources = [{"commit": c, "embedding_dimension": 1024} for c in args.commit]
     if args.all_versions:
@@ -223,8 +229,6 @@ def main(argv=None):
     for i, source in enumerate([{"commit": None, "embedding_dimension": 1024}, *sources]):
         commit = source["commit"]
         key = commit or "fresh"
-        if key not in goldens["cases"]:
-            ap.error(f"schema-startup.json has no golden for {key}; record it with --record-candidate")
         result = cell(args.rust_test_bin.resolve(), number + i * 3, commit, source["embedding_dimension"],
                       goldens["cases"][key])
         result.pop("_observed")

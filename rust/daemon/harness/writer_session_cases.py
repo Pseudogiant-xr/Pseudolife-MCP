@@ -76,8 +76,8 @@ def dump_phase(phase):
     (output / f"{phase}.json").write_text(json.dumps(dbstate.dump(dsn), allow_nan=False), encoding="utf-8")
 
 
-# The board clock mark the second writer leaves (2100-01-01 UTC): both arms
-# must reseed past it before their next stamp. Fixed, so the dumps agree.
+# The board clock mark the second writer leaves (2100-01-01 UTC): the
+# service must reseed past it before its next stamp. Fixed, so dumps agree.
 OTHER_WRITER_HLC = [4102444800000, 3]
 
 
@@ -303,6 +303,9 @@ def main(argv=None):
     parser.add_argument("--other-writer", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--hold-lease", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    # Retired modes refuse first: before the database turn and any check.
+    if args.oracle:
+        parser.error(ORACLE_RETIRED)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -324,8 +327,6 @@ def main(argv=None):
     if args.hold_lease:
         hold_lease()
         return 0
-    if args.oracle:
-        parser.error(ORACLE_RETIRED)
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
     args.out.parent.mkdir(parents=True, exist_ok=True)
