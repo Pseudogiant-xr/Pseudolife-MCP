@@ -13,12 +13,13 @@ import re
 import subprocess
 import tarfile
 import tempfile
-import tomllib
 import zipfile
 
 if __package__:
+    from . import release_version
     from .windows_imports import check_windows_imports
 else:
+    import release_version
     from windows_imports import check_windows_imports
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,12 +42,9 @@ def checked_version(version: str) -> str:
 
 
 def version(root: Path = ROOT) -> str:
-    value = checked_version(tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])
-    for crate in ("shim", "daemon"):
-        native = tomllib.loads((root / "rust" / crate / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
-        if native != value:
-            raise ValueError(f"{crate} version differs from the release")
-    return value
+    """The release version (rust/ci/release_version.py), after checking every
+    field the version cut writes equals it."""
+    return checked_version(release_version.check(root))
 
 
 def asset_name(value: str, target: str) -> str:

@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from rust.ci import release_version
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -105,11 +107,11 @@ def test_plugin_manifest_carries_no_version():
 def test_plugin_release_matches_pyproject():
     """The release the hooks report to the daemon (the version handshake)
     lives beside the manifest, not in it. The release version-cut touches
-    this file (.claude/skills/release-procedure/SKILL.md)."""
+    this file (.claude/skills/release-procedure/SKILL.md). It is pinned to
+    the release version, which pyproject.toml must equal while the package
+    is published (test_pyproject_version_matches_the_native_release)."""
     release = json.loads(_read("plugin/release.json"))
-    version = re.search(r'^version\s*=\s*"([^"]+)"', _read("pyproject.toml"),
-                        re.M).group(1)
-    assert release == {"version": version}
+    assert release == {"version": _release_version()}
 
 
 def test_plugin_tree_ships_no_top_level_dot_entry_but_its_manifest():
@@ -160,6 +162,36 @@ def _pyproject_version() -> str:
     return re.search(r'^version\s*=\s*"([^"]+)"', _read("pyproject.toml"), re.M).group(1)
 
 
+def _release_version() -> str:
+    """The release version's native authority, ``[package] version`` in
+    rust/shim/Cargo.toml, through its one reader (rust/ci/release_version.py).
+    While the Python package is published, pyproject.toml must equal it, so
+    each pin that compares with it pins to pyproject's version as well, even
+    when run alone (the release procedure runs some of them by name)."""
+    value = release_version.read(ROOT)
+    assert _pyproject_version() == value, (
+        f"pyproject.toml version {_pyproject_version()!r} != release version {value!r} "
+        f"({release_version.AUTHORITY}): the version cut writes both")
+    return value
+
+
+def test_pyproject_version_matches_the_native_release():
+    """While the Python package is still published, the release cut writes
+    its version too, and every pin here compares with the native release
+    version, so pyproject.toml must equal it: then each field pinned to the
+    release version is pinned to pyproject's as well. The pull request that
+    deletes the package deletes this test with pyproject.toml."""
+    assert _pyproject_version() == _release_version()
+
+
+def test_every_version_field_matches_the_native_release():
+    """The one drift check the release workflow's guards job also runs
+    (``python rust/ci/release_version.py check``): every field a version cut
+    writes equals the release version, and the first that differs is
+    named."""
+    assert release_version.check(ROOT) == _release_version()
+
+
 def test_server_json_versions_match_pyproject():
     """The MCP registry's version guard used to run in the `registry` GitHub
     Actions job, which only executes AFTER the irreversible PyPI publish
@@ -168,17 +200,19 @@ def test_server_json_versions_match_pyproject():
     two places that drift independently, and the compose daemon image tag
     (`ops/docker-compose.yml`) calls itself the deploy source of truth but
     was unguarded against pyproject.toml too. Pin all three here so a bad
-    version cut fails locally, before any workflow runs."""
-    pyproject_version = _pyproject_version()
+    version cut fails locally, before any workflow runs. They are pinned to
+    the release version, which pyproject.toml must equal while the package
+    is published (test_pyproject_version_matches_the_native_release)."""
+    release = _release_version()
 
     server = json.loads(_read("server.json"))
-    assert server["version"] == pyproject_version
-    assert server["packages"][0]["version"] == pyproject_version
+    assert server["version"] == release
+    assert server["packages"][0]["version"] == release
 
     compose = _read("ops/docker-compose.yml")
     match = re.search(r"^\s*image:\s*pseudolife-daemon:(\S+)$", compose, re.M)
     assert match, "ops/docker-compose.yml must pin the daemon image tag to a version"
-    assert match.group(1) == pyproject_version
+    assert match.group(1) == release
 
 
 def test_the_native_crates_report_the_release_version():
@@ -188,15 +222,16 @@ def test_the_native_crates_report_the_release_version():
     activation rehearsal). Both native crates carry the release version, as
     a checkout-built Python daemon reports the last release's, and the cut
     moves them with the rest (release-procedure skill; the oracle selection's
-    VERSION_FILES)."""
-    pyproject_version = _pyproject_version()
+    VERSION_FILES). The shim crate's version is the release version itself;
+    this pins the daemon crate and both lock entries to it."""
+    release = _release_version()
     lock = _read("rust/Cargo.lock")
     for crate, package in (("daemon", "pseudolife-daemon"), ("shim", "pseudolife-stdio")):
         manifest = _read(f"rust/{crate}/Cargo.toml")
         assert re.search(rf'^name = "{package}"\nversion = "([^"]+)"', manifest, re.M).group(1) \
-            == pyproject_version, f"rust/{crate}/Cargo.toml"
+            == release, f"rust/{crate}/Cargo.toml"
         assert re.search(rf'^name = "{package}"\nversion = "([^"]+)"', lock, re.M).group(1) \
-            == pyproject_version, f"rust/Cargo.lock {package}"
+            == release, f"rust/Cargo.lock {package}"
 
 
 def test_plugin_ships_no_mcp_server():
