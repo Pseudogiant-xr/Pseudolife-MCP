@@ -154,10 +154,10 @@ class = "intentional legacy compatibility"
 reason = "Registration migration recognizes installed Python modules and launcher arguments."
 
 [[rules]]
-globs = ["rust/shim/src/cli/installer/codex_hooks/definitions.rs", "rust/shim/src/cli/update/clients/codex.rs"]
+globs = ["rust/shim/src/setup/codex_launchers.rs"]
 kinds = ["command"]
-class = "active dependency"
-reason = "Approved launcher definitions still print the Python repair command."
+class = "intentional legacy compatibility"
+reason = "A test fixture rebuilds the launchers earlier releases shipped, which the installer and update replace."
 
 [[rules]]
 globs = ["rust/shim/src/cli/update/*.rs", "rust/shim/src/cli/installer/*.rs"]
