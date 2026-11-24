@@ -220,19 +220,24 @@ fn mcp_memory_outcome<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Tool
             handle: text_arg(a, "episode").filter(|h| !h.is_empty()),
             ids: ids.clone(),
         };
-        let m = &app.service.config.memory;
-        let cfg = LabelConfig {
-            lessons: m.lessons_enabled,
-            retrieval_log: m.retrieval_log_enabled,
-            window: m.retrieval_log_use_window_seconds,
+        let mut out = match unknown_outcome(&args.outcome) {
+            Some(refusal) => refusal,
+            None => {
+                let m = &app.service.config.memory;
+                let cfg = LabelConfig {
+                    lessons: m.lessons_enabled,
+                    retrieval_log: m.retrieval_log_enabled,
+                    window: m.retrieval_log_use_window_seconds,
+                };
+                let ready = app.service.ensure_init().await.map_err(internal)?;
+                let (r2, caller) = (ready.clone(), caller(&call));
+                ready
+                    .writes
+                    .spawn(async move { record_outcome(&r2, &caller, &cfg, args).await })
+                    .await
+                    .map_err(internal)??
+            }
         };
-        let ready = app.service.ensure_init().await.map_err(internal)?;
-        let (r2, caller) = (ready.clone(), caller(&call));
-        let mut out = ready
-            .writes
-            .spawn(async move { record_outcome(&r2, &caller, &cfg, args).await })
-            .await
-            .map_err(internal)??;
         // `_noted(..., _OUTCOME_NOTES)`.
         if out.get("reason").and_then(Value::as_str) == Some("lessons disabled") {
             out.entry("note")
@@ -257,8 +262,26 @@ fn mcp_memory_outcome<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Tool
     })
 }
 
-/// `service.record_outcome` (`origin="action"`), under the write lock to
-/// the answer: the signal row attributed to the handle's root or else the
+/// `record_outcome`'s first check (OC3): an outcome outside [`OUTCOMES`]
+/// is refused with the accepted values and never recorded, so never
+/// coerced to a success. The body asks it before initialization, the write
+/// queue and the lock, so a refusal touches no state. Over MCP the binder
+/// refuses such a value before the body runs (`binding.rs`); this answers a
+/// caller that reaches the body unbound.
+fn unknown_outcome(outcome: &str) -> Option<Map<String, Value>> {
+    if OUTCOMES.contains(&outcome) {
+        return None;
+    }
+    let mut out = Map::new();
+    out.insert("recorded".into(), json!(false));
+    out.insert("reason".into(), json!("unknown_outcome"));
+    out.insert("outcomes".into(), json!(OUTCOMES));
+    Some(out)
+}
+
+/// `service.record_outcome` (`origin="action"`) for an accepted outcome
+/// ([`unknown_outcome`] refused the rest), under the write lock to the
+/// answer: the signal row attributed to the handle's root or else the
 /// caller's open leaf, then the `used_ids` label and its record.
 async fn record_outcome(
     ready: &Arc<Ready>,
@@ -267,12 +290,6 @@ async fn record_outcome(
     a: OutcomeArgs,
 ) -> Result<Map<String, Value>, ToolError> {
     let mut out = Map::new();
-    if !OUTCOMES.contains(&a.outcome.as_str()) {
-        out.insert("recorded".into(), json!(false));
-        out.insert("reason".into(), json!("unknown_outcome"));
-        out.insert("outcomes".into(), json!(OUTCOMES));
-        return Ok(out);
-    }
     let mut ws = ready.write.lock().await;
     if !cfg.lessons {
         out.insert("recorded".into(), json!(false));
@@ -616,6 +633,87 @@ mod tests {
         assert_eq!(got.len(), USED_IDS_CAP);
         assert_eq!((ignored, truncated), (0, 3));
         assert_eq!(got[49], "50");
+    }
+
+    fn fixture_ident() -> crate::mcp::dispatch::CallIdentity {
+        crate::mcp::dispatch::CallIdentity {
+            principal: "default".into(),
+            writer: "fixture".into(),
+            header_session: None,
+            transport_session: None,
+            headers: Default::default(),
+        }
+    }
+
+    /// The memory_outcome body, called as the dispatcher calls it but with
+    /// unbound arguments: the binder is not in front of it.
+    async fn outcome_body(app: &crate::http::App, args: Value) -> Result<Value, ToolError> {
+        let ident = fixture_ident();
+        mcp_memory_outcome(
+            app,
+            ToolCall {
+                args: args.as_object().unwrap(),
+                ident: &ident,
+            },
+        )
+        .await
+    }
+
+    #[test]
+    fn only_the_three_outcomes_pass_the_check() {
+        for accepted in OUTCOMES {
+            assert_eq!(unknown_outcome(accepted), None, "{accepted}");
+        }
+        let refusal = json!({"recorded": false, "reason": "unknown_outcome",
+                             "outcomes": ["success", "failure", "correction"]});
+        // Near misses of an accepted value are refused too, never folded
+        // into one: case, surrounding space, a past tense, the empty string.
+        for refused in [
+            "failed", "Success", "SUCCESS", " success", "success ", "", "partial",
+        ] {
+            assert_eq!(
+                unknown_outcome(refused).map(Value::Object),
+                Some(refusal.clone()),
+                "{refused:?}"
+            );
+        }
+    }
+
+    /// An unknown outcome is answered from the arguments alone: on the
+    /// body's first poll, before the service initializes, so before the
+    /// write queue, the lock or the bank. Initialization runs in a spawned
+    /// task the body awaits, so a body that went on to initialize could not
+    /// answer on its first poll (no timer: polled once, it is ready or not).
+    /// The test also holds the service mutex every initialization takes, so
+    /// a left-behind initialization never reaches the (unreachable) bank.
+    #[tokio::test]
+    async fn an_unknown_outcome_is_refused_before_any_state_is_touched() {
+        use futures::FutureExt;
+        let app = crate::http::tests::mcp_refusal_app();
+        let _held = app.service.hold_service_lock().await;
+        for refused in ["failed", "Success", ""] {
+            let args = json!({"task": "deploy thing", "outcome": refused});
+            let Some(answer) = outcome_body(&app, args).now_or_never() else {
+                panic!("{refused:?}: the refusal waited for initialization");
+            };
+            let answer =
+                answer.unwrap_or_else(|e| panic!("{refused:?}: refused with an error: {e:?}"));
+            // Exactly the refusal: not recorded, no signal id, the accepted
+            // values listed.
+            assert_eq!(
+                answer,
+                json!({"recorded": false, "reason": "unknown_outcome",
+                       "outcomes": ["success", "failure", "correction"]}),
+                "{refused:?}"
+            );
+        }
+        // The first-poll check is not vacuous: an accepted outcome goes on to
+        // initialize, so it is still pending after one poll.
+        let args = json!({"task": "deploy thing", "outcome": "success"});
+        assert!(
+            outcome_body(&app, args).now_or_never().is_none(),
+            "an accepted outcome answered without initializing"
+        );
     }
 
     #[test]
