@@ -940,8 +940,9 @@ fn verify(options: &Options, root: &Path) -> Output {
             )));
         }
         return Err(Fail::Detail(format!(
-            "tunnel verify checks only a launch this client started, and {} is not one. Stop that tunnel with the client that started it, start it with `{}`, then retry",
+            "tunnel verify checks only a launch this client started, and {} is not one. Check `{}`: if that tunnel still runs, stop it with the client that started it; once it reports the tunnel stopped, move the record aside, start the tunnel with `{}`, then retry",
             record::path(root, &profile.name).display(),
+            tunnel_command("status", &profile.name, options.profile_dir.as_deref()),
             tunnel_command("run", &profile.name, options.profile_dir.as_deref())
         )));
     }

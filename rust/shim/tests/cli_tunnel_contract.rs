@@ -244,15 +244,38 @@ fn every_tunnel_argv_answers_or_refuses_with_its_cause_without_effect() {
         assert_eq!(stdout.lines().next(), Some(first), "{args:?}: {stdout}");
     }
     assert!(tree(&home.0) == before, "help changed the home");
-    // The joined form names the same profile as the separate one.
+    // The joined form names the same profile and directory as the separate
+    // one: a saved, non-default profile answers only when both are read.
+    let store = home.path("tunnels");
+    pseudolife_stdio::board::state::private_dir(&store).unwrap();
+    pseudolife_stdio::board::state::atomic_create(
+        &store.join("alpha.profile.json"),
+        &serde_json::to_vec(&serde_json::json!({
+            "name": "alpha", "daemon_url": "http://127.0.0.1:9", "token_file": home.path("token"),
+            "state": "pending", "consent": true,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let joined = run(
         &home,
         &["status", "--profile=dot", &format!("--profile-dir={dir}")],
         &[],
     );
+    assert_eq!(joined.status.code(), Some(2));
+    let joined = run(
+        &home,
+        &["status", "--profile=alpha", &format!("--profile-dir={dir}")],
+        &[],
+    );
+    assert!(
+        String::from_utf8_lossy(&joined.stdout).starts_with("Profile alpha: pending"),
+        "{}",
+        String::from_utf8_lossy(&joined.stderr)
+    );
     let separate = run(
         &home,
-        &["status", "--profile", "dot", "--profile-dir", &dir],
+        &["status", "--profile", "alpha", "--profile-dir", &dir],
         &[],
     );
     assert_eq!(joined.status.code(), separate.status.code());
@@ -1095,6 +1118,26 @@ fn setup_waits_for_no_launch_before_changing_a_keyed_profile() {
     );
     assert_eq!(std::fs::read(&profile).unwrap(), before);
     ambient.assert_untouched();
+}
+
+#[test]
+fn setup_names_an_expiry_spelling_it_does_not_read_by_its_option() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    pending_setup_profile(&home, &daemon.url());
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-expires-at",
+            "2099-12-31T00:00:00.5Z",
+        ],
+        &[],
+        "--key-expires-at is an expiry spelling this client does not read",
+    );
+    daemon.assert_untouched();
 }
 
 #[test]

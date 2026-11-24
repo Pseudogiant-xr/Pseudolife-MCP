@@ -77,7 +77,8 @@ unchanged. An expiry-only request with a new deadline asks for key input.
 Setup requires a saved tunnel ID before first-key intake and both connection
 flags when repointing the daemon. A process record that appears during
 setup gets a refusal naming its path. Settings edits keep a saved key and
-approved autostart, and ask for consent again where Python did; a process
+approved autostart, and ask for consent again on any connection or access
+change; a process
 record refuses them, naming it. Combining key intake with other profile
 settings, and a saved profile that does not load, are refused naming the
 cause. These effects are covered in
@@ -162,7 +163,8 @@ these cases are recorded from the candidate, not the oracle:
 
 These shapes once deferred; each is now a one-line refusal (exit 2) that
 names its cause and the next step, and changes nothing (the `defer-*` cases
-keep their recorded ids; `defer-status-help` prints help):
+keep their recorded ids; `defer-status-help` prints help and
+`defer-joined-option` now answers status, since `--option=value` is accepted):
 
 - `verify` of a launch this client did not start, or with a Windows `DPAPI`
   key this session cannot unseal. With a key that unseals and no record it

@@ -24,7 +24,8 @@ Commands:
   stop     ask a running tunnel to stop
   update   check saved tunnels after a client update
 
-Every command takes --profile NAME (default dot) and --profile-dir DIR.
+Every command takes --profile NAME (default dot) and --profile-dir DIR;
+update checks every saved profile in the directory.
 Run `pseudolife-mcp tunnel <command> --help` for its options.
 ";
 
@@ -97,8 +98,11 @@ fn not_built(form: &str) -> Option<String> {
         "setup --start" => {
             "Rerun tunnel setup without --start, then run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself; `pseudolife-mcp tunnel stop` ends it"
         }
-        "start" | "service" => {
+        "start" => {
             "Run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself; `pseudolife-mcp tunnel stop` ends it"
+        }
+        "service" => {
+            "To keep a tunnel running, run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself. A service the Python client registered is managed with the service manager's own commands, which `pseudolife-mcp update` prints"
         }
         "doctor" => {
             "`pseudolife-mcp tunnel status` and `pseudolife-mcp doctor` check the saved tunnels"
