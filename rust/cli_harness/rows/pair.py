@@ -37,7 +37,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .. import core, normalize
+from .. import core, credential_files, normalize
 
 CODE = "abcd-efgh-jkmn"
 CANONICAL = "ABCDEFGHJKMN"
@@ -223,7 +223,6 @@ def _real_tokens() -> dict | None:
     only write on master): name, size, mtime, mode, the oracle's owner-only
     verdict and the content's SHA-256. The digest lives only in this
     process, for an equality check; it is never printed or stored."""
-    from pseudolife_memory import client_config  # noqa: PLC0415 (the oracle's own check)
     home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
     try:
         paths = sorted((home / ".pseudolife-mcp").glob("*.token"))
@@ -238,7 +237,7 @@ def _real_tokens() -> dict | None:
             found[path.name] = ("unreadable", type(error).__name__)
             continue
         found[path.name] = (info.st_size, info.st_mtime_ns, info.st_mode,
-                            client_config.check_token_file(path).get("status"), digest)
+                            credential_files.token_file_status(path), digest)
     return found
 
 
@@ -352,17 +351,17 @@ normalize.RECORD_RULES.add("pair-cleanup-fixture-token")
 # ── cases ───────────────────────────────────────────────────────────────────
 
 def _owner_only(home: Path) -> dict:
-    from pseudolife_memory import client_config  # noqa: PLC0415 (the oracle's own check)
+    """``client_config.check_token_file``'s status for each token file (the
+    frozen client's own read, ``credential_files.token_file_status``)."""
     found = {}
     for path in sorted(home.rglob("*.token")):
         rel = path.relative_to(home).as_posix()
-        found[rel] = client_config.check_token_file(path).get("status")
+        found[rel] = credential_files.token_file_status(path)
     return found
 
 
 def _seed_token(path: Path, token: str) -> None:
-    from pseudolife_memory.credentials import _write_token_file  # noqa: PLC0415 (oracle writer)
-    _write_token_file(path, token)
+    credential_files.write_token_file(path, token)
 
 
 def _env(**extra) -> dict:

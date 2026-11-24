@@ -66,7 +66,7 @@ from pathlib import Path
 
 import psutil  # attributes each request to connect or to its handshake child
 
-from .. import normalize
+from .. import credential_files, normalize
 from ..core import WINDOWS, Case
 from . import _handshake_cache  # noqa: F401 (registers shim-handshake-cache-name)
 
@@ -370,14 +370,9 @@ def _fixture(port: int, url: str, **options):
 
 # ── seeds ───────────────────────────────────────────────────────────────────
 
-def _oracle_token_writer():
-    from pseudolife_memory.credentials import _write_token_file  # noqa: PLC0415 (oracle producer)
-    return _write_token_file
-
-
 def token_file(home: Path, name: str = "claude-code.token", token: str = GOOD) -> Path:
     path = home / ".pseudolife-mcp" / name
-    _oracle_token_writer()(path, token)
+    credential_files.write_token_file(path, token)
     return path
 
 
@@ -785,22 +780,17 @@ def _check_reported_paths(arm, obs: dict) -> None:
 
 
 def _windows_acl(home: Path) -> dict:
-    """Whether each file under the home is owner-only, by the oracle's own
-    test (``credentials._windows_owner_only``). Master's core compares POSIX
-    modes and no Windows ACLs; this record rides in the compared ``db``
-    field. The arms' temporary directory is the handshake child's, not
-    connect's."""
-    from pseudolife_memory.credentials import _windows_owner_only  # noqa: PLC0415
+    """Whether each file under the home is owner-only, by the frozen client's
+    own test (``credentials._windows_owner_only``, copied in
+    ``_credential_checks``). Master's core compares POSIX modes and no
+    Windows ACLs; this record rides in the compared ``db`` field. The arms'
+    temporary directory is the handshake child's, not connect's."""
     found = {}
     for path in sorted(home.rglob("*")):
         rel = path.relative_to(home).as_posix()
         if not path.is_file() or rel.startswith("tmp/"):
             continue
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
-        try:
-            found[rel] = "owner-only" if _windows_owner_only(fd) else "inherited"
-        finally:
-            os.close(fd)
+        found[rel] = "owner-only" if credential_files.windows_owner_only(path) else "inherited"
     return found
 
 

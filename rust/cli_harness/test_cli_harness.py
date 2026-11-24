@@ -355,28 +355,27 @@ def test_windows_acl_capture_only_directories_drop_inherited_aces(tmp_path, monk
 @pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor")
 def test_windows_hand_edited_login_fixture_has_bound_private_acl(tmp_path, monkeypatch):
     from types import SimpleNamespace  # noqa: PLC0415
+    from cli_harness import credential_files  # noqa: PLC0415
     from cli_harness.rows import test_login  # noqa: PLC0415
-    from pseudolife_memory.credentials import _windows_owner_only  # noqa: PLC0415
     monkeypatch.setattr(test_login, "_seed_login", lambda *args, **kwargs: None)
     body = b"invalid byte: \xff"
     test_login._hand_edited(body)(SimpleNamespace(home=tmp_path), None)
     path = tmp_path / test_login.LOGIN_REL
     assert path.read_bytes() == body
-    with path.open("rb") as handle:
-        assert _windows_owner_only(handle.fileno())
+    assert credential_files.windows_owner_only(path)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor")
 def test_native_login_file_inherited_everyone_grant_is_a_difference(tmp_path):
     import ctypes  # noqa: PLC0415
     from ctypes import wintypes  # noqa: PLC0415
+    from cli_harness import credential_files  # noqa: PLC0415
     from cli_harness.rows import test_login  # noqa: PLC0415
-    from pseudolife_memory.credentials import _secure_windows_file, _windows_owner_only  # noqa: PLC0415
+    from rust.harness_support._windows_fixture_acl import secure_windows_file  # noqa: PLC0415
     path = tmp_path / "login"
     path.write_bytes(b"fixture")
-    _secure_windows_file(path)
-    with path.open("rb") as handle:
-        assert _windows_owner_only(handle.fileno())
+    secure_windows_file(path)
+    assert credential_files.windows_owner_only(path)
     before = test_login._permissions(path)
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
@@ -396,8 +395,7 @@ def test_native_login_file_inherited_everyone_grant_is_a_difference(tmp_path):
         assert apply(str(path), 0x80000005, descriptor)  # owner and protected DACL
     finally:
         free(descriptor)
-    with path.open("rb") as handle:
-        assert not _windows_owner_only(handle.fileno())
+    assert not credential_files.windows_owner_only(path)
     after = test_login._permissions(path)
     assert compare.diff(obs(db={"file_acl": before}), obs(db={"file_acl": after}), ())
     assert after["protected"]

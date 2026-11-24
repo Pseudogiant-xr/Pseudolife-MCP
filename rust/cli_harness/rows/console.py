@@ -31,7 +31,7 @@ import sys
 import time
 from pathlib import Path
 
-from .. import core
+from .. import core, credential_files
 from ..core import Case
 from ..fixture_daemon import TLS_CA, factory, json_body, redirect, text
 
@@ -319,8 +319,7 @@ def _claude_registration(env: dict):
 
 
 def _token_file(arm):
-    from pseudolife_memory.credentials import _write_token_file  # noqa: PLC0415 (oracle writer)
-    _write_token_file(arm.home / "console.token", "console-file-token")
+    credential_files.write_token_file(arm.home / "console.token", "console-file-token")
 
 
 def cases() -> list[Case]:
