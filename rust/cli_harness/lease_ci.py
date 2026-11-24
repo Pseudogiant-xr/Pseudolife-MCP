@@ -69,6 +69,9 @@ def main() -> int:
         # user profile like the existing lite CI lane; leave test TEMP unchanged.
         server = postgres.start(Path.home(), "pl-cli-lease-postgres-")
         secret = server.password
+        host_port = f"{server.host}:{server.port}"
+        if any(character in host_port or character in str(login_file) for character in "\r\n"):
+            raise RuntimeError("fixture values cannot be written to GITHUB_ENV")
         login_file.parent.mkdir(parents=True, exist_ok=True)
         result = postgres.create_test_login(binary, server, login_file)
         if result.returncode != 0:
@@ -76,9 +79,6 @@ def main() -> int:
             print(diagnostic(RuntimeError(result.stderr.strip()), f"password={secret}"), file=sys.stderr)
             return result.returncode
 
-        host_port = f"{server.host}:{server.port}"
-        if any(character in host_port or character in str(login_file) for character in "\r\n"):
-            raise RuntimeError("fixture values cannot be written to GITHUB_ENV")
         with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="") as env_file:
             env_file.write(f"PSEUDOLIFE_TEST_PG_HOST_PORT={host_port}\n")
             env_file.write(f"PSEUDOLIFE_TEST_PG_LOGIN_FILE={login_file}\n")

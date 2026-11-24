@@ -306,14 +306,24 @@ def test_lease_fixture_refuses_without_the_native_client(lease_ci, capsys):
 def test_lease_fixture_reports_a_failed_login_without_its_secret(lease_ci, monkeypatch, capsys):
     def run(command, **kwargs):
         secret = kwargs["env"]["PGPASSWORD"]
-        return subprocess.CompletedProcess(command, 3, "", f"refused: password={secret}")
+        seen.append(secret)
+        # A bare secret: only the redaction by value can remove it.
+        return subprocess.CompletedProcess(command, 3, "", f"refused for {secret}")
 
+    seen = []
     monkeypatch.setattr(postgres.subprocess, "run", run)
     assert lease_ci.module.main() == 3
     err = capsys.readouterr().err
     assert "test-login fixture provisioning failed (exit 3)" in err
     assert not lease_ci.env_file.exists()
-    assert not re.search(r"password=[0-9a-f]{32}", err)
+    assert seen and seen[0] not in err
+
+
+def test_lease_fixture_refuses_values_github_env_cannot_hold(lease_ci, monkeypatch, capsys):
+    monkeypatch.setenv("RUNNER_TEMP", str(lease_ci.tmp / "runner\ntemp"))
+    assert lease_ci.module.main() == 1
+    assert "cannot be written to GITHUB_ENV" in capsys.readouterr().err
+    assert not lease_ci.env_file.exists()
 
 
 def test_lease_fixture_imports_nothing_from_the_package(lease_ci):
