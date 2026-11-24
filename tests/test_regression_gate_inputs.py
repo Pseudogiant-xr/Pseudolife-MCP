@@ -67,7 +67,7 @@ def test_rust_gate_maps_post_preflight_exit_and_stops_owned_qwen(
         "Set-Content (Join-Path $PSScriptRoot 'stopped') 'yes' }\n", encoding="utf-8")
     (tmp_path / "regression_gate.py").write_text(
         "import json, sys\nfrom pathlib import Path\n"
-        "if sys.argv[-1] == '--preflight':\n    sys.exit(0)\n"
+        "if sys.argv[-1] in ('--preflight', '--contexts-only'):\n    sys.exit(0)\n"
         "out = Path(sys.argv[sys.argv.index('--out') + 1])\nout.mkdir()\n"
         f"result = {verdict!r}\n"
         "if result is not None:\n    (out / 'verdict.json').write_text(json.dumps(result), encoding='utf-8')\n"
@@ -86,6 +86,48 @@ def test_rust_gate_maps_post_preflight_exit_and_stops_owned_qwen(
     assert (tmp_path / "started").is_file()
     assert (tmp_path / "stopped").is_file()
     assert (tmp_path / "out").is_dir() == verified
+
+
+@pytest.mark.parametrize(("contexts_exit", "expected", "launched"), [(0, 0, True), (2, 2, False)])
+def test_rust_gate_builds_contexts_before_the_model_server_holds_the_gpu(
+        tmp_path, contexts_exit, expected, launched):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is not installed")
+    repo = Path(__file__).resolve().parents[1]
+    gate = tmp_path / "regression_gate.ps1"
+    shutil.copyfile(repo / "evals" / gate.name, gate)
+    calls = tmp_path / "calls.txt"
+    (tmp_path / "qwen_server.ps1").write_text(
+        "function Start-Qwen { param([switch]$Owned); "
+        f"Add-Content -LiteralPath '{calls}' 'Start-Qwen'; return $true }}\n"
+        "function Test-QwenReproducibleListener { return $true }\n"
+        f"function Stop-Qwen {{ param([switch]$Owned); Add-Content -LiteralPath '{calls}' 'Stop-Qwen' }}\n",
+        encoding="utf-8")
+    (tmp_path / "regression_gate.py").write_text(
+        "import sys\n"
+        f"open(r'{calls}', 'a', encoding='utf-8').write(sys.argv[-1] + '\\n')\n"
+        "workers = sys.argv[sys.argv.index('--context-workers') + 1]\n"
+        "assert workers == '3', workers\n"
+        f"if sys.argv[-1] == '--contexts-only':\n    sys.exit({contexts_exit})\n"
+        "sys.exit(0)\n", encoding="utf-8")
+    fixture, baseline = tmp_path / "fixture.json", tmp_path / "baseline.json"
+    for path in (fixture, baseline):
+        path.write_text("{}", encoding="utf-8")
+    reply = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(gate), "-Fixture", str(fixture), "-Baseline", str(baseline),
+         "-Out", str(tmp_path / "out"), "-Daemon", "mock", "-DaemonRevision", "mock",
+         "-OnnxDir", "mock", "-OrtLibrary", "mock", "-Scratch", "mock", "-ContextWorkers", "3",
+         "-Python", sys.executable],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert reply.returncode == expected, reply.stdout + reply.stderr
+    order = calls.read_text(encoding="utf-8").split()
+    if launched:
+        assert order[:3] == ["--preflight", "--contexts-only", "Start-Qwen"], order
+        assert order[-1] == "Stop-Qwen", order
+    else:
+        assert order == ["--preflight", "--contexts-only"], order
 
 
 def test_qwen_gate_verifies_the_process_serving_the_stock_profile(tmp_path):

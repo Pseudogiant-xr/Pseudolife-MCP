@@ -6,7 +6,8 @@ pinned:
 
 * every node ``path`` must exist in the tree (the drift guard — deleting or
   moving a module goes red on the commit that did it);
-* the atlas ``meta`` block must match the shipped version (``pyproject``) and
+* the atlas ``meta`` block must match the shipped version (the release
+  version, ``rust/ci/release_version.py``, which ``pyproject`` equals) and
   ``SCHEMA_META_VERSION`` — a version or schema bump must re-verify the map
   and update ``docs/atlas/atlas.json`` in the same change;
 * edges and flows must reference nodes/edges that exist (no dangling ids);
@@ -21,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from rust.ci import release_version
 from rust.daemon.harness.gen_schema_sql import load_schema_plan
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,10 +56,9 @@ def test_node_paths_exist(atlas: dict) -> None:
 
 
 def test_meta_matches_shipped_version(atlas: dict) -> None:
-    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    version = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M).group(1)
+    version = release_version.read(ROOT)
     assert atlas["meta"]["version"] == version, (
-        f"atlas meta.version {atlas['meta']['version']!r} != pyproject "
+        f"atlas meta.version {atlas['meta']['version']!r} != release version "
         f"{version!r} — re-verify the map and update docs/atlas/atlas.json "
         "meta (version cut checklist)"
     )

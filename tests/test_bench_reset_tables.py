@@ -84,4 +84,4 @@ def test_both_reset_sites_consume_the_shared_list():
     from tests import pg_fixtures
 
     assert ladder_sweep._ALL_TABLES is schema.BENCH_RESET_TABLES
-    assert pg_fixtures._ALL_TABLES is schema.BENCH_RESET_TABLES
+    assert pg_fixtures._reset_tables() is schema.BENCH_RESET_TABLES

@@ -7,9 +7,10 @@ the budget check). A Python environment that can import the package is refused.
 The temporary checkout and home are made under your home directory. Probe
 failures produce exit 1. Setup errors produce exit 2.
 
-The checks import live test modules and shared fixtures, check the CI budget and
-producer census, and request harness help. A successful import or --help does
-not exercise a test body, a build, an installation or a daemon.
+The checks import live test modules and shared fixtures, collect the suite with
+pytest (which loads tests/conftest.py), check the CI budget and producer census,
+and request harness help. A successful import, collection or --help does not
+exercise a test body, a build, an installation or a daemon.
 """
 from __future__ import annotations
 
@@ -29,7 +30,9 @@ from package_consumers import ACTIVE, CATEGORIES, PACKAGE, ROOT, TESTING
 
 
 PER_PROBE_SECONDS = 12
-TOTAL_PROBE_SECONDS = 240
+# A ceiling, not a measurement: room for the two collection probes beside the
+# few hundred imports the 240 s it replaced was sized for.
+TOTAL_PROBE_SECONDS = 600
 BOOTSTRAP = """
 from importlib.util import find_spec
 from pathlib import Path
@@ -61,6 +64,12 @@ elif mode == "module":
     sys.path.insert(0, str(root))
     sys.argv = [target, *arguments]
     runpy.run_module(target, run_name="__main__", alter_sys=True)
+elif mode == "collect":
+    # Collection loads tests/conftest.py and its fixtures, which importing a
+    # test module alone does not. Nothing is run.
+    sys.path.insert(0, str(root))
+    import pytest
+    raise SystemExit(pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider", target]))
 else:
     script = root / target
     sys.path[:0] = [str(root), str(script.parent)]
@@ -76,6 +85,7 @@ class Probe:
     mode: str
     target: str
     arguments: tuple[str, ...] = ()
+    seconds: float = PER_PROBE_SECONDS
 
     @property
     def label(self) -> str:
@@ -103,6 +113,13 @@ def plan(checkout: Path) -> list[Probe]:
         Probe(TESTING, "script", "rust/daemon/harness/run.py", ("--help",)),
         Probe(TESTING, "module", "evals.rust_port.cli_dispatch", ("--help",)),
         *(Probe(TESTING, "import", f"tests/{filename}") for filename in fixtures),
+        # pytest itself: the suite's conftest and fixtures load (one file whose
+        # own imports are package-free), then the whole default collection.
+        # The limits are ceilings, not measurements: pytest's start-up and a
+        # collection that imports every live test module outlast the 12 s
+        # an import gets.
+        Probe(TESTING, "collect", "tests/test_fixture_guards_package_absent.py", seconds=60),
+        Probe(TESTING, "collect", "tests", seconds=180),
         *live,
     ]
 
@@ -151,6 +168,13 @@ def probe_env(directory: Path, git: str) -> dict[str, str]:
         "GIT_TERMINAL_PROMPT": "0",
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:1",
         "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+        # libpq connects outside the audit hook below, so every PostgreSQL
+        # setting conftest reads points nowhere: an explicit test URL (which
+        # also ends the suite's password preflight before it opens a socket),
+        # and a bench name and admin URL that keep its exit-time DROP inert.
+        "PSEUDOLIFE_TEST_DATABASE_URL": "postgresql://probe@127.0.0.1:1/pl_cf_prb_absent",
+        "PSEUDOLIFE_BENCH_DB": "pl_cf_prb_absent_bench",
+        "PSEUDOLIFE_BENCH_ADMIN_URL": "postgresql://probe@127.0.0.1:1/postgres",
         "CUDA_VISIBLE_DEVICES": "-1",
         "HF_HUB_OFFLINE": "1",
         "BROWSER": str(bin_dir / "no-browser"),
@@ -172,6 +196,12 @@ def run_probe(probe: Probe, checkout: Path, env: dict[str, str], seconds: float)
     output = result.stdout.replace(str(checkout), "<checkout>").replace(env["HOME"], "<home>")
     lines = output.splitlines()
     reason = next((line.strip() for line in reversed(lines) if line.strip()), "no output")
+    if probe.mode == "collect" and result.returncode:
+        # pytest's last line is a count; name the first modules it could not
+        # collect, or its internal error, so the cause is visible.
+        causes = [line.strip() for line in lines
+                  if line.startswith(("ERROR ", "INTERNALERROR> E ", "E   "))][:3]
+        reason = "; ".join([*causes, reason])
     return result.returncode, reason if result.returncode else "completed"
 
 
@@ -222,7 +252,7 @@ def run(commit: str) -> int:
             for probe in group:
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
-                    code, reason = run_probe(probe, checkout, env, min(PER_PROBE_SECONDS, remaining))
+                    code, reason = run_probe(probe, checkout, env, min(probe.seconds, remaining))
                 else:
                     code, reason = 124, "not run: overall time limit reached"
                 failed |= code != 0

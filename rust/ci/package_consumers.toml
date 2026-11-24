@@ -214,10 +214,16 @@ class = "retained test tooling"
 reason = "The census and contract inventory read frozen package sources from Git at pinned commits, never the working tree; the command patterns only recognize Python CLI calls in shipped producers."
 
 [[rules]]
-globs = ["rust/ci/*oracle.py", "rust/ci/pr_precheck*.py", "rust/ci/release_assets.py"]
+globs = ["rust/ci/*oracle.py", "rust/ci/pr_precheck*.py"]
 kinds = ["command", "metadata", "path", "python-import"]
 class = "active dependency"
-reason = "Prechecks, oracle tools and release tooling still reference package sources or metadata."
+reason = "Prechecks and oracle tools still reference package sources or metadata."
+
+[[rules]]
+globs = ["rust/ci/release_version.py"]
+kinds = ["metadata"]
+class = "active dependency"
+reason = "The release version reader keeps pyproject.toml's version equal to the native one while the wheel is published; that field leaves with the package."
 
 [[rules]]
 globs = [".github/workflows/ci.yml", ".github/workflows/rust.yml", ".github/workflows/release.yml"]

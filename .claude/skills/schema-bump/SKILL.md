@@ -50,8 +50,8 @@ A schema bump changes the native schema inputs and the release and transfer surf
     recording flag (what CI runs: Rust only, with the mutant controls) on
     this OS and the other, and name the cases and the reason in the pull
     request (`rust/daemon/harness/candidate_record.py` has the rules).
-    `--record-goldens` still records the frozen Python beside Rust, so it
-    reproduces only a golden for a change Python also has.
+    `--record-goldens` is retired and refuses, because it recorded the
+    frozen Python service; `--record-candidate` records from Rust, as above.
 
 ## C. A schema bump also moves the Rust parity pin (the register, `rust/parity/`)
 
