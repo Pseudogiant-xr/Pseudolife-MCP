@@ -96,6 +96,26 @@ def test_operator_routes_accept_a_new_route_in_both_daemon_lists_even_wrapped():
 
 
 @pytest.mark.parametrize("policy", [
+    # rustfmt's wrapped form, with and without a trailing comma.
+    'matches!(\n        path,\n        "/api/config" | "/api/daemon-notice",\n    )',
+    'matches!(\n        path,\n        "/api/config"\n            | "/api/daemon-notice"\n    )',
+])
+def test_operator_routes_accept_a_wrapped_auth_policy(policy):
+    assert principals.operator_post_paths(HTTP, AUTH.replace(POLICY, policy)) == \
+        frozenset({"/api/config", "/api/daemon-notice"})
+
+
+@pytest.mark.parametrize("policy", [
+    'path == "/api/config" || path == "/api/daemon-notice"',
+    'matches!(path.as_str(), "/api/config" | "/api/daemon-notice")',
+    POLICY + "\n}\npub fn operator_route(path: &str) -> bool {\n    " + POLICY,
+])
+def test_operator_routes_name_a_changed_auth_policy_shape_as_such(policy):
+    with pytest.raises(AssertionError, match="is no longer one matches"):
+        principals.operator_post_paths(HTTP, AUTH.replace(POLICY, policy))
+
+
+@pytest.mark.parametrize("policy", [
     f'matches!(path, "/api/config" | "/api/daemon-notice" | "{ADDED}")',
     'matches!(path, "/api/config")',
     'matches!(path, "/api/config" | OTHER)',
@@ -290,9 +310,15 @@ def test_committed_golden_holds_its_records_and_at_most_provenance():
 @pytest.mark.parametrize("argv,error", [
     (["mutants", "--rust-bin", "x", "--out", "o", "--record-candidate"], "records the golden run"),
     (["golden", "--rust-bin", "x", "--out", "o", "--write"], "--write needs --record-candidate"),
-    (["live", "--rust-bin", "x", "--out", "o"], "invalid choice"),
-    (["oracle", "--out", "o"], "invalid choice"),
-    (["golden", "--out", "o"], "--rust-bin"),
+    (["live", "--rust-bin", "x", "--out", "o"], principals.MODES_RETIRED),
+    (["oracle", "--out", "o"], principals.MODES_RETIRED),
+    (["oracle"], principals.MODES_RETIRED),
+    (["golden", "--rust-bin", "x", "--out", "o", "--record"], principals.MODES_RETIRED),
+    (["golden", "--rust-bin", "x", "--out", "o", "--record-c"], "unrecognized arguments: --record-c"),
+    (["mutants", "--rust-bin", "x", "--out", "o", "--mut", "principal-shadow"], "unrecognized arguments"),
+    (["unknown", "--rust-bin", "x", "--out", "o"], "invalid choice"),
+    (["golden", "--out", "o"], "required: --rust-bin"),
+    (["golden", "--rust-bin", "x"], "required: --out"),
     (["golden", "--rust-bin", "x", "--out", str(principals.GOLDEN)], "--out names the committed golden"),
 ])
 def test_retired_and_inconsistent_modes_are_refused(argv, error, monkeypatch, capsys):

@@ -1,7 +1,9 @@
 """CI's two startup parts run every cell and control once, with no extra build."""
 import json
 import os
+import re
 import runpy
+import shlex
 import shutil
 import subprocess
 import sys
@@ -204,6 +206,11 @@ class StartupParts(unittest.TestCase):
             (clock_retry_cases.main, ["--record-goldens", "--rust-test-bin", "x", "--out", "retry.json"]),
             (schema_cases.main, ["--record-goldens", "--rust-test-bin", "x", "--out", "schema.json"]),
         ]
+        # Beside a golden-mode flag the retirement still wins over argparse's
+        # "not allowed with".
+        for main in (startup_cases.main, clock_retry_cases.main, schema_cases.main):
+            for mode in ("--check-goldens", "--record-candidate"):
+                calls.append((main, ["--record-goldens", mode, "--rust-test-bin", "x", "--out", "o.json"]))
         for main, arguments in calls:
             module = sys.modules[main.__module__]
             # No slice, and a database-turn marker that fails if it is read.
@@ -219,6 +226,48 @@ class StartupParts(unittest.TestCase):
             self.assertEqual(refused.exception.code, 2)
             written = "".join(call.args[0] for call in stderr.write.call_args_list)
             self.assertIn(candidate_record.RECORD_GOLDENS_RETIRED, written)
+
+    def test_a_missing_startup_golden_names_a_recording_that_runs_as_written(self):
+        hint = candidate_record.STARTUP_RECORDING
+        command = shlex.split(re.search(r"`([^`]+)`", hint).group(1))
+        self.assertEqual(command[:2], ["python", "rust/daemon/harness/startup_ci.py"])
+        self.assertIn("a dry run", hint)
+        self.assertLess(hint.index("a dry run"), hint.index("--write"))
+        # The command as printed (dry run, then with --write) passes the
+        # wrapper's argument checks and reaches its first check.
+        for extra in ([], ["--write"]):
+            turn = MagicMock()
+            turn.exists.return_value = False
+            ran = []
+
+            def run(argv, **kwargs):
+                ran.append(argv)
+                return subprocess.CompletedProcess(argv, 7)
+            with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ), \
+                    patch.object(startup_ci, "_DATABASE_TURN_MARKER", turn), \
+                    patch.object(startup_ci.subprocess, "run", run):
+                os.environ.pop(candidate_record.MUTANT_ENV, None)
+                argv = [str(Path(tmp) / "report.json") if word == "<report.json>" else word
+                        for word in command[2:]] + extra
+                self.assertEqual(startup_ci.main(argv), 7, argv)
+            self.assertEqual(Path(ran[0][1]).name, "gen_schema_sql.py")
+        # Both harnesses print it when their golden is missing.
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}), \
+                patch("sys.stdout"):
+            empty = Path(tmp) / "empty.json"
+            empty.write_text(json.dumps({"cases": {}}))
+            binary = Path(tmp) / "daemon-test"
+            binary.write_bytes(b"")
+            out = Path(tmp) / "out.json"
+            with patch.object(startup_cases, "GOLDEN", empty), \
+                    patch.object(startup_cases, "cell", side_effect=AssertionError("ran a cell")):
+                startup_cases.main(["--rust-test-bin", str(binary), "--out", str(out), "--only", "empty"])
+            self.assertIn(hint, json.loads(out.read_text())["cells"][0]["error"])
+            with patch.object(clock_retry_cases, "GOLDEN", empty), \
+                    patch.object(clock_retry_cases.subprocess, "check_output", return_value=b"head"), \
+                    patch("sys.stderr") as stderr, self.assertRaises(SystemExit):
+                clock_retry_cases.main(["--rust-test-bin", str(binary), "--out", str(out)])
+            self.assertIn(hint, "".join(call.args[0] for call in stderr.write.call_args_list))
 
     def test_the_retired_writer_oracle_is_refused_with_its_reason(self):
         turn = MagicMock()

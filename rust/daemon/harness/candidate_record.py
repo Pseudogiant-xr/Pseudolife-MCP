@@ -96,6 +96,12 @@ MUTANT_ENV = "PSEUDOLIFE_DAEMON_MUTANT"
 RECORD_GOLDENS_RETIRED = ("--record-goldens recorded the frozen Python service, which is retired; "
                           "re-record a golden from the Rust candidate with --record-candidate "
                           "(a dry run), then --record-candidate --write")
+# How a missing startup or clock-retry golden is recorded, runnable as written:
+# the CI wrapper builds the test executable, sets the slice and records both.
+STARTUP_RECORDING = ("record it from the Rust candidate with `python rust/daemon/harness/startup_ci.py "
+                     "--record-candidate --out <report.json>` (a dry run that builds the daemon test "
+                     "executable and records the startup and clock-retry goldens), then the same "
+                     "command with --write")
 
 
 def refuse_mutant_environment() -> str | None:

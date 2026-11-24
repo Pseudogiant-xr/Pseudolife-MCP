@@ -208,8 +208,9 @@ def main(argv=None):
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--mutants", action="store_true")
+    # Outside the group, so its retirement message wins over "not allowed with".
+    parser.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--check-goldens", action="store_true")
     mode.add_argument("--record-candidate", action="store_true",
                       help="re-record the golden from the Rust candidate (candidate_record.py); a dry run "
@@ -248,8 +249,7 @@ def main(argv=None):
     number = time.time_ns()
     expected = json.loads(GOLDEN.read_text())
     if "database" not in expected:
-        parser.error("clock-retry.json has no database section; record it with "
-                     "`python rust/daemon/harness/clock_retry_cases.py --record-candidate --write`")
+        parser.error("clock-retry.json has no database section; " + candidate_record.STARTUP_RECORDING)
     try:
         cell(args.rust_test_bin.resolve(), number, result, expected=expected)
     except Exception as error:

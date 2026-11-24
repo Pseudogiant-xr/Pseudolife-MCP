@@ -181,8 +181,9 @@ def main(argv=None):
     ap.add_argument("--all-versions", action="store_true")
     ap.add_argument("--refusals", action="store_true")
     ap.add_argument("--mutants", action="store_true")
+    # Outside the group, so its retirement message wins over "not allowed with".
+    ap.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     mode = ap.add_mutually_exclusive_group()
-    mode.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--check-goldens", action="store_true")
     mode.add_argument("--record-candidate", action="store_true",
                       help="re-record the golden from the Rust candidate (candidate_record.py); a dry run "

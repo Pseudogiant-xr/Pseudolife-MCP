@@ -81,9 +81,13 @@ def operator_post_paths(source=None, auth=None):
             or len(set(paths)) != len(paths) or not all(path.startswith("/api/") for path in paths)):
         raise AssertionError("daemon operator routes are not a plain list of distinct /api/ paths")
     text = AUTH_SOURCE.read_text(encoding="utf-8") if auth is None else auth
-    policy = re.findall(r'fn operator_route\(path: &str\) -> bool \{\s*matches!\(path, ([^)]*)\)\s*\}', text)
-    if len(policy) != 1 or set(re.findall(r'"([^"\\]+)"', policy[0])) != set(paths) \
-            or re.sub(r'"[^"\\]+"|[\s|]', "", policy[0]):
+    # One `matches!(path, "..." | ...)`, on one line or wrapped by rustfmt
+    # (which may leave a trailing comma after the last route).
+    policy = re.findall(r'fn operator_route\(\s*path:\s*&str\s*\)\s*->\s*bool\s*\{\s*'
+                        r'matches!\(\s*path\s*,([^)]*?),?\s*\)\s*\}', text)
+    if len(policy) != 1:
+        raise AssertionError("auth.rs operator_route is no longer one matches!(path, ...) over string routes")
+    if set(re.findall(r'"([^"\\]+)"', policy[0])) != set(paths) or re.sub(r'"[^"\\]+"|[\s|]', "", policy[0]):
         raise AssertionError("auth.rs operator_route and http.rs OPERATOR_POST_PATHS name different routes")
     return frozenset(paths)
 
@@ -282,7 +286,8 @@ def create_invite(conn, name, code_hash, *, tier, board, ttl_seconds, replace, o
             paired, revoked = existing
             state = "revoked" if revoked else "paired" if paired else "pending"
             if state == "revoked" or (state == "paired" and not replace):
-                raise AssertionError(f"invite fixture does not model a {state} name without its reset")
+                raise AssertionError("invite fixture does not model a revoked name" if state == "revoked"
+                                     else "invite fixture does not model a paired name without replace")
             given = ", tier = %(tier)s, board = %(board)s" + ("" if owned is KEEP else ", owned = %(owned)s")
             row = conn.execute(
                 f"UPDATE public.principals p SET code_hash = %(code)s, code_expires_at = {DB_NOW} + "
@@ -706,16 +711,31 @@ def provenance(binary):
             "binary_sha256": binary_hash}
 
 
+RETIRED_MODES = ("live", "oracle")
+MODES_RETIRED = ("live, oracle and --record ran or recorded the frozen Python service, which is retired: "
+                 "check the golden with golden, check the mutants against it with mutants, and re-record "
+                 "it from the Rust candidate with golden --record-candidate (a dry run), then "
+                 "golden --record-candidate --write")
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("golden", "mutants"))
-    parser.add_argument("--rust-bin", type=Path, required=True)
+    # No abbreviations: the retired --record must not mean --record-candidate.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("mode", choices=("golden", "mutants") + RETIRED_MODES, metavar="{golden,mutants}")
+    parser.add_argument("--rust-bin", type=Path)
     parser.add_argument("--record-candidate", action="store_true",
                         help="golden only: class each step against the golden; a dry run unless --write")
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the golden")
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--record", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--mutants", nargs="+", choices=MUTANTS)
     args = parser.parse_args()
+    # Retired modes refuse first, before the required options they no longer need.
+    if args.mode in RETIRED_MODES or args.record:
+        parser.error(MODES_RETIRED)
+    missing = [flag for flag, value in (("--rust-bin", args.rust_bin), ("--out", args.out)) if value is None]
+    if missing:
+        parser.error("the following arguments are required: " + ", ".join(missing))
     if args.record_candidate and args.mode != "golden":
         parser.error("--record-candidate records the golden run; check mutants afterwards with mutants")
     if args.write and not args.record_candidate:

@@ -315,11 +315,13 @@ def check_executable_coverage(jobs):
     schema = commands(parity["Daemon schema startup parity"]["run"])
     # Both run the storage test executable the fixtures job built.
     require_command(schema, ("python", "rust/daemon/harness/schema_ci.py"),
-                    ("--out", "--no-build", "--rust-test-bin", "$storageTest"), ("--record-goldens", "--build-only"))
+                    ("--out", "--no-build", "--rust-test-bin", "$storageTest"),
+                    ("--record-goldens", "--record-candidate", "--write", "--build-only"))
     assert not any(words[0] == "cargo" for words in schema)
     startup = commands(parity["Daemon resident startup parity"]["run"])
     require_command(startup, ("python", "rust/daemon/harness/startup_ci.py"),
-                    ("--out", "--no-build", "--rust-test-bin", "--part"), ("--record-goldens",))
+                    ("--out", "--no-build", "--rust-test-bin", "--part"),
+                    ("--record-goldens", "--record-candidate", "--write"))
     assert not any(words[0] == "cargo" for words in startup)
     for name in ("Daemon schema startup parity", "Daemon resident startup parity"):
         assert "Join-Path 'rust/target/storage-test' $testName" in parity[name]["run"], name
@@ -329,14 +331,14 @@ def check_executable_coverage(jobs):
                     ("rust/daemon/harness/test_embedding.py",), PYTEST_FILTERS)
     require_command(invocations, ("python", "rust/daemon/harness/run.py", "embedding"),
                     ("--fixture", "--golden", "rust/daemon/harness/goldens/embedding-fixture.json", "--rust-bin", "--out"),
-                    ("--record", "--model", "--mutant"))
+                    ("--record", "--record-candidate", "--write", "--model", "--mutant"))
     assert "rust/target/release" in embedding["run"]
     assert not any(words[:2] == ["cargo", "build"] for words in invocations)
 
     principal = parity["Principal store golden harness"]
     invocations = commands(principal["run"])
     require_command(invocations, ("python", "rust/daemon/harness/principals.py", "golden"),
-                    ("--rust-bin", "--out"), ("--record", "--mutants"))
+                    ("--rust-bin", "--out"), ("--record", "--record-candidate", "--write", "--mutants"))
     lines = [line.strip() for line in principal["run"].splitlines()]
     assert [line for line in lines if re.match(r"\$binaryName\s*=", line)] == [
         "$binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }"]
@@ -384,6 +386,57 @@ def workflow():
     pins the expressions and the per-pull-request selection)."""
     from parity_scope import resolve
     return resolve(yaml.safe_load(WORKFLOW.read_text(encoding="utf-8")))
+
+
+HARNESS_SCRIPT = re.compile(r"rust/(?:daemon/harness|cli_harness)/[\w./-]+\.py")
+RECORDING_FLAGS = {"--record-candidate", "--write"}
+
+
+def recording_harness_lines(script):
+    """Each harness invocation in a step's script that passes a recording
+    flag. Continued lines (a trailing backslash or backtick) are joined
+    first, so a flag on a continuation line still counts."""
+    found, pending = [], ""
+    for raw in script.splitlines():
+        line = pending + raw.strip()
+        if line.endswith(("\\", "`")):
+            pending = line[:-1] + " "
+            continue
+        pending = ""
+        try:
+            words = shlex.split(line, comments=True)
+        except ValueError:
+            continue
+        if any(HARNESS_SCRIPT.fullmatch(word) for word in words) \
+                and RECORDING_FLAGS & {word.split("=", 1)[0] for word in words}:
+            found.append(line)
+    return found
+
+
+def test_the_recording_flag_scan_finds_flags_and_only_flags():
+    assert recording_harness_lines(
+        "python rust/daemon/harness/principals.py golden --rust-bin $c --out o.json --write") != []
+    assert recording_harness_lines("python rust/cli_harness/run.py rows \\\n  --record-candidate=1") != []
+    assert recording_harness_lines("& python rust/daemon/harness/schema_ci.py `\n  --record-candidate") != []
+    # Near misses: a value that merely names the flag, a pytest filter, a comment.
+    assert recording_harness_lines("python rust/daemon/harness/principals.py golden --out write.json") == []
+    assert recording_harness_lines("python -m pytest -q rust/daemon/harness/test_x.py -k write") == []
+    assert recording_harness_lines("python rust/daemon/harness/startup_ci.py --out o  # never --write") == []
+
+
+def test_no_workflow_step_turns_a_golden_check_into_a_rewrite():
+    """CI's harness steps compare against committed goldens; with
+    --record-candidate or --write a step would record the candidate and
+    could rewrite the golden it is meant to check."""
+    harness_lines = 0
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        jobs = yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}
+        for job, spec in jobs.items():
+            for step in spec.get("steps") or []:
+                script = str(step.get("run", ""))
+                harness_lines += len(HARNESS_SCRIPT.findall(script))
+                assert recording_harness_lines(script) == [], (path.name, job, step.get("name"))
+    assert harness_lines > 20
 
 
 def test_shards_cover_both_systems_and_build_once():
