@@ -1214,7 +1214,9 @@ async fn diagnose(
                 put(
                     &mut report,
                     "recovery",
-                    json!(proxy_hint(&handshake_failed_recovery(env!("CARGO_PKG_VERSION")))),
+                    json!(proxy_hint(&handshake_failed_recovery(env!(
+                        "CARGO_PKG_VERSION"
+                    )))),
                 );
             }
         }
