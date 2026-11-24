@@ -5,8 +5,9 @@ is frozen: when a Rust change alters behaviour on purpose, its golden is
 recorded again from the candidate, through the replay's own path, so that
 what is written is exactly what the replay will compare. The runners that
 support it (``w2e.py golden --record-candidate``, ``run.py golden
---record-candidate``, and ``schema_cases.py``, ``startup_cases.py`` and
-``clock_retry_cases.py --record-candidate`` through ``Recording`` below)
+--record-candidate``, and ``schema_cases.py``, ``startup_cases.py``,
+``clock_retry_cases.py --record-candidate`` and ``principals.py golden
+--record-candidate`` through ``Recording`` below)
 share the rules here: a dry run unless ``--write``, every scenario reported
 as unchanged, changed (with the replay's own difference) or new, a refusal
 for a deferral or an entry that would not replay against the run it came

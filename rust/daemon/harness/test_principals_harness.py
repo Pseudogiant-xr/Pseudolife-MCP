@@ -4,6 +4,7 @@ and compares every step with the committed golden, without the frozen
 Python package. These tests need no database or built binary."""
 import importlib
 import json
+from pathlib import Path
 import sys
 from unittest.mock import MagicMock
 
@@ -68,6 +69,7 @@ def test_operator_routes_are_the_daemons_declaration():
     'const OPERATOR_POST_PATHS: [&str; 3] = ["/api/config", "/api/daemon-notice"];',
     'const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/api/config"];',
     'const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", OTHER];',
+    'const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/api/daemon-notice", OTHER];',
     'const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/ui/next"];',
     'const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/api/\\"x"];',
     'static OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/api/daemon-notice"];',
@@ -179,29 +181,42 @@ def test_invite_fixture_refuses_states_the_scenario_never_reaches(existing, repl
     assert conn.execute.call_count == 1
 
 
-def test_record_candidate_classes_steps_and_writes_only_with_write(tmp_path, monkeypatch):
+def recorded_golden(tmp_path, monkeypatch, records):
     golden = tmp_path / "principals.json"
+    golden.write_text(json.dumps({"normalizers": "label", "records": records}, indent=1) + "\n", encoding="utf-8")
     monkeypatch.setattr(principals, "GOLDEN", golden)
-    monkeypatch.setattr(principals.candidate_record, "provenance", lambda _binary: {"commit": "x"})
-    committed = [RECORD, {**RECORD, "case": "b"}, {**RECORD, "case": "gone"}]
-    result = {"records": [RECORD, {**RECORD, "case": "b", "output": {"state": "pending"}}]}
-    report = principals.record_candidate(result, committed, False, None)
-    assert report == {"unchanged": 1, "changed": ["1:b"], "new": [], "removed": ["2:gone"], "written": False}
-    assert not golden.exists()
-    report = principals.record_candidate({"records": [*result["records"], {**RECORD, "case": "c"}]},
-                                         committed[:2], True, None)
-    assert (report["changed"], report["new"], report["written"]) == (["1:b"], ["2:c"], True)
+    monkeypatch.setattr(principals.candidate_record, "provenance", lambda _binary: {"commit": "x", "rust_tree": "clean"})
+    return golden
+
+
+def test_record_candidate_dry_run_exits_1_and_write_replaces_only_the_records(tmp_path, monkeypatch):
+    committed = [RECORD, {**RECORD, "case": "b"}]
+    golden = recorded_golden(tmp_path, monkeypatch, committed)
+    before = golden.read_bytes()
+    assert principals.record_candidate(committed, True, "bin") == (0, {
+        "unchanged": ["principals"], "changed": [], "new": [], "removed": [], "refused": {}, "written": False})
+    assert golden.read_bytes() == before
+    changed = [RECORD, {**RECORD, "case": "b", "output": {"state": "pending"}}, {**RECORD, "case": "c"}]
+    code, report = principals.record_candidate(changed, False, "bin")
+    assert (code, report["changed"], report["written"]) == (1, ["principals"], False)
+    assert golden.read_bytes() == before
+    code, report = principals.record_candidate(changed, True, "bin")
+    assert (code, report["written"]) == (0, True)
     written = json.loads(golden.read_text(encoding="utf-8"))
-    assert written["records"][2]["case"] == "c"
-    assert written["normalizers"] == principals.NORMALIZERS
-    assert written[principals.candidate_record.PROVENANCE_KEY] == {"commit": "x"}
-    golden.unlink()
-    assert principals.record_candidate({"records": [RECORD]}, [RECORD], True, None)["written"] is False
-    assert not golden.exists()
+    assert written["records"] == changed and written["normalizers"] == "label"
+    assert written[principals.candidate_record.PROVENANCE_KEY] == {"principals": {"commit": "x", "rust_tree": "clean"}}
 
 
-def test_committed_golden_keeps_its_normalizer_label():
-    assert json.loads(principals.GOLDEN.read_text(encoding="utf-8"))["normalizers"] == principals.NORMALIZERS
+def test_record_candidate_refuses_records_naming_a_host_path(tmp_path, monkeypatch):
+    golden = recorded_golden(tmp_path, monkeypatch, [RECORD])
+    before = golden.read_bytes()
+    code, report = principals.record_candidate([{**RECORD, "output": {"home": str(Path.home())}}], True, "bin")
+    assert code == 1 and "host path" in report["refused"]["principals"]
+    assert golden.read_bytes() == before
+
+
+def test_committed_golden_holds_only_normalizers_and_records():
+    assert set(json.loads(principals.GOLDEN.read_text(encoding="utf-8"))) == {"normalizers", "records"}
 
 
 @pytest.mark.parametrize("argv,error", [

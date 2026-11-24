@@ -57,8 +57,9 @@ from test_principals_harness import (  # noqa: F401
     test_invite_fixture_inserts_a_new_name_with_ownership_only_when_set,
     test_invite_fixture_reissues_a_pending_or_replaced_name,
     test_invite_fixture_refuses_states_the_scenario_never_reaches,
-    test_record_candidate_classes_steps_and_writes_only_with_write,
-    test_committed_golden_keeps_its_normalizer_label,
+    test_record_candidate_dry_run_exits_1_and_write_replaces_only_the_records,
+    test_record_candidate_refuses_records_naming_a_host_path,
+    test_committed_golden_holds_only_normalizers_and_records,
     test_retired_and_inconsistent_modes_are_refused,
     test_record_candidate_refuses_a_selected_mutant,
 )

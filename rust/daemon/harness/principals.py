@@ -602,30 +602,20 @@ def run(binary, golden, mutant=None):
         p.close()
 
 
-NORMALIZERS = ("per-arm database-clock windows; verified fixture owners and initial vector version; "
-               "controls=9")
+CHECK_COMMAND = "python rust/daemon/harness/principals.py golden --rust-bin <binary> --out <scratch>/principals.json"
 
 
-def record_candidate(result, committed, write, binary):
-    """Class each step of a clean candidate run against the committed golden
-    (unchanged, changed, new, removed) and, with ``write``, replace the
-    golden with the candidate's records: what ``golden`` then compares."""
-    report = {"unchanged": 0, "changed": [], "new": [], "removed": [], "written": False}
-    for index, record in enumerate(result["records"]):
-        if index >= len(committed):
-            report["new"].append(f"{index}:{record['case']}")
-        elif step_diffs(committed[index], record):
-            report["changed"].append(f"{index}:{record['case']}")
-        else:
-            report["unchanged"] += 1
-    report["removed"] = [f"{index}:{record.get('case')}" for index, record
-                         in enumerate(committed[len(result["records"]):], len(result["records"]))]
-    if write and (report["changed"] or report["new"] or report["removed"]):
-        GOLDEN.write_text(json.dumps({"normalizers": NORMALIZERS, "records": result["records"],
-                                      candidate_record.PROVENANCE_KEY: candidate_record.provenance(binary)},
-                                     indent=1) + "\n", encoding="utf-8", newline="\n")
-        report["written"] = True
-    return report
+def record_candidate(records, write, binary):
+    """``--record-candidate``: the candidate's records, classed against the
+    committed golden as one case (``candidate_record.Recording``, as the
+    startup harnesses do): a dry run unless ``write``, exit 1 when the golden
+    would change and is not written, a refusal for a record naming a host
+    path or not surviving the file. ``golden`` then compares what is written."""
+    recording = candidate_record.Recording(GOLDEN, ("records",), Path(binary), whole=False,
+                                           defined=["principals"], single=True)
+    recording.write = write
+    recording.observe("principals", {"records": records}, [], candidate_record.round_trip)
+    return recording.finish(write, CHECK_COMMAND), recording.report
 
 
 def provenance(binary):
@@ -675,12 +665,10 @@ def main():
     try:
         golden = json.loads(GOLDEN.read_text(encoding="utf-8"))["records"]
         result = run(args.rust_bin, golden)
+        recorded = None
         if args.record_candidate:
-            result["record_candidate"] = record_candidate(result, golden, args.write, args.rust_bin)
-            for kind in ("changed", "new", "removed"):
-                for case in result["record_candidate"][kind]:
-                    print(f"  {kind} {case}", flush=True)
-            # The run is the candidate's own; its differences are what it records.
+            # The run's differences from the golden are what it would record.
+            recorded, result["record_candidate"] = record_candidate(result["records"], args.write, args.rust_bin)
             result["recorded_diffs"], result["diffs"] = result["diffs"], []
         if args.mode == "mutants":
             if result["diffs"]:
@@ -697,6 +685,8 @@ def main():
         result["prefix_controls"] = prefix_controls
         args.out.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
         print(json.dumps({k: v for k, v in result.items() if k not in ("records", "mutants", "recorded_diffs")}))
+        if recorded is not None:
+            return recorded
         return int(bool(result.get("diffs") or result.get("survivors")))
     except Exception as exc:
         # Exceptions from database drivers can carry connection parameters.
