@@ -696,9 +696,10 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     done)" || native_expected=""
     # A line ending in the name after a blank or an asterisk names the
     # archive in no standard form: that release does carry this platform.
+    # A CRLF file reads as the grep above reads it (Git Bash's grep drops CRs).
     native_named=""
     while IFS= read -r native_line || [ -n "$native_line" ]; do
-        case "$native_line" in
+        case "${native_line%$'\r'}" in
             (*" $native_name"|*$'\t'"$native_name"|*"*$native_name") native_named=1 ;;
         esac
     done <"$NATIVE_SUMS"

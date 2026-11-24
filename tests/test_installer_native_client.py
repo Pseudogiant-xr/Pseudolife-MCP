@@ -811,6 +811,18 @@ def test_a_line_naming_the_archive_in_no_standard_form_refuses_even_when_default
     assert not log.exists()
 
 
+def test_a_crlf_line_naming_the_archive_in_no_standard_form_refuses(tmp_path):
+    # A SHA256SUMS saved with CRLF line ends (as Python's text mode writes
+    # one on Windows) still names the archive.
+    _release(tmp_path / "release")
+    digest = hashlib.sha256((tmp_path / "release" / ASSET).read_bytes()).hexdigest()
+    (tmp_path / "release" / "SHA256SUMS").write_bytes(f"{digest} {ASSET}\r\n".encode())
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert f"lists {ASSET} 0 times, not once (a line names it in no standard checksum form)" in result.stderr
+
+
 @pytest.mark.parametrize("value, used", [
     ("08", "8"), ("09", "9"), ("010", "10"), ("7", "7"), ("00", "30"), ("0", "30"),
     ("", "30"), ("abc", "30"), ("1.5", "30"), ("-3", "30"), ("123456", "30"),
