@@ -121,6 +121,11 @@ UNREPLAYED_ROWS = ("audit", "backup", "migrate_flat")
 SHIM = ("cli", "w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect")
 # The pseudolife-daemon crate (and its graph and dream contract binaries).
 DAEMON = ("cli", "cli-store", "cli-startup", "eval")
+# Every cli and W1-C shard prepares its PostgreSQL with
+# rust/cli_harness/lease_ci.py, which runs the native `test-login create`, so
+# that command's code reaches every one of them, not only its own row's.
+POSTGRES_PREP = tuple(suite for suite in SUITES if suite.startswith(("cli", "w1c-")))
+POSTGRES_PREP_COMMANDS = ("test_login",)
 # rust/shim/src/cli entries whose users are covered by the listed rows;
 # any other shim file reaches the whole binary. Shared
 # helpers (lease, pairing, hook_http, hook_json, doorbell_*) are left out:
@@ -254,6 +259,8 @@ def reached(path: str) -> tuple[str, ...]:
             # every shard's PostgreSQL prep import it too.
             return ALL
         if area == "shim":
+            if rest[1:3] == ("src", "cli") and len(rest) > 3 and rest[3] in POSTGRES_PREP_COMMANDS:
+                return POSTGRES_PREP
             if rest[1:3] == ("src", "cli") and len(rest) > 3 and rest[3] in SHIM_COMMANDS:
                 return tuple(ROW_SUITES[row] for row in SHIM_COMMANDS[rest[3]] if row in ROW_SUITES)
             return SHIM

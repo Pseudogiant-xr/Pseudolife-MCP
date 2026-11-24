@@ -1,16 +1,20 @@
-"""Start the disposable PostgreSQL fixture used by the CLI lease row."""
+"""Start the disposable PostgreSQL fixture used by the CLI lease row.
+
+The cluster comes from ``rust/ci/disposable_postgres.py`` (the pg0 wheel,
+not the Python package) and the isolated test login from the native
+client's ``test-login create``: the release binary the job built or
+downloaded, or ``PSEUDOLIFE_LEASE_CI_BINARY`` when set.
+"""
 
 from __future__ import annotations
 
-import io
-import ipaddress
 import os
 import re
 from pathlib import Path
 
 _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+_ROOT = Path(__file__).resolve().parents[2]
 import sys
-import tempfile
 from urllib.parse import quote
 
 
@@ -33,6 +37,13 @@ def diagnostic(exc, dsn=""):
     return text[-2000:]
 
 
+def _helper():
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+    from rust.ci import disposable_postgres  # noqa: PLC0415
+    return disposable_postgres
+
+
 def main() -> int:
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
@@ -44,61 +55,28 @@ def main() -> int:
             require_turn(holder="standalone database harness", contain=True)
         finally:
             _turn_sys.path.remove(_turn_root)
-    from psycopg.conninfo import conninfo_to_dict, make_conninfo
-    from pseudolife_memory.storage.embedded_pg import attach_or_start
-    from pseudolife_memory.test_login_cli import main as test_login_main
+    postgres = _helper()
 
     runner_temp = Path(os.environ["RUNNER_TEMP"])
-    # The runner staging root's group ACL can deny initdb's chmod. Use the
-    # user profile like the existing lite CI lane; leave test TEMP unchanged.
-    data_dir = Path(tempfile.mkdtemp(prefix="pl-cli-lease-postgres-", dir=Path.home()))
     login_file = runner_temp / "test-pg.env"
-    dsn = ""
+    binary = Path(os.environ.get("PSEUDOLIFE_LEASE_CI_BINARY") or postgres.native_binary(_ROOT))
+    secret = ""
 
     try:
-        dsn, owned = attach_or_start(data_dir)
-        if owned is None:
-            raise RuntimeError("embedded PostgreSQL was unexpectedly already running")
-
-        options = conninfo_to_dict(dsn)
-        host = options.get("host", "127.0.0.1")
-        port = options.get("port", "")
-        if host == "localhost":
-            host = "127.0.0.1"
-        address = ipaddress.ip_address(host.strip("[]"))
-        if address.version != 4 or not address.is_loopback or not port.isdigit():
-            raise RuntimeError("embedded PostgreSQL did not provide a loopback TCP endpoint")
-        host = str(address)
-
+        if not binary.is_file():
+            raise postgres.SetupError(f"the native client is missing at {binary}; build or download it first")
+        # The runner staging root's group ACL can deny initdb's chmod. Use the
+        # user profile like the existing lite CI lane; leave test TEMP unchanged.
+        server = postgres.start(Path.home(), "pl-cli-lease-postgres-")
+        secret = server.password
         login_file.parent.mkdir(parents=True, exist_ok=True)
-        admin_url = make_conninfo(
-            host=host,
-            port=port,
-            user=options.get("user", ""),
-            dbname="postgres",
-        )
-        old_pgpassword = os.environ.get("PGPASSWORD")
-        old_daemon_dsn = os.environ.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
-        if options.get("password"):
-            os.environ["PGPASSWORD"] = options["password"]
-        try:
-            code = test_login_main(
-                ["create", "--rotate", "--file", str(login_file), "--admin-url", admin_url],
-                out=io.StringIO(),
-            )
-        finally:
-            if old_pgpassword is None:
-                os.environ.pop("PGPASSWORD", None)
-            else:
-                os.environ["PGPASSWORD"] = old_pgpassword
-            if old_daemon_dsn is not None:
-                os.environ["PSEUDOLIFE_MCP_DATABASE_URL"] = old_daemon_dsn
+        result = postgres.create_test_login(binary, server, login_file)
+        if result.returncode != 0:
+            print(f"test-login fixture provisioning failed (exit {result.returncode})", file=sys.stderr)
+            print(diagnostic(RuntimeError(result.stderr.strip()), f"password={secret}"), file=sys.stderr)
+            return result.returncode
 
-        if code != 0:
-            print(f"test-login fixture provisioning failed (exit {code})", file=sys.stderr)
-            return code
-
-        host_port = f"{host}:{port}"
+        host_port = f"{server.host}:{server.port}"
         if any(character in host_port or character in str(login_file) for character in "\r\n"):
             raise RuntimeError("fixture values cannot be written to GITHUB_ENV")
         with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="") as env_file:
@@ -106,7 +84,7 @@ def main() -> int:
             env_file.write(f"PSEUDOLIFE_TEST_PG_LOGIN_FILE={login_file}\n")
     except Exception as exc:  # noqa: BLE001 - never expose a connection string
         print(f"lease PostgreSQL fixture setup failed ({type(exc).__name__})", file=sys.stderr)
-        print(diagnostic(exc, dsn), file=sys.stderr)
+        print(diagnostic(exc, f"password={secret}" if secret else ""), file=sys.stderr)
         return 1
 
     print("Disposable PostgreSQL and isolated test login are ready for the lease row.")
