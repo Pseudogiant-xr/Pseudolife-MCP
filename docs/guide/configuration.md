@@ -3788,7 +3788,8 @@ browser on Windows, macOS and Linux desktops. If the browser cannot open,
 the client prints the validated sign-in link and the cause. See
 [Signing in to the Console](#signing-in-to-the-console) and
 [Moving a bank](remote-bank.md#moving-a-bank) for native `move` requirements.
-Unsupported `tunnel` operations still exit 1 with the deferral message.
+`tunnel` refuses the forms it does not run yet with the cause and what to
+run instead (exit 2).
 See [Tunnels](tunnels.md) for the supported foreground lifecycle and the
 commands that still need the Python client.
 

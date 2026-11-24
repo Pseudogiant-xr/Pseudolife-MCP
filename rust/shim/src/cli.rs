@@ -41,9 +41,9 @@ pub(crate) fn process_table() -> Result<Option<connect::ProcessTable>, ()> {
 }
 
 const HELP: &str = include_str!("cli_help.txt");
-const DEFERRED_MODES: &[&str] = &[
-    "tunnel", // The parser and some profile/store operations still decline unsupported inputs.
-];
+/// Modes the native client recognises but hands back; none since `tunnel`
+/// answers or refuses every argv itself.
+const DEFERRED_MODES: &[&str] = &[];
 
 fn text_bytes(text: &str) -> Vec<u8> {
     // Python's Windows console text stream translates LF even when redirected.
@@ -216,10 +216,8 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
             &arguments,
         )));
     }
-    if mode == "tunnel"
-        && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(code);
+    if mode == "tunnel" {
+        return Some(tunnel::run(std::env::args_os().skip(2).collect()));
     }
     if mode == "restore"
         && let Some(code) = restore_cli::run(std::env::args_os().skip(2).collect())

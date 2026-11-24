@@ -12,11 +12,13 @@ use serde_json::{Map, Value};
 
 use super::hook_json::quoted;
 
+mod argv;
 mod bridge;
 mod doctor_section;
 #[cfg(windows)]
 mod dpapi;
 mod record;
+mod refusal;
 mod runtime;
 mod setup;
 mod store;
@@ -28,8 +30,8 @@ use record::Liveness;
 use store::{Profile, exists, occupied};
 use syntax::{Admit, json_loads, refresh_id};
 
-/// Why a ported command stops: a sanitized `TunnelError` (exit 2), or a
-/// shape this leaf does not decide (the dispatcher's deferral, exit 1).
+/// Why a command stops: a refusal (exit 2), or a file in a form this client
+/// does not read, which `outcome` turns into a refusal naming it.
 #[derive(Debug, PartialEq)]
 pub(super) enum Fail {
     Tunnel(&'static str),
@@ -40,15 +42,6 @@ pub(super) enum Fail {
 /// A command's answer: its stdout and exit, or a refusal for stderr
 /// (exit 2), which may name the file it is about.
 type Answer = Result<(String, u8), String>;
-
-fn answer(output: Output) -> Option<Answer> {
-    match output {
-        Ok(printed) => Some(Ok(printed)),
-        Err(Fail::Tunnel(message)) => Some(Err(message.to_owned())),
-        Err(Fail::Detail(message)) => Some(Err(message)),
-        Err(Fail::Defer) => None,
-    }
-}
 
 const NO_PROFILES: &str = "No saved tunnel profiles; update does not start new setup.";
 const AMBIGUOUS: &str = "daemon connection is missing or ambiguous; pass --daemon-url and --token-file explicitly (an owner-only credential file)";
@@ -123,74 +116,26 @@ struct Options {
     setup: Setup,
 }
 
-/// Canonical argv only: the subcommand, then its own options in any order,
-/// each at most once, values as the next argument and never `-`-led.
+/// The options of an argv `argv::read` admits, for tests.
+#[cfg(test)]
 fn parse(values: &[OsString]) -> Option<Options> {
-    let values: Vec<&str> = values.iter().map(|v| v.to_str()).collect::<Option<_>>()?;
-    let (command, rest) = values.split_first()?;
-    let command = match *command {
-        "status" => Command::Status,
-        "update" => Command::Update,
-        "verify" => Command::Verify,
-        "setup" => Command::Setup,
-        "run" => Command::Run,
-        "stop" => Command::Stop,
-        _ => return None,
-    };
-    let mut options = Options {
-        command,
-        profile: "dot".into(),
-        profile_dir: None,
-        json: false,
-        setup: Setup::default(),
-    };
-    let mut seen: Vec<&str> = Vec::new();
-    let mut rest = rest.iter();
-    while let Some(option) = rest.next() {
-        if seen.contains(option) {
-            return None;
-        }
-        seen.push(option);
-        match (*option, command) {
-            ("--json", Command::Status) => options.json = true,
-            ("--accept-access", Command::Setup) => options.setup.accept_access = true,
-            ("--read-key", Command::Setup) => options.setup.read_key = true,
-            ("--restore-key", Command::Setup) => options.setup.restore_key = true,
-            ("--discard-previous-key", Command::Setup) => options.setup.discard_previous_key = true,
-            _ => {
-                let value = rest.next().filter(|value| !value.starts_with('-'))?;
-                let value = Some((*value).to_owned());
-                let s = &mut options.setup;
-                match (*option, command) {
-                    ("--profile", _) => options.profile = value?,
-                    ("--profile-dir", _) => options.profile_dir = value,
-                    ("--daemon-url", Command::Setup) => s.daemon_url = value,
-                    ("--token-file", Command::Setup) => s.token_file = value,
-                    ("--key-file", Command::Setup) => s.key_file = value,
-                    ("--tunnel-id", Command::Setup) => s.tunnel_id = value,
-                    ("--organization-id", Command::Setup) => s.organization_id = value,
-                    ("--key-expires-at", Command::Setup) => s.key_expires_at = value,
-                    ("--catalog", Command::Setup)
-                        if matches!(value.as_deref(), Some("current" | "full")) =>
-                    {
-                        s.catalog = value
-                    }
-                    _ => return None,
-                }
-            }
-        }
+    match argv::read(values) {
+        Ok(argv::Parsed::Run(options)) => Some(options),
+        _ => None,
     }
-    Some(options)
 }
 
-pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
+pub(super) fn run(values: Vec<OsString>) -> ExitCode {
     // The hidden bridge the vendor's tunnel-client starts (`tunnel shim`).
     if values.first().is_some_and(|command| command == "shim") {
-        return Some(bridge::run(&values[1..]));
+        return bridge::run(&values[1..]);
     }
-    let options = parse(&values)?;
-    let (stdout, stderr, code) = match outcome(&options)? {
-        Ok((text, code)) => (text, String::new(), code),
+    let (stdout, stderr, code) = match argv::read(&values) {
+        Ok(argv::Parsed::Help(text)) => (text, String::new(), 0),
+        Ok(argv::Parsed::Run(options)) => match outcome(&options) {
+            Ok((text, code)) => (text, String::new(), code),
+            Err(message) => (String::new(), format!("{message}\n"), 2),
+        },
         Err(message) => (String::new(), format!("{message}\n"), 2),
     };
     // The oracle's stdout is block-buffered: a refused stdout fails only its
@@ -203,43 +148,38 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         .is_err();
     drop(out);
     let written = io::stderr().lock().write_all(&super::text_bytes(&stderr));
-    Some(if stdout_refused {
+    if stdout_refused {
         ExitCode::from(STDOUT_REFUSED)
     } else if written.is_ok() {
         ExitCode::from(code)
     } else {
         ExitCode::FAILURE
-    })
+    }
 }
 
-/// The command's answer; `None` when the store root cannot be opened and
-/// the command defers.
-fn outcome(options: &Options) -> Option<Answer> {
-    let root = store::store_root(options.profile_dir.as_deref());
-    // `update` runs unattended inside `pseudolife-mcp update`, which shows
-    // its refusal: a root it cannot open is named, never deferred.
-    let root = match root {
-        Err(_)
-            if matches!(
-                options.command,
-                Command::Update | Command::Run | Command::Stop
-            ) =>
-        {
-            return Some(Err(store::UNSAFE_ROOT.to_owned()));
-        }
-        root => root.ok()?,
+/// The command's answer. A store root that cannot be opened, or a file in
+/// a form this client does not read, is a refusal naming it.
+fn outcome(options: &Options) -> Answer {
+    let Ok(root) = store::store_root(options.profile_dir.as_deref()) else {
+        return Err(store::UNSAFE_ROOT.to_owned());
     };
     if matches!(options.command, Command::Status | Command::Setup) {
         setup::warn_for_stages(&root);
     }
-    answer(match options.command {
+    let output = match options.command {
         Command::Status => status(options, &root),
-        Command::Update => return Some(update(&root)),
+        Command::Update => return update(&root),
         Command::Verify => verify(options, &root),
         Command::Setup => setup(options, &root),
         Command::Run => runtime::run(&root, &options.profile),
         Command::Stop => runtime::stop(&root, &options.profile),
-    })
+    };
+    match output {
+        Ok(printed) => Ok(printed),
+        Err(Fail::Tunnel(message)) => Err(message.to_owned()),
+        Err(Fail::Detail(message)) => Err(message),
+        Err(Fail::Defer) => Err(refusal::unread(options, &root)),
+    }
 }
 
 /// CPython's exit when its shutdown flush of a refused stdout fails.
@@ -985,7 +925,11 @@ fn verify(options: &Options, root: &Path) -> Output {
         {
             return runtime::restart::verify(root, &profile.name);
         }
-        return Err(Fail::Defer);
+        return Err(Fail::Detail(format!(
+            "tunnel verify checks only a launch this client started, and {} is not one. Stop that tunnel with the client that started it, start it with `{}`, then retry",
+            record::path(root, &profile.name).display(),
+            tunnel_command("run", &profile.name, options.profile_dir.as_deref())
+        )));
     }
     Err(Fail::Tunnel(store::UNAVAILABLE))
 }
@@ -996,7 +940,11 @@ fn environment(key: &str) -> Result<Option<String>, Fail> {
         Some(value) => value
             .into_string()
             .map(|value| Some(value).filter(|value| !value.is_empty()))
-            .map_err(|_| Fail::Defer),
+            .map_err(|_| {
+                Fail::Detail(format!(
+                    "the environment variable {key} is not valid text; unset it, or pass --daemon-url and --token-file explicitly"
+                ))
+            }),
     }
 }
 
@@ -1006,8 +954,11 @@ fn truthy(value: &Option<String>) -> Option<&str> {
 
 /// `Path(token).expanduser().absolute()`, as text, for the shapes decided here.
 fn absolute_token(token: &str) -> Result<String, Fail> {
+    const ABSOLUTE: Fail = Fail::Tunnel(
+        "pass the daemon credential file as an absolute path (on Windows with its drive letter, such as C:\\Users\\<user>\\token)",
+    );
     if token.starts_with('~') || token.contains('\0') {
-        return Err(Fail::Defer);
+        return Err(ABSOLUTE);
     }
     if cfg!(windows) {
         let b = token.as_bytes();
@@ -1015,20 +966,22 @@ fn absolute_token(token: &str) -> Result<String, Fail> {
         let rooted = b.first().is_some_and(|c| matches!(c, b'\\' | b'/'));
         let absolute = drive && b.get(2).is_some_and(|c| matches!(c, b'\\' | b'/'));
         if rooted || (drive && !absolute) {
-            return Err(Fail::Defer);
+            return Err(ABSOLUTE);
         }
     }
     crate::credentials::absolute_expanded(Path::new(token))
         .ok()
         .and_then(|path| path.to_str().map(str::to_owned))
-        .ok_or(Fail::Defer)
+        .ok_or(ABSOLUTE)
 }
 
 fn home() -> Result<PathBuf, Fail> {
     crate::credentials::expand_user(Path::new("~"))
         .ok()
         .filter(|home| !home.as_os_str().is_empty())
-        .ok_or(Fail::Defer)
+        .ok_or(Fail::Tunnel(
+            "cannot find your home directory to look for a registered daemon; pass --daemon-url and --token-file explicitly",
+        ))
 }
 
 /// `_discover`: the daemon connection setup would save.
@@ -1053,7 +1006,9 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
         }
         .join("config.toml");
         if occupied(&claude)? || occupied(&codex)? {
-            return Err(Fail::Defer);
+            return Err(Fail::Tunnel(
+                "this client does not read the daemon connection from a Claude Code or Codex registration; pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
+            ));
         }
         return Err(Fail::Tunnel(AMBIGUOUS));
     }
@@ -1111,7 +1066,9 @@ fn setup(options: &Options, root: &Path) -> Output {
             || (!saved && settings.key_expires_at.is_some()))
     {
         return Err(if saved {
-            Fail::Defer
+            Fail::Tunnel(
+                "import the private key with --read-key or --key-file by itself (with --key-expires-at for a renewal); save other settings in a separate tunnel setup invocation",
+            )
         } else {
             Fail::Tunnel(
                 "save profile settings first, then use --read-key or --key-file in a separate setup invocation",
@@ -1121,7 +1078,11 @@ fn setup(options: &Options, root: &Path) -> Output {
     if saved {
         if !settings.has_profile_settings() && !settings.has_key_input() && !settings.accept_access
         {
-            return Err(Fail::Defer);
+            return Err(Fail::Detail(format!(
+                "profile {name} is saved; guided setup is not in the native client yet. `{status}` shows what it still needs; resume it with that option of tunnel setup (--tunnel-id, --organization-id, --catalog, --key-expires-at, --daemon-url with --token-file, or --read-key or --key-file)",
+                name = options.profile,
+                status = tunnel_command("status", &options.profile, options.profile_dir.as_deref()),
+            )));
         }
         return setup::resume(options, root, &path);
     }
@@ -1140,8 +1101,12 @@ fn setup(options: &Options, root: &Path) -> Output {
     if explicit {
         setup::save(options, root, &path, payload)
     } else {
-        store::validate(&payload)?;
-        Err(Fail::Defer)
+        let profile = store::validate(&payload)?;
+        Err(Fail::Detail(format!(
+            "guided setup is not in the native client yet. To use the daemon this environment names, run tunnel setup with --daemon-url {} --token-file {} --accept-access",
+            quote_tunnel_arg(&profile.daemon_url),
+            quote_tunnel_arg(&profile.token_file)
+        )))
     }
 }
 
@@ -1590,7 +1555,7 @@ mod tests {
                 ]))
                 .unwrap()
             ),
-            Some(Err(refused))
+            Err(refused)
         );
         #[cfg(windows)]
         {
@@ -1725,11 +1690,16 @@ mod tests {
 
     #[test]
     fn update_refuses_a_store_root_it_cannot_open_with_the_cause() {
-        // An empty --profile-dir: update names it, status still defers.
+        // An empty --profile-dir: every command names it.
         let answer =
             |command: &str| outcome(&parse(&argv(&[command, "--profile-dir", ""])).unwrap());
-        assert_eq!(answer("update"), Some(Err(store::UNSAFE_ROOT.to_owned())));
-        assert_eq!(answer("status"), None);
+        for command in ["update", "status", "verify", "setup", "run", "stop"] {
+            assert_eq!(
+                answer(command),
+                Err(store::UNSAFE_ROOT.to_owned()),
+                "{command}"
+            );
+        }
         // A store root reached through a link.
         let store = Store::new();
         let link = store.0.parent().unwrap().join("link");
@@ -1742,7 +1712,7 @@ mod tests {
         let link = link.to_str().unwrap();
         assert_eq!(
             outcome(&parse(&argv(&["update", "--profile-dir", link])).unwrap()),
-            Some(Err(store::UNSAFE_ROOT.to_owned()))
+            Err(store::UNSAFE_ROOT.to_owned())
         );
     }
 
@@ -1828,25 +1798,84 @@ mod tests {
             "--tunnel-id",
             "x"
         ]));
-        for shape in [
-            &[][..],
-            &["doctor"],
-            &["status", "--json", "--json"],
-            &["status", "--profile"],
-            &["status", "--profile", "-x"],
-            &["status", "--profile=dot"],
-            &["status", "--prof", "dot"],
-            &["status", "extra"],
-            &["update", "--json"],
-            &["verify", "--accept-access"],
-            &["setup", "--catalog", "all"],
-            &["setup", "--read-key", "--read-key"],
-            &["setup", "--key-file"],
-            &["setup", "--start"],
-            &["setup", "--open-browser", "keys"],
-            &["status", "-h"],
+        // The joined form is the same option.
+        assert_eq!(
+            parse(&argv(&["status", "--profile=alpha", "--profile-dir=d"]))
+                .map(|o| (o.profile, o.profile_dir)),
+            Some(("alpha".to_owned(), Some("d".to_owned())))
+        );
+    }
+
+    #[test]
+    fn every_argv_this_client_does_not_run_is_refused_with_its_cause() {
+        let refused = |values: &[&str]| match argv::read(&argv(values)) {
+            Err(message) => message,
+            Ok(_) => panic!("{values:?} was admitted"),
+        };
+        for (shape, says) in [
+            (&[][..], "tunnel needs a command: setup, status"),
+            (&["bogus"], "unknown tunnel command "),
+            (&["doctor"], "tunnel doctor is not in the native client yet"),
+            (
+                &["start"],
+                "tunnel start is not in the native client yet. Run `pseudolife-mcp tunnel run`",
+            ),
+            (
+                &["service", "install"],
+                "tunnel service is not in the native client yet",
+            ),
+            (&["status", "--json", "--json"], "--json is given twice"),
+            (&["status", "--profile"], "--profile needs a value"),
+            (&["status", "--profile", "-x"], "--profile needs a value"),
+            (
+                &["status", "--prof", "dot"],
+                "tunnel status does not take --prof",
+            ),
+            (
+                &["status", "extra"],
+                "tunnel status takes no argument extra",
+            ),
+            (&["update", "--json"], "tunnel update does not take --json"),
+            (
+                &["verify", "--accept-access"],
+                "tunnel verify does not take --accept-access",
+            ),
+            (
+                &["setup", "--catalog", "all"],
+                "--catalog takes current or full, not all",
+            ),
+            (
+                &["setup", "--read-key", "--read-key"],
+                "--read-key is given twice",
+            ),
+            (&["setup", "--read-key=yes"], "--read-key takes no value"),
+            (&["setup", "--key-file"], "--key-file needs a value"),
+            (
+                &["setup", "--start"],
+                "tunnel setup --start is not in the native client yet",
+            ),
+            (
+                &["setup", "--open-browser", "keys"],
+                "tunnel setup --open-browser is not in the native client yet",
+            ),
         ] {
-            assert!(!ok(shape), "{shape:?}");
+            let message = refused(shape);
+            assert!(message.starts_with(says), "{shape:?}: {message}");
+            assert!(!message.contains("candidate"), "{shape:?}: {message}");
+        }
+        for help in [&["--help"][..], &["-h"], &["help"]] {
+            assert!(
+                matches!(argv::read(&argv(help)), Ok(argv::Parsed::Help(text)) if text == argv::OVERVIEW)
+            );
+        }
+        for command in ["setup", "status", "verify", "run", "stop", "update"] {
+            let Ok(argv::Parsed::Help(text)) = argv::read(&argv(&[command, "-h"])) else {
+                panic!("{command} -h");
+            };
+            assert!(
+                text.starts_with(&format!("usage: pseudolife-mcp tunnel {command}")),
+                "{text}"
+            );
         }
     }
 
@@ -2062,10 +2091,13 @@ mod tests {
         let options = parse(&argv(&["status", "--json"])).unwrap();
         let report = report_of(status(&options, &store.0));
         assert_eq!(report["private_key_present"], "not_verified", "{report}");
-        // verify cannot tell whether the key is finished: it defers,
-        // never "finish tunnel setup".
+        // verify cannot tell whether the key is finished: it names the
+        // session as the cause, never "finish tunnel setup".
         let verify_options = parse(&argv(&["verify"])).unwrap();
-        assert_eq!(verify(&verify_options, &store.0).unwrap_err(), Fail::Defer);
+        assert_eq!(
+            verify(&verify_options, &store.0).unwrap_err(),
+            Fail::Tunnel(store::SEALED)
+        );
         let (entry, next) = doctor_entry(&store);
         assert_eq!(entry["private_key_present"], "not_verified", "{entry}");
         assert_eq!(

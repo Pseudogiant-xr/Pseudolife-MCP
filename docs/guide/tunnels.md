@@ -110,14 +110,17 @@ A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
 profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native
 client also answers preflight refusals for `tunnel verify` and `tunnel setup`.
-Operations it defers stop with
-`pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and exit 1,
-having changed nothing. That covers guided setup and unsupported saved-profile
-edits, `start`,
-`doctor`, `service`, verification of a Python-owned launch, `status` of a profile in a
-form it does not read or beside a verification or refresh file in a form
-it does not read, and `verify` with a
-Windows (DPAPI) key it cannot unseal in this session. On Windows it unseals
+Anything else it does not run is refused with one line naming the cause
+and what to run instead (exit 2), having changed nothing. `start`,
+`doctor`, `service`, `setup --start` and `setup --open-browser` are not in
+the native client yet; the refusal names `tunnel run` in a terminal you keep
+open, `tunnel status`, or the Platform pages. Guided setup is not either: the
+refusal names the explicit `--daemon-url` and `--token-file` to use. A file
+it cannot read (a profile, key, verification challenge or refresh file in a
+form it does not read) is named with the fix, as are verification of a launch
+another client started and a Windows (DPAPI) key it cannot unseal in this
+session. Settings edits keep a saved key and approved autostart; a process
+record refuses them, naming the record. On Windows it unseals
 the saved key to check it: a damaged key file is no usable key, and a key
 sealed by another account, or read over a logon without the account's
 credentials (such as a key-based SSH logon), is reported as `not_verified`.

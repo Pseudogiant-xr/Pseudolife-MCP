@@ -1,0 +1,61 @@
+//! The refusal for a command that met a store file in a form this client
+//! does not read: it names the file and the one fix.
+use std::path::Path;
+
+use super::{
+    ChallengeIssue, Fail, Options, challenge_issue, challenge_path, private_object, store,
+};
+
+/// Names the first file of `options.profile` this client could not read,
+/// in the order the commands read them, and says what to do about it.
+pub(super) fn unread(options: &Options, root: &Path) -> String {
+    let name = &options.profile;
+    let word = options.command.word();
+    if matches!(store::load(root, name), Err(Fail::Defer)) {
+        return format!(
+            "this client could not read profile {}: {}. Move that file aside and save the profile again with `pseudolife-mcp tunnel setup`, then retry tunnel {word}",
+            store::profile_file(root, name).display(),
+            store::unread_reason(root, name)
+        );
+    }
+    if matches!(store::key_state(root, name), Err(Fail::Defer)) {
+        return format!(
+            "cannot read the key file {}; check that it is a plain owner-only file, not a pipe or a link, then retry tunnel {word}",
+            store::key_path(root, name).display()
+        );
+    }
+    match challenge_issue(root, name) {
+        Some(ChallengeIssue::Form) => {
+            return format!(
+                "cannot read the verification challenge {}; check that it is a plain owner-only file, not a pipe or a link, then retry tunnel {word}",
+                challenge_path(root, name).display()
+            );
+        }
+        Some(ChallengeIssue::Deep) => {
+            return format!(
+                "the verification challenge {} is nested too deeply to be one this client wrote; move that file aside (tunnel verify writes a new one), then retry tunnel {word}",
+                challenge_path(root, name).display()
+            );
+        }
+        None => {}
+    }
+    for file in [
+        format!("{name}.reload.json"),
+        format!("{name}.reload.result.json"),
+    ] {
+        let path = root.join(file);
+        if matches!(private_object(&path), Err(Fail::Defer)) {
+            return format!(
+                "cannot read the refresh file {}: it is not a plain owner-only file, or holds JSON this client does not read. Move it aside, then retry tunnel {word}",
+                path.display()
+            );
+        }
+    }
+    if matches!(store::list(root), Err(Fail::Defer)) {
+        return store::list_refusal(root);
+    }
+    format!(
+        "tunnel {word} met a file in {} that this client cannot read (a link, a junction, a pipe, or a name or record it cannot decode). `pseudolife-mcp tunnel update` names each such file; move it aside, then retry",
+        root.display()
+    )
+}

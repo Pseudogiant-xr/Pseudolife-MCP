@@ -8,7 +8,8 @@ Canonical argv: ``tunnel status [--json] [--profile N] [--profile-dir D]``,
 most once, values as the next argument. The native leaf answers status for a
 profile with no process record, update when every saved profile is pending,
 and the refusals that verify and setup reach before any write, handshake,
-process or network use. Everything else defers (``rows/tunnel.md``).
+process or network use. Every other argv is refused with its cause and
+the fix, or answers its help (``rows/tunnel.md``); nothing defers.
 
 Profiles, keys, refresh records and tokens are written through the oracle's
 own writers (``ProfileStore.save`` / ``set_key`` / ``private_write``); an
@@ -48,7 +49,6 @@ SEP = "\\" if core.WINDOWS else "/"
 NEAR = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%dT00:00:00Z")
 REFRESH_ID = "0123456789abcdef0123456789abcdef"
 FIXTURE_KEY = "fixture-tunnel-key"
-DEFERRAL = "pseudolife-stdio: mode 'tunnel' is deferred in this candidate\n"
 REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
 
 
@@ -414,28 +414,6 @@ def refresh(rel: str, **record):
 
 # --- cases ----------------------------------------------------------------------
 
-def _native(text: str) -> bytes:
-    return (text.replace("\n", "\r\n") if core.WINDOWS else text).encode("utf-8")
-
-
-@normalize.rule("tunnel-deferral")
-def tunnel_deferral(obs: dict) -> None:
-    """A declared deferral case: the candidate must print the dispatcher's
-    deferral line, exit 1 and change nothing. The oracle arm still runs (only
-    shapes whose oracle run is local and harmless are listed), but its exit
-    and streams are replaced by that expectation and its files and modes by
-    the home as setup left it."""
-    if obs.get("arm") != "python":
-        return
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-    # ``before`` carries the home and daemon tokens apply() gave the observed
-    # files (the case's ``after`` applied them), so a golden needs neither.
-    obs["files"] = dict(obs.get("before", {}))
-    obs["modes"] = dict(obs.get("before_modes", {}))
-
-
 @normalize.rule("tunnel-dpapi-key")
 def tunnel_dpapi_key(obs: dict) -> None:
     """Windows ``set_key`` output is DPAPI ciphertext, fresh per arm. A key
@@ -567,8 +545,10 @@ def status(case_id, *seeds, extra=(), json_out=True, **kw):
     return case(case_id, argv, *seeds, **kw)
 
 
-def defer(case_id, argv, *seeds, **kw):
-    return case(case_id, argv, *seeds, rules=("tunnel-deferral", "tunnel-dpapi-key"), **kw)
+def refuse(case_id, argv, *seeds, **kw):
+    """A shape the candidate refuses (or, for help, answers) natively; its
+    golden is recorded from the candidate."""
+    return case(case_id, argv, *seeds, rules=("tunnel-dpapi-key",), **kw)
 
 
 def setup_case(case_id, *extra, seeds=(), env=None):
@@ -802,41 +782,42 @@ def cases() -> list[core.Case]:
                    _home("token")),
         case("setup-invalid-name", ["setup", "--profile-dir", DIR, "--profile", "bad.name",
                                     *explicit()]),
-        # declared deferrals: the candidate defers and changes nothing
-        defer("defer-verify-process-record", ["verify", "--profile-dir", DIR], ready(), key(),
+        # shapes that once deferred: the candidate refuses with the cause
+        # and the fix (or prints help) and changes nothing
+        refuse("refuse-verify-process-record", ["verify", "--profile-dir", DIR], ready(), key(),
               private("tunnels/dot.process.json", json.dumps(
                   {"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode())),
-        defer("defer-status-seven-digit-fraction", ["status", "--profile-dir", DIR],
+        refuse("refuse-status-seven-digit-fraction", ["status", "--profile-dir", DIR],
               profile(runtime_key_expires_at="2099-12-31T00:00:00.1234567Z")),
-        defer("defer-status-one-digit-fraction", ["status", "--profile-dir", DIR],
+        refuse("refuse-status-one-digit-fraction", ["status", "--profile-dir", DIR],
               profile(runtime_key_expires_at="2099-12-31T00:00:00.5Z")),
         # hour 24: refused by the 3.11 oracle, admitted by CPython 3.14
-        defer("defer-status-hour-24-expiry", ["status", "--profile-dir", DIR],
+        refuse("refuse-status-hour-24-expiry", ["status", "--profile-dir", DIR],
               profile(raw_edit=edit(runtime_key_expires_at="2099-12-31T24:00:00Z"))),
-        defer("defer-status-deep-challenge", ["status", "--profile-dir", DIR], ready(),
+        refuse("refuse-status-deep-challenge", ["status", "--profile-dir", DIR], ready(),
               private("tunnels/dot-verification/challenge.json", DEEP)),
-        defer("defer-status-refresh-reserved-id", ["status", "--profile-dir", DIR], profile(),
+        refuse("refuse-status-refresh-reserved-id", ["status", "--profile-dir", DIR], profile(),
               private("tunnels/dot.reload.json", RESERVED_ID + b"}")),
-        defer("defer-status-result-reserved-id", ["status", "--profile-dir", DIR], ready(),
+        refuse("refuse-status-result-reserved-id", ["status", "--profile-dir", DIR], ready(),
               private("tunnels/dot.reload.result.json",
                       RESERVED_ID + b', "state": "failed"}')),
-        defer("defer-profile-dangling-junction", ["status", "--profile-dir", DIR], prepared(),
+        refuse("refuse-profile-dangling-junction", ["status", "--profile-dir", DIR], prepared(),
               junction("tunnels/dot.profile.json", "gone", dangling=True),
               platforms=("windows",), skip_if=no_junctions),
         # setup resuming a saved profile (its token reference is missing, so
         # the oracle stops at check_token_file, before any handshake process)
-        defer("defer-setup-existing-profile", ["setup", "--profile-dir", DIR],
+        refuse("refuse-setup-existing-profile", ["setup", "--profile-dir", DIR],
               profile(token_file="missing-token")),
         # a Codex registration file: its env block is not read natively (the
         # oracle reads it, finds no server block and refuses)
-        defer("defer-setup-codex-registration", ["setup", "--profile-dir", DIR],
+        refuse("refuse-setup-codex-registration", ["setup", "--profile-dir", DIR],
               plain(".codex/config.toml", b"[other]\nx = 1\n")),
-        defer("defer-setup-claude-registration", ["setup", "--profile-dir", DIR],
+        refuse("refuse-setup-claude-registration", ["setup", "--profile-dir", DIR],
               plain(".claude.json", b'{"mcpServers": {}}')),
-        defer("defer-status-help", ["status", "--help"]),
-        defer("defer-no-subcommand", []),
-        defer("defer-joined-option", ["status", "--profile=dot", "--profile-dir", DIR],
+        refuse("help-status", ["status", "--help"]),
+        refuse("refuse-no-subcommand", []),
+        refuse("refuse-joined-option", ["status", "--profile=dot", "--profile-dir", DIR],
               profile()),
-        defer("defer-repeated-option", ["status", "--json", "--json", "--profile-dir", DIR],
+        refuse("refuse-repeated-option", ["status", "--json", "--json", "--profile-dir", DIR],
               profile()),
     ]
