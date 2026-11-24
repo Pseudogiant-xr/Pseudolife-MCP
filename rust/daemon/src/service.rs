@@ -1689,8 +1689,10 @@ impl crate::background::Duties for Service {
     }
 }
 
-/// The stale-dimensions refusal: the cause, the wrong-bank fix, and the one
-/// setting that serves these vectors. No native step re-embeds them (#1938).
+/// The stale-dimensions refusal: the cause, the wrong-bank fix, and the
+/// setting that serves a bank whose rows share one dimension (the ONNX
+/// directory override replaces it when set). No native step re-embeds a
+/// mixed bank (#1938).
 fn stale_dims_text(
     s: &crate::bank::StaleDims,
     data_dir: &Path,
@@ -1702,9 +1704,10 @@ fn stale_dims_text(
         "Refusing to serve: {} hydrated row(s) in the bank at {} are embedded at {} dims, but the live \
          embedder ({}) produces {}-d vectors, so every search and store would fail. If this daemon \
          was started against the wrong bank, stop it and point the client at the intended daemon. \
-         Otherwise set embedding.model_name to the model that produced these vectors (its ONNX \
-         artifact must be in the local model or Hub cache) and restart the daemon; this release has \
-         no step that re-embeds them (#1938).",
+         Otherwise, if every row in the bank is at one dimension, set embedding.model_name to the \
+         model that produced them (its ONNX artifact must be in the local model or Hub cache; \
+         PSEUDOLIFE_DAEMON_ONNX_DIR, when set, overrides that setting) and restart the daemon; this \
+         release has no step that re-embeds them (#1938).",
         s.count,
         data_dir.display(),
         dims.join(", "),
@@ -1738,9 +1741,11 @@ mod tests {
             "Refusing to serve: 3 hydrated row(s) in the bank at /bank are embedded at 384 dims, \
              but the live embedder (Qwen/Qwen3-Embedding-0.6B) produces 1024-d vectors, so every \
              search and store would fail. If this daemon was started against the wrong bank, stop \
-             it and point the client at the intended daemon. Otherwise set embedding.model_name to \
-             the model that produced these vectors (its ONNX artifact must be in the local model or \
-             Hub cache) and restart the daemon; this release has no step that re-embeds them (#1938)."
+             it and point the client at the intended daemon. Otherwise, if every row in the bank is \
+             at one dimension, set embedding.model_name to the model that produced them (its ONNX \
+             artifact must be in the local model or Hub cache; PSEUDOLIFE_DAEMON_ONNX_DIR, when set, \
+             overrides that setting) and restart the daemon; this release has no step that \
+             re-embeds them (#1938)."
         );
         for gone in [
             "python",
