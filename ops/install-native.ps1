@@ -1847,7 +1847,10 @@ if (-not $ClientOnly) {
     $defaultArgs = @()
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if ($composeEngine -eq 'rust' -and -not $engineDefaulted -and -not (Test-RustTokenExpected)) {
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false; or rerun with -Engine python. Nothing was pulled or started.")
+        # An accepted Rust install keeps its engine (-Engine python only
+        # schedules the switch), so a Python rerun is offered only without one.
+        $pythonWay = if ($installedEngine -eq 'rust') { '' } else { '; or rerun with -Engine python' }
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false$pythonWay. Nothing was pulled or started.")
         exit 2
     }
     if ($engineDefaulted) { $defaultArgs = @('--default') }
@@ -2022,7 +2025,9 @@ if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
         $engineFiles = @()
         Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
     } else {
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one; or rerun with -Engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
+        # As at stage 4b: no Python rerun where an accepted Rust install keeps its engine.
+        $pythonWay = if ($installedEngine -eq 'rust') { '' } else { '; or rerun with -Engine python' }
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one$pythonWay. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
         exit 2
     }
 }

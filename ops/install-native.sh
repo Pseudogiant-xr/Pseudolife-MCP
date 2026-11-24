@@ -2025,7 +2025,11 @@ if [ -z "$CLIENT_ONLY" ]; then
     esac
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if [ "$COMPOSE_ENGINE" = rust ] && [ -z "${ENGINE_DEFAULTED:-}" ] && ! rust_token_expected; then
-        echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http; or rerun with --engine python. Nothing was pulled or started." >&2
+        # An accepted Rust install keeps its engine (--engine python only
+        # schedules the switch), so a Python rerun is offered only without one.
+        python_way="; or rerun with --engine python"
+        [ "$INSTALLED_ENGINE" = rust ] && python_way=""
+        echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http$python_way. Nothing was pulled or started." >&2
         exit 2
     fi
     default_args=()
@@ -2194,7 +2198,10 @@ if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN
         engine_files=()
         step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
     else
-        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http so the installer mints one; or rerun with --engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
+        # As at stage 4b: no Python rerun where an accepted Rust install keeps its engine.
+        python_way="; or rerun with --engine python"
+        [ "${INSTALLED_ENGINE:-}" = rust ] && python_way=""
+        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http so the installer mints one$python_way. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
         exit 2
     fi
 fi
