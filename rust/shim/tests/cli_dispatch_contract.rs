@@ -20,15 +20,36 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(0));
-        // SHA-256 of cli_help.txt (cli.py::_USAGE with serve and embedded refused and move's
-        // installed-release target), with Windows CRLF.
+        // SHA-256 of cli_help.txt (cli.py::_USAGE with serve and embedded refused, move's
+        // installed-release target, and the native installer and tunnel steps), with
+        // Windows CRLF.
         let expected = if cfg!(windows) {
-            "ceb5efe014f334751ce0b47ec0230d6ecc3dd92c500ea93d7197c731ff83b172"
+            "2c4847c8e729b14632844705cc623cb42d1aeffde9d0cea7a7d5b1dd09d0879e"
         } else {
-            "646c96e4c444de170d9a38ca06d82f3a81ea7e643f7b2a70b99bd54109793deb"
+            "5a6ea22da916d479c8704fee58e85777c0f9ab3681bb0b4d647f3c524a3c3139"
         };
         assert_eq!(format!("{:x}", Sha256::digest(&output.stdout)), expected);
         assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn the_tunnel_help_line_names_only_the_native_tunnel_commands() {
+    // #1609: `tunnel --help` lists setup, status, verify, run, stop and
+    // update; the native client refuses guided setup, tunnel doctor and the
+    // autostart service, so the overview must not advertise them.
+    // cli_help.txt is LF everywhere (rust/.gitattributes); this file may be
+    // checked out CRLF, so the lines are joined explicitly.
+    let help = include_str!("../src/cli_help.txt");
+    let lines = [
+        "  tunnel         optional Secure MCP Tunnel for a ChatGPT developer app: save",
+        "                 or resume a profile and import or renew its runtime key, show",
+        "                 status, verify cloud access, run it in this terminal and stop",
+        "                 it (`tunnel --help`)",
+    ];
+    assert!(help.contains(&(lines.join("\n") + "\n")), "{help}");
+    for gone in ["guided optional", "status/doctor", "opted-in autostart"] {
+        assert!(!help.contains(gone), "{gone}");
     }
 }
 
