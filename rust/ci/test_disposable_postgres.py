@@ -244,8 +244,9 @@ def test_start_owns_a_fresh_loopback_cluster(fakes):
 def test_start_refuses_a_prefix_that_is_not_one_path_component(fakes, prefix):
     with pytest.raises(postgres.SetupError, match="one path component"):
         postgres.start(fakes.parent, prefix)
-    assert list(fakes.parent.iterdir()) == [] and list(fakes.parent.parent.iterdir()) == [
-        fakes.home, fakes.parent] and fakes.pg0.instances == []
+    # nothing was made, in the parent or beside it (iterdir's order is the platform's)
+    assert list(fakes.parent.iterdir()) == [] and set(fakes.parent.parent.iterdir()) == {
+        fakes.home, fakes.parent} and fakes.pg0.instances == []
 
 
 @pytest.mark.parametrize("prefix", ["pl.ci-", "pl-cli-lease-postgres-", "-_"])
