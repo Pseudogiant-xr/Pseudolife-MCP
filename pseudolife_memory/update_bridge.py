@@ -22,12 +22,22 @@ failed download or digest check, or a binary that will not run here (an
 old glibc) leaves the Python client in place, says why in one line, and the
 Python code finishes the client steps as before.
 
-The move is opt-in in 0.24.0: it happens only with ``PSEUDOLIFE_SHIM_ENGINE=
-native``. Without it the hand-off child keeps the Python client and says in
-one line how to opt in. A machine already on this release's Python client
-moves when it runs ``pseudolife-mcp update --clients-only`` with the
-setting, as an ordinary native run with no hand-off variables.
-``PSEUDOLIFE_SHIM_ENGINE=python`` keeps the Python client, as before.
+Since 0.26.0 the move is the default (it was opt-in, with
+``PSEUDOLIFE_SHIM_ENGINE=native``, in 0.24.0 and 0.25.x). It does not happen,
+and the Python client is kept with one line saying why:
+- with ``PSEUDOLIFE_SHIM_ENGINE=python``, or when
+  ``~/.pseudolife-mcp/client-engine`` records that the installer was run with
+  it (unless ``PSEUDOLIFE_SHIM_ENGINE=native`` asks again);
+- when the update runs without a person (maintainer, 20 November 2026): the
+  hand-off parent's own argv holds ``--unattended`` (the scheduled run) or
+  ``--result-file`` (the shim's session-start client update), or cannot be
+  read;
+- when the native client cannot serve the machine (no build for it, a
+  download or digest failure, a binary that does not run here, or, unless
+  asked for, a tunnel the Python client registered to start by itself).
+A machine already on this release's Python client moves when it runs
+``pseudolife-mcp update --clients-only``, as an ordinary native run with no
+hand-off variables.
 Standard library only: a shim runtime carries ``runtimes.SHIM_REQUIREMENTS``
 and nothing else.
 """
@@ -55,8 +65,13 @@ from pseudolife_memory import __version__
 
 HANDOFF_ENV = "PSEUDOLIFE_UPDATE_HANDOFF"
 ENGINE_ENV = "PSEUDOLIFE_SHIM_ENGINE"
-# The one value that asks for the move to the native client (0.24.0: opt-in).
+# The value that asks for the move to the native client even where the
+# default keeps Python (a recorded Python choice, a tunnel autostart).
 NATIVE = "native"
+# What an update without a person puts in the hand-off parent's argv: the
+# scheduled run (unattended_update._command) and the shim's session-start
+# client update (shim.py, --result-file).
+UNATTENDED_FLAGS = ("--unattended", "--result-file")
 # The same override the native installer honours
 # (rust/shim/src/runtime/install.rs, release_base): the http(s) directory
 # holding the archives and SHA256SUMS, for a mirror or a test server.
@@ -283,9 +298,104 @@ def _wait(proc: subprocess.Popen) -> int:
         raise
 
 
+def engine_record() -> Path:
+    """Where the installers record an explicit PSEUDOLIFE_SHIM_ENGINE=python
+    install (ops/install.sh, ops/install.ps1: client engine)."""
+    return Path.home() / ".pseudolife-mcp" / "client-engine"
+
+
+def _recorded_python() -> bool:
+    try:
+        return engine_record().read_text(encoding="utf-8").strip() == "python"
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def process_argv(pid: int) -> list[str] | None:
+    """Process ``pid``'s argv, or None when it cannot be read. Read in place,
+    starting no process: /proc on Linux, KERN_PROCARGS2 on macOS, the PEB's
+    command line on Windows (split as the C runtime splits it)."""
+    try:
+        if sys.platform.startswith("linux"):
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+            return [os.fsdecode(part) for part in raw.split(b"\0")[:-1]] if raw.endswith(b"\0") else None
+        import ctypes
+        if sys.platform == "darwin":
+            import ctypes.util
+            libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+            mib = (ctypes.c_int * 3)(1, 49, pid)            # CTL_KERN, KERN_PROCARGS2
+            size = ctypes.c_size_t(0)
+            if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or size.value < 4:
+                return None
+            buf = ctypes.create_string_buffer(size.value)
+            if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
+                return None
+            data = buf.raw[:size.value]
+            argc = int.from_bytes(data[:4], sys.byteorder)
+            rest = data[4:].split(b"\0", 1)[1].lstrip(b"\0")    # past the executable path
+            words = rest.split(b"\0")
+            return [os.fsdecode(word) for word in words[:argc]] if len(words) > argc else None
+        if os.name == "nt":
+            from ctypes import wintypes
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            ntdll = ctypes.WinDLL("ntdll")
+            shell32 = ctypes.WinDLL("shell32")
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+            ntdll.NtQueryInformationProcess.restype = ctypes.c_long
+            ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                                        wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)]
+            shell32.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
+            shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+
+            class UnicodeString(ctypes.Structure):
+                _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT),
+                            ("Buffer", ctypes.c_void_p)]
+
+            handle = kernel32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return None
+            try:
+                size = wintypes.ULONG(0)
+                ntdll.NtQueryInformationProcess(handle, 60, None, 0, ctypes.byref(size))  # command line
+                if size.value < ctypes.sizeof(UnicodeString):
+                    return None
+                buf = ctypes.create_string_buffer(size.value)
+                if ntdll.NtQueryInformationProcess(handle, 60, buf, size, ctypes.byref(size)) != 0:
+                    return None
+                text = UnicodeString.from_buffer(buf)
+                line = ctypes.wstring_at(text.Buffer, text.Length // 2) if text.Buffer else ""
+            finally:
+                kernel32.CloseHandle(handle)
+            count = ctypes.c_int(0)
+            words = shell32.CommandLineToArgvW(line, ctypes.byref(count))
+            if not words:
+                return None
+            try:
+                return [words[i] for i in range(count.value)]
+            finally:
+                kernel32.LocalFree(words)
+    except (OSError, ValueError, AttributeError):
+        return None
+    return None
+
+
+def ran_unattended(marker: str, parent_argv: Callable[[int], list[str] | None] = process_argv) -> bool:
+    """Whether the hand-off parent (``marker`` is its pid) runs without a
+    person: its argv holds one of UNATTENDED_FLAGS, or cannot be read (then
+    it might, so the default keeps the client as it is)."""
+    argv = parent_argv(int(marker))
+    if not argv:
+        return True
+    return any(word in UNATTENDED_FLAGS or word.startswith("--result-file=") for word in argv[1:])
+
+
 def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
            run: Runner = subprocess.run, popen=subprocess.Popen,
-           out: Callable[[str], None] | None = None) -> int | str | None:
+           out: Callable[[str], None] | None = None,
+           parent_argv: Callable[[int], list[str] | None] = process_argv) -> int | str | None:
     """Run the client steps in this release's native updater when this
     process is a handed-off client update, or a hand-run ``update
     --clients-only``, that asked for the native client. Returns the native
@@ -296,10 +406,10 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
     marker = env.get(HANDOFF_ENV) or ""
     handed_off = marker.isascii() and marker.isdigit()
     engine = env.get(ENGINE_ENV)
-    # A hand-run moves only when it asks for the native client, from a shim
+    # A hand-run moves unless it asks for the Python client, from a shim
     # runtime whose launcher is not native already (a native machine reaches
     # this code only through its explicit --python-runtime legacy updater).
-    if not handed_off and (engine != NATIVE or not _python_shim_runtime()):
+    if not handed_off and (engine == "python" or not _python_shim_runtime()):
         return None
     try:
         parser = parser_factory()
@@ -324,19 +434,19 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
         return None
     if engine == "python":     # the exact value runtimes.py honours
         return f"{ENGINE_ENV}=python keeps the Python client; this run's own code finishes the client steps"
+    # An update that runs without a person never changes the client
+    # (maintainer, 20 November 2026), whatever the setting.
+    if handed_off and ran_unattended(marker, parent_argv):
+        return ("this update ran unattended, so this machine keeps the Python client, and this run's own code "
+                "finishes the client steps; to move it to the native client, run "
+                "`pseudolife-mcp update --clients-only`")
+    move = (f"`{ENGINE_ENV}={NATIVE} pseudolife-mcp update --clients-only` (in PowerShell: "
+            f"`$env:{ENGINE_ENV}='{NATIVE}'; pseudolife-mcp update --clients-only`)")
+    if engine != NATIVE and _recorded_python():
+        return (f"{engine_record()} records an earlier {ENGINE_ENV}=python install, so this machine keeps the "
+                f"Python client, and this run's own code finishes the client steps; to move it to the native "
+                f"client, run {move}")
     triple = target()
-    if engine != NATIVE:
-        # 0.24.0: the native client still defers commands the Python client
-        # runs (interactive connect, most tunnel commands, doctor on a
-        # tunnel host), and a moved machine has no command back, so the move
-        # is the user's choice, never the default. A platform with no
-        # native build has nothing to opt in to: nothing is said.
-        if triple is None:
-            return None
-        return (f"the native client is opt-in in {version}: this machine keeps the Python client, and this "
-                f"run's own code finishes the client steps; to move it to the native client, run "
-                f"`{ENGINE_ENV}={NATIVE} pseudolife-mcp update --clients-only` (in PowerShell: "
-                f"`$env:{ENGINE_ENV}='{NATIVE}'; pseudolife-mcp update --clients-only`)")
     kept = "the Python client was kept and this run's own code finishes the client steps"
     if handed_off and args.tag != version:
         return f"the native client was not installed (this runtime is {version}, not {args.tag}); {kept}"
@@ -366,6 +476,19 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
                 raise Kept(f"{name} does not match its SHA256SUMS digest")
             binary = extract(data, triple, scratch)
             _probe(binary, version, run)
+            if engine != NATIVE:
+                # By default a tunnel the Python client registered to start
+                # by itself keeps that client (#1632): the staged binary's
+                # check exits 3 and prints the guard's line, which names the
+                # removal; asked for, the native updater refuses it itself.
+                check = run([str(binary), "runtime", "install", "--check"], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=120, stdin=subprocess.DEVNULL)
+                if check.returncode == 3:
+                    for line in f"{check.stderr or ''}\n{check.stdout or ''}".splitlines():
+                        if line.strip():
+                            (out or (lambda text: print(text, flush=True)))(line.rstrip())
+                    raise Kept(f"a tunnel the Python client registered to start by itself keeps it; the line "
+                               f"above says how to remove that autostart, then run {move}")
         except Kept as exc:
             note = (f"; from {ARCHIVE_URL_ENV}={env.get(ARCHIVE_URL_ENV, '').strip()}, unset it to use the "
                     f"GitHub release" if (env.get(ARCHIVE_URL_ENV) or "").strip() else "")
@@ -406,7 +529,12 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
             # The native updater does not read the setting, so this holds only
             # while the launcher is still the Python one.
             say(f"==> the native client steps ended with exit {code} (see above); while this machine still "
-                f"runs the Python client, an update without {ENGINE_ENV}={NATIVE} keeps it")
+                f"runs the Python client, an update with {ENGINE_ENV}=python keeps it")
+        elif engine == NATIVE:
+            # An explicit native choice ends a recorded Python one, as the
+            # native installer's does.
+            with contextlib.suppress(OSError):
+                engine_record().unlink()
         return code
     finally:
         if scratch is not None:
