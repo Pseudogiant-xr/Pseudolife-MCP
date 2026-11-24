@@ -37,8 +37,9 @@ SCENARIOS = {
 }
 
 # What the frozen Python CLI reported per scenario: the exit code and the
-# current and target versions, captured at 6ca817d70 on Linux and Windows
-# by verify/w107-capture-s5.py (the same on both).
+# current and target versions, captured from it at 6ca817d70 on Linux and
+# Windows (the same on both; the capture is recorded in the pull request that
+# added these). A deliberate native change that departs from one edits it here.
 ORACLE_REPORTS = {
     "current": {"exit_code": 3, "current": "0.15.1", "target": "0.15.1"},
     "knob-off": {"exit_code": 4, "current": "0.15.0", "target": "0.15.1"},
@@ -197,7 +198,8 @@ def _proof(tmp_path, scenario, command):
 @only_frozen_python
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_oracle_unattended_refusal_contract(tmp_path, scenario):
-    _proof(tmp_path, scenario, [sys.executable, "-P", "-m", "pseudolife_memory.cli"])
+    report = _proof(tmp_path, scenario, [sys.executable, "-P", "-m", "pseudolife_memory.cli"])
+    assert report == ORACLE_REPORTS[scenario]
 
 
 def test_oracle_reports_cover_every_scenario():

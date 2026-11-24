@@ -2,8 +2,9 @@
 
 While the package is still published, the release cut runs these tests on
 purpose: they are what can see a dependency regression in it. They are
-deleted with the package (``rust/ci/package_consumers.toml`` lists their
-files as retiring with it), never moved.
+deleted with the package, never moved; their files keep their native tests
+(``rust/ci/package_consumers.toml`` classes the package uses in those files
+as belonging to the marked tests).
 
 The skip decides on one signal: whether the import system can find the
 package (``importlib.util.find_spec``). A package that is present but cannot

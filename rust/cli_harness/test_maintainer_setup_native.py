@@ -193,8 +193,8 @@ def _native_env(tmp_path):
 ])
 def test_native_host_state_reads_safe_yaml_without_rewriting(tmp_path, text):
     # The frozen Python _state() read every one of these texts as the plain
-    # maintainer section, with no problem (captured at 6ca817d70 on Windows
-    # and Linux by verify/w107-capture-setup-state.py).
+    # maintainer section, with no problem (captured from it at 6ca817d70 on
+    # Windows and Linux).
     path = tmp_path / "config.yaml"
     original = text + ("coordination: !!map\n  maintainer: !!map\n"
                        "    rp_id: localhost\n    origin: http://localhost:8765\n")
@@ -286,8 +286,7 @@ def test_native_config_write_keeps_date_like_strings(tmp_path, text):
 
 
 # The problem the frozen Python _state() reported for each name value, the
-# same merged or not (captured at 6ca817d70 on Windows and Linux by
-# verify/w107-capture-setup-state.py).
+# same merged or not (captured from it at 6ca817d70 on Windows and Linux).
 NOT_STRINGS = "coordination.maintainer.rp_id and .origin must be strings"
 NAME_SCALAR_PROBLEMS = {
     "2026-01-02": NOT_STRINGS,
@@ -322,8 +321,8 @@ def test_native_host_state_preserves_name_scalar_validation(tmp_path, value, mer
     assert list(tmp_path.iterdir()) == [path]
 
 
-# The problem the frozen Python _state() reported for each cap (captured at
-# 6ca817d70 on Windows and Linux by verify/w107-capture-setup-state.py).
+# The problem the frozen Python _state() reported for each cap (captured
+# from it at 6ca817d70 on Windows and Linux).
 NOT_A_WHOLE_NUMBER = ("coordination.maintainer.maintainer_per_recipient_per_hour must "
                       "be a whole number, 0 or more")
 LARGE_CAP_PROBLEMS = {

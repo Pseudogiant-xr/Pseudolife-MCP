@@ -2,11 +2,13 @@
 
 The ``test-login`` row seeds the role and login file a previous run left
 (``test_login._seed_login``) with the frozen command's own statements, so
-both arms start from exactly what that command wrote. Copied verbatim from
-pseudolife_memory/test_login_cli.py at 6ca817d70 by
-verify/w107-transcribe-login-seed.py (EXTENSIONS :95-95, _FILE_HEADER :105-110, scram_verifier :216-229, _literal :232-233, _ident :236-237, _names :240-241, role_statements :331-375, extension_statements :378-388, _extension_versions :391-393); the
-package is frozen, so the copy cannot drift from its source. Recopy, never
-edit by hand.
+both arms start from exactly what that command wrote. Copied verbatim, by
+its syntax tree, from pseudolife_memory/test_login_cli.py at 6ca817d70:
+EXTENSIONS :95-95, _FILE_HEADER :105-110, scram_verifier :216-229, _literal
+:232-233, _ident :236-237, _names :240-241, role_statements :331-375,
+extension_statements :378-388, _extension_versions :391-393.
+The package is frozen, so the copy cannot drift from its source; never edit
+it by hand.
 """
 from __future__ import annotations
 

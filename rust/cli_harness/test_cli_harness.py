@@ -2794,18 +2794,27 @@ def test_frozen_python_marker_decides_on_finding_the_package(monkeypatch):
     import importlib.util
     from cli_harness import frozen_python
 
-    present = (Path(__file__).resolve().parents[2] / "pseudolife_memory" / "__init__.py").is_file()
-    assert frozen_python.package_present() is present
+    # The marker was built from the import system's answer, wherever the
+    # package is found (a checkout or an installed wheel).
     mark = frozen_python.only_frozen_python.mark
-    assert mark.name == "skipif" and mark.args == (not present,)
+    assert mark.name == "skipif"
+    assert mark.args == (importlib.util.find_spec("pseudolife_memory") is None,)
     assert mark.kwargs == {"reason": "frozen Python only: deleted with the package"}
-    real = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec",
-                        lambda name, *a: None if name == "pseudolife_memory" else real(name, *a))
+    asked = []
+    found = object()
+
+    def find(answer):
+        def find_spec(name, *args):
+            asked.append(name)
+            return answer
+        return find_spec
+
+    monkeypatch.setattr(importlib.util, "find_spec", find(None))
     assert frozen_python.package_present() is False
     # A package that is found but broken is not "absent": its tests run and fail.
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: object())
+    monkeypatch.setattr(importlib.util, "find_spec", find(found))
     assert frozen_python.package_present() is True
+    assert asked == ["pseudolife_memory", "pseudolife_memory"]
 
 
 def test_test_login_seed_runs_with_frozen_imports_blocked(tmp_path):
@@ -2843,7 +2852,11 @@ def test_test_login_seed_runs_with_frozen_imports_blocked(tmp_path):
         f"{test_login.USER_KEY}={test_login.ROLE}\n"
         f"{test_login.PASSWORD_KEY}={test_login.SEEDED_PASSWORD}\n").encode()
     assert sorted(path.name for path in login.parent.iterdir()) == [login.name]
-    if os.name != "nt":
+    if os.name == "nt":
+        # What the row records for an owner-only login file.
+        assert test_login._permissions(login) == {"owner": "<me>", "protected": True,
+                                                  "aces": ["(A;;FA;;;OW)"]}
+    else:
         umask = os.umask(0)
         os.umask(umask)
         assert login.stat().st_mode & 0o777 == 0o600

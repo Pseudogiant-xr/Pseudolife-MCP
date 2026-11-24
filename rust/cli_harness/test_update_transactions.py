@@ -2847,14 +2847,21 @@ def _as_python_updater_left_it(state_path, round_name):
     for relative, body in captured["files"].items():
         target = home / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body.replace("{HOME}", str(home)), encoding="utf-8")
+        # Inside a JSON file the home is spelled as a JSON string's content.
+        target.write_text(body.replace("{HOME}", spelled if relative.endswith(".json") else str(home)),
+                          encoding="utf-8")
     return captured
 
 
 def test_python_updater_host_capture_is_the_round_it_names():
+    # Both platforms: each runs the replay cases with its own capture.
+    assert sorted(PYTHON_UPDATER_HOSTS) == ["linux", "windows"]
     for rounds in PYTHON_UPDATER_HOSTS.values():
-        assert sorted(rounds) == ["engine-rust", "plain"]
+        assert sorted(rounds) == ["engine-rust", "engine-rust-then-plain", "plain"]
         rust, plain = rounds["engine-rust"], rounds["plain"]
+        kept = rounds["engine-rust-then-plain"]
+        assert "--engine" not in kept["args"]
+        assert kept["state"]["running"]["Config"]["Labels"]["org.pseudolife.engine"] == "rust"
         assert rust["args"][:2] == ["--engine", "rust"] and "--engine" not in plain["args"]
         assert rust["state"]["running"]["Config"]["Labels"]["org.pseudolife.engine"] == "rust"
         assert "org.pseudolife.engine" not in plain["state"]["running"]["Config"]["Labels"]
@@ -2872,7 +2879,27 @@ def test_native_updater_follows_the_python_updaters_rust_selection(tmp_path):
         result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--reinstall", "--daemon-only", "--json",
                                              "--health-retries", "1", "--rollback-tag", "pre-round-1"])
         assert result.returncode == 0, result.stdout + result.stderr
+        # A real reinstall over the Python updater's host: backup, rollback
+        # tag and a recreated daemon, in this run's own call log.
+        assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+def test_native_updater_returns_to_python_after_the_python_updater_kept_rust(tmp_path):
+    """An explicit native --engine python leaves the Rust engine a plain
+    Python update kept (after its own --engine rust round)."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        _as_python_updater_left_it(state_path, "engine-rust-then-plain")
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        result = run_arm(repo, env, binary, ["--engine", "python", "--tag", "0.21.1", "--reinstall",
+                                             "--daemon-only", "--json", "--health-retries", "1",
+                                             "--rollback-tag", "pre-round-2"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "python"
 
 
 @pytest.mark.parametrize("explicit_python", [False, True])
@@ -2890,8 +2917,12 @@ def test_native_updater_follows_a_plain_python_update(tmp_path, explicit_python)
             args += ["--engine", "python"]
         result = run_arm(repo, env, binary, args)
         assert result.returncode == 0, result.stdout + result.stderr
-        labels = json.loads(state_path.read_text())["running"]["Config"]["Labels"]
-        if not explicit_python:
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        labels = state["running"]["Config"]["Labels"]
+        if explicit_python:
+            assert labels["org.pseudolife.engine"] == "python"
+        else:
             assert not labels.get("org.pseudolife.activation")
 
 

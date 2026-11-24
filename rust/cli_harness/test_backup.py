@@ -245,9 +245,8 @@ def test_prefixes_the_docker_selectors_made_ambiguous_keep_python_errors(tmp_pat
     env = dict(os.environ, COLUMNS="80", PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "home"),
                PSEUDOLIFE_DOCKER=str(tmp_path / "no-docker"))
     actual = subprocess.run([_native_backup(), *argv], env=env, capture_output=True, timeout=10)
-    # What the frozen Python CLI printed for each (captured at 6ca817d70 on
-    # Linux and Windows by verify/w107-capture-s5.py; only the line
-    # separator differs).
+    # What the frozen Python CLI printed for each (captured from it at
+    # 6ca817d70 on Linux and Windows; only the line separator differs).
     shown = selector[0] if inline else option
     expected = (BACKUP_USAGE + f"pseudolife-mcp backup: error: ambiguous option: {shown} "
                 f"could match {AMBIGUOUS_MATCHES[option]}\n")

@@ -524,8 +524,7 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
 
 # What the frozen Python doctor printed for each invalid or production
 # database, exit 1 and nothing on stderr: one error name and the same
-# recovery (captured at 6ca817d70 on Linux and Windows by
-# verify/w107-capture-s5.py).
+# recovery (captured from it at 6ca817d70 on Linux and Windows).
 INVALID_DATABASE_ERRORS = {
     "host='unterminated": 'ProgrammingError',
     'host=127.0.0.1 dbname=r2_unknown foo=bar': 'ProgrammingError',
