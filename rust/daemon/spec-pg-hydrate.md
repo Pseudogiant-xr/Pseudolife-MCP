@@ -24,11 +24,12 @@ tests reject source changes without regeneration. New literal schema additions
 (including the pending v56 document store) and constant-loop migrations are
 picked up by that command; new control flow requires an explicit compiler
 extension and review. Check current master again before opening the PR.
-The `--record-goldens <result.json>` option also builds and records oracle
-post-states for every historical cell, after the live control and five source
-mutants pass. Since the Python freeze CI compares the candidate with these
-committed snapshots only, and a deliberate Rust change re-records them from
-the candidate (`schema_ci.py --record-candidate`, `harness/candidate_record.py`).
+CI compares the candidate with the committed post-state snapshots of every
+historical cell, with five source mutants, and a deliberate Rust change
+re-records them from the candidate (`schema_ci.py --record-candidate`,
+`harness/candidate_record.py`). The `--record-goldens` option that recorded
+them from the frozen Python oracle is retired and refuses, naming that
+command.
 
 ## Seam with W2-D/E
 
