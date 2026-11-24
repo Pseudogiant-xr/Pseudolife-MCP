@@ -255,22 +255,30 @@ fn detect(repo: Option<&Path>) -> Result<&'static str> {
 }
 
 fn checkout_version(repo: &Path) -> Result<String> {
-    const NO_VERSION: &str = "Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. Nothing was started.";
-    // An unreadable pyproject.toml is a refusal, not unavailability: it is
-    // the checkout that is broken, so the default does not fall back.
-    let text = fs::read_to_string(repo.join("pyproject.toml")).map_err(|_| refusal(NO_VERSION))?;
-    let version = text.lines().find_map(|line| {
-        let rest = line
-            .strip_prefix("version")?
-            .trim_start_matches([' ', '\t']);
-        let rest = rest.strip_prefix('=')?.trim_start_matches([' ', '\t']);
-        let value = rest.strip_prefix('"')?;
-        let end = value.find('"')?;
-        (end > 0).then(|| value[..end].to_owned())
-    });
+    use crate::cli::update::{RELEASE_MANIFEST, plain_release, release_manifest_unreadable};
+    // An unreadable release manifest is a refusal, not unavailability: it is
+    // the checkout that is broken, so the default does not fall back. The
+    // message keeps the cause and names the native fix.
+    let version = crate::cli::update::checkout_release_version(repo).map_err(|error| {
+        let why = release_manifest_unreadable(repo, &error);
+        let mut text = why[..1].to_uppercase();
+        text.push_str(&why[1..]);
+        refusal(format!("{text}. Nothing was started."))
+    })?;
     match version {
-        Some(version) if crate::cli::update::plain_release(&version) => Ok(version),
-        _ => Err(unavailable(NO_VERSION)),
+        Some(version) if plain_release(&version) => Ok(version),
+        // A defaulted install falls back to Python on either alone, and the
+        // fallback line keeps the text before the first ';' (cause()).
+        Some(version) => Err(unavailable(format!(
+            "Cannot read a release version from this checkout's {RELEASE_MANIFEST} (its [package] version is {version}, not a plain release); check out a release tag (git checkout v<version>) and rerun, or rerun with --engine python. Nothing was started."
+        ))),
+        // No plain version line at all: the file needs repair, which a
+        // checkout of a release tag would not do (it refuses the local
+        // change, or keeps it where the tag has the same file).
+        None => Err(unavailable(format!(
+            "Cannot read a release version from this checkout's {RELEASE_MANIFEST} (its [package] table names no plain version); {}. Nothing was started.",
+            crate::cli::update::RELEASE_MANIFEST_NO_VERSION_FIX
+        ))),
     }
 }
 
@@ -1048,6 +1056,104 @@ mod tests {
     }
 
     #[test]
+    fn the_checkout_version_is_the_native_crate_not_pyproject() {
+        let repo = std::env::temp_dir().join(format!(
+            "pl-installer-checkout-version-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let manifest = repo.join("rust/shim/Cargo.toml");
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        // pyproject.toml leaves with the Python package; it is not read.
+        fs::write(
+            repo.join("pyproject.toml"),
+            "[project]\nversion = \"0.0.9\"\n",
+        )
+        .unwrap();
+        fs::write(
+            &manifest,
+            "[package]\nname = \"pseudolife-stdio\"\nversion = \"0.26.0\"\n",
+        )
+        .unwrap();
+        assert_eq!(checkout_version(&repo).unwrap(), "0.26.0");
+        // A version that is no plain release: Rust is unavailable here.
+        fs::write(&manifest, "[package]\nversion = \"0.26.0.dev1\"\n").unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(refused.unavailable, "{}", refused.message);
+        assert_eq!(
+            cause(&refused.message),
+            "Cannot read a release version from this checkout's rust/shim/Cargo.toml (its [package] version is 0.26.0.dev1, not a plain release)"
+        );
+        assert!(
+            refused
+                .message
+                .contains("check out a release tag (git checkout v<version>) and rerun, or rerun with --engine python")
+        );
+        // No plain version at all (a deleted line, version.workspace): the
+        // message names the line it needs and the repair, not a release tag
+        // (a checkout of a tag would refuse the local change or keep it).
+        fs::write(&manifest, "[package]\nname = \"pseudolife-stdio\"\n").unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(refused.unavailable, "{}", refused.message);
+        assert!(
+            refused.message.contains(
+                "its [package] table needs a plain `version = \"<x.y.z>\"` line: restore it (git checkout -- rust/shim/Cargo.toml) or update the checkout"
+            ),
+            "{}",
+            refused.message
+        );
+        assert!(
+            !refused.message.contains("git checkout v<version>"),
+            "{}",
+            refused.message
+        );
+        // Invalid TOML is a broken checkout too: refused without the
+        // fallback, with the parse error and the repair.
+        fs::write(&manifest, "[package]\nversion = \"0.26.0\"\nnot toml [\n").unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(!refused.unavailable, "{}", refused.message);
+        assert!(
+            refused
+                .message
+                .starts_with("Cannot read rust/shim/Cargo.toml in this checkout (not valid TOML:"),
+            "{}",
+            refused.message
+        );
+        assert!(
+            refused.message.ends_with(
+                "restore it (git checkout -- rust/shim/Cargo.toml) and retry. Nothing was started."
+            ),
+            "{}",
+            refused.message
+        );
+        // The manifest deleted from a current checkout (rust/shim/ is still
+        // there): restore it; pulling would not bring it back.
+        fs::remove_file(&manifest).unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(!refused.unavailable, "{}", refused.message);
+        assert!(
+            refused.message.ends_with(
+                "restore it (git checkout -- rust/shim/Cargo.toml) and retry. Nothing was started."
+            ),
+            "{}",
+            refused.message
+        );
+        // No rust/shim/ at all: a checkout from before the native client
+        // crate, told to update rather than to restore.
+        fs::remove_dir_all(manifest.parent().unwrap()).unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(!refused.unavailable, "{}", refused.message);
+        assert_eq!(
+            refused.message,
+            "This checkout has no rust/shim/Cargo.toml, so it predates the native release version; update the checkout (git pull, or check out a newer release tag) and retry. Nothing was started."
+        );
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
     fn the_fallback_line_keeps_only_the_cause() {
         assert_eq!(
             cause(
@@ -1061,9 +1167,9 @@ mod tests {
         );
         assert_eq!(
             cause(
-                "Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. Nothing was started."
+                "Cannot read a release version from this checkout's rust/shim/Cargo.toml (its [package] table names no plain version); check out a release tag (git checkout v<version>) and rerun, or rerun with --engine python. Nothing was started."
             ),
-            "Cannot read a release version from this checkout's pyproject.toml"
+            "Cannot read a release version from this checkout's rust/shim/Cargo.toml (its [package] table names no plain version)"
         );
     }
 

@@ -1,11 +1,12 @@
 """CPU-only startup hydration cells on independently cloned disposable banks.
 
-The oracle uses sync.hydrate_cms and the required slot-store hydrators. Identity
-metadata follows service.py:1308-1329; HLC input selection follows
-service.py:1638-1664, before observe() adds the process's wall clock. Complete
-storage.load_* rows preserve durable IDs, nullable fields and float32 vectors;
-entry snapshots expose resident timestamps and tags after construction. The
-zero-timestamp cell fixes both entry and seating clocks to 1000 seconds.
+Each case starts the native service's startup inputs dump on a bank cloned
+from its seeded template and compares the snapshot (complete storage rows,
+durable IDs, nullable fields, float32 vectors, resident timestamps and tags)
+and the start's database changes with the committed golden (--check-goldens,
+the default); --record-candidate re-records the golden from the candidate.
+The frozen Python arm that recorded it first is retired. The zero-timestamp
+cell fixes both entry and seating clocks to 1000 seconds.
 Dimension fault fixtures remove column typmods before inserting legacy vectors.
 Startup still accepts alternate world and lesson vector lengths.
 This is startup evidence, not a claim that PG-HYDRATE is closed.
@@ -14,8 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -23,14 +22,12 @@ import time
 from pathlib import Path
 
 _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
-from contextlib import nullcontext
-from types import SimpleNamespace
-from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(HERE))
+import candidate_record
 import daemons
 import dbstate
 import pgdisposable
@@ -41,6 +38,7 @@ from startup_fixture import FIDELITY_CASES, LOAD_CLOCK, seed_bank
 from rust.harness_support.bank_fixture import assert_fixture_database
 
 pg = pgdisposable.Slice.from_env("pgs")
+GOLDEN = HERE / "goldens" / "startup-hydration.json"
 # Multi-band presets and retention policies other than balanced are retired
 # (R11, maintainer 2026-11-02) and refuse Rust startup (run.py's retired-layout
 # refusals), so the custom cases run one balanced band: a stored band name
@@ -115,142 +113,6 @@ MUTANTS = {
 }
 
 
-def plain(value):
-    """Promote float32 components to JSON doubles without rounding or sorting."""
-    if isinstance(value, dict):
-        return {key: plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [plain(item) for item in value]
-    if hasattr(value, "tolist"):
-        return plain(value.tolist())
-    return value
-
-
-def python_hydrate(storage, config_path, resident_service=None):
-    import torch
-    from pseudolife_memory.memory.cms import ContinuumMemorySystem
-    from pseudolife_memory.memory.cortex import CortexStore
-    from pseudolife_memory.memory.lessons import LessonStore
-    from pseudolife_memory.memory.world_cortex import WorldCortexStore
-    from pseudolife_memory.storage import sync
-    from pseudolife_memory.service import MemoryService
-    from pseudolife_memory.utils.config import load_config
-
-    torch.set_num_threads(1)
-    config = resident_service.config if resident_service is not None else load_config(config_path)
-    dimension = resident_service._embedder.embedding_dim if resident_service is not None else 1024
-    config.memory.embedding_dim = dimension  # service aligns this to the embedder.
-    cms = ContinuumMemorySystem(config.memory, storage=storage)
-    if resident_service is not None:
-        resident_service._cms = cms
-    try:
-        clock = (patch("time.time", return_value=LOAD_CLOCK)
-                 if os.environ.get("PL_PGS_CASE") == "zero-timestamp-seating" else nullcontext())
-        with clock:
-            sync.hydrate_cms(cms, storage)
-    except Exception as error:
-        raise RuntimeError(f"entry hydration failed: {error}") from error
-    cortex, world, lessons = CortexStore(), WorldCortexStore(), LessonStore()
-    try:
-        sync.hydrate_cortex(cortex, storage)
-    except Exception as error:
-        raise RuntimeError(f"cortex hydration failed: {error}") from error
-    # service.py:1142-1210 and :1584: the real guard runs after cortex and
-    # before world/lessons. A stub supplies only its cheap state inputs.
-    resident = resident_service or SimpleNamespace(
-        _cms=cms, _cortex=cortex, _embedder=SimpleNamespace(embedding_dim=dimension),
-        config=config, data_dir=Path(config_path).parent)
-    resident._cortex = cortex
-    MemoryService._refuse_on_stale_hydrated_dims(resident)
-    for label, hydrate, store in (
-        ("world cortex", sync.hydrate_world_cortex, world),
-        ("lesson", sync.hydrate_lessons, lessons),
-    ):
-        try:
-            hydrate(store, storage)
-        except Exception as error:
-            raise RuntimeError(f"{label} hydration failed: {error}") from error
-    resident._world, resident._lessons = world, lessons
-
-    # service.py:1308-1329: preserve its truthiness/default conversions.
-    pointer = storage.get_meta("active_session_pointer")
-    active = ([str(pointer["session_id"]), float(pointer.get("ts") or 0.0)]
-              if isinstance(pointer, dict) and pointer.get("session_id") else None)
-    raw = storage.get_meta("episode_tombstones")
-    tombstones = {
-        str(key): [str(value["session_key"]), float(value.get("ended_at") or 0.0),
-                   str(value.get("title") or "")]
-        for key, value in (raw.items() if isinstance(raw, dict) else ())
-        if isinstance(value, dict) and value.get("session_key")
-    }
-    raw = storage.get_meta("deferred_empty_roots")
-    deferred = {str(key): float(value or 0.0)
-                for key, value in (raw.items() if isinstance(raw, dict) else ())}
-    entries = storage.load_entries()
-    residents = {entry.db_id: entry for band in cms.bands for entry in band.entries}
-    seating = {entry.db_id: band.name for band in cms.bands for entry in band.entries}
-    for row in entries:
-        row["band"] = seating[row["id"]]
-        row["ts"] = residents[row["id"]].timestamp
-        row["tags"] = residents[row["id"]].tags
-    snapshot = plain({"startup": {
-        "episodes": storage.load_episodes(), "current_episode": cms.episodes.current_id,
-        "cortex": storage.load_facts(), "world": storage.load_world_facts(),
-        "lessons": storage.load_lessons(), "metadata": {
-            "active_session": active, "episode_tombstones": tombstones,
-            "deferred_empty_roots": deferred,
-            "cortex_supersession_log": cortex.supersession_log,
-            "cortex_dream_cursor": cortex.dream_cursor,
-        }, "hlc_highwater": [0, 0], "hlc_reseed_pending": True,
-    }, "entries": entries})
-    if os.environ.get("PL_PGS_CASE") in {"surprise-real-text-rounding", "startup-tags-non-string-preservation"}:
-        from pseudolife_memory.service import _entry_to_dict
-        query = torch.zeros(dimension)
-        query[0] = 1.0
-        hits = cms.retrieve(query, top_k=12, min_score=0.0, bm25=False, rerank=False,
-                            timeline=False, disable_recency_boost=True, count_access=False,
-                            tags=["valid"] if os.environ["PL_PGS_CASE"] == "startup-tags-non-string-preservation" else None)
-        snapshot["search_entries"] = [_entry_to_dict(entry, score)
-                                      for entry, score in zip(hits.entries, hits.scores)]
-    if resident_service is not None:
-        resident_service._clock_retry_snapshot = snapshot
-        return snapshot
-    from pseudolife_memory.memory.hlc import HybridLogicalClock
-    resident._world, resident._lessons, resident._storage = world, lessons, storage
-    resident._hlc = HybridLogicalClock(now_ms=lambda: 100)
-    resident._hlc_reseed_pending = True
-    try:
-        # This late source failure retains the fully loaded stores; it is
-        # outside service.py's _abandon_partial_init/backoff boundary.
-        MemoryService._reseed_hlc(resident)
-    except Exception as error:
-        return {"ok": False, "error": str(error), "retained": snapshot}
-    snapshot["startup"]["hlc_highwater"] = [resident._hlc._phys, resident._hlc._logical]
-    snapshot["startup"]["hlc_reseed_pending"] = resident._hlc_reseed_pending
-    return {"ok": True, **snapshot}
-
-
-def oracle_cell():
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    storage = None
-    try:
-        storage = PostgresStorage(os.environ["PL_PGS_STARTUP_DSN"])
-        try:
-            result = python_hydrate(storage, os.environ["PL_PGS_CONFIG"])
-        except Exception as error:
-            result = {"ok": False, "error": str(error)}
-            details = source_stale_dims(str(error))
-            if details is not None:
-                result["stale_dims"] = details
-    except Exception as error:
-        result = {"ok": False, "error": str(error)}
-    finally:
-        if storage is not None:
-            storage.close()
-    Path(os.environ["PL_PGS_STARTUP_OUT"]).write_text(
-        json.dumps(result, allow_nan=False), encoding="utf-8")
-
-
 def invoke(binary, kind, dsn, home, output, mutant=None, case=None):
     env = daemons.base_env(home, {
         "PL_PGS_STARTUP_DSN": dsn, "PL_PGS_STARTUP_OUT": str(output),
@@ -265,12 +127,9 @@ def invoke(binary, kind, dsn, home, output, mutant=None, case=None):
             "PL_PGS_CASE",
         }:
             env.pop(key)
-    if kind == "python":
-        argv = [sys.executable, str(Path(__file__).resolve()), "--oracle-cell"]
-    else:
-        argv = [str(binary), "--exact", "startup::tests::db_startup_inputs_dump", "--nocapture"]
-        if mutant:
-            env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
+    argv = [str(binary), "--exact", "startup::tests::db_startup_inputs_dump", "--nocapture"]
+    if mutant:
+        env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
     start = time.time()
     run = subprocess.run(argv, cwd=REPO, env=env, capture_output=True, text=True, timeout=120)
     window = [start, time.time()]
@@ -291,15 +150,6 @@ def invoke(binary, kind, dsn, home, output, mutant=None, case=None):
             or retained.get("startup", {}).get("hlc_reseed_pending") is not True):
         raise RuntimeError(f"{kind} retained an incomplete startup or a resolved clock failure")
     return result, window
-
-
-def source_stale_dims(error):
-    """Retain the real service guard's count and dimensions, never its path."""
-    match = re.search(r"Refusing to serve: (\d+) hydrated row\(s\).*? are embedded at "
-                      r"(\d+(?:, \d+)*) dims, but the live embedder .*? produces 1024-d vectors", error)
-    if match is None:
-        return None
-    return {"count": int(match[1]), "dims": [int(value) for value in match[2].split(", ")]}
 
 
 def normalized_result(result):
@@ -352,7 +202,7 @@ def start_delta(before, state, rules):
     first column (the key) of each template row it rewrote or removed, and
     each catalog row it added or removed. Rows are counted as multisets, so a
     duplicated row is a change. A table's rows sit under ``rows`` so that a
-    difference reads like the live comparison's
+    difference reads like a full state comparison's
     (``/rows/public.entries/rows: ...``).
     """
     from collections import Counter
@@ -397,12 +247,11 @@ def epoch(state):
     return next(row[value] for row in table["rows"] if row[key] == "writer_lease_epoch")
 
 
-def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
-    """One case on cloned banks. With ``oracle`` the Python service starts
-    beside Rust and each stage compares the two; without it (golden checking)
-    only Rust starts, and ``expected`` (the case's committed snapshot and
-    database stages) is its expectation. Both modes use the same fixture rows."""
-    arms = ("python", "rust") if oracle else ("rust",)
+def cell(binary, number, case, result, mutant=None, expected=None):
+    """One case on a bank cloned from its seeded template: Rust starts twice,
+    and ``expected`` (the case's committed snapshot and database stages, None
+    when recording from the candidate) is its expectation."""
+    arms = ("rust",)
     names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []
     try:
@@ -439,7 +288,7 @@ def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
                 expected_error = ("stale-hydrated-dimensions" if case in STALE_FAILURES
                                   else REQUIRED_FAILURES[case][3] if case in REQUIRED_FAILURES
                                   else "coordination-highwater")
-                semantic_diffs = dbstate.diff(*(normalized_result(output) for output in outputs)) if oracle else []
+                semantic_diffs = []
                 for kind, output, state in zip(arms, outputs, states):
                     if output["ok"] != expected_ok:
                         semantic_diffs.append(f"{kind}: expected ok={expected_ok}")
@@ -482,8 +331,6 @@ def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
                     "windows": dict(zip(arms, windows)),
                     "database": {kind: start_delta(before, state, rules) for kind, state in zip(arms, states)},
                 }
-                if oracle:
-                    stage["db_diffs"] = dbstate.diff(*(dbstate.normalize(state, rules, before) for state in states))
                 if expected is not None:
                     # The golden is the left side, which dbstate.diff labels "python".
                     stage["golden_diffs"] = dbstate.diff(
@@ -525,21 +372,25 @@ def failed(result):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--only", nargs="+", choices=CASES)
     parser.add_argument("--part", type=int, choices=(1, 2), help="one CI part's cases (part_cases)")
     parser.add_argument("--mutants", action="store_true")
+    # Outside the group, so its retirement message wins over "not allowed with".
+    parser.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     golden_mode = parser.add_mutually_exclusive_group()
-    golden_mode.add_argument("--record-goldens", action="store_true")
     golden_mode.add_argument("--check-goldens", action="store_true")
     golden_mode.add_argument("--record-candidate", action="store_true",
                              help="re-record the golden from the Rust candidate (candidate_record.py); a dry "
                                   "run unless --write")
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
-    parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    # Retired modes refuse first: before the database turn and any check.
+    if args.record_goldens:
+        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -552,13 +403,8 @@ def main(argv=None):
             _turn_sys.path.remove(_turn_root)
     if pg.SLICE != "pgs":
         parser.error("startup cells require PL_HARNESS_SLICE=pgs")
-    if args.oracle_cell:
-        oracle_cell()
-        return 0
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
-    if args.record_goldens and (args.only or args.part):
-        parser.error("--record-goldens requires the complete startup matrix")
     if args.only and args.part:
         parser.error("--only and --part select cases differently; give one")
     if args.write and not args.record_candidate:
@@ -575,23 +421,20 @@ def main(argv=None):
     payload = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
                "normalizers": NORMALIZERS, "cells": []}
     number = time.time_ns()
-    golden_path = HERE / "goldens" / "startup-hydration.json"
-    goldens = json.loads(golden_path.read_text()) if args.check_goldens else None
-    oracle = goldens is None
+    golden_path = GOLDEN
+    goldens = json.loads(golden_path.read_text())
 
     def expected(case):
-        if not goldens:
-            return None
         if case not in goldens["cases"] or case not in goldens.get("database", {}):
-            raise RuntimeError(f"startup-hydration.json has no committed golden for {case}; record it with "
-                               "`python rust/daemon/harness/startup_ci.py --record-goldens`")
+            raise RuntimeError(f"startup-hydration.json has no committed golden for {case}; "
+                               + candidate_record.startup_recording("startup_cases.py"))
         return {"snapshot": goldens["cases"][case], "database": goldens["database"][case]}
 
     for index, case in enumerate(args.only or (part_cases(args.part) if args.part else CASES)):
         result = {"case": case}
         payload["cells"].append(result)
         try:
-            cell(binary, number + index * 3, case, result, expected=expected(case), oracle=oracle)
+            cell(binary, number + index * 3, case, result, expected=expected(case))
         except Exception as error:
             result["error"] = str(error)
         args.out.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
@@ -603,17 +446,16 @@ def main(argv=None):
             result = {"case": mutant_case}
             try:
                 cell(binary, number + 1000 + index * 3, mutant_case, result, mutant=mutant,
-                     expected=expected(mutant_case), oracle=oracle)
+                     expected=expected(mutant_case))
             except Exception as error:
                 result["error"] = str(error)
             stages = result.get("stages", [])
             # An infrastructure failure is never proof of a source mutant.
             infrastructure_failed = bool(result.get("error") or result.get("cleanup_errors") or any(
                 stage.get("clock_diffs") or stage.get("epoch_diffs") for stage in stages))
-            # Live, a mutant shows as a Python/Rust difference; checking
-            # goldens, as a difference from the committed stage.
+            # A mutant shows as a difference from the committed stage.
             differences = [difference for stage in stages
-                           for key in ("snapshot_diffs", "db_diffs", "golden_diffs", "db_golden_diffs")
+                           for key in ("snapshot_diffs", "golden_diffs", "db_golden_diffs")
                            for difference in stage.get(key, [])]
             caught = not infrastructure_failed and len(stages) == 2 and any(
                 reaches(difference, wanted_path) for difference in differences)
@@ -626,24 +468,17 @@ def main(argv=None):
             print(f"startup mutant {mutant}: {'caught' if caught else 'SURVIVED'}", flush=True)
             args.out.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
         bad = any(not value["caught"] for value in payload["mutants"].values())
-    if args.record_goldens and not bad:
-        golden_path.write_text(json.dumps({"normalizers": NORMALIZERS, "oracle_head": payload["head"],
-            "cases": {result["case"]: [normalized_result(s["snapshots"]["python"]) for s in result["stages"]]
-                      for result in payload["cells"]},
-            "database": {result["case"]: [s["database"]["python"] for s in result["stages"]]
-                         for result in payload["cells"]}}, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return int(bad)
 
 
 def record_candidate(args, binary):
     """--record-candidate: each selected case starts on the candidate alone
     and is classed against startup-hydration.json (candidate_record.py)."""
-    import candidate_record
     why = candidate_record.refuse_mutant_environment()
     if why:
         print(f"startup record-candidate refused: {why}", flush=True)
         return 1
-    golden_path = HERE / "goldens" / "startup-hydration.json"
+    golden_path = GOLDEN
     recording = candidate_record.Recording(golden_path, ("cases", "database"), binary, whole=not args.only,
                                            defined=list(CASES))
     recording.write = args.write
@@ -654,7 +489,7 @@ def record_candidate(args, binary):
         result = {"case": case}
         payload["cells"].append(result)
         try:
-            cell(binary, number + index * 3, case, result, oracle=False)
+            cell(binary, number + index * 3, case, result)
         except Exception as error:
             result["error"] = str(error)
         stages = result.get("stages", [])

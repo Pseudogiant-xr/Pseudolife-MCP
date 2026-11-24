@@ -2788,3 +2788,77 @@ def test_login_stdout_failure_normalization_keeps_native_pipe_lf(monkeypatch, wi
     before = dict(malformed)
     test_login.stdout_failure_rule(malformed)
     assert malformed == before
+
+
+def test_frozen_python_marker_decides_on_finding_the_package(monkeypatch):
+    import importlib.util
+    from cli_harness import frozen_python
+
+    # The marker was built from the import system's answer, wherever the
+    # package is found (a checkout or an installed wheel).
+    mark = frozen_python.only_frozen_python.mark
+    assert mark.name == "skipif"
+    assert mark.args == (importlib.util.find_spec("pseudolife_memory") is None,)
+    assert mark.kwargs == {"reason": "frozen Python only: deleted with the package"}
+    asked = []
+    found = object()
+
+    def find(answer):
+        def find_spec(name, *args):
+            asked.append(name)
+            return answer
+        return find_spec
+
+    monkeypatch.setattr(importlib.util, "find_spec", find(None))
+    assert frozen_python.package_present() is False
+    # A package that is found but broken is not "absent": its tests run and fail.
+    monkeypatch.setattr(importlib.util, "find_spec", find(found))
+    assert frozen_python.package_present() is True
+    assert asked == ["pseudolife_memory", "pseudolife_memory"]
+
+
+def test_test_login_seed_runs_with_frozen_imports_blocked(tmp_path):
+    import re
+    from types import SimpleNamespace
+    from cli_harness.rows import test_login
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    scripts = []
+
+    class Server:  # the container path's psql seam: one script per database
+        def psql(self, script, dbname):
+            scripts.append((dbname, script))
+
+    home = tmp_path / "home"
+    with cold_harness_imports():
+        test_login._seed_login(SimpleNamespace(home=home), Server())
+    assert [dbname for dbname, _ in scripts] == ["postgres", "template1"]
+    roles, extensions = scripts[0][1], scripts[1][1]
+    assert roles.startswith("BEGIN;\n") and roles.endswith("SELECT 'ok';\nCOMMIT;\n")
+    assert f'CREATE ROLE "{test_login.ROLE}" WITH LOGIN CREATEDB NOSUPERUSER' in roles
+    assert f'REVOKE CONNECT ON DATABASE "{test_login._cluster.BANK}" FROM PUBLIC;' in roles
+    verifier = re.search(r"PASSWORD '(SCRAM-SHA-256\$[^']+)'", roles)[1]
+    assert test_login._verifier_check(verifier, test_login.SEEDED_PASSWORD) == {
+        "method": "SCRAM-SHA-256", "iterations": 4096, "salt_bytes": 16,
+        "stored_key": True, "server_key": True}
+    assert extensions == ('CREATE EXTENSION IF NOT EXISTS "vector";\n'
+                          'ALTER EXTENSION "vector" UPDATE;\n')
+    login = home / test_login.LOGIN_REL
+    assert login.read_bytes() == (
+        "# Pseudolife-MCP test login, written by `pseudolife-mcp test-login create`.\n"
+        "# The PostgreSQL role the test suite logs in as: it creates and drops its own\n"
+        "# databases and cannot connect to the bank. Not the bank owner's password.\n"
+        "# Rotate with `pseudolife-mcp test-login create --rotate`.\n"
+        f"{test_login.USER_KEY}={test_login.ROLE}\n"
+        f"{test_login.PASSWORD_KEY}={test_login.SEEDED_PASSWORD}\n").encode()
+    assert sorted(path.name for path in login.parent.iterdir()) == [login.name]
+    if os.name == "nt":
+        # What the row records for an owner-only login file.
+        assert test_login._permissions(login) == {"owner": "<me>", "protected": True,
+                                                  "aces": ["(A;;FA;;;OW)"]}
+    else:
+        umask = os.umask(0)
+        os.umask(umask)
+        assert login.stat().st_mode & 0o777 == 0o600
+        # The folder keeps the default mode, as the command's own writer leaves it.
+        assert login.parent.stat().st_mode & 0o777 == 0o777 & ~umask

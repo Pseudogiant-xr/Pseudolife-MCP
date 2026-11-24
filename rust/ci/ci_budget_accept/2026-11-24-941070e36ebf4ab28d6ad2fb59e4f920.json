@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "fba99601308c7ff7",
+  "fingerprint": "42ec8b1f257c8e30",
+  "reason": "rust/ci/parity_scope.py drops its test_login entry, so a change under rust/shim/src/cli/test_login/ reaches the whole binary's rows (cli and every W1-C shard) instead of w1c-connection alone, because every cli and W1-C shard's PostgreSQL prep (rust/cli_harness/lease_ci.py) now runs the native test-login create. No job, shard, matrix value, step or timeout changes, so each shard's measured minutes hold; only pull requests that touch test_login code select more shards, as every other shim file already does."
+}

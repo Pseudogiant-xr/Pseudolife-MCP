@@ -4,7 +4,7 @@ Resolution order for the test server:
 
 1. ``PSEUDOLIFE_TEST_DATABASE_URL`` env var (any reachable PG 16+vector;
    refused if it names a production bank — see
-   ``storage.schema.assert_disposable_database``).
+   ``rust/harness_support/database_guard.py``, ``assert_disposable_database``).
 2. The repo's dev container at ``127.0.0.1:5433`` (ops/docker-compose.yml).
 
 If neither is reachable, PG-backed tests skip cleanly so the pure-logic
@@ -59,20 +59,30 @@ from tests.pg_defaults import (  # noqa: E402
 # reintroduce the concurrent-run reaper crossfire.
 _TEST_DB = f"pseudolife_memory_test_{run_suffix()}"
 
-# The truncate list. Was a hand-maintained copy of the FK-free tables
-# CASCADE cannot reach — which is a list that has to be re-derived on every
-# schema bump, and it had already drifted (`communities` was missing) while
-# the eval harness's own copy had drifted much further (#181, 2026-08-25).
-# One list now, defined beside the DDL and completeness-checked by
-# tests/test_bench_reset_tables.py.
-from pseudolife_memory.storage.schema import (  # noqa: E402
-    BENCH_RESET_TABLES as _ALL_TABLES,
+# The production-bank guard: the package-free one in rust/harness_support,
+# which decides exactly as the frozen package's copy does
+# (rust/harness_support/test_database_guard.py), so this module loads and
+# refuses the same banks whether or not the package is importable
+# (tests/test_fixture_guards_package_absent.py).
+from rust.harness_support.database_guard import (  # noqa: E402
     assert_disposable_database,
     refuse_production_database,
 )
-from pseudolife_memory.service_dream import (  # noqa: E402
-    SESSION_END_DREAM_THREAD_NAME,
-)
+
+
+def _reset_tables() -> tuple[str, ...]:
+    """The truncate list, read when a reset needs it.
+
+    Was a hand-maintained copy of the FK-free tables CASCADE cannot reach —
+    a list that has to be re-derived on every schema bump, and it had
+    already drifted (`communities` was missing) while the eval harness's own
+    copy had drifted much further (#181, 2026-08-25). One list now, defined
+    beside the frozen package's DDL that ``pg_conn`` runs and
+    completeness-checked by tests/test_bench_reset_tables.py; imported here,
+    not at module load, because only that package-backed reset reads it."""
+    from pseudolife_memory.storage.schema import BENCH_RESET_TABLES
+
+    return BENCH_RESET_TABLES
 
 
 def _admin_url() -> str:
@@ -302,6 +312,10 @@ def _foreign_owner_refusal(conn, db_name: str) -> str | None:
 # CI run 35556355319). Anything near this budget is a hung dream.
 DREAM_WAIT_BUDGET_SECONDS = 60.0
 
+# The thread name the frozen package's end-of-session dream runs under
+# (pseudolife_memory.service_dream.SESSION_END_DREAM_THREAD_NAME).
+SESSION_END_DREAM_THREAD_NAME = "session-end-dream"
+
 # Thread idents already reported as stragglers. A thread stuck past the
 # budget once is not re-joined on every later PG test — that would turn one
 # hung dream into a full budget plus a failure per remaining test.
@@ -325,10 +339,18 @@ def wait_for_background_dreams(
     returned so the caller can fail loudly instead of racing it. A thread
     reported once is returned again without a second wait.
     """
+    # The name the frozen package's service gives these threads. Read from
+    # its module when this process imported it; otherwise the same literal
+    # (pinned equal by tests/test_fixture_guards_package_absent.py), so a
+    # dream thread is still waited for if the module was imported in an
+    # unusual way, and the wait works without the package.
+    service_dream = sys.modules.get("pseudolife_memory.service_dream")
+    thread_name = getattr(service_dream, "SESSION_END_DREAM_THREAD_NAME",
+                          SESSION_END_DREAM_THREAD_NAME)
     deadline = _time.monotonic() + timeout
     stragglers: list[threading.Thread] = []
     for thread in threading.enumerate():
-        if (thread.name != SESSION_END_DREAM_THREAD_NAME
+        if (thread.name != thread_name
                 or thread is threading.current_thread()):
             continue
         if thread.ident not in _reported_stragglers:
@@ -401,9 +423,10 @@ def pg_service(pg_url, pg_conn, tmp_path, monkeypatch):
 # own constants, not input. An empty table needs no TRUNCATE; BENCH_RESET_TABLES
 # names every declared table (tests/test_bench_reset_tables.py), so none is
 # missed, and CASCADE still reaches FK children of a truncated table.
-_HOLDS_ROWS_SQL = " UNION ALL ".join(
-    f"SELECT '{table}' WHERE EXISTS (SELECT 1 FROM {table})"
-    for table in _ALL_TABLES)
+def _holds_rows_sql(tables: tuple[str, ...]) -> str:
+    return " UNION ALL ".join(
+        f"SELECT '{table}' WHERE EXISTS (SELECT 1 FROM {table})"
+        for table in tables)
 
 # What TRUNCATE ... RESTART IDENTITY did for the tables now skipped: restart
 # their serial and identity sequences, but through setval, which updates the
@@ -432,12 +455,13 @@ WHERE d.classid = 'pg_class'::regclass
 def _tables_holding_rows(conn) -> list[str]:
     """The reset tables to truncate, in list order: those holding rows, and
     always ``meta``, whose schema_version row the reset re-seeds."""
-    holding = {row[0] for row in conn.execute(_HOLDS_ROWS_SQL).fetchall()}
-    return [t for t in _ALL_TABLES if t == "meta" or t in holding]
+    tables = _reset_tables()
+    holding = {row[0] for row in conn.execute(_holds_rows_sql(tables)).fetchall()}
+    return [t for t in tables if t == "meta" or t in holding]
 
 
 def _restart_skipped_sequences(conn, truncated: list[str]) -> None:
-    conn.execute(_RESTART_SKIPPED_SQL, (list(_ALL_TABLES), truncated))
+    conn.execute(_RESTART_SKIPPED_SQL, (list(_reset_tables()), truncated))
 
 
 @pytest.fixture()
@@ -451,12 +475,11 @@ def _pg_conn_session(pg_url):
     background dreams, reap leaked backends, ensure the schema, truncate,
     re-seed the schema_version row, yield the connection. Separate from the
     fixture so tests/test_pg_fixture_dream_wait.py can run one setup pass
-    on demand and pin that the wait happens BEFORE the first connection."""
-    from pseudolife_memory.storage.schema import (
-        SCHEMA_META_VERSION,
-        ensure_schema,
-    )
+    on demand and pin that the wait happens BEFORE the first connection.
 
+    The schema this reset runs is the frozen package's (its tests are what
+    ``pg_conn`` serves), imported only after the server check below, so a
+    production bank is refused the same way with or without the package."""
     # BEFORE the reap: a dream thread the previous test fired is this
     # process's own live backend. Killing it mid-dream makes the storage
     # layer reconnect, and that fresh transaction can deadlock the TRUNCATE
@@ -468,6 +491,11 @@ def _pg_conn_session(pg_url):
         # server, not the DSN, says which database this is — and it must not
         # be a production bank (tests/test_disposable_database_guard.py).
         assert_disposable_database(conn)
+        from pseudolife_memory.storage.schema import (
+            SCHEMA_META_VERSION,
+            ensure_schema,
+        )
+
         # Pin to public BEFORE any schema/truncate work — mirrors
         # PostgresStorage.__init__. The DB role `pseudolife` can clash with
         # schema names, so the default ("$user", public) search_path could

@@ -63,6 +63,10 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     # No row runs the installer steps; their goldens and contract binaries do.
     (["rust/shim/src/cli/installer/engine.rs", "rust/shim/src/cli/installer/state.rs"], set()),
     (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing"}),
+    # Every cli and W1-C shard's PostgreSQL prep (lease_ci.py) runs the
+    # native test-login, so its code reaches them all, not only its row's.
+    (["rust/shim/src/cli/test_login/mod.rs"], {"w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect"}),
+    (["rust/shim/src/cli/test_login/create_help.txt"], {"w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect"}),
     # Helpers other commands import reach the whole binary (Codex review:
     # tunnel uses hook_json, board_audit uses lease).
     (["rust/shim/src/cli/hook_json.rs"], set(parity_scope.SHIM) - set(FLOOR)),

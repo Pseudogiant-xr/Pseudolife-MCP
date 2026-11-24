@@ -80,9 +80,11 @@ STACKED_PREFIX = "stacked/"
 # so a lone ready one (an urgent fix, a revert, a release cut) gets its full
 # CI as a batch of one instead of merging directly.
 MIN_MEMBERS = 1
-# A release cut (a member changing project.version in pyproject.toml) is
-# batched alone: the release is tagged at the batch's merge, so whatever
-# shares the batch ships in that release, while its notes are the fragments
+# A release cut (a member changing the release version: the native client
+# crate's, rust/shim/Cargo.toml, or project.version in pyproject.toml while
+# the wheel is published; _changes_release_version) is batched alone: the
+# release is tagged at the batch's merge, so whatever shares the batch ships
+# in that release, while its notes are the fragments
 # the cut folded; a change merged beside the cut would ship with its
 # fragment unfolded, described under the next release. For the same reason
 # a cut must fold every fragment on master (_release_cut_alone).
@@ -1238,6 +1240,45 @@ def _project_version(rev: str) -> str | None:
     return None
 
 
+@functools.lru_cache(maxsize=1)
+def _release_version_reader():
+    # Load this controller's reader (rust/ci/release_version.py beside it),
+    # never Python from the candidate head.
+    name = "_integrate_release_version"
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).resolve().parents[1] / "rust" / "ci" / "release_version.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _native_version(rev: str) -> str | None:
+    """The release version at `rev`: `[package] version` in the native client
+    crate (rust/shim/Cargo.toml), or None where `rev` has none."""
+    reader = _release_version_reader()
+    shown = git("show", f"{rev}:{reader.AUTHORITY}", check=False)
+    if shown.returncode != 0:
+        return None
+    try:
+        return reader.from_manifest(shown.stdout)
+    except reader.VersionError:
+        return None
+
+
+def _changes_release_version(base: str, head: str) -> bool:
+    """Whether `head` changes the release version against `base`: the native
+    one, or pyproject.toml's while the wheel is published. Each counts only
+    where both revisions carry it, so a revision before the crate existed is
+    no signal, and neither is the pull request that deletes pyproject.toml
+    with the package (it changes no version)."""
+    for read in (_native_version, _project_version):
+        versions = read(base), read(head)
+        if None not in versions and versions[0] != versions[1]:
+            return True
+    return False
+
+
 def _fragments(rev: str) -> set[str]:
     """The changelog fragments at `rev`: changelog.d/*.md but its README, as
     ops/assemble_changelog.py folds them."""
@@ -1247,9 +1288,9 @@ def _fragments(rev: str) -> set[str]:
 
 
 def _is_release_cut(base_sha: str, m: Member) -> bool:
-    """A member whose own diff changes project.version."""
+    """A member whose own diff changes the release version (_changes_release_version)."""
     common = git("merge-base", base_sha, m.sha, check=False)
-    return common.returncode == 0 and _project_version(m.sha) != _project_version(common.stdout.strip())
+    return common.returncode == 0 and _changes_release_version(common.stdout.strip(), m.sha)
 
 
 def _unfolded_reason(base_sha: str, fork: str, m: Member) -> str | None:
@@ -1271,7 +1312,7 @@ def _unfolded_reason(base_sha: str, fork: str, m: Member) -> str | None:
 
 def _release_cut_alone(plan: Plan, members: list[Member], refused: dict | None = None) -> list[Member]:
     """The members to merge: all of them, or only the first ready release cut
-    (a member whose own diff changes project.version), with the others
+    (a member whose own diff changes the release version), with the others
     left out keeping their labels.
 
     The cut is alone because the release is tagged at the batch's merge:
@@ -1293,7 +1334,7 @@ def _release_cut_alone(plan: Plan, members: list[Member], refused: dict | None =
         if m.sha in refused or _carried(refused, m):
             continue
         base = _out("merge-base", plan.base_sha, m.sha)
-        if _project_version(m.sha) == _project_version(base):
+        if not _changes_release_version(base, m.sha):
             continue
         reason = _unfolded_reason(plan.base_sha, base, m)
         if reason:

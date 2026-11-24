@@ -28,6 +28,7 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 
 from pseudolife_memory.storage import schema
+from rust.harness_support import database_guard as guard
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "evals"))
@@ -171,6 +172,14 @@ _RESET_SITES = {
     "evals/_python_ladder_sweep.py::reset_bench": _run_ladder_reset_bench,
     "tests/test_transfer_cli.py::_bank": _run_transfer_bank,
 }
+# The refusal each site raises: the suite's own fixtures use the package-free
+# guard (rust/harness_support), the frozen eval and the transfer test the
+# package's copy, which decides the same way.
+_REFUSALS = {
+    "tests/pg_fixtures.py::_pg_conn_session": guard.ProductionDatabaseError,
+    "evals/_python_ladder_sweep.py::reset_bench": schema.ProductionDatabaseError,
+    "tests/test_transfer_cli.py::_bank": schema.ProductionDatabaseError,
+}
 
 
 @pytest.fixture
@@ -185,7 +194,7 @@ def allowed_bench_name(monkeypatch):
 def test_reset_refuses_the_production_bank_before_touching_it(
         site, server_db, stub_server, allowed_bench_name):
     stub_server.target = server_db
-    with pytest.raises(schema.ProductionDatabaseError):
+    with pytest.raises(_REFUSALS[site]):
         _RESET_SITES[site]()
     sent_to_bank = [sql for db, sql in stub_server.statements if db == server_db]
     assert sent_to_bank == [_PROBE], (
@@ -204,7 +213,7 @@ def test_reset_refuses_the_bank_the_daemon_dsn_names(
     stub_server.target = "renamed_bank"
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL",
                        "host=127.0.0.1 port=5433 dbname=renamed_bank user=u")
-    with pytest.raises(schema.ProductionDatabaseError):
+    with pytest.raises(_REFUSALS[site]):
         _RESET_SITES[site]()
     assert [sql for db, sql in stub_server.statements
             if db == "renamed_bank"] == [_PROBE]
@@ -401,7 +410,7 @@ def test_reset_refuses_before_touching_a_bank_the_daemon_dsn_names_implicitly(
     monkeypatch.delenv("PGSERVICE", raising=False)
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
     stub_server.target = "live_bank"
-    with pytest.raises(schema.ProductionDatabaseError):
+    with pytest.raises(_REFUSALS[site]):
         _RESET_SITES[site]()
     sent_to_bank = [sql for db, sql in stub_server.statements
                     if db == "live_bank"]
@@ -482,11 +491,11 @@ def test_test_db_override_naming_the_bank_is_refused(
         monkeypatch.setenv("PYTEST_XDIST_WORKER", worker)
     else:
         monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
-    with pytest.raises(schema.ProductionDatabaseError):
+    with pytest.raises(guard.ProductionDatabaseError):
         pg_fixtures._target_db_name()
-    with pytest.raises(schema.ProductionDatabaseError):
+    with pytest.raises(guard.ProductionDatabaseError):
         pg_fixtures.resolve_test_db_url()
-    with pytest.raises(schema.ProductionDatabaseError):
+    with pytest.raises(guard.ProductionDatabaseError):
         pg_fixtures.ensure_test_db()
 
 
@@ -575,7 +584,8 @@ def test_every_harness_guard_allows_a_replay_copy(harness, clean_env):
 # The two statements that wreck a bank the reset did not own: the mass reap
 # of every other backend on the database, and a TRUNCATE assembled from a
 # table list (the tree's only spelling of a full-bank reset —
-# BENCH_RESET_TABLES, or pg_fixtures'/ladder_sweep's _ALL_TABLES alias).
+# BENCH_RESET_TABLES, read by pg_fixtures' _reset_tables() and aliased as
+# ladder_sweep's _ALL_TABLES).
 # Killing ONE known pid (a test's own storage connection) is not a reap.
 _REAP_ALL = "pg_terminate_backend(pid) FROM pg_stat_activity"
 _TRUNCATE_HEAD = "TRUNCATE "

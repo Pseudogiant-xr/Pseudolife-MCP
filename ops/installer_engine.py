@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import secrets
 import subprocess
 import sys
@@ -33,6 +32,7 @@ if str(Path(__file__).resolve().parents[1]) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pseudolife_memory import update_cli as up  # noqa: E402
 from pseudolife_memory import update_engine as eng  # noqa: E402
+from rust.ci import release_version  # noqa: E402
 
 OVERLAY = "docker-compose.engine-installer.yml"
 PROJECT = "pseudolife-mcp"
@@ -126,11 +126,25 @@ def detect(repo: Path | None = None) -> str:
 
 
 def checkout_version(repo: Path) -> str:
-    match = re.search(r'^version\s*=\s*"([^"]+)"', (repo / "pyproject.toml").read_text(encoding="utf-8"), re.M)
-    if not match or not up.plain_release(match.group(1)):
-        raise Unavailable("Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. "
-                      "Nothing was started.")
-    return match.group(1)
+    """The checkout's release version: the native client crate's
+    (rust/ci/release_version.py). An unreadable crate file is a refusal, not
+    unavailability: the checkout is broken, so the default does not fall
+    back (as the native installer engine decides)."""
+    manifest = release_version.AUTHORITY
+    try:
+        text = (repo / manifest).read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as error:
+        why = error.strerror if isinstance(error, OSError) and error.strerror else "not UTF-8 text"
+        raise Refusal(f"Cannot read {manifest} in this checkout ({why}); restore it (git checkout -- "
+                      f"{manifest}) and rerun. Nothing was started.") from None
+    try:
+        version = release_version.from_manifest(text)
+    except release_version.VersionError:
+        version = None
+    if not version or not up.plain_release(version):
+        raise Unavailable(f"Cannot read a release version from this checkout's {manifest}; "
+                          "rerun with --engine python. Nothing was started.")
+    return version
 
 
 def overlay_path() -> Path:

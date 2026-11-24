@@ -3814,9 +3814,10 @@ browser on Windows, macOS and Linux desktops. If the browser cannot open,
 the client prints the validated sign-in link and the cause. See
 [Signing in to the Console](#signing-in-to-the-console) and
 [Moving a bank](remote-bank.md#moving-a-bank) for native `move` requirements.
-Unsupported `tunnel` operations still exit 1 with the deferral message.
+`tunnel` refuses the forms that are not part of the native client with the
+cause and what to run instead (exit 2).
 See [Tunnels](tunnels.md) for the supported foreground lifecycle and the
-commands that still need the Python client.
+forms only the Python client has.
 
 The native tunnel step reports a verified matching launch as `current`. A compatible supervisor can reconnect on the verified installed shim. It reports `refreshed` after the live vendor answers its local readiness probe and the bridge acknowledges the signed launch. It verifies the pinned tunnel client, the candidate's readiness protocol and the saved daemon connection before interrupting the old process. A failed check leaves the running child alone. A candidate that fails readiness triggers a rollback to the previous shim when the supervisor confirms the candidate exited. Reports of a refusal, successful rollback or a reply deadline with the launch still owned are `stale` and exit 0. Older foreground supervisors and vendor version changes need the stop and run commands in the report. Restart an older service-managed launch through its manager. See [Tunnels](tunnels.md) for Python-supervised launches and cloud verification. The tunnel step exits 2 if it cannot safely read the store or a profile, if the tunnel stops during refresh, if rollback fails, or if the supervisor cannot confirm the child exited. A supervisor that disappears before reporting also yields exit 2. The outer update reports that failure with exit 5.
 

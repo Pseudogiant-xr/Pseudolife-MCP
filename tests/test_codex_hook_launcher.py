@@ -226,13 +226,30 @@ def test_a_launcher_from_an_earlier_release_is_rewritten_by_a_refresh(tmp_path, 
     assert (root / "run.sh").read_bytes() == setup.LAUNCHERS["run.sh"]
 
 
+def test_the_launchers_before_the_native_repair_text_are_rewritten_by_a_refresh(tmp_path):
+    """#1609: the launchers every release shipped until they named a native
+    repair step are known, and a refresh moves a host carrying them."""
+    setup.install_manual(tmp_path, report())
+    root = _hooks_root(tmp_path)
+    for name, data in setup.LAUNCHERS.items():
+        assert b".py" not in data, name
+        earlier = (data.replace(b"by the PseudoLife installer.", b"by ops/setup-codex-hooks.py.")
+                   .replace(b"rerun the installer and approve the Codex hooks",
+                            b"rerun: python ops/setup-codex-hooks.py"))
+        assert hashlib.sha256(earlier).hexdigest() in setup.PREVIOUS_LAUNCHERS[name], name
+        (root / name).write_bytes(earlier)
+    setup.refresh_manual(tmp_path, _scripts(tmp_path / "newer", tweak="newer"))
+    for name, data in setup.LAUNCHERS.items():
+        assert (root / name).read_bytes() == data, name
+
+
 def test_every_shipped_launcher_is_known_to_later_releases():
     """Changing a launcher? Add the previous bytes' sha256 to
     PREVIOUS_LAUNCHERS in ops/setup-codex-hooks.py and the new ones here,
     or every existing manual install stops refreshing."""
     assert {name: hashlib.sha256(data).hexdigest() for name, data in setup.LAUNCHERS.items()} == {
-        "run.sh": "23dc357bbddc1b4687f9ddfe54f8591b03fbc6e1b19bd41c3aeb2834b0f0a1ce",
-        "run.ps1": "0ff3ff20c091588aa5b8bf2d2f6859c0ade5a922ba83f9ac8b824415f09d2bc7",
+        "run.sh": "24443d25914314c21b81081fa7adbcd0e577860e6a7adb69c9326835998f239b",
+        "run.ps1": "2c436e82c4a934bace34d37d73dd0ec9ea398078affaf2151c46b3ac403a0ddb",
     }
 
 
