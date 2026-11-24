@@ -131,8 +131,24 @@ def _release(directory: Path, *, client: str, digest_override: str | None = None
     (directory / "SHA256SUMS").write_text("" if omit else f"{digest}  {asset}\n", encoding="utf-8")
 
 
+def _write_crate(repo: Path, manifest: str | None = None) -> None:
+    """The checkout's native client crate, with near misses around its
+    version: other tables' `version` keys before and after it, an inline
+    table, a capitalised key and a comment after the table header."""
+    crate = repo / "rust" / "shim" / "Cargo.toml"
+    crate.parent.mkdir(parents=True, exist_ok=True)
+    if manifest == "":
+        crate.unlink(missing_ok=True)
+        return
+    default = ('[lints]\nversion = "0.0.2"\n[package] # the native client\nname = "pseudolife-stdio"\n'
+               f'Version = "0.0.3"\nrmcp = {{ version = "0.0.4" }}\nversion = "{VERSION}"\n\n'
+               '[dependencies]\nversion = "0.0.1"\n')
+    crate.write_text(manifest if manifest is not None else default, encoding="utf-8", newline="\n")
+
+
 def _run(client: str, tmp_path: Path, body: str, *, release: bool = True, host_only: bool = False,
-         extra_env: dict[str, str] | None = None, **release_kwargs) -> subprocess.CompletedProcess:
+         extra_env: dict[str, str] | None = None, manifest: str | None = None,
+         **release_kwargs) -> subprocess.CompletedProcess:
     """``body`` run after the installer's native-client block; ``client``
     ("stub" or "real") is the release ``_release`` packs. A host-only
     control runs the body with the same sandbox setup and no installer code."""
@@ -140,7 +156,11 @@ def _run(client: str, tmp_path: Path, body: str, *, release: bool = True, host_o
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
-    (repo / "pyproject.toml").write_text(f'[project]\nversion = "{VERSION}"\n', encoding="utf-8")
+    # The checkout's release version is its native client crate's
+    # (``manifest`` replaces that file's text; ``""`` removes it);
+    # pyproject.toml carries a decoy version the installer must not read.
+    _write_crate(repo, manifest)
+    (repo / "pyproject.toml").write_text('[project]\nversion = "0.0.9"\n', encoding="utf-8")
     base = tmp_path / "release"
     if release:
         _release(base, client=client, **release_kwargs)
@@ -210,7 +230,8 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
      "with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C "
      "runtime and rerun that tag's installer with its matching archive."),
     (1, "version probe failed\nmore detail", "the downloaded client does not run on this host "
-     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."
+     " Or set $env:PSEUDOLIFE_SHIM_ENGINE = 'python' for the Python client."),
 ])
 def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_path, code, output, diagnostic):
     control = tmp_path / "host-control"
@@ -344,7 +365,7 @@ def test_a_python_client_registration_moves_to_the_native_launcher(tmp_path):
 @pytest.mark.parametrize("case, expected", [
     ("mismatch", "does not match the release's SHA256SUMS"),
     ("no-release", "has no SHA256SUMS"),
-    ("missing", "lists " + _asset("stub") + " 0 times, not once"),
+    ("missing", "its SHA256SUMS lists no " + _asset("stub")),
 ])
 def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case, expected):
     kwargs = {"mismatch": {"digest_override": "f" * 64}, "missing": {"omit": True}}.get(case, {})
@@ -356,6 +377,29 @@ def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case
     assert "STAGED" not in result.stdout
     assert not (tmp_path / "home" / "runtimes").exists()
     assert not (tmp_path / "home" / "bin").exists()
+
+
+@pytest.mark.parametrize("manifest", [
+    f'﻿[package]\r\nname = "pseudolife-stdio"\r\nversion = "{VERSION}"\r\n',
+    f"[package]\nversion = '{VERSION}' # cut\n",
+], ids=["byte-order-mark-crlf", "literal-string"])
+def test_every_one_line_string_version_is_read(tmp_path, manifest):
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host "VERSION=$($script:nativeVersion)"',
+                  manifest=manifest)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"VERSION={VERSION}" in result.stdout
+
+
+@pytest.mark.parametrize("manifest", ["", '[package]\nname = "pseudolife-stdio"\nversion.workspace = true\n'],
+                         ids=["no-crate", "no-literal-version"])
+def test_a_checkout_without_a_native_release_version_is_refused_naming_the_crate(tmp_path, manifest):
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', manifest=manifest)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert ("this checkout's rust/shim/Cargo.toml names no version. "
+            "Check out a release tag (git checkout v<version>) and rerun.") in line
+    assert not (tmp_path / "home" / "runtimes").exists()
 
 
 @pytest.mark.skipif(WINDOWS, reason="the v0.24.0 stand-in is a shell script; on Windows the fixture is a real client")
@@ -375,8 +419,9 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     assert f"the native client {VERSION} predates this installer" in line
     assert "installer --capability" in line and f"installer-protocol {LEVEL} or newer" in line
-    # The route that works today: the default client, then update moves it.
-    assert "without PSEUDOLIFE_SHIM_ENGINE" in line
+    # The route that works today: the Python client, then update moves it.
+    assert "rerunning the installer after $env:PSEUDOLIFE_SHIM_ENGINE = 'python'" in line
+    assert "without PSEUDOLIFE_SHIM_ENGINE" not in line
     assert "PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only" in line
     assert "release_assets" not in line and "PSEUDOLIFE_NATIVE_ARCHIVE_URL" not in line
     # What a refusal after the download leaves: the verified download only.
@@ -602,6 +647,19 @@ def test_a_checksum_line_in_no_standard_form_is_refused(tmp_path, separator):
     assert f"lists {_asset('stub')} 0 times, not once" in result.stderr
 
 
+def test_a_line_naming_the_archive_in_no_standard_form_refuses_even_when_defaulted(tmp_path):
+    # A listing for this platform that cannot be read is not a release
+    # without this platform: no hand-back to the Python client.
+    _rewrite_sums(tmp_path, " ", "stub")
+    body = "$global:PseudolifeClientDefaulted = $true\nInitialize-NativeClient; Write-Host STAGED\n"
+    result = _run("stub", tmp_path, body, release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert (f"lists {_asset('stub')} 0 times, not once (a line names it in no standard checksum form)"
+            in result.stderr)
+    assert "publishes no native client" not in result.stderr
+
+
 @pytest.mark.parametrize("value, used", [
     ("08", "8"), ("09", "9"), ("010", "10"), ("7", "7"), ("00", "30"), ("0", "30"),
     ("", "30"), ("abc", "30"), ("1.5", "30"), ("-3", "30"), ("123456", "30"),
@@ -618,11 +676,56 @@ def test_the_probe_deadline_is_read_as_a_decimal_number_of_seconds(tmp_path, val
 
 
 @pytest.mark.skipif(WINDOWS, reason="the v0.24.0 stand-in is a shell script; on Windows the fixture is a real client")
-def test_the_refusal_says_how_to_clear_the_variable_in_powershell(tmp_path):
+def test_the_refusal_says_how_to_set_the_python_client_in_powershell(tmp_path):
     result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env={"STUB_V0240": "1"})
     assert result.returncode == 1
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
-    assert "Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE" in line
+    assert "$env:PSEUDOLIFE_SHIM_ENGINE = 'python'" in line
+    assert "Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE" not in line
+
+
+PS_FALLBACK_CAUSES = [
+    ("platform", "function Get-NativeTarget { $null }\n", {}, "no native client is published for this platform"),
+    ("old-release", "", {"STUB_V0240": "1"}, f"the native client {VERSION} predates this installer"),
+    ("tunnel", "", {"STUB_REFUSE_TUNNEL": "1"}, "a tunnel is registered to start by itself"),
+]
+
+
+@pytest.mark.skipif(WINDOWS, reason="the stand-ins are shell scripts; on Windows the fixture is a real client")
+@pytest.mark.parametrize("case, prefix, env, cause", PS_FALLBACK_CAUSES, ids=[c[0] for c in PS_FALLBACK_CAUSES])
+def test_a_defaulted_powershell_run_hands_back_through_the_global(tmp_path, case, prefix, env, cause):
+    body = (prefix + "$global:PseudolifeClientDefaulted = $true\n"
+            "try { Initialize-NativeClient; Write-Host STAGED } finally {\n"
+            "  Write-Host \"HANDBACK=$($global:PseudolifeClientFallback)\" }\n")
+    result = _run("stub", tmp_path, body, extra_env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert "cannot be installed" not in result.stderr
+    [line] = [text for text in result.stdout.splitlines() if text.startswith("HANDBACK=")]
+    assert line.startswith(f"HANDBACK=the native client cannot serve this machine ({cause}"), line
+    assert line.endswith("chooses the Python client for later runs too"), line
+
+
+@pytest.mark.skipif(WINDOWS, reason="the stand-ins are shell scripts; on Windows the fixture is a real client")
+@pytest.mark.parametrize("defaulted, said", [("$true", True), ("$false", False)])
+def test_a_powershell_refusal_names_the_python_route_only_when_defaulted(tmp_path, defaulted, said):
+    body = (f"$global:PseudolifeClientDefaulted = {defaulted}\n"
+            "Stop-NativeInstall 'a cause' 'A fix.'\n")
+    result = _run("stub", tmp_path, body, release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert line.startswith("The native pseudolife-mcp client cannot be installed: a cause. A fix. Nothing was changed.")
+    assert line.endswith(
+        " To install the Python client instead, rerun after $env:PSEUDOLIFE_SHIM_ENGINE = 'python'.") is said
+
+
+@pytest.mark.skipif(WINDOWS, reason="the stand-ins are shell scripts; on Windows the fixture is a real client")
+def test_a_powershell_hand_back_never_follows_a_host_change(tmp_path):
+    body = ("$global:PseudolifeClientDefaulted = $true\n$script:nativeHostChanging = $true\n"
+            "Stop-NativeOrFallBack 'a cause' 'A fix.'\n")
+    result = _run("stub", tmp_path, body, release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "The install stopped part way: a cause. A fix." in result.stderr
 
 
 def test_a_mismatched_archive_refusal_names_only_what_is_kept(tmp_path):
@@ -640,9 +743,7 @@ def _whole_repo(tmp_path: Path) -> Path:
     shutil.copytree(ROOT / "ops", repo / "ops", ignore=shutil.ignore_patterns(".env", "__pycache__", "*.log"))
     if (ROOT / "examples").is_dir():
         shutil.copytree(ROOT / "examples", repo / "examples")
-    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    (repo / "pyproject.toml").write_text(re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{VERSION}"', text, count=1),
-                                         encoding="utf-8")
+    _write_crate(repo)
     return repo
 
 

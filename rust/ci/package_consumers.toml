@@ -220,6 +220,13 @@ class = "retained test tooling"
 reason = "The census and contract inventory read frozen package sources from Git at pinned commits, never the working tree; the command patterns only recognize Python CLI calls in shipped producers."
 
 [[rules]]
+globs = ["rust/ci/pr_precheck_run.py"]
+kinds = ["python-import"]
+class = "retained test tooling"
+reason = "Only the frozen merge-base judges import the package: PROCESS_BOOTSTRAP runs inside the oracle's own runtime, with --only judges or all, which no workflow starts (ops/harness_selection.py admits --only goldens alone). The golden replay starts its PostgreSQL through rust/ci/disposable_postgres.py and the candidate's native test-login. The judges retire with the package."
+retire_with_package = true
+
+[[rules]]
 globs = ["rust/ci/*oracle.py", "rust/ci/pr_precheck*.py"]
 kinds = ["command", "metadata", "path", "python-import"]
 class = "active dependency"

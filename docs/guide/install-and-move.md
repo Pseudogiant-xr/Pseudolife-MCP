@@ -76,14 +76,36 @@ install refuses it.
 
 ## Native client
 
-The installers select the Python client by default. To install the native
-client, check out a release tag that carries the native installer and set
-`PSEUDOLIFE_SHIM_ENGINE=native` before running the same installer. The native
-installer runs its setup and client-registration steps without host Python.
-It checks the platform archive against `SHA256SUMS` and confirms that the
-client supports the installer's setup commands before making changes. Use
-the installer and native archive from the same release. The client choice
-is independent of `--engine`, which selects the Docker daemon.
+The installers install the native client by default. It runs its setup and
+client-registration steps without host Python. It checks the platform archive
+against `SHA256SUMS` and confirms that the client supports the installer's
+setup commands before making changes. Use the installer and native archive
+from the same release. A rerun of the installer on a machine with the Python
+client moves it to the native client, also with `--yes` or redirected input.
+The client choice is independent of `--engine`, which selects the Docker
+daemon.
+
+When the native client cannot serve the machine, the installer installs the
+Python client instead. It says why in one line before it changes anything,
+and keeps any verified download for a later run. That happens in these cases:
+- no client is published for the platform;
+- the checkout's release is not published yet;
+- the client does not run there (an older C library, for example);
+- the checkout's release predates this installer;
+- the Python client registered a tunnel to start by itself.
+
+`PSEUDOLIFE_SHIM_ENGINE=native` makes each of these a refusal instead, and so
+does a machine already on the native client, which a rerun never swaps for
+the Python one. A release whose `SHA256SUMS` names this platform's archive
+in a broken line also refuses, because that release does carry the
+platform.
+
+To install the Python client on purpose, set `PSEUDOLIFE_SHIM_ENGINE=python`
+for the installer (`$env:PSEUDOLIFE_SHIM_ENGINE = 'python'` in PowerShell).
+The installer records that choice in `~/.pseudolife-mcp/client-engine`, and
+later installer runs without the variable keep the Python client. A run with
+`PSEUDOLIFE_SHIM_ENGINE=native` installs the native client and removes the
+record.
 
 The Windows x64 native client bundles its C runtime starting with 0.25.1.
 If an older archive fails to start because a system library is missing
@@ -102,16 +124,18 @@ sessions use the selected client through the existing launcher. Pip, pipx
 and lite installs update in place. See [The native client](configuration.md#the-native-client)
 for the supported platforms, tunnel limits and the route back to Python.
 
-If the Python client registered a tunnel to start automatically, opting in
-stops in preflight and prints the command to remove that registration. Keep
-the Python client to retain autostart. On the native client, tunnels run in
-the foreground. See [the tunnel guide](tunnels.md#autostart-and-private-storage)
+If the Python client registered a tunnel to start automatically, the
+installer keeps the Python client and prints how to remove that registration.
+With `PSEUDOLIFE_SHIM_ENGINE=native` it stops in preflight instead. Keep the
+Python client to retain autostart. On the native client, tunnels run in the
+foreground. See [the tunnel guide](tunnels.md#autostart-and-private-storage)
 before moving a host that serves a tunnel.
 
 The installer's guided tunnel setup (`--tunnel` or `-Tunnel`) is available
-with the Python client. The native installer exits with status 1 before
-changing the host. For the native client, rerun without the switch and
-follow the [explicit profile and key setup](tunnels.md).
+with the Python client (`PSEUDOLIFE_SHIM_ENGINE=python`). Without that
+variable, the installer exits with status 1 before changing the host. For the
+native client, rerun without the switch and follow the [explicit profile and
+key setup](tunnels.md).
 
 When the native installer sets up Codex with a daemon token (the local
 install's own or a supplied file), it waits up to three minutes for an

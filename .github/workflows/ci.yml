@@ -365,6 +365,8 @@ jobs:
           tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
           tests/test_scheduled_task_lock.py tests/test_fixture_guards_package_absent.py
           tests/test_suite_lock.py tests/test_ci_windows_lanes.py
+          tests/test_installer_native_client.py tests/test_installer_native_client_ps.py tests/test_installer_client_only_native.py
+          tests/test_installer_client_only_ps_native.py tests/test_installer_native_ask_order.py tests/test_installer_extractor_modes_native.py
 
   lock-resolve:
     # Replays the daemon image's constrained install (ops/Dockerfile.daemon

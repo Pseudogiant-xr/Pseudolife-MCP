@@ -343,7 +343,7 @@ def test_a_pairing_code_with_a_remote_daemon_url_is_client_only(bash, tmp_path):
 def test_the_script_itself_refuses_client_only_without_a_url(bash, tmp_path):
     """Refused while parsing arguments: nothing else has run yet."""
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install.sh')}' --client-only --no-art\n")
+    proc = shell.run(f"PSEUDOLIFE_SHIM_ENGINE=python exec '{shell.path(ROOT / 'ops' / 'install.sh')}' --client-only --no-art\n")
     assert proc.returncode == 2
     assert "--client-only needs" in proc.stderr
     assert shell.logged() == []
@@ -1337,7 +1337,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"}}), encoding="utf-8")
     with user_path_unchanged(shell.home):
         proc = shell.run(
-            f"exec '{shell.path(repo / 'ops' / 'install.sh')}' --client-only "
+            f"PSEUDOLIFE_SHIM_ENGINE=python exec '{shell.path(repo / 'ops' / 'install.sh')}' --client-only "
             f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
             "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
             extra_env={"FAKE_HEALTH": HEALTH_ON,

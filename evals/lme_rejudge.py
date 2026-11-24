@@ -10,13 +10,14 @@ if not __package__:
 
 from evals import lme_scoring, longmemeval_bench as lme
 from evals.retained_artifacts import fingerprint, record
-from evals.retained_daemon import BenchError, add_endpoint_arguments, endpoint_args
+from evals.retained_daemon import BenchError, add_endpoint_arguments, endpoint_args, model_identity
 
 
 def run(source, output, judge):
     context, primary, rows = lme.validated_scores(source)
     instruments = judge.provenance()
-    if primary.get("judge", {}).get("served_model") == instruments["served_model"]:
+    # A GGUF pinned by its path and by its file name is one judge, as endpoint checks treat it.
+    if model_identity(primary.get("judge", {}).get("served_model")) == model_identity(instruments["served_model"]):
         raise BenchError("choose a different judge model from the primary LongMemEval run")
     if source.resolve() == output.resolve():
         raise BenchError("use a separate directory for the re-judged results")

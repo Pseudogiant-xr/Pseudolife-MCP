@@ -1138,7 +1138,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     settings_path.write_text(json.dumps({"env": {
         "PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/local/claude-code.token",
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"}}), encoding="utf-8")
-    env = dict(ps.env)
+    env = dict(ps.env, PSEUDOLIFE_SHIM_ENGINE="python")
     system_dirs = [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")] \
         if os.name == "nt" else ["/usr/bin", "/bin"]
     env.update({"PATH": os.pathsep.join([str(fake_bin), *system_dirs]),

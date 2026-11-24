@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from rust.ci import release_version
+
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = "x86_64-unknown-linux-gnu"
 POSIX = pytest.mark.skipif(os.name == "nt", reason="a pty is POSIX-only")
@@ -41,15 +43,14 @@ QUESTIONS = ("Where does the memory bank live", "Choose 1-3", "Select one or mor
 
 
 def _version() -> str:
-    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert match
-    return match.group(1)
+    return release_version.read(ROOT)
 
 
 def _copy(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     shutil.copytree(ROOT / "ops", repo / "ops", ignore=shutil.ignore_patterns(".env", "__pycache__", "*.log"))
-    shutil.copy2(ROOT / "pyproject.toml", repo / "pyproject.toml")
+    (repo / "rust" / "shim").mkdir(parents=True)
+    shutil.copy2(ROOT / "rust/shim/Cargo.toml", repo / "rust/shim/Cargo.toml")
     if (ROOT / "examples").is_dir():
         shutil.copytree(ROOT / "examples", repo / "examples")
     return repo

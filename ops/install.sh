@@ -32,10 +32,10 @@
 #   --yes                         no prompts; take documented defaults (not broad consent)
 #   PSEUDOLIFE_UNATTENDED=1        the same explicit signal for agents under a pty
 #                                  (also enabled when stdin is not a terminal)
-#   PSEUDOLIFE_SHIM_ENGINE=native  install the native pseudolife-mcp client
-#                                  (ops/install-native.sh) instead of the Python
-#                                  client; python, the default, installs the Python
-#                                  client, or brings it back over a native one
+#   PSEUDOLIFE_SHIM_ENGINE=python  install the Python client instead of the native
+#                                  pseudolife-mcp client (ops/install-native.sh, the
+#                                  default), or bring it back over a native one; the
+#                                  choice is remembered until PSEUDOLIFE_SHIM_ENGINE=native
 #   Omitted --client detects installed CLIs; omitted --extractor uses sidecar.
 #   --codex-hooks auto|manual|plugin|skip  hook owner (default: auto)
 #   --codex-hook-trust ask|yes|no     approve PseudoLife hooks and the memory_message
@@ -149,22 +149,71 @@
 # <<< usage <<<
 set -euo pipefail
 # >>> client engine >>>
-# Which client this installer installs, decided before anything changes: the
-# Python client (the rest of this script) by default and with
-# PSEUDOLIFE_SHIM_ENGINE=python, and the native client, which
-# ops/install-native.sh installs, only when PSEUDOLIFE_SHIM_ENGINE=native asks
-# for it (the variable pseudolife-mcp update reads).
-case "${PSEUDOLIFE_SHIM_ENGINE:-}" in
-    ""|python) ;;
-    native)
+# Which client this installer installs, decided before anything changes (the
+# variable pseudolife-mcp update reads too):
+# - PSEUDOLIFE_SHIM_ENGINE=native: the native client, which
+#   ops/install-native.sh installs; a machine it cannot serve is refused.
+# - PSEUDOLIFE_SHIM_ENGINE=python: the Python client (the rest of this
+#   script), and the choice is recorded in ~/.pseudolife-mcp/client-engine,
+#   which later reruns and updates honour until an explicit native choice.
+# - Unset: the Python client when that record says so, else the native
+#   client by default (PSEUDOLIFE_INSTALLER_DEFAULTED=1 tells the native
+#   installer so). When the native client cannot serve this machine (no
+#   client for the platform or its release, one that does not run here, a
+#   checkout whose release predates this installer, a tunnel the Python
+#   client registered to start by itself) and it is not installed already,
+#   the native installer, before anything on the host changed, runs this
+#   script again with PSEUDOLIFE_SHIM_ENGINE=python and its one line in
+#   PSEUDOLIFE_INSTALLER_FALLBACK, which is printed and records nothing.
+# The record lives in the home Python's Path.home() names too (on Windows
+# USERPROFILE, which Git Bash's HOME need not be), and says python when its
+# text, white space trimmed at both ends, is exactly that (as Python's
+# str.strip() and PowerShell's Trim() read it).
+client_engine_home="$HOME"
+if [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
+    client_engine_home="$(cygpath -u "$USERPROFILE" 2>/dev/null || printf '%s' "$HOME")"
+fi
+CLIENT_ENGINE_RECORD="$client_engine_home/.pseudolife-mcp/client-engine"
+RECORD_PYTHON_CHOICE=""
+recorded_client_engine() {  # the record's text trimmed at both ends, or nothing
+    [ -f "$CLIENT_ENGINE_RECORD" ] || return 0
+    # Leading blank lines go, each line loses its outer blanks (a CR too),
+    # and the command substitution drops the trailing newlines.
+    sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$CLIENT_ENGINE_RECORD" 2>/dev/null | sed -e '/./,$!d' || true
+}
+record_client_engine() {  # an explicit PSEUDOLIFE_SHIM_ENGINE=python install is remembered at its end
+    [ -n "$RECORD_PYTHON_CHOICE" ] || return 0
+    [ "$(recorded_client_engine)" != python ] || return 0
+    if mkdir -p "$(dirname "$CLIENT_ENGINE_RECORD")" 2>/dev/null && printf 'python\n' >"$CLIENT_ENGINE_RECORD" 2>/dev/null; then
+        echo "Python client chosen: recorded in $CLIENT_ENGINE_RECORD, so later installer runs and pseudolife-mcp update keep the Python client until you set PSEUDOLIFE_SHIM_ENGINE=native."
+    else
+        echo "WARNING: the Python client choice could not be recorded in $CLIENT_ENGINE_RECORD, so a later installer run or update without PSEUDOLIFE_SHIM_ENGINE=python moves this machine to the native client." >&2
+    fi
+}
+client_engine="${PSEUDOLIFE_SHIM_ENGINE:-}"
+if [ -z "$client_engine" ] && [ "$(recorded_client_engine)" = python ]; then
+    echo "Python client install: $CLIENT_ENGINE_RECORD records an earlier PSEUDOLIFE_SHIM_ENGINE=python install; set PSEUDOLIFE_SHIM_ENGINE=native to move this machine to the native client."
+    client_engine=python
+elif [ "$client_engine" = python ] && [ -z "${PSEUDOLIFE_INSTALLER_FALLBACK:-}" ]; then
+    RECORD_PYTHON_CHOICE=1
+fi
+case "$client_engine" in
+    python)
+        # The native installer's hand-back: its line, and nothing recorded.
+        [ -z "${PSEUDOLIFE_INSTALLER_FALLBACK:-}" ] || echo "==> $PSEUDOLIFE_INSTALLER_FALLBACK"
+        unset PSEUDOLIFE_INSTALLER_FALLBACK ;;
+    ""|native)
         native_installer="$(cd "$(dirname "$0")" && pwd)/install-native.sh"
         if [ ! -f "$native_installer" ]; then
-            echo "PSEUDOLIFE_SHIM_ENGINE=native asks for the native client, but this checkout has no $native_installer (it predates the native installer): update the checkout (git pull), or unset PSEUDOLIFE_SHIM_ENGINE for the Python client. Nothing was changed." >&2
+            echo "This checkout has no $native_installer, which installs the native client (it predates the native installer): update the checkout (git pull), or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client. Nothing was changed." >&2
             exit 1
         fi
-        exec bash "$native_installer" "$@" ;;
+        if [ "$client_engine" = native ]; then
+            PSEUDOLIFE_INSTALLER_DEFAULTED="" exec bash "$native_installer" "$@"
+        fi
+        PSEUDOLIFE_INSTALLER_DEFAULTED=1 exec bash "$native_installer" "$@" ;;
     *)
-        echo "PSEUDOLIFE_SHIM_ENGINE=${PSEUDOLIFE_SHIM_ENGINE} is not a client this installer installs: use python (the Python client, the default) or native (the native client), or unset it. Nothing was changed." >&2
+        echo "PSEUDOLIFE_SHIM_ENGINE=${PSEUDOLIFE_SHIM_ENGINE} is not a client this installer installs: use native (the native client, the default) or python (the Python client), or unset it. Nothing was changed." >&2
         exit 2 ;;
 esac
 # <<< client engine <<<
@@ -1489,7 +1538,11 @@ if [ -z "$CLIENT_ONLY" ]; then
     esac
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if [ "$COMPOSE_ENGINE" = rust ] && [ -z "${ENGINE_DEFAULTED:-}" ] && ! rust_token_expected; then
-        echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun; or rerun with --engine python. Nothing was pulled or started." >&2
+        # An accepted Rust install keeps its engine (--engine python only
+        # schedules the switch), so a Python rerun is offered only without one.
+        python_way="; or rerun with --engine python"
+        [ "$INSTALLED_ENGINE" = rust ] && python_way=""
+        echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun$python_way. Nothing was pulled or started." >&2
         exit 2
     fi
     default_args=()
@@ -1657,7 +1710,10 @@ if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN
         engine_files=()
         step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
     else
-        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with --engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
+        # As at stage 4b: no Python rerun where an accepted Rust install keeps its engine.
+        python_way="; or rerun with --engine python"
+        [ "${INSTALLED_ENGINE:-}" = rust ] && python_way=""
+        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun$python_way. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
         exit 2
     fi
 fi
@@ -4005,6 +4061,7 @@ offer_client_update_schedule() {
 # <<< client update schedule offer <<<
 if [ -n "$CLIENT_ONLY" ]; then offer_client_update_schedule; fi
 print_update_line
+record_client_engine
 if [ -n "$TUNNEL" ] && [ -n "${INSTALLER_UNATTENDED:-}" ]; then
     echo "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
 elif [ -n "$TUNNEL" ]; then
