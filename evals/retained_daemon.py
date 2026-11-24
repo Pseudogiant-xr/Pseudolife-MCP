@@ -88,6 +88,18 @@ def request_json(origin, method, path, *, token=None, body=None, timeout=120, se
     return result
 
 
+def served_name(model_id):
+    """The file name at the end of a served model id, or the whole id when it has no path.
+
+    llama.cpp started with `-m <path>` and no `--alias` names the model by that full path,
+    in /v1/models and in every chat response, whatever model the request named (engine
+    b10488, probed on the maintainer's Windows PC on 25 November 2026). The pinned GGUF
+    file name is the identity; the directory differs from machine to machine and holds a
+    home path, so only the file name is ever printed.
+    """
+    return re.split(r"[\\/]", model_id)[-1] if isinstance(model_id, str) else None
+
+
 @dataclass(frozen=True)
 class Endpoint:
     url: str
@@ -115,13 +127,21 @@ class Endpoint:
         return {"request_model": self.model, "served_model": self.expected_model,
                 "profile": self.profile, "chat_timeout_seconds": CHAT_TIMEOUT_SECONDS}
 
+    def serves(self, model_id):
+        """Whether a reported model id is the expected one, exactly or as a path to that file."""
+        return model_id == self.expected_model or served_name(model_id) == self.expected_model
+
     def verify(self):
         origin = urlsplit(self.url)
         result = request_json(origin, "GET", origin.path.rstrip("/") + "/models", timeout=5)
         models = result.get("data")
-        if not isinstance(models, list) or not any(
-                isinstance(row, dict) and row.get("id") == self.expected_model for row in models):
-            raise BenchError("the model endpoint does not advertise the expected model")
+        ids = [row.get("id") for row in models if isinstance(row, dict)] if isinstance(models, list) else []
+        if not any(self.serves(model_id) for model_id in ids):
+            advertised = ", ".join(repr(served_name(model_id)) for model_id in ids) or "no model"
+            raise BenchError(f"the model endpoint advertises {advertised}, not the expected "
+                             f"{self.expected_model!r}. Serve that model file, or pass the served "
+                             "file name as the endpoint's --<role>-served-model (-ServedModel in "
+                             "regression_gate.ps1).")
 
     def chat(self, system, user, *, max_tokens):
         origin = urlsplit(self.url)
@@ -131,8 +151,9 @@ class Endpoint:
                                     "chat_template_kwargs": {"enable_thinking": False},
                                     "messages": [{"role": "system", "content": system},
                                                  {"role": "user", "content": user}]})
-        if result.get("model") != self.expected_model:
-            raise BenchError("chat completion was served by an unexpected model")
+        if not self.serves(result.get("model")):
+            raise BenchError(f"chat completion was served by {served_name(result.get('model'))!r}, "
+                             f"not the expected {self.expected_model!r}")
         try:
             text = result["choices"][0]["message"]["content"]
         except (IndexError, KeyError, TypeError):
@@ -205,7 +226,7 @@ class Bank:
         if (status.get("extractor_mode") != "primary" or status.get("fallback_url")
                 or (status.get("primary_url") or "").rstrip("/") != endpoint.url.rstrip("/")
                 or status.get("primary_model") != endpoint.model
-                or served is not None and served != endpoint.expected_model):
+                or served is not None and not endpoint.serves(served)):
             raise BenchError("the daemon did not report the pinned primary extractor identity")
         if served is None and endpoint.expected_model != endpoint.model:
             # Rust only resolves a served ID for its recognized request aliases.

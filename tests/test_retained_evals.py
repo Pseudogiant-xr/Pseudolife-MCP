@@ -390,6 +390,110 @@ def test_extractor_readback_distinguishes_request_alias_and_served_id(monkeypatc
         bank.verify_extractor(endpoint)
 
 
+SERVED_GGUF = "Qwen3.8-27B-UD-Q4_K_XL.gguf"
+SERVED_PATH = "C:\\Users\\<user>\\llama.cpp\\models\\" + SERVED_GGUF
+
+
+@contextmanager
+def llama_cpp_server(model_id):
+    """A local HTTP server answering with the shapes llama.cpp b10488 returned when probed.
+
+    Started with `-m <path>` and no --alias, it advertised the full path in /v1/models
+    and reported it as the chat response's model, whatever model the request named.
+    """
+    import http.server
+    import threading
+
+    requests = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def reply(self, body):
+            data = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            requests.append(("GET", self.path, None))
+            self.reply({"models": [{"name": model_id, "model": model_id, "type": "model"}],
+                        "object": "list",
+                        "data": [{"id": model_id, "aliases": [model_id], "object": "model",
+                                  "owned_by": "llamacpp"}]})
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(("POST", self.path, body["model"]))
+            self.reply({"choices": [{"finish_reason": "stop", "index": 0,
+                                     "message": {"role": "assistant", "content": "ok"}}],
+                        "model": model_id, "system_fingerprint": "b10488-9d77fa172",
+                        "object": "chat.completion"})
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/v1", requests
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+@pytest.mark.parametrize("model_id", [SERVED_PATH, "/home/<user>/models/" + SERVED_GGUF, SERVED_GGUF],
+                         ids=["windows path", "posix path", "file name"])
+def test_endpoint_accepts_llama_cpp_naming_the_pinned_file_by_its_path(model_id):
+    with llama_cpp_server(model_id) as (url, requests):
+        endpoint = retained_daemon.Endpoint(url, "bench", "fixture-profile", SERVED_GGUF)
+        endpoint.verify()
+        assert endpoint.chat("Reply with one word.", "Say ok.", max_tokens=8) == "ok"
+    assert requests == [("GET", "/v1/models", None), ("POST", "/v1/chat/completions", "bench")]
+
+
+@pytest.mark.parametrize("model_id", [
+    "C:\\Users\\<user>\\llama.cpp\\models\\Qwen3.8-27B-UD-Q8_K_XL.gguf",
+    "C:\\Users\\<user>\\llama.cpp\\models\\old-" + SERVED_GGUF,
+    SERVED_GGUF + ".bak",
+], ids=["another file", "file name as a suffix", "file name as a prefix"])
+def test_endpoint_refuses_another_file_and_names_both_files_without_the_path(model_id):
+    with llama_cpp_server(model_id) as (url, _):
+        endpoint = retained_daemon.Endpoint(url, "bench", "fixture-profile", SERVED_GGUF)
+        with pytest.raises(BenchError) as refused:
+            endpoint.verify()
+        leaf = retained_daemon.served_name(model_id)
+        assert f"advertises {leaf!r}, not the expected {SERVED_GGUF!r}" in str(refused.value)
+        with pytest.raises(BenchError) as served:
+            endpoint.chat("Reply with one word.", "Say ok.", max_tokens=8)
+        assert str(served.value) == f"chat completion was served by {leaf!r}, not the expected {SERVED_GGUF!r}"
+    for message in (str(refused.value), str(served.value)):
+        assert "<user>" not in message and "llama.cpp" not in message
+
+
+def test_endpoint_without_a_served_name_still_needs_the_request_model():
+    with llama_cpp_server(SERVED_PATH) as (url, _):
+        endpoint = retained_daemon.Endpoint(url, SERVED_GGUF + "-other", "fixture-profile")
+        with pytest.raises(BenchError, match="not the expected"):
+            endpoint.verify()
+    with llama_cpp_server("bench") as (url, _):
+        retained_daemon.Endpoint(url, "bench", "fixture-profile").verify()
+
+
+def test_extractor_readback_accepts_the_served_file_by_its_path(monkeypatch):
+    endpoint = retained_daemon.Endpoint("http://127.0.0.1:9/v1", "custom", "premapped", SERVED_GGUF)
+    status = {"extractor_mode": "primary", "primary_url": endpoint.url, "primary_model": endpoint.model,
+              "primary_model_served": SERVED_PATH}
+    bank = retained_daemon.Bank(SimpleNamespace(port=9), "test-token")
+    monkeypatch.setattr(bank, "tool", lambda *args, **kwargs: status)
+    bank.verify_extractor(endpoint)
+    status["primary_model_served"] = SERVED_PATH.replace("Q4_K_XL", "Q8_K_XL")
+    with pytest.raises(BenchError, match="pinned primary extractor identity"):
+        bank.verify_extractor(endpoint)
+
+
 @pytest.mark.parametrize("spawn_failed", [True, False])
 def test_daemon_startup_keeps_failure_detail_and_releases_log(tmp_path, monkeypatch, spawn_failed):
     dsn = "postgresql://fixture:private-test-password@127.0.0.1:5434/fixture"
