@@ -141,6 +141,5 @@ def test_the_generic_snippet_needs_the_native_client_not_pip(script, start):
     body = source[source.index(start):]
     body = body[:body.index("\n}\n")]
     assert ("stdio shim (recommended - per-session identity; needs the native\n"
-            "  client this installer installs: while PATH does not find\n"
-            "  pseudolife-mcp, put its full path in \"command\"):") in body
+            "  pseudolife-mcp client, on PATH or by its full path in \"command\"):") in body
     assert "pip install" not in body and "pipx" not in body

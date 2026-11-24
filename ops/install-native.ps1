@@ -839,8 +839,7 @@ function Show-GenericSnippets {
   shapes (pick ONE):
 
   stdio shim (recommended - per-session identity; needs the native
-  client this installer installs: while PATH does not find
-  pseudolife-mcp, put its full path in "command"):
+  pseudolife-mcp client, on PATH or by its full path in "command"):
     { "mcpServers": { "pseudolife-memory": {
         "command": "pseudolife-mcp",
         "env": { "PSEUDOLIFE_WRITER_ID": "mcp-client",
