@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "49211123d3e99e42",
+  "fingerprint": "af18a315acca57b4",
+  "reason": "Adds three test files to the Rust-only readers step: the package-absent fixture guard test (child-interpreter checks), the fake embedder test (now reads rust/daemon/src/config.rs) and the suite-lock test (its fresh-checkout copy now includes rust/harness_support). Each already runs whole in the test job; here they run only on Rust-only changes. Their time in this step is not yet measured."
+}

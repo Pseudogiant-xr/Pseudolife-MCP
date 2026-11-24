@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "ci.yml",
-  "job": "guards",
-  "before": "49211123d3e99e42",
-  "fingerprint": "194df4b7ef5bd926",
-  "reason": "Adds two test files to the Rust-only readers step (the package-absent fixture guard test and the fake embedder test, which now reads rust/daemon/src/config.rs); both are in-process or short child-interpreter tests that add seconds, not minutes, and run only on Rust-only changes."
-}

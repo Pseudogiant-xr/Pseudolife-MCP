@@ -360,6 +360,7 @@ jobs:
           tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
           tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
           tests/test_scheduled_task_lock.py tests/test_fixture_guards_package_absent.py tests/test_fake_embedder.py
+          tests/test_suite_lock.py
 
   lock-resolve:
     # Replays the daemon image's constrained install (ops/Dockerfile.daemon
