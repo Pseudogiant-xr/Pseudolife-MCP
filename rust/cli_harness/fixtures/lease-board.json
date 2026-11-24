@@ -1403,6 +1403,1409 @@
      ]
     ]
    }
+  },
+  "windows": {
+   "claim": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": 1,
+      "coordination_lease_waiters_ticket_seq": null,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [
+       "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+      ],
+      "coordination_events": [
+       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+       "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+      ],
+      "coordination_lease_waiters": [],
+      "coordination_leases": [
+       "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+      ],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "name": "fixture"
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [
+         {
+          "expected_end": 1700000060.0,
+          "expires_at": 1700000120.0,
+          "fence": 1,
+          "holder": {
+           "acquired_at": 1700000000.0,
+           "agent_id": "00000000000040008000000000000001",
+           "expected_end": 1700000060.0,
+           "expires_at": 1700000120.0,
+           "label": "codex",
+           "name": "codex 00000000",
+           "principal": "alice",
+           "purpose": "peer work"
+          },
+          "name": "fixture",
+          "queue": [],
+          "queued": 0,
+          "stale": false
+         }
+        ],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ],
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "limit": 50
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [
+         {
+          "expected_end": 1700000060.0,
+          "expires_at": 1700000120.0,
+          "fence": 1,
+          "holder": {
+           "acquired_at": 1700000000.0,
+           "agent_id": "00000000000040008000000000000001",
+           "expected_end": 1700000060.0,
+           "expires_at": 1700000120.0,
+           "label": "codex",
+           "name": "codex 00000000",
+           "principal": "alice",
+           "purpose": "peer work"
+          },
+          "name": "fixture",
+          "queue": [],
+          "queued": 0,
+          "stale": false
+         }
+        ],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ],
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "name": "missing"
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ]
+    ]
+   },
+   "free": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": null,
+      "coordination_lease_waiters_ticket_seq": null,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [],
+      "coordination_events": [],
+      "coordination_lease_waiters": [],
+      "coordination_leases": [],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "name": "fixture"
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ],
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "limit": 50
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ],
+     [
+      {
+       "key": [
+        "register",
+        {
+         "capabilities": {
+          "resumable": false
+         },
+         "label": "lease-run",
+         "project": "",
+         "status": "",
+         "task": "fixture: python.exe",
+         "wake_enabled": false
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "adapter_available": false,
+        "agent_id": "00000000000040008000000000000001",
+        "capabilities": {
+         "resumable": false
+        },
+        "children": [],
+        "created_at": 1700000000.0,
+        "credential": "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo",
+        "episode": "",
+        "label": "lease-run",
+        "last_activity": 1700000000.0,
+        "lifecycle": "registered",
+        "name": "lease-run 00000000",
+        "name_source": "",
+        "parent_agent_id": null,
+        "park_clear_by": "",
+        "park_expires": null,
+        "park_needs": "",
+        "park_reason": null,
+        "park_resume": "",
+        "park_set_at": null,
+        "principal": "alice",
+        "project": "",
+        "status": "",
+        "subagent": false,
+        "task": "fixture: python.exe",
+        "wake_enabled": false
+       },
+       "states": [
+        {
+         "action": "register",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": null,
+           "coordination_lease_waiters_ticket_seq": null,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "lease",
+        {
+         "expect": 120,
+         "name": "fixture",
+         "purpose": "proof",
+         "ttl": 30
+        },
+        "00000000000040008000000000000001",
+        "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+       ],
+       "reply": {
+        "expected_end": 1700000120.0,
+        "expires_at": 1700000030.0,
+        "fence": 1,
+        "holder": {
+         "acquired_at": 1700000000.0,
+         "agent_id": "00000000000040008000000000000001",
+         "expected_end": 1700000120.0,
+         "expires_at": 1700000030.0,
+         "label": "lease-run",
+         "name": "lease-run 00000000",
+         "principal": "alice",
+         "purpose": "proof"
+        },
+        "name": "fixture",
+        "position": null,
+        "queued": 0,
+        "state": "held"
+       },
+       "states": [
+        {
+         "action": "lease",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": null,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"6806a094d19b6ede8cf192202c8a18d070ed2aa42fa1dc9ea6d915fb1f016e22\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 120, \"purpose\": \"proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "release",
+        {
+         "name": "fixture"
+        },
+        "00000000000040008000000000000001",
+        "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+       ],
+       "reply": {
+        "dequeued": false,
+        "name": "fixture",
+        "released": true
+       },
+       "states": [
+        {
+         "action": "release",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": null,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"6806a094d19b6ede8cf192202c8a18d070ed2aa42fa1dc9ea6d915fb1f016e22\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"c1bff3fb8963d0c90af2ac3d20709a0b1c84edb467ffb310aa53441a9db190c1\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"6806a094d19b6ede8cf192202c8a18d070ed2aa42fa1dc9ea6d915fb1f016e22\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": null, \"purpose\": \"\", \"freed_at\": 1700000000, \"expires_at\": null, \"acquired_at\": null, \"expected_end\": null, \"holder_agent_id\": null, \"holder_principal\": \"\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      }
+     ]
+    ]
+   },
+   "held": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": 1,
+      "coordination_lease_waiters_ticket_seq": null,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [
+       "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+      ],
+      "coordination_events": [
+       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+       "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+      ],
+      "coordination_lease_waiters": [],
+      "coordination_leases": [
+       "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+      ],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     [
+      {
+       "key": [
+        "register",
+        {
+         "capabilities": {
+          "resumable": false
+         },
+         "label": "lease-run",
+         "project": "",
+         "status": "",
+         "task": "fixture: python.exe",
+         "wake_enabled": false
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "adapter_available": false,
+        "agent_id": "00000000000040008000000000000002",
+        "capabilities": {
+         "resumable": false
+        },
+        "children": [],
+        "created_at": 1700000000.0,
+        "credential": "26AILsaOctR_qSbcyR-5sAlhzrQ0JVSgwqpWcUSlptM",
+        "episode": "",
+        "label": "lease-run",
+        "last_activity": 1700000000.0,
+        "lifecycle": "registered",
+        "name": "lease-run 00000000",
+        "name_source": "",
+        "parent_agent_id": null,
+        "park_clear_by": "",
+        "park_expires": null,
+        "park_needs": "",
+        "park_reason": null,
+        "park_resume": "",
+        "park_set_at": null,
+        "principal": "alice",
+        "project": "",
+        "status": "",
+        "subagent": false,
+        "task": "fixture: python.exe",
+        "wake_enabled": false
+       },
+       "states": [
+        {
+         "action": "register",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": null,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"95b5a2b08abebcb7149083dbbbb15c966d0b56909cacd1caec122c3996246092\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "lease",
+        {
+         "name": "fixture",
+         "ttl": 120
+        },
+        "00000000000040008000000000000002",
+        "26AILsaOctR_qSbcyR-5sAlhzrQ0JVSgwqpWcUSlptM"
+       ],
+       "reply": {
+        "expected_end": null,
+        "expires_at": null,
+        "fence": null,
+        "holder": {
+         "acquired_at": 1700000000.0,
+         "agent_id": "00000000000040008000000000000001",
+         "expected_end": 1700000060.0,
+         "expires_at": 1700000120.0,
+         "label": "codex",
+         "name": "codex 00000000",
+         "principal": "alice",
+         "purpose": "peer work"
+        },
+        "name": "fixture",
+        "position": 1,
+        "queued": 1,
+        "state": "queued"
+       },
+       "states": [
+        {
+         "action": "lease",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": 1,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"95b5a2b08abebcb7149083dbbbb15c966d0b56909cacd1caec122c3996246092\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"89f98585c466c9440d7f5d86aba00855223f2cb74dbcb5b834ff8b0718af2ebd\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"\\\",\\\"ttl\\\":120}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"95b5a2b08abebcb7149083dbbbb15c966d0b56909cacd1caec122c3996246092\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [
+            "{\"ttl\": 120, \"name\": \"fixture\", \"expect\": null, \"ticket\": 1, \"purpose\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"principal\": \"alice\", \"enqueued_at\": 1700000000}"
+           ],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "release",
+        {
+         "name": "fixture"
+        },
+        "00000000000040008000000000000002",
+        "26AILsaOctR_qSbcyR-5sAlhzrQ0JVSgwqpWcUSlptM"
+       ],
+       "reply": {
+        "dequeued": true,
+        "name": "fixture",
+        "released": false
+       },
+       "states": [
+        {
+         "action": "release",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": 1,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"95b5a2b08abebcb7149083dbbbb15c966d0b56909cacd1caec122c3996246092\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"89f98585c466c9440d7f5d86aba00855223f2cb74dbcb5b834ff8b0718af2ebd\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"\\\",\\\"ttl\\\":120}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"95b5a2b08abebcb7149083dbbbb15c966d0b56909cacd1caec122c3996246092\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"692233099c01a24fc9b99361586a5e145cce92dd8926e20ee9ae05e48cbff4be\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_dequeue\", \"payload\": \"{\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"89f98585c466c9440d7f5d86aba00855223f2cb74dbcb5b834ff8b0718af2ebd\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      }
+     ]
+    ]
+   },
+   "malformed": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": null,
+      "coordination_lease_waiters_ticket_seq": null,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [],
+      "coordination_events": [],
+      "coordination_lease_waiters": [],
+      "coordination_leases": [],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     []
+    ]
+   },
+   "other-mirror": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": 1,
+      "coordination_lease_waiters_ticket_seq": null,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [
+       "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"lease-hold@0123456789ab\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+      ],
+      "coordination_events": [
+       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f76d1e8ef533b1d73d24c70e81a91bc47b25412461bf0f805d16ee63ceddb155\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@0123456789ab\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+       "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"bc8a1de94b8558cd86f8e0c794b3729f9ff85f808d11eb218ec530376f57c148\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f76d1e8ef533b1d73d24c70e81a91bc47b25412461bf0f805d16ee63ceddb155\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+      ],
+      "coordination_lease_waiters": [],
+      "coordination_leases": [
+       "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+      ],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "name": "fixture"
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [
+         {
+          "expected_end": 1700000060.0,
+          "expires_at": 1700000120.0,
+          "fence": 1,
+          "holder": {
+           "acquired_at": 1700000000.0,
+           "agent_id": "00000000000040008000000000000001",
+           "expected_end": 1700000060.0,
+           "expires_at": 1700000120.0,
+           "label": "lease-hold@0123456789ab",
+           "name": "lease-hold@0123456789ab 00000000",
+           "principal": "alice",
+           "purpose": "peer work"
+          },
+          "name": "fixture",
+          "queue": [],
+          "queued": 0,
+          "stale": false
+         }
+        ],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ]
+    ]
+   },
+   "queue": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": 1,
+      "coordination_lease_waiters_ticket_seq": 1,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [
+       "{\"name\": \"\", \"task\": \"first waiter\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+       "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+      ],
+      "coordination_events": [
+       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+       "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+       "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"first waiter\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+       "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+      ],
+      "coordination_lease_waiters": [
+       "{\"ttl\": 120, \"name\": \"fixture\", \"expect\": null, \"ticket\": 1, \"purpose\": \"first waiter\", \"agent_id\": \"00000000000040008000000000000002\", \"principal\": \"alice\", \"enqueued_at\": 1700000000}"
+      ],
+      "coordination_leases": [
+       "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+      ],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "limit": 50
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [
+         {
+          "expected_end": 1700000060.0,
+          "expires_at": 1700000120.0,
+          "fence": 1,
+          "holder": {
+           "acquired_at": 1700000000.0,
+           "agent_id": "00000000000040008000000000000001",
+           "expected_end": 1700000060.0,
+           "expires_at": 1700000120.0,
+           "label": "codex",
+           "name": "codex 00000000",
+           "principal": "alice",
+           "purpose": "peer work"
+          },
+          "name": "fixture",
+          "queue": [
+           {
+            "agent_id": "00000000000040008000000000000002",
+            "enqueued_at": 1700000000.0,
+            "label": "codex",
+            "name": "codex 00000000",
+            "purpose": "first waiter"
+           }
+          ],
+          "queued": 1,
+          "stale": false
+         }
+        ],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ],
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "name": "fixture"
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [
+         {
+          "expected_end": 1700000060.0,
+          "expires_at": 1700000120.0,
+          "fence": 1,
+          "holder": {
+           "acquired_at": 1700000000.0,
+           "agent_id": "00000000000040008000000000000001",
+           "expected_end": 1700000060.0,
+           "expires_at": 1700000120.0,
+           "label": "codex",
+           "name": "codex 00000000",
+           "principal": "alice",
+           "purpose": "peer work"
+          },
+          "name": "fixture",
+          "queue": [
+           {
+            "agent_id": "00000000000040008000000000000002",
+            "enqueued_at": 1700000000.0,
+            "label": "codex",
+            "name": "codex 00000000",
+            "purpose": "first waiter"
+           }
+          ],
+          "queued": 1,
+          "stale": false
+         }
+        ],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ],
+     [
+      {
+       "key": [
+        "register",
+        {
+         "capabilities": {
+          "resumable": false
+         },
+         "label": "lease-run",
+         "project": "",
+         "status": "",
+         "task": "fixture: python.exe",
+         "wake_enabled": false
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "adapter_available": false,
+        "agent_id": "00000000000040008000000000000003",
+        "capabilities": {
+         "resumable": false
+        },
+        "children": [],
+        "created_at": 1700000000.0,
+        "credential": "39WSL1qpRB6V0h7Vi7nyIJoASRKhIy6J919yW9N_PUo",
+        "episode": "",
+        "label": "lease-run",
+        "last_activity": 1700000000.0,
+        "lifecycle": "registered",
+        "name": "lease-run 00000000",
+        "name_source": "",
+        "parent_agent_id": null,
+        "park_clear_by": "",
+        "park_expires": null,
+        "park_needs": "",
+        "park_reason": null,
+        "park_resume": "",
+        "park_set_at": null,
+        "principal": "alice",
+        "project": "",
+        "status": "",
+        "subagent": false,
+        "task": "fixture: python.exe",
+        "wake_enabled": false
+       },
+       "states": [
+        {
+         "action": "register",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": 1,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"first waiter\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"a5bbc6a6f3be8023d0a092b9e66dafd4027e95b82a2348e22405a6f69f25ff4f\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"first waiter\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [
+            "{\"ttl\": 120, \"name\": \"fixture\", \"expect\": null, \"ticket\": 1, \"purpose\": \"first waiter\", \"agent_id\": \"00000000000040008000000000000002\", \"principal\": \"alice\", \"enqueued_at\": 1700000000}"
+           ],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "lease",
+        {
+         "expect": 120,
+         "name": "fixture",
+         "purpose": "proof",
+         "ttl": 30
+        },
+        "00000000000040008000000000000003",
+        "39WSL1qpRB6V0h7Vi7nyIJoASRKhIy6J919yW9N_PUo"
+       ],
+       "reply": {
+        "expected_end": null,
+        "expires_at": null,
+        "fence": null,
+        "holder": {
+         "acquired_at": 1700000000.0,
+         "agent_id": "00000000000040008000000000000001",
+         "expected_end": 1700000060.0,
+         "expires_at": 1700000120.0,
+         "label": "codex",
+         "name": "codex 00000000",
+         "principal": "alice",
+         "purpose": "peer work"
+        },
+        "name": "fixture",
+        "position": 2,
+        "queued": 2,
+        "state": "queued"
+       },
+       "states": [
+        {
+         "action": "lease",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": 2,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"first waiter\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"a5bbc6a6f3be8023d0a092b9e66dafd4027e95b82a2348e22405a6f69f25ff4f\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"first waiter\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":120,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [
+            "{\"ttl\": 120, \"name\": \"fixture\", \"expect\": null, \"ticket\": 1, \"purpose\": \"first waiter\", \"agent_id\": \"00000000000040008000000000000002\", \"principal\": \"alice\", \"enqueued_at\": 1700000000}",
+            "{\"ttl\": 30, \"name\": \"fixture\", \"expect\": 120, \"ticket\": 2, \"purpose\": \"proof\", \"agent_id\": \"00000000000040008000000000000003\", \"principal\": \"alice\", \"enqueued_at\": 1700000000}"
+           ],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        },
+        {
+         "action": "fixture-release",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 2,
+           "coordination_lease_waiters_ticket_seq": 2,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"first waiter\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"a5bbc6a6f3be8023d0a092b9e66dafd4027e95b82a2348e22405a6f69f25ff4f\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"first waiter\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":120,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"4a552ab315801424a43c5ba67de368827741493d253a3281b2d8eb3370e29d9b\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"7a5f1aa1d9b2917b08c859d51074dd6a58c3d6967c54013250d89a5b45529ba5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"lease_grant\", \"payload\": \"{\\\"expect\\\":null,\\\"fence\\\":2,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"window\\\":120}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"4a552ab315801424a43c5ba67de368827741493d253a3281b2d8eb3370e29d9b\", \"principal\": \"\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [
+            "{\"ttl\": 30, \"name\": \"fixture\", \"expect\": 120, \"ticket\": 2, \"purpose\": \"proof\", \"agent_id\": \"00000000000040008000000000000003\", \"principal\": \"alice\", \"enqueued_at\": 1700000000}"
+           ],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 2, \"expect\": null, \"purpose\": \"first waiter\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": null, \"holder_agent_id\": \"00000000000040008000000000000002\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        },
+        {
+         "action": "fixture-release-waiter",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 3,
+           "coordination_lease_waiters_ticket_seq": 2,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"first waiter\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"a5bbc6a6f3be8023d0a092b9e66dafd4027e95b82a2348e22405a6f69f25ff4f\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 10, \"body\": null, \"hash\": \"0f40b5a0c70714c66f8837a5094686863623f25c40383af7c7272be9722491ed\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"lease_grant\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":3,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"window\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"ff479606e620a30a981d185abe2b18de7ed175af7d54af81c170dda718209ded\", \"principal\": \"\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"first waiter\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":120,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"4a552ab315801424a43c5ba67de368827741493d253a3281b2d8eb3370e29d9b\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"7a5f1aa1d9b2917b08c859d51074dd6a58c3d6967c54013250d89a5b45529ba5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"lease_grant\", \"payload\": \"{\\\"expect\\\":null,\\\"fence\\\":2,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"window\\\":120}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"4a552ab315801424a43c5ba67de368827741493d253a3281b2d8eb3370e29d9b\", \"principal\": \"\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 9, \"body\": null, \"hash\": \"ff479606e620a30a981d185abe2b18de7ed175af7d54af81c170dda718209ded\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":2,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"7a5f1aa1d9b2917b08c859d51074dd6a58c3d6967c54013250d89a5b45529ba5\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 3, \"expect\": 120, \"purpose\": \"proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000003\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "lease",
+        {
+         "expect": 120,
+         "name": "fixture",
+         "purpose": "proof",
+         "ttl": 30
+        },
+        "00000000000040008000000000000003",
+        "39WSL1qpRB6V0h7Vi7nyIJoASRKhIy6J919yW9N_PUo"
+       ],
+       "reply": {
+        "expected_end": 1700000120.0,
+        "expires_at": 1700000030.0,
+        "fence": 3,
+        "holder": {
+         "acquired_at": 1700000000.0,
+         "agent_id": "00000000000040008000000000000003",
+         "expected_end": 1700000120.0,
+         "expires_at": 1700000030.0,
+         "label": "lease-run",
+         "name": "lease-run 00000000",
+         "principal": "alice",
+         "purpose": "proof"
+        },
+        "name": "fixture",
+        "position": null,
+        "queued": 0,
+        "state": "held"
+       },
+       "states": [
+        {
+         "action": "lease",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 3,
+           "coordination_lease_waiters_ticket_seq": 2,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"first waiter\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"a5bbc6a6f3be8023d0a092b9e66dafd4027e95b82a2348e22405a6f69f25ff4f\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 10, \"body\": null, \"hash\": \"0f40b5a0c70714c66f8837a5094686863623f25c40383af7c7272be9722491ed\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"lease_grant\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":3,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"window\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"ff479606e620a30a981d185abe2b18de7ed175af7d54af81c170dda718209ded\", \"principal\": \"\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 11, \"body\": null, \"hash\": \"e987c4c59ca832628f40d94317f4d59785830e4e085ec97ea937c0abfb86affa\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_update\", \"payload\": \"{\\\"accepted\\\":true,\\\"fence\\\":3,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"0f40b5a0c70714c66f8837a5094686863623f25c40383af7c7272be9722491ed\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"first waiter\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":120,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"4a552ab315801424a43c5ba67de368827741493d253a3281b2d8eb3370e29d9b\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"7a5f1aa1d9b2917b08c859d51074dd6a58c3d6967c54013250d89a5b45529ba5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"lease_grant\", \"payload\": \"{\\\"expect\\\":null,\\\"fence\\\":2,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"window\\\":120}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"4a552ab315801424a43c5ba67de368827741493d253a3281b2d8eb3370e29d9b\", \"principal\": \"\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 9, \"body\": null, \"hash\": \"ff479606e620a30a981d185abe2b18de7ed175af7d54af81c170dda718209ded\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":2,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"7a5f1aa1d9b2917b08c859d51074dd6a58c3d6967c54013250d89a5b45529ba5\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 3, \"expect\": 120, \"purpose\": \"proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000003\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "release",
+        {
+         "name": "fixture"
+        },
+        "00000000000040008000000000000003",
+        "39WSL1qpRB6V0h7Vi7nyIJoASRKhIy6J919yW9N_PUo"
+       ],
+       "reply": {
+        "dequeued": false,
+        "name": "fixture",
+        "released": true
+       },
+       "states": [
+        {
+         "action": "release",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 3,
+           "coordination_lease_waiters_ticket_seq": 2,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"first waiter\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"a5bbc6a6f3be8023d0a092b9e66dafd4027e95b82a2348e22405a6f69f25ff4f\", \"parent_agent_id\": null, \"status_expires_at\": null}",
+            "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"codex\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 10, \"body\": null, \"hash\": \"0f40b5a0c70714c66f8837a5094686863623f25c40383af7c7272be9722491ed\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"lease_grant\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":3,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"window\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"ff479606e620a30a981d185abe2b18de7ed175af7d54af81c170dda718209ded\", \"principal\": \"\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 11, \"body\": null, \"hash\": \"e987c4c59ca832628f40d94317f4d59785830e4e085ec97ea937c0abfb86affa\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_update\", \"payload\": \"{\\\"accepted\\\":true,\\\"fence\\\":3,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"0f40b5a0c70714c66f8837a5094686863623f25c40383af7c7272be9722491ed\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 12, \"body\": null, \"hash\": \"9667e150455efe4096909ca09c7bce6881dd161b2db43fdd45be439a267879fc\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":3,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"e987c4c59ca832628f40d94317f4d59785830e4e085ec97ea937c0abfb86affa\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"e149d183baac6585174e2b882d1321bea04f9a635ebe7d91c415000d742a4617\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"codex\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"first waiter\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"5c2dafda23f1c6366e2fcf40990bd55b00fae254f00cf11e1b0bc1d2a8a7936c\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":null,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"6f0fa700ace4128534cb032c75b739a4817bd7a7d5e5cbe06701040ae83ac8e2\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"2a45ee2e3aed50a1e7747dada3c99cbbab7cd9d5198c610253b4e3a693c9c10a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_queue\", \"payload\": \"{\\\"expect\\\":120,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000003\", \"body_salt\": null, \"prev_hash\": \"af82ad2376a889fa9f9b173958662027814e9f5b4a274c47acea38b9d0b13087\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"4a552ab315801424a43c5ba67de368827741493d253a3281b2d8eb3370e29d9b\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"a902a8582eeb8ae1814a995421e9b2220f0c8a3c1bde5dad1ba7f34703082496\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"7a5f1aa1d9b2917b08c859d51074dd6a58c3d6967c54013250d89a5b45529ba5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"lease_grant\", \"payload\": \"{\\\"expect\\\":null,\\\"fence\\\":2,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"first waiter\\\",\\\"window\\\":120}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"4a552ab315801424a43c5ba67de368827741493d253a3281b2d8eb3370e29d9b\", \"principal\": \"\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 9, \"body\": null, \"hash\": \"ff479606e620a30a981d185abe2b18de7ed175af7d54af81c170dda718209ded\", \"task\": \"first waiter\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":2,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000002\", \"body_salt\": null, \"prev_hash\": \"7a5f1aa1d9b2917b08c859d51074dd6a58c3d6967c54013250d89a5b45529ba5\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 3, \"expect\": null, \"purpose\": \"\", \"freed_at\": 1700000000, \"expires_at\": null, \"acquired_at\": null, \"expected_end\": null, \"holder_agent_id\": null, \"holder_principal\": \"\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      }
+     ]
+    ]
+   },
+   "refused": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": null,
+      "coordination_lease_waiters_ticket_seq": null,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [],
+      "coordination_events": [],
+      "coordination_lease_waiters": [],
+      "coordination_leases": [],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     []
+    ]
+   },
+   "same-mirror": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": 1,
+      "coordination_lease_waiters_ticket_seq": null,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [
+       "{\"name\": \"\", \"task\": \"peer work\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+      ],
+      "coordination_events": [
+       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"77164f92cddedae772fd08374d0b79039afb65f358adc820e8d218f208a22921\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"peer work\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+       "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"d03b8f6e8ec7e6835a5287b204298a6e4fe4cc20e70501411c45ba247d3dea9a\", \"task\": \"peer work\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":60,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"peer work\\\",\\\"ttl\\\":120}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"77164f92cddedae772fd08374d0b79039afb65f358adc820e8d218f208a22921\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+      ],
+      "coordination_lease_waiters": [],
+      "coordination_leases": [
+       "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 60, \"purpose\": \"peer work\", \"freed_at\": null, \"expires_at\": 1700000120, \"acquired_at\": 1700000000, \"expected_end\": 1700000060, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+      ],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     [
+      {
+       "key": [
+        "leases",
+        {
+         "name": "fixture"
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "leases": [
+         {
+          "expected_end": 1700000060.0,
+          "expires_at": 1700000120.0,
+          "fence": 1,
+          "holder": {
+           "acquired_at": 1700000000.0,
+           "agent_id": "00000000000040008000000000000001",
+           "expected_end": 1700000060.0,
+           "expires_at": 1700000120.0,
+           "label": "lease-hold@abcdef123456",
+           "name": "lease-hold@abcdef123456 00000000",
+           "principal": "alice",
+           "purpose": "peer work"
+          },
+          "name": "fixture",
+          "queue": [],
+          "queued": 0,
+          "stale": false
+         }
+        ],
+        "truncated": false
+       },
+       "states": [],
+       "status": 200
+      }
+     ]
+    ]
+   },
+   "transient": {
+    "initial": {
+     "sequences": {
+      "coordination_lease_fence": null,
+      "coordination_lease_waiters_ticket_seq": null,
+      "coordination_wakes_wake_id_seq": null
+     },
+     "tables": {
+      "coordination_agents": [],
+      "coordination_events": [],
+      "coordination_lease_waiters": [],
+      "coordination_leases": [],
+      "coordination_messages": [],
+      "coordination_wakes": []
+     }
+    },
+    "transcripts": [
+     [
+      {
+       "key": [
+        "register",
+        {
+         "capabilities": {
+          "resumable": false
+         },
+         "label": "lease-run",
+         "project": "",
+         "status": "",
+         "task": "fixture: python.exe",
+         "wake_enabled": false
+        },
+        null,
+        null
+       ],
+       "reply": {
+        "adapter_available": false,
+        "agent_id": "00000000000040008000000000000001",
+        "capabilities": {
+         "resumable": false
+        },
+        "children": [],
+        "created_at": 1700000000.0,
+        "credential": "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo",
+        "episode": "",
+        "label": "lease-run",
+        "last_activity": 1700000000.0,
+        "lifecycle": "registered",
+        "name": "lease-run 00000000",
+        "name_source": "",
+        "parent_agent_id": null,
+        "park_clear_by": "",
+        "park_expires": null,
+        "park_needs": "",
+        "park_reason": null,
+        "park_resume": "",
+        "park_set_at": null,
+        "principal": "alice",
+        "project": "",
+        "status": "",
+        "subagent": false,
+        "task": "fixture: python.exe",
+        "wake_enabled": false
+       },
+       "states": [
+        {
+         "action": "register",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": null,
+           "coordination_lease_waiters_ticket_seq": null,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "lease",
+        {
+         "expect": 120,
+         "name": "fixture",
+         "purpose": "proof",
+         "ttl": 30
+        },
+        "00000000000040008000000000000001",
+        "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+       ],
+       "reply": {
+        "expected_end": 1700000120.0,
+        "expires_at": 1700000030.0,
+        "fence": 1,
+        "holder": {
+         "acquired_at": 1700000000.0,
+         "agent_id": "00000000000040008000000000000001",
+         "expected_end": 1700000120.0,
+         "expires_at": 1700000030.0,
+         "label": "lease-run",
+         "name": "lease-run 00000000",
+         "principal": "alice",
+         "purpose": "proof"
+        },
+        "name": "fixture",
+        "position": null,
+        "queued": 0,
+        "state": "held"
+       },
+       "states": [
+        {
+         "action": "lease",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": null,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"6806a094d19b6ede8cf192202c8a18d070ed2aa42fa1dc9ea6d915fb1f016e22\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 120, \"purpose\": \"proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      },
+      {
+       "key": [
+        "release",
+        {
+         "name": "fixture"
+        },
+        "00000000000040008000000000000001",
+        "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+       ],
+       "reply": {
+        "dequeued": false,
+        "name": "fixture",
+        "released": true
+       },
+       "states": [
+        {
+         "action": "release",
+         "state": {
+          "sequences": {
+           "coordination_lease_fence": 1,
+           "coordination_lease_waiters_ticket_seq": null,
+           "coordination_wakes_wake_id_seq": null
+          },
+          "tables": {
+           "coordination_agents": [
+            "{\"name\": \"\", \"task\": \"fixture: python.exe\", \"label\": \"lease-run\", \"status\": \"\", \"episode\": \"\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+           ],
+           "coordination_events": [
+            "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-run\\\",\\\"project\\\":\\\"\\\",\\\"status\\\":\\\"\\\",\\\"task\\\":\\\"fixture: python.exe\\\",\\\"wake_enabled\\\":false}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"6806a094d19b6ede8cf192202c8a18d070ed2aa42fa1dc9ea6d915fb1f016e22\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"proof\\\",\\\"ttl\\\":30}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"3255e5194a6686c53705688dd87cdcbddaa09777865240034736b6acd15cb04a\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+            "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"c1bff3fb8963d0c90af2ac3d20709a0b1c84edb467ffb310aa53441a9db190c1\", \"task\": \"fixture: python.exe\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"6806a094d19b6ede8cf192202c8a18d070ed2aa42fa1dc9ea6d915fb1f016e22\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+           ],
+           "coordination_lease_waiters": [],
+           "coordination_leases": [
+            "{\"name\": \"fixture\", \"fence\": 1, \"expect\": null, \"purpose\": \"\", \"freed_at\": 1700000000, \"expires_at\": null, \"acquired_at\": null, \"expected_end\": null, \"holder_agent_id\": null, \"holder_principal\": \"\"}"
+           ],
+           "coordination_messages": [],
+           "coordination_wakes": []
+          }
+         }
+        }
+       ],
+       "status": 200
+      }
+     ]
+    ]
+   }
   }
  }
 }
