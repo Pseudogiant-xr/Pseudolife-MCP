@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 STORAGE = Path(__file__).resolve().parents[1] / "src" / "storage"
-PLAN_SHA256 = "541ace8f10c8df08cfaf89c1c6814bf1b02b811e59059861e624099d949f4124"
+PLAN_SHA256 = "364fb0dc2ad0b9f6d336f92f32b1f37c3ab2ef56067ce35d383bf65fdad7849f"
 
 
 def load_schema_plan(storage: Path = STORAGE) -> dict:

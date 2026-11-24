@@ -557,7 +557,9 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
         connect = psycopg.connect
     from psycopg.conninfo import conninfo_to_dict
 
-    from pseudolife_memory.storage.schema import is_production_database
+    # The package-free guard (rust/harness_support), so a dispatched run
+    # refuses the live bank's server with or without the frozen package.
+    from rust.harness_support.database_guard import is_production_database
 
     prefix = "refusing a dispatched run"
     targets: dict[str, tuple[str, list[str]]] = {}

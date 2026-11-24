@@ -1,11 +1,13 @@
 """Storage startup cells using the daemon harness's disposable/catalog helpers.
 
 The candidate is Cargo's daemon unit-test executable: it calls the production
-Storage::open and close boundary without loading an embedding model. The
-oracle calls PostgresStorage on a separate cloned bank. Every open is followed
-by a full catalog/row snapshot; restart changes only writer_lease_epoch.
-Checking goldens (--check-goldens, what CI runs) opens only the candidate and
-compares each stage with the committed snapshot; recording runs both.
+Storage::open and close boundary without loading an embedding model. Every
+open is followed by a full catalog/row snapshot; restart changes only
+writer_lease_epoch. Checking goldens (--check-goldens, what CI runs and the
+default) compares each stage with the committed snapshot; --record-candidate
+re-records it from the candidate. The frozen Python arm that recorded it first
+is retired. Upgrade preimages still come from the historical schema source in
+recorded Git objects (historical_schema), not from the package directory.
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO))
+import candidate_record
 import dbstate
 import pgdisposable
 import psycopg
@@ -38,8 +41,7 @@ GOLDEN_FILE = HERE / "goldens" / "schema-startup.json"
 def golden_state(state):
     state = json.loads(json.dumps(state))
     # The schema installs the server's available extension version, so the
-    # golden binds only the DDL-controlled names and namespaces. A recording
-    # (both arms) still compares extversion exactly; checking does not.
+    # golden binds only the DDL-controlled names and namespaces.
     state["catalog"]["extensions"] = [[name, "<server-version>", namespace]
                                        for name, version, namespace in state["catalog"]["extensions"]]
     return golden_scrub(state)
@@ -107,11 +109,11 @@ def refusal_cell(binary, number, version):
         pg.drop(name)
 
 
-def cell(binary, number, commit=None, dimension=1024, expected=None, oracle=True):
-    """One source schema on cloned banks. With ``oracle`` PostgresStorage opens
-    a clone beside Rust and each stage compares the two; without it only Rust
-    opens, and ``expected`` (the committed stages) is its expectation."""
-    arms = ("python", "rust") if oracle else ("rust",)
+def cell(binary, number, commit=None, dimension=1024, expected=None):
+    """One source schema on a bank cloned from its template: Rust opens it,
+    and ``expected`` (the committed stages, None when recording from the
+    candidate) is its expectation."""
+    arms = ("rust",)
     names = [pg.name(f"{pg.PREFIX}{number + i}") for i in range(1 + len(arms))]
     created = []
     try:
@@ -127,7 +129,6 @@ def cell(binary, number, commit=None, dimension=1024, expected=None, oracle=True
             dsns[arm] = pg.create(name, template=names[0])
             created.append(name)
         stages = []
-        recorded = []
         observed = []   # the candidate's entry per open, for --record-candidate
         rules = {("relations", "created_at"): "clock"}
         for restart in range(2):
@@ -136,20 +137,6 @@ def cell(binary, number, commit=None, dimension=1024, expected=None, oracle=True
                     assert_disposable_database(conn)
             before = {arm: snapshot(dsn) for arm, dsn in dsns.items()}
             windows = {}
-            if oracle:
-                from pseudolife_memory.storage.postgres import PostgresStorage
-                python_start = time.time()
-                if dimension != 1024:
-                    try:
-                        PostgresStorage(dsns["python"]).close()
-                    except RuntimeError as error:
-                        if f"vector({dimension})" not in str(error):
-                            raise
-                    else:
-                        raise RuntimeError("Python unexpectedly upgraded a legacy embedding dimension")
-                else:
-                    PostgresStorage(dsns["python"]).close()
-                windows["python"] = [python_start, time.time()]
             rust_start = time.time()
             rust_open(binary, dsns["rust"], f"vector({dimension})" if dimension != 1024 else None)
             windows["rust"] = [rust_start, time.time()]
@@ -157,9 +144,6 @@ def cell(binary, number, commit=None, dimension=1024, expected=None, oracle=True
             normalized = {arm: dbstate.normalize(state, rules, template_state) for arm, state in states.items()}
             stage = {"restart": restart, "windows": windows,
                      "clock_diffs": [d for arm in arms for d in clock_diffs(states[arm], before[arm], windows[arm])]}
-            if oracle:
-                stage["diffs"] = dbstate.diff(normalized["python"], normalized["rust"])
-                recorded.append(golden_state(normalized["python"]))
             observed.append(golden_state(normalized["rust"]))
             if expected is not None:
                 stage["golden_diffs"] = dbstate.diff(expected[restart], observed[-1])
@@ -178,34 +162,43 @@ def cell(binary, number, commit=None, dimension=1024, expected=None, oracle=True
                     strict.extend(dbstate.diff(prior, state))
                 stage["idempotence_diffs"] = strict
             stages.append(stage)
-        return {"source_commit": commit, "stages": stages, "_recorded": recorded, "_observed": observed}
+        return {"source_commit": commit, "stages": stages, "_observed": observed}
     finally:
         for name in reversed(created):
             pg.drop(name)
 
 
 def stage_diffs(stage):
-    """Every difference a stage reports, whichever arms ran."""
-    return [d for key in ("diffs", "clock_diffs", "idempotence_diffs", "refusal_state_diffs", "golden_diffs")
+    """Every difference a stage reports."""
+    return [d for key in ("clock_diffs", "idempotence_diffs", "refusal_state_diffs", "golden_diffs")
             for d in stage.get(key, [])]
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--rust-test-bin", required=True, type=Path)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    ap = argparse.ArgumentParser(allow_abbrev=False)
+    ap.add_argument("--rust-test-bin", type=Path, help="the daemon mutants test executable (required)")
     ap.add_argument("--commit", action="append", default=[])
     ap.add_argument("--all-versions", action="store_true")
     ap.add_argument("--refusals", action="store_true")
     ap.add_argument("--mutants", action="store_true")
+    # Outside the group, so its retirement message wins over "not allowed with".
+    ap.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     mode = ap.add_mutually_exclusive_group()
-    mode.add_argument("--record-goldens", action="store_true")
     mode.add_argument("--check-goldens", action="store_true")
     mode.add_argument("--record-candidate", action="store_true",
                       help="re-record the golden from the Rust candidate (candidate_record.py); a dry run "
                            "unless --write")
     ap.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
-    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--out", type=Path, help="report JSON path (required)")
     args = ap.parse_args(argv)
+    # Retired modes refuse first: before the database turn and any check.
+    if args.record_goldens:
+        ap.error(candidate_record.RECORD_GOLDENS_RETIRED)
+    missing = [flag for flag, value in (("--rust-test-bin", args.rust_test_bin), ("--out", args.out))
+               if value is None]
+    if missing:
+        ap.error("the following arguments are required: " + ", ".join(missing))
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -225,12 +218,16 @@ def main(argv=None):
             ap.error("--record-candidate records the golden's cases only; check the result with "
                      "--check-goldens --refusals --mutants")
         return record_candidate(args)
+    goldens = json.loads(GOLDEN_FILE.read_text())
+    unknown = [commit for commit in args.commit if commit not in goldens["cases"]]
+    if unknown:
+        # Checked before any database work: replay covers the fresh schema and
+        # the commits schema_history.json lists, each with its golden.
+        ap.error("--commit " + ", ".join(unknown) + " has no golden in schema-startup.json; add it to "
+                 "schema_history.json, then record it with --record-candidate --commit <commit> --write")
     from test_schema_executor import check_equivalence
     equivalence = check_equivalence(args.rust_test_bin.resolve(), pg)
     results = []
-    recorded = {}
-    goldens = json.loads(GOLDEN_FILE.read_text()) if args.check_goldens else None
-    oracle = goldens is None
     number = time.time_ns() // 1000
     sources = [{"commit": c, "embedding_dimension": 1024} for c in args.commit]
     if args.all_versions:
@@ -238,9 +235,9 @@ def main(argv=None):
     for i, source in enumerate([{"commit": None, "embedding_dimension": 1024}, *sources]):
         commit = source["commit"]
         key = commit or "fresh"
-        expected = goldens["cases"][key] if goldens else None
-        result = cell(args.rust_test_bin.resolve(), number + i * 3, commit, source["embedding_dimension"], expected, oracle)
-        recorded[key] = result.pop("_recorded")
+        result = cell(args.rust_test_bin.resolve(), number + i * 3, commit, source["embedding_dimension"],
+                      goldens["cases"][key])
+        result.pop("_observed")
         results.append(result)
         print(f"schema {commit or 'fresh'}: {sum(len(stage_diffs(s)) for s in result['stages'])} diffs", flush=True)
         args.out.write_text(json.dumps({"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
@@ -267,10 +264,9 @@ def main(argv=None):
                         result = refusal_cell(args.rust_test_bin.resolve(), number + 1000 + i * 3, "99")
                         caught = bool(result["diffs"])
                     else:
-                        # Live, a mutant shows as a Python/Rust difference;
-                        # checking goldens, as a difference from the fresh case.
+                        # A mutant shows as a difference from the fresh case.
                         result = cell(args.rust_test_bin.resolve(), number + 1000 + i * 3,
-                                      expected=goldens["cases"]["fresh"] if goldens else None, oracle=oracle)
+                                      expected=goldens["cases"]["fresh"])
                         caught = any(stage_diffs(s) for s in result["stages"])
                 except RuntimeError as error:
                     # Only the expected source mutation can satisfy this
@@ -286,23 +282,12 @@ def main(argv=None):
         output["mutants"] = mutations
         args.out.write_text(json.dumps(output, indent=2), encoding="utf-8")
         failed = any(not r["caught"] for r in mutations.values())
-    if args.record_goldens and not failed:
-        # Oracle capture only; the candidate's state never becomes its own
-        # expectation. The existing golden scrub retains all row values and
-        # hashes complete catalogs rather than truncating them.
-        GOLDEN_FILE.write_text(json.dumps({"normalizers": {
-            "relations.created_at": "newly seeded rows only, against the common template",
-            "catalog": "golden_scrub: full catalog row counts and SHA-256 digests",
-            "catalog.extensions.extversion": "server-provided version; exact only between the arms of a recording",
-        }, "oracle_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
-           "cases": recorded}, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return int(failed)
 
 
 def record_candidate(args):
     """--record-candidate: each selected source schema runs on the candidate
     alone and is classed against schema-startup.json (candidate_record.py)."""
-    import candidate_record
     why = candidate_record.refuse_mutant_environment()
     if why:
         print(f"schema record-candidate refused: {why}", flush=True)
@@ -329,11 +314,10 @@ def record_candidate(args):
     for i, source in enumerate(sources):
         key = source["commit"] or "fresh"
         try:
-            result = cell(binary, number + i * 3, source["commit"], source["embedding_dimension"], oracle=False)
+            result = cell(binary, number + i * 3, source["commit"], source["embedding_dimension"])
         except Exception as error:   # a failed open is a refused case, not a crash
             result = {"source_commit": source["commit"], "stages": [], "error": str(error), "_observed": []}
         entry = result.pop("_observed")
-        result.pop("_recorded", None)
         results.append(result)
         failures = ([f"error: {result['error']}"] if result.get("error") else []) + [
             d for stage in result["stages"] for d in stage_diffs(stage)]

@@ -12,6 +12,7 @@ import re
 from secrets import token_hex, token_urlsafe
 import sys
 import tempfile
+import threading
 from urllib.parse import unquote, urlencode, urlsplit
 
 from rust.daemon.harness import daemons, mcp_wire
@@ -27,6 +28,10 @@ DREAM_TALLIES = ("claims", "inserted", "superseded", "literal_flagged", "literal
 
 class BenchError(RuntimeError):
     """An incomplete or invalid measurement."""
+
+
+class CellStopped(BenchError):
+    """A parallel cell told to stop because another failed; its daemon did not fail."""
 
 
 def redact(text, secrets=()):
@@ -281,6 +286,26 @@ def database_errors(pg):
                          "server at the declared loopback address and check the test login.") from None
 
 
+_DATABASE_LOCK = threading.Lock()
+_PORT_LOCK = threading.Lock()
+_RESERVED_PORTS = set()
+
+
+def _reserve_port():
+    """A free loopback port no other daemon of this process has been handed yet.
+
+    ``free_port`` closes its probe socket, so two cells starting together could
+    otherwise both be given the same port before either daemon binds it.
+    """
+    with _PORT_LOCK:
+        for _ in range(64):
+            port = daemons.free_port()
+            if port not in _RESERVED_PORTS:
+                _RESERVED_PORTS.add(port)
+                return port
+    raise BenchError("no free loopback port for a Rust daemon")
+
+
 def save_failure_log(source, destination, secrets):
     if destination is None or not source.is_file():
         return
@@ -353,20 +378,30 @@ class DaemonSetup:
     @contextmanager
     def bank(self, config, extractor=None):
         pg = self._test_database()
-        name = pg.name(f"{pg.PREFIX}quality_{token_hex(6)}")
+        # The harness's name registry is shared module state; parallel gate cells
+        # allocate, create and drop their databases one at a time.
+        with _DATABASE_LOCK:
+            name = pg.name(f"{pg.PREFIX}quality_{token_hex(6)}")
         self.scratch.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="rust-quality-", dir=self.scratch) as scratch:
             home = daemons.make_home(Path(scratch), "daemon", json.dumps(config, allow_nan=False))
-            with database_errors(pg):
+            with database_errors(pg), _DATABASE_LOCK:
                 dsn = pg.create(name)
             try:
                 yield from self._serve(home, dsn, extractor)
             finally:
-                with database_errors(pg):
+                with database_errors(pg), _DATABASE_LOCK:
                     pg.drop(name)
 
     def _serve(self, home, dsn, extractor):
-        port, token = daemons.free_port(), token_urlsafe(32)
+        port, token = _reserve_port(), token_urlsafe(32)
+        try:
+            yield from self._serve_on(home, dsn, extractor, port, token)
+        finally:
+            with _PORT_LOCK:
+                _RESERVED_PORTS.discard(port)
+
+    def _serve_on(self, home, dsn, extractor, port, token):
         env = daemons.base_env(home, {})
         env = {key: value for key, value in env.items() if not key.startswith("PSEUDOLIFE_")}
         env.update({"PSEUDOLIFE_MCP_HOST": "127.0.0.1", "PSEUDOLIFE_MCP_TOKEN": token,
@@ -415,6 +450,8 @@ class DaemonSetup:
                 if daemon.proc is None and (handle := getattr(daemon, "_out", None)) is not None:
                     handle.close()  # Popen can fail after launch() opens the log.
                 daemon.stop()
+        except CellStopped:
+            raise  # nothing went wrong in this daemon, so no failure log is saved
         except Exception as exc:
             try:
                 save_failure_log(daemon.log, self.failure_log, secrets)

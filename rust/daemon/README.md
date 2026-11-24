@@ -84,13 +84,20 @@ an embedder or exposing a diagnostic HTTP endpoint:
 
 ```bash
 cargo build --manifest-path rust/Cargo.toml -p pseudolife-daemon --features principal-harness,mutants -j 3
-python rust/daemon/harness/principals.py live --rust-bin <binary> --out principals-live.json
 python rust/daemon/harness/principals.py golden --rust-bin <binary> --out principals-golden.json
 python rust/daemon/harness/principals.py mutants --rust-bin <binary> --out principals-mutants.json
+# a deliberate change: a dry run first, then --write and review the golden diff
+python rust/daemon/harness/principals.py golden --record-candidate --rust-bin <binary> --out principals-record.json
 ```
 
-Every database mutation compares both catalogs and all durable rows. New
-timestamps must fall inside the arm's database-clock write window, including
+Each step is compared with the golden record at the same position: its case
+label, its output and, after every database mutation, the catalog and all
+durable rows; a mutant is caught when any step differs. The fixture creates
+the `principals` table (and, in one adversarial step, `meta`) from the
+daemon's own `schema.sql`, asks about the operator routes `http.rs` declares,
+and writes invites with the SQL the native `invite` runs. The frozen Python
+arm and its `live`, `oracle` and `--record` modes are retired. New
+timestamps must fall inside the bank's database-clock write window, including
 the invite TTL offset; unchanged timestamps retain their event identity.
 The concurrent-redemption case verifies two blocked callers and exactly one
 durable winner; only that case's validated winning hash becomes a symbol.

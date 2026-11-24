@@ -2,7 +2,9 @@
 
 These proofs never call host Docker, a scheduler or a bank. Set
 PSEUDOLIFE_RUST_BINARY to the serialized-build candidate for the native arm.
-Python remains the oracle, including for the cross-language update lock.
+The native report is compared with what the frozen Python CLI reported
+(``ORACLE_REPORTS``); the held update lock is taken by the harness's own
+lock fixture, the same OS lock the Python updater takes.
 """
 from __future__ import annotations
 
@@ -17,6 +19,9 @@ from pathlib import Path
 
 import pytest
 
+from . import lease_fixture
+from .frozen_python import only_frozen_python
+
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIOS = {
     "current": 3,
@@ -29,6 +34,23 @@ SCENARIOS = {
     "lock-held": 4,
     "moved-before-lock": 3,
     "missing-version": 2,
+}
+
+# What the frozen Python CLI reported per scenario: the exit code and the
+# current and target versions, captured from it at 6ca817d70 on Linux and
+# Windows (the same on both; the capture is recorded in the pull request that
+# added these). A deliberate native change that departs from one edits it here.
+ORACLE_REPORTS = {
+    "current": {"exit_code": 3, "current": "0.15.1", "target": "0.15.1"},
+    "knob-off": {"exit_code": 4, "current": "0.15.0", "target": "0.15.1"},
+    "active": {"exit_code": 4, "current": "0.15.0", "target": "0.15.1"},
+    "malformed-board": {"exit_code": 4, "current": "0.15.0", "target": "0.15.1"},
+    "board-off": {"exit_code": 4, "current": "0.15.0", "target": "0.15.1"},
+    "no-bearer": {"exit_code": 4, "current": "0.15.0", "target": "0.15.1"},
+    "notice-refused": {"exit_code": 4, "current": "0.15.0", "target": "0.15.1"},
+    "lock-held": {"exit_code": 4, "current": "0.15.0", "target": "0.15.1"},
+    "moved-before-lock": {"exit_code": 3, "current": "0.15.1", "target": "0.15.1"},
+    "missing-version": {"exit_code": 2, "current": None, "target": "0.15.1"},
 }
 
 
@@ -137,11 +159,10 @@ def _proof(tmp_path, scenario, command):
     docker = _docker(home)
     lock = None
     if scenario == "lock-held":
-        from pseudolife_memory.os_lock import OsLock
         data = home / "data"
         data.mkdir()
-        lock = OsLock(data / "update.lock")
-        assert lock.acquire()
+        lock = lease_fixture.take(data / "update.lock")
+        assert lock is not None
         (data / "update.lock.pid").write_text("4242\n", encoding="utf-8")
     try:
         with _endpoint(scenario) as (url, requests):
@@ -171,20 +192,21 @@ def _proof(tmp_path, scenario, command):
             return {key: report.get(key) for key in ("exit_code", "current", "target")}
     finally:
         if lock is not None:
-            lock.release()
+            lease_fixture.release(lock)
 
 
+@only_frozen_python
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_oracle_unattended_refusal_contract(tmp_path, scenario):
-    _proof(tmp_path, scenario, [sys.executable, "-P", "-m", "pseudolife_memory.cli"])
+    report = _proof(tmp_path, scenario, [sys.executable, "-P", "-m", "pseudolife_memory.cli"])
+    assert report == ORACLE_REPORTS[scenario]
+
+
+def test_oracle_reports_cover_every_scenario():
+    assert list(ORACLE_REPORTS) == list(SCENARIOS)
+    assert all(report["exit_code"] == SCENARIOS[name] for name, report in ORACLE_REPORTS.items())
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_native_unattended_refusal_parity(tmp_path, scenario):
-    native = _native()
-    oracle_home, native_home = tmp_path / "oracle", tmp_path / "native"
-    oracle_home.mkdir()
-    native_home.mkdir()
-    oracle = _proof(oracle_home, scenario, [sys.executable, "-P", "-m", "pseudolife_memory.cli"])
-    actual = _proof(native_home, scenario, [native])
-    assert actual == oracle
+    assert _proof(tmp_path, scenario, [_native()]) == ORACLE_REPORTS[scenario]

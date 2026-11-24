@@ -1395,6 +1395,84 @@ def test_a_release_cut_is_batched_alone(world, capsys, cut_first):
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
 
 
+def _crate(version: str, dependency: str = "1") -> str:
+    """The native client crate (rust/shim/Cargo.toml), whose version is the
+    release version (rust/ci/release_version.py)."""
+    return (f'[package]\nname = "pseudolife-stdio"\nversion = "{version}"\n\n'
+            f'[dependencies]\nserde = "{dependency}"\n')
+
+
+@pytest.mark.parametrize("files, cut", [
+    # A cut as one is made today: both versions move together.
+    ({"pyproject.toml": _cut("0.19.1"), "rust/shim/Cargo.toml": _crate("0.19.1")}, True),
+    # The native version alone (the cut after the wheel's last release),
+    # also behind a byte-order mark, which `git show` text keeps.
+    ({"rust/shim/Cargo.toml": _crate("0.19.1")}, True),
+    ({"rust/shim/Cargo.toml": "﻿" + _crate("0.19.1")}, True),
+    # pyproject.toml alone, as before.
+    ({"pyproject.toml": _cut("0.19.1")}, True),
+    # An ordinary change, and one that edits the crate but not its version.
+    ({"b2.txt": "b\n"}, False),
+    ({"rust/shim/Cargo.toml": _crate("0.19.0", "2")}, False),
+    # Shaped like the pull requests that moved the version's readers: a
+    # reader and its pins change, no version does.
+    ({"rust/ci/release_version.py": "AUTHORITY = 'rust/shim/Cargo.toml'\n",
+      "tests/test_plugin_packaging.py": "def test_pin(): pass\n"}, False),
+], ids=["both-versions", "native-only", "native-only-bom", "pyproject-only", "ordinary",
+        "crate-not-version", "reader-pr-shape"])
+def test_a_release_cut_is_a_change_of_the_release_version(world, capsys, files, cut):
+    world.advance_master({"pyproject.toml": _cut("0.19.0"), "rust/shim/Cargo.toml": _crate("0.19.0")})
+    sha10 = world.pr(10, files)
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-10-19T09:00:00Z")
+    world.gh.add(11, sha11, labeled_at="2026-10-19T09:30:00Z")
+
+    assert _publish(world) == 0, capsys.readouterr()
+    out = capsys.readouterr().out
+
+    merged = set(_second_parents(world.origin, f"integrate/{DATE}-batch-1"))
+    if cut:
+        assert merged == {sha10} and "#11" in out and "release cut" in out
+    else:
+        assert merged == {sha10, sha11} and "release cut" not in out
+
+
+def test_a_crate_added_where_master_has_none_is_no_cut(world, capsys):
+    # A revision without the native crate gives no native signal, so only
+    # pyproject.toml's version decides, as before.
+    world.advance_master({"pyproject.toml": _cut("0.19.0")})
+    sha10 = world.pr(10, {"rust/shim/Cargo.toml": _crate("0.19.0")})
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert set(_second_parents(world.origin, f"integrate/{DATE}-batch-1")) == {sha10, sha11}
+
+
+def test_deleting_pyproject_with_the_package_is_no_cut(world, capsys):
+    # The pull request that deletes the Python package removes
+    # pyproject.toml; it changes no release version, so it batches with the
+    # rest instead of being taken for a cut.
+    world.advance_master({"pyproject.toml": _cut("0.19.0"), "rust/shim/Cargo.toml": _crate("0.19.0")})
+    seed = world.gh.seed
+    _git(seed, "fetch", "-q", "origin")
+    _git(seed, "switch", "-q", "-C", "pr-10", "origin/master")
+    _git(seed, "rm", "-q", "pyproject.toml")
+    _git(seed, "commit", "-q", "-m", "delete the package metadata")
+    _git(seed, "push", "-q", "-f", "origin", "HEAD:refs/pull/10/head")
+    sha10 = _git(seed, "rev-parse", "HEAD")
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert set(_second_parents(world.origin, f"integrate/{DATE}-batch-1")) == {sha10, sha11}
+    assert "release cut" not in capsys.readouterr().out
+
+
 def _fold_cut(world, number: int, version: str, *, fold: tuple[str, ...] = (),
               add: dict[str, str] | None = None) -> str:
     """A version cut on master's tip: pyproject bumped, `fold` fragments

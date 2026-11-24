@@ -451,10 +451,13 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
     })
 }
 
+/// A Windows key this session cannot unseal, which is never called absent.
+pub(super) const SEALED: &str = "the saved runtime key cannot be unsealed in this session: it was sealed by another account, or this logon has no access to the account's credentials (such as a key-based SSH logon). Run the command from a desktop session of the account that saved the key";
+
 /// `_key_present`: `ProfileStore.read_key` succeeds. A Windows key this
-/// session cannot unseal is deferred rather than called absent.
+/// session cannot unseal is refused rather than called absent.
 pub(super) fn key_present(root: &Path, name: &str) -> Result<bool, Fail> {
-    key_state(root, name)?.ok_or(Fail::Defer)
+    key_state(root, name)?.ok_or(Fail::Tunnel(SEALED))
 }
 
 /// The private key's presence: `Some(true)` when it reads as a valid key

@@ -37,9 +37,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from rust.harness_support.private_fixture import write_owner_only
+
 from .. import normalize
 from ..core import WINDOWS, Case
 from . import _cluster
+from . import _test_login_seed as seed
 
 class _Secret(str):
     """Keep credential values intact for children, out of pytest case reprs."""
@@ -63,11 +66,6 @@ PASSWORD_KEY = "PSEUDOLIFE_TEST_PG_PASSWORD"
 LOGIN_REL = ".pseudolife-mcp/test-pg.env"
 ADMIN_URL = f"postgresql://{_cluster.SUPERUSER}@127.0.0.1:{_cluster.PORT}/postgres"
 SEP = os.sep
-
-
-def _oracle():
-    import pseudolife_memory.test_login_cli as cli  # noqa: PLC0415 (oracle checkout)
-    return cli
 
 
 # ── observation ──────────────────────────────────────────────────────────────
@@ -430,20 +428,18 @@ def _login_path(arm, rel: str = LOGIN_REL) -> Path:
 
 def _seed_login(arm, server, *, with_file: bool = True, rel: str = LOGIN_REL,
                 provisioned: bool = True, password: str = SEEDED_PASSWORD) -> None:
-    """The role as a previous run left it, through the oracle's own statement
-    builders and file writer."""
-    cli = _oracle()
-    statements = cli.role_statements(ROLE, cli.scram_verifier(password), [_cluster.BANK])
+    """The role as a previous run left it, through the frozen command's own
+    statement builders (``_test_login_seed``) and an owner-only file as its
+    private writer leaves one."""
+    statements = seed.role_statements(ROLE, seed.scram_verifier(password), [_cluster.BANK])
     if not provisioned:
         statements = statements[:2] + ["COMMIT"]
     server_exec(server, statements)
     if provisioned:
-        server_exec(server, cli.extension_statements()[1:-1], "template1")
+        server_exec(server, seed.extension_statements()[1:-1], "template1")
     if with_file:
-        path = _login_path(arm, rel)
-        staged = cli._write_private(path, f"{cli._FILE_HEADER}{USER_KEY}={ROLE}\n"
-                                          f"{PASSWORD_KEY}={password}\n")
-        os.replace(staged, path)
+        write_owner_only(_login_path(arm, rel), (f"{seed._FILE_HEADER}{USER_KEY}={ROLE}\n"
+                                                 f"{PASSWORD_KEY}={password}\n").encode("utf-8"))
 
 
 def _hand_edited(body: str | bytes):
@@ -455,9 +451,8 @@ def _hand_edited(body: str | bytes):
         path.parent.mkdir(parents=True, exist_ok=True)
         if WINDOWS:
             # This case tests reading edited bytes. Bind its initial ACL to
-            # the oracle's private-file fixture, rather than host inheritance.
-            staged = _oracle()._write_private(path, "")
-            os.replace(staged, path)
+            # an owner-only fixture file, rather than host inheritance.
+            write_owner_only(path, b"")
         path.write_bytes(body if isinstance(body, bytes) else body.encode("utf-8"))
     return prepare
 

@@ -21,8 +21,10 @@ from tests.test_installer_existing_upgrade import _bash_variants
 
 
 @pytest.mark.parametrize("script", ["install-native.sh", "install-native.ps1"])
-@pytest.mark.parametrize("flag,installed", [("", "none"), ("", "rust-unaccepted"), ("rust", "none")],
-                         ids=["default", "unfinished-rust", "explicit-rust"])
+@pytest.mark.parametrize("flag,installed", [("", "none"), ("", "rust-unaccepted"), ("rust", "none"),
+                                            ("python", "rust-unaccepted"), ("", "rust"), ("python", "rust")],
+                         ids=["default", "unfinished-rust", "explicit-rust", "unfinished-rust-asks-python",
+                              "rust-installed", "rust-installed-asks-python"])
 @pytest.mark.parametrize("transport", ["shim", "http"], ids=["no-token", "http-without-token"])
 def test_a_bearer_the_install_cannot_mint_is_decided_before_anything_is_pulled(tmp_path, script, flag,
                                                                                installed, transport):
@@ -67,10 +69,35 @@ def test_a_bearer_the_install_cannot_mint_is_decided_before_anything_is_pulled(t
                          + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         calls, output = shell.logged(), proc.stdout + proc.stderr
     prepares = [call for call in calls if "prepare" in call]
-    if flag == "rust" or installed == "rust-unaccepted":
+    python_way = "rerun with -Engine python" if script.endswith(".ps1") else "rerun with --engine python"
+    if flag == "python" and installed == "rust-unaccepted":
+        # The refusal's last way out works where it is offered: this
+        # checkout's own unfinished Rust install reruns as Python. (Another
+        # release's unfinished container is refused by prepare whichever
+        # engine is asked for, rust/shim/src/cli/installer/engine.rs
+        # refuse_foreign_unaccepted, and that refusal names its own fix; the
+        # stub here stands for the same-release case.)
+        assert proc.returncode == 0, output
+        assert "RESULT:python" in output
+        assert [call for call in prepares if "--engine rust" in call] == []
+    elif flag == "rust" or installed in ("rust-unaccepted", "rust"):
         # A Rust install that is not a default refuses before it pulls anything.
         assert proc.returncode == 2, output
         assert "cannot mint one" in output and "Nothing was pulled or started" in output
+        # Where an accepted Rust daemon is installed, the engine stays what
+        # detection found (`rust`, rust/shim/src/cli/installer/engine.rs) and
+        # the Python engine is only switched to later, so a rerun with it meets
+        # this same refusal: the text offers it only where detection found no
+        # accepted Rust daemon.
+        assert (python_way in output) == (installed != "rust"), output
+        # The cause is the flag this install was given, never missing pip tooling
+        # (#1609): the native client needs no pipx or pip.
+        assert ("-NoToken" if script.endswith(".ps1") else "--no-token") in output, output
+        if script.endswith(".ps1"):
+            # A recorded opt-out is cleared only by an explicit -NoToken:$false,
+            # printed literally (not PowerShell's expanded "False").
+            assert "rerun with -NoToken:$false -Transport shim" in output, output
+        assert "pipx" not in output and "pip-capable" not in output, output
         assert prepares == []
     else:
         assert proc.returncode == 0, output
@@ -80,11 +107,13 @@ def test_a_bearer_the_install_cannot_mint_is_decided_before_anything_is_pulled(t
 
 
 @pytest.mark.parametrize("script", ["install-native.sh", "install-native.ps1"])
-@pytest.mark.parametrize("token_state,defaulted,expected", [
-    ("minted", True, "rust"), ("present", True, "rust"), ("opted-out", True, "python"), ("failed", True, "python"),
-    ("http", False, "refused"), ("failed", False, "refused"), ("present", False, "rust"),
+@pytest.mark.parametrize("token_state,defaulted,expected,installed", [
+    ("minted", True, "rust", "none"), ("present", True, "rust", "none"), ("opted-out", True, "python", "none"),
+    ("failed", True, "python", "none"), ("http", False, "refused", "none"), ("failed", False, "refused", "none"),
+    ("present", False, "rust", "none"), ("http", False, "refused", "rust"), ("failed", False, "refused", "rust"),
 ])
-def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, defaulted, expected):
+def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, defaulted, expected,
+                                                                installed):
     # Codex P1 (round 3): stage 4b predicted a bearer that stage 5b never
     # minted (then: the shim transport with no pipx or pip; still: a mint
     # that fails), so the engine follows the token state stage 5b recorded.
@@ -92,6 +121,7 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
         stage = _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
         ps = _PowerShell(tmp_path)
         proc = ps.run("function Step($text) { Write-Output \"STEP: $text\" }\n"
+                      f"$installedEngine='{installed}'\n"
                       f"$composeEngine='rust'\n$engineDefaulted=${'true' if defaulted else 'false'}\n"
                       f"$engineFiles=@('C:\\fixture\\engine.yml')\n$tokenState='{token_state}'\n" + stage
                       + "Write-Output \"RESULT:$composeEngine|$($engineFiles -join ',')\"\n")
@@ -103,6 +133,7 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
         stage = _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
         shell = _Shell(variants[0], tmp_path)
         proc = shell.run('step() { echo "STEP: $*"; }\n'
+                         f"INSTALLED_ENGINE={installed}\n"
                          f"COMPOSE_ENGINE=rust\nENGINE_DEFAULTED='{'1' if defaulted else ''}'\n"
                          f"engine_files=(/fixture/engine.yml)\nTOKEN_STATE='{token_state}'\n" + stage
                          + 'echo "RESULT:$COMPOSE_ENGINE|${engine_files[*]-}"\n')
@@ -110,6 +141,9 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
     if expected == "refused":
         assert proc.returncode == 2, output
         assert "needs its bearer token" in output and "The daemon was not started" in output
+        # As at stage 4b: no Python-engine rerun where an accepted Rust daemon is installed.
+        python_way = "rerun with -Engine python" if script.endswith(".ps1") else "rerun with --engine python"
+        assert (python_way in output) == (installed != "rust"), output
         return
     assert proc.returncode == 0, output
     result = next(line for line in output.splitlines() if line.startswith("RESULT:"))
@@ -122,3 +156,16 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
 def _stage(script, start, end):
     source = (ROOT / "ops" / script).read_text(encoding="utf-8")
     return source[source.index(start):source.index(end)]
+
+
+@pytest.mark.parametrize("script,start", [("install-native.sh", "show_generic_snippets() {"),
+                                          ("install-native.ps1", "function Show-GenericSnippets {")])
+def test_the_generic_snippet_needs_the_native_client_not_pip(script, start):
+    # #1609: the stdio-shim snippet a native install prints names the client
+    # that install put in place, not `pip install pseudolife-mcp` or pipx.
+    source = (ROOT / "ops" / script).read_text(encoding="utf-8").replace("\r\n", "\n")
+    body = source[source.index(start):]
+    body = body[:body.index("\n}\n")]
+    assert ("stdio shim (recommended - per-session identity; needs the native\n"
+            "  pseudolife-mcp client, on PATH or by its full path in \"command\"):") in body
+    assert "pip install" not in body and "pipx" not in body

@@ -1,13 +1,13 @@
-"""Late clock reseed recovery through the actual Python and native services.
+"""Late clock reseed recovery through the native service.
 
 All loaders finish before a malformed coordination clock fails. Correcting
 that clock and dropping entries.text proves the next initialization retries
 only the clock; a later malformed clock proves healthy calls skip its read.
-Python's unported recovery/curation preamble is explicitly inert in this cell.
 The native embedder loads the existing four-dimensional offline ONNX fixture.
-Checking goldens (--check-goldens, what CI runs) starts only the native service
-and compares its attempts and each phase's database with the committed golden;
-recording runs both.
+Checking goldens (--check-goldens, what CI runs and the default) starts the
+native service and compares its attempts and each phase's database with the
+committed golden; --record-candidate re-records the golden from the candidate.
+The frozen Python arm that recorded it first is retired.
 """
 from __future__ import annotations
 
@@ -22,13 +22,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from types import SimpleNamespace
-from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(HERE))
+import candidate_record
 import daemons
 import dbstate
 import pgdisposable
@@ -50,11 +49,6 @@ memory:
   miras:
     preset: flat
 """
-NOOP_CALLBACKS = (
-    "_rehydrate_if_bank_changed_hands", "_recover_correction_locked",
-    "_recover_entry_reinstatement_locked", "_recover_lesson_synthesis",
-    "_refresh_source_retired_lessons_locked", "_carry_over_listing_spelling",
-)
 
 
 def dump_phase(phase):
@@ -68,85 +62,6 @@ def dump_phase(phase):
     output = Path(os.environ["PL_PGS_CLOCK_DB_OUT"])
     output.mkdir(parents=True, exist_ok=True)
     (output / f"{phase}.json").write_text(json.dumps(dbstate.dump(dsn), allow_nan=False), encoding="utf-8")
-
-
-def resident_snapshot(service):
-    # The source loaded these exact storage row shapes before clock failure.
-    # Reusing that resident capture avoids querying the dropped entries field.
-    snapshot = json.loads(json.dumps(service._clock_retry_snapshot))
-    snapshot["startup"]["hlc_highwater"] = [service._hlc._phys, service._hlc._logical]
-    snapshot["startup"]["hlc_reseed_pending"] = service._hlc_reseed_pending
-    return snapshot
-
-
-def identities(service):
-    return (service._cms, (service._cortex, service._world, service._lessons, service._cms.episodes),
-            service._storage, service._embedder)
-
-
-def same_as_first(service, original):
-    current = identities(service)
-    return {"bank": current[0] is original[0],
-            "startup": all(a is b for a, b in zip(current[1], original[1])),
-            "storage": current[2] is original[2], "embedder": current[3] is original[3]}
-
-
-def oracle_cell():
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    storage = PostgresStorage(os.environ["PL_PGS_CLOCK_RETRY_DSN"])
-    try:
-        import torch
-        from pseudolife_memory.memory.hlc import HybridLogicalClock
-        from pseudolife_memory.service import MemoryService
-        torch.set_num_threads(1)
-        config = Path(os.environ["PL_PGS_CLOCK_CONFIG"])
-        service = MemoryService(data_dir=config.parent, config_path=config,
-                                database_url=os.environ["PL_PGS_CLOCK_RETRY_DSN"])
-        service._storage = storage
-        service._embedder = SimpleNamespace(embedding_dim=4)
-        service._hlc = HybridLogicalClock(now_ms=lambda: 100)
-        for name in NOOP_CALLBACKS:
-            setattr(service, name, lambda: None)
-        service._hydrate_resident_stores = lambda: startup.python_hydrate(
-            storage, config, resident_service=service)
-        attempts = []
-        with patch("pseudolife_memory.curation_safety.recover_slot_curation", return_value=None):
-            try:
-                # Actual cold _ensure_init invokes actual _reseed_hlc after
-                # resetting retry/backoff and publishing all resident stores.
-                service._ensure_init()
-            except Exception as error:
-                attempts.append({"ok": False, "error": str(error),
-                                 "retained": resident_snapshot(service), "same_as_first": None})
-            else:
-                attempts.append({"ok": True, "error": None,
-                                 "retained": resident_snapshot(service), "same_as_first": None})
-            original = identities(service)
-            dump_phase("initial")
-            storage.meta_set("coordination_hlc_highwater", [20000, 2])
-            dump_phase("clock-corrected")
-            assert_disposable_database(storage.conn)
-            storage.conn.execute("ALTER TABLE entries DROP COLUMN text")
-            dump_phase("column-dropped")
-            for index, phase in ((1, "retry"), (2, "healthy")):
-                if index == 2:
-                    storage.meta_set("coordination_hlc_highwater", "malformed")
-                    dump_phase("healthy-clock-broken")
-                try:
-                    # Both calls run the real _ensure_init fast path. The
-                    # healthy call must not revisit malformed clock metadata.
-                    service._ensure_init()
-                except Exception as error:
-                    attempts.append({"ok": False, "error": str(error),
-                                     "retained": resident_snapshot(service), "same_as_first": None})
-                else:
-                    attempts.append({"ok": True, **resident_snapshot(service),
-                                     "same_as_first": same_as_first(service, original)})
-                dump_phase(phase)
-        Path(os.environ["PL_PGS_CLOCK_OUT"]).write_text(json.dumps({"attempts": attempts}, allow_nan=False),
-                                                       encoding="utf-8")
-    finally:
-        storage.close()
 
 
 def normalized(result):
@@ -187,12 +102,9 @@ def invoke(binary, kind, dsn, home, model, phases, output, mutant=None):
     for key in list(env):
         if key.startswith("PL_") and key != "PL_HARNESS_SLICE" and not key.startswith("PL_PGS_CLOCK_"):
             env.pop(key)
-    if kind == "python":
-        command = [sys.executable, str(Path(__file__).resolve()), "--oracle-cell"]
-    else:
-        command = [str(binary), "--exact", "service::tests::db_clock_reseed_retry", "--nocapture"]
-        if mutant:
-            env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
+    command = [str(binary), "--exact", "service::tests::db_clock_reseed_retry", "--nocapture"]
+    if mutant:
+        env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
     run = subprocess.run(command, cwd=REPO, env=env, capture_output=True, text=True, timeout=120)
     if run.returncode:
         raise RuntimeError(f"{kind} clock retry cell exit {run.returncode}: "
@@ -225,11 +137,11 @@ def expectations(result):
     return differences
 
 
-def cell(binary, number, result, mutant=None, expected=None, oracle=True):
-    """The cell on cloned banks. With ``oracle`` the Python service runs beside
-    Rust and the two are compared; without it only Rust runs and ``expected``
-    (the committed golden) is its expectation. Both use the same fixture rows."""
-    arms = ("python", "rust") if oracle else ("rust",)
+def cell(binary, number, result, mutant=None, expected=None):
+    """The cell on a bank cloned from the seeded template: the native service
+    runs, and ``expected`` (the committed golden, None when recording from the
+    candidate) is its expectation."""
+    arms = ("rust",)
     names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []
     try:
@@ -253,13 +165,10 @@ def cell(binary, number, result, mutant=None, expected=None, oracle=True):
                 outputs.append(invoke(binary, kind, dsn, home, model, phases, root / f"{kind}.json", mutant=mutant))
                 states.append({phase: json.loads((phases / f"{phase}.json").read_text()) for phase in PHASES})
             result["snapshots"] = dict(zip(arms, outputs))
-            result["snapshot_diffs"] = compare_attempts(*outputs) if oracle else []
             result["expectation_diffs"] = [difference for output in outputs for difference in expectations(output)]
             rules = {("relations", "created_at"): "clock"}
             result["database"] = {kind: {phase: startup.start_delta(before, state[phase], rules) for phase in PHASES}
                                   for kind, state in zip(arms, states)}
-            if oracle:
-                result["db_diffs"] = {phase: dbstate.diff(states[0][phase], states[1][phase]) for phase in PHASES}
             if expected is not None:
                 # The golden is the left side, which dbstate.diff labels "python".
                 result["golden_diffs"] = compare_attempts(expected["oracle"], outputs[-1])
@@ -295,20 +204,24 @@ def failed(result):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--mutants", action="store_true")
+    # Outside the group, so its retirement message wins over "not allowed with".
+    parser.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--record-goldens", action="store_true")
     mode.add_argument("--check-goldens", action="store_true")
     mode.add_argument("--record-candidate", action="store_true",
                       help="re-record the golden from the Rust candidate (candidate_record.py); a dry run "
                            "unless --write")
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed golden")
     parser.add_argument("--dump-db", choices=PHASES, help=argparse.SUPPRESS)
-    parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    # Retired modes refuse first: before the database turn and any check.
+    if args.record_goldens:
+        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -324,9 +237,6 @@ def main(argv=None):
     if args.dump_db:
         dump_phase(args.dump_db)
         return 0
-    if args.oracle_cell:
-        oracle_cell()
-        return 0
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
     if args.write and not args.record_candidate:
@@ -336,27 +246,24 @@ def main(argv=None):
     args.out.parent.mkdir(parents=True, exist_ok=True)
     if args.record_candidate:
         return record_candidate(args)
-    result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
-              "declared_noop_callbacks": [*NOOP_CALLBACKS, "curation_safety.recover_slot_curation"]}
+    result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip()}
     number = time.time_ns()
-    expected = json.loads(GOLDEN.read_text()) if args.check_goldens else None
-    if expected is not None and "database" not in expected:
-        parser.error("clock-retry.json has no database section; record it with "
-                     "`python rust/daemon/harness/startup_ci.py --record-goldens`")
-    oracle = expected is None
+    expected = json.loads(GOLDEN.read_text())
+    if "database" not in expected:
+        parser.error("clock-retry.json has no database section; "
+                     + candidate_record.startup_recording("clock_retry_cases.py"))
     try:
-        cell(args.rust_test_bin.resolve(), number, result, expected=expected, oracle=oracle)
+        cell(args.rust_test_bin.resolve(), number, result, expected=expected)
     except Exception as error:
         result["error"] = str(error)
     if args.mutants and not failed(result):
         mutant = {}
         try:
             cell(args.rust_test_bin.resolve(), number + 1000, mutant, "startup-clock-reloads",
-                 expected=expected, oracle=oracle)
+                 expected=expected)
         except Exception as error:
             mutant["error"] = str(error)
-        # Live, the mutant shows as a Python/Rust attempt difference; checking
-        # goldens, as a difference from the committed attempts. Either way a
+        # The mutant shows as a difference from the committed attempts; a
         # database difference means the cell itself broke.
         infrastructure_failed = bool(mutant.get("error") or mutant.get("cleanup_errors")
                                      or mutant.get("epoch_diffs") or mutant.get("write_diffs")
@@ -366,18 +273,12 @@ def main(argv=None):
         infrastructure_failed |= len(native_attempts) != 3 or (
             normalized({"attempts": native_attempts})["attempts"][0].get("error") != "coordination-highwater"
             if native_attempts else True)
-        differences = mutant.get("snapshot_diffs", []) + mutant.get("golden_diffs", [])
+        differences = mutant.get("golden_diffs", [])
         caught = not infrastructure_failed and any(difference.startswith("/attempts/1/ok:")
                                                    for difference in differences)
         result["mutants"] = {"startup-clock-reloads": {"caught": caught,
             "snapshot_diffs": differences,
             "error": mutant.get("error"), "infrastructure_failed": infrastructure_failed}}
-    if args.record_goldens and not failed(result) and all(value["caught"] for value in result.get("mutants", {}).values()):
-        GOLDEN.write_text(json.dumps({"oracle_head": result["head"],
-            "declared_noop_callbacks": result["declared_noop_callbacks"],
-            "oracle": normalized(result["snapshots"]["python"]),
-            "database": result["database"]["python"]}, indent=1, sort_keys=True, allow_nan=False) + "\n",
-            encoding="utf-8", newline="\n")
     args.out.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     bad = failed(result) or any(not value["caught"] for value in result.get("mutants", {}).values())
     print(f"clock retry: {'FAIL' if bad else '0 diffs'}", flush=True)
@@ -387,7 +288,6 @@ def main(argv=None):
 def record_candidate(args):
     """--record-candidate: the cell runs on the candidate alone and is
     classed against clock-retry.json (candidate_record.py)."""
-    import candidate_record
     why = candidate_record.refuse_mutant_environment()
     if why:
         print(f"clock retry record-candidate refused: {why}", flush=True)
@@ -398,7 +298,7 @@ def record_candidate(args):
     recording.write = args.write
     result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip()}
     try:
-        cell(binary, time.time_ns(), result, oracle=False)
+        cell(binary, time.time_ns(), result)
     except Exception as error:
         result["error"] = str(error)
     failures = ([f"error: {result['error']}"] if result.get("error") else []) + [

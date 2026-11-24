@@ -1,5 +1,4 @@
 """Wire-size controls for the admission corpus."""
-import asyncio
 import copy
 import http.client
 import json
@@ -519,20 +518,6 @@ def test_scenario_crash_cannot_count_as_a_caught_mutant(tmp_path, monkeypatch):
     with patch.object(run.daemons, "scratch_root", return_value=tmp_path), \
             patch.object(run, "run_scenario", side_effect=[clean, failed]):
         assert run.main() == 1
-
-
-def test_oracle_stream_stops_after_the_first_over_limit_frame():
-    from pseudolife_memory.web.api import _read_body
-    chunks = iter([b" " * 200000, b" " * 70000, b" " * 1000])
-    seen = []
-
-    async def receive():
-        seen.append(1)
-        return {"type": "http.request", "body": next(chunks), "more_body": len(seen) < 3}
-
-    with pytest.raises(ValueError, match="request_too_large"):
-        asyncio.run(_read_body(receive, max_bytes=262144))
-    assert len(seen) == 2
 
 
 def test_header_only_refusal_sends_no_body_and_preserves_the_response():

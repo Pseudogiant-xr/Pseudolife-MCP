@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
-//! `tunnel`: authenticated profile setup, read-only answers, and deferrals
-//! that change nothing and open no connection. Seeded profiles need
+//! `tunnel`: authenticated profile setup, read-only answers, and refusals
+//! that name their cause, change nothing and open no connection. Seeded profiles need
 //! owner-only files: the `seeded` cells run on Unix (chmod); the bridge's
 //! `serve()` cell seeds through the native client's own private-file
 //! helpers, so it runs on every platform. The differential harness row
@@ -13,7 +13,8 @@ use std::{
     process::{Command, Output},
 };
 
-const DEFERRED: &str = "pseudolife-stdio: mode 'tunnel' is deferred in this candidate\n";
+/// What the generic dispatcher deferral said; no `tunnel` argv prints it.
+const DEFERRAL_MARK: &str = "is deferred in this candidate";
 const AMBIGUOUS: &str = "daemon connection is missing or ambiguous; pass --daemon-url and --token-file explicitly (an owner-only credential file)\n";
 const UNAVAILABLE: &str = "private tunnel file is unavailable or not owner-only\n";
 
@@ -102,12 +103,17 @@ fn tree(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     out
 }
 
-fn assert_deferred(home: &Home, args: &[&str], env: &[(&str, &str)]) {
+/// A refusal (exit 2) whose one line contains `cause`, never the old
+/// generic deferral, changing nothing.
+fn assert_refused_with(home: &Home, args: &[&str], env: &[(&str, &str)], cause: &str) {
     let before = tree(&home.0);
     let output = run(home, args, env);
-    assert_eq!(output.status.code(), Some(1), "{args:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
     assert!(output.stdout.is_empty(), "{args:?}");
-    assert_eq!(output.stderr, native_text(DEFERRED), "{args:?}");
+    assert!(stderr.contains(cause), "{args:?}: {stderr}");
+    assert!(!stderr.contains(DEFERRAL_MARK), "{args:?}: {stderr}");
+    assert_eq!(stderr.trim_end().lines().count(), 1, "{args:?}: {stderr}");
     assert!(tree(&home.0) == before, "{args:?} changed the home");
 }
 
@@ -135,35 +141,150 @@ fn bridge_readiness_protocol_query_is_local_and_inert() {
 }
 
 #[test]
-fn unported_commands_and_argv_shapes_defer_without_effect() {
+fn every_tunnel_argv_answers_or_refuses_with_its_cause_without_effect() {
     let home = Home::new();
     let dir = home.dir();
-    for args in [
-        &[][..],
-        &["doctor"],
-        &["doctor", "--profile-dir", &dir],
-        &["start", "--profile-dir", &dir],
-        &["service", "preview", "--profile-dir", &dir],
-        &["service", "install", "--profile-dir", &dir],
-        &["service", "status", "--profile-dir", &dir],
-        &["status", "--help"],
-        &["status", "--profile=dot", "--profile-dir", &dir],
-        &["status", "--prof", "dot", "--profile-dir", &dir],
-        &["status", "--json", "--json", "--profile-dir", &dir],
-        &["status", "--profile", "-x", "--profile-dir", &dir],
-        &["status", "--profile-dir", ""],
-        &["update", "--json", "--profile-dir", &dir],
-        &["verify", "--accept-access", "--profile-dir", &dir],
-        &["setup", "--start", "--profile-dir", &dir],
-        &["setup", "--open-browser", "keys", "--profile-dir", &dir],
-        &["setup", "--catalog", "all", "--profile-dir", &dir],
+    for (args, cause) in [
+        (
+            &[][..],
+            "tunnel needs a command: setup, status, verify, run, stop or update",
+        ),
+        (
+            &["doctor"],
+            "tunnel doctor is not part of the native client",
+        ),
+        (
+            &["doctor", "--profile-dir", &dir],
+            "tunnel doctor is not part of the native client",
+        ),
+        (
+            &["start", "--profile-dir", &dir],
+            "Run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open; `pseudolife-mcp tunnel stop` ends it",
+        ),
+        (
+            &["service", "preview", "--profile-dir", &dir],
+            "tunnel service is not part of the native client",
+        ),
+        (
+            &["service", "install", "--profile-dir", &dir],
+            "tunnel service is not part of the native client",
+        ),
+        (
+            &["service", "status", "--profile-dir", &dir],
+            "tunnel service is not part of the native client",
+        ),
+        (
+            &["status", "--prof", "dot", "--profile-dir", &dir],
+            "tunnel status does not take",
+        ),
+        (
+            &["status", "--json", "--json", "--profile-dir", &dir],
+            "--json is given twice",
+        ),
+        (
+            &["status", "--profile", "-x", "--profile-dir", &dir],
+            "--profile needs a value",
+        ),
+        (
+            &["status", "--profile-dir", ""],
+            "the tunnel directory cannot be opened safely",
+        ),
+        (
+            &["verify", "--profile-dir", ""],
+            "the tunnel directory cannot be opened safely",
+        ),
+        (
+            &["setup", "--profile-dir", ""],
+            "the tunnel directory cannot be opened safely",
+        ),
+        (
+            &["update", "--json", "--profile-dir", &dir],
+            "tunnel update does not take",
+        ),
+        (
+            &["verify", "--accept-access", "--profile-dir", &dir],
+            "tunnel verify does not take",
+        ),
+        (
+            &["setup", "--start", "--profile-dir", &dir],
+            "tunnel setup --start is not part of the native client",
+        ),
+        (
+            &["setup", "--open-browser", "keys", "--profile-dir", &dir],
+            "https://platform.openai.com/settings/organization/api-keys",
+        ),
+        (
+            &["setup", "--catalog", "all", "--profile-dir", &dir],
+            "--catalog takes current or full",
+        ),
+        (&["bogus", "--profile-dir", &dir], "unknown tunnel command"),
     ] {
-        assert_deferred(&home, args, &[]);
+        assert_refused_with(&home, args, &[], cause);
     }
+    // Help answers on stdout and changes nothing.
+    let before = tree(&home.0);
+    for (args, first) in [
+        (
+            &["--help"][..],
+            "usage: pseudolife-mcp tunnel <command> [options]",
+        ),
+        (
+            &["status", "--help"],
+            "usage: pseudolife-mcp tunnel status [options]",
+        ),
+        (
+            &["setup", "-h"],
+            "usage: pseudolife-mcp tunnel setup [options]",
+        ),
+    ] {
+        let output = run(&home, args, &[]);
+        assert_eq!(output.status.code(), Some(0), "{args:?}");
+        assert!(output.stderr.is_empty(), "{args:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.lines().next(), Some(first), "{args:?}: {stdout}");
+    }
+    assert!(tree(&home.0) == before, "help changed the home");
+    // The joined form names the same profile and directory as the separate
+    // one: a saved, non-default profile answers only when both are read.
+    let store = home.path("tunnels");
+    pseudolife_stdio::board::state::private_dir(&store).unwrap();
+    pseudolife_stdio::board::state::atomic_create(
+        &store.join("alpha.profile.json"),
+        &serde_json::to_vec(&serde_json::json!({
+            "name": "alpha", "daemon_url": "http://127.0.0.1:9", "token_file": home.path("token"),
+            "state": "pending", "consent": true,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let joined = run(
+        &home,
+        &["status", "--profile=dot", &format!("--profile-dir={dir}")],
+        &[],
+    );
+    assert_eq!(joined.status.code(), Some(2));
+    let joined = run(
+        &home,
+        &["status", "--profile=alpha", &format!("--profile-dir={dir}")],
+        &[],
+    );
+    assert!(
+        String::from_utf8_lossy(&joined.stdout).starts_with("Profile alpha: pending"),
+        "{}",
+        String::from_utf8_lossy(&joined.stderr)
+    );
+    let separate = run(
+        &home,
+        &["status", "--profile", "alpha", "--profile-dir", &dir],
+        &[],
+    );
+    assert_eq!(joined.status.code(), separate.status.code());
+    assert_eq!(joined.stdout, separate.stdout);
+    assert_eq!(joined.stderr, separate.stderr);
 }
 
 #[test]
-fn explicit_setup_with_a_missing_credential_refuses_and_discovery_defers() {
+fn explicit_setup_with_a_missing_credential_refuses_and_discovery_names_the_flags() {
     let home = Home::new();
     let dir = home.dir();
     let token = home.path("token");
@@ -201,20 +322,23 @@ fn explicit_setup_with_a_missing_credential_refuses_and_discovery_defers() {
             "daemon credential file is unavailable or unsafe; repair its owner-only access and retry setup\n",
         );
     }
-    // A token file from the environment, with the listener as the daemon URL.
-    assert_deferred(
+    // A token file from the environment, with the listener as the daemon
+    // URL: the refusal gives the explicit command for that connection.
+    assert_refused_with(
         &home,
         &["setup", "--profile-dir", &dir],
         &[("PSEUDOLIFE_MCP_TOKEN_FILE", token)],
+        "guided setup is not part of the native client. To use the daemon this environment names, run tunnel setup with --daemon-url ",
     );
     // A Codex registration exists: its env block is not read natively.
     std::fs::create_dir_all(home.path(".codex")).unwrap();
     std::fs::write(home.path(".codex/config.toml"), b"[other]\n").unwrap();
-    assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
+    let registration = "this client does not read the daemon connection from a Claude Code or Codex registration; pass --daemon-url and --token-file";
+    assert_refused_with(&home, &["setup", "--profile-dir", &dir], &[], registration);
     std::fs::remove_dir_all(home.path(".codex")).unwrap();
     // A Claude Code registration exists.
     std::fs::write(home.path(".claude.json"), b"{}").unwrap();
-    assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
+    assert_refused_with(&home, &["setup", "--profile-dir", &dir], &[], registration);
 }
 
 const SETUP_BEARER: &str = "fixture-setup-bearer";
@@ -805,7 +929,7 @@ fn expiry_guidance_names_first_key_steps_when_no_key_is_saved() {
     }
 }
 
-fn expect_setup_deferral_for_saved_authority(record: Option<&str>, autostart: bool) {
+fn expect_setup_refusal_for_saved_authority(record: Option<&str>, autostart: bool, cause: &str) {
     let home = setup_home();
     let daemon = Listener::new();
     seed_setup_profile(
@@ -827,7 +951,7 @@ fn expect_setup_deferral_for_saved_authority(record: Option<&str>, autostart: bo
     }
     let dir = home.dir();
     let token = home.path("moved-token");
-    assert_deferred(
+    assert_refused_with(
         &home,
         &[
             "setup",
@@ -839,6 +963,7 @@ fn expect_setup_deferral_for_saved_authority(record: Option<&str>, autostart: bo
             token.to_str().unwrap(),
         ],
         &[],
+        cause,
     );
     assert_refused(
         &home,
@@ -855,19 +980,185 @@ fn expect_setup_deferral_for_saved_authority(record: Option<&str>, autostart: bo
     daemon.assert_untouched();
 }
 
+/// A changed connection asks for consent again; a saved key does not block it.
+const CONSENT_AGAIN: &str = "Rerun with --accept-access to consent to that access.";
+
 #[test]
-fn setup_defers_repointing_the_daemon_of_a_keyed_profile() {
-    expect_setup_deferral_for_saved_authority(Some("dot.key"), false);
+fn setup_repointing_the_daemon_of_a_keyed_profile_asks_for_consent_again() {
+    expect_setup_refusal_for_saved_authority(Some("dot.key"), false, CONSENT_AGAIN);
 }
 
 #[test]
-fn setup_defers_changes_when_a_stopped_tunnel_has_a_process_record() {
-    expect_setup_deferral_for_saved_authority(Some("dot.process.json"), false);
+fn setup_refuses_changes_while_a_process_record_exists_and_names_it() {
+    expect_setup_refusal_for_saved_authority(
+        Some("dot.process.json"),
+        false,
+        "cannot change profile dot while a process record exists at ",
+    );
 }
 
 #[test]
-fn setup_defers_changes_when_autostart_is_approved() {
-    expect_setup_deferral_for_saved_authority(None, true);
+fn setup_changes_with_autostart_approved_ask_for_consent_again() {
+    expect_setup_refusal_for_saved_authority(None, true, CONSENT_AGAIN);
+}
+
+#[test]
+fn setup_changes_a_keyed_profile_and_keeps_its_key() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+            "autostart_consent": true,
+        }),
+    );
+    let key = home.path("tunnels/dot.key");
+    pseudolife_stdio::board::state::atomic_create(&key, b"opaque key fixture").unwrap();
+    let ambient = Listener::new();
+    let output = command(&home, &ambient)
+        .args([
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--tunnel-id",
+            "tunnel_ef01",
+            "--accept-access",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let saved = pseudolife_stdio::board::state::read(&home.path("tunnels/dot.profile.json"), 65536)
+        .unwrap();
+    let profile: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(profile["tunnel_id"], "tunnel_ef01");
+    assert_eq!(profile["autostart_consent"], true);
+    assert_eq!(std::fs::read(&key).unwrap(), b"opaque key fixture");
+    ambient.assert_untouched();
+}
+
+/// A ready profile with a saved (opaque) key, served by a fixture daemon.
+fn keyed_profile(home: &Home, daemon: &common::Fixture) {
+    seed_setup_profile(
+        home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+            "runtime_key_expires_at": "2099-01-01T00:00:00Z",
+        }),
+    );
+    pseudolife_stdio::board::state::atomic_create(
+        &home.path("tunnels").join("dot.key"),
+        b"opaque key fixture",
+    )
+    .unwrap();
+}
+
+#[test]
+fn setup_changes_the_expiry_of_a_saved_key_only_by_renewing_it() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    keyed_profile(&home, &daemon);
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--catalog",
+            "current",
+            "--key-expires-at",
+            "2099-12-31T00:00:00Z",
+        ],
+        &[],
+        "renew the runtime key with tunnel setup --read-key or --key-file",
+    );
+}
+
+#[test]
+fn setup_waits_for_no_launch_before_changing_a_keyed_profile() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    keyed_profile(&home, &daemon);
+    // A launch preparing to start holds this lock before it writes a record.
+    let lock_path = home.path("tunnels").join("dot.native-run.lock");
+    pseudolife_stdio::board::state::atomic_create(&lock_path, b"").unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    lock.try_lock().unwrap();
+    let profile = home.path("tunnels").join("dot.profile.json");
+    let before = std::fs::read(&profile).unwrap();
+    let ambient = Listener::new();
+    let output = command(&home, &ambient)
+        .args([
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--tunnel-id",
+            "tunnel_ef01",
+            "--accept-access",
+        ])
+        .output()
+        .unwrap();
+    drop(lock);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.contains("stop the tunnel first, then retry tunnel setup"),
+        "{stderr}"
+    );
+    assert_eq!(std::fs::read(&profile).unwrap(), before);
+    ambient.assert_untouched();
+}
+
+#[test]
+fn setup_names_an_expiry_spelling_it_does_not_read_by_its_option() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    pending_setup_profile(&home, &daemon.url());
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-expires-at",
+            "2099-12-31T00:00:00.5Z",
+        ],
+        &[],
+        "--key-expires-at is an expiry spelling this client does not read",
+    );
+    daemon.assert_untouched();
+}
+
+#[test]
+fn setup_names_a_daemon_url_spelling_it_does_not_accept() {
+    let home = setup_home();
+    let token = home.path("token");
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--daemon-url",
+            "http://LOCALHOST:8123",
+            "--token-file",
+            token.to_str().unwrap(),
+            "--accept-access",
+        ],
+        &[],
+        "the URL in --daemon-url is a spelling this client does not accept",
+    );
 }
 
 #[test]
@@ -966,7 +1257,7 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
     pseudolife_stdio::board::state::atomic_create(&input, synthetic).unwrap();
     let profile = home.path("tunnels/dot.profile.json");
     let original = std::fs::read(&profile).unwrap();
-    assert_deferred(
+    assert_refused_with(
         &home,
         &[
             "setup",
@@ -978,6 +1269,7 @@ fn setup_imports_an_initial_private_key_without_rewriting_the_profile() {
             "tunnel_1111",
         ],
         &[],
+        "import the private key with --read-key or --key-file by itself",
     );
     let ambient = Listener::new();
     let mut setup = command(&home, &ambient);
@@ -1394,18 +1686,29 @@ fn setup_refuses_an_oversized_daemon_response_without_saving() {
 }
 
 #[test]
-fn setup_resuming_an_existing_profile_defers() {
+fn setup_resuming_an_existing_profile_names_the_option_or_the_broken_file() {
     let home = Home::new();
     let dir = home.dir();
     seed_setup_profile(&home, &serde_json::json!({}));
-    assert_deferred(&home, &["setup", "--profile-dir", &dir], &[]);
-    assert_deferred(
+    assert_refused_with(
+        &home,
+        &["setup", "--profile-dir", &dir],
+        &[],
+        "profile dot is saved; guided setup is not part of the native client.",
+    );
+    let broken = format!(
+        "{}; fix that file or move it aside and save the profile again with `pseudolife-mcp tunnel setup --profile dot --profile-dir {} --daemon-url <url> --token-file <owner-only file> --accept-access`",
+        home.path("tunnels").join("dot.profile.json").display(),
+        shell_quoted(&dir)
+    );
+    assert_refused_with(
         &home,
         &["setup", "--profile-dir", &dir, "--tunnel-id", "nope"],
         &[],
+        &broken,
     );
     let daemon = Listener::new();
-    assert_deferred(
+    assert_refused_with(
         &home,
         &[
             "setup",
@@ -1417,6 +1720,7 @@ fn setup_resuming_an_existing_profile_defers() {
             home.path("token").to_str().unwrap(),
         ],
         &[],
+        &broken,
     );
     daemon.assert_untouched();
 }
@@ -1640,6 +1944,49 @@ fn file_free_answers_and_refusals_match_the_oracle_text() {
     assert!(!home.path("tunnels").exists());
 }
 
+#[test]
+fn setup_names_an_absolute_token_path_and_a_profile_not_ready_for_its_key() {
+    let home = setup_home();
+    let daemon = Listener::new();
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--daemon-url",
+            &daemon.url(),
+            "--token-file",
+            "~/token",
+            "--accept-access",
+        ],
+        &[],
+        "pass the daemon credential file as an absolute path",
+    );
+    seed_setup_profile(
+        &home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url(), "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "pending", "consent": true,
+        }),
+    );
+    let input = home.path("key-input");
+    pseudolife_stdio::board::state::atomic_create(&input, b"fixture-runtime-key").unwrap();
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--key-file",
+            input.to_str().unwrap(),
+        ],
+        &[],
+        "profile dot is not ready to take a runtime key (its saved state is pending)",
+    );
+    daemon.assert_untouched();
+}
+
 #[cfg(unix)]
 mod seeded {
     use super::*;
@@ -1727,7 +2074,12 @@ mod seeded {
             not_running
         );
         private(&home.path("tunnels/dot.process.json"), b"{}");
-        assert_deferred(&home, &["verify", "--profile-dir", &dir], &[]);
+        assert_refused_with(
+            &home,
+            &["verify", "--profile-dir", &dir],
+            &[],
+            "cannot tell which launch the process record ",
+        );
         // A record naming no process id proves nothing: unknown, never
         // called deletable, and status says so.
         let status = answered(&home, &["status", "--profile-dir", &dir]);
@@ -1816,22 +2168,106 @@ mod seeded {
         let output = run_bounded(&home, &["status", "--profile-dir", &dir, "--json"]);
         assert_eq!(output.status.code(), Some(0));
         assert_eq!(output.stdout, normal.stdout);
-        // The same deep record as a private regular file: deferred.
+        // The same deep record as a private regular file: named.
         std::fs::remove_file(verification.join("challenge.json")).unwrap();
         private(
             &verification.join("challenge.json"),
             "[".repeat(150).as_bytes(),
         );
-        assert_deferred(&home, &["status", "--profile-dir", &dir], &[]);
-        // A FIFO would block Python's open: deferred, without blocking here.
+        assert_refused_with(
+            &home,
+            &["status", "--profile-dir", &dir],
+            &[],
+            "is nested too deeply to be one this client wrote; move that file aside",
+        );
+        // A FIFO is named, without blocking here.
         std::fs::remove_file(verification.join("challenge.json")).unwrap();
         let made = Command::new("mkfifo")
             .arg(verification.join("challenge.json"))
             .status();
         if made.is_ok_and(|status| status.success()) {
             let output = run_bounded(&home, &["status", "--profile-dir", &dir]);
-            assert_eq!(output.status.code(), Some(1));
-            assert_eq!(output.stderr, native_text(DEFERRED));
+            assert_eq!(output.status.code(), Some(2));
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("cannot read the verification challenge")
+            );
         }
+    }
+
+    #[test]
+    fn a_registration_path_it_cannot_inspect_is_named() {
+        let home = Home::new();
+        let dir = home.dir();
+        // CODEX_HOME names a regular file, so its config.toml cannot be
+        // inspected: the refusal names that path and that variable alone,
+        // never the tunnel store.
+        let codex = home.path("codex-file");
+        std::fs::write(&codex, b"not a directory").unwrap();
+        let config = codex.join("config.toml");
+        assert_refused_with(
+            &home,
+            &["setup", "--profile-dir", &dir],
+            &[("CODEX_HOME", codex.to_str().unwrap())],
+            &format!(
+                "cannot inspect {} to look for a client registration (CODEX_HOME must name a directory); fix that path",
+                config.display()
+            ),
+        );
+    }
+
+    #[test]
+    fn a_key_file_in_a_form_it_does_not_read_is_named() {
+        let home = Home::new();
+        let dir = home.dir();
+        profile(&home, "dot", true);
+        let key = home.path("tunnels/dot.key");
+        let made = Command::new("mkfifo").arg(&key).status();
+        if !made.is_ok_and(|status| status.success()) {
+            return; // no mkfifo on this host
+        }
+        let output = run_bounded(&home, &["status", "--profile-dir", &dir]);
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("cannot read the key file {}", key.display())),
+            "{stderr}"
+        );
+    }
+
+    #[test]
+    fn non_text_arguments_and_environment_are_refused_with_the_cause() {
+        use std::os::unix::ffi::OsStringExt;
+        let home = Home::new();
+        let dir = home.dir();
+        let listener = Listener::new();
+        let before = tree(&home.0);
+        let output = command(&home, &listener)
+            .arg("status")
+            .arg(std::ffi::OsString::from_vec(vec![b'-', b'-', 0xff]))
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .starts_with("tunnel arguments must be valid text"),
+        );
+        let output = command(&home, &listener)
+            .args(["setup", "--profile-dir", &dir])
+            .env(
+                "PSEUDOLIFE_MCP_TOKEN_FILE",
+                std::ffi::OsString::from_vec(vec![b'/', 0xff]),
+            )
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("the environment variable PSEUDOLIFE_MCP_TOKEN_FILE is not valid text"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(tree(&home.0) == before);
+        listener.assert_untouched();
     }
 }

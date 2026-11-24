@@ -26,8 +26,6 @@ from functools import lru_cache
 
 import numpy as np
 
-from pseudolife_memory.utils.config import EmbeddingConfig
-
 # Models the fake stands in for, with the dimensions and native sequence
 # caps the real checkpoints report. Anything else loads for real.
 KNOWN_MODELS: dict[str, tuple[int, int]] = {
@@ -41,7 +39,13 @@ KNOWN_MODELS: dict[str, tuple[int, int]] = {
 _FLOOR = 0.2
 _TRIGRAM_WEIGHT = 0.5
 _WORD = re.compile(r"\w+", re.UNICODE)
-_QUERY_PREFIX = EmbeddingConfig().query_prefix
+# The default instruction the embedder prepends to a search query: the Rust
+# daemon's DEFAULT_QUERY_PREFIX (rust/daemon/src/config.rs) and the frozen
+# package's EmbeddingConfig.query_prefix, both pinned by
+# tests/test_fake_embedder.py. A literal, so this module loads without the
+# package.
+_QUERY_PREFIX = ("Instruct: Given a web search query, retrieve relevant passages "
+                 "that answer the query\nQuery:")
 
 
 def is_known(model_name: object) -> bool:

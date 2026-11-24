@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 import tests.conftest as suite
+from tests import fake_embedder
 from tests.fake_embedder import FakeSentenceTransformer, is_known
 
 QWEN = "Qwen/Qwen3-Embedding-0.6B"
@@ -70,6 +71,28 @@ def test_the_query_instruction_is_not_content():
     model = FakeSentenceTransformer(QWEN)
     plain, prefixed = _unit(model, ["coffee order", QUERY_PREFIX + "coffee order"])
     assert float(plain @ prefixed) == pytest.approx(1.0)
+
+
+def test_the_stripped_instruction_is_the_rust_daemons_default():
+    """The fake strips the instruction the embedder prepends; that default
+    lives in the Rust daemon's config, read here from its source."""
+    import re
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1]
+              / "rust/daemon/src/config.rs").read_text(encoding="utf-8")
+    match = re.search(r'const DEFAULT_QUERY_PREFIX: &str =\s*"((?:\\.|[^"\\])*)";', source)
+    assert match, "DEFAULT_QUERY_PREFIX moved; repoint this pin"
+    rust_default = match[1].replace("\\n", "\n")
+    assert QUERY_PREFIX == rust_default
+    assert fake_embedder._QUERY_PREFIX == rust_default
+
+
+def test_temporary_frozen_package_query_prefix_comparison():
+    """Migration bridge only: DELETE this test when the package is retired."""
+    from pseudolife_memory.utils.config import EmbeddingConfig
+
+    assert fake_embedder._QUERY_PREFIX == EmbeddingConfig().query_prefix
 
 
 def test_unnormalised_output_is_not_unit_length():
