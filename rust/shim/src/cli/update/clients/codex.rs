@@ -1,4 +1,5 @@
 use super::*;
+use crate::setup::codex_launchers::{LAUNCHERS, launcher_previous};
 use plugin::{MARKETPLACE, PLUGIN, normalized_file};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -704,21 +705,18 @@ fn manual_hooks(home: &Path, repo: Option<&Path>, refresh: bool) -> Result<Value
             json!({"state":"stale","source":"manual","detail":"manual hooks still name a script bundle or a custom command; rerun native setup and review Codex /hooks to move them to a stable launcher"}),
         );
     }
-    // These are the exact launchers shipped by the Python oracle, checked
-    // without loading or executing its setup module. Modified launchers fail
-    // closed; refreshing scripts does not silently approve modified commands.
-    for (name, expected) in [
-        (
-            "run.sh",
-            "23dc357bbddc1b4687f9ddfe54f8591b03fbc6e1b19bd41c3aeb2834b0f0a1ce",
-        ),
-        (
-            "run.ps1",
-            "0ff3ff20c091588aa5b8bf2d2f6859c0ade5a922ba83f9ac8b824415f09d2bc7",
-        ),
-    ] {
-        if runtime::hash_file(&root.join(name)).as_deref() != Ok(expected) {
-            return Err("a manual hook launcher is missing or modified; rerun native setup with consent to repair it".into());
+    // The launchers this release writes, or ones an earlier release shipped:
+    // Codex approves the command naming a launcher, not its bytes, so a
+    // refresh replaces an earlier one without a new approval. Any other bytes
+    // fail closed; refreshing scripts does not silently approve modified
+    // commands.
+    let mut earlier = Vec::new();
+    for (name, current) in LAUNCHERS {
+        let path = root.join(name);
+        match fs::read(&path) {
+            Ok(data) if data == current => {}
+            Ok(data) if launcher_previous(name, &data) => earlier.push((path, data, current)),
+            _ => return Err("a manual hook launcher is missing or modified; rerun native setup with consent to repair it".into()),
         }
     }
     let pointer = fs::read_to_string(root.join("current"))
@@ -731,6 +729,16 @@ fn manual_hooks(home: &Path, repo: Option<&Path>, refresh: bool) -> Result<Value
         || digest(&root.join(previous), MANUAL).is_none_or(|d| !d.starts_with(previous))
     {
         return Err("manual hook bundle was modified or its pointer is invalid; review it before native setup".into());
+    }
+    if !earlier.is_empty() {
+        if !refresh {
+            return Ok(
+                json!({"state":"behind","source":"manual","detail":"manual hook launchers are an earlier release's; update replaces them without changing approved commands"}),
+            );
+        }
+        for (path, before, after) in &earlier {
+            registrations::write_config(path, before, after)?;
+        }
     }
     let scripts = repo.join("plugin/hooks");
     let target = digest(&scripts, MANUAL)
@@ -883,5 +891,119 @@ mod runtime_trust_tests {
             "needs-approval: Open /hooks in the Codex CLI or Settings > Hooks in the Codex app. Review and trust the Pseudolife handlers, then start a new session."
         );
         assert!(!approval.contains("setup-codex-hooks.py"));
+    }
+}
+
+#[cfg(test)]
+mod launcher_refresh_tests {
+    use super::*;
+    use crate::setup::codex_launchers::{LAUNCHERS, earlier_release};
+
+    struct Home(PathBuf);
+    impl Drop for Home {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn checkout() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// A Codex home with manual hooks at the checkout's scripts and the given
+    /// launcher bytes, as setup leaves it.
+    fn home_with(launchers: &[(&str, Vec<u8>)]) -> Home {
+        let temp = crate::setup::codex::resolved_path(&std::env::temp_dir()).unwrap();
+        let path = temp.join(format!("w110-launch-{}", uuid::Uuid::new_v4().simple()));
+        crate::board::state::private_dir(&path).unwrap();
+        let home = crate::setup::codex::resolved_path(&path).unwrap();
+        let root = home.join("pseudolife/hooks");
+        fs::create_dir_all(&root).unwrap();
+        let scripts = checkout().join("plugin/hooks");
+        let target = digest(&scripts, MANUAL).unwrap()[..20].to_owned();
+        fs::create_dir_all(root.join(&target)).unwrap();
+        for name in MANUAL {
+            fs::write(
+                root.join(&target).join(name),
+                normalized_file(&scripts.join(name)).unwrap(),
+            )
+            .unwrap();
+        }
+        fs::write(root.join("current"), format!("{target}\n")).unwrap();
+        for (name, bytes) in launchers {
+            fs::write(root.join(name), bytes).unwrap();
+        }
+        let base = format!(
+            "env PSEUDOLIFE_CODEX_HOOK=1 bash {}",
+            shell_quote(&root.join("run.sh").to_string_lossy())
+        );
+        let handlers: Vec<Value> = [
+            "session-start.sh",
+            "session-start.sh memory-policy",
+            "user-prompt-submit.sh",
+            "coordination-start.sh",
+            "coordination-prompt.sh",
+            "session-end.sh",
+        ]
+        .iter()
+        .map(|s| json!({"type": "command", "command": format!("{base} {s}")}))
+        .collect();
+        fs::write(
+            home.join("hooks.json"),
+            serde_json::to_vec(&json!({"hooks": {"SessionStart": [{"hooks": handlers}]}})).unwrap(),
+        )
+        .unwrap();
+        Home(home)
+    }
+
+    fn launcher(home: &Home, name: &str) -> Vec<u8> {
+        fs::read(home.0.join("pseudolife/hooks").join(name)).unwrap()
+    }
+
+    fn current() -> Vec<(&'static str, Vec<u8>)> {
+        LAUNCHERS.iter().map(|(n, b)| (*n, b.to_vec())).collect()
+    }
+
+    fn earlier() -> Vec<(&'static str, Vec<u8>)> {
+        LAUNCHERS
+            .iter()
+            .map(|(n, _)| (*n, earlier_release(n)))
+            .collect()
+    }
+
+    #[test]
+    fn current_launchers_are_current() {
+        let home = home_with(&current());
+        let state = manual_hooks(&home.0, Some(&checkout()), false).unwrap();
+        assert_eq!(state["state"], "current", "{state}");
+    }
+
+    #[test]
+    fn an_earlier_releases_launchers_are_behind_until_update_replaces_them() {
+        let home = home_with(&earlier());
+        let definitions = fs::read(home.0.join("hooks.json")).unwrap();
+        let state = manual_hooks(&home.0, Some(&checkout()), false).unwrap();
+        assert_eq!(state["state"], "behind", "{state}");
+        assert_eq!(launcher(&home, "run.sh"), earlier_release("run.sh"));
+        let state = manual_hooks(&home.0, Some(&checkout()), true).unwrap();
+        assert_eq!(state["state"], "current", "{state}");
+        for (name, bytes) in LAUNCHERS {
+            assert_eq!(launcher(&home, name), bytes, "{name}");
+        }
+        assert_eq!(
+            fs::read(home.0.join("hooks.json")).unwrap(),
+            definitions,
+            "the approved commands stay byte for byte"
+        );
+    }
+
+    #[test]
+    fn a_launcher_no_release_shipped_is_still_refused() {
+        let mut launchers = current();
+        launchers[0].1 = b"echo changed\n".to_vec();
+        let home = home_with(&launchers);
+        let error = manual_hooks(&home.0, Some(&checkout()), true).unwrap_err();
+        assert!(error.contains("missing or modified"), "{error}");
+        assert_eq!(launcher(&home, "run.sh"), b"echo changed\n");
     }
 }

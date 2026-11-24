@@ -91,57 +91,9 @@ pub const PLUGIN_SCRIPTS: [&str; 9] = [
 pub const POINTER: &str = "current";
 pub const LAUNCHED: &str = "launched";
 
-/// The launchers, byte for byte what every release since 2026-09-30
-/// shipped: Codex approves the command naming them, and both the frozen
-/// Python setup and the native updater refuse any other bytes (their
-/// sha256 is pinned in `tests/test_codex_hook_launcher.py`). Their
-/// "rerun: python ops/setup-codex-hooks.py" text is therefore kept.
-pub const RUN_SH: &[u8] = b"#!/usr/bin/env bash
-# PseudoLife's Codex hooks: runs the script named by $1 from the bundle that
-# ./current names. Codex approves the command naming this file, not the
-# scripts it runs, so a new bundle needs no new approval. Written and
-# verified byte for byte by ops/setup-codex-hooks.py.
-here=$(dirname \"$0\")
-fail() { printf 'PseudoLife hooks: %s; rerun: python ops/setup-codex-hooks.py\\n' \"$1\" >&2; exit 1; }
-bundle=$(head -c 64 \"$here/current\" 2>/dev/null | tr -d '\\r\\n ')
-case \"$bundle\" in *[!0-9a-f]*|'') fail \"$here/current names no script bundle\" ;; esac
-[ \"${#bundle}\" -eq 20 ] || fail \"$here/current names no script bundle\"
-case \"${1:-}\" in
-    session-start.sh|user-prompt-submit.sh|coordination-start.sh|coordination-prompt.sh|session-end.sh) ;;
-    *) fail \"no hook script named ${1:-(none)}\" ;;
-esac
-script=$1
-shift
-exec bash \"$here/$bundle/$script\" \"$@\"
-";
-pub const RUN_PS1: &[u8] = b"# PseudoLife's Codex hooks: runs lifecycle.ps1 from the bundle that
-# .\\current names. Codex approves the command naming this file, not the
-# scripts it runs, so a new bundle needs no new approval. Written and
-# verified byte for byte by ops/setup-codex-hooks.py.
-param([string]$Event)
-$bundle = ''
-try { $bundle = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'current'))).Trim() } catch {}
-if ($bundle -cnotmatch '^[0-9a-f]{20}$') {
-    [Console]::Error.WriteLine(\"PseudoLife hooks: $PSScriptRoot\\current names no script bundle; rerun: python ops/setup-codex-hooks.py\")
-    exit 1
-}
-$global:LASTEXITCODE = 0
-& (Join-Path (Join-Path $PSScriptRoot $bundle) 'lifecycle.ps1') -Event $Event
-exit $LASTEXITCODE
-";
-pub const LAUNCHERS: [(&str, &[u8]); 2] = [("run.sh", RUN_SH), ("run.ps1", RUN_PS1)];
-/// The sha256 of every launcher an earlier release shipped, by name (none
-/// yet: the launchers never changed since they shipped).
-pub const PREVIOUS_LAUNCHERS: [(&str, &[&str]); 2] = [("run.sh", &[]), ("run.ps1", &[])];
-
-pub fn launcher_shipped(name: &str, data: &[u8]) -> bool {
-    LAUNCHERS
-        .iter()
-        .any(|(known, bytes)| *known == name && *bytes == data)
-        || PREVIOUS_LAUNCHERS.iter().any(|(known, hashes)| {
-            *known == name && hashes.contains(&format!("{:x}", Sha256::digest(data)).as_str())
-        })
-}
+pub use crate::setup::codex_launchers::{LAUNCHERS, launcher_shipped};
+#[cfg(test)]
+pub use crate::setup::codex_launchers::{RUN_PS1, RUN_SH};
 
 pub fn hooks_root(home: &Path) -> PathBuf {
     home.join("pseudolife").join("hooks")
@@ -328,15 +280,15 @@ mod tests {
     }
 
     #[test]
-    fn the_launchers_are_the_bytes_every_release_shipped() {
+    fn the_launchers_are_this_releases_bytes() {
         let hash = |data: &[u8]| format!("{:x}", Sha256::digest(data));
         assert_eq!(
             hash(RUN_SH),
-            "23dc357bbddc1b4687f9ddfe54f8591b03fbc6e1b19bd41c3aeb2834b0f0a1ce"
+            "3f0458932149876f49134256e76a47c2da7ae89679da916ebcda8dec673b7cdd"
         );
         assert_eq!(
             hash(RUN_PS1),
-            "0ff3ff20c091588aa5b8bf2d2f6859c0ade5a922ba83f9ac8b824415f09d2bc7"
+            "7c49b9afa313813b9e24af50bb10af21dc9e9d44f7e60016d0f4744e6a44d465"
         );
         assert!(launcher_shipped("run.sh", RUN_SH));
         assert!(!launcher_shipped("run.sh", b"echo changed\n"));

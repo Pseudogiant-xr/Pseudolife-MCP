@@ -119,9 +119,9 @@ LAUNCHERS = {
 # PseudoLife's Codex hooks: runs the script named by $1 from the bundle that
 # ./current names. Codex approves the command naming this file, not the
 # scripts it runs, so a new bundle needs no new approval. Written and
-# verified byte for byte by ops/setup-codex-hooks.py.
+# verified byte for byte by the Pseudolife installer.
 here=$(dirname "$0")
-fail() { printf 'PseudoLife hooks: %s; rerun: python ops/setup-codex-hooks.py\\n' "$1" >&2; exit 1; }
+fail() { printf 'PseudoLife hooks: %s; rerun the installer and approve the Codex hooks\\n' "$1" >&2; exit 1; }
 bundle=$(head -c 64 "$here/current" 2>/dev/null | tr -d '\\r\\n ')
 case "$bundle" in *[!0-9a-f]*|'') fail "$here/current names no script bundle" ;; esac
 [ "${#bundle}" -eq 20 ] || fail "$here/current names no script bundle"
@@ -136,12 +136,12 @@ exec bash "$here/$bundle/$script" "$@"
     "run.ps1": b"""# PseudoLife's Codex hooks: runs lifecycle.ps1 from the bundle that
 # .\\current names. Codex approves the command naming this file, not the
 # scripts it runs, so a new bundle needs no new approval. Written and
-# verified byte for byte by ops/setup-codex-hooks.py.
+# verified byte for byte by the Pseudolife installer.
 param([string]$Event)
 $bundle = ''
 try { $bundle = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'current'))).Trim() } catch {}
 if ($bundle -cnotmatch '^[0-9a-f]{20}$') {
-    [Console]::Error.WriteLine("PseudoLife hooks: $PSScriptRoot\\current names no script bundle; rerun: python ops/setup-codex-hooks.py")
+    [Console]::Error.WriteLine("PseudoLife hooks: $PSScriptRoot\\current names no script bundle; rerun the installer and approve the Codex hooks")
     exit 1
 }
 $global:LASTEXITCODE = 0
@@ -154,7 +154,10 @@ exit $LASTEXITCODE
 # editing a launcher never strands an install; one no release shipped is
 # refused as modified. Changing LAUNCHERS? Add the old bytes' sha256 here
 # (tests/test_codex_hook_launcher.py pins the current ones).
-PREVIOUS_LAUNCHERS = {"run.sh": frozenset(), "run.ps1": frozenset()}
+PREVIOUS_LAUNCHERS = {
+    "run.sh": frozenset({"23dc357bbddc1b4687f9ddfe54f8591b03fbc6e1b19bd41c3aeb2834b0f0a1ce"}),
+    "run.ps1": frozenset({"0ff3ff20c091588aa5b8bf2d2f6859c0ade5a922ba83f9ac8b824415f09d2bc7"}),
+}
 
 
 def backup(path: Path) -> str | None:
