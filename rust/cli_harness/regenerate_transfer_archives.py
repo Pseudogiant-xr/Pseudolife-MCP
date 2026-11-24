@@ -49,7 +49,9 @@ def _members(blob: bytes) -> dict:
                     manifest.pop(field, None)
                 members[name] = manifest
             elif name.endswith(".jsonl"):
-                members[name] = [json.loads(line) for line in data.decode("utf-8").splitlines() if line]
+                # Split on newlines only: str.splitlines also breaks at the
+                # Unicode line separators the tricky bank keeps inside strings.
+                members[name] = [json.loads(line) for line in data.decode("utf-8").split("\n") if line]
             else:
                 members[name] = data
     return members
