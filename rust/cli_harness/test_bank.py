@@ -703,16 +703,19 @@ def test_teardown_propagates_when_the_check_fails_or_a_guard_refuses(monkeypatch
 
 def test_bank_and_pairing_rows_load_without_the_frozen_package():
     # A fresh interpreter, so the rows' top-level imports run under the blocker
-    # too (collection has already imported them here).
+    # too (collection has already imported them here). Only the modules are
+    # imported: building their cases reads the test login, which an offline
+    # lane need not have.
     script = """\
+import importlib
 import sys
 sys.path.insert(0, sys.argv[1])
 from rust.harness_support.import_blocker import cold_harness_imports
 with cold_harness_imports():
-    from rust.cli_harness.rows import load
-    for row, case in (("invite", "container-rust"), ("transfer", "export-help"), ("backup", "help")):
-        ids = [c.id for c in load(row)]
-        assert case in ids, (row, ids[:5])
+    for row in ("invite", "transfer", "backup"):
+        module = importlib.import_module("rust.cli_harness.rows." + row)
+        assert callable(module.cases), row
+assert not any(name == "pseudolife_memory" or name.startswith("pseudolife_memory.") for name in sys.modules)
 """
     repo = Path(__file__).resolve().parents[2]
     child = subprocess.run([sys.executable, "-I", "-c", script, str(repo)],
