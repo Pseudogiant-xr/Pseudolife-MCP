@@ -698,25 +698,49 @@ fn earlier_launchers(root: &Path) -> Result<Earlier, String> {
     Ok(earlier)
 }
 
+type LauncherWrite = fn(&Path, &[u8], &[u8]) -> Result<PathBuf, String>;
+
 fn replace_launchers(earlier: &Earlier) -> Result<(), String> {
+    replace_launchers_with(earlier, registrations::write_config)
+}
+
+fn replace_launchers_with(earlier: &Earlier, write: LauncherWrite) -> Result<(), String> {
     for (path, before, after) in earlier {
-        registrations::write_config(path, before, after)?;
+        write(path, before, after)?;
     }
     Ok(())
+}
+
+const BUNDLE_PRESENT: &str = "manual hook copies present; current scripts need a checkout; rerun native client setup and inspect Codex /hooks";
+
+/// Release mode: no checkout to refresh scripts from, but a refresh still
+/// replaces an earlier release's launchers from the bytes this binary
+/// carries. Other launcher bytes are left for setup to report, and a refused
+/// write (a launcher held open, a permission) is reported, never a failed
+/// step: before launchers moved, release mode always reported the bundle.
+fn release_manual_hooks(root: &Path, refresh: bool, write: LauncherWrite) -> Value {
+    if refresh
+        && let Ok(earlier) = earlier_launchers(root)
+        && let Err(error) = replace_launchers_with(&earlier, write)
+    {
+        return result(
+            "bundle-present",
+            format!(
+                "{BUNDLE_PRESENT}; an earlier release's hook launcher in {} could not be replaced ({error}): rerun pseudolife-mcp update --clients-only once no Codex session holds it",
+                root.display()
+            ),
+        );
+    }
+    result("bundle-present", BUNDLE_PRESENT)
 }
 
 fn manual_hooks(home: &Path, repo: Option<&Path>, refresh: bool) -> Result<Value, String> {
     let root = home.join("pseudolife/hooks");
     let Some(repo) = repo else {
-        // Release mode has no checkout to refresh scripts from, but a refresh
-        // still replaces an earlier release's launchers from the bytes this
-        // binary carries; other launcher bytes are left for setup to report.
-        if refresh && let Ok(earlier) = earlier_launchers(&root) {
-            replace_launchers(&earlier)?;
-        }
-        return Ok(result(
-            "bundle-present",
-            "manual hook copies present; current scripts need a checkout; rerun native client setup and inspect Codex /hooks",
+        return Ok(release_manual_hooks(
+            &root,
+            refresh,
+            registrations::write_config,
         ));
     };
     let definitions = read_json(&home.join("hooks.json"))?;
@@ -1042,6 +1066,30 @@ mod launcher_refresh_tests {
             assert_eq!(launcher(&home, name), bytes, "{name}");
         }
         assert_eq!(fs::read(home.0.join("hooks.json")).unwrap(), definitions);
+    }
+
+    #[test]
+    fn release_mode_reports_a_launcher_it_could_not_replace_instead_of_failing() {
+        fn refused(_: &Path, _: &[u8], _: &[u8]) -> Result<PathBuf, String> {
+            Err("Access is denied. (os error 5)".into())
+        }
+        let home = home_with(&earlier());
+        let root = home.0.join("pseudolife/hooks");
+        let state = release_manual_hooks(&root, true, refused);
+        assert_eq!(state["state"], "bundle-present", "{state}");
+        let detail = state["detail"].as_str().unwrap();
+        assert!(
+            detail.contains("could not be replaced (Access is denied. (os error 5))"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("rerun pseudolife-mcp update --clients-only"),
+            "{detail}"
+        );
+        assert_eq!(launcher(&home, "run.sh"), earlier_release("run.sh"));
+        // Without a refresh nothing is written, so nothing can be refused.
+        let state = release_manual_hooks(&root, false, refused);
+        assert_eq!(state["detail"], BUNDLE_PRESENT, "{state}");
     }
 
     #[test]

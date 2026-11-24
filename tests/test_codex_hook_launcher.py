@@ -233,7 +233,7 @@ def test_the_launchers_before_the_native_repair_text_are_rewritten_by_a_refresh(
     root = _hooks_root(tmp_path)
     for name, data in setup.LAUNCHERS.items():
         assert b".py" not in data, name
-        earlier = (data.replace(b"by the Pseudolife installer.", b"by ops/setup-codex-hooks.py.")
+        earlier = (data.replace(b"by the PseudoLife installer.", b"by ops/setup-codex-hooks.py.")
                    .replace(b"rerun the installer and approve the Codex hooks",
                             b"rerun: python ops/setup-codex-hooks.py"))
         assert hashlib.sha256(earlier).hexdigest() in setup.PREVIOUS_LAUNCHERS[name], name
@@ -248,8 +248,8 @@ def test_every_shipped_launcher_is_known_to_later_releases():
     PREVIOUS_LAUNCHERS in ops/setup-codex-hooks.py and the new ones here,
     or every existing manual install stops refreshing."""
     assert {name: hashlib.sha256(data).hexdigest() for name, data in setup.LAUNCHERS.items()} == {
-        "run.sh": "3f0458932149876f49134256e76a47c2da7ae89679da916ebcda8dec673b7cdd",
-        "run.ps1": "7c49b9afa313813b9e24af50bb10af21dc9e9d44f7e60016d0f4744e6a44d465",
+        "run.sh": "24443d25914314c21b81081fa7adbcd0e577860e6a7adb69c9326835998f239b",
+        "run.ps1": "2c436e82c4a934bace34d37d73dd0ec9ea398078affaf2151c46b3ac403a0ddb",
     }
 
 

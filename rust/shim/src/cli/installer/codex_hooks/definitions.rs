@@ -284,11 +284,11 @@ mod tests {
         let hash = |data: &[u8]| format!("{:x}", Sha256::digest(data));
         assert_eq!(
             hash(RUN_SH),
-            "3f0458932149876f49134256e76a47c2da7ae89679da916ebcda8dec673b7cdd"
+            "24443d25914314c21b81081fa7adbcd0e577860e6a7adb69c9326835998f239b"
         );
         assert_eq!(
             hash(RUN_PS1),
-            "7c49b9afa313813b9e24af50bb10af21dc9e9d44f7e60016d0f4744e6a44d465"
+            "2c436e82c4a934bace34d37d73dd0ec9ea398078affaf2151c46b3ac403a0ddb"
         );
         assert!(launcher_shipped("run.sh", RUN_SH));
         assert!(!launcher_shipped("run.sh", b"echo changed\n"));

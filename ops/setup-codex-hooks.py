@@ -119,7 +119,7 @@ LAUNCHERS = {
 # PseudoLife's Codex hooks: runs the script named by $1 from the bundle that
 # ./current names. Codex approves the command naming this file, not the
 # scripts it runs, so a new bundle needs no new approval. Written and
-# verified byte for byte by the Pseudolife installer.
+# verified byte for byte by the PseudoLife installer.
 here=$(dirname "$0")
 fail() { printf 'PseudoLife hooks: %s; rerun the installer and approve the Codex hooks\\n' "$1" >&2; exit 1; }
 bundle=$(head -c 64 "$here/current" 2>/dev/null | tr -d '\\r\\n ')
@@ -136,7 +136,7 @@ exec bash "$here/$bundle/$script" "$@"
     "run.ps1": b"""# PseudoLife's Codex hooks: runs lifecycle.ps1 from the bundle that
 # .\\current names. Codex approves the command naming this file, not the
 # scripts it runs, so a new bundle needs no new approval. Written and
-# verified byte for byte by the Pseudolife installer.
+# verified byte for byte by the PseudoLife installer.
 param([string]$Event)
 $bundle = ''
 try { $bundle = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'current'))).Trim() } catch {}

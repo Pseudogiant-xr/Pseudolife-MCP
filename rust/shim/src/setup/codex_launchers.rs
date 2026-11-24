@@ -13,7 +13,7 @@ pub const RUN_SH: &[u8] = b"#!/usr/bin/env bash
 # PseudoLife's Codex hooks: runs the script named by $1 from the bundle that
 # ./current names. Codex approves the command naming this file, not the
 # scripts it runs, so a new bundle needs no new approval. Written and
-# verified byte for byte by the Pseudolife installer.
+# verified byte for byte by the PseudoLife installer.
 here=$(dirname \"$0\")
 fail() { printf 'PseudoLife hooks: %s; rerun the installer and approve the Codex hooks\\n' \"$1\" >&2; exit 1; }
 bundle=$(head -c 64 \"$here/current\" 2>/dev/null | tr -d '\\r\\n ')
@@ -30,7 +30,7 @@ exec bash \"$here/$bundle/$script\" \"$@\"
 pub const RUN_PS1: &[u8] = b"# PseudoLife's Codex hooks: runs lifecycle.ps1 from the bundle that
 # .\\current names. Codex approves the command naming this file, not the
 # scripts it runs, so a new bundle needs no new approval. Written and
-# verified byte for byte by the Pseudolife installer.
+# verified byte for byte by the PseudoLife installer.
 param([string]$Event)
 $bundle = ''
 try { $bundle = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'current'))).Trim() } catch {}
@@ -89,7 +89,7 @@ pub(crate) fn earlier_release(name: &str) -> Vec<u8> {
     String::from_utf8(current.to_vec())
         .unwrap()
         .replace(
-            "verified byte for byte by the Pseudolife installer.",
+            "verified byte for byte by the PseudoLife installer.",
             "verified byte for byte by ops/setup-codex-hooks.py.",
         )
         .replace(
@@ -111,11 +111,11 @@ mod tests {
     fn the_launchers_name_a_native_repair_and_know_the_earlier_bytes() {
         assert_eq!(
             hash(RUN_SH),
-            "3f0458932149876f49134256e76a47c2da7ae89679da916ebcda8dec673b7cdd"
+            "24443d25914314c21b81081fa7adbcd0e577860e6a7adb69c9326835998f239b"
         );
         assert_eq!(
             hash(RUN_PS1),
-            "7c49b9afa313813b9e24af50bb10af21dc9e9d44f7e60016d0f4744e6a44d465"
+            "2c436e82c4a934bace34d37d73dd0ec9ea398078affaf2151c46b3ac403a0ddb"
         );
         for (name, data) in LAUNCHERS {
             let text = String::from_utf8(data.to_vec()).unwrap();
