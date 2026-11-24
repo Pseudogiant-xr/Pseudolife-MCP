@@ -1478,6 +1478,23 @@ def test_deleting_pyproject_with_the_package_is_no_cut(world, capsys):
     assert "release cut" not in capsys.readouterr().out
 
 
+def test_a_controller_without_the_release_version_reader_is_refused(monkeypatch, tmp_path):
+    # A controller checkout from before rust/ci/release_version.py cannot
+    # classify a release cut; it is told to update itself, not shown a
+    # bare FileNotFoundError.
+    (tmp_path / "ops").mkdir()
+    monkeypatch.setattr(integrate, "__file__", str(tmp_path / "ops" / "integrate.py"))
+    integrate._release_version_reader.cache_clear()
+    try:
+        with pytest.raises(integrate.Refusal) as refused:
+            integrate._changes_release_version("HEAD", "HEAD")
+        assert "rust/ci/release_version.py" in str(refused.value)
+        assert "update the controller checkout" in str(refused.value)
+        assert "_integrate_release_version" not in sys.modules
+    finally:
+        integrate._release_version_reader.cache_clear()
+
+
 def _fold_cut(world, number: int, version: str, *, fold: tuple[str, ...] = (),
               add: dict[str, str] | None = None) -> str:
     """A version cut on master's tip: pyproject bumped, `fold` fragments
