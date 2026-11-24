@@ -43,7 +43,7 @@ class FakePg0:
         self.server = server
         self.pid, self.port, self.uri_host = 4242, 55432, "localhost"
         self.already_running = self.fail_after_launch = False
-        self.pidfile = True
+        self.pidfile = self.answers = True
         self.info_pid = self.info_port = None
         self.instances, self.drops = [], []
         self.Pg0AlreadyRunningError = _AlreadyRunning
@@ -62,7 +62,8 @@ class FakePg0:
                 if fake.pidfile:
                     (data_dir / "postmaster.pid").write_text(
                         f"{fake.pid}\n{data_dir}\n0\n{fake.port}\n", encoding="utf-8")
-                    fake.server.boot(data_dir, self.kwargs["password"])
+                    if fake.answers:
+                        fake.server.boot(data_dir, self.kwargs["password"])
                 if fake.fail_after_launch:
                     raise _Pg0Error("timed out waiting for the server")
                 port = fake.port if fake.info_port is None else fake.info_port
@@ -88,6 +89,8 @@ class FakeServer:
         self.data_directory = None
         self.started = START_TIME
         self.honour_alter = True
+        self.down_after_alter = False
+        self.keep_old = False
         self.plain, self.verifier = None, None
         self.statements = []
 
@@ -98,7 +101,9 @@ class FakeServer:
         if self.verifier is not None:
             match = re.fullmatch(r"SCRAM-SHA-256\$(\d+):([^$]+)\$.+", self.verifier)
             salt = base64.b64decode(match.group(2))
-            return postgres.scram_verifier(password, salt, int(match.group(1))) == self.verifier
+            if postgres.scram_verifier(password, salt, int(match.group(1))) == self.verifier:
+                return True
+            return self.keep_old and password == self.plain
         return password == self.plain
 
     def connect(self, port, password, dbname="postgres"):
@@ -115,6 +120,8 @@ class FakeServer:
                 match = re.search(r"Literal\('(SCRAM-SHA-256[^']+)'\)", text)
                 if match and server.honour_alter:
                     server.verifier = match.group(1)
+                if match and server.down_after_alter:
+                    server.running = False
                 return types.SimpleNamespace(fetchone=lambda: (server.started, server.data_directory))
 
             def __enter__(self):
@@ -133,7 +140,16 @@ def fakes(monkeypatch, tmp_path):
     pg0.Pg0Error = _Pg0Error
     monkeypatch.setitem(sys.modules, "pg0", pg0)
     monkeypatch.setattr(postgres, "_connect", server.connect)
-    return types.SimpleNamespace(pg0=pg0, server=server, parent=tmp_path)
+    monkeypatch.setattr(postgres, "ABANDON_WAIT", 0)
+    stops = []
+
+    def pg_ctl_stop(pgdata):
+        stops.append(pgdata)
+        (pgdata / "postmaster.pid").unlink(missing_ok=True)
+        server.running = False
+
+    monkeypatch.setattr(postgres, "_pg_ctl_stop", pg_ctl_stop)
+    return types.SimpleNamespace(pg0=pg0, server=server, parent=tmp_path, stops=stops)
 
 
 def test_start_owns_a_fresh_loopback_cluster(fakes):
@@ -157,7 +173,7 @@ def test_start_rotates_off_the_command_line_password(fakes):
 
 
 def test_start_refuses_when_the_old_password_still_works(fakes):
-    fakes.server.honour_alter = False
+    fakes.server.keep_old = True
     with pytest.raises(postgres.SetupError, match="still accepts the start-up password"):
         postgres.start(fakes.parent, "pl-test-")
     assert len(fakes.pg0.drops) == 1  # the owned server is stopped, not left running
@@ -169,7 +185,11 @@ def test_start_refuses_a_server_that_does_not_serve_its_directory(fakes):
     fakes.server.boot = lambda data_dir, password: original(data_dir.parent, password)
     with pytest.raises(postgres.SetupError, match="does not serve the fresh data directory"):
         postgres.start(fakes.parent, "pl-test-")
-    assert len(fakes.pg0.drops) == 1
+    # It answers for another directory, so it is not confirmed ours: nothing
+    # is signalled and the fresh directory (with its pid file) stays.
+    assert fakes.stops == [] and fakes.pg0.drops == []
+    (data_dir,) = fakes.parent.iterdir()
+    assert (data_dir / "pgdata" / "postmaster.pid").is_file()
 
 
 def test_start_refuses_a_server_that_was_already_running(fakes):
@@ -208,11 +228,11 @@ def test_start_stops_its_own_server_when_pg0_reports_another(fakes, field):
 
 def test_start_keeps_the_directory_of_a_server_it_could_not_stop(fakes, monkeypatch):
     """A server still running in the fresh directory keeps its files."""
-    monkeypatch.setattr(fakes.pg0.Pg0, "drop", lambda self, force=True: fakes.pg0.drops.append(self.kwargs["name"]))
+    monkeypatch.setattr(postgres, "_pg_ctl_stop", lambda pgdata: fakes.stops.append(pgdata))
     fakes.server.honour_alter = False
     with pytest.raises(postgres.SetupError):
         postgres.start(fakes.parent, "pl-test-")
-    assert len(fakes.pg0.drops) == 1
+    assert len(fakes.stops) == 1 and fakes.pg0.drops == []
     (data_dir,) = fakes.parent.iterdir()
     assert (data_dir / "pgdata" / "postmaster.pid").is_file()
 
@@ -279,12 +299,65 @@ def test_connect_pins_the_loopback_address_and_hides_libpq_variables(monkeypatch
     assert os.environ["PGHOSTADDR"] == "10.0.0.5"
 
 
-def test_refused_means_the_server_answered_with_an_authentication_failure(fakes):
+def test_login_tells_refused_from_unreachable(fakes):
     fakes.server.boot(fakes.parent, "right")
-    assert postgres._refused(1, "wrong") is True
-    assert postgres._refused(1, "right") is False
+    assert postgres._login(1, "wrong") == "refused"
+    assert postgres._login(1, "right") == "ok"
     fakes.server.running = False
-    assert postgres._refused(1, "wrong") is False  # unreachable proves nothing
+    assert postgres._login(1, "wrong") == "unreachable"  # no answer proves nothing
+
+
+def test_start_requires_a_login_with_the_rotated_password(fakes):
+    fakes.server.down_after_alter = True
+    with pytest.raises(postgres.SetupError, match="did not open with the rotated password"):
+        postgres.start(fakes.parent, "pl-test-")
+
+
+def test_start_refuses_when_the_old_password_cannot_be_checked(fakes, monkeypatch):
+    real = postgres._login
+    monkeypatch.setattr(postgres, "_login", lambda port, password: "unreachable"
+                        if password == fakes.pg0.instances[0]["password"] else real(port, password))
+    with pytest.raises(postgres.SetupError, match="could not be asked"):
+        postgres.start(fakes.parent, "pl-test-")
+
+
+def test_a_failed_start_leaves_a_server_that_never_answers_as_ours(fakes):
+    """pg0 failed after writing a pid file, but nothing answers on its port:
+    that pid may be anyone's, so nothing is signalled and nothing deleted."""
+    fakes.pg0.answers, fakes.pg0.fail_after_launch = False, True
+    with pytest.raises(_Pg0Error):
+        postgres.start(fakes.parent, "pl-test-")
+    assert fakes.stops == [] and fakes.pg0.drops == []
+    (data_dir,) = fakes.parent.iterdir()
+    assert (data_dir / "pgdata" / "postmaster.pid").is_file()
+
+
+def test_stop_reports_failure_while_the_postmaster_survives(fakes, monkeypatch):
+    server = postgres.start(fakes.parent, "pl-test-")
+    monkeypatch.setattr(postgres, "_pg_ctl_stop", lambda pgdata: fakes.stops.append(pgdata))
+    assert server.stop() is False
+    assert len(fakes.stops) == 1 and fakes.pg0.drops == []  # registry kept, files kept
+    assert server.data_dir.exists() and server.owned
+
+
+def test_pg_ctl_comes_from_the_clusters_major_bundle(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    for version in ("17.6.0", "18.0.0", "18.1.0"):
+        (home / ".pg0" / "installation" / version / "bin").mkdir(parents=True)
+    pgdata = tmp_path / "pgdata"
+    pgdata.mkdir()
+    (pgdata / "PG_VERSION").write_text("18\n", encoding="ascii")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("PGHOST", "10.0.0.5")
+    program, env = postgres._pg_ctl(pgdata)
+    assert program.parent == home / ".pg0" / "installation" / "18.1.0" / "bin"
+    assert program.name in ("pg_ctl", "pg_ctl.exe")
+    assert "PGHOST" not in env
+    if os.name != "nt":
+        assert env["LD_LIBRARY_PATH"].split(os.pathsep)[0] == str(home / ".pg0" / "installation" / "18.1.0" / "lib")
+    (pgdata / "PG_VERSION").write_text("19\n", encoding="ascii")
+    with pytest.raises(postgres.SetupError, match="no pg0 PostgreSQL 19 bundle"):
+        postgres._pg_ctl(pgdata)
 
 
 def test_scram_verifier_has_postgres_layout():
@@ -297,7 +370,7 @@ def test_scram_verifier_has_postgres_layout():
 def test_stop_stops_only_the_server_it_started(fakes):
     server = postgres.start(fakes.parent, "pl-test-")
     assert server.stop() is True
-    assert fakes.pg0.drops == [server.name]
+    assert fakes.stops == [server.pgdata] and fakes.pg0.drops == [server.name]
     assert not server.data_dir.exists()
     assert server.stop() is False and fakes.pg0.drops == [server.name]
 
@@ -455,6 +528,14 @@ def test_lease_fixture_exports_the_cluster_and_login(lease_ci, capsys):
     assert "PSEUDOLIFE_MCP_DATABASE_URL" not in kwargs["env"]
     # The cluster lives under the home directory, not RUNNER_TEMP (initdb's chmod).
     assert Path(lease_ci.fakes.pg0.instances[0]["data_dir"]).parent.parent == lease_ci.tmp
+
+
+def test_lease_fixture_runs_the_binary_it_checked(lease_ci, monkeypatch):
+    monkeypatch.chdir(lease_ci.tmp)
+    monkeypatch.setenv("PSEUDOLIFE_LEASE_CI_BINARY", "pseudolife-stdio")
+    assert lease_ci.module.main() == 0
+    (command, _), = lease_ci.calls
+    assert Path(command[0]).is_absolute() and Path(command[0]) == lease_ci.binary
 
 
 def test_lease_fixture_refuses_without_the_native_client(lease_ci, capsys):

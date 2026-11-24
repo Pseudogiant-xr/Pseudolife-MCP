@@ -39,7 +39,9 @@ from pathlib import Path
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 from urllib.parse import quote, urlsplit
 
 SUPERUSER = "postgres"
@@ -53,12 +55,15 @@ _LIBPQ_PREFIX = "PG"
 # pg0's free-port check) cannot fail the start, as it failed the lite
 # bank's on a Linux dev box (rust/shared/embedded_pg.rs, 2026-10-26). Both
 # checked against pg0-embedded 0.15.2 in WSL on 2026-11-24. lc_messages=C
-# keeps the server's authentication error in the English `_refused` reads.
+# keeps the server's authentication error in the English `_login` reads.
 SERVER_SETTINGS = {"listen_addresses": "127.0.0.1", "unix_socket_directories": "", "lc_messages": "C"}
 _AUTH_FAILED = "password authentication failed"
 # Below the five-minute timeout of the shortest step that runs lease_ci.py,
 # so a hung native client is reported here rather than killed with the step.
 TEST_LOGIN_TIMEOUT = 240
+# How long a failed start waits for a launched server to answer as ours
+# before leaving it running (pg0's own readiness wait failed first).
+ABANDON_WAIT = 30
 
 
 class SetupError(RuntimeError):
@@ -95,14 +100,15 @@ def _connect(port: int, password: str, dbname: str = "postgres"):
                                connect_timeout=10, autocommit=True)
 
 
-def _refused(port: int, password: str) -> bool:
-    """True only when the server answers and refuses ``password``."""
+def _login(port: int, password: str) -> str:
+    """"ok", "refused" (the server's own authentication failure) or
+    "unreachable" (anything else: no answer proves nothing)."""
     import psycopg  # noqa: PLC0415
     try:
         with _connect(port, password):
-            return False
+            return "ok"
     except psycopg.OperationalError as error:
-        return _AUTH_FAILED in str(error)
+        return "refused" if _AUTH_FAILED in str(error) else "unreachable"
 
 
 def _identity(port: int, password: str) -> tuple[str, str] | None:
@@ -181,28 +187,74 @@ class Server:
         # A pid in a stale postmaster.pid can belong to another process by
         # now: the server must still answer with this start time, for this
         # data directory, to our password.
-        identity = _identity(self.port, self.password)
-        if identity is None or identity[0] != self.started or not _same_directory(identity[1], self.pgdata):
+        if not _stop_verified(self.name, self.pgdata, self.port, [self.password], started=self.started):
             return False
-        _drop(self.name, self.pgdata)
         shutil.rmtree(self.data_dir, ignore_errors=True)
         self.owned = False
         return True
 
 
-def _drop(name: str, pgdata: Path) -> None:
+def _pg_ctl(pgdata: Path) -> tuple[Path, dict[str, str]]:
+    """pg_ctl from the pg0 bundle of the cluster's major, and its environment
+    (no libpq variables; on Linux the bundle's lib first, as pg0 runs it)."""
+    major = (pgdata / "PG_VERSION").read_text(encoding="ascii").strip()
+    installs = sorted(path for path in (Path.home() / ".pg0" / "installation").glob(f"{major}.*") if path.is_dir())
+    if not installs:
+        raise SetupError(f"no pg0 PostgreSQL {major} bundle under ~/.pg0/installation to stop the server with")
+    program = installs[-1] / "bin" / ("pg_ctl.exe" if os.name == "nt" else "pg_ctl")
+    env = child_environment()
+    if os.name != "nt":
+        env["LD_LIBRARY_PATH"] = os.pathsep.join(
+            part for part in (str(installs[-1] / "lib"), env.get("LD_LIBRARY_PATH", "")) if part)
+    return program, env
+
+
+def _pg_ctl_stop(pgdata: Path) -> None:
+    """Stop the postmaster of ``pgdata`` and wait for it to exit."""
+    program, env = _pg_ctl(pgdata)
+    subprocess.run([str(program), "stop", "-D", str(pgdata), "-m", "fast", "-w", "-t", "60"],
+                   env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   timeout=90, check=False)
+
+
+def _deregister(name: str, pgdata: Path) -> None:
+    """Remove pg0's registry record of a server already stopped (pg0 finds
+    instances by name, so its drop is no proof that anything stopped)."""
     import pg0  # noqa: PLC0415
     with _without_libpq_environment():
         pg0.Pg0(name=name, data_dir=str(pgdata)).drop(force=True)
 
 
-def _abandon(name: str, data_dir: Path, pgdata: Path) -> None:
-    """Undo a start that failed: stop a server pg0 launched in our fresh
-    directory, then remove the directory once nothing runs in it."""
+def _stop_verified(name: str, pgdata: Path, port: int, passwords: list[str], *,
+                   started: str | None = None, wait: float = 0) -> bool:
+    """Stop the postmaster of ``pgdata`` only once the server on ``port``
+    answers one of ``passwords`` as the server of that directory (with
+    ``started`` as its start time, when known), and report success only once
+    it has exited. Anything unconfirmed is left running."""
+    deadline = time.monotonic() + wait
+    while True:
+        identity = next(filter(None, (_identity(port, password) for password in passwords)), None)
+        if identity and _same_directory(identity[1], pgdata) and started in (None, identity[0]):
+            break
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1)
+    _pg_ctl_stop(pgdata)
     if _pidfile(pgdata) is not None:
-        _drop(name, pgdata)
-    if _pidfile(pgdata) is None:
-        shutil.rmtree(data_dir, ignore_errors=True)
+        return False
+    _deregister(name, pgdata)
+    return True
+
+
+def _abandon(name: str, data_dir: Path, pgdata: Path, passwords: list[str]) -> None:
+    """Undo a start that failed: stop a server pg0 launched in our fresh
+    directory once it answers as ours, then remove the directory once
+    nothing runs in it. A server that never answers is left running."""
+    record = _pidfile(pgdata)
+    if record is not None and not _stop_verified(name, pgdata, record[1], passwords, wait=ABANDON_WAIT):
+        print(f"disposable PostgreSQL in {pgdata} did not answer as ours; left running", file=sys.stderr)
+        return
+    shutil.rmtree(data_dir, ignore_errors=True)
 
 
 def start(parent: Path, prefix: str) -> Server:
@@ -224,20 +276,21 @@ def start(parent: Path, prefix: str) -> Server:
         with _without_libpq_environment():
             info = instance.start()
     except pg0.Pg0AlreadyRunningError:
-        _abandon(name, data_dir, pgdata)
+        _abandon(name, data_dir, pgdata, [first])
         raise SetupError("PostgreSQL was unexpectedly already running; refusing to adopt it") from None
     except BaseException:
         # pg0 can fail after postgres launched (a readiness timeout): a
         # server in this fresh directory is ours and must not outlive this.
-        _abandon(name, data_dir, pgdata)
+        _abandon(name, data_dir, pgdata, [first])
         raise
     record = _pidfile(pgdata)
     if record is None:
         # pg0 reports a server, but none runs in our fresh directory: it
         # attached to something else, which is not ours to use or stop.
-        _abandon(name, data_dir, pgdata)
+        _abandon(name, data_dir, pgdata, [first])
         raise SetupError("PostgreSQL was unexpectedly already running; refusing to adopt it")
     pid, port = record
+    server = None
     try:
         if (info.port and info.port != port) or (info.pid and info.pid != pid):
             raise SetupError("pg0 reported another server than the one in its fresh directory; refusing it")
@@ -248,7 +301,8 @@ def start(parent: Path, prefix: str) -> Server:
                         password=first, owned=True, host=host)
         rotate_password(server)
     except BaseException:
-        _abandon(name, data_dir, pgdata)  # ours: our fresh directory's own postmaster
+        passwords = [first] if server is None or server.password == first else [server.password, first]
+        _abandon(name, data_dir, pgdata, passwords)  # ours once it answers as ours
         raise
     return server
 
@@ -266,10 +320,12 @@ def rotate_password(server: Server) -> None:
         conn.execute(sql.SQL("ALTER ROLE {} PASSWORD {}").format(
             sql.Identifier(SUPERUSER), sql.Literal(scram_verifier(second))))
     old, server.password, server.started = server.password, second, started
-    if not _refused(server.port, old):
-        raise SetupError("PostgreSQL still accepts the start-up password after rotation")
-    if _refused(server.port, second):
-        raise SetupError("PostgreSQL refuses the rotated password")
+    rotated, previous = _login(server.port, second), _login(server.port, old)
+    if rotated != "ok":
+        raise SetupError(f"PostgreSQL did not open with the rotated password ({rotated})")
+    if previous != "refused":
+        raise SetupError("PostgreSQL still accepts the start-up password after rotation" if previous == "ok"
+                         else "PostgreSQL could not be asked whether the start-up password still works")
 
 
 def child_environment(server: Server | None = None, base: dict | None = None) -> dict[str, str]:

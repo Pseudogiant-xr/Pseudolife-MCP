@@ -59,7 +59,9 @@ def main() -> int:
 
     runner_temp = Path(os.environ["RUNNER_TEMP"])
     login_file = runner_temp / "test-pg.env"
-    binary = Path(os.environ.get("PSEUDOLIFE_LEASE_CI_BINARY") or postgres.native_binary(_ROOT))
+    # Absolute, so the file checked is the file run (a bare "./name" would
+    # otherwise be looked up on PATH).
+    binary = Path(os.environ.get("PSEUDOLIFE_LEASE_CI_BINARY") or postgres.native_binary(_ROOT)).absolute()
     secret = ""
 
     try:
