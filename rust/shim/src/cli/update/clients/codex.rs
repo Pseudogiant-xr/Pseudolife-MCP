@@ -664,9 +664,56 @@ fn shell_quote(path: &str) -> String {
         format!("'{}'", path.replace('\'', "'\"'\"'"))
     }
 }
+/// The most a launcher file is read before it is judged: every launcher a
+/// release shipped is about 1 KiB, so a larger file is modified, not loaded.
+const LAUNCHER_READ_LIMIT: u64 = 64 * 1024;
+
+fn read_launcher(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut data = Vec::new();
+    fs::File::open(path)
+        .ok()?
+        .take(LAUNCHER_READ_LIMIT + 1)
+        .read_to_end(&mut data)
+        .ok()?;
+    (data.len() as u64 <= LAUNCHER_READ_LIMIT).then_some(data)
+}
+
+type Earlier = Vec<(PathBuf, Vec<u8>, &'static [u8])>;
+
+/// The launchers this release writes, or ones an earlier release shipped:
+/// Codex approves the command naming a launcher, not its bytes, so a refresh
+/// replaces an earlier one without a new approval. Any other bytes fail
+/// closed; refreshing scripts does not silently approve modified commands.
+fn earlier_launchers(root: &Path) -> Result<Earlier, String> {
+    let mut earlier = Vec::new();
+    for (name, current) in LAUNCHERS {
+        let path = root.join(name);
+        match read_launcher(&path) {
+            Some(data) if data == current => {}
+            Some(data) if launcher_previous(name, &data) => earlier.push((path, data, current)),
+            _ => return Err("a manual hook launcher is missing or modified; rerun native setup with consent to repair it".into()),
+        }
+    }
+    Ok(earlier)
+}
+
+fn replace_launchers(earlier: &Earlier) -> Result<(), String> {
+    for (path, before, after) in earlier {
+        registrations::write_config(path, before, after)?;
+    }
+    Ok(())
+}
+
 fn manual_hooks(home: &Path, repo: Option<&Path>, refresh: bool) -> Result<Value, String> {
     let root = home.join("pseudolife/hooks");
     let Some(repo) = repo else {
+        // Release mode has no checkout to refresh scripts from, but a refresh
+        // still replaces an earlier release's launchers from the bytes this
+        // binary carries; other launcher bytes are left for setup to report.
+        if refresh && let Ok(earlier) = earlier_launchers(&root) {
+            replace_launchers(&earlier)?;
+        }
         return Ok(result(
             "bundle-present",
             "manual hook copies present; current scripts need a checkout; rerun native client setup and inspect Codex /hooks",
@@ -705,20 +752,7 @@ fn manual_hooks(home: &Path, repo: Option<&Path>, refresh: bool) -> Result<Value
             json!({"state":"stale","source":"manual","detail":"manual hooks still name a script bundle or a custom command; rerun native setup and review Codex /hooks to move them to a stable launcher"}),
         );
     }
-    // The launchers this release writes, or ones an earlier release shipped:
-    // Codex approves the command naming a launcher, not its bytes, so a
-    // refresh replaces an earlier one without a new approval. Any other bytes
-    // fail closed; refreshing scripts does not silently approve modified
-    // commands.
-    let mut earlier = Vec::new();
-    for (name, current) in LAUNCHERS {
-        let path = root.join(name);
-        match fs::read(&path) {
-            Ok(data) if data == current => {}
-            Ok(data) if launcher_previous(name, &data) => earlier.push((path, data, current)),
-            _ => return Err("a manual hook launcher is missing or modified; rerun native setup with consent to repair it".into()),
-        }
-    }
+    let earlier = earlier_launchers(&root)?;
     let pointer = fs::read_to_string(root.join("current"))
         .map_err(|_| "manual hook bundle pointer is missing")?;
     let previous = pointer.trim();
@@ -730,21 +764,18 @@ fn manual_hooks(home: &Path, repo: Option<&Path>, refresh: bool) -> Result<Value
     {
         return Err("manual hook bundle was modified or its pointer is invalid; review it before native setup".into());
     }
-    if !earlier.is_empty() {
-        if !refresh {
-            return Ok(
-                json!({"state":"behind","source":"manual","detail":"manual hook launchers are an earlier release's; update replaces them without changing approved commands"}),
-            );
-        }
-        for (path, before, after) in &earlier {
-            registrations::write_config(path, before, after)?;
-        }
+    if !earlier.is_empty() && !refresh {
+        return Ok(
+            json!({"state":"behind","source":"manual","detail":"manual hook launchers are an earlier release's; update replaces them without changing approved commands"}),
+        );
     }
     let scripts = repo.join("plugin/hooks");
     let target = digest(&scripts, MANUAL)
         .ok_or("checkout manual hook scripts could not be read")?[..20]
         .to_owned();
     if target == previous {
+        // Everything is verified: only an earlier launcher is left to move.
+        replace_launchers(&earlier)?;
         return Ok(
             json!({"state":"current","source":"manual","detail":"manual hooks run the checkout's verified scripts through the stable launcher"}),
         );
@@ -773,6 +804,7 @@ fn manual_hooks(home: &Path, repo: Option<&Path>, refresh: bool) -> Result<Value
     if digest(&directory, MANUAL).is_none_or(|d| !d.starts_with(&target)) {
         return Err("new manual bundle did not verify; pointer unchanged".into());
     }
+    replace_launchers(&earlier)?;
     registrations::write_config(
         &root.join("current"),
         pointer.as_bytes(),
@@ -995,6 +1027,54 @@ mod launcher_refresh_tests {
             definitions,
             "the approved commands stay byte for byte"
         );
+    }
+
+    #[test]
+    fn release_mode_update_replaces_an_earlier_releases_launchers() {
+        let home = home_with(&earlier());
+        let state = manual_hooks(&home.0, None, false).unwrap();
+        assert_eq!(state["state"], "bundle-present", "{state}");
+        assert_eq!(launcher(&home, "run.sh"), earlier_release("run.sh"));
+        let definitions = fs::read(home.0.join("hooks.json")).unwrap();
+        let state = manual_hooks(&home.0, None, true).unwrap();
+        assert_eq!(state["state"], "bundle-present", "{state}");
+        for (name, bytes) in LAUNCHERS {
+            assert_eq!(launcher(&home, name), bytes, "{name}");
+        }
+        assert_eq!(fs::read(home.0.join("hooks.json")).unwrap(), definitions);
+    }
+
+    #[test]
+    fn release_mode_update_leaves_a_launcher_no_release_shipped() {
+        let mut launchers = earlier();
+        launchers[0].1 = b"echo changed\n".to_vec();
+        let home = home_with(&launchers);
+        let state = manual_hooks(&home.0, None, true).unwrap();
+        assert_eq!(state["state"], "bundle-present", "{state}");
+        assert_eq!(launcher(&home, "run.sh"), b"echo changed\n");
+        assert_eq!(launcher(&home, "run.ps1"), earlier_release("run.ps1"));
+    }
+
+    #[test]
+    fn checkout_update_verifies_the_checkout_before_it_moves_a_launcher() {
+        let home = home_with(&earlier());
+        let empty = home.0.join("not-a-checkout");
+        fs::create_dir_all(&empty).unwrap();
+        let error = manual_hooks(&home.0, Some(&empty), true).unwrap_err();
+        assert!(error.contains("could not be read"), "{error}");
+        for (name, _) in LAUNCHERS {
+            assert_eq!(launcher(&home, name), earlier_release(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn an_oversized_launcher_is_refused_without_loading_it() {
+        let mut launchers = current();
+        launchers[0].1 = vec![b'#'; (LAUNCHER_READ_LIMIT + 1) as usize];
+        let home = home_with(&launchers);
+        let error = manual_hooks(&home.0, Some(&checkout()), true).unwrap_err();
+        assert!(error.contains("missing or modified"), "{error}");
+        assert!(read_launcher(&home.0.join("pseudolife/hooks/run.sh")).is_none());
     }
 
     #[test]
