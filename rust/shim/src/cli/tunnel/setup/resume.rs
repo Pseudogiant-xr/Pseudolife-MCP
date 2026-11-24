@@ -222,6 +222,9 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
         return Err(Fail::Tunnel(KEY_RENEWAL));
     }
     require_inactive(root, &profile.name, false, &status)?;
+    // A key saved before setup started stays; one that appears during the
+    // handshake belongs to another setup, so the commit refuses it.
+    let had_key = store::occupied(&store::key_path(root, &profile.name))?;
     let updated = store::validate(&desired)?;
     if needs_consent && !setup.accept_access {
         return Err(consent_required(&updated));
@@ -232,7 +235,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
         return Ok((String::new(), crate::cli::tunnel::STDOUT_REFUSED));
     }
     let (_lock, expected) = commit_lock(root, path, &original)?;
-    recheck_inactive(root, &updated.name, &status, false)?;
+    recheck_inactive(root, &updated.name, &status, !had_key)?;
     stage_and_publish(
         path,
         |file| file.write_all(&bytes),

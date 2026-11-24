@@ -1554,7 +1554,7 @@ fn setup_resuming_an_existing_profile_names_the_option_or_the_broken_file() {
     );
     let broken = format!(
         "{}; fix that file or move it aside",
-        home.path("tunnels/dot.profile.json").display()
+        home.path("tunnels").join("dot.profile.json").display()
     );
     assert_refused_with(
         &home,
