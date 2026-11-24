@@ -112,7 +112,7 @@ def test_start_owns_a_fresh_loopback_cluster(fakes):
     server = postgres.start(fakes.parent, "pl-test-")
     assert server.owned and server.port == 55432 and server.pid == 4242 and server.host == "127.0.0.1"
     started = fakes.pg0.instances[0]
-    assert started["config"] == {"listen_addresses": "127.0.0.1"}
+    assert started["config"] == {"listen_addresses": "127.0.0.1", "unix_socket_directories": ""}
     assert Path(started["data_dir"]).parent.parent == fakes.parent
     assert server.admin_conninfo() == "host=127.0.0.1 port=55432 user=postgres dbname=postgres"
     assert server.password not in server.admin_conninfo() and server.password not in repr(server)

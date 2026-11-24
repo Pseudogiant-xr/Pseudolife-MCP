@@ -36,6 +36,13 @@ SUPERUSER = "postgres"
 # most of them outright, so a stray one in the runner's environment must not
 # reach either.
 _LIBPQ_PREFIX = "PG"
+# TCP on IPv4 loopback only: a dev machine's network must never reach a CI
+# cluster, and with no Unix socket a socket lock another account's server
+# holds for the same port number (/tmp/.s.PGSQL.<port>.lock, invisible to
+# pg0's free-port check) cannot fail the start, as it failed the lite
+# bank's on a Linux dev box (rust/shared/embedded_pg.rs, 2026-10-26). Both
+# checked against pg0-embedded 0.15.2 in WSL on 2026-11-24.
+SERVER_SETTINGS = {"listen_addresses": "127.0.0.1", "unix_socket_directories": ""}
 
 
 class SetupError(RuntimeError):
@@ -127,9 +134,8 @@ def start(parent: Path, prefix: str) -> Server:
     pgdata.mkdir()
     name = f"{prefix.strip('-_') or 'pl-ci'}-{secrets.token_hex(6)}"
     first = secrets.token_hex(16)
-    # Loopback only: a dev machine's network must never reach a CI cluster.
     instance = pg0.Pg0(name=name, data_dir=str(pgdata), username=SUPERUSER, password=first,
-                       config={"listen_addresses": "127.0.0.1"})
+                       config=SERVER_SETTINGS)
     try:
         info = instance.start()
     except pg0.Pg0AlreadyRunningError:
