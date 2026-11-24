@@ -814,14 +814,14 @@ mod tests {
         let command = desktop_install_command(
             true,
             "http://10.0.0.5:8765",
-            Some(r"C:\Users\A B\it's.token"),
+            Some(r"C:\Users\<user>\My Tokens\it's.token"),
         );
         assert!(
-            command.contains(r#"--token-file 'C:\Users\A B\it'"'"'s.token'"#),
+            command.contains(r#"--token-file 'C:\Users\<user>\My Tokens\it'"'"'s.token'"#),
             "{command}"
         );
         assert!(
-            command.contains(r"-TokenFile 'C:\Users\A B\it''s.token'"),
+            command.contains(r"-TokenFile 'C:\Users\<user>\My Tokens\it''s.token'"),
             "{command}"
         );
         assert_eq!(sh_word("/plain/path.token"), "/plain/path.token");
