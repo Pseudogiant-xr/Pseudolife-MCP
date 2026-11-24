@@ -102,7 +102,9 @@ and keeps any verified download for a later run. That happens in these cases:
 
 `PSEUDOLIFE_SHIM_ENGINE=native` makes each of these a refusal instead, and so
 does a machine already on the native client, which a rerun never swaps for
-the Python one.
+the Python one. A release whose `SHA256SUMS` names this platform's archive
+in a broken line also refuses, because that release does carry the
+platform.
 
 To install the Python client on purpose, set `PSEUDOLIFE_SHIM_ENGINE=python`
 for the installer (`$env:PSEUDOLIFE_SHIM_ENGINE = 'python'` in PowerShell).

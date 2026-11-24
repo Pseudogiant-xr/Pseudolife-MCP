@@ -6,6 +6,6 @@
   - a client that does not run there (an older C library, for example);
   - a checkout whose release predates the installer;
   - a tunnel the Python client registered to start by itself.
-- `PSEUDOLIFE_SHIM_ENGINE=native` makes each of these a refusal, as before. So does a machine already on the native client: a rerun never swaps a working native client for the Python one. A refusal in a run without the variable also names `PSEUDOLIFE_SHIM_ENGINE=python`.
+- `PSEUDOLIFE_SHIM_ENGINE=native` makes each of these a refusal, as before. So does a machine already on the native client: a rerun never swaps a working native client for the Python one. So does a release `SHA256SUMS` whose line for this platform's archive is not in a standard checksum form: that release carries the platform, so the run says the listing is broken instead of falling back. A refusal in a run without the variable also names `PSEUDOLIFE_SHIM_ENGINE=python`.
 - `PSEUDOLIFE_SHIM_ENGINE=python` installs the Python client and records that choice in `~/.pseudolife-mcp/client-engine`. Later installer runs without the variable keep the Python client until a run with `PSEUDOLIFE_SHIM_ENGINE=native`, which removes the record.
 - The guided tunnel setup (`--tunnel`, `-Tunnel`) now needs `PSEUDOLIFE_SHIM_ENGINE=python`. Without it the installer refuses before changing anything and names that route.
