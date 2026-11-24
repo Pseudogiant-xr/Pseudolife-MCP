@@ -2639,6 +2639,20 @@ verify_current_client_token() {
     fi
     [ -z "$CONNECT_CURRENT_FAILURE" ]
 }
+# A client-only install registers Codex's own copy of the token file's token,
+# and connect --token-file would re-point it at the file although nothing
+# changed (issue #1908). A plan is treated as current when its only changes
+# are Codex's rows (connect-report codex-only) and the native step answers
+# exactly "same": the registration names that copy, it holds the same token,
+# and Codex's rows change nothing but that pointer. Any other answer, or none,
+# applies the plan as before.
+codex_token_copy_current() {  # $1 = connect's client list
+    local report
+    case ",$1," in *,codex,*) ;; *) return 1 ;; esac
+    [ "$(printf '%s' "$connect_report" | connect_report_lines codex-only 2>/dev/null)" = codex-only ] || return 1
+    report=$(native_helper codex-token-copy --daemon-url "$DAEMON_URL" --token-file "$TOKEN_FILE" </dev/null 2>/dev/null) || return 1
+    [ "$(native_helper json-field state <<< "$report" 2>/dev/null)" = same ]
+}
 connect_existing_registration() {
     local provider="$1" connect_name="$2" grouped="${3:-}"
     ensure_shim
@@ -2681,6 +2695,19 @@ connect_existing_registration() {
             return 0
         fi
         step "Verified the current credential for $connect_name at $DAEMON_URL. Nothing to write."
+    elif codex_token_copy_current "$connect_name"; then
+        # Only Codex's token-file pointer would change: as a current plan.
+        if ! verify_current_client_token "$connect_name"; then
+            [ -z "$grouped" ] || return 1
+            warn_client_failure "$provider" "$CONNECT_CURRENT_FAILURE"
+            return 0
+        fi
+        step "Verified the current credential for $connect_name at $DAEMON_URL: Codex's registration already names its own copy of the token in $TOKEN_FILE. Nothing to write."
+        connect_manual=$(printf '%s' "$connect_report" | connect_report_lines manual) || true
+        if [ -n "$connect_manual" ]; then
+            echo "WARNING: pseudolife-mcp connect found entries it does not rewrite; change them by hand:" >&2
+            printf '%s\n' "$connect_manual" >&2
+        fi
     else
         step "Existing registrations: pseudolife-mcp connect points them at $DAEMON_URL:"
         printf '%s' "$connect_report" | connect_report_lines plan || true
