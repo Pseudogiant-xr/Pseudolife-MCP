@@ -37,10 +37,8 @@ import pgdisposable
 pg = pgdisposable.Slice("prn")
 SCHEMA_SOURCE = REPO / "rust/daemon/src/storage/schema.sql"
 HTTP_SOURCE = REPO / "rust/daemon/src/http.rs"
-# The pairing-code alphabet (rust/daemon/src/routes/pair.rs). The seeded
-# codes drawn from it reach the golden only as their stored hashes, so a
-# changed alphabet shows as a golden difference.
-PAIRING_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+AUTH_SOURCE = REPO / "rust/daemon/src/auth.rs"
+PAIR_SOURCE = REPO / "rust/daemon/src/routes/pair.rs"
 # The probe's clock column (principal_probe.rs): epoch seconds from the database.
 DB_NOW = "EXTRACT(EPOCH FROM clock_timestamp())::double precision"
 OWNED_SQL = "COALESCE((to_jsonb(p) ->> 'owned')::boolean, TRUE)"
@@ -68,11 +66,13 @@ META_TABLE_SQL = schema_statement("CREATE TABLE IF NOT EXISTS meta (", ");")
 PRINCIPALS_TABLE_SQL = schema_statement("CREATE TABLE IF NOT EXISTS principals (", "END $$;")
 
 
-def operator_post_paths(source=None):
+def operator_post_paths(source=None, auth=None):
     """The operator routes the daemon gates (``http.rs``
-    ``OPERATOR_POST_PATHS``), read from the one exact declaration."""
+    ``OPERATOR_POST_PATHS``), read from the one exact declaration, which
+    may wrap over lines; they must be the routes ``auth.rs``
+    ``operator_route`` (what the probe answers with) names."""
     text = HTTP_SOURCE.read_text(encoding="utf-8") if source is None else source
-    found = re.findall(r'^const OPERATOR_POST_PATHS: \[&str; (\d+)\] = \[([^\]\n]*)\];$', text, re.M)
+    found = re.findall(r'^const OPERATOR_POST_PATHS: \[&str; (\d+)\] = \[([^\]]*)\];$', text, re.M)
     if len(found) != 1:
         raise AssertionError("daemon operator route declaration changed")
     count, body = found[0]
@@ -80,10 +80,26 @@ def operator_post_paths(source=None):
     if (re.sub(r'"[^"\\]+"|[\s,]', "", body) or len(paths) != int(count)
             or len(set(paths)) != len(paths) or not all(path.startswith("/api/") for path in paths)):
         raise AssertionError("daemon operator routes are not a plain list of distinct /api/ paths")
+    text = AUTH_SOURCE.read_text(encoding="utf-8") if auth is None else auth
+    policy = re.findall(r'fn operator_route\(path: &str\) -> bool \{\s*matches!\(path, ([^)]*)\)\s*\}', text)
+    if len(policy) != 1 or set(re.findall(r'"([^"\\]+)"', policy[0])) != set(paths) \
+            or re.sub(r'"[^"\\]+"|[\s|]', "", policy[0]):
+        raise AssertionError("auth.rs operator_route and http.rs OPERATOR_POST_PATHS name different routes")
     return frozenset(paths)
 
 
+def pairing_code_alphabet(source=None):
+    """The pairing-code alphabet the daemon redeems (``routes/pair.rs``). The
+    seeded codes drawn from it reach the golden only as stored hashes."""
+    text = PAIR_SOURCE.read_text(encoding="utf-8") if source is None else source
+    found = re.findall(r'^const PAIRING_CODE_ALPHABET: &str = "([0-9A-Z]+)";$', text, re.M)
+    if len(found) != 1 or len(set(found[0])) != len(found[0]):
+        raise AssertionError("routes/pair.rs PAIRING_CODE_ALPHABET declaration changed")
+    return found[0]
+
+
 OPERATOR_POST_PATHS = operator_post_paths()
+PAIRING_CODE_ALPHABET = pairing_code_alphabet()
 OPERATOR_REQUESTS = [{"method": method, "path": path}
                      for path in sorted(OPERATOR_POST_PATHS) + ["/api/stats"]
                      for method in ("GET", "POST")]
@@ -239,13 +255,15 @@ KEEP = object()
 
 
 def create_invite(conn, name, code_hash, *, tier, board, ttl_seconds, replace, owned=KEEP):
-    """The invite fixture: the statements the native ``invite`` runs
+    """The invite fixture, modelled on the native ``invite``'s statements
     (``rust/shim/src/cli/pairing/invite_db.rs`` ``create_invite``) for the
     states this scenario reaches. A new name is inserted; a pending one, or
-    a paired one with ``replace``, gets the new code. ``tier`` and ``board``
-    are always given; ``owned`` only when the scenario sets it. A revoked
-    name (whose reset also ends its Console sessions) and a paired name
-    without ``replace`` are refused, since no step here invites one."""
+    a paired one with ``replace``, gets the new code. Unlike the native
+    command (where no tier means keep it), ``tier`` and ``board`` are always
+    written, as the recorded scenario's invites gave them; ``owned`` only
+    when the scenario sets it. A revoked name (whose reset also ends its
+    Console sessions) and a paired name without ``replace`` are refused,
+    since no step here invites one."""
     with conn.transaction():
         existing = conn.execute(
             "SELECT token_hash IS NOT NULL, revoked_at IS NOT NULL "
@@ -443,9 +461,11 @@ def step_diffs(expected, record):
     if expected is None:
         return ["/: only in the candidate"]
     diffs = [] if expected.get("case") == record["case"] else ["/case: golden and candidate steps differ"]
-    diffs += dbstate.diff(expected.get("output"), record["output"])
+    # section_diff descends lists of equal length, so a value inside a list
+    # compares by type as well (true is not 1), as everywhere else.
+    diffs += candidate_record.section_diff(expected.get("output"), record["output"], "")
     if expected.get("state") is not None or record["state"] is not None:
-        diffs += dbstate.diff(expected.get("state"), record["state"], "/database")
+        diffs += candidate_record.section_diff(expected.get("state"), record["state"], "/database")
     return candidate_record.labelled(diffs)
 
 
@@ -602,20 +622,72 @@ def run(binary, golden, mutant=None):
         p.close()
 
 
+RACE_CASE = "two-redeemers-one-conditional-winner"
+RACE_PROOF = {"both_queued": True, "winners": 1, "durable_winner_matches": True}
+
+
+def run_failures(records):
+    """The harness's own checks a recording needs beyond the golden: the
+    redemption race proved two queued callers and one durable winner."""
+    race = [record["output"] for record in records if record["case"] == RACE_CASE]
+    return [] if race == [RACE_PROOF] else [f"{RACE_CASE} did not prove {RACE_PROOF}: {race}"]
+
+
+def record_candidate(records, write, binary, failures=()):
+    """``--record-candidate``: class each candidate step against the golden
+    record at its position with the replay's own comparison (``step_diffs``),
+    then, with ``write``, write the golden: unchanged records kept exactly as
+    committed, changed and new ones from the candidate, provenance under
+    ``candidate_record.PROVENANCE_KEY``. A dry run exits 1 when the golden
+    would change; a failed own check, a host path or a record that would not
+    survive the file is refused and nothing is written."""
+    committed = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    old = committed["records"]
+    report = {"unchanged": 0, "changed": [], "new": [], "removed": [], "refused": list(failures),
+              "written": False}
+    if candidate_record.host_paths(records):
+        report["refused"].append("a record names a host path, which a golden must not hold")
+    if candidate_record.round_trip(records):
+        report["refused"].append("a record does not survive the JSON file")
+    merged = []
+    for index, record in enumerate(records):
+        diffs = step_diffs(old[index] if index < len(old) else None, record)
+        if not diffs:
+            report["unchanged"] += 1
+            merged.append(old[index])
+            continue
+        report["changed" if index < len(old) else "new"].append(f"{index}:{record['case']}")
+        merged.append(record)
+        print(f"  {'CHANGED' if index < len(old) else 'new'} {index}:{record['case']}", flush=True)
+        for difference in diffs[:20]:
+            print(f"        {difference}", flush=True)
+    report["removed"] = [f"{index}:{record.get('case')}" for index, record
+                         in enumerate(old[len(records):], len(records))]
+    for case in report["removed"]:
+        print(f"  removed {case}", flush=True)
+    if report["refused"]:
+        for why in report["refused"]:
+            print(f"  REFUSED: {why}", flush=True)
+        print(f"  nothing written to {GOLDEN.name}", flush=True)
+        return 1, report
+    if not (report["changed"] or report["new"] or report["removed"]):
+        print(f"  {GOLDEN.name}: nothing to change", flush=True)
+        return 0, report
+    if not write:
+        print(f"  dry run: {GOLDEN.name} would change ({len(report['changed'])} changed, "
+              f"{len(report['new'])} new, {len(report['removed'])} removed); review the differences "
+              "above, then add --write", flush=True)
+        return 1, report
+    committed["records"] = merged
+    committed[candidate_record.PROVENANCE_KEY] = {"principals": candidate_record.provenance(Path(binary))}
+    GOLDEN.write_text(json.dumps(committed, indent=1) + "\n", encoding="utf-8", newline="\n")
+    report["written"] = True
+    print(f"  wrote {GOLDEN}; one golden serves both operating systems, so check it here and on the "
+          f"other OS before committing: {CHECK_COMMAND}", flush=True)
+    return 0, report
+
+
 CHECK_COMMAND = "python rust/daemon/harness/principals.py golden --rust-bin <binary> --out <scratch>/principals.json"
-
-
-def record_candidate(records, write, binary):
-    """``--record-candidate``: the candidate's records, classed against the
-    committed golden as one case (``candidate_record.Recording``, as the
-    startup harnesses do): a dry run unless ``write``, exit 1 when the golden
-    would change and is not written, a refusal for a record naming a host
-    path or not surviving the file. ``golden`` then compares what is written."""
-    recording = candidate_record.Recording(GOLDEN, ("records",), Path(binary), whole=False,
-                                           defined=["principals"], single=True)
-    recording.write = write
-    recording.observe("principals", {"records": records}, [], candidate_record.round_trip)
-    return recording.finish(write, CHECK_COMMAND), recording.report
 
 
 def provenance(binary):
@@ -650,6 +722,8 @@ def main():
         parser.error("--write needs --record-candidate")
     if args.record_candidate and candidate_record.refuse_mutant_environment():
         parser.error(candidate_record.refuse_mutant_environment())
+    if args.out.resolve() == GOLDEN.resolve():
+        parser.error("--out names the committed golden; write the report elsewhere")
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -668,7 +742,8 @@ def main():
         recorded = None
         if args.record_candidate:
             # The run's differences from the golden are what it would record.
-            recorded, result["record_candidate"] = record_candidate(result["records"], args.write, args.rust_bin)
+            recorded, result["record_candidate"] = record_candidate(
+                result["records"], args.write, args.rust_bin, run_failures(result["records"]))
             result["recorded_diffs"], result["diffs"] = result["diffs"], []
         if args.mode == "mutants":
             if result["diffs"]:

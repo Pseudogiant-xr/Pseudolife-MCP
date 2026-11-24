@@ -81,10 +81,40 @@ def test_operator_routes_refuse_a_changed_declaration(declaration):
         principals.operator_post_paths(HTTP.replace(DECLARATION, declaration))
 
 
-def test_operator_routes_accept_a_new_route_the_golden_would_then_report():
-    added = 'const OPERATOR_POST_PATHS: [&str; 3] = ["/api/config", "/api/daemon-notice", "/api/x"];'
-    assert principals.operator_post_paths(HTTP.replace(DECLARATION, added)) == \
-        frozenset({"/api/config", "/api/daemon-notice", "/api/x"})
+AUTH = principals.AUTH_SOURCE.read_text(encoding="utf-8")
+POLICY = 'matches!(path, "/api/config" | "/api/daemon-notice")'
+ADDED = "/api/facts/set"
+
+
+def test_operator_routes_accept_a_new_route_in_both_daemon_lists_even_wrapped():
+    added = ('const OPERATOR_POST_PATHS: [&str; 3] = [\n    "/api/config",\n    "/api/daemon-notice",\n'
+             f'    "{ADDED}",\n];')
+    policy = f'matches!(path, "/api/config" | "/api/daemon-notice" | "{ADDED}")'
+    assert AUTH.count(POLICY) == 1
+    assert principals.operator_post_paths(HTTP.replace(DECLARATION, added), AUTH.replace(POLICY, policy)) == \
+        frozenset({"/api/config", "/api/daemon-notice", ADDED})
+
+
+@pytest.mark.parametrize("policy", [
+    f'matches!(path, "/api/config" | "/api/daemon-notice" | "{ADDED}")',
+    'matches!(path, "/api/config")',
+    'matches!(path, "/api/config" | OTHER)',
+])
+def test_operator_routes_refuse_a_policy_that_names_other_routes(policy):
+    with pytest.raises(AssertionError, match="name different routes"):
+        principals.operator_post_paths(HTTP, AUTH.replace(POLICY, policy))
+
+
+def test_pairing_alphabet_is_the_daemons_and_refuses_a_changed_declaration():
+    source = principals.PAIR_SOURCE.read_text(encoding="utf-8")
+    assert principals.PAIRING_CODE_ALPHABET == "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+    declaration = 'const PAIRING_CODE_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";'
+    assert source.count(declaration) == 1
+    assert principals.pairing_code_alphabet(source.replace(declaration, declaration.replace("XYZ", "XY"))) \
+        == "0123456789ABCDEFGHJKMNPQRSTVWXY"
+    for changed in (declaration.replace("XYZ", "XYZZ"), declaration.replace("&str", "&[u8; 32]"), ""):
+        with pytest.raises(AssertionError, match="PAIRING_CODE_ALPHABET"):
+            principals.pairing_code_alphabet(source.replace(declaration, changed))
 
 
 def test_golden_inspections_ask_exactly_the_current_operator_requests():
@@ -99,24 +129,15 @@ def test_golden_inspections_ask_exactly_the_current_operator_requests():
 def test_golden_steps_are_the_scenario_steps_in_order():
     labels = []
 
-    class Recorder:
+    class Recorder(principals.Replay):
+        """The harness's own invite, adversarial, secret and code helpers;
+        only the step that would reach the probe and the bank is replaced."""
+
         def step(self, label, *_args, **_kwargs):
             labels.append(label)
 
-        def invite(self, name, tier=None, board=True, replace=False, ttl=900, adversarial=False,
-                   owned=principals.KEEP):
-            self.codes[name] = "hash-" + name
-            labels.append(("adversarial-invite-" if adversarial else "invite-") + name +
-                          ("-replace" if replace else ""))
-
-        def adversarial(self, label, *_args, **_kwargs):
-            labels.append("adversarial-" + label)
-
-        def secret(self, label):
-            return "secret-" + label
-
-    recorder = Recorder()
-    recorder.codes, recorder.raw_secrets = {}, []
+    recorder = Recorder.__new__(Recorder)
+    recorder.codes, recorder.raw_secrets, recorder.rng = {}, [], principals.random.Random(53)
     principals.scenarios(recorder)
     records = json.loads(principals.GOLDEN.read_text(encoding="utf-8"))["records"]
     assert labels == [record["case"] for record in records]
@@ -133,6 +154,18 @@ def test_step_comparison_reports_label_output_state_and_length():
     assert principals.step_diffs(RECORD, {**RECORD, "state": {"rows": {"x": 1}}})[0].startswith("/database")
     assert principals.step_diffs(RECORD, {**RECORD, "state": None})
     assert principals.step_diffs(None, RECORD) == ["/: only in the candidate"]
+    # Inside a list a value compares by type too: true is not 1.
+    listed = {**RECORD, "output": {"resolved": [{"allowed": True}]}}
+    assert principals.step_diffs(listed, {**listed, "output": {"resolved": [{"allowed": 1}]}})
+
+
+def test_the_race_must_prove_two_queued_callers_and_one_winner():
+    proof = {"case": principals.RACE_CASE, "output": dict(principals.RACE_PROOF), "state": None}
+    assert principals.run_failures([RECORD, proof]) == []
+    for broken in ({**proof["output"], "both_queued": False}, {**proof["output"], "winners": 2}):
+        assert principals.run_failures([RECORD, {**proof, "output": broken}])
+    assert principals.run_failures([RECORD])
+    assert principals.run_failures([proof, proof])
 
 
 def test_a_golden_record_past_the_last_step_is_a_difference():
@@ -185,38 +218,73 @@ def recorded_golden(tmp_path, monkeypatch, records):
     golden = tmp_path / "principals.json"
     golden.write_text(json.dumps({"normalizers": "label", "records": records}, indent=1) + "\n", encoding="utf-8")
     monkeypatch.setattr(principals, "GOLDEN", golden)
-    monkeypatch.setattr(principals.candidate_record, "provenance", lambda _binary: {"commit": "x", "rust_tree": "clean"})
+    monkeypatch.setattr(principals.candidate_record, "provenance", lambda _binary: {"commit": "x"})
     return golden
 
 
-def test_record_candidate_dry_run_exits_1_and_write_replaces_only_the_records(tmp_path, monkeypatch):
-    committed = [RECORD, {**RECORD, "case": "b"}]
+def test_record_candidate_dry_run_exits_1_and_write_keeps_unchanged_records(tmp_path, monkeypatch):
+    # Key order differs from the candidate's: an unchanged record stays as committed.
+    first = {"state": {"rows": {}}, "output": {"state": "new"}, "case": "invite-a"}
+    committed = [first, {**RECORD, "case": "b"}]
     golden = recorded_golden(tmp_path, monkeypatch, committed)
     before = golden.read_bytes()
-    assert principals.record_candidate(committed, True, "bin") == (0, {
-        "unchanged": ["principals"], "changed": [], "new": [], "removed": [], "refused": {}, "written": False})
+    unchanged = [RECORD, {**RECORD, "case": "b"}]
+    assert principals.record_candidate(unchanged, True, "bin") == (0, {
+        "unchanged": 2, "changed": [], "new": [], "removed": [], "refused": [], "written": False})
     assert golden.read_bytes() == before
     changed = [RECORD, {**RECORD, "case": "b", "output": {"state": "pending"}}, {**RECORD, "case": "c"}]
     code, report = principals.record_candidate(changed, False, "bin")
-    assert (code, report["changed"], report["written"]) == (1, ["principals"], False)
+    assert (code, report["changed"], report["new"], report["written"]) == (1, ["1:b"], ["2:c"], False)
     assert golden.read_bytes() == before
     code, report = principals.record_candidate(changed, True, "bin")
     assert (code, report["written"]) == (0, True)
     written = json.loads(golden.read_text(encoding="utf-8"))
-    assert written["records"] == changed and written["normalizers"] == "label"
-    assert written[principals.candidate_record.PROVENANCE_KEY] == {"principals": {"commit": "x", "rust_tree": "clean"}}
+    assert list(written["records"][0]) == ["state", "output", "case"]
+    assert written["records"] == [first, *changed[1:]] and written["normalizers"] == "label"
+    assert written[principals.candidate_record.PROVENANCE_KEY] == {"principals": {"commit": "x"}}
+    code, report = principals.record_candidate(changed[:1], True, "bin")
+    assert (code, report["removed"]) == (0, ["1:b", "2:c"])
+    assert len(json.loads(golden.read_text(encoding="utf-8"))["records"]) == 1
 
 
-def test_record_candidate_refuses_records_naming_a_host_path(tmp_path, monkeypatch):
+def test_record_candidate_writes_the_committed_golden_back_unchanged_but_for_the_change(tmp_path, monkeypatch):
+    text = principals.GOLDEN.read_text(encoding="utf-8")
+    records = json.loads(text)["records"]
+    golden = recorded_golden(tmp_path, monkeypatch, [])
+    golden.write_text(text, encoding="utf-8", newline="\n")
+    candidate = json.loads(json.dumps(records))
+    candidate[1]["output"] = {"ok": "changed"}
+    assert principals.record_candidate(candidate, True, "bin")[0] == 0
+    before, after = text.splitlines(), golden.read_text(encoding="utf-8").splitlines()
+    import difflib
+    changed = [line for line in difflib.unified_diff(before, after, lineterm="", n=0)
+               if line[:1] in "+-" and not line.startswith(("+++", "---"))]
+    assert 0 < len(changed) < 12, changed
+
+
+@pytest.mark.parametrize("refusal", ["home", "failure", "nan"])
+def test_record_candidate_refuses_a_failed_check_host_path_or_unwritable_record(refusal, tmp_path, monkeypatch):
     golden = recorded_golden(tmp_path, monkeypatch, [RECORD])
     before = golden.read_bytes()
-    code, report = principals.record_candidate([{**RECORD, "output": {"home": str(Path.home())}}], True, "bin")
-    assert code == 1 and "host path" in report["refused"]["principals"]
+    records, failures = [RECORD], ()
+    if refusal == "home":
+        records = [{**RECORD, "output": {"home": str(Path.home())}}]
+    elif refusal == "failure":
+        failures = ["the race did not prove itself"]
+    else:
+        records = [{**RECORD, "output": {"value": float("nan")}}]
+    try:
+        code, report = principals.record_candidate(records, True, "bin", failures)
+    except ValueError:  # NaN refused by the JSON round trip itself
+        code, report = 1, {"refused": ["unwritable"]}
+    assert code == 1 and report["refused"]
     assert golden.read_bytes() == before
 
 
-def test_committed_golden_holds_only_normalizers_and_records():
-    assert set(json.loads(principals.GOLDEN.read_text(encoding="utf-8"))) == {"normalizers", "records"}
+def test_committed_golden_holds_its_records_and_at_most_provenance():
+    keys = set(json.loads(principals.GOLDEN.read_text(encoding="utf-8")))
+    assert {"normalizers", "records"} <= keys <= {"normalizers", "records",
+                                                    principals.candidate_record.PROVENANCE_KEY}
 
 
 @pytest.mark.parametrize("argv,error", [
@@ -225,6 +293,7 @@ def test_committed_golden_holds_only_normalizers_and_records():
     (["live", "--rust-bin", "x", "--out", "o"], "invalid choice"),
     (["oracle", "--out", "o"], "invalid choice"),
     (["golden", "--out", "o"], "--rust-bin"),
+    (["golden", "--rust-bin", "x", "--out", str(principals.GOLDEN)], "--out names the committed golden"),
 ])
 def test_retired_and_inconsistent_modes_are_refused(argv, error, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["principals.py", *argv])
