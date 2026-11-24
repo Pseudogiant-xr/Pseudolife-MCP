@@ -149,26 +149,26 @@ fn every_tunnel_argv_answers_or_refuses_with_its_cause_without_effect() {
             &[][..],
             "tunnel needs a command: setup, status, verify, run, stop or update",
         ),
-        (&["doctor"], "tunnel doctor is not in the native client yet"),
+        (&["doctor"], "tunnel doctor is not part of the native client"),
         (
             &["doctor", "--profile-dir", &dir],
-            "tunnel doctor is not in the native client yet",
+            "tunnel doctor is not part of the native client",
         ),
         (
             &["start", "--profile-dir", &dir],
-            "Run `pseudolife-mcp tunnel run` in a terminal you keep open",
+            "Run `pseudolife-mcp tunnel run` in a terminal you keep open, or register that command with a service manager you set up yourself",
         ),
         (
             &["service", "preview", "--profile-dir", &dir],
-            "tunnel service is not in the native client yet",
+            "tunnel service is not part of the native client",
         ),
         (
             &["service", "install", "--profile-dir", &dir],
-            "tunnel service is not in the native client yet",
+            "tunnel service is not part of the native client",
         ),
         (
             &["service", "status", "--profile-dir", &dir],
-            "tunnel service is not in the native client yet",
+            "tunnel service is not part of the native client",
         ),
         (
             &["status", "--prof", "dot", "--profile-dir", &dir],
@@ -204,7 +204,7 @@ fn every_tunnel_argv_answers_or_refuses_with_its_cause_without_effect() {
         ),
         (
             &["setup", "--start", "--profile-dir", &dir],
-            "tunnel setup --start is not in the native client yet",
+            "tunnel setup --start is not part of the native client",
         ),
         (
             &["setup", "--open-browser", "keys", "--profile-dir", &dir],
@@ -302,7 +302,7 @@ fn explicit_setup_with_a_missing_credential_refuses_and_discovery_names_the_flag
         &home,
         &["setup", "--profile-dir", &dir],
         &[("PSEUDOLIFE_MCP_TOKEN_FILE", token)],
-        "guided setup is not in the native client yet. To use the daemon this environment names, run tunnel setup with --daemon-url ",
+        "guided setup is not part of the native client. To use the daemon this environment names, run tunnel setup with --daemon-url ",
     );
     // A Codex registration exists: its env block is not read natively.
     std::fs::create_dir_all(home.path(".codex")).unwrap();
@@ -1550,7 +1550,7 @@ fn setup_resuming_an_existing_profile_names_the_option_or_the_broken_file() {
         &home,
         &["setup", "--profile-dir", &dir],
         &[],
-        "profile dot is saved; guided setup is not in the native client yet.",
+        "profile dot is saved; guided setup is not part of the native client.",
     );
     let broken = format!(
         "{}; fix that file or move it aside",

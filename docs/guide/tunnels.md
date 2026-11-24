@@ -32,7 +32,9 @@ supervisor to stop its runtime. Pass the same `--profile` and
 `--profile-dir` in both commands if you selected a different profile or
 store. Use the same client to manage a running tunnel. The Python client's
 status can report a native launch as stopped, and Python stop leaves that
-launch running. Background start still requires the Python client.
+launch running. The native client has no background start of its own: keep
+`tunnel run` open in a terminal, or register that command with a service
+manager you set up yourself.
 
 To renew a key with the native client, stop the tunnel, then run
 `pseudolife-mcp tunnel setup --profile dot --read-key --key-expires-at <ISO timestamp>`
@@ -112,9 +114,10 @@ profile it cannot read is named as `unread` with the reason, naming the field wh
 client also answers preflight refusals for `tunnel verify` and `tunnel setup`.
 Anything else it does not run is refused with one line naming the cause
 and what to run instead (exit 2), having changed nothing. `start`,
-`doctor`, `service`, `setup --start` and `setup --open-browser` are not in
-the native client yet; the refusal names `tunnel run` in a terminal you keep
-open, `tunnel status`, or the Platform pages. Guided setup is not either: the
+`doctor`, `service`, `setup --start` and `setup --open-browser` are not part of
+the native client; the refusal names `tunnel run` in a terminal you keep open
+(or under a service manager you set up yourself), `tunnel status`, or the
+Platform pages. Guided setup is not either: the
 refusal names the explicit `--daemon-url` and `--token-file` to use. A file
 it cannot read (a profile, key, verification challenge or refresh file in a
 form it does not read) is named with the fix, as are verification of a launch
@@ -125,8 +128,9 @@ the saved key to check it: a damaged key file is no usable key, and a key
 sealed by another account, or read over a logon without the account's
 credentials (such as a key-based SSH logon), is reported as `not_verified`.
 `pseudolife-mcp doctor` lists saved tunnels and names only steps this client
-runs. If your tunnel relies on automatic or background start, keep the
-Python client. An update keeps it unless you opt in with
+runs. The native client does not register or start a tunnel service. A
+machine whose tunnel the Python client registered to start by itself stays on
+the Python client: an update keeps it unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how

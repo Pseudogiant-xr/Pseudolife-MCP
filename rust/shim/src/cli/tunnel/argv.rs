@@ -91,14 +91,11 @@ impl Command {
     }
 }
 
-/// The refusal for a form of `tunnel` this client does not run yet.
+/// The refusal for a form of `tunnel` this client does not provide.
 fn not_built(form: &str) -> Option<String> {
     let instead = match form {
-        "start" | "setup --start" => {
-            "Run `pseudolife-mcp tunnel run` in a terminal you keep open instead; `pseudolife-mcp tunnel stop` ends it"
-        }
-        "service" => {
-            "To keep a tunnel running, run `pseudolife-mcp tunnel run` in a terminal you keep open"
+        "start" | "setup --start" | "service" => {
+            "Run `pseudolife-mcp tunnel run` in a terminal you keep open, or register that command with a service manager you set up yourself; `pseudolife-mcp tunnel stop` ends it"
         }
         "doctor" => {
             "`pseudolife-mcp tunnel status` and `pseudolife-mcp doctor` check the saved tunnels"
@@ -106,11 +103,11 @@ fn not_built(form: &str) -> Option<String> {
         _ => return None,
     };
     Some(format!(
-        "tunnel {form} is not in the native client yet. {instead}"
+        "tunnel {form} is not part of the native client. {instead}"
     ))
 }
 
-const BROWSER: &str = "tunnel setup --open-browser is not in the native client yet. Open the step yourself: tunnels https://platform.openai.com/settings/organization/tunnels, keys https://platform.openai.com/settings/organization/api-keys, app https://chatgpt.com/plugins";
+const BROWSER: &str = "tunnel setup --open-browser is not part of the native client. Open the step yourself: tunnels https://platform.openai.com/settings/organization/tunnels, keys https://platform.openai.com/settings/organization/api-keys, app https://chatgpt.com/plugins";
 
 /// `None` for an option that takes no value, else the option's slot.
 enum Takes {

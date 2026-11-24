@@ -1079,7 +1079,7 @@ fn setup(options: &Options, root: &Path) -> Output {
         if !settings.has_profile_settings() && !settings.has_key_input() && !settings.accept_access
         {
             return Err(Fail::Detail(format!(
-                "profile {name} is saved; guided setup is not in the native client yet. `{status}` shows what it still needs; resume it with that option of tunnel setup (--tunnel-id, --organization-id, --catalog, --key-expires-at, --daemon-url with --token-file, or --read-key or --key-file)",
+                "profile {name} is saved; guided setup is not part of the native client. `{status}` shows what it still needs; resume it with that option of tunnel setup (--tunnel-id, --organization-id, --catalog, --key-expires-at, --daemon-url with --token-file, or --read-key or --key-file)",
                 name = options.profile,
                 status = tunnel_command("status", &options.profile, options.profile_dir.as_deref()),
             )));
@@ -1103,7 +1103,7 @@ fn setup(options: &Options, root: &Path) -> Output {
     } else {
         let profile = store::validate(&payload)?;
         Err(Fail::Detail(format!(
-            "guided setup is not in the native client yet. To use the daemon this environment names, run tunnel setup with --daemon-url {} --token-file {} --accept-access",
+            "guided setup is not part of the native client. To use the daemon this environment names, run tunnel setup with --daemon-url {} --token-file {} --accept-access",
             quote_tunnel_arg(&profile.daemon_url),
             quote_tunnel_arg(&profile.token_file)
         )))
@@ -1840,14 +1840,14 @@ mod tests {
         for (shape, says) in [
             (&[][..], "tunnel needs a command: setup, status"),
             (&["bogus"], "unknown tunnel command bogus; the commands are"),
-            (&["doctor"], "tunnel doctor is not in the native client yet"),
+            (&["doctor"], "tunnel doctor is not part of the native client"),
             (
                 &["start"],
-                "tunnel start is not in the native client yet. Run `pseudolife-mcp tunnel run`",
+                "tunnel start is not part of the native client. Run `pseudolife-mcp tunnel run`",
             ),
             (
                 &["service", "install"],
-                "tunnel service is not in the native client yet",
+                "tunnel service is not part of the native client",
             ),
             (&["status", "--json", "--json"], "--json is given twice"),
             (&["status", "--profile"], "--profile needs a value"),
@@ -1877,11 +1877,11 @@ mod tests {
             (&["setup", "--key-file"], "--key-file needs a value"),
             (
                 &["setup", "--start"],
-                "tunnel setup --start is not in the native client yet",
+                "tunnel setup --start is not part of the native client",
             ),
             (
                 &["setup", "--open-browser", "keys"],
-                "tunnel setup --open-browser is not in the native client yet",
+                "tunnel setup --open-browser is not part of the native client",
             ),
         ] {
             let message = refused(shape);

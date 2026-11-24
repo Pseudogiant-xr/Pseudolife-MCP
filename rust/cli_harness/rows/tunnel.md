@@ -29,7 +29,8 @@ once, each value as the next argument and never `-`-led
 `--opt=value` is the same option. `-h`/`--help` (alone or after a command)
 prints native help on stdout, exit 0. Nothing defers: every other shape is
 refused (exit 2) with its cause and the next step, changing nothing. That
-covers no command, an unknown command, the forms not built yet (`doctor`,
+covers no command, an unknown command, the forms the native client does not
+provide (`doctor`,
 `start`, `service ...`, `setup --start`, `setup --open-browser`, each naming
 what to run instead), abbreviations, repeated options, a missing or `-`-led
 value, `--catalog` outside its choices, an empty `--profile-dir` and
@@ -167,7 +168,7 @@ keep their recorded ids; `defer-status-help` prints help):
   key this session cannot unseal. With a key that unseals and no record it
   refuses as on POSIX (`verify-ready-key-no-record`, both platforms).
 - `service`, `start`, `doctor`, `setup --start` and `setup --open-browser`:
-  not in the native client yet, each naming what to run instead.
+  not part of the native client, each naming what to run instead.
 - `setup` that discovers its connection from the environment (the refusal
   prints the explicit flags), a present client registration file, `~`-led
   or drive-relative token paths, and a saved profile resumed with no option.

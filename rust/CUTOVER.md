@@ -42,8 +42,8 @@ gate below.
 | Published packages | The PyPI wheel, the Python daemon image, the PostgreSQL image, the Rust daemon image, the native archives on the GitHub release, and an MCP registry entry (`server.json`) that points at PyPI. | PyPI, the Python image and the registry entry |
 
 The generic dispatcher deferral prints `pseudolife-stdio: mode '<mode>' is
-deferred in this candidate` on stderr and exits 1. The only entry in
-`DEFERRED_MODES` in `rust/shim/src/cli.rs` is `tunnel`.
+deferred in this candidate` on stderr and exits 1. `DEFERRED_MODES` in
+`rust/shim/src/cli.rs` is empty: `tunnel` answers or refuses every argv itself.
 The command exits at that point without starting the Python client.
 
 ## What is left
@@ -79,10 +79,10 @@ The command exits at that point without starting the Python client.
 | `test-login` | Help, argument checks, admin-URL and container setup, and private credential staging run natively. Preflight refusals name the failed condition. (#1727) | — |
 | `maintainer` | Guided setup and administration (`enrol-code`, `confirm`, `revoke`, `reset`, `list`) run natively. Invalid arguments and database settings receive named refusals. (#1730) | — |
 | `move` | The native dispatcher owns help, argument refusals, dry runs, moves, resume, rollback and target release. On Linux Docker targets, preflight checks both bearer modes. Carried moves can use explicit original files. `--expose-target` can reuse a target tailnet forward or create one with a recovery receipt. Checkout handover receives an early refusal with the installed release route. A command line the native parsers cannot take is refused with its cause named. | The installed acceptance matrix's move interruption and rollback, and a real-process kill after the commit marker reaches the source and before the move record says committed (engine model tests only). |
-| `tunnel` | Native setup creates and resumes prepared profiles and imports or renews private keys. A renewal retains the previous pair until the replacement completes a control-plane poll. Setup can recover interrupted writes and explicitly restore or discard a retained pair. `tunnel run` requires a live vendor, local readiness and an acknowledgment from its bound bridge. `tunnel stop` requests owned shutdown. Verification binds receipts to the current launch identity. A compatible supervisor can refresh onto the verified installed shim and can restore its previous shim if the candidate's exit is confirmed and rollback becomes ready. Older foreground supervisors and vendor version changes require a manual restart. | Background start, service registration and migration, and installed lifecycle proofs. |
+| `tunnel` | Native setup creates and resumes prepared profiles and imports or renews private keys. A renewal retains the previous pair until the replacement completes a control-plane poll. Setup can recover interrupted writes and explicitly restore or discard a retained pair. `tunnel run` requires a live vendor, local readiness and an acknowledgment from its bound bridge. `tunnel stop` requests owned shutdown. Verification binds receipts to the current launch identity. A compatible supervisor can refresh onto the verified installed shim and can restore its previous shim if the candidate's exit is confirmed and rollback becomes ready. Older foreground supervisors and vendor version changes require a manual restart. `start`, `service`, `doctor`, `setup --start` and `setup --open-browser` are not part of the native client and are refused, naming `tunnel run` in a kept-open terminal (or under a service manager the user sets up), `tunnel status` or the Platform pages. | Installed lifecycle proofs. |
 | `embedded` | A plain refusal: retired with file mode. | Nothing. |
 | `backup`, `restore`, `export`, `import`, `invite`, `maintainer`, `lease`, `board-audit` on a lite bank | One refusal that names the Docker install and the 0.23.x pip release that still opens the bank (`cli/retired.rs`). | Nothing. |
-| Edge shapes in `tunnel` and `move` | The named deferral is still reachable. `tunnel` can defer on unsupported arguments, a profile directory it cannot open outside `update`, or work its `status`, `verify` and `setup` paths cannot complete. `move` no longer defers for any argv. | Give supported operations a native result and other calls a refusal with the cause and remedy. |
+| Edge shapes in `tunnel` and `move` | Neither defers for any argv. `tunnel` refuses unsupported arguments, a profile directory it cannot open and files in a form it does not read, naming the cause and the fix. | Nothing. |
 
 The sweeps also completed native answers for `invite` and `pair` (#1679),
 `board-audit` (#1699), and `export` and `import` (#1676).
