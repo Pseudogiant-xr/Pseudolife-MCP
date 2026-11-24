@@ -309,6 +309,10 @@ touched, with no retrofit sweep.
   `pseudolife-mcp wait-mail --timeout 7000` (re-armed after a ring or
   timeout) or the Codex doorbell, or say `next-turn-only` in your park and
   tell the maintainer when an urgent dependency cannot wait.
+- **A Codex session run by T3 Code parks as `next-turn-only`**, because T3
+  releases a thread two minutes after the last turn it started and Codex
+  then stops its MCP server, which ends the doorbell and any `wait-mail` it
+  started.
 - Read `examples/hook-instructions.md` before your first board message, for
   the host dialect, the GPU hand-off and what a wake receipt means.
 

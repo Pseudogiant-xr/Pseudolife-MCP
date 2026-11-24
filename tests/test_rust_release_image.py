@@ -119,10 +119,11 @@ def test_version_guards_gate_both_builds(jobs):
     guards = jobs["guards"]
     assert guards["permissions"] == {"contents": "read"}
     assert [step["name"] for step in guards["steps"] if "run" in step] == [
-        "Guard — release tag must match pyproject version",
+        "Guard — release tag must match the release version",
         "Guard — server.json versions must match the release tag",
         "Guard — native crate versions must match the release",
     ]
+    assert guards["steps"][-3]["run"] == 'python rust/ci/release_version.py check --tag "$GITHUB_REF_NAME"'
     assert guards["steps"][-1]["run"] == "python rust/ci/release_assets.py version"
     assert not any(step.get("uses", "").startswith("actions/upload-artifact@") for step in guards["steps"])
     assert needs_of(jobs["build"]) == ["guards"]

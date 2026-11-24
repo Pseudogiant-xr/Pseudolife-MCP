@@ -295,6 +295,26 @@ def test_wait_for_background_dreams_joins_only_dream_threads():
         other.join(5.0)
 
 
+def test_wait_for_background_dreams_without_the_dream_module_loaded(monkeypatch):
+    """With the package's dream module absent from sys.modules, the wait
+    still finds a dream thread by the fixtures' own copy of its name."""
+    import sys
+    import threading
+
+    monkeypatch.setitem(sys.modules, "pseudolife_memory.service_dream", None)
+    release = threading.Event()
+    stuck = threading.Thread(target=release.wait,
+                             name=pg_fixtures.SESSION_END_DREAM_THREAD_NAME,
+                             daemon=True)
+    stuck.start()
+    try:
+        assert stuck in pg_fixtures.wait_for_background_dreams(timeout=0.05)
+    finally:
+        release.set()
+        stuck.join(5.0)
+        pg_fixtures._reported_stragglers.discard(stuck.ident)
+
+
 def test_wait_for_background_dreams_returns_stragglers_past_the_budget():
     """A dream that does not finish inside the budget comes back to the
     caller — the fixture fails loudly on it rather than racing it."""

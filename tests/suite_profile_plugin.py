@@ -449,7 +449,7 @@ def _production(name: str | None) -> bool:
     bank cannot be identified (the caller then counts no sessions)."""
     if not name:
         return False
-    from pseudolife_memory.storage.schema import is_production_database
+    from rust.harness_support.database_guard import is_production_database
 
     return is_production_database(name)
 

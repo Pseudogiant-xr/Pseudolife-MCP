@@ -17,10 +17,10 @@ by the episode they name. The ``write_file`` home op writes a file into each sid
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import time
-import tomllib
 from pathlib import Path
 
 # Deliberate breaks (``--features mutants``) these scenarios must catch.
@@ -36,11 +36,15 @@ MUTANTS = ["session-end-no-client-stamp", "session-end-keeps-empty",
 
 HOME_OPS = ("write_file",)
 
-# Both daemons report the package version (Python from its installed
+# Both daemons report the release version (Python from its installed
 # metadata, Rust from its crate); the version notices are asked about it.
-VERSION = tomllib.loads(
-    (Path(__file__).resolve().parents[3] / "pyproject.toml").read_text(encoding="utf-8")
-)["project"]["version"]
+# rust/ci/release_version.py is loaded by its path: the harness does not
+# put the repository root on sys.path.
+_ROOT = Path(__file__).resolve().parents[3]
+_spec = importlib.util.spec_from_file_location("_release_version", _ROOT / "rust" / "ci" / "release_version.py")
+_release_version = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_release_version)
+VERSION = _release_version.read(_ROOT)
 
 # The session-end dream: everything but extraction off, and no sweep dream,
 # so only the close's own trigger can dream.
