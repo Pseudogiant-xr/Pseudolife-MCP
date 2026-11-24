@@ -588,7 +588,7 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
         lines[0].contains("can run a tunnel in the foreground and has no tunnel service command")
             && !lines[0].contains("fails at each logon")
             && lines[0]
-                .contains("Remove it with: schtasks /End /TN \\pseudolife-tunnel-dot and then schtasks /Delete /TN \\pseudolife-tunnel-dot /F ;"),
+                .contains("Remove it with: schtasks /End /TN \\pseudolife-tunnel-dot and then, even if /End says the task is not running, schtasks /Delete /TN \\pseudolife-tunnel-dot /F ;"),
         "{lines:?}"
     );
     let system = f.path.join("etc-systemd-system");
@@ -750,7 +750,7 @@ fn a_registered_scheduled_task_refuses_after_read_only_queries() {
     );
     assert!(
         line.contains(
-            "with the service manager: schtasks /End /TN \\pseudolife-tunnel-dot and then schtasks /Delete /TN \\pseudolife-tunnel-dot /F (or,"
+            "with the service manager: schtasks /End /TN \\pseudolife-tunnel-dot and then, even if /End says the task is not running, schtasks /Delete /TN \\pseudolife-tunnel-dot /F (or,"
         ),
         "{line}"
     );
@@ -938,7 +938,7 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
     // machine: only a person's run does, and the line names it exactly.
     assert!(
         unattended.contains(
-            "then move it with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only."
+            "then move it with `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`."
         ) && !unattended.contains("next run"),
         "{unattended}"
     );
@@ -952,7 +952,7 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
         daemon.starts_with(
             "this machine stays on the Python client: a tunnel is registered to start by itself. This unattended run updates the daemon alone and leaves this machine's client as it is."
         ) && daemon.contains(
-            "then move it with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only."
+            "then move it with `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`."
         ) && !daemon.contains("next unattended run"),
         "{daemon}"
     );
@@ -964,7 +964,7 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
     );
     assert!(
         windows_daemon.contains(
-            "then move it in PowerShell with $env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update --clients-only."
+            "then move it in PowerShell with `$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update --clients-only`."
         ),
         "{windows_daemon}"
     );
@@ -1252,10 +1252,23 @@ fn the_could_not_check_note_names_a_stop_command_and_a_public_page() {
     );
     assert!(note.contains("to remove that registration"), "{note}");
     assert!(note.contains(NATIVE_CLIENT_DOCS), "{note}");
+    assert!(
+        note.contains("&& systemctl --user daemon-reload, then delete the Python client's record of it, pseudolife-tunnel-<profile>.service-owner in the tunnel profile directory (see"),
+        "{note}"
+    );
+    for kind in [Kind::SystemUnit, Kind::LaunchAgent] {
+        let other = unchecked("x", kind);
+        assert!(
+            other.contains(".service-owner in the tunnel profile directory"),
+            "{other}"
+        );
+    }
+    let task = unchecked("x", Kind::Task);
+    assert!(!task.contains(".service-owner"), "{task}");
     assert!(!note.contains("switch back to the Python client"), "{note}");
     assert!(
         unchecked("x", Kind::Task)
-            .contains("to remove that registration, run schtasks /End /TN <task> and then schtasks /Delete /TN <task> /F")
+            .contains("to remove that registration, run schtasks /End /TN <task> and then, even if /End says the task is not running, schtasks /Delete /TN <task> /F (see")
     );
     assert!(unchecked("x", Kind::LaunchAgent).contains(
         "to remove that registration, run launchctl bootout gui/$(id -u)/<label> ; rm <plist file>"

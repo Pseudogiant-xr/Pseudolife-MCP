@@ -234,8 +234,10 @@ impl Registered {
             // /Delete does not stop a running task's program: end it first,
             // as the Python client's removal does. Two commands, not joined
             // by a separator, since cmd.exe and PowerShell 5.1 share none.
+            // /End fails for a task that is not running, and the Python
+            // client ignores that (check=False), so the text says to go on.
             Kind::Task => format!(
-                "{}schtasks /End /TN {name} and then schtasks /Delete /TN {name} /F",
+                "{}schtasks /End /TN {name} and then, even if /End says the task is not running, schtasks /Delete /TN {name} /F",
                 powershell_note(&name)
             ),
         }
@@ -285,7 +287,9 @@ impl Registered {
                 "systemctl disable --now <unit> && rm <unit file> && systemctl daemon-reload"
             }
             Kind::LaunchAgent => "launchctl bootout gui/$(id -u)/<label> ; rm <plist file>",
-            Kind::Task => "schtasks /End /TN <task> and then schtasks /Delete /TN <task> /F",
+            Kind::Task => {
+                "schtasks /End /TN <task> and then, even if /End says the task is not running, schtasks /Delete /TN <task> /F"
+            }
         }
     }
 }
@@ -1004,10 +1008,18 @@ fn quote(path: &str, powershell: bool) -> String {
 
 fn unchecked(what: &str, kind: Kind) -> String {
     format!(
-        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you find a service whose definition carries the {} marker and starts this machine's pseudolife-mcp launcher with tunnel run, disable it with {}; to remove that registration, run {} (see {NATIVE_CLIENT_DOCS}). Leave any other service alone",
+        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you find a service whose definition carries the {} marker and starts this machine's pseudolife-mcp launcher with tunnel run, disable it with {}; to remove that registration, run {}{} (see {NATIVE_CLIENT_DOCS}). Leave any other service alone",
         OWNER.trim_end_matches(':'),
         Registered::stop_hint(kind),
-        Registered::remove_hint(kind)
+        Registered::remove_hint(kind),
+        // As in the refusal: a record left behind with its unit gone makes
+        // the Python client refuse the profile; a task keeps its pair.
+        match kind {
+            Kind::Task => String::new(),
+            _ => format!(
+                ", then delete the Python client's record of it, {PREFIX}<profile>.service-owner in the tunnel profile directory"
+            ),
+        }
     )
 }
 
@@ -1087,9 +1099,9 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover, home: &Path) -> St
     // the machine, while an unset variable means the release's default.
     let python = python_first(windows);
     let move_now = if windows {
-        format!("in PowerShell with $env:{ENGINE}='native'; pseudolife-mcp update --clients-only")
+        format!("in PowerShell with `$env:{ENGINE}='native'; pseudolife-mcp update --clients-only`")
     } else {
-        format!("with {ENGINE}=native pseudolife-mcp update --clients-only")
+        format!("with `{ENGINE}=native pseudolife-mcp update --clients-only`")
     };
     // Cause and fix first: a 0.23.x hand-off parent keeps 400 characters.
     let (stay, again) = match mover {

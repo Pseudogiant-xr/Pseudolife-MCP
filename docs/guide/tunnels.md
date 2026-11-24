@@ -311,7 +311,8 @@ which need no Python client:
 - `systemctl disable --now`, then delete the unit file and run
   `daemon-reload`;
 - or `launchctl bootout`, then delete the plist;
-- or `schtasks /End` and then `schtasks /Delete`.
+- or `schtasks /End` and then `schtasks /Delete`, even when `/End` says
+  the task is not running.
 
 On Linux and macOS, also delete the Python client's record of the service
 (`pseudolife-tunnel-<profile>.service-owner` in the profile directory). The
