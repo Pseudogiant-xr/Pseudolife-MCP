@@ -1,4 +1,10 @@
-"""Native proof admission checks and explicit live actual-adapter parity."""
+"""Native proof admission checks and the explicit live actual-adapter proof.
+
+Native reports are compared with literals: the frozen Python doctor's
+reports, transcribed or captured and named where they are defined. The one
+test marked ``only_frozen_python`` runs the frozen Python proof against the
+same literal while the package is present; it is deleted with the package.
+"""
 from __future__ import annotations
 
 import json
@@ -9,6 +15,59 @@ import shutil
 import subprocess
 import sys
 import pytest
+
+from rust.harness_support.database_guard import refuse_production_database
+from ..frozen_python import only_frozen_python
+
+
+# The report a successful actual-adapter proof prints once its run-specific
+# values are normalized (``_normalized_proof``): transcribed from the frozen
+# Python proof (pseudolife_memory/coordination_proof.py at 6ca817d70: the
+# stage records at :116-118, the report at :124-125, fixture_removed at :141),
+# with the instrument, which names each implementation's transport, normalized.
+ACTUAL_ADAPTER_PROOF = {
+    "ok": True, "tag": "<proof-tag>", "instrument": "<actual-adapter-transport>",
+    "stages": [{"path": path, "message_id": "<message-id>", "enqueued": True, "wake_decision": decision,
+                "signal_observed": True, "received": True, "harness_ack": True}
+               for path, decision in (("hint", "hinted"), ("ring", "rung"))],
+    "host_delivery": "unverified", "model_ack": "unverified", "fixture_removed": True,
+}
+
+
+def _normalized_proof(report: dict, instrument: str) -> dict:
+    """``report`` with its run-specific values checked and replaced."""
+    import re
+    assert report["ok"] is True and report["fixture_removed"] is True
+    assert report["instrument"] == instrument
+    assert re.fullmatch(r"coordination-proof-[0-9a-f]{32}", report["tag"])
+    report = dict(report, tag="<proof-tag>", instrument="<actual-adapter-transport>")
+    assert [stage["path"] for stage in report["stages"]] == ["hint", "ring"]
+    stages = []
+    for stage in report["stages"]:
+        assert re.fullmatch(r"[0-9a-f]{32}", stage["message_id"])
+        for key in ("enqueued", "signal_observed", "received", "harness_ack"):
+            assert stage[key] is True
+        stages.append(dict(stage, message_id="<message-id>"))
+    report["stages"] = stages
+    return report
+
+
+def _live_proof_server():
+    """The explicit disposable server of a live proof, and its r2_* banks."""
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    dsn = os.environ["PSEUDOLIFE_TEST_DATABASE_URL"]
+    selected = conninfo_to_dict(dsn)["dbname"]
+    assert selected.startswith("r2_"), "live proof needs the stream's disposable namespace"
+    refuse_production_database(selected)
+    admin_dsn = make_conninfo(dsn, dbname="postgres", connect_timeout=5)
+
+    def banks():
+        with psycopg.connect(admin_dsn, autocommit=True) as connection:
+            return {r[0] for r in connection.execute(
+                "SELECT datname FROM pg_database WHERE starts_with(datname, 'r2_')")}
+    return dsn, admin_dsn, banks
 
 
 @pytest.fixture(scope="module")
@@ -124,62 +183,22 @@ def test_client_only_install_refuses_before_connecting(tmp_path):
     assert not result.stderr
 
 
+LIVE_AUTHENTICATIONS = ["inline", "environment", "embedding-only", "dead-proxy", pytest.param(
+    "password-file", marks=pytest.mark.skipif(os.name == "nt", reason="Windows password files use the real Shell32 profile; isolated resolver coverage is native"))]
+
+
 @pytest.mark.skipif(os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
                     reason="explicit disposable server and provisioned native models required")
-@pytest.mark.parametrize("authentication", ["inline", "environment", "embedding-only", "dead-proxy", pytest.param(
-    "password-file", marks=pytest.mark.skipif(os.name == "nt", reason="Windows password files use the real Shell32 profile; isolated resolver coverage is native"))])
-def test_actual_adapter_proof_matches_python(tmp_path, monkeypatch, capsys, authentication):
-    """Compare actual adapter proofs; only bank namespace and transport differ.
-
-    The oracle's bank context is substituted to honor the test host's r2_*
-    namespace. Its schema, authenticated API, adapter and proof are unchanged.
-    Native drives its sibling daemon over loopback; Python drives its ASGI app.
-    """
-    from contextlib import contextmanager
-    import re
-    import sys
-    import uuid
-    import psycopg
-    from psycopg import sql
+@pytest.mark.parametrize("authentication", LIVE_AUTHENTICATIONS)
+def test_actual_adapter_proof_reports_the_recorded_proof(tmp_path, authentication):
+    """The native proof over loopback, on the stream's disposable namespace,
+    reports what the frozen Python proof reported (``ACTUAL_ADAPTER_PROOF``)
+    and leaves no bank or fixture file behind."""
+    import psycopg  # noqa: F401  (the live proof's own dependency)
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
-    from pseudolife_memory import coordination_proof, doctor_cli
-    from pseudolife_memory.storage.schema import refuse_production_database
 
-    dsn = os.environ["PSEUDOLIFE_TEST_DATABASE_URL"]
-    selected = conninfo_to_dict(dsn)["dbname"]
-    assert selected.startswith("r2_"), "live proof needs the stream's disposable namespace"
-    refuse_production_database(selected)
-    admin_dsn = make_conninfo(dsn, dbname="postgres", connect_timeout=5)
-
-    def banks():
-        with psycopg.connect(admin_dsn, autocommit=True) as connection:
-            return {r[0] for r in connection.execute(
-                "SELECT datname FROM pg_database WHERE starts_with(datname, 'r2_')")}
-
-    @contextmanager
-    def own_bank(explicit_dsn):
-        assert explicit_dsn == dsn
-        name = "r2_doctor_oracle_" + uuid.uuid4().hex
-        with psycopg.connect(admin_dsn, autocommit=True) as connection:
-            connection.execute("SET statement_timeout = '5s'")
-            connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-        try:
-            yield make_conninfo(dsn, dbname=name, connect_timeout=5)
-        finally:
-            with psycopg.connect(admin_dsn, autocommit=True) as connection:
-                connection.execute("SET statement_timeout = '300s'")
-                connection.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
-
+    dsn, _admin, banks = _live_proof_server()
     before = banks()
-    monkeypatch.setattr(coordination_proof, "_disposable_bank", own_bank)
-    monkeypatch.setattr(sys, "argv", ["cli.py", "doctor", "--disposable-proof"])
-    with pytest.raises(SystemExit) as exited:
-        doctor_cli.run_doctor()
-    assert exited.value.code == 0
-    captured = capsys.readouterr()
-    oracle = json.loads(captured.out)
-    assert banks() == before
-
     candidate = Path(os.environ["PSEUDOLIFE_PROOF_CANDIDATE"]).resolve()
     env = {key: value for key, value in os.environ.items() if key in (
         "SYSTEMROOT", "WINDIR", "PATH", "LD_LIBRARY_PATH", "ORT_DYLIB_PATH",
@@ -229,20 +248,47 @@ def test_actual_adapter_proof_matches_python(tmp_path, monkeypatch, capsys, auth
     assert banks() == before
     assert not list(temp.iterdir()), "native fixture files must be removed"
 
-    for report, instrument in ((oracle, "disposable_asgi_actual_adapter"),
-                               (native, "disposable_http_actual_adapter")):
-        assert report["ok"] is True and report["fixture_removed"] is True
-        assert report["instrument"] == instrument
-        assert re.fullmatch(r"coordination-proof-[0-9a-f]{32}", report["tag"])
-        report["tag"] = "<proof-tag>"
-        report["instrument"] = "<actual-adapter-transport>"
-        assert [stage["path"] for stage in report["stages"]] == ["hint", "ring"]
-        for stage in report["stages"]:
-            assert re.fullmatch(r"[0-9a-f]{32}", stage["message_id"])
-            stage["message_id"] = "<message-id>"
-            for key in ("enqueued", "signal_observed", "received", "harness_ack"):
-                assert stage[key] is True
-    assert native == oracle
+    assert _normalized_proof(native, "disposable_http_actual_adapter") == ACTUAL_ADAPTER_PROOF
+
+
+@only_frozen_python
+@pytest.mark.skipif(os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
+                    reason="explicit disposable server required")
+def test_frozen_actual_adapter_proof_reports_the_recorded_proof(monkeypatch, capsys):
+    """The frozen Python proof, run through its ASGI app on a bank of the
+    stream's namespace, reports ``ACTUAL_ADAPTER_PROOF`` too."""
+    from contextlib import contextmanager
+    import uuid
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+    from pseudolife_memory import coordination_proof, doctor_cli
+
+    dsn, admin_dsn, banks = _live_proof_server()
+
+    @contextmanager
+    def own_bank(explicit_dsn):
+        assert explicit_dsn == dsn
+        name = "r2_doctor_oracle_" + uuid.uuid4().hex
+        with psycopg.connect(admin_dsn, autocommit=True) as connection:
+            connection.execute("SET statement_timeout = '5s'")
+            connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+        try:
+            yield make_conninfo(dsn, dbname=name, connect_timeout=5)
+        finally:
+            with psycopg.connect(admin_dsn, autocommit=True) as connection:
+                connection.execute("SET statement_timeout = '300s'")
+                connection.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+
+    before = banks()
+    monkeypatch.setattr(coordination_proof, "_disposable_bank", own_bank)
+    monkeypatch.setattr(sys, "argv", ["cli.py", "doctor", "--disposable-proof"])
+    with pytest.raises(SystemExit) as exited:
+        doctor_cli.run_doctor()
+    assert exited.value.code == 0
+    oracle = json.loads(capsys.readouterr().out)
+    assert banks() == before
+    assert _normalized_proof(oracle, "disposable_asgi_actual_adapter") == ACTUAL_ADAPTER_PROOF
 
 
 def test_proof_never_uses_saved_agent_state(tmp_path):
@@ -476,27 +522,31 @@ def test_lost_database_replies_are_bounded_and_cleanup_is_reported(tmp_path, fau
             thread.join(5)
 
 
-@pytest.mark.parametrize("dsn", ["host='unterminated", "host=127.0.0.1 dbname=r2_unknown foo=bar",
-                                 "host=127.0.0.1 dbname=r2_unknown sslunknown=bar", "postgresql://fixture@127.0.0.1:1/",
-                                 "postgresql://fixture@127.0.0.1:1/pseudolife_memory"])
-def test_invalid_or_production_database_report_matches_python(tmp_path, monkeypatch, capsys, dsn):
-    import sys
-    from pseudolife_memory import doctor_cli
+# What the frozen Python doctor printed for each invalid or production
+# database, exit 1 and nothing on stderr: one error name and the same
+# recovery (captured at 6ca817d70 on Linux and Windows by
+# verify/w107-capture-s5.py).
+INVALID_DATABASE_ERRORS = {
+    "host='unterminated": 'ProgrammingError',
+    'host=127.0.0.1 dbname=r2_unknown foo=bar': 'ProgrammingError',
+    'host=127.0.0.1 dbname=r2_unknown sslunknown=bar': 'ProgrammingError',
+    'postgresql://fixture@127.0.0.1:1/': 'ValueError',
+    'postgresql://fixture@127.0.0.1:1/pseudolife_memory': 'ProductionDatabaseError',
+}
+INVALID_DATABASE_RECOVERY = 'Check the disposable fixture server and CREATE/DROP DATABASE permission; no host delivery has been verified.'
 
+
+@pytest.mark.parametrize("dsn", list(INVALID_DATABASE_ERRORS))
+def test_invalid_or_production_database_report_matches_python(tmp_path, monkeypatch, dsn):
     daemon = tmp_path / ("pseudolife-daemon.exe" if os.name == "nt" else "pseudolife-daemon")
     daemon.write_bytes(b"must not execute")
     models = _admission_models(tmp_path / "models")
-    monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL", dsn)
     monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
     monkeypatch.delenv("_PSEUDOLIFE_PRODUCTION_DB", raising=False)
-    monkeypatch.setattr(sys, "argv", ["cli.py", "doctor", "--disposable-proof"])
-    with pytest.raises(SystemExit) as exited:
-        doctor_cli.run_doctor()
-    captured = capsys.readouterr()
     native = _run(tmp_path, dsn=dsn, models=models)
-    assert native.returncode == exited.value.code == 1
-    assert native.stdout == captured.out
-    assert native.stderr == captured.err == ""
+    expected = json.dumps({"ok": False, "error": INVALID_DATABASE_ERRORS[dsn],
+                           "recovery": INVALID_DATABASE_RECOVERY}) + "\n"
+    assert (native.returncode, native.stdout, native.stderr) == (1, expected, "")
 
 
 @pytest.mark.skipif(os.name == "nt" or os.environ.get("PSEUDOLIFE_DOCTOR_LIVE_PROOF") != "1",
@@ -508,7 +558,6 @@ def test_signal_during_daemon_start_removes_owned_process_files_and_bank(tmp_pat
     import time
     import psycopg
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
-    from pseudolife_memory.storage.schema import refuse_production_database
 
     dsn = os.environ["PSEUDOLIFE_TEST_DATABASE_URL"]
     selected = conninfo_to_dict(dsn)["dbname"]

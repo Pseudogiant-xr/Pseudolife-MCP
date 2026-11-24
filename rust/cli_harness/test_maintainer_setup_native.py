@@ -1,4 +1,10 @@
-"""Pure transport and config invariants; no installed daemon or database."""
+"""Pure transport and config invariants; no installed daemon or database.
+
+The tests marked ``only_frozen_python`` exercise the frozen Python
+``maintainer_setup`` module itself; they run while the package is present
+and are deleted with it (``frozen_python.py``). Every other test runs the
+native client and compares with literals.
+"""
 from __future__ import annotations
 
 import base64
@@ -7,7 +13,10 @@ import subprocess
 
 import pytest
 
+from .frozen_python import only_frozen_python
 
+
+@only_frozen_python
 @pytest.mark.parametrize("args,tail", [
     (("state",), ["maintainer", "setup", "--host-state"]),
     (("write", "localhost", "http://localhost:8765"),
@@ -31,6 +40,7 @@ def test_rust_image_host_helpers_use_the_installed_native_cli(monkeypatch, args,
                          "pseudolife-mcp", *tail]
 
 
+@only_frozen_python
 def test_rust_image_enrolment_keeps_the_same_native_environment(monkeypatch):
     from pseudolife_memory import maintainer_setup as setup
 
@@ -42,6 +52,7 @@ def test_rust_image_enrolment_keeps_the_same_native_environment(monkeypatch):
         "maintainer", "enrol-code"]
 
 
+@only_frozen_python
 def test_python_image_retains_the_oracle_helper_command(monkeypatch):
     from pseudolife_memory import maintainer_setup as setup
 
@@ -60,6 +71,7 @@ def test_python_image_retains_the_oracle_helper_command(monkeypatch):
                          "-m", setup.MODULE, "state"]
 
 
+@only_frozen_python
 def test_write_keeps_unrelated_values_and_original_backup(tmp_path, monkeypatch):
     import yaml
     from pseudolife_memory import maintainer_setup as setup
@@ -78,6 +90,7 @@ def test_write_keeps_unrelated_values_and_original_backup(tmp_path, monkeypatch)
     assert after == before
 
 
+@only_frozen_python
 def test_restart_failure_does_not_discard_the_saved_name(monkeypatch):
     from pseudolife_memory import maintainer_setup as setup
 
@@ -90,6 +103,7 @@ def test_restart_failure_does_not_discard_the_saved_name(monkeypatch):
     assert "maintainer setup" in str(caught.value)
 
 
+@only_frozen_python
 @pytest.mark.parametrize("mode,code", [("active", 0), ("pending", 1), ("stopped", 4),
                                       ("fresh", 0), ("restart-fails", 5), ("restart-retry", 0)])
 @pytest.mark.parametrize("engine", ["rust", "python", "unlabelled"])
@@ -105,6 +119,7 @@ def test_native_image_harness_seam_executes_the_real_oracle(tmp_path, mode, code
     assert result["exit"] == code
 
 
+@only_frozen_python
 @pytest.mark.parametrize("cap", [-1, True, 1.5, "7", None])
 def test_setup_rejects_invalid_retained_rate_limit_before_backup(tmp_path, monkeypatch, cap):
     import yaml
@@ -126,6 +141,7 @@ def test_setup_rejects_invalid_retained_rate_limit_before_backup(tmp_path, monke
     assert list(tmp_path.iterdir()) == [path]
 
 
+@only_frozen_python
 @pytest.mark.parametrize("kind", ["negative", "boolean", "fraction", "string", "null"])
 def test_invalid_rate_limit_harness_case_uses_the_real_oracle(tmp_path, kind):
     import sys
@@ -175,21 +191,20 @@ def _native_env(tmp_path):
     'other: {"\\0maintainer-scalar:timestamp:2026-01-02": literal, 2026-01-02: date}\n',
     "defaults: &defaults {rp_id: ignored.invalid, origin: https://ignored.invalid}\n",
 ])
-def test_native_host_state_reads_safe_yaml_without_rewriting(tmp_path, monkeypatch, text):
-    from pseudolife_memory import maintainer_setup as setup
+def test_native_host_state_reads_safe_yaml_without_rewriting(tmp_path, text):
+    # The frozen Python _state() read every one of these texts as the plain
+    # maintainer section, with no problem (captured at 6ca817d70 on Windows
+    # and Linux by verify/w107-capture-setup-state.py).
     path = tmp_path / "config.yaml"
     original = text + ("coordination: !!map\n  maintainer: !!map\n"
                        "    rp_id: localhost\n    origin: http://localhost:8765\n")
     path.write_text(original, encoding="utf-8")
-    monkeypatch.setenv("PSEUDOLIFE_MCP_CONFIG", str(path))
-    monkeypatch.setattr(setup, "_bank_keys", lambda: (None, "NoBank"))
-    oracle = setup._state()
     result = subprocess.run([_native(), "maintainer", "setup", "--host-state"],
                             env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     state = json.loads(result.stdout)
     assert (state["rp_id"], state["origin"], state["problem"]) == (
-        oracle["rp_id"], oracle["origin"], oracle["problem"])
+        "localhost", "http://localhost:8765", None)
     assert path.read_text(encoding="utf-8") == original
     assert list(tmp_path.iterdir()) == [path]
 
@@ -270,27 +285,35 @@ def test_native_config_write_keeps_date_like_strings(tmp_path, text):
     assert yaml.safe_load(path.read_text(encoding="utf-8"))["other"] == text
 
 
-@pytest.mark.parametrize("value", [
-    "2026-01-02", "!!timestamp 2026-01-02", "2026-01-02T01:02:03Z",
-    "!!binary MjAyNi0wMS0wMg==", "'2026-01-02'", "!!str 2026-01-02",
-    '"\\0maintainer-scalar:tag:yaml.org,2002:timestamp:2026-01-02"',
-])
+# The problem the frozen Python _state() reported for each name value, the
+# same merged or not (captured at 6ca817d70 on Windows and Linux by
+# verify/w107-capture-setup-state.py).
+NOT_STRINGS = "coordination.maintainer.rp_id and .origin must be strings"
+NAME_SCALAR_PROBLEMS = {
+    "2026-01-02": NOT_STRINGS,
+    "!!timestamp 2026-01-02": NOT_STRINGS,
+    "2026-01-02T01:02:03Z": NOT_STRINGS,
+    "!!binary MjAyNi0wMS0wMg==": NOT_STRINGS,
+    "'2026-01-02'": None,
+    "!!str 2026-01-02": None,
+    '"\\0maintainer-scalar:tag:yaml.org,2002:timestamp:2026-01-02"': "rp_id must be a lower-case hostname",
+}
+
+
+@pytest.mark.parametrize("value", list(NAME_SCALAR_PROBLEMS))
 @pytest.mark.parametrize("merged", [False, True])
-def test_native_host_state_preserves_name_scalar_validation(tmp_path, monkeypatch, value, merged):
-    from pseudolife_memory import maintainer_setup as setup
+def test_native_host_state_preserves_name_scalar_validation(tmp_path, value, merged):
+    expected = NAME_SCALAR_PROBLEMS[value]
     section = f"rp_id: {value}, origin: https://2026-01-02"
     original = (f"defaults: &base {{{section}}}\ncoordination: {{maintainer: {{<<: *base}}}}\n"
                 if merged else f"coordination: {{maintainer: {{{section}}}}}\n")
     path = tmp_path / "config.yaml"
     path.write_text(original, encoding="utf-8")
-    monkeypatch.setenv("PSEUDOLIFE_MCP_CONFIG", str(path))
-    monkeypatch.setattr(setup, "_bank_keys", lambda: (None, "NoBank"))
-    oracle = setup._state()
     result = subprocess.run([_native(), "maintainer", "setup", "--host-state"],
                             env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["problem"] == oracle["problem"]
-    if oracle["problem"]:
+    assert json.loads(result.stdout)["problem"] == expected
+    if expected:
         checked = subprocess.run([_native(), "maintainer", "setup", "--check"],
                                  env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
         assert checked.returncode == 1, checked.stderr
@@ -299,25 +322,29 @@ def test_native_host_state_preserves_name_scalar_validation(tmp_path, monkeypatc
     assert list(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("cap", [
-    "9223372036854775808", "18446744073709551616", "1" + "0" * 60,
-    "0x1" + "0" * 50, "0b1" + "0" * 200, "01" + "0" * 70,
-    "1" + ":00" * 30, "-1" + "0" * 60, "'18446744073709551616'",
-])
-def test_native_host_state_preserves_large_integer_validation(tmp_path, monkeypatch, cap):
-    from pseudolife_memory import maintainer_setup as setup
+# The problem the frozen Python _state() reported for each cap (captured at
+# 6ca817d70 on Windows and Linux by verify/w107-capture-setup-state.py).
+NOT_A_WHOLE_NUMBER = ("coordination.maintainer.maintainer_per_recipient_per_hour must "
+                      "be a whole number, 0 or more")
+LARGE_CAP_PROBLEMS = {
+    "9223372036854775808": None, "18446744073709551616": None, "1" + "0" * 60: None,
+    "0x1" + "0" * 50: None, "0b1" + "0" * 200: None, "01" + "0" * 70: None,
+    "1" + ":00" * 30: None, "-1" + "0" * 60: NOT_A_WHOLE_NUMBER,
+    "'18446744073709551616'": NOT_A_WHOLE_NUMBER,
+}
+
+
+@pytest.mark.parametrize("cap", list(LARGE_CAP_PROBLEMS))
+def test_native_host_state_preserves_large_integer_validation(tmp_path, cap):
     original = ("coordination:\n  maintainer:\n    rp_id: localhost\n"
                 "    origin: http://localhost:8765\n"
                 f"    maintainer_per_recipient_per_hour: {cap}\n")
     path = tmp_path / "config.yaml"
     path.write_text(original, encoding="utf-8")
-    monkeypatch.setenv("PSEUDOLIFE_MCP_CONFIG", str(path))
-    monkeypatch.setattr(setup, "_bank_keys", lambda: (None, "NoBank"))
-    oracle = setup._state()
     result = subprocess.run([_native(), "maintainer", "setup", "--host-state"],
                             env=_native_env(tmp_path), capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["problem"] == oracle["problem"]
+    assert json.loads(result.stdout)["problem"] == LARGE_CAP_PROBLEMS[cap]
     assert path.read_text(encoding="utf-8") == original
     assert list(tmp_path.iterdir()) == [path]
 

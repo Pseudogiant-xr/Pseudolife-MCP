@@ -238,20 +238,21 @@ def test_prefixes_the_docker_selectors_made_ambiguous_keep_python_errors(tmp_pat
     added: both refuse them as argparse does, before any tier or effect."""
     import os
     import subprocess
-    import sys
     bank = tmp_path / "bank"
     bank.mkdir()
     selector = [f"{option}=5432"] if inline else [option, "5432"]
     argv = ["backup", "--data-dir", str(bank), *selector]
     env = dict(os.environ, COLUMNS="80", PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "home"),
                PSEUDOLIFE_DOCKER=str(tmp_path / "no-docker"))
-    expected = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", *argv], env=env,
-                              capture_output=True, timeout=10)
     actual = subprocess.run([_native_backup(), *argv], env=env, capture_output=True, timeout=10)
-    assert expected.returncode == 2
-    assert b"ambiguous option: " + option.encode() in expected.stderr
+    # What the frozen Python CLI printed for each (captured at 6ca817d70 on
+    # Linux and Windows by verify/w107-capture-s5.py; only the line
+    # separator differs).
+    shown = selector[0] if inline else option
+    expected = (BACKUP_USAGE + f"pseudolife-mcp backup: error: ambiguous option: {shown} "
+                f"could match {AMBIGUOUS_MATCHES[option]}\n")
     assert (actual.returncode, actual.stdout, actual.stderr) == (
-        expected.returncode, expected.stdout, expected.stderr,
+        2, b"", expected.replace("\n", os.linesep).encode(),
     )
     assert list(bank.iterdir()) == []
     assert not (tmp_path / "home").exists()
@@ -266,6 +267,9 @@ BACKUP_USAGE = ("usage: pseudolife-mcp backup [-h] [--data-dir DATA_DIR] [--out 
                 "                             [--keep-days KEEP_DAYS] [--container CONTAINER]\n"
                 "                             [--daemon-container DAEMON_CONTAINER] [--db DB]\n"
                 "                             [--user USER] [--db-port DB_PORT]\n")
+# The options each ambiguous prefix could match, as the frozen CLI listed them.
+AMBIGUOUS_MATCHES = {"--d": "--data-dir, --daemon-container, --db, --db-port",
+                     "--da": "--data-dir, --daemon-container"}
 
 
 @pytest.mark.parametrize("arguments, unrecognized", [

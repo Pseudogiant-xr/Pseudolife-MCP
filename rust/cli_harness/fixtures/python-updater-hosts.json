@@ -1,0 +1,138 @@
+{
+ "about": "The fixture host of rust/cli_harness/test_update_transactions.py as the frozen Python updater left it after one round, per platform and round: the changed fixture state ('state') and the files it wrote under the home's data directory ('files'), with {HOME} for the home. Captured at 6ca817d7020fc25ca7a7be01cf8ac7f9ffa18509 by verify/w107-capture-s5.py and written by verify/w107-make-updater-hosts.py; regenerate, never hand-edit.",
+ "hosts": {
+  "linux": {
+   "engine-rust": {
+    "args": [
+     "--engine",
+     "rust",
+     "--tag",
+     "0.21.1",
+     "--reinstall",
+     "--daemon-only",
+     "--json",
+     "--health-retries",
+     "1",
+     "--rollback-tag",
+     "pre-round-0"
+    ],
+    "files": {
+     "data/compose/docker-compose.rust-ghcr.yml": "# Rust release image, the default engine since 0.23.0; apply after\n# docker-compose.ghcr.yml.\n# The updater supplies an explicit version and uses --no-build --no-deps.\nservices:\n  pseudolife-daemon:\n    pull_policy: always\n    build: !reset null\n    image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${PSEUDOLIFE_IMAGE_TAG:?Select an explicit Rust release version}\n    labels:\n      org.pseudolife.engine: rust\n    # The pinned models are a re-downloadable cache: keep them out of /data,\n    # which every backup archives.\n    environment:\n      PSEUDOLIFE_DAEMON_MODELS_DIR: /models\n    volumes:\n      - pseudolife_rust_models:/models\n  # The release bundle is self-contained; the checkout base uses ../ops.\n  pseudolife-extractor:\n    build:\n      context: .\n      dockerfile: Dockerfile.extractor\nvolumes:\n  pseudolife_rust_models: {}\n",
+     "data/update-engine/docker-compose.release-accepted.json": "{\n  \"services\": {\n    \"pseudolife-daemon\": {\n      \"image\": \"ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1\",\n      \"labels\": {\n        \"org.pseudolife.engine\": \"rust\",\n        \"org.pseudolife.activation\": \"22d443f07416ab12e2e79eca38fa6417\",\n        \"org.pseudolife.release\": \"0.21.1\"\n      }\n    }\n  }\n}\n",
+     "data/update-engine/docker-compose.rollback-20261124-040439-0b430b8e74f124c6653734e5fafcb41e.json": "{\n  \"services\": {\n    \"pseudolife-daemon\": {\n      \"image\": \"ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.0-pre-round-0\",\n      \"labels\": {\n        \"org.pseudolife.engine\": \"python\"\n      }\n    }\n  }\n}\n"
+    },
+    "state": {
+     "archived_python": false,
+     "deployed": true,
+     "images": {
+      "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1": "sha256:replacement",
+      "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.0-pre-round-0": "sha256:validated",
+      "pseudolife-daemon:0.21.0": "sha256:validated"
+     },
+     "orphaned": [],
+     "running": {
+      "Config": {
+       "Env": [
+        "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture",
+        "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"
+       ],
+       "Image": "pseudolife-daemon:0.21.0",
+       "Labels": {
+        "com.docker.compose.project": "fixture-project",
+        "com.docker.compose.project.config_files": "{HOME}/checkout/ops/docker-compose.yml",
+        "com.docker.compose.project.environment_file": "{HOME}/checkout/ops/.env",
+        "com.docker.compose.project.working_dir": "{HOME}/checkout/ops",
+        "com.docker.compose.service": "pseudolife-daemon",
+        "org.pseudolife.activation": "22d443f07416ab12e2e79eca38fa6417",
+        "org.pseudolife.engine": "rust",
+        "org.pseudolife.release": "0.21.1"
+       }
+      },
+      "Id": "fixture-daemon",
+      "Image": "sha256:replacement",
+      "Mounts": [
+       {
+        "Destination": "/data",
+        "Name": "fixture-state",
+        "RW": true,
+        "Type": "volume"
+       }
+      ],
+      "NetworkSettings": {
+       "Networks": {
+        "fixture": {
+         "Aliases": [
+          "pseudolife-pg"
+         ]
+        }
+       }
+      },
+      "State": {
+       "Running": true
+      }
+     }
+    }
+   },
+   "plain": {
+    "args": [
+     "--tag",
+     "0.21.1",
+     "--daemon-only",
+     "--reinstall",
+     "--json",
+     "--health-retries",
+     "1",
+     "--rollback-tag",
+     "pre-round-0"
+    ],
+    "files": {},
+    "state": {
+     "deployed": true,
+     "images": {
+      "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.21.0-pre-round-0": "sha256:validated",
+      "pseudolife-daemon:0.21.0": "sha256:validated"
+     },
+     "orphaned": [],
+     "running": {
+      "Config": {
+       "Env": [
+        "PSEUDOLIFE_MCP_DATABASE_URL=postgresql://fixture:fixture@pseudolife-pg:5432/fixture",
+        "PSEUDOLIFE_MCP_TOKEN=fixture-bearer"
+       ],
+       "Image": "pseudolife-daemon:0.21.0",
+       "Labels": {
+        "com.docker.compose.project": "fixture-project",
+        "com.docker.compose.project.config_files": "{HOME}/checkout/ops/docker-compose.yml",
+        "com.docker.compose.project.environment_file": "{HOME}/checkout/ops/.env",
+        "com.docker.compose.project.working_dir": "{HOME}/checkout/ops",
+        "com.docker.compose.service": "pseudolife-daemon"
+       }
+      },
+      "Id": "fixture-daemon",
+      "Image": "sha256:replacement",
+      "Mounts": [
+       {
+        "Destination": "/data",
+        "Name": "fixture-state",
+        "RW": true,
+        "Type": "volume"
+       }
+      ],
+      "NetworkSettings": {
+       "Networks": {
+        "fixture": {
+         "Aliases": [
+          "pseudolife-pg"
+         ]
+        }
+       }
+      },
+      "State": {
+       "Running": true
+      }
+     }
+    }
+   }
+  }
+ }
+}
