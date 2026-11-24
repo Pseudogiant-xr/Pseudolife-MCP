@@ -747,18 +747,21 @@ def test_merge_docs_refuses_conflicting_edits_in_the_combined_doc_guards(docs_wo
     target = f"{guard}::test_claude_md_stays_under_its_word_ceiling"
     monkeypatch.setattr(integrate, "_DOCS_TEST_RUNNER", _SHARED_DOCS_TEST_RUNNER.replace(
         "tests = docs_scope.doc_tests(paths)", f"tests = [{target!r}]"))
-    first, last = "one " * 2420, "two " * 2420
+    guard_text = (ROOT / guard).read_text(encoding="utf-8")
+    ceiling = int(re.search(r"^WORD_CEILING = ([\d_]+)$", guard_text, re.M).group(1).replace("_", ""))
+    filler = ceiling - 10  # leaves room for the five keep lines and one 4-word edit
+    first, last = "one " * (filler // 2), "two " * (filler - filler // 2)
     middle = "\nkeep-1\nkeep-2\nkeep-3\nkeep-4\nkeep-5\n"
-    world.advance_master({"CLAUDE.md": first + middle + last,
-                          guard: (ROOT / guard).read_text(encoding="utf-8")})
+    world.advance_master({"CLAUDE.md": first + middle + last, guard: guard_text})
     head = _docs_pr(world, {"CLAUDE.md": first + "extra " * 4 + middle + last})
-    # Both versions have 4849 words alone, 4853 together. They touch
-    # different lines, and GitHub would combine them without a conflict.
+    # Both versions are one word under the guard's ceiling alone and three
+    # over it together. They touch different lines, and GitHub would combine
+    # them without a conflict.
     world.advance_master({"CLAUDE.md": first + middle + last + "another " * 4})
     base, _ = _docs_preview(world, head)
     assert integrate.main(["merge-docs", "42"]) == 2
     err = capsys.readouterr().err
-    assert "doc guards failed" in err and target in err and "4853" in err
+    assert "doc guards failed" in err and target in err and str(ceiling + 3) in err
     assert _git(world.origin, "rev-parse", "master") == base
     assert not world.gh.mutations()
 
