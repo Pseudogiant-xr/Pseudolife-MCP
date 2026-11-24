@@ -41,12 +41,40 @@ from test_principal_fixtures import (  # noqa: F401
     test_static_contract_is_package_independent_and_detects_wrong_headers,
 )
 
+# The principal-store golden harness's own controls (principals.py), likewise.
+from test_principals_harness import (  # noqa: F401
+    test_harness_imports_without_the_product_package,
+    test_fixture_ddl_is_the_daemons_own_statements,
+    test_schema_statement_refuses_a_missing_repeated_or_open_statement,
+    test_schema_statement_stops_at_the_first_end,
+    test_operator_routes_are_the_daemons_declaration,
+    test_operator_routes_refuse_a_changed_declaration,
+    test_operator_routes_accept_a_new_route_in_both_daemon_lists_even_wrapped,
+    test_operator_routes_refuse_a_policy_that_names_other_routes,
+    test_pairing_alphabet_is_the_daemons_and_refuses_a_changed_declaration,
+    test_golden_inspections_ask_exactly_the_current_operator_requests,
+    test_golden_steps_are_the_scenario_steps_in_order,
+    test_step_comparison_reports_label_output_state_and_length,
+    test_the_race_must_prove_two_queued_callers_and_one_winner,
+    test_a_golden_record_past_the_last_step_is_a_difference,
+    test_invite_fixture_inserts_a_new_name_with_ownership_only_when_set,
+    test_invite_fixture_reissues_a_pending_or_replaced_name,
+    test_invite_fixture_refuses_states_the_scenario_never_reaches,
+    test_record_candidate_dry_run_exits_1_and_write_keeps_unchanged_records,
+    test_record_candidate_writes_the_committed_golden_back_unchanged_but_for_the_change,
+    test_record_candidate_refuses_a_failed_check_host_path_or_unwritable_record,
+    test_committed_golden_holds_its_records_and_at_most_provenance,
+    test_retired_and_inconsistent_modes_are_refused,
+    test_record_candidate_refuses_a_selected_mutant,
+)
+
 
 def test_fixture_controls_are_imported_for_parity():
     import test_principal_fixtures
+    import test_principals_harness
     from rust.harness_support import test_readiness
 
-    for source in (test_readiness, test_principal_fixtures):
+    for source in (test_readiness, test_principal_fixtures, test_principals_harness):
         missing = sorted(name for name, test in vars(source).items()
                          if name.startswith("test_") and globals().get(name) is not test)
         assert not missing, f"import {source.__name__} tests in the principal parity module: {', '.join(missing)}"
