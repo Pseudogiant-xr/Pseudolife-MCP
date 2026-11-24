@@ -694,9 +694,20 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
             ("  $native_name"|" *$native_name") printf '%s\n' "$native_digest" ;;
         esac
     done)" || native_expected=""
+    # A line ending in the name after a blank or an asterisk names the
+    # archive in no standard form: that release does carry this platform.
+    native_named=""
+    while IFS= read -r native_line || [ -n "$native_line" ]; do
+        case "$native_line" in
+            (*" $native_name"|*$'\t'"$native_name"|*"*$native_name") native_named=1 ;;
+        esac
+    done <"$NATIVE_SUMS"
     case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
         1) ;;
-        0) native_fallback "release v$NATIVE_VERSION publishes no native client for $NATIVE_TARGET (its SHA256SUMS lists no $native_name)" "Run this installer on a platform the release carries, or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client." ;;
+        0) if [ -n "$native_named" ]; then
+               native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name 0 times, not once (a line names it in no standard checksum form)" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+           fi
+           native_fallback "release v$NATIVE_VERSION publishes no native client for $NATIVE_TARGET (its SHA256SUMS lists no $native_name)" "Run this installer on a platform the release carries, or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client." ;;
         *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
     esac
     if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then

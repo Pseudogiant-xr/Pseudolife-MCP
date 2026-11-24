@@ -236,7 +236,16 @@ def test_sh_explicit_native_overrides_a_recorded_python_choice(tmp_path):
 
 def _record_function(shell: str) -> str:
     text = (ROOT / "ops" / ("install.sh" if shell == "bash" else "install.ps1")).read_text(encoding="utf-8")
-    start = "record_client_engine() {" if shell == "bash" else "function Save-ClientEngineChoice {"
+    if shell == "bash":
+        # record_client_engine reads the record through
+        # recorded_client_engine, defined just before it.
+        start = "recorded_client_engine() {"
+        assert text.count(start) == 1
+        reader, rest = text.split(start, 1)[1].split("\n}\n", 1)
+        writer = rest.split("\n}\n", 1)[0]
+        assert writer.startswith("record_client_engine() {"), writer[:60]
+        return start + reader + "\n}\n" + writer + "\n}\n"
+    start = "function Save-ClientEngineChoice {"
     assert text.count(start) == 1
     return start + text.split(start, 1)[1].split("\n}\n", 1)[0] + "\n}\n"
 

@@ -279,8 +279,9 @@ one-line reason in `PSEUDOLIFE_INSTALLER_FALLBACK`, which the wrapper prints
 and records nothing for. In PowerShell it sets the global and returns, and
 the wrapper carries on with the Python client. These causes qualify: no
 target for the platform, a release whose canonical `SHA256SUMS` is not
-published (404 with no `PSEUDOLIFE_NATIVE_ARCHIVE_URL`) or lists no archive
-for it, a client that does not run there, a release older than the
+published (404 with no `PSEUDOLIFE_NATIVE_ARCHIVE_URL`) or has no line
+naming its archive (a line naming it in no standard checksum form refuses),
+a client that does not run there, a release older than the
 installer's protocol, and the tunnel check's exit 3. Each refuses as before
 under an explicit `=native`, on a machine already on the native client, or
 after the first host change; a defaulted run's refusals also name

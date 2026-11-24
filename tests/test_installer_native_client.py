@@ -312,7 +312,7 @@ echo STAGED
 @pytest.mark.parametrize("case, expected", [
     ("mismatch", "does not match the release's SHA256SUMS"),
     ("duplicate", "lists " + ASSET + " 2 times, not once"),
-    ("missing", "lists " + ASSET + " 0 times, not once"),
+    ("missing", f"publishes no native client for {TARGET} (its SHA256SUMS lists no {ASSET})"),
     ("no-release", "has no SHA256SUMS"),
 ])
 def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case, expected):
@@ -524,6 +524,7 @@ def test_a_defaulted_rerun_on_a_native_machine_refuses_rather_than_hand_back(tmp
 
 def test_a_defaulted_refusal_names_the_python_route_and_an_explicit_one_does_not(tmp_path):
     for index, (defaulted, said) in enumerate((("1", True), ("", False))):
+        (tmp_path / f"run{index}").mkdir()
         result = _run(tmp_path / f"run{index}", 'native_stage', sums_override="f" * 64,
                       env={"PSEUDOLIFE_INSTALLER_DEFAULTED": defaulted})
         assert result.returncode == 1
@@ -600,7 +601,10 @@ def test_installing_the_native_client_ends_a_recorded_python_choice(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "OK=1" in result.stdout
     assert not record.exists()
-    assert f"The recorded Python client choice ({_p(record)}) is removed" in result.stdout
+    [line] = [text for text in result.stdout.splitlines() if "The recorded Python client choice (" in text]
+    assert "/.pseudolife-mcp/client-engine) is removed" in line, line
+    if os.name != "nt":
+        assert f"({_p(record)}) is removed" in line, line
     # A rerun says nothing more about it.
     again = _run(tmp_path, "native_stage; ensure_shim")
     assert "recorded Python client choice" not in again.stdout + again.stderr
@@ -793,6 +797,20 @@ def test_a_checksum_line_in_no_standard_form_is_refused(tmp_path, separator):
     assert f"lists {ASSET} 0 times, not once" in result.stderr
 
 
+def test_a_line_naming_the_archive_in_no_standard_form_refuses_even_when_defaulted(tmp_path):
+    # A listing for this platform that cannot be read is not a release
+    # without this platform: no hand-back to the Python client.
+    _rewrite_sums(tmp_path, " ")
+    log = _python_path(tmp_path)
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False,
+                  env={"PSEUDOLIFE_INSTALLER_DEFAULTED": "1", "HANDBACK_LOG": _p(log)})
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert f"lists {ASSET} 0 times, not once (a line names it in no standard checksum form)" in result.stderr
+    assert "publishes no native client" not in result.stderr
+    assert not log.exists()
+
+
 @pytest.mark.parametrize("value, used", [
     ("08", "8"), ("09", "9"), ("010", "10"), ("7", "7"), ("00", "30"), ("0", "30"),
     ("", "30"), ("abc", "30"), ("1.5", "30"), ("-3", "30"), ("123456", "30"),
@@ -899,7 +917,7 @@ def test_another_names_line_never_supplies_the_digest(tmp_path):
     result = _run(tmp_path, 'native_stage; echo STAGED', release=False, version=LOCAL)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "STAGED" not in result.stdout
-    assert f"lists pseudolife-mcp-{LOCAL}-{TARGET}.tar.gz 0 times, not once" in result.stderr
+    assert f"its SHA256SUMS lists no pseudolife-mcp-{LOCAL}-{TARGET}.tar.gz" in result.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="an unreadable file needs POSIX permissions")

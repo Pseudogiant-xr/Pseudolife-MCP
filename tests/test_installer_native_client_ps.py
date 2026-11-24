@@ -345,7 +345,7 @@ def test_a_python_client_registration_moves_to_the_native_launcher(tmp_path):
 @pytest.mark.parametrize("case, expected", [
     ("mismatch", "does not match the release's SHA256SUMS"),
     ("no-release", "has no SHA256SUMS"),
-    ("missing", "lists " + _asset("stub") + " 0 times, not once"),
+    ("missing", "its SHA256SUMS lists no " + _asset("stub")),
 ])
 def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case, expected):
     kwargs = {"mismatch": {"digest_override": "f" * 64}, "missing": {"omit": True}}.get(case, {})
@@ -602,6 +602,19 @@ def test_a_checksum_line_in_no_standard_form_is_refused(tmp_path, separator):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "STAGED" not in result.stdout
     assert f"lists {_asset('stub')} 0 times, not once" in result.stderr
+
+
+def test_a_line_naming_the_archive_in_no_standard_form_refuses_even_when_defaulted(tmp_path):
+    # A listing for this platform that cannot be read is not a release
+    # without this platform: no hand-back to the Python client.
+    _rewrite_sums(tmp_path, " ", "stub")
+    body = "$global:PseudolifeClientDefaulted = $true\nInitialize-NativeClient; Write-Host STAGED\n"
+    result = _run("stub", tmp_path, body, release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert (f"lists {_asset('stub')} 0 times, not once (a line names it in no standard checksum form)"
+            in result.stderr)
+    assert "publishes no native client" not in result.stderr
 
 
 @pytest.mark.parametrize("value, used", [

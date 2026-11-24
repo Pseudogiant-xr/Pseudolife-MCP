@@ -519,6 +519,14 @@ function Initialize-NativeClient {
     # (binary mode, as sha256sum writes under Git Bash); nothing looser.
     $pattern = '^[0-9a-f]{64} [ *]' + [regex]::Escape($name) + '$'
     $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
+    # A line ending in the name after a blank or an asterisk names the
+    # archive in no standard form: that release does carry this platform.
+    $named = @(Get-Content -LiteralPath $script:nativeSums | Where-Object {
+            $_.Length -gt $name.Length -and $_.EndsWith($name, [System.StringComparison]::Ordinal) -and
+            " `t*".Contains([string] $_[$_.Length - $name.Length - 1]) })
+    if ($lines.Count -eq 0 -and $named.Count -gt 0) {
+        Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name 0 times, not once (a line names it in no standard checksum form)" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    }
     if ($lines.Count -eq 0) {
         Stop-NativeOrFallBack "release v$($script:nativeVersion) publishes no native client for $target (its SHA256SUMS lists no $name)" "Run this installer on a platform the release carries, or set `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' for the Python client."
     }
