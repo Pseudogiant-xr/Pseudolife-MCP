@@ -693,10 +693,11 @@ mod tests {
         let _held = app.service.hold_service_lock().await;
         for refused in ["failed", "Success", ""] {
             let args = json!({"task": "deploy thing", "outcome": refused});
-            let answer = outcome_body(&app, args)
-                .now_or_never()
-                .unwrap_or_else(|| panic!("{refused:?}: the refusal waited for initialization"))
-                .unwrap_or_else(|e| panic!("{refused:?}: refused with an error: {e:?}"));
+            let Some(answer) = outcome_body(&app, args).now_or_never() else {
+                panic!("{refused:?}: the refusal waited for initialization");
+            };
+            let answer =
+                answer.unwrap_or_else(|e| panic!("{refused:?}: refused with an error: {e:?}"));
             // Exactly the refusal: not recorded, no signal id, the accepted
             // values listed.
             assert_eq!(
