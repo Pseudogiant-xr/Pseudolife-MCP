@@ -187,6 +187,91 @@ const STDOUT_REFUSED: u8 = 120;
 
 type Output = Result<(String, u8), Fail>;
 
+/// What to do about a refresh outcome the Python client recorded, as the
+/// tail of the status line: every step this client needs before its own
+/// `tunnel run` of this profile and store succeeds, in that order.
+fn python_refresh_next(
+    profile: &Profile,
+    key: &KeyStatus,
+    record: Option<&record::Record>,
+    expired: bool,
+    setup: &str,
+    options: &Options,
+) -> String {
+    let name = &profile.name;
+    let dir = options.profile_dir.as_deref();
+    let run = tunnel_command("run", name, dir);
+    let status = tunnel_command("status", name, dir);
+    if let Some(record) = record.filter(|record| record.native) {
+        let root = record.path.parent().unwrap_or(Path::new(""));
+        return format!(
+            ", and this client's own launch does not use it; move {} or {} aside to clear it",
+            root.join(format!("{name}.reload.json")).display(),
+            root.join(format!("{name}.reload.result.json")).display()
+        );
+    }
+    let mut steps = Vec::new();
+    // Another client's process record blocks both the key import and the
+    // run until it is moved aside, and only a stopped launch's may be.
+    match record {
+        None => {}
+        Some(record) if record.liveness == Liveness::Gone => {
+            steps.push(format!(
+                "move the process record {} aside",
+                record.path.display()
+            ));
+        }
+        Some(record) => {
+            steps
+                .push("stop any tunnel of this profile with the client that started it".to_owned());
+            steps.push(format!(
+                "move the process record {} aside once `{status}` reports it stopped",
+                record.path.display()
+            ));
+        }
+    }
+    if profile.state != "ready" {
+        // Setup refuses a tunnel ID without consent the profile lacks, and
+        // ignores --accept-access when consent stands.
+        if profile.tunnel_id.is_none() {
+            steps.push(format!(
+                "save its tunnel ID with `{setup} --tunnel-id <tunnel_id> --accept-access`"
+            ));
+        } else {
+            steps.push(format!("consent to access with `{setup} --accept-access`"));
+        }
+    }
+    let import = format!("import its runtime key with `{setup} --read-key`");
+    if !key.saved {
+        steps.push(import);
+    } else {
+        match key.readable {
+            Some(true) if expired => steps.push(format!(
+                "renew its runtime key with `{setup} --read-key --key-expires-at <ISO timestamp>`"
+            )),
+            Some(true) => {}
+            // A file that is no usable key is replaced, not renewed.
+            Some(false) => {
+                steps.push(format!(
+                    "move the unusable key file {} aside",
+                    key.path.display()
+                ));
+                steps.push(import);
+            }
+            // A Windows key this session cannot unseal.
+            None => steps.push(
+                "use a desktop session of the Windows account that saved its runtime key"
+                    .to_owned(),
+            ),
+        }
+    }
+    steps.push(format!("start it with `{run}`"));
+    format!(
+        "; to run the tunnel on this client, {}",
+        steps.join(", then ")
+    )
+}
+
 fn bool_text(value: bool) -> &'static str {
     if value { "true" } else { "false" }
 }
@@ -306,6 +391,7 @@ fn status(options: &Options, root: &Path) -> Output {
     setup::check_pending(root, &profile.name)?;
     let key = KeyStatus {
         readable: key,
+        path: store::key_path(root, &profile.name),
         saved: occupied(&store::key_path(root, &profile.name))?,
         retained: setup::validate_previous_key(root, &profile.name)?,
     };
@@ -344,6 +430,7 @@ fn status(options: &Options, root: &Path) -> Output {
 
 struct KeyStatus {
     readable: Option<bool>,
+    path: PathBuf,
     saved: bool,
     retained: bool,
 }
@@ -597,24 +684,10 @@ fn report(
         .map_or("unknown; check Platform key settings", |(text, _)| text);
     text.push_str(&format!("API key expiry: {shown}.\n"));
     if refresh.needs_attention() && native_refresh.is_none() {
-        let run = tunnel_command("run", name, options.profile_dir.as_deref());
-        let next = if profile.state != "ready" {
-            let status = tunnel_command("status", name, options.profile_dir.as_deref());
-            format!(
-                "finish this profile's setup first (`{status}` shows the step it needs), then start it with `{run}`"
-            )
-        } else if !key.saved {
-            format!(
-                "import its runtime key with `{command} --read-key` first, then start it with `{run}`"
-            )
-        } else if running == Some(Liveness::Gone) || running.is_none() {
-            format!("start it with `{run}`")
-        } else {
-            format!("stop that tunnel with the client that started it, then start it with `{run}`")
-        };
         text.push_str(&format!(
-            "Last tunnel refresh: {}; needs attention. The Python client recorded it; {next} to run it on this client.\n",
-            refresh.state()
+            "Last tunnel refresh: {}; needs attention. The Python client recorded it{}.\n",
+            refresh.state(),
+            python_refresh_next(profile, &key, record, expired, &command, options)
         ));
     }
     if let Some((_, detail)) = native_refresh {
@@ -1027,30 +1100,33 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
     if env_file.is_none() && env_token.is_none() {
         // Registration env blocks: only their absence is decided here.
         let claude_dir = environment("CLAUDE_CONFIG_DIR")?;
-        let codex_dir = environment("CODEX_HOME")?;
-        let named = if claude_dir.is_some() || codex_dir.is_some() {
-            " (CLAUDE_CONFIG_DIR and CODEX_HOME must name directories)"
-        } else {
-            ""
-        };
+        let claude_named = claude_dir.is_some();
         let claude = match claude_dir {
             Some(directory) => PathBuf::from(directory).join(".claude.json"),
             None => home()?.join(".claude.json"),
         };
+        let codex_dir = environment("CODEX_HOME")?;
+        let codex_named = codex_dir.is_some();
         let codex = match codex_dir {
             Some(directory) => PathBuf::from(directory),
             None => home()?.join(".codex"),
         }
         .join("config.toml");
-        let inspect = |path: &Path| {
+        // The variable is named only when the path that failed came from it.
+        let inspect = |path: &Path, variable: Option<&str>| {
             occupied(path).map_err(|_| {
+                let named = variable
+                    .map(|variable| format!(" ({variable} must name a directory)"))
+                    .unwrap_or_default();
                 Fail::Detail(format!(
                     "cannot inspect {} to look for a client registration{named}; fix that path, or pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
                     path.display()
                 ))
             })
         };
-        if inspect(&claude)? || inspect(&codex)? {
+        if inspect(&claude, claude_named.then_some("CLAUDE_CONFIG_DIR"))?
+            || inspect(&codex, codex_named.then_some("CODEX_HOME"))?
+        {
             return Err(Fail::Tunnel(
                 "this client does not read the daemon connection from a Claude Code or Codex registration; pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
             ));
@@ -1881,41 +1957,119 @@ mod tests {
             .unwrap();
             status(&options, &store.0).unwrap().0
         };
-        let run = |store: &Store| tunnel_command("run", "work-2", Some(&dir(store)));
-        // Pending: setup comes first, with this profile's status command.
+        // The whole advice: these steps, then this profile's own run command.
+        let advice = |store: &Store, steps: &str| {
+            let run = tunnel_command("run", "work-2", Some(&dir(store)));
+            let steps = if steps.is_empty() {
+                String::new()
+            } else {
+                format!("{steps}, then ")
+            };
+            format!(
+                "The Python client recorded it; to run the tunnel on this client, {steps}start it with `{run}`.\n"
+            )
+        };
+        let setup = |store: &Store| tunnel_command("setup", "work-2", Some(&dir(store)));
+        let replace = |store: &Store, rel: &str, data: &[u8]| {
+            std::fs::remove_file(store.0.join(rel)).unwrap();
+            store.put(rel, data);
+        };
+
+        // Pending: save the tunnel ID, then import the key, then run.
         let store = Store::new();
         store.profile("work-2", false);
         store.put("work-2.reload.result.json", result.as_bytes());
+        let setup_command = setup(&store);
         let pending = text(&store);
-        let status_command = tunnel_command("status", "work-2", Some(&dir(&store)));
-        assert!(
-            pending.contains(&format!(
-                "finish this profile's setup first (`{status_command}` shows the step it needs), then start it with `{}`",
-                run(&store)
-            )),
-            "{pending}"
+        let expected = advice(
+            &store,
+            &format!(
+                "save its tunnel ID with `{setup_command} --tunnel-id <tunnel_id> --accept-access`, then import its runtime key with `{setup_command} --read-key`"
+            ),
         );
+        assert!(pending.contains(&expected), "{pending}");
+
         // Ready without a key: import it first.
         let store = Store::new();
         store.profile("work-2", true);
         store.put("work-2.reload.result.json", result.as_bytes());
+        let setup_command = setup(&store);
+        let import = format!("import its runtime key with `{setup_command} --read-key`");
         let keyless = text(&store);
-        assert!(
-            keyless.contains("--read-key` first, then start it with `"),
-            "{keyless}"
+        assert!(keyless.contains(&advice(&store, &import)), "{keyless}");
+
+        // A stopped launch's record from the Python client goes aside first,
+        // since it blocks the import and the run.
+        store.record("work-2", DEAD_PID, Path::new("/nonexistent/tunnel-client"));
+        let record = store.0.join("work-2.process.json");
+        let stale = text(&store);
+        let expected = advice(
+            &store,
+            &format!(
+                "move the process record {} aside, then {import}",
+                record.display()
+            ),
         );
-        assert!(keyless.contains(&run(&store)), "{keyless}");
-        // Ready with a key and no record: just run it, never "stop".
-        store.key("work-2");
+        assert!(stale.contains(&expected), "{stale}");
+
+        // A running launch of another client is stopped before its record
+        // goes aside.
+        std::fs::remove_file(&record).unwrap();
+        store.record("work-2", u64::from(std::process::id()), &own_exe());
+        let live = text(&store);
+        let status_command = tunnel_command("status", "work-2", Some(&dir(&store)));
+        let expected = advice(
+            &store,
+            &format!(
+                "stop any tunnel of this profile with the client that started it, then move the process record {} aside once `{status_command}` reports it stopped, then {import}",
+                record.display()
+            ),
+        );
+        assert!(live.contains(&expected), "{live}");
+        std::fs::remove_file(&record).unwrap();
+
+        // A key file that holds no usable key is moved aside and imported
+        // again, never renewed.
+        store.put("work-2.key", b"NOPE\0not-a-key");
+        let unusable = text(&store);
+        let expected = advice(
+            &store,
+            &format!(
+                "move the unusable key file {} aside, then {import}",
+                store.0.join("work-2.key").display()
+            ),
+        );
+        assert!(unusable.contains(&expected), "{unusable}");
+
+        // A usable key: just run it, never "stop".
+        #[cfg(windows)]
+        {
+            let Some(key) = sealed(b"fixture-tunnel-key") else {
+                return;
+            };
+            replace(&store, "work-2.key", &key);
+        }
+        #[cfg(not(windows))]
+        replace(&store, "work-2.key", b"PLAIN\0fixture-tunnel-key");
         let idle = text(&store);
-        assert!(
-            idle.contains(&format!(
-                "The Python client recorded it; start it with `{}` to run it on this client.",
-                run(&store)
-            )),
-            "{idle}"
-        );
+        assert!(idle.contains(&advice(&store, "")), "{idle}");
         assert!(!idle.contains("stop"), "{idle}");
+
+        // An expired key is renewed before the run.
+        let token = serde_json::to_string(&store.0.join("token")).unwrap();
+        replace(
+            &store,
+            "work-2.profile.json",
+            format!("{{\"name\": \"work-2\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}, \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true, \"runtime_key_expires_at\": \"2026-01-01T00:00:00+00:00\"}}").as_bytes(),
+        );
+        let expired = text(&store);
+        let expected = advice(
+            &store,
+            &format!(
+                "renew its runtime key with `{setup_command} --read-key --key-expires-at <ISO timestamp>`"
+            ),
+        );
+        assert!(expired.contains(&expected), "{expired}");
     }
 
     #[test]

@@ -1697,8 +1697,9 @@ fn setup_resuming_an_existing_profile_names_the_option_or_the_broken_file() {
         "profile dot is saved; guided setup is not part of the native client.",
     );
     let broken = format!(
-        "{}; fix that file or move it aside and save the profile again with `pseudolife-mcp tunnel setup --daemon-url <url> --token-file <owner-only file> --accept-access`",
-        home.path("tunnels").join("dot.profile.json").display()
+        "{}; fix that file or move it aside and save the profile again with `pseudolife-mcp tunnel setup --profile dot --profile-dir {} --daemon-url <url> --token-file <owner-only file> --accept-access`",
+        home.path("tunnels").join("dot.profile.json").display(),
+        shell_quoted(&dir)
     );
     assert_refused_with(
         &home,
@@ -2199,7 +2200,8 @@ mod seeded {
         let home = Home::new();
         let dir = home.dir();
         // CODEX_HOME names a regular file, so its config.toml cannot be
-        // inspected: the refusal names that path, never the tunnel store.
+        // inspected: the refusal names that path and that variable alone,
+        // never the tunnel store.
         let codex = home.path("codex-file");
         std::fs::write(&codex, b"not a directory").unwrap();
         let config = codex.join("config.toml");
@@ -2208,7 +2210,7 @@ mod seeded {
             &["setup", "--profile-dir", &dir],
             &[("CODEX_HOME", codex.to_str().unwrap())],
             &format!(
-                "cannot inspect {} to look for a client registration",
+                "cannot inspect {} to look for a client registration (CODEX_HOME must name a directory); fix that path",
                 config.display()
             ),
         );

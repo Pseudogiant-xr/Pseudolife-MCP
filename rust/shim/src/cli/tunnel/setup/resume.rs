@@ -29,14 +29,18 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     check_directory(root)?;
     // A file in a form this client does not open stays `Defer`, which names
     // it; a saved profile it can read but not use names the field at fault.
+    let save = format!(
+        "`{} --daemon-url <url> --token-file <owner-only file> --accept-access`",
+        setup_command(&options.profile, options.profile_dir.as_deref())
+    );
     let broken = |fail: Fail| match fail {
         Fail::Defer => Fail::Defer,
         Fail::Tunnel(reason) => Fail::Detail(format!(
-            "{reason}: {}; fix that file or move it aside and save the profile again with `pseudolife-mcp tunnel setup --daemon-url <url> --token-file <owner-only file> --accept-access`",
+            "{reason}: {}; fix that file or move it aside and save the profile again with {save}",
             path.display()
         )),
         Fail::Detail(reason) => Fail::Detail(format!(
-            "{reason} ({}); fix that file or move it aside and save the profile again with `pseudolife-mcp tunnel setup --daemon-url <url> --token-file <owner-only file> --accept-access`",
+            "{reason} ({}); fix that file or move it aside and save the profile again with {save}",
             path.display()
         )),
     };
