@@ -852,11 +852,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLgpBUEkga2V5IGV4cGlyeTogdW5rbm93bjsgY2hlY2sgUGxhdGZvcm0ga2V5IHNldHRpbmdzLgpMYXN0IHR1bm5lbCByZWZyZXNoOiBwZW5kaW5nOyBuZWVkcyBhdHRlbnRpb24uIFRoZSBQeXRob24gY2xpZW50IHJlY29yZGVkIGl0OyBzdG9wIHRoZSB0dW5uZWwgYW5kIHN0YXJ0IGl0IHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBydW5gIHRvIHJ1biBpdCBvbiB0aGlzIGNsaWVudC4K",
+   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLgpBUEkga2V5IGV4cGlyeTogdW5rbm93bjsgY2hlY2sgUGxhdGZvcm0ga2V5IHNldHRpbmdzLgpMYXN0IHR1bm5lbCByZWZyZXNoOiBwZW5kaW5nOyBuZWVkcyBhdHRlbnRpb24uIFRoZSBQeXRob24gY2xpZW50IHJlY29yZGVkIGl0OyB0byBydW4gdGhlIHR1bm5lbCBvbiB0aGlzIGNsaWVudCwgc2F2ZSBpdHMgdHVubmVsIElEIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLXByb2ZpbGUgZG90IC0tcHJvZmlsZS1kaXIgJ3tIT01FfS90dW5uZWxzJyAtLXR1bm5lbC1pZCA8dHVubmVsX2lkPiAtLWFjY2VwdC1hY2Nlc3NgLCB0aGVuIGltcG9ydCBpdHMgcnVudGltZSBrZXkgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHNldHVwIC0tcHJvZmlsZSBkb3QgLS1wcm9maWxlLWRpciAne0hPTUV9L3R1bm5lbHMnIC0tcmVhZC1rZXlgLCB0aGVuIHN0YXJ0IGl0IHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBydW4gLS1wcm9maWxlIGRvdCAtLXByb2ZpbGUtZGlyICd7SE9NRX0vdHVubmVscydgLgo=",
    "stderr": "",
    "window": [
-    1795495530.103887,
-    1795495530.1082888
+    1795508052.2378535,
+    1795508052.242173
    ],
    "requests": [],
    "arm": "rust",
@@ -1104,11 +1104,11 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4KTGFzdCB0dW5uZWwgcmVmcmVzaDogcm9sbGVkLWJhY2s7IG5lZWRzIGF0dGVudGlvbi4gVGhlIFB5dGhvbiBjbGllbnQgcmVjb3JkZWQgaXQ7IHN0b3AgdGhlIHR1bm5lbCBhbmQgc3RhcnQgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHJ1bmAgdG8gcnVuIGl0IG9uIHRoaXMgY2xpZW50Lgo=",
+   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4KTGFzdCB0dW5uZWwgcmVmcmVzaDogcm9sbGVkLWJhY2s7IG5lZWRzIGF0dGVudGlvbi4gVGhlIFB5dGhvbiBjbGllbnQgcmVjb3JkZWQgaXQ7IHRvIHJ1biB0aGUgdHVubmVsIG9uIHRoaXMgY2xpZW50LCBpbXBvcnQgaXRzIHJ1bnRpbWUga2V5IHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLXByb2ZpbGUgZG90IC0tcHJvZmlsZS1kaXIgJ3tIT01FfS90dW5uZWxzJyAtLXJlYWQta2V5YCwgdGhlbiBzdGFydCBpdCB3aXRoIGBwc2V1ZG9saWZlLW1jcCB0dW5uZWwgcnVuIC0tcHJvZmlsZSBkb3QgLS1wcm9maWxlLWRpciAne0hPTUV9L3R1bm5lbHMnYC4K",
    "stderr": "",
    "window": [
-    1795495530.7156215,
-    1795495530.720865
+    1795508052.8540003,
+    1795508052.8591373
    ],
    "requests": [],
    "arm": "rust",
@@ -4213,16 +4213,16 @@
    "candidate_sha256": "8ca638522d60a063594f3d9743dfca1881e96665eba4e3254ef9ab3bbdaa6f6e"
   },
   "status-refresh-pending-text": {
-   "commit": "b963ac3df47885555b87a65873248d886582f374",
+   "commit": "ca28d13eac2f6d067fbed974f31531c5266e47b5",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "b6f394e659ab09183cdedd2f7a0312b77cc5a1b68e7d635d88688817b5966209"
+   "candidate_sha256": "e8d6bdde57959e794be3efdaf0e43813d32b69724d017b574d841495e66813f0"
   },
   "status-refresh-rolled-back-text": {
-   "commit": "b963ac3df47885555b87a65873248d886582f374",
+   "commit": "ca28d13eac2f6d067fbed974f31531c5266e47b5",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "b6f394e659ab09183cdedd2f7a0312b77cc5a1b68e7d635d88688817b5966209"
+   "candidate_sha256": "e8d6bdde57959e794be3efdaf0e43813d32b69724d017b574d841495e66813f0"
   },
   "update-corrupt-profile": {
    "commit": "ebbb36a52f3566210ced9185a336d3eb003feabe",
