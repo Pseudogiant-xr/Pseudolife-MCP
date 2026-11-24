@@ -3713,27 +3713,28 @@ program with no Python. Its runtime is a numbered directory holding that
 binary (`runtime.json` says `"kind": "native"`) behind the same launcher,
 so the registrations and the `PATH` entry above stay as they are.
 
-**The native client is opt-in.** A Python client update keeps that client
-unless you select `PSEUDOLIFE_SHIM_ENGINE=native`. A native client update
-keeps the native client. The installer can switch a machine back to Python
-as described below.
+**The native client is the default.** A person's `pseudolife-mcp update` on
+a Python client moves the machine to the native client. A native client
+update keeps the native client. An update that runs without a person never
+moves a machine: the scheduled `update --unattended` and the shim's own
+session-start client update keep the client they find. The installer can
+switch a machine back to Python as described below.
 
-**Moving a machine.** Set `PSEUDOLIFE_SHIM_ENGINE=native` for the update:
+**Moving a machine.** Run the update as usual:
 
 ```bash
-PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update                # from a 0.23.x Python client
-PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only # already on this release's Python client
+pseudolife-mcp update                # from a 0.23.x to 0.25.x Python client
+pseudolife-mcp update --clients-only # already on this release's Python client
 ```
 
-In PowerShell: `$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update --clients-only`.
-
-From a 0.23.x Python client, a release-mode `update` (or `--clients-only`)
-installs the new release's Python runtime, and the client steps continue in
-that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). With
-the setting, that code downloads the release's `SHA256SUMS` and its native
-archive for this platform from the GitHub release, checks the archive
-against its digest, and runs the binary twice to confirm it is that
-release; only then does anything change. It prints
+From a 0.23.x to 0.25.x Python client, a release-mode `update` (or
+`--clients-only`) installs the new release's Python runtime, and the client
+steps continue in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)).
+That code downloads the release's `SHA256SUMS` and its native archive for
+this platform from the GitHub release. It checks the archive against its
+digest and runs the binary to confirm it is that release. By default it
+also asks the binary whether the Python client registered a tunnel to start
+by itself. Only then does anything change. It prints
 
 ```text
 ==> moving this machine to the native client: native <version> (<target>) runs the client steps
@@ -3744,34 +3745,48 @@ moves each registration to the launcher (backing each file up beside
 itself), and runs the plugin and Codex steps. Running sessions keep the
 runtime they started with, and new sessions start on the native client.
 Native archives are built for Linux x86_64 and arm64 (glibc), macOS Intel
-and Apple silicon, and Windows x64. A machine already on this release's
-Python client moves the same way with `update --clients-only`, but only from
-a shim runtime behind the Python launcher (as the installers install it)
-and with no other option than `--daemon-url`, `--allow-downgrade` or
-`--tag <this version>`; anything else (a plain `update`, `--reinstall`,
-`--json`) keeps the Python client without a note. The native updater then
-picks the release as an update would.
+and Apple silicon, and Windows x64.
 
-- **Without the setting** the update keeps the Python client. An update
-  from 0.23.x, where a native client is built for the platform, says how
-  to move in one line:
-  `==> the native client is opt-in in <version>: this machine keeps the
-  Python client, and this run's own code finishes the client steps; to move
-  it to the native client, run ...` with the `--clients-only` command above
-  and its PowerShell form.
-- **When it cannot move**, nothing about the move has changed: the update
-  keeps the Python client, finishes the client steps with it, and says why
-  in one line, `==> the native client was not installed (<cause>); the
-  Python client was kept and this run's own code finishes the client steps`
-  (no archive for this platform, a download or digest failure, a binary
-  that does not run here).
-- **`PSEUDOLIFE_SHIM_ENGINE=python`** keeps the Python client and says
+A machine already on this release's Python client moves the same way with
+`update --clients-only`. That works only from a shim runtime behind the
+Python launcher (as the installers install it), and with no other option
+than `--daemon-url`, `--allow-downgrade` or `--tag <this version>`. Anything
+else (a plain `update`, `--reinstall`, `--json`) keeps the Python client
+without a note. The native updater then picks the release as an update
+would.
+
+The update keeps the Python client, finishes the client steps with it and
+says why in one line in each of these cases:
+
+- **An unattended update.** The update ran without a person: the scheduled
+  run, the shim's session-start client update, or a run the update cannot
+  tell (it reads its starting command's own arguments). It says
+  `==> this update ran unattended, so this machine keeps the Python client,
+  and this run's own code finishes the client steps; to move it to the
+  native client, run `pseudolife-mcp update --clients-only``. This holds
+  even with `PSEUDOLIFE_SHIM_ENGINE=native` set.
+- **A recorded Python choice.** `~/.pseudolife-mcp/client-engine` records
+  an installer run with `PSEUDOLIFE_SHIM_ENGINE=python`. The line names the
+  file and the move command,
+  `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (in
+  PowerShell, `$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update
+  --clients-only`). A successful move with that setting removes the record.
+- **When it cannot move.** Nothing about the move has changed:
+  `==> the native client was not installed (<cause>); the Python client was
+  kept and this run's own code finishes the client steps`. The causes are no
+  archive for this platform, a download or digest failure, a binary that
+  does not run here, or a tunnel the Python client registered to start by
+  itself. For the tunnel, the guard's own line comes first and names how to
+  remove that autostart. With `PSEUDOLIFE_SHIM_ENGINE=native`, the native
+  updater refuses that autostart itself and changes nothing.
+- **`PSEUDOLIFE_SHIM_ENGINE=python`.** It says
   `==> PSEUDOLIFE_SHIM_ENGINE=python keeps the Python client; this run's own
   code finishes the client steps`.
-- **If the native client steps start and fail**, the native part ends
-  with `==> the native client steps ended with exit <code> (see above);
-  while this machine still runs the Python client, an update without
-  PSEUDOLIFE_SHIM_ENGINE=native keeps it`, and its exit code is the run's.
+
+If the native client steps start and fail, the native part ends with
+`==> the native client steps ended with exit <code> (see above); while this
+machine still runs the Python client, an update with
+PSEUDOLIFE_SHIM_ENGINE=python keeps it`, and its exit code is the run's.
 - **Not moved:** a pip, pipx or lite install, which `update` upgrades in
   place; a checkout's environment and a checkout deploy; an update started
   from 0.22.0 or earlier, which has no client hand-off; and a machine

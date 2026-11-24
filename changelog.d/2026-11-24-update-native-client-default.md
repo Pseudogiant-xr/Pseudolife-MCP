@@ -1,0 +1,6 @@
+### Changed (2026-11-24 — an attended update moves a Python-client machine to the native client)
+- `pseudolife-mcp update` from a Python client (0.23.0 and later) moves the machine to the native client by default, also `update --clients-only` on this release's Python client. Before, it moved only with `PSEUDOLIFE_SHIM_ENGINE=native`.
+- An update that runs without a person never changes the client: the scheduled `update --unattended` and the shim's session-start client update keep the Python client, as does a run whose starting command cannot be read. The line it prints names `pseudolife-mcp update --clients-only` to move.
+- A Python client recorded by an installer run with `PSEUDOLIFE_SHIM_ENGINE=python` (`~/.pseudolife-mcp/client-engine`) is kept by later updates until `PSEUDOLIFE_SHIM_ENGINE=native` asks again. A successful move with that setting removes the record.
+- By default a machine whose Python client registered a tunnel to start by itself keeps that client. The update prints the guard's line, which names how to remove the autostart, and the command to move afterwards. A platform with no native build now says so, instead of saying nothing.
+- After a native run that started and failed, the update now names `PSEUDOLIFE_SHIM_ENGINE=python` as the setting that keeps the Python client.
