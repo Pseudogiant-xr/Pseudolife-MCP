@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 import release_assets as assets
+import release_version
 
 
 @pytest.mark.parametrize("target", assets.TARGETS)
@@ -127,14 +128,17 @@ def test_archive_bytes_are_independent_of_packaging_time(tmp_path):
 
 @pytest.mark.parametrize("crate", ["shim", "daemon"])
 def test_version_refuses_either_mismatched_native_crate(tmp_path, crate):
-    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.2.3"\n')
-    for name in ("shim", "daemon"):
-        directory = tmp_path / "rust" / name
-        directory.mkdir(parents=True)
-        (directory / "Cargo.toml").write_text('[package]\nversion = "1.2.3"\n')
-    assert assets.version(tmp_path) == "1.2.3"
-    (tmp_path / "rust" / crate / "Cargo.toml").write_text('[package]\nversion = "1.2.4"\n')
-    with pytest.raises(ValueError, match=crate + " version differs"):
+    # Every field the version cut writes, copied from this checkout.
+    for path in {release_version.AUTHORITY, *(row[1] for row in release_version.FIELDS)}:
+        if (assets.ROOT / path).is_file():
+            (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / path).write_bytes((assets.ROOT / path).read_bytes())
+    value = release_version.read(assets.ROOT)
+    assert assets.version(tmp_path) == value
+    manifest = tmp_path / "rust" / crate / "Cargo.toml"
+    text = manifest.read_text(encoding="utf-8")
+    manifest.write_text(text.replace(f'\nversion = "{value}"', '\nversion = "1.2.4"', 1), encoding="utf-8")
+    with pytest.raises(ValueError, match="1.2.4" if crate == "daemon" else "but the release version is 1.2.4"):
         assets.version(tmp_path)
 
 

@@ -54,15 +54,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Guard — release tag must match pyproject version
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          VERSION="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
-          echo "tag=$TAG pyproject=$VERSION"
-          if [ "$TAG" != "$VERSION" ]; then
-            echo "::error::release tag v$TAG does not match pyproject.toml version $VERSION — fix the tag or the version cut before publishing" >&2
-            exit 1
-          fi
+      - name: Guard — release tag must match the release version
+        # The release version is the shim crate's (rust/shim/Cargo.toml);
+        # `check` also requires every field the version cut writes, the
+        # pyproject.toml version among them, to equal it, naming the first
+        # that differs (rust/ci/release_version.py).
+        run: python rust/ci/release_version.py check --tag "$GITHUB_REF_NAME"
 
       - name: Guard — server.json versions must match the release tag
         # Moved here from the `registry` job (issue #185): that job runs
