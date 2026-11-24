@@ -423,7 +423,7 @@ if [ -n "$native_probe_setting" ]; then
         *) echo "PSEUDOLIFE_NATIVE_PROBE_SECONDS='$native_probe_setting' is not a whole number of seconds from 1 to 99999; the probe waits 30 s." >&2 ;;
     esac
 fi
-NATIVE_INSTALLER_PROTOCOL=4
+NATIVE_INSTALLER_PROTOCOL=5
 NATIVE_VERSION=""
 NATIVE_TARGET=""
 NATIVE_ARCHIVE=""
@@ -2758,6 +2758,7 @@ for selected_client in $CLIENTS; do
         HOOK_CODEX=unavailable
         INSTR_CODEX=skipped
         CODEX_HOOK_RECOVERY=""
+        CODEX_MAILBOX_AFTER_REGISTRATION=""
         {
             credential_exit=0
             installer_token="$(get_env PSEUDOLIFE_MCP_TOKEN)"
@@ -2835,6 +2836,12 @@ for selected_client in $CLIENTS; do
                     CODEX_SETUP_VALID=1
                     if grep -Eq '(^|[,{])[[:space:]]*"instructions_error"[[:space:]]*:[[:space:]]*\{' <<< "$setup_output"; then
                         CODEX_INSTRUCTION_WARNING=1
+                    fi
+                    # Consent was given before the server existed: the
+                    # runtime-defaults step applies the approval once it is
+                    # registered (issue #1903).
+                    if grep -Eq '(^|[,{])[[:space:]]*"mailbox_approval"[[:space:]]*:[[:space:]]*"after-registration"' <<< "$setup_output"; then
+                        CODEX_MAILBOX_AFTER_REGISTRATION=1
                     fi
                 else
                     CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Rerun this installer to retry."
@@ -3074,8 +3081,11 @@ desktop_tokens_source() {
     get_env PSEUDOLIFE_MCP_TOKENS
 }
 configure_codex_runtime_defaults() {
+    local runtime_args=(codex-runtime-defaults)
+    # The memory_message approval the hook step deferred until now.
+    if [ -n "${CODEX_MAILBOX_AFTER_REGISTRATION:-}" ]; then runtime_args+=(--approve-memory-message); fi
     runtime_exit=0
-    runtime_output=$(native_helper codex-runtime-defaults) || runtime_exit=$?
+    runtime_output=$(native_helper "${runtime_args[@]}") || runtime_exit=$?
     if [ "$runtime_exit" -eq 0 ] && runtime_state=$(native_helper codex-fields runtime-defaults <<< "$runtime_output" 2>/dev/null); then
         CODEX_RUNTIME_DEFAULTS="$runtime_state"
         step "Codex runtime defaults ready (startup 240s, tools 240s, required)."
@@ -3416,7 +3426,12 @@ for selected_client in $CLIENTS; do
                 warn_client_failure codex "Codex authentication requires the stdio shim. HTTP transport was not registered. Rerun the installer with --transport shim."
             else
                 register_client codex http pseudolife-memory --url http://127.0.0.1:8765/mcp
-                if [ "$MCP_CODEX" = http ]; then step "Wired into Codex (codex mcp add, HTTP)."; fi
+                # As install-native.ps1 does: the runtime defaults, and the
+                # memory_message approval the hook step deferred (#1903).
+                if [ "$MCP_CODEX" = http ]; then
+                    step "Wired into Codex (codex mcp add, HTTP)."
+                    configure_codex_runtime_defaults
+                fi
             fi
         fi
     elif [ "$selected_client" = gemini ]; then

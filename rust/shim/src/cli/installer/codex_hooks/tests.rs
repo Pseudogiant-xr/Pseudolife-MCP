@@ -1433,3 +1433,258 @@ async fn an_instruction_file_that_cannot_be_written_is_reported_not_silent() {
         "{lines:?}"
     );
 }
+
+// -- issue #1903: the memory_message approval across install, update, rerun -----
+
+const APPROVAL: &str = "approval_mode";
+
+fn approval(user: &Value) -> &Value {
+    &user["mcp_servers"]["pseudolife-memory"]["tools"]["memory_message"][APPROVAL]
+}
+
+/// The approvals among the config writes since `from`.
+fn approval_writes(world: &World, from: usize) -> usize {
+    world.codex().writes()[from..]
+        .iter()
+        .filter(|w| w.to_string().contains(APPROVAL))
+        .count()
+}
+
+/// What `codex mcp add pseudolife-memory --env ... -- <shim>` leaves in the
+/// user layer: both native installers run it after the hook step on a first
+/// install (`install-native.sh` "client registrations", `install-native.ps1`
+/// the same), and so did the Python installers of v0.23.1 and v0.24.0
+/// (`ops/install.sh`, its first `codex mcp add` line). The token file is
+/// Codex's own private copy, which their credential step wrote first.
+fn register_as_codex_mcp_add(world: &World, command: &str) {
+    let copy = crate::setup::codex::token_copy_path(&world.home);
+    if !copy.exists() {
+        fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        crate::board::state::atomic_create(&copy, b"fixture-installer-bearer\n").unwrap();
+    }
+    let token_file = copy.to_string_lossy().into_owned();
+    let server = json!({
+        "command": command, "args": [],
+        "env": {
+            "PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+            "PSEUDOLIFE_MCP_DAEMON_URL": "http://10.0.0.5:8765",
+            "PSEUDOLIFE_MCP_TOKEN_FILE": token_file,
+        },
+    });
+    let mut codex = world.codex();
+    codex.user["mcp_servers"] = json!({"pseudolife-memory": server});
+    codex.version += 1;
+}
+
+fn without_registration(world: &World) {
+    world
+        .codex()
+        .user
+        .as_object_mut()
+        .unwrap()
+        .remove("mcp_servers");
+}
+
+/// A second session starts as a fresh Codex would.
+fn new_session(world: &World) {
+    world.host.shared.turned.set(false);
+    world.host.shared.closed_after_turn.set(false);
+}
+
+/// The installers' first-install order: the hook step, then `codex mcp
+/// add`, then `codex-runtime-defaults`, which gets `--approve-memory-message`
+/// exactly when the hook step reported "after-registration".
+async fn first_install(world: &World, trust: &str) -> (Report, Value, Option<String>) {
+    let hooks = world.run("manual", trust, "auto").await;
+    register_as_codex_mcp_add(world, "/opt/pseudolife-mcp");
+    let approve = hooks.mailbox_approval.as_deref() == Some("after-registration");
+    let launcher = world.host.codex(&world.home, &world.home).unwrap();
+    let mut session = launcher.open(&json!({}), &[]).await.unwrap();
+    let (registered, line) = crate::cli::installer::codex_config::registered_setup(
+        &mut session,
+        &world.home,
+        &world.home,
+        approve,
+    )
+    .await;
+    (hooks, registered, line)
+}
+
+#[tokio::test]
+async fn consent_before_the_server_is_registered_defers_the_approval_and_says_so() {
+    let world = World::new();
+    without_registration(&world);
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    // Not "unavailable": the installers register the server next and the
+    // approval follows; nothing is written to a server that does not exist.
+    assert_eq!(
+        report.mailbox_approval.as_deref(),
+        Some("after-registration")
+    );
+    assert_eq!(report.mailbox_approval_detail, None);
+    assert_eq!(approval_writes(&world, 0), 0);
+    assert!(approval(&world.codex().user).is_null());
+    // The hook step says the approval follows the registration, not that it
+    // failed; the step that applies it prints the outcome.
+    let lines = stderr_lines(&report);
+    assert!(
+        lines.iter().any(|l| l
+            == "Hooks ready; setup approves memory_message once Codex has registered the \
+                pseudolife-memory server, later in this install. If this install does not \
+                register it, rerun the installer once it can, interactively or with \
+                --codex-hook-trust yes (install.ps1: -CodexHookTrust yes): that run \
+                approves it.\n\
+                See docs/guide/configuration.md (Experimental agent coordination)."),
+        "{lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("could not approve")),
+        "{lines:?}"
+    );
+    // Without consent nothing is deferred.
+    let world = World::new();
+    without_registration(&world);
+    let declined = world.run("manual", "no", "auto").await;
+    assert_eq!(declined.mailbox_approval.as_deref(), Some("declined"));
+}
+
+#[tokio::test]
+async fn a_server_another_layer_registers_is_not_deferred() {
+    let world = World::new();
+    without_registration(&world);
+    world.codex().overlay =
+        json!({"mcp_servers": {"pseudolife-memory": {"command": "/managed/pseudolife-mcp"}}});
+    let report = world.run("manual", "yes", "auto").await;
+    assert_eq!(report.mailbox_approval.as_deref(), Some("unavailable"));
+    assert!(
+        report
+            .mailbox_approval_detail
+            .as_deref()
+            .is_some_and(|d| d.contains("no pseudolife-memory server")),
+        "{:?}",
+        report.mailbox_approval_detail
+    );
+}
+
+#[tokio::test]
+async fn a_fresh_consented_install_ends_approved_and_an_identical_rerun_changes_nothing() {
+    let world = World::new();
+    without_registration(&world);
+    let (hooks, registered, line) = first_install(&world, "yes").await;
+    assert_eq!(
+        hooks.mailbox_approval.as_deref(),
+        Some("after-registration")
+    );
+    assert_eq!(registered["status"], "ready");
+    assert_eq!(registered["mailbox_approval"], "set");
+    // The install's last approval line says what happened.
+    let line = line.expect("the deferred approval's line");
+    assert!(
+        line.starts_with("Codex server registered; setup approved memory_message"),
+        "{line}"
+    );
+    // The finished form: the server, its runtime defaults and the approval.
+    let installed = world.codex().user.clone();
+    assert_eq!(approval(&installed), "approve");
+    assert_eq!(
+        installed["mcp_servers"]["pseudolife-memory"]["required"],
+        true
+    );
+    // The same command again: the registration exists, so the installers
+    // keep it ("registration preserved", no runtime-defaults step) and only
+    // the hook step runs. It must change nothing and say so.
+    let writes = world.codex().writes().len();
+    new_session(&world);
+    let rerun = world.run("manual", "yes", "auto").await;
+    assert_eq!(rerun.status, "ready", "{:?}", rerun.recovery);
+    assert_eq!(rerun.mailbox_approval.as_deref(), Some("already"));
+    assert_eq!(
+        world.codex().writes().len(),
+        writes,
+        "the rerun wrote config"
+    );
+    assert_eq!(
+        world.codex().user,
+        installed,
+        "the rerun changed the registration"
+    );
+    assert_eq!(approval(&world.codex().user), approval(&installed));
+    assert!(rerun.backups.is_empty(), "{:?}", rerun.backups);
+}
+
+#[tokio::test]
+async fn a_fresh_install_without_consent_approves_nothing_and_reruns_quietly() {
+    let world = World::new();
+    without_registration(&world);
+    let (hooks, registered, line) = first_install(&world, "no").await;
+    assert_eq!(hooks.mailbox_approval.as_deref(), Some("declined"));
+    assert!(registered.get("mailbox_approval").is_none());
+    assert_eq!(line, None);
+    let installed = world.codex().user.clone();
+    assert!(approval(&installed).is_null());
+    new_session(&world);
+    let rerun = world.run("manual", "no", "auto").await;
+    assert_eq!(rerun.mailbox_approval.as_deref(), Some("declined"));
+    assert_eq!(world.codex().user, installed);
+}
+
+/// The registration the Python installers of v0.23.1 and v0.24.0 leave,
+/// client-only or local (they differ only in the daemon URL), after
+/// `pseudolife-mcp update --clients-only` moved it to the native client:
+/// their `codex mcp add` line (the credential file is Codex's own copy),
+/// their runtime defaults (`ops/setup-codex-coordination.py`
+/// `RUNTIME_DEFAULTS`), and no `memory_message` approval, because their
+/// hook step also ran before the server was registered. The hand-off's
+/// registration step (`runtime::registrations::migrate`) rewrites only
+/// `command`, `args` and `cwd`; its hook step (`check_codex_hooks`) writes
+/// no Codex configuration.
+fn legacy_registration_after_the_handoff(world: &World) {
+    register_as_codex_mcp_add(
+        world,
+        "/home/<user>/.local/share/pseudolife-mcp/bin/pseudolife-mcp",
+    );
+    let mut codex = world.codex();
+    let server = codex.user["mcp_servers"]["pseudolife-memory"]
+        .as_object_mut()
+        .unwrap();
+    server.insert("startup_timeout_sec".into(), json!(240.0));
+    server.insert("tool_timeout_sec".into(), json!(240.0));
+    server.insert("required".into(), json!(true));
+    server.insert(
+        "command".into(),
+        json!("/home/<user>/.local/bin/pseudolife-mcp"),
+    );
+}
+
+#[tokio::test]
+async fn after_the_handoff_two_identical_installer_runs_converge_after_the_first() {
+    let world = World::new();
+    legacy_registration_after_the_handoff(&world);
+    let handed_off = world.codex().user.clone();
+    // Run 1, with consent: it completes the approval the older release
+    // lost. That is its only registration change.
+    let first = world.run("manual", "yes", "auto").await;
+    assert_eq!(first.status, "ready", "{:?}", first.recovery);
+    assert_eq!(first.mailbox_approval.as_deref(), Some("set"));
+    let after_first = world.codex().user.clone();
+    let mut expected = handed_off.clone();
+    expected["mcp_servers"]["pseudolife-memory"]["tools"] =
+        json!({"memory_message": {APPROVAL: "approve"}});
+    assert_eq!(
+        after_first["mcp_servers"], expected["mcp_servers"],
+        "run 1 changed more than the lost approval"
+    );
+    // Run 2, the same inputs: byte-identical to run 1, and it says so.
+    let writes = world.codex().writes().len();
+    new_session(&world);
+    let second = world.run("manual", "yes", "auto").await;
+    assert_eq!(second.mailbox_approval.as_deref(), Some("already"));
+    assert_eq!(world.codex().writes().len(), writes, "run 2 wrote config");
+    assert_eq!(
+        world.codex().user,
+        after_first,
+        "run 2 changed the registration"
+    );
+    assert_eq!(approval(&world.codex().user), "approve");
+}

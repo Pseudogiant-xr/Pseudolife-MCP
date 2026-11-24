@@ -19,7 +19,8 @@
 //! "covered-by-hooks") and `recovery` (one line, or null). Also `backups`,
 //! the credential fields of `codex-credentials`, `verified`,
 //! `mailbox_approval` ("set", "already", "kept-explicit", "declined",
-//! "unavailable"), `mailbox_approval_detail`, `mailbox_approval_notice` and
+//! "after-registration", "unavailable"), `mailbox_approval_detail`,
+//! `mailbox_approval_notice` and
 //! `instructions_path`. Exit 0 when ready or the instructions are present or
 //! appended, 1 otherwise (still a valid report), 2 for a usage error.
 mod definitions;
@@ -507,7 +508,14 @@ async fn hook_setup<H: Host>(
             }
             vet(&mine, true)?;
             trust::trust_hooks(&mut client, &fresh, &mine, home, &cwd, report).await?;
-            trust::mailbox_approval(&fresh, home, report, Some((&mut client, cwd.as_path()))).await;
+            trust::mailbox_approval(
+                &fresh,
+                home,
+                report,
+                Some((&mut client, cwd.as_path())),
+                trust::Unregistered::Defer,
+            )
+            .await;
             Ok::<_, Fail>((
                 fresh.clone(),
                 listed.clone(),
@@ -519,7 +527,14 @@ async fn hook_setup<H: Host>(
         let (_, _, mine) = outcome?;
         selected = mine;
     } else {
-        trust::mailbox_approval::<<H::Codex as Codex>::Session>(&config, home, report, None).await;
+        trust::mailbox_approval::<<H::Codex as Codex>::Session>(
+            &config,
+            home,
+            report,
+            None,
+            trust::Unregistered::Defer,
+        )
+        .await;
     }
     if obsolete_any && !approved {
         return Err(Fail::new(
@@ -668,9 +683,59 @@ pub(super) fn run(arguments: &[String]) -> u8 {
     report.exit()
 }
 
+/// `codex-runtime-defaults --approve-memory-message`: apply the
+/// `memory_message` approval that a first install's hook step deferred
+/// ("after-registration") because the server was not registered yet. The
+/// consent was given to that step; this one only finishes it. Returns the
+/// report fields and the line for stderr. Never fails the step.
+pub(super) async fn approve_registered_mailbox(
+    client: &mut impl Rpc,
+    home: &Path,
+    cwd: &Path,
+) -> (Map<String, Value>, String) {
+    let mut report = Report::default();
+    // With a client the approval reads Codex's configuration afresh.
+    let state = trust::mailbox_approval(
+        &Value::Null,
+        home,
+        &mut report,
+        Some((client, cwd)),
+        trust::Unregistered::Refuse,
+    )
+    .await;
+    let notice =
+        trust::registered_mailbox_notice(&state, report.mailbox_approval_detail.as_deref());
+    let mut fields = Map::new();
+    fields.insert("mailbox_approval".into(), json!(state));
+    if let Some(detail) = report.mailbox_approval_detail {
+        fields.insert("mailbox_approval_detail".into(), json!(detail));
+    }
+    if let Some(backup) = report.backups.first() {
+        fields.insert("mailbox_backup".into(), json!(backup));
+    }
+    (fields, notice)
+}
+
+/// The report fields and the stderr line when `codex-runtime-defaults
+/// --approve-memory-message` could not reach Codex at all (no Codex home,
+/// scratch folder, executable or session), so the deferred approval was
+/// not applied: "unavailable", with `reason` (the setup error) in the detail.
+pub(super) fn unapplied_mailbox(reason: &str) -> (Map<String, Value>, String) {
+    let mut fields = Map::new();
+    fields.insert("mailbox_approval".into(), json!("unavailable"));
+    fields.insert(
+        "mailbox_approval_detail".into(),
+        json!(format!("Codex could not be reached: {reason}")),
+    );
+    (fields, trust::unreached_mailbox_notice(reason))
+}
+
 /// What the step says on stderr after its report.
 fn stderr_lines(report: &Report) -> Vec<String> {
     let mut lines = Vec::new();
+    // A deferred approval's line says it follows the registration; the step
+    // that applies it prints the outcome, and if no registration follows,
+    // a later installer run with consent that finds the server approves it.
     if report.status == "ready"
         && let Some(notice) = &report.mailbox_approval_notice
     {
