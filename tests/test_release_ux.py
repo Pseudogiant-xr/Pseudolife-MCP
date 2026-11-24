@@ -47,11 +47,25 @@ def _rust_embedding_default(config: str, provision: str) -> str:
     EmbeddingConfig``, from the text of ``config.rs``: a string literal
     (``"m".to_string()``, ``.to_owned()``, ``.into()``, ``String::from("m")``)
     or the ``EMBEDDING_MODEL`` constant, resolved in ``model_provision.rs``'s
-    text. A form it cannot read fails, naming the form."""
+    text. Only a line that starts with the field counts, so a commented-out
+    ``// model_name: ...`` is never read. A form it cannot read fails,
+    naming its config.rs line."""
     block = re.search(r"impl Default for EmbeddingConfig \{(.*?)\n\}", config, re.S)
     assert block, "rust/daemon/src/config.rs has no impl Default for EmbeddingConfig"
-    value = re.search(r"\bmodel_name:\s*([^,\n]+),", block[1])
-    assert value, "EmbeddingConfig::default() sets no model_name"
+    first = config[:block.start(1)].count("\n") + 1
+    fields = [(first + offset, line) for offset, line in enumerate(block[1].split("\n"))
+              if re.match(r"\s*model_name\s*:", line)]
+    assert fields, "EmbeddingConfig::default() sets no model_name"
+    assert len(fields) == 1, (
+        f"EmbeddingConfig::default() sets model_name on more than one line: "
+        f"config.rs lines {[number for number, _ in fields]}")
+    number, line = fields[0]
+    value = re.fullmatch(r"\s*model_name\s*:\s*(.+?),\s*(?://.*)?", line)
+    if not value:
+        raise AssertionError(
+            f"config.rs line {number}: EmbeddingConfig::default() sets model_name in a "
+            f"form this guard cannot read ({line.strip()!r}, perhaps wrapped over lines); "
+            f"teach _rust_embedding_default in tests/test_release_ux.py the form")
     expr = value[1].strip()
     literal = re.fullmatch(rf'"([^"]+)"{_RUST_STRING}|String::from\("([^"]+)"\)', expr)
     if literal:
@@ -62,8 +76,9 @@ def _rust_embedding_default(config: str, provision: str) -> str:
         assert pinned, "rust/daemon/src/model_provision.rs defines no EMBEDDING_MODEL literal"
         return pinned[1]
     raise AssertionError(
-        f"EmbeddingConfig::default() sets model_name to {expr!r}, a form this guard "
-        f"cannot read; teach _rust_embedding_default in tests/test_release_ux.py the form")
+        f"config.rs line {number}: EmbeddingConfig::default() sets model_name to "
+        f"{expr!r}, a form this guard cannot read; teach _rust_embedding_default in "
+        f"tests/test_release_ux.py the form")
 
 
 def _default_embedding_model() -> str:
@@ -75,10 +90,11 @@ def _default_embedding_model() -> str:
         (_RUST_DAEMON / "model_provision.rs").read_text(encoding="utf-8"))
 
 
-def _embedding_config(expr: str) -> str:
+def _embedding_config(expr: str, before: str = "") -> str:
     return ("impl Default for EmbeddingConfig {\n    fn default() -> Self {\n"
             "        EmbeddingConfig {\n"
-            f"            model_name: {expr},\n"
+            + before
+            + f"            model_name: {expr},\n"
             '            device: "cuda".to_string(),\n'
             "        }\n    }\n}\n")
 
@@ -99,6 +115,21 @@ def test_the_default_model_reader_takes_each_way_rust_writes_it(expr, want) -> N
     """A tidy-up of how the Rust default is written must not turn the image
     guards red while the model is unchanged."""
     assert _rust_embedding_default(_embedding_config(expr), _PROVISION) == want
+
+
+def test_the_default_model_reader_skips_a_commented_out_model() -> None:
+    """A commented-out old default above the real field is not the default."""
+    config = _embedding_config('"org/literal-model".to_string()',
+                               before='            // model_name: "old/model".to_string(),\n')
+    assert _rust_embedding_default(config, _PROVISION) == "org/literal-model"
+
+
+def test_the_default_model_reader_names_the_line_of_a_wrapped_value() -> None:
+    """rustfmt may wrap a long value over lines; the guard says it cannot read
+    that form and where, rather than that there is no model_name."""
+    config = _embedding_config('String::from(\n                "org/wrapped-model",\n            )')
+    with pytest.raises(AssertionError, match=r"config\.rs line 4: .*cannot read"):
+        _rust_embedding_default(config, _PROVISION)
 
 
 def test_the_default_model_reader_names_a_form_it_cannot_read() -> None:
