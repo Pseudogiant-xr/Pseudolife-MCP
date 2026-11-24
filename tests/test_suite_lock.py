@@ -1241,8 +1241,12 @@ def test_a_github_actions_run_is_never_asked_for_a_password(tmp_path, procs,
 
 def _copy_of_the_checkout(dest: Path) -> Path:
     """What a full run imports before it queues, copied to ``dest``: the
-    package, the non-test files of tests/ (conftest and its helpers), and
-    pyproject.toml (rootdir, markers). No test files: nothing is collected."""
+    package-free guard conftest loads (rust/harness_support), the frozen
+    package (imported only after the lock, by package tests' fixtures), the
+    non-test files of tests/ (conftest and its helpers), and pyproject.toml
+    (rootdir, markers). No test files: nothing is collected."""
+    shutil.copytree(ROOT / "rust" / "harness_support", dest / "rust" / "harness_support",
+                    ignore=shutil.ignore_patterns("__pycache__", "test_*.py"))
     shutil.copytree(ROOT / "pseudolife_memory", dest / "pseudolife_memory",
                     ignore=shutil.ignore_patterns("__pycache__"))
     (dest / "tests").mkdir()
@@ -1255,9 +1259,12 @@ def _copy_of_the_checkout(dest: Path) -> Path:
     return dest
 
 
+# The tree code conftest imports before the run queues is the package-free
+# guard: since the suite loads without the frozen package, its modules are
+# imported only after the lock (by the package tests' fixtures).
 @pytest.mark.parametrize(("workers", "changed", "named"), [
-    (0, "pseudolife_memory/utils/config.py", "pseudolife_memory/utils/config.py"),
-    (1, "pseudolife_memory/utils/config.py", "pseudolife_memory/utils/config.py"),
+    (0, "rust/harness_support/database_guard.py", "rust/harness_support/database_guard.py"),
+    (1, "rust/harness_support/database_guard.py", "rust/harness_support/database_guard.py"),
     # conftest read ops/.env for the bench URL; a worktree's pre-flight
     # copies it in, and a copy made while the run queued is a change too.
     (0, "ops/.env", "ops/.env (created)"),

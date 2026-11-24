@@ -208,10 +208,16 @@ class = "retained test tooling"
 reason = "Guard tests use Python paths as inputs or validate contract generation against Python."
 
 [[rules]]
-globs = ["rust/ci/*oracle.py", "rust/ci/pr_precheck*.py", "rust/ci/release_assets.py", "rust/*_census.py", "rust/contract_inventory.py"]
+globs = ["rust/ci/*oracle.py", "rust/ci/pr_precheck*.py", "rust/*_census.py", "rust/contract_inventory.py"]
 kinds = ["command", "metadata", "path", "python-import"]
 class = "active dependency"
-reason = "Prechecks, contract inventories and release tooling still reference package sources or metadata."
+reason = "Prechecks and contract inventories still reference package sources or metadata."
+
+[[rules]]
+globs = ["rust/ci/release_version.py"]
+kinds = ["metadata"]
+class = "active dependency"
+reason = "The release version reader keeps pyproject.toml's version equal to the native one while the wheel is published; that field leaves with the package."
 
 [[rules]]
 globs = [".github/workflows/ci.yml", ".github/workflows/rust.yml", ".github/workflows/release.yml"]

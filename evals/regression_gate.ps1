@@ -14,6 +14,7 @@ param(
     [string]$Scratch,
     [string]$Model = 'bench',
     [string]$ServedModel = 'Qwen3.8-27B-UD-Q4_K_XL.gguf',
+    [int]$ContextWorkers = 0,
     [string]$Python
 )
 
@@ -53,10 +54,14 @@ try {
         '--replicates', $Replicates, '--answerer-url', $endpoint, '--answerer-model', $Model,
         '--answerer-profile', $profile, '--answerer-served-model', $ServedModel,
         '--judge-url', $endpoint, '--judge-model', $Model, '--judge-profile', $profile,
-        '--judge-served-model', $ServedModel
+        '--judge-served-model', $ServedModel, '--context-workers', $ContextWorkers
     )
     if ($Establish) { $arguments += '--establish' }
     & $Python @arguments --preflight
+    if ($LASTEXITCODE -ne 0) { exit 2 }
+    # Contexts need only the daemon and the test database, so they are built
+    # and recorded before the model server holds the GPU.
+    & $Python @arguments --contexts-only
     if ($LASTEXITCODE -ne 0) { exit 2 }
 
     . (Join-Path $PSScriptRoot 'qwen_server.ps1')

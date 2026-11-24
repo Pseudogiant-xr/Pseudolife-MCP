@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "49211123d3e99e42",
+  "fingerprint": "ce09bac9cf45865e",
+  "reason": "Measured on the first Linux dev box at 06da875c0 (24 Nov 2026). On Rust-only changes, the step for live tests that read rust/ files gains tests/test_fixture_guards_package_absent.py (7 tests, 15.3 s serial) and tests/test_suite_lock.py (144 tests, 118.7 s serial); the pair took 126 s on the step's two workers. That adds about 1 minute to the step when its workers balance, and at most 2.2. The job keeps its 25-minute timeout, and its estimate is re-measured from the first Rust-only batch. On every non-docs change, Tree-wide guards gains rust/harness_support/test_database_guard.py (50 tests, 0.3 s). tests/test_fake_embedder.py is not added to the job; it already runs in Tree-wide guards."
+}
