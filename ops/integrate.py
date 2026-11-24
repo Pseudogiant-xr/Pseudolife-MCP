@@ -1249,7 +1249,13 @@ def _release_version_reader():
         name, Path(__file__).resolve().parents[1] / "rust" / "ci" / "release_version.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except OSError as error:
+        sys.modules.pop(name, None)
+        raise Refusal(f"this controller checkout cannot load rust/ci/release_version.py "
+                      f"({error.strerror or error}), which decides a release cut; "
+                      "update the controller checkout (git pull) and retry") from None
     return module
 
 
