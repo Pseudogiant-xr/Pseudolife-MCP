@@ -180,13 +180,9 @@ class Server:
         still that server. Returns whether it was stopped."""
         if not self.owned:
             return False
-        record = _pidfile(self.pgdata)
-        if record is None or record[0] != self.pid:
-            # Gone, or another server in this data directory since: not ours.
-            return False
-        # A pid in a stale postmaster.pid can belong to another process by
-        # now: the server must still answer with this start time, for this
-        # data directory, to our password.
+        # The server must still answer with this start time, for this data
+        # directory, to our password, and its pid file must still name the
+        # pid this process launched (a stale file's pid can be anyone's now).
         if not _stop_verified(self.name, self.pgdata, self.port, self.pid, [self.password], started=self.started):
             return False
         shutil.rmtree(self.data_dir, ignore_errors=True)
