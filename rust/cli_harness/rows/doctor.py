@@ -421,6 +421,8 @@ def tokenize_identity(arm: str, fields: dict, out: bytes, err: bytes) -> tuple[b
     out = out.replace(b"The shim is pseudolife-mcp " + mine + b" but",
                       b"The shim is pseudolife-mcp <runtime:pseudolife-mcp> but")
     out = out.replace(b"--tag " + mine + b" ", b"--tag <runtime:pseudolife-mcp> ")
+    # The handshake recovery names this client's own release before a comma.
+    out = out.replace(b"--tag " + mine + b",", b"--tag <runtime:pseudolife-mcp>,")
     err = err.replace(b"this shim is pseudolife-mcp " + mine + b" but",
                       b"this shim is pseudolife-mcp <runtime:pseudolife-mcp> but")
     return out, err
