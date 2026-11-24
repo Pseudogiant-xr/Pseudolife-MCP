@@ -276,8 +276,12 @@ def test_the_install_records_an_explicit_python_choice_and_accepts_rust(tmp_path
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("flag", ["", "rust"])
-def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, flag):
+@pytest.mark.parametrize("flag,installed", [("", "none"), ("rust", "none"), ("", "rust-unaccepted"),
+                                            ("python", "rust-unaccepted"), ("", "rust"), ("python", "rust")],
+                         ids=["default", "explicit-rust", "unfinished-rust", "unfinished-rust-asks-python",
+                              "rust-installed",
+                              "rust-installed-asks-python"])
+def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, flag, installed):
     # Conductor round-4 delta: with the shim transport, no token set and no
     # pipx or pip, stage 5b mints none. Stage 4b now knows that before its
     # prepare pulls the image and fills the models volume.
@@ -289,7 +293,7 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
         stub = ("function Invoke-EngineHelper {\n"
                 f"    Add-Content -LiteralPath '{ps.calls}' -Value ('helper|' + (@($args) -join ' '))\n"
                 "    $global:LASTEXITCODE = 0\n"
-                "    if ($args[0] -eq 'detect') { return 'none' }\n}\n"
+                f"    if ($args[0] -eq 'detect') {{ return '{installed}' }}\n}}\n"
                 "function Test-ShimToolingReady($python) { return $false }\n"
                 "function Get-EnvValue($name) { return $null }\n"
                 "function Get-InstallerPython { return 'python' }\n")
@@ -307,18 +311,35 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
         stage = stage.replace(definition, "").replace("shim_tooling_ready() {", "shim_tooling_ready_real() {")
         shell = _Shell(variants[0], tmp_path)
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
-                'case "$1" in detect) echo none ;; esac; }\n'
+                f'case "$1" in detect) echo {installed} ;; esac; }}\n'
                 'step() { echo "STEP: $*"; }\nshim_tooling_ready() { return 1; }\nget_env() { :; }\n')
         proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=1\nTRANSPORT=shim\nBANK_EXISTED=''\n"
                          "unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS\n" + stub + stage
                          + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         calls, output = shell.logged(), proc.stdout + proc.stderr
     prepares = [call for call in calls if "prepare" in call]
-    if flag == "rust":
-        # An explicit Rust install refuses before it pulls anything.
+    python_way = "rerun with -Engine python" if script.endswith(".ps1") else "rerun with --engine python"
+    if flag == "python" and installed == "rust-unaccepted":
+        # The refusal's last way out works where it is offered: this
+        # checkout's own unfinished Rust install reruns as Python. (Another
+        # release's unfinished container is refused by prepare whichever
+        # engine is asked for, ops/installer_engine.py
+        # refuse_foreign_unaccepted, and that refusal names its own fix; the
+        # stub here stands for the same-release case.)
+        assert proc.returncode == 0, output
+        assert "RESULT:python" in output
+        assert [call for call in prepares if "--engine rust" in call] == []
+    elif flag == "rust" or installed in ("rust-unaccepted", "rust"):
+        # A Rust install that is not a default refuses before it pulls anything.
         assert proc.returncode == 2, output
         assert "cannot mint one" in output and "Nothing was pulled or started" in output
         assert prepares == []
+        # Where an accepted Rust daemon is installed, the engine stays what
+        # detection found (`rust`, ops/installer_engine.py `detect`) and
+        # the Python engine is only switched to later, so a rerun with it meets
+        # this same refusal: the text offers it only where detection found no
+        # accepted Rust daemon.
+        assert (python_way in output) == (installed != "rust"), output
     else:
         assert proc.returncode == 0, output
         assert "RESULT:python" in output
@@ -327,17 +348,21 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("token_state,defaulted,expected", [
-    ("minted", True, "rust"), ("present", True, "rust"), ("no-shim", True, "python"), ("failed", True, "python"),
-    ("no-shim", False, "refused"), ("present", False, "rust"),
+@pytest.mark.parametrize("token_state,defaulted,expected,installed", [
+    ("minted", True, "rust", "none"), ("present", True, "rust", "none"), ("no-shim", True, "python", "none"),
+    ("failed", True, "python", "none"), ("no-shim", False, "refused", "none"), ("present", False, "rust", "none"),
+    ("no-shim", False, "refused", "rust-unaccepted"), ("no-shim", False, "refused", "rust"),
+    ("failed", False, "refused", "rust"),
 ])
-def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, defaulted, expected):
+def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, defaulted, expected,
+                                                                installed):
     # Codex P1 (round 3): with the shim transport but no pipx or pip, stage 4b
     # predicted a bearer that stage 5b never minted.
     if script.endswith(".ps1"):
         stage = _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
         ps = _PowerShell(tmp_path)
         proc = ps.run("function Step($text) { Write-Output \"STEP: $text\" }\n"
+                      f"$installedEngine='{installed}'\n"
                       f"$composeEngine='rust'\n$engineDefaulted=${'true' if defaulted else 'false'}\n"
                       f"$engineFiles=@('C:\\fixture\\engine.yml')\n$tokenState='{token_state}'\n" + stage
                       + "Write-Output \"RESULT:$composeEngine|$($engineFiles -join ',')\"\n")
@@ -349,6 +374,7 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
         stage = _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
         shell = _Shell(variants[0], tmp_path)
         proc = shell.run('step() { echo "STEP: $*"; }\n'
+                         f"INSTALLED_ENGINE={installed}\n"
                          f"COMPOSE_ENGINE=rust\nENGINE_DEFAULTED='{'1' if defaulted else ''}'\n"
                          f"engine_files=(/fixture/engine.yml)\nTOKEN_STATE='{token_state}'\n" + stage
                          + 'echo "RESULT:$COMPOSE_ENGINE|${engine_files[*]-}"\n')
@@ -356,6 +382,9 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
     if expected == "refused":
         assert proc.returncode == 2, output
         assert "needs its bearer token" in output and "The daemon was not started" in output
+        # As at stage 4b: no Python-engine rerun where an accepted Rust daemon is installed.
+        python_way = "rerun with -Engine python" if script.endswith(".ps1") else "rerun with --engine python"
+        assert (python_way in output) == (installed != "rust"), output
         return
     assert proc.returncode == 0, output
     result = next(line for line in output.splitlines() if line.startswith("RESULT:"))
