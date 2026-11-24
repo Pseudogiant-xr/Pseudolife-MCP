@@ -11,6 +11,7 @@ shape, the Console's list totals) are in tests/test_mcp_tool_layer_ux.py.
 
 from __future__ import annotations
 
+import ast
 import base64
 import gzip
 import hashlib
@@ -36,29 +37,89 @@ from rust.daemon.harness.gen_schema_sql import load_schema_plan
 # guide page.
 
 _README = Path(__file__).resolve().parents[1] / "README.md"
-_RUST_DAEMON_CONFIG = _README.parent / "rust" / "daemon" / "src" / "config.rs"
+_DOCS_GUIDE = _README.parent / "docs" / "guide"
+_RUST_DAEMON = _README.parent / "rust" / "daemon" / "src"
+_RUST_STRING = r"\.(?:to_string|to_owned|into)\(\)"
+
+
+def _rust_embedding_default(config: str, provision: str) -> str:
+    """``model_name`` in the Rust daemon's ``impl Default for
+    EmbeddingConfig``, from the text of ``config.rs``: a string literal
+    (``"m".to_string()``, ``.to_owned()``, ``.into()``, ``String::from("m")``)
+    or the ``EMBEDDING_MODEL`` constant, resolved in ``model_provision.rs``'s
+    text. A form it cannot read fails, naming the form."""
+    block = re.search(r"impl Default for EmbeddingConfig \{(.*?)\n\}", config, re.S)
+    assert block, "rust/daemon/src/config.rs has no impl Default for EmbeddingConfig"
+    value = re.search(r"\bmodel_name:\s*([^,\n]+),", block[1])
+    assert value, "EmbeddingConfig::default() sets no model_name"
+    expr = value[1].strip()
+    literal = re.fullmatch(rf'"([^"]+)"{_RUST_STRING}|String::from\("([^"]+)"\)', expr)
+    if literal:
+        return literal[1] or literal[2]
+    if re.fullmatch(rf"(?:[\w:]+::)?EMBEDDING_MODEL{_RUST_STRING}"
+                    r"|String::from\((?:[\w:]+::)?EMBEDDING_MODEL\)", expr):
+        pinned = re.search(r'^pub const EMBEDDING_MODEL: &str = "([^"]+)";', provision, re.M)
+        assert pinned, "rust/daemon/src/model_provision.rs defines no EMBEDDING_MODEL literal"
+        return pinned[1]
+    raise AssertionError(
+        f"EmbeddingConfig::default() sets model_name to {expr!r}, a form this guard "
+        f"cannot read; teach _rust_embedding_default in tests/test_release_ux.py the form")
 
 
 def _default_embedding_model() -> str:
-    """The daemon's default embedding model: ``model_name`` in the Rust
-    daemon's ``impl Default for EmbeddingConfig``. Both daemons default to
-    it (the bridge test below pins the frozen package's copy)."""
-    source = _RUST_DAEMON_CONFIG.read_text(encoding="utf-8")
-    block = re.search(r"impl Default for EmbeddingConfig \{(.*?)\n\}", source, re.S)
-    assert block, "rust/daemon/src/config.rs has no impl Default for EmbeddingConfig"
-    model = re.search(r'model_name: "([^"]+)"\.to_string\(\)', block[1])
-    assert model, "EmbeddingConfig::default() names no literal model_name"
-    return model[1]
+    """The daemon's default embedding model, as the Rust daemon sets it. Both
+    daemons default to it (the bridge test below pins the frozen package's
+    copy while the Python image still ships)."""
+    return _rust_embedding_default(
+        (_RUST_DAEMON / "config.rs").read_text(encoding="utf-8"),
+        (_RUST_DAEMON / "model_provision.rs").read_text(encoding="utf-8"))
+
+
+def _embedding_config(expr: str) -> str:
+    return ("impl Default for EmbeddingConfig {\n    fn default() -> Self {\n"
+            "        EmbeddingConfig {\n"
+            f"            model_name: {expr},\n"
+            '            device: "cuda".to_string(),\n'
+            "        }\n    }\n}\n")
+
+
+_PROVISION = 'pub const EMBEDDING_MODEL: &str = "org/constant-model";\n'
+
+
+@pytest.mark.parametrize("expr,want", [
+    ('"org/literal-model".to_string()', "org/literal-model"),
+    ('"org/literal-model".to_owned()', "org/literal-model"),
+    ('"org/literal-model".into()', "org/literal-model"),
+    ('String::from("org/literal-model")', "org/literal-model"),
+    ("crate::model_provision::EMBEDDING_MODEL.to_string()", "org/constant-model"),
+    ("EMBEDDING_MODEL.into()", "org/constant-model"),
+    ("String::from(model_provision::EMBEDDING_MODEL)", "org/constant-model"),
+])
+def test_the_default_model_reader_takes_each_way_rust_writes_it(expr, want) -> None:
+    """A tidy-up of how the Rust default is written must not turn the image
+    guards red while the model is unchanged."""
+    assert _rust_embedding_default(_embedding_config(expr), _PROVISION) == want
+
+
+def test_the_default_model_reader_names_a_form_it_cannot_read() -> None:
+    with pytest.raises(AssertionError, match="cannot read") as refused:
+        _rust_embedding_default(_embedding_config("default_model()"), _PROVISION)
+    assert "default_model()" in str(refused.value)
 
 
 def test_temporary_frozen_package_default_embedding_model_is_the_rust_default() -> None:
     """Migration bridge only: DELETE this test when the package is retired.
     The Python daemon image still ships, so its default must stay the one
-    the guards below read from the Rust daemon."""
+    the guards below read from the Rust daemon. Skipped when the package is
+    not installed; a package that is installed but broken still fails."""
+    from importlib.util import find_spec
+
+    package = find_spec("pseudolife_memory")
+    if package is None or package.origin is None:
+        pytest.skip("the frozen package is not installed: no Python default to compare")
     from pseudolife_memory.utils.config import EmbeddingConfig
 
     assert EmbeddingConfig().model_name == _default_embedding_model()
-_DOCS_GUIDE = _README.parent / "docs" / "guide"
 
 
 def _guide_pages() -> list[Path]:
@@ -125,18 +186,9 @@ def test_dockerfile_bakes_the_default_embedding_model() -> None:
     Matching the name against the Dockerfile text would pass on the prose
     comment that names the model, which downloads nothing — check the
     script's model list and the Dockerfile's invocation of it instead."""
-    import importlib.util
-
     ops = Path(__file__).resolve().parents[1] / "ops"
-    spec = importlib.util.spec_from_file_location(
-        "provision_embedding_models", ops / "provision_embedding_models.py",
-    )
-    assert spec is not None and spec.loader is not None
-    provisioner = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(provisioner)
-
     default_model = _default_embedding_model()
-    provisioned = {provisioner.QWEN_MODEL, provisioner.MINILM_MODEL}
+    provisioned = _provisioned_models(ops / "provision_embedding_models.py")
     assert default_model in provisioned, (
         f"ops/provision_embedding_models.py does not provision the default "
         f"embedding model ({default_model!r}, provisions {sorted(provisioned)}) "
@@ -146,6 +198,23 @@ def test_dockerfile_bakes_the_default_embedding_model() -> None:
     assert "python /app/provision_embedding_models.py" in dockerfile, (
         "ops/Dockerfile.daemon does not run the provisioner, so nothing "
         "downloads the models the guard above just checked")
+
+
+def _provisioned_models(script: Path) -> set[str]:
+    """The provisioner's ``QWEN_MODEL`` and ``MINILM_MODEL``, read as the
+    literals they are: running the script imports the frozen package."""
+    found = {}
+    for node in ast.parse(script.read_text(encoding="utf-8")).body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id in {"QWEN_MODEL", "MINILM_MODEL"}):
+            assert isinstance(node.value, ast.Constant) and isinstance(node.value.value, str), (
+                f"{script.name}: {node.targets[0].id} is no longer a string literal; "
+                "read it another way in tests/test_release_ux.py")
+            found[node.targets[0].id] = node.value.value
+    assert set(found) == {"QWEN_MODEL", "MINILM_MODEL"}, (
+        f"{script.name} no longer defines QWEN_MODEL and MINILM_MODEL: {sorted(found)}")
+    return set(found.values())
 
 
 def test_ci_warms_the_default_embedding_model() -> None:
@@ -722,6 +791,17 @@ def test_every_release_tag_has_a_changelog_section() -> None:
         f"— a later edit likely overwrote the header line")
 
 
+def test_the_core_tier_can_close_its_own_loops() -> None:
+    """``memory_fact_get`` (core) surfaces ``source_entries`` ids, so
+    ``memory_get`` must be core to dereference them; the recommended workflow
+    names the session early, so ``memory_session_title`` must be core. Read
+    from the Rust daemon's catalogue (the frozen package's own check is in
+    tests/test_mcp_tool_layer_ux.py)."""
+    tiers = json.loads((_RUST_DAEMON / "mcp" / "tiers.json").read_text(encoding="utf-8"))
+    for tool in ("memory_fact_get", "memory_get", "memory_session_title"):
+        assert tiers[tool] in {"minimal", "core"}, f"{tool} is {tiers[tool]}, not core"
+
+
 def test_docs_tool_tier_counts_match_code() -> None:
     """Every prose site stating the per-tier tool counts must match the
     registered surface. The three literals went stale silently when the
@@ -729,8 +809,7 @@ def test_docs_tool_tier_counts_match_code() -> None:
     code side was pinned — this closes the doc side of the class. The code
     side is the Rust daemon's catalogue, rust/daemon/src/mcp/tiers.json
     (each tool's lowest tier)."""
-    tiers = json.loads((_README.parent / "rust" / "daemon" / "src" / "mcp" / "tiers.json")
-                       .read_text(encoding="utf-8"))
+    tiers = json.loads((_RUST_DAEMON / "mcp" / "tiers.json").read_text(encoding="utf-8"))
     ranks = {"minimal": 0, "core": 1, "full": 2}
     counts = {
         tier: sum(1 for t in tiers.values() if ranks[t] <= ranks[tier])

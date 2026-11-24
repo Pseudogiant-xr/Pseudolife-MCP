@@ -386,7 +386,7 @@ frozen test_maintainer_webauthn.py
 live test_mcp_client_neutrality.py
 frozen test_mcp_defaults_overlay.py
 frozen test_mcp_refusal_notes.py
-live test_mcp_server.py
+frozen test_mcp_server.py
 live test_mcp_stdio_errlog.py
 frozen test_mcp_string_arguments.py
 frozen test_mcp_tool_layer_ux.py
