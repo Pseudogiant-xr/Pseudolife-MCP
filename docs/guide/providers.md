@@ -466,7 +466,7 @@ when an older installation has the same version number. This keeps the shim's
 credential handling aligned with the daemon built from that checkout. The
 Codex setup helpers can run before package installation; no `PYTHONPATH`
 setting or preinstalled Pseudolife package is required.
-With `PSEUDOLIFE_SHIM_ENGINE=native` the installer instead runs the Codex
+With the native client (the installers' default) the installer instead runs the Codex
 setup as steps of the native client it has just downloaded and verified
 (`pseudolife-mcp installer codex-credentials`, `codex-hooks`,
 `codex-runtime-defaults`), with no Python involved.

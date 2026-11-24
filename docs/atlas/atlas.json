@@ -1165,7 +1165,7 @@
    "s": "one-shot idempotent installer",
    "p": "ops/",
    "d": [
-    "The installers default to the Python client. With PSEUDOLIFE_SHIM_ENGINE=native, the installer verifies the release archive and runs setup without host Python. The client choice is separate from the Docker daemon engine.",
+    "The installers default to the native client: they verify the release archive and run setup without host Python, falling back to the Python client where the native one cannot serve the machine. PSEUDOLIFE_SHIM_ENGINE=python installs the Python client and is remembered. The client choice is separate from the Docker daemon engine.",
     "providers (multi-select + capability matrix) → preflight → extractor mode",
     "volumes → managed .env → Compose startup → hooks → MCP registration. Native reruns skip Compose for an unchanged stack, use up --no-build to start existing images, and use up --build when the checkout or images changed.",
     "Providers: claude / claude-desktop / codex / gemini / generic; per-provider writer ids",

@@ -412,7 +412,11 @@ function Stop-NativeInstall([string]$Cause, [string]$Fix) {
                 $script:nativeSums -and (Test-Path -LiteralPath $script:nativeSums)) { $kept = "SHA256SUMS" }
         $left = " Nothing else was changed: $kept in $($script:nativeDownloads) is kept for a rerun (delete it to free the space)."
     }
-    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix$left")
+    $pythonRoute = ""
+    if ($global:PseudolifeClientDefaulted -eq $true) {
+        $pythonRoute = " To install the Python client instead, rerun after `$env:PSEUDOLIFE_SHIM_ENGINE = 'python'."
+    }
+    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix$left$pythonRoute")
     exit 1
 }
 function Stop-NativeOrFallBack([string]$Cause, [string]$Fix) {
@@ -421,9 +425,17 @@ function Stop-NativeOrFallBack([string]$Cause, [string]$Fix) {
     # reads and it carries on with the Python client. An explicit
     # PSEUDOLIFE_SHIM_ENGINE=native, or a step after the first host change,
     # refuses as before.
-    if (($global:PseudolifeClientDefaulted -eq $true) -and -not $script:nativeHostChanging) {
+    # Never where the native client is installed already: a rerun must not
+    # swap a working native client for the Python one.
+    if (($global:PseudolifeClientDefaulted -eq $true) -and -not $script:nativeHostChanging -and
+            -not (Get-NativeInstalledLauncher)) {
         Remove-NativeStage
-        $global:PseudolifeClientFallback = "the native client cannot serve this machine ($Cause), so this install uses the Python client; `$env:PSEUDOLIFE_SHIM_ENGINE = 'native' makes this a refusal, and `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' chooses the Python client for later runs too"
+        $kept = ""
+        if ($script:nativeDownloads -and (Test-Path -LiteralPath $script:nativeDownloads) -and
+                @(Get-ChildItem -LiteralPath $script:nativeDownloads -Force -ErrorAction SilentlyContinue).Count) {
+            $kept = "; what it downloaded stays in $($script:nativeDownloads) for a later run"
+        }
+        $global:PseudolifeClientFallback = "the native client cannot serve this machine ($Cause), so this install uses the Python client$kept; `$env:PSEUDOLIFE_SHIM_ENGINE = 'native' makes this a refusal, and `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' chooses the Python client for later runs too"
         exit 0
     }
     Stop-NativeInstall $Cause $Fix
@@ -490,6 +502,11 @@ function Initialize-NativeClient {
     $script:nativeSums = Join-Path $downloads "SHA256SUMS"
     $script:nativeArchive = Join-Path $downloads $name
     $sumsFetch = Get-NativeAsset $base "SHA256SUMS" $script:nativeSums
+    if (($sumsFetch -eq "missing") -and -not $env:PSEUDOLIFE_NATIVE_ARCHIVE_URL) {
+        # This checkout's release is not published yet (a version cut before
+        # its assets), or predates the native client.
+        Stop-NativeOrFallBack "release v$($script:nativeVersion) has no SHA256SUMS at $base (it is not published yet, or predates the native client)" "Update this checkout to a published release (git pull, or git checkout of a newer tag) and rerun."
+    }
     if ($sumsFetch -eq "missing") {
         Stop-NativeInstall "release v$($script:nativeVersion) has no SHA256SUMS at $base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
     } elseif ($sumsFetch -ne "ok") {
@@ -502,6 +519,9 @@ function Initialize-NativeClient {
     # (binary mode, as sha256sum writes under Git Bash); nothing looser.
     $pattern = '^[0-9a-f]{64} [ *]' + [regex]::Escape($name) + '$'
     $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
+    if ($lines.Count -eq 0) {
+        Stop-NativeOrFallBack "release v$($script:nativeVersion) publishes no native client for $target (its SHA256SUMS lists no $name)" "Run this installer on a platform the release carries, or set `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' for the Python client."
+    }
     if ($lines.Count -ne 1) {
         Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name $($lines.Count) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
     }
@@ -661,7 +681,8 @@ function Install-NativeClient {
     $script:nativeInstalledAt = $launcher
     # An explicit native choice ends a recorded Python one (ops\install.ps1,
     # client engine): a defaulted run never gets here with that record.
-    $engineRecord = Join-Path (Join-Path $HOME '.pseudolife-mcp') 'client-engine'
+    $engineHome = if ($IsWindows -and $env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+    $engineRecord = Join-Path (Join-Path $engineHome '.pseudolife-mcp') 'client-engine'
     if (Test-Path -LiteralPath $engineRecord -PathType Leaf) {
         try {
             Remove-Item -LiteralPath $engineRecord -Force

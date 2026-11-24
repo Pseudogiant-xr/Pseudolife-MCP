@@ -150,6 +150,8 @@
 # openai-* modes.
 # <<< usage <<<
 set -euo pipefail
+# The arguments as given, for a hand-back to ops/install.sh (native_fallback).
+NATIVE_ORIGINAL_ARGS=("$@")
 
 EXTRACTOR=""
 EXTRACTOR_URL=""
@@ -506,7 +508,9 @@ native_download() {  # $1 = asset name, $2 = destination file
 native_fetch_refuse() {  # $1 = what was fetched (SHA256SUMS or the archive name), $2 = native_download's status
     case "$2" in
         2)
-            if [ "$1" = SHA256SUMS ]; then
+            if [ "$1" = SHA256SUMS ] && [ -z "${PSEUDOLIFE_NATIVE_ARCHIVE_URL:-}" ]; then
+                native_fallback "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (it is not published yet, or predates the native client)" "Update this checkout to a published release (git pull, or git checkout of a newer tag) and rerun."
+            elif [ "$1" = SHA256SUMS ]; then
                 native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
             fi
             native_refuse "release v$NATIVE_VERSION has no $1 at $native_base, although its SHA256SUMS lists it" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
@@ -613,21 +617,33 @@ native_refuse() {  # $1 = cause, $2 = fix
         fi
         native_left=" Nothing else was changed: $native_kept in $native_dir is kept for a rerun (delete it to free the space)."
     fi
-    echo "The native pseudolife-mcp client cannot be installed: $1. $2$native_left" >&2
+    native_python_route=""
+    if [ "${PSEUDOLIFE_INSTALLER_DEFAULTED:-}" = 1 ]; then
+        native_python_route=" To install the Python client instead, rerun with PSEUDOLIFE_SHIM_ENGINE=python."
+    fi
+    echo "The native pseudolife-mcp client cannot be installed: $1. $2$native_left$native_python_route" >&2
     exit 1
 }
 native_fallback() {  # $1 = cause, $2 = fix: a refusal, unless the native client was the default
-    # ops/install.sh chose the native client by default and made the file
-    # PSEUDOLIFE_INSTALLER_FALLBACK_FILE names: before anything on the host
-    # changed, the line for it goes there and ops/install.sh carries on with
-    # the Python client. An explicit PSEUDOLIFE_SHIM_ENGINE=native, or a
-    # step after the first host change, refuses as before.
-    if [ -n "${PSEUDOLIFE_INSTALLER_FALLBACK_FILE:-}" ] && [ -f "$PSEUDOLIFE_INSTALLER_FALLBACK_FILE" ] && [ -z "$NATIVE_HOST_CHANGING" ]; then
-        if printf '%s\n' "the native client cannot serve this machine ($1), so this install uses the Python client; PSEUDOLIFE_SHIM_ENGINE=native makes this a refusal, and PSEUDOLIFE_SHIM_ENGINE=python chooses the Python client for later runs too" >"$PSEUDOLIFE_INSTALLER_FALLBACK_FILE"; then
-            native_unstage
-            trap - EXIT
-            exit 0
+    # ops/install.sh chose the native client by default
+    # (PSEUDOLIFE_INSTALLER_DEFAULTED=1): before anything on the host
+    # changed, and unless the native client is installed here already (a
+    # rerun must not swap a working native client for the Python one), this
+    # run becomes ops/install.sh with the Python client, its arguments and
+    # this line. An explicit PSEUDOLIFE_SHIM_ENGINE=native, or a step after
+    # the first host change, refuses as before.
+    if [ "${PSEUDOLIFE_INSTALLER_DEFAULTED:-}" = 1 ] && [ -z "$NATIVE_HOST_CHANGING" ] && [ -z "$(native_installed_launcher)" ] \
+            && [ -f "$repo/ops/install.sh" ]; then
+        native_unstage
+        trap - EXIT
+        native_kept_note=""
+        if [ -n "${native_dir:-}" ] && [ -d "$native_dir" ] && [ -n "$(ls -A "$native_dir" 2>/dev/null)" ]; then
+            native_kept_note="; what it downloaded stays in $native_dir for a later run"
         fi
+        unset PSEUDOLIFE_INSTALLER_DEFAULTED
+        PSEUDOLIFE_SHIM_ENGINE=python \
+        PSEUDOLIFE_INSTALLER_FALLBACK="the native client cannot serve this machine ($1), so this install uses the Python client$native_kept_note; PSEUDOLIFE_SHIM_ENGINE=native makes this a refusal, and PSEUDOLIFE_SHIM_ENGINE=python chooses the Python client for later runs too" \
+            exec bash "$repo/ops/install.sh" ${NATIVE_ORIGINAL_ARGS[@]+"${NATIVE_ORIGINAL_ARGS[@]}"}
     fi
     native_refuse "$1" "$2"
 }
@@ -680,6 +696,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     done)" || native_expected=""
     case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
         1) ;;
+        0) native_fallback "release v$NATIVE_VERSION publishes no native client for $NATIVE_TARGET (its SHA256SUMS lists no $native_name)" "Run this installer on a platform the release carries, or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client." ;;
         *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
     esac
     if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then
@@ -810,7 +827,12 @@ native_install() {
     NATIVE_INSTALLED_AT="$SHIM_PATH"
     # An explicit native choice ends a recorded Python one (ops/install.sh,
     # client engine): a defaulted run never gets here with that record.
-    native_engine_record="$HOME/.pseudolife-mcp/client-engine"
+    # The same home ops/install.sh reads it in (USERPROFILE under Git Bash).
+    native_engine_home="$HOME"
+    if [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
+        native_engine_home="$(cygpath -u "$USERPROFILE" 2>/dev/null || printf '%s' "$HOME")"
+    fi
+    native_engine_record="$native_engine_home/.pseudolife-mcp/client-engine"
     if [ -f "$native_engine_record" ]; then
         if rm -f "$native_engine_record"; then
             echo "  The recorded Python client choice ($native_engine_record) is removed: later installer runs and updates keep the native client."

@@ -68,12 +68,8 @@ def _env(tmp_path: Path, engine: str | None) -> dict[str, str]:
 
 
 SH_STUB = ('#!/usr/bin/env bash\nprintf "%s\\n" "$@" >"$NATIVE_ARGS"\n'
-           # Says whether the wrapper handed it a file to hand back through,
-           # and hands back when the test asks it to.
-           '[ -z "${PSEUDOLIFE_INSTALLER_FALLBACK_FILE:-}" ] || '
-           '{ [ -f "$PSEUDOLIFE_INSTALLER_FALLBACK_FILE" ] && echo file >"$NATIVE_ARGS.handback"; }\n'
-           'if [ -n "${STUB_HAND_BACK:-}" ]; then printf "%s\\n" "$STUB_HAND_BACK" >"$PSEUDOLIFE_INSTALLER_FALLBACK_FILE"; '
-           'exit 0; fi\n'
+           # Says whether the wrapper marked the run as defaulted.
+           'printf "%s\\n" "${PSEUDOLIFE_INSTALLER_DEFAULTED-unset}" >"$NATIVE_ARGS.defaulted"\n'
            'exit 7\n')
 
 
@@ -128,23 +124,21 @@ def test_sh_python_runs_the_python_installer(tmp_path):
 
 
 @pytest.mark.parametrize("engine", [None, ""])
-def test_sh_default_runs_the_native_installer_with_a_hand_back_file(tmp_path, engine):
-    scratch = tmp_path / "tmp"
-    scratch.mkdir()
-    proc = _sh(tmp_path, engine, "--client-only", "--daemon-url", "http://pl.example.invalid:8765", "--yes",
-               extra={"TMPDIR": _bash_path(scratch)})
-    # Its own exit is the run's, and the Python installer never starts.
+def test_sh_default_runs_the_native_installer_marked_as_defaulted(tmp_path, engine):
+    proc = _sh(tmp_path, engine, "--client-only", "--daemon-url", "http://pl.example.invalid:8765", "--yes")
+    # It replaces the wrapper (exec), so its exit is the run's and the
+    # Python installer never starts.
     assert proc.returncode == 7, proc.stdout + proc.stderr
     assert _native_args(tmp_path) == ["--client-only", "--daemon-url", "http://pl.example.invalid:8765", "--yes"]
-    assert (tmp_path / "native-args.handback").read_text(encoding="utf-8").strip() == "file"
+    assert (tmp_path / "native-args.defaulted").read_text(encoding="utf-8").strip() == "1"
     assert "==>" not in proc.stdout
-    assert not list(scratch.iterdir()), "the hand-back file is removed"
 
 
-def test_sh_explicit_native_gets_no_hand_back_file(tmp_path):
-    proc = _sh(tmp_path, "native", "--yes")
+def test_sh_explicit_native_is_never_marked_as_defaulted(tmp_path):
+    # Not even when the caller's environment carries the mark.
+    proc = _sh(tmp_path, "native", "--yes", extra={"PSEUDOLIFE_INSTALLER_DEFAULTED": "1"})
     assert proc.returncode == 7, proc.stdout + proc.stderr
-    assert not (tmp_path / "native-args.handback").exists()
+    assert (tmp_path / "native-args.defaulted").read_text(encoding="utf-8").strip() == ""
 
 
 HAND_BACK = ("the native client cannot serve this machine (no native client is published for this platform), so "
@@ -152,13 +146,49 @@ HAND_BACK = ("the native client cannot serve this machine (no native client is p
              "PSEUDOLIFE_SHIM_ENGINE=python chooses the Python client for later runs too")
 
 
-def test_sh_a_hand_back_carries_on_with_the_python_installer_and_records_nothing(tmp_path):
-    proc = _sh(tmp_path, None, "--help", extra={"STUB_HAND_BACK": HAND_BACK})
+def test_sh_a_hand_back_runs_the_python_installer_and_says_its_line(tmp_path):
+    # What the native installer's hand-back execs: this script with =python.
+    proc = _sh(tmp_path, "python", "--help", extra={"PSEUDOLIFE_INSTALLER_FALLBACK": HAND_BACK})
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert _native_args(tmp_path) == ["--help"]
+    assert _native_args(tmp_path) is None
     assert f"==> {HAND_BACK}" in proc.stdout.splitlines()
     assert "--client-only" in proc.stdout, "the Python installer's usage"
-    assert not (tmp_path / "home" / ".pseudolife-mcp" / "client-engine").exists()
+
+
+def _engine_block_then_record(tmp_path: Path, engine: str | None, extra: dict[str, str]) -> subprocess.CompletedProcess:
+    # The real client engine block, then the record step the install's end
+    # runs: which runs record a Python choice.
+    if BASH is None:
+        pytest.skip("needs bash")
+    text = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    head = text.split("# <<< client engine <<<", 1)[0]
+    script = tmp_path / "engine.sh"
+    script.write_text(head + "\nrecord_client_engine\necho END\n", encoding="utf-8", newline="\n")
+    env = dict(_env(tmp_path, engine), **extra)
+    return subprocess.run([BASH, _bash_path(script), "--yes"], env=env, capture_output=True, text=True, timeout=120,
+                          check=False, stdin=subprocess.DEVNULL)
+
+
+@pytest.mark.parametrize("case, engine, extra, recorded", [
+    ("explicit-python", "python", {}, True),
+    ("hand-back", "python", {"PSEUDOLIFE_INSTALLER_FALLBACK": HAND_BACK}, False),
+])
+def test_sh_only_an_explicit_python_choice_is_recorded(tmp_path, case, engine, extra, recorded):
+    proc = _engine_block_then_record(tmp_path, engine, extra)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "END" in proc.stdout
+    record = tmp_path / "home" / ".pseudolife-mcp" / "client-engine"
+    assert record.exists() is recorded
+    if recorded:
+        assert record.read_text(encoding="utf-8") == "python\n"
+
+
+def test_sh_a_recorded_choice_is_kept_and_not_rewritten(tmp_path):
+    record = _record(tmp_path, "python\r\n")
+    proc = _engine_block_then_record(tmp_path, None, {})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "records an earlier" in proc.stdout and "Python client chosen" not in proc.stdout
+    assert record.read_bytes() == b"python\r\n"
 
 
 def _record(tmp_path: Path, text: str) -> Path:
@@ -178,8 +208,19 @@ def test_sh_a_recorded_python_choice_is_honoured_without_the_variable(tmp_path):
     assert line.startswith("Python client install: ") and "PSEUDOLIFE_SHIM_ENGINE=native" in line
 
 
-@pytest.mark.parametrize("text", ["native\n", "", "Python\n", "python python\n"])
+@pytest.mark.parametrize("text", ["python\r\n", "  python \n", "\npython\n", "python"])
+def test_sh_a_record_reads_as_python_and_strip_read_it(tmp_path, text):
+    # The same reading as the update bridge (str.strip()) and install.ps1.
+    assert text.strip() == "python"
+    _record(tmp_path, text)
+    proc = _sh(tmp_path, None, "--help")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) is None
+
+
+@pytest.mark.parametrize("text", ["native\n", "", "Python\n", "python python\n", "py thon\n", "python\npython\n"])
 def test_sh_a_record_that_does_not_say_exactly_python_is_no_choice(tmp_path, text):
+    assert text.strip() != "python"
     _record(tmp_path, text)
     proc = _sh(tmp_path, None, "--yes")
     assert proc.returncode == 7, proc.stdout + proc.stderr
@@ -277,6 +318,14 @@ def test_ps_default_and_native_run_the_native_installer(tmp_path, engine, defaul
     proc = _ps(tmp_path, engine, "-ClientOnly", "-NoArt", ending=PS_LOG_DEFAULTED + "exit 7\n")
     assert proc.returncode == 7, proc.stdout + proc.stderr
     assert _native_args(tmp_path) == ["started", "ClientOnly=True", "NoArt=True", f"defaulted={defaulted}"]
+
+
+@pytest.mark.parametrize("text", ["python\r\n", "  python \n", "\npython\n"])
+def test_ps_a_record_reads_as_python_and_strip_read_it(tmp_path, text):
+    _record(tmp_path, text)
+    proc = _ps(tmp_path, None, "-ClientOnly", "-NoArt")
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) is None
 
 
 def test_ps_a_hand_back_carries_on_with_the_python_installer_and_records_nothing(tmp_path):

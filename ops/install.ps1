@@ -179,7 +179,10 @@ param(
 #   start by itself): before anything changed it sets
 #   $global:PseudolifeClientFallback to that line and returns, and this script
 #   carries on below with the Python client.
-$clientEngineRecord = Join-Path (Join-Path $HOME ".pseudolife-mcp") "client-engine"
+# The record lives in the home Python's Path.home() names too (USERPROFILE on
+# Windows), and says python when its text, trimmed, is exactly that.
+$clientEngineHome = if ($IsWindows -and $env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$clientEngineRecord = Join-Path (Join-Path $clientEngineHome ".pseudolife-mcp") "client-engine"
 $script:recordPythonChoice = $false
 function Save-ClientEngineChoice {
     # An explicit PSEUDOLIFE_SHIM_ENGINE=python install is remembered at its end.

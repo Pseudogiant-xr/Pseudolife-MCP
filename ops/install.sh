@@ -157,18 +157,33 @@ set -euo pipefail
 #   script), and the choice is recorded in ~/.pseudolife-mcp/client-engine,
 #   which later reruns and updates honour until an explicit native choice.
 # - Unset: the Python client when that record says so, else the native
-#   client by default. The native installer then falls back to the Python
-#   client, with one line saying why, when the native client cannot serve
-#   this machine (no client for the platform, one that does not run here,
-#   a checkout whose release predates this installer, a tunnel the Python
-#   client registered to start by itself): it writes that line to the file
-#   PSEUDOLIFE_INSTALLER_FALLBACK_FILE names, which this script made, before
-#   anything changed, and this script carries on below with the Python client.
-CLIENT_ENGINE_RECORD="$HOME/.pseudolife-mcp/client-engine"
+#   client by default (PSEUDOLIFE_INSTALLER_DEFAULTED=1 tells the native
+#   installer so). When the native client cannot serve this machine (no
+#   client for the platform or its release, one that does not run here, a
+#   checkout whose release predates this installer, a tunnel the Python
+#   client registered to start by itself) and it is not installed already,
+#   the native installer, before anything on the host changed, runs this
+#   script again with PSEUDOLIFE_SHIM_ENGINE=python and its one line in
+#   PSEUDOLIFE_INSTALLER_FALLBACK, which is printed and records nothing.
+# The record lives in the home Python's Path.home() names too (on Windows
+# USERPROFILE, which Git Bash's HOME need not be), and says python when its
+# text, white space trimmed at both ends, is exactly that (as Python's
+# str.strip() and PowerShell's Trim() read it).
+client_engine_home="$HOME"
+if [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
+    client_engine_home="$(cygpath -u "$USERPROFILE" 2>/dev/null || printf '%s' "$HOME")"
+fi
+CLIENT_ENGINE_RECORD="$client_engine_home/.pseudolife-mcp/client-engine"
 RECORD_PYTHON_CHOICE=""
+recorded_client_engine() {  # the record's text trimmed at both ends, or nothing
+    [ -f "$CLIENT_ENGINE_RECORD" ] || return 0
+    # Leading blank lines go, each line loses its outer blanks (a CR too),
+    # and the command substitution drops the trailing newlines.
+    sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$CLIENT_ENGINE_RECORD" 2>/dev/null | sed -e '/./,$!d' || true
+}
 record_client_engine() {  # an explicit PSEUDOLIFE_SHIM_ENGINE=python install is remembered at its end
     [ -n "$RECORD_PYTHON_CHOICE" ] || return 0
-    [ "$(cat "$CLIENT_ENGINE_RECORD" 2>/dev/null)" != python ] || return 0
+    [ "$(recorded_client_engine)" != python ] || return 0
     if mkdir -p "$(dirname "$CLIENT_ENGINE_RECORD")" 2>/dev/null && printf 'python\n' >"$CLIENT_ENGINE_RECORD" 2>/dev/null; then
         echo "Python client chosen: recorded in $CLIENT_ENGINE_RECORD, so later installer runs and pseudolife-mcp update keep the Python client until you set PSEUDOLIFE_SHIM_ENGINE=native."
     else
@@ -176,14 +191,17 @@ record_client_engine() {  # an explicit PSEUDOLIFE_SHIM_ENGINE=python install is
     fi
 }
 client_engine="${PSEUDOLIFE_SHIM_ENGINE:-}"
-if [ -z "$client_engine" ] && [ -f "$CLIENT_ENGINE_RECORD" ] && [ "$(cat "$CLIENT_ENGINE_RECORD" 2>/dev/null)" = python ]; then
+if [ -z "$client_engine" ] && [ "$(recorded_client_engine)" = python ]; then
     echo "Python client install: $CLIENT_ENGINE_RECORD records an earlier PSEUDOLIFE_SHIM_ENGINE=python install; set PSEUDOLIFE_SHIM_ENGINE=native to move this machine to the native client."
     client_engine=python
-elif [ "$client_engine" = python ]; then
+elif [ "$client_engine" = python ] && [ -z "${PSEUDOLIFE_INSTALLER_FALLBACK:-}" ]; then
     RECORD_PYTHON_CHOICE=1
 fi
 case "$client_engine" in
-    python) ;;
+    python)
+        # The native installer's hand-back: its line, and nothing recorded.
+        [ -z "${PSEUDOLIFE_INSTALLER_FALLBACK:-}" ] || echo "==> $PSEUDOLIFE_INSTALLER_FALLBACK"
+        unset PSEUDOLIFE_INSTALLER_FALLBACK ;;
     ""|native)
         native_installer="$(cd "$(dirname "$0")" && pwd)/install-native.sh"
         if [ ! -f "$native_installer" ]; then
@@ -191,19 +209,9 @@ case "$client_engine" in
             exit 1
         fi
         if [ "$client_engine" = native ]; then
-            exec bash "$native_installer" "$@"
+            PSEUDOLIFE_INSTALLER_DEFAULTED="" exec bash "$native_installer" "$@"
         fi
-        native_fallback_file="$(mktemp "${TMPDIR:-/tmp}/pseudolife-client-engine.XXXXXX")" || {
-            echo "No temporary file could be made in ${TMPDIR:-/tmp} for the client choice: free space there and rerun. Nothing was changed." >&2
-            exit 1
-        }
-        native_status=0
-        PSEUDOLIFE_INSTALLER_FALLBACK_FILE="$native_fallback_file" bash "$native_installer" "$@" || native_status=$?
-        native_fallback="$(cat "$native_fallback_file" 2>/dev/null || true)"
-        rm -f "$native_fallback_file"
-        [ -n "$native_fallback" ] || exit "$native_status"
-        echo "==> $native_fallback"
-        ;;
+        PSEUDOLIFE_INSTALLER_DEFAULTED=1 exec bash "$native_installer" "$@" ;;
     *)
         echo "PSEUDOLIFE_SHIM_ENGINE=${PSEUDOLIFE_SHIM_ENGINE} is not a client this installer installs: use native (the native client, the default) or python (the Python client), or unset it. Nothing was changed." >&2
         exit 2 ;;

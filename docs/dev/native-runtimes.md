@@ -261,20 +261,30 @@ old client left on disk. A rerun that changes nothing prints one line.
 and with `PSEUDOLIFE_SHIM_ENGINE=native`. `PSEUDOLIFE_SHIM_ENGINE=python`
 installs the Python client, which also brings a native machine back, and
 records the choice as `python` in `~/.pseudolife-mcp/client-engine` once
-the install has run to its end. A later run without the variable honours
-that file when it says exactly `python`, and a native install removes it.
-Any other value of the variable is refused before anything changes.
+the install has run to its end (on Windows under `USERPROFILE`, where
+Python's `Path.home()` looks too). A later run without the variable honours
+that file when its text, trimmed at both ends, is exactly `python`, and a
+native install removes it. Any other value of the variable is refused
+before anything changes.
 
-A defaulted run gives the native installer a hand-back channel the wrapper
-made: in bash a file named by `PSEUDOLIFE_INSTALLER_FALLBACK_FILE`, in
-PowerShell the global `PseudolifeClientFallback` (cleared again with
-`PseudolifeClientDefaulted` after the run). When the native client cannot
-serve the machine, the native installer writes its one-line reason there
-before anything on the host changes, and the wrapper carries on with the
-Python client. Four causes qualify: no target for the platform, a client
-that does not run there, a release older than the installer's protocol, and
-the tunnel check's exit 3. Each refuses as before under an explicit
-`=native`, or after the first host change.
+A defaulted run tells the native installer so: bash runs it with
+`PSEUDOLIFE_INSTALLER_DEFAULTED=1` (exactly that value; an explicit
+`=native` clears it), PowerShell sets the global `PseudolifeClientDefaulted`
+and reads the global `PseudolifeClientFallback` back (both cleared after the
+run). When the native client cannot serve the machine, is not installed
+there already, and nothing on the host has changed, the native installer
+hands back. In bash it runs `ops/install.sh` again (`exec`, the same
+process) with `PSEUDOLIFE_SHIM_ENGINE=python`, its original arguments and its
+one-line reason in `PSEUDOLIFE_INSTALLER_FALLBACK`, which the wrapper prints
+and records nothing for. In PowerShell it sets the global and returns, and
+the wrapper carries on with the Python client. These causes qualify: no
+target for the platform, a release whose canonical `SHA256SUMS` is not
+published (404 with no `PSEUDOLIFE_NATIVE_ARCHIVE_URL`) or lists no archive
+for it, a client that does not run there, a release older than the
+installer's protocol, and the tunnel check's exit 3. Each refuses as before
+under an explicit `=native`, on a machine already on the native client, or
+after the first host change; a defaulted run's refusals also name
+`PSEUDOLIFE_SHIM_ENGINE=python`.
 
 For the native client, the wrappers hand their arguments to
 `ops/install-native.sh` / `ops/install-native.ps1`, which install the client

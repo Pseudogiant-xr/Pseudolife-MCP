@@ -86,11 +86,17 @@ The client choice is independent of `--engine`, which selects the Docker
 daemon.
 
 When the native client cannot serve the machine, the installer installs the
-Python client instead and says why in one line. That happens when no client is
-published for the platform, or the client does not run there (an older C
-library, for example), or the checkout's release predates this installer, or
-the Python client registered a tunnel to start by itself.
-`PSEUDOLIFE_SHIM_ENGINE=native` makes each of these a refusal instead.
+Python client instead. It says why in one line before it changes anything,
+and keeps any verified download for a later run. That happens in these cases:
+- no client is published for the platform;
+- the checkout's release is not published yet;
+- the client does not run there (an older C library, for example);
+- the checkout's release predates this installer;
+- the Python client registered a tunnel to start by itself.
+
+`PSEUDOLIFE_SHIM_ENGINE=native` makes each of these a refusal instead, and so
+does a machine already on the native client, which a rerun never swaps for
+the Python one.
 
 To install the Python client on purpose, set `PSEUDOLIFE_SHIM_ENGINE=python`
 for the installer (`$env:PSEUDOLIFE_SHIM_ENGINE = 'python'` in PowerShell).

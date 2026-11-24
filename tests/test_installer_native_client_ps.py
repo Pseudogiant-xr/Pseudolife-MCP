@@ -210,7 +210,8 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
      "with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C "
      "runtime and rerun that tag's installer with its matching archive."),
     (1, "version probe failed\nmore detail", "the downloaded client does not run on this host "
-     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."
+     " Or set $env:PSEUDOLIFE_SHIM_ENGINE = 'python' for the Python client."),
 ])
 def test_windows_version_probe_reports_its_exit_and_keeps_only_the_download(tmp_path, code, output, diagnostic):
     control = tmp_path / "host-control"
@@ -375,8 +376,9 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     assert f"the native client {VERSION} predates this installer" in line
     assert "installer --capability" in line and f"installer-protocol {LEVEL} or newer" in line
-    # The route that works today: the default client, then update moves it.
-    assert "without PSEUDOLIFE_SHIM_ENGINE" in line
+    # The route that works today: the Python client, then update moves it.
+    assert "rerunning the installer after $env:PSEUDOLIFE_SHIM_ENGINE = 'python'" in line
+    assert "without PSEUDOLIFE_SHIM_ENGINE" not in line
     assert "PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only" in line
     assert "release_assets" not in line and "PSEUDOLIFE_NATIVE_ARCHIVE_URL" not in line
     # What a refusal after the download leaves: the verified download only.
@@ -618,11 +620,56 @@ def test_the_probe_deadline_is_read_as_a_decimal_number_of_seconds(tmp_path, val
 
 
 @pytest.mark.skipif(WINDOWS, reason="the v0.24.0 stand-in is a shell script; on Windows the fixture is a real client")
-def test_the_refusal_says_how_to_clear_the_variable_in_powershell(tmp_path):
+def test_the_refusal_says_how_to_set_the_python_client_in_powershell(tmp_path):
     result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env={"STUB_V0240": "1"})
     assert result.returncode == 1
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
-    assert "Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE" in line
+    assert "$env:PSEUDOLIFE_SHIM_ENGINE = 'python'" in line
+    assert "Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE" not in line
+
+
+PS_FALLBACK_CAUSES = [
+    ("platform", "function Get-NativeTarget { $null }\n", {}, "no native client is published for this platform"),
+    ("old-release", "", {"STUB_V0240": "1"}, f"the native client {VERSION} predates this installer"),
+    ("tunnel", "", {"STUB_REFUSE_TUNNEL": "1"}, "a tunnel is registered to start by itself"),
+]
+
+
+@pytest.mark.skipif(WINDOWS, reason="the stand-ins are shell scripts; on Windows the fixture is a real client")
+@pytest.mark.parametrize("case, prefix, env, cause", PS_FALLBACK_CAUSES, ids=[c[0] for c in PS_FALLBACK_CAUSES])
+def test_a_defaulted_powershell_run_hands_back_through_the_global(tmp_path, case, prefix, env, cause):
+    body = (prefix + "$global:PseudolifeClientDefaulted = $true\n"
+            "try { Initialize-NativeClient; Write-Host STAGED } finally {\n"
+            "  Write-Host \"HANDBACK=$($global:PseudolifeClientFallback)\" }\n")
+    result = _run("stub", tmp_path, body, extra_env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert "cannot be installed" not in result.stderr
+    [line] = [text for text in result.stdout.splitlines() if text.startswith("HANDBACK=")]
+    assert line.startswith(f"HANDBACK=the native client cannot serve this machine ({cause}"), line
+    assert line.endswith("chooses the Python client for later runs too"), line
+
+
+@pytest.mark.skipif(WINDOWS, reason="the stand-ins are shell scripts; on Windows the fixture is a real client")
+@pytest.mark.parametrize("defaulted, said", [("$true", True), ("$false", False)])
+def test_a_powershell_refusal_names_the_python_route_only_when_defaulted(tmp_path, defaulted, said):
+    body = (f"$global:PseudolifeClientDefaulted = {defaulted}\n"
+            "Stop-NativeInstall 'a cause' 'A fix.'\n")
+    result = _run("stub", tmp_path, body, release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert line.startswith("The native pseudolife-mcp client cannot be installed: a cause. A fix. Nothing was changed.")
+    assert line.endswith(
+        " To install the Python client instead, rerun after $env:PSEUDOLIFE_SHIM_ENGINE = 'python'.") is said
+
+
+@pytest.mark.skipif(WINDOWS, reason="the stand-ins are shell scripts; on Windows the fixture is a real client")
+def test_a_powershell_hand_back_never_follows_a_host_change(tmp_path):
+    body = ("$global:PseudolifeClientDefaulted = $true\n$script:nativeHostChanging = $true\n"
+            "Stop-NativeOrFallBack 'a cause' 'A fix.'\n")
+    result = _run("stub", tmp_path, body, release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "The install stopped part way: a cause. A fix." in result.stderr
 
 
 def test_a_mismatched_archive_refusal_names_only_what_is_kept(tmp_path):

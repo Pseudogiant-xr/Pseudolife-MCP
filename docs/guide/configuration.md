@@ -3681,12 +3681,14 @@ Those scripts download the native client from the release the checkout
 names, verify it against that release's `SHA256SUMS`, and move each client's
 registration to the native launcher (`docs/dev/native-runtimes.md`,
 "Installers"). When the native client cannot serve the machine, the
-installer installs the Python client described above instead and says why in
-one line. That covers no client for the platform, one that does not run
-there, a checkout whose release predates the installer, and a tunnel the
-Python client registered to start by itself.
+installer installs the Python client described above instead. It says why in
+one line before it changes anything. That covers no client for the platform,
+a checkout whose release is not published yet, one that does not run there,
+a checkout whose release predates the installer, and a tunnel the Python
+client registered to start by itself.
 
-With `PSEUDOLIFE_SHIM_ENGINE=native` each of those is a refusal instead. With
+With `PSEUDOLIFE_SHIM_ENGINE=native` each of those is a refusal instead, as
+it is on a machine already on the native client. With
 `PSEUDOLIFE_SHIM_ENGINE=python` (`$env:PSEUDOLIFE_SHIM_ENGINE = 'python'`
 before `.\ops\install.ps1 ...`) the installer installs the Python client, and
 a machine on the native client returns to it. It records that choice in

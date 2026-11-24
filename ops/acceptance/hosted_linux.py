@@ -56,6 +56,10 @@ BASELINE_MESSAGES = (
     (b"owner-only", "The installer reported an owner-only path requirement. <details redacted>"),
     (b"no native client is published", "The installer reported that no native client was published for the platform."),
     (b"Native client install (PSEUDOLIFE_SHIM_ENGINE=native)", "Native client install selected."),
+    # The banner since the native client became the default (0.26.0), and
+    # the default's hand-back to the Python client.
+    (b"Native client install (the default client;", "Native client install selected."),
+    (b"the native client cannot serve this machine", "The installer fell back to the Python client. <details redacted>"),
     (b"Unattended install:", "Unattended install: no prompts; documented defaults apply."),
     (b"nothing was deployed", "Nothing was deployed. <details redacted>"),
     (b"rollback", "Rollback: <details redacted>"),

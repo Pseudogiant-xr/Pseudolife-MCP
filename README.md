@@ -384,8 +384,9 @@ An `ask` firewall rule or client-update schedule is skipped with the
 finishing command. On Linux, `--firewall-rule yes` authorizes that rule;
 client-only `--client-update-schedule yes|HH:MM` opts into its timer.
 The Console is not opened; the summary prints `pseudolife-mcp console`.
-The Python installer skips guided tunnel setup in unattended mode and prints
-the finishing command. The native installer refuses `--tunnel` / `-Tunnel`
+Guided tunnel setup (`--tunnel` / `-Tunnel`) needs the Python client
+(`PSEUDOLIFE_SHIM_ENGINE=python`), which skips it in unattended mode and prints
+the finishing command; without that setting the installer refuses the switch
 before changing the host. See [native tunnel setup](docs/guide/install-and-move.md#native-client).
 
 Image sizes, the Windows WSL2 memory cap, and what the installer automates:
@@ -616,10 +617,11 @@ flattening YAML loses that context. For a stack manager, use the
 [supported external-stack path](docs/guide/install-and-move.md#running-under-portainer-or-another-stack-manager).
 
 The whole stack — Postgres **and** the memory daemon — runs in Docker.
-The daemon needs no host Python or torch installation. The installer selects
-the Python client by default. Set `PSEUDOLIFE_SHIM_ENGINE=native` to install
-the [native client](docs/guide/install-and-move.md#native-client) without
-host Python. This choice is independent of the daemon engine.
+The daemon needs no host Python or torch installation. The installer installs
+the [native client](docs/guide/install-and-move.md#native-client), which needs
+no host Python either, and falls back to the Python client where the native
+one cannot serve the machine. Set `PSEUDOLIFE_SHIM_ENGINE=python` to install
+the Python client. This choice is independent of the daemon engine.
 A new install normally runs the Rust daemon, a small image (about 0.3 GB,
 measured 2026-11-10) that
 downloads its pinned models once (about 2.4 GB) into their own volume;
