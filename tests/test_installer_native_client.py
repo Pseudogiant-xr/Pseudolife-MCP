@@ -284,11 +284,12 @@ def test_rerun_on_a_native_host_says_nothing_changed(tmp_path):
      "with this archive. To install without the Redistributable, check out a release tag that bundles the Windows C "
      "runtime and rerun that tag's installer with its matching archive."),
     (1, "version probe failed\nmore detail", "the downloaded client does not run on this host "
-     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+     "(exit code 1, version probe failed). Check that nothing (an antivirus or an execution policy) blocks it, and rerun."
+     " Or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client."),
     (53, "", "the downloaded client does not run on this host (exit code 53). "
-     "Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+     "Check that nothing (an antivirus or an execution policy) blocks it, and rerun. Or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client."),
     (29, "direct probe failed", "the downloaded client does not run on this host (exit code 29, direct probe failed). "
-     "Check that nothing (an antivirus or an execution policy) blocks it, and rerun."),
+     "Check that nothing (an antivirus or an execution policy) blocks it, and rerun. Or set PSEUDOLIFE_SHIM_ENGINE=python for the Python client."),
     (124, "", "the downloaded client did not answer version within 30 s. "
      "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."),
 ])
@@ -349,7 +350,7 @@ echo STAGED
 @pytest.mark.parametrize("case, expected", [
     ("mismatch", "does not match the release's SHA256SUMS"),
     ("duplicate", "lists " + ASSET + " 2 times, not once"),
-    ("missing", "lists " + ASSET + " 0 times, not once"),
+    ("missing", f"publishes no native client for {TARGET} (its SHA256SUMS lists no {ASSET})"),
     ("no-release", "has no SHA256SUMS"),
 ])
 def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case, expected):
@@ -401,8 +402,9 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
     # The true cause and the one fix: which release, from which checkout.
     assert f"the native client {VERSION} predates this installer" in line
     assert "installer --capability" in line and f"installer-protocol {LEVEL} or newer" in line
-    # The route that works today: the default client, then update moves it.
-    assert "without PSEUDOLIFE_SHIM_ENGINE" in line
+    # The route that works today: the Python client, then update moves it.
+    assert "rerunning the installer with PSEUDOLIFE_SHIM_ENGINE=python" in line
+    assert "without PSEUDOLIFE_SHIM_ENGINE" not in line
     assert "PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only" in line
     assert "release_assets" not in line and "PSEUDOLIFE_NATIVE_ARCHIVE_URL" not in line
     # What a refusal after the download leaves: the verified download only.
@@ -478,6 +480,173 @@ def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
     assert "Nothing else was changed: the download in" in result.stderr
     assert not any(c.startswith("runtime install --archive") for c in _calls(tmp_path))
     assert not (tmp_path / "home" / "runtimes").exists()
+
+
+FALLBACK_CAUSES = [
+    ("platform", "native_target() { :; }; ", {}, "no native client is published for this platform"),
+    ("does-not-run", "", {"STUB_BROKEN": "1"}, "the downloaded client does not run on this host"),
+    ("old-release", "", {"STUB_V0240": "1"}, f"the native client {VERSION} predates this installer"),
+    ("tunnel", "", {"STUB_REFUSE_TUNNEL": "1"}, "a tunnel is registered to start by itself"),
+]
+
+
+# The wrapper's Python path, as the hand-back reaches it: its environment
+# and arguments, logged.
+PYTHON_PATH = ('#!/usr/bin/env bash\n'
+               'printf "%s\\n" "engine=$PSEUDOLIFE_SHIM_ENGINE" "defaulted=${PSEUDOLIFE_INSTALLER_DEFAULTED-unset}" '
+               '"line=$PSEUDOLIFE_INSTALLER_FALLBACK" "$@" >"$HANDBACK_LOG"\n')
+
+
+def _python_path(tmp_path: Path) -> Path:
+    wrapper = tmp_path / "repo" / "ops" / "install.sh"
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
+    wrapper.write_text(PYTHON_PATH, encoding="utf-8", newline="\n")
+    wrapper.chmod(0o755)
+    return tmp_path / "handback"
+
+
+@pytest.mark.parametrize("case, prefix, env, cause", FALLBACK_CAUSES, ids=[c[0] for c in FALLBACK_CAUSES])
+def test_a_defaulted_run_the_native_client_cannot_serve_hands_back_to_the_python_client(tmp_path, case, prefix, env,
+                                                                                        cause):
+    # ops/install.sh chose the native client by default: before anything
+    # changed, the run becomes ops/install.sh with the Python client, its own
+    # arguments and the one line, and no longer says it was defaulted.
+    log = _python_path(tmp_path)
+    result = _run(tmp_path, 'NATIVE_ORIGINAL_ARGS=(--client-only --daemon-url "http://pl.example.invalid:8765")\n'
+                  + prefix + 'native_stage; echo "STAGED"',
+                  env={**env, "PSEUDOLIFE_INSTALLER_DEFAULTED": "1", "HANDBACK_LOG": _p(log)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert "cannot be installed" not in result.stderr
+    engine, defaulted, line, *args = log.read_text(encoding="utf-8").splitlines()
+    assert (engine, defaulted) == ("engine=python", "defaulted=unset")
+    assert args == ["--client-only", "--daemon-url", "http://pl.example.invalid:8765"]
+    assert line.startswith(f"line=the native client cannot serve this machine ({cause}"), line
+    assert line.endswith(
+        "so this install uses the Python client; PSEUDOLIFE_SHIM_ENGINE=native makes this a refusal, and "
+        "PSEUDOLIFE_SHIM_ENGINE=python chooses the Python client for later runs too") or (
+        "what it downloaded stays in" in line and line.endswith("for later runs too")), line
+    assert not any(c.startswith("runtime install --archive") for c in _calls(tmp_path))
+    assert not (tmp_path / "home" / "share").exists()
+    assert not list((tmp_path / "tmp").glob("pseudolife-native.*")), "the staged copy is removed"
+
+
+def test_a_defaulted_run_with_no_arguments_hands_back_none(tmp_path):
+    # bash 3.2 under set -u: an empty argument list expands to nothing.
+    log = _python_path(tmp_path)
+    result = _run(tmp_path, 'NATIVE_ORIGINAL_ARGS=()\nnative_target() { :; }; native_stage',
+                  env={"PSEUDOLIFE_INSTALLER_DEFAULTED": "1", "HANDBACK_LOG": _p(log)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert log.read_text(encoding="utf-8").splitlines()[:2] == ["engine=python", "defaulted=unset"]
+    assert len(log.read_text(encoding="utf-8").splitlines()) == 3
+
+
+@pytest.mark.parametrize("case, prefix, env, cause", FALLBACK_CAUSES, ids=[c[0] for c in FALLBACK_CAUSES])
+def test_a_defaulted_rerun_on_a_native_machine_refuses_rather_than_hand_back(tmp_path, case, prefix, env, cause):
+    # A working native client is never swapped for the Python one: the rerun
+    # refuses, naming both routes, and the native client stays.
+    first = _run(tmp_path, "native_stage; ensure_shim")
+    assert first.returncode == 0, first.stderr
+    launcher = tmp_path / "home" / "share" / "pseudolife-mcp" / "bin" / "pseudolife-mcp"
+    before = launcher.read_bytes()
+    log = _python_path(tmp_path)
+    result = _run(tmp_path, prefix + 'native_stage; echo "STAGED"',
+                  env={**env, "PSEUDOLIFE_INSTALLER_DEFAULTED": "1", "HANDBACK_LOG": _p(log)})
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert not log.exists()
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert cause in line
+    assert line.endswith("To install the Python client instead, rerun with PSEUDOLIFE_SHIM_ENGINE=python."), line
+    assert launcher.read_bytes() == before
+
+
+def test_a_defaulted_refusal_names_the_python_route_and_an_explicit_one_does_not(tmp_path):
+    for index, (defaulted, said) in enumerate((("1", True), ("", False))):
+        (tmp_path / f"run{index}").mkdir()
+        result = _run(tmp_path / f"run{index}", 'native_stage', sums_override="f" * 64,
+                      env={"PSEUDOLIFE_INSTALLER_DEFAULTED": defaulted})
+        assert result.returncode == 1
+        [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+        assert "does not match the release's SHA256SUMS" in line
+        assert ("rerun with PSEUDOLIFE_SHIM_ENGINE=python" in line) is said, line
+
+
+def test_a_release_whose_sums_list_no_client_for_this_platform_hands_back(tmp_path):
+    log = _python_path(tmp_path)
+    result = _run(tmp_path, 'native_stage', omit=True,
+                  env={"PSEUDOLIFE_INSTALLER_DEFAULTED": "1", "HANDBACK_LOG": _p(log)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"publishes no native client for {TARGET}" in log.read_text(encoding="utf-8")
+
+
+def test_an_unpublished_release_hands_back_but_a_mirror_without_it_refuses(tmp_path):
+    # The canonical release not published yet (a version cut before its
+    # assets): the default falls back. A mirror the user named that lacks it
+    # is refused, as before.
+    first = _fake_curl(tmp_path, 'printf 404\nexit 0\n')
+    log = _python_path(tmp_path)
+    canonical = {"PSEUDOLIFE_INSTALLER_DEFAULTED": "1", "HANDBACK_LOG": _p(log), "PSEUDOLIFE_NATIVE_ARCHIVE_URL": ""}
+    result = _run(tmp_path, f"{first}; native_stage", release=False, env=canonical)
+    assert result.returncode == 0, result.stdout + result.stderr
+    line = log.read_text(encoding="utf-8")
+    assert "has no SHA256SUMS at https://github.com/" in line and "not published yet" in line
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    # Its own hand-back wrapper, so a hand-back here would happen and show.
+    mirror_log = _python_path(mirror)
+    refused = _run(mirror, f"{_fake_curl(mirror, 'printf 404' + chr(10) + 'exit 0' + chr(10))}; native_stage",
+                   release=False, env={**canonical, "HANDBACK_LOG": _p(mirror_log),
+                                       "PSEUDOLIFE_NATIVE_ARCHIVE_URL": "https://mirror.example.invalid/v9.8.7"})
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    assert "has no SHA256SUMS" in refused.stderr and not mirror_log.exists()
+
+
+@pytest.mark.parametrize("case, prefix, env, cause", FALLBACK_CAUSES, ids=[c[0] for c in FALLBACK_CAUSES])
+def test_an_explicit_native_run_still_refuses_what_it_cannot_serve(tmp_path, case, prefix, env, cause):
+    # No hand-back file: PSEUDOLIFE_SHIM_ENGINE=native asked for this client.
+    result = _run(tmp_path, prefix + 'native_stage; echo "STAGED"', env=env)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert cause in line
+    assert "PSEUDOLIFE_SHIM_ENGINE=python" in line, line
+    assert "without PSEUDOLIFE_SHIM_ENGINE" not in line
+
+
+def test_no_hand_back_once_the_host_has_changed(tmp_path):
+    log = _python_path(tmp_path)
+    result = _run(tmp_path, 'NATIVE_HOST_CHANGING=1; native_fallback "a cause" "A fix."; echo "GONE ON"',
+                  env={"PSEUDOLIFE_INSTALLER_DEFAULTED": "1", "HANDBACK_LOG": _p(log)})
+    assert result.returncode == 1
+    assert "The install stopped part way: a cause. A fix." in result.stderr
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("value", ["", "0", "yes", "1 "])
+def test_only_the_exact_defaulted_mark_hands_back(tmp_path, value):
+    log = _python_path(tmp_path)
+    result = _run(tmp_path, 'native_target() { :; }; native_stage',
+                  env={"PSEUDOLIFE_INSTALLER_DEFAULTED": value, "HANDBACK_LOG": _p(log)})
+    assert result.returncode == 1
+    assert "cannot be installed: no native client is published for this platform" in result.stderr
+    assert not log.exists()
+
+
+def test_installing_the_native_client_ends_a_recorded_python_choice(tmp_path):
+    record = tmp_path / "home" / ".pseudolife-mcp" / "client-engine"
+    record.parent.mkdir(parents=True)
+    record.write_text("python\n", encoding="utf-8")
+    result = _run(tmp_path, 'native_stage; ensure_shim; echo "OK=$SHIM_OK"')
+    assert result.returncode == 0, result.stderr
+    assert "OK=1" in result.stdout
+    assert not record.exists()
+    [line] = [text for text in result.stdout.splitlines() if "The recorded Python client choice (" in text]
+    assert "/.pseudolife-mcp/client-engine) is removed" in line, line
+    if os.name != "nt":
+        assert f"({_p(record)}) is removed" in line, line
+    # A rerun says nothing more about it.
+    again = _run(tmp_path, "native_stage; ensure_shim")
+    assert "recorded Python client choice" not in again.stdout + again.stderr
 
 
 def test_a_refused_move_keeps_the_python_client_and_says_so(tmp_path):
@@ -667,6 +836,32 @@ def test_a_checksum_line_in_no_standard_form_is_refused(tmp_path, separator):
     assert f"lists {ASSET} 0 times, not once" in result.stderr
 
 
+def test_a_line_naming_the_archive_in_no_standard_form_refuses_even_when_defaulted(tmp_path):
+    # A listing for this platform that cannot be read is not a release
+    # without this platform: no hand-back to the Python client.
+    _rewrite_sums(tmp_path, " ")
+    log = _python_path(tmp_path)
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False,
+                  env={"PSEUDOLIFE_INSTALLER_DEFAULTED": "1", "HANDBACK_LOG": _p(log)})
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert f"lists {ASSET} 0 times, not once (a line names it in no standard checksum form)" in result.stderr
+    assert "publishes no native client" not in result.stderr
+    assert not log.exists()
+
+
+def test_a_crlf_line_naming_the_archive_in_no_standard_form_refuses(tmp_path):
+    # A SHA256SUMS saved with CRLF line ends (as Python's text mode writes
+    # one on Windows) still names the archive.
+    _release(tmp_path / "release")
+    digest = hashlib.sha256((tmp_path / "release" / ASSET).read_bytes()).hexdigest()
+    (tmp_path / "release" / "SHA256SUMS").write_bytes(f"{digest} {ASSET}\r\n".encode())
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert f"lists {ASSET} 0 times, not once (a line names it in no standard checksum form)" in result.stderr
+
+
 @pytest.mark.parametrize("value, used", [
     ("08", "8"), ("09", "9"), ("010", "10"), ("7", "7"), ("00", "30"), ("0", "30"),
     ("", "30"), ("abc", "30"), ("1.5", "30"), ("-3", "30"), ("123456", "30"),
@@ -773,7 +968,7 @@ def test_another_names_line_never_supplies_the_digest(tmp_path):
     result = _run(tmp_path, 'native_stage; echo STAGED', release=False, version=LOCAL)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "STAGED" not in result.stdout
-    assert f"lists pseudolife-mcp-{LOCAL}-{TARGET}.tar.gz 0 times, not once" in result.stderr
+    assert f"its SHA256SUMS lists no pseudolife-mcp-{LOCAL}-{TARGET}.tar.gz" in result.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="an unreadable file needs POSIX permissions")

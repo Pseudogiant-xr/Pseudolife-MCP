@@ -146,8 +146,10 @@ pseudolife-mcp tunnel setup
 ```
 
 With the Python client, the installer can enter this guided flow with
-`ops/install.sh --tunnel` or `ops/install.ps1 -Tunnel`. The native installer
-refuses that switch before changing the host. For the native client, rerun
+`PSEUDOLIFE_SHIM_ENGINE=python ops/install.sh --tunnel` or, in PowerShell,
+`$env:PSEUDOLIFE_SHIM_ENGINE = 'python'` and `ops/install.ps1 -Tunnel`.
+Without that setting the installer installs the native client and refuses
+the switch before changing the host. For the native client, rerun
 without the switch and follow the explicit profile and key setup above.
 Guided setup reuses saved choices and does not ask again for access consent
 or a saved key.

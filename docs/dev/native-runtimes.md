@@ -1,8 +1,9 @@
 # Native client runtimes
 
 The native runtime installer installs a new Rust CLI beside existing runtimes and
-selects it for the next session. This is opt-in work; it does not change the
-daemon engine default or remove the Python oracle or existing Python installs.
+selects it for the next session. The installers select it by default since
+0.26.0; it does not change the daemon engine default or remove the Python
+oracle or existing Python installs.
 
 [Finish the move to Rust](python-retirement.md) maps the work after the 0.24
 cut: the open installer stack, remaining client workflows, package-deletion
@@ -256,10 +257,37 @@ old client left on disk. A rerun that changes nothing prints one line.
 
 ## Installers
 
-`ops/install.sh` and `ops/install.ps1` install the Python client unless
-`PSEUDOLIFE_SHIM_ENGINE=native` asks for the native one (`python`, the
-default, also brings a native machine back; any other value is refused
-before anything changes). Asked for native, they hand their arguments to
+`ops/install.sh` and `ops/install.ps1` install the native client by default
+and with `PSEUDOLIFE_SHIM_ENGINE=native`. `PSEUDOLIFE_SHIM_ENGINE=python`
+installs the Python client, which also brings a native machine back, and
+records the choice as `python` in `~/.pseudolife-mcp/client-engine` once
+the install has run to its end (on Windows under `USERPROFILE`, where
+Python's `Path.home()` looks too). A later run without the variable honours
+that file when its text, trimmed at both ends, is exactly `python`, and a
+native install removes it. Any other value of the variable is refused
+before anything changes.
+
+A defaulted run tells the native installer so: bash runs it with
+`PSEUDOLIFE_INSTALLER_DEFAULTED=1` (exactly that value; an explicit
+`=native` clears it), PowerShell sets the global `PseudolifeClientDefaulted`
+and reads the global `PseudolifeClientFallback` back (both cleared after the
+run). When the native client cannot serve the machine, is not installed
+there already, and nothing on the host has changed, the native installer
+hands back. In bash it runs `ops/install.sh` again (`exec`, the same
+process) with `PSEUDOLIFE_SHIM_ENGINE=python`, its original arguments and its
+one-line reason in `PSEUDOLIFE_INSTALLER_FALLBACK`, which the wrapper prints
+and records nothing for. In PowerShell it sets the global and returns, and
+the wrapper carries on with the Python client. These causes qualify: no
+target for the platform, a release whose canonical `SHA256SUMS` is not
+published (404 with no `PSEUDOLIFE_NATIVE_ARCHIVE_URL`) or has no line
+naming its archive (a line naming it in no standard checksum form refuses),
+a client that does not run there, a release older than the
+installer's protocol, and the tunnel check's exit 3. Each refuses as before
+under an explicit `=native`, on a machine already on the native client, or
+after the first host change; a defaulted run's refusals also name
+`PSEUDOLIFE_SHIM_ENGINE=python`.
+
+For the native client, the wrappers hand their arguments to
 `ops/install-native.sh` / `ops/install-native.ps1`, which install the client
 from the release their checkout names (`pyproject.toml`'s version) in their
 native-client block, before anything on the host changes: they download that version's
@@ -274,9 +302,10 @@ client that hangs is refused rather than stalling an unattended run. It must ans
 installer-protocol <N>` with N at least the installer's level
 (`NATIVE_INSTALLER_PROTOCOL`, the binary's `INSTALLER_PROTOCOL`), because the
 installer runs that release's `installer` steps. A release older than the
-installer (0.24.0 answers with a usage error) is refused, naming the route that
-works today: install the default client (the installer without
-`PSEUDOLIFE_SHIM_ENGINE`), then move the machine with
+installer (0.24.0 answers with a usage error) hands a defaulted run back to the
+Python client, and under an explicit `=native` is refused, naming the route that
+works today: install the Python client (the installer with
+`PSEUDOLIFE_SHIM_ENGINE=python`), then move the machine with
 `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`; the
 native installer itself works from a checkout of a release that carries it. An
 interactive first install stages, verifies and probes the release before its

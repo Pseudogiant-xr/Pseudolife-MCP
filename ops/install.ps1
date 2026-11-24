@@ -39,9 +39,10 @@
 # PSEUDOLIFE_UNATTENDED=1 is the explicit agent-under-pty signal; redirected
 # stdin also enables it. Omitted -Client detects installed CLIs (else generic);
 # omitted -Extractor uses sidecar, the local CPU default.
-# PSEUDOLIFE_SHIM_ENGINE=native installs the native pseudolife-mcp client
-# (ops\install-native.ps1) instead of the Python client; python, the default,
-# installs the Python client, or brings it back over a native one.
+# PSEUDOLIFE_SHIM_ENGINE=python installs the Python client instead of the
+# native pseudolife-mcp client (ops\install-native.ps1, the default), or brings
+# it back over a native one; the choice is remembered until
+# PSEUDOLIFE_SHIM_ENGINE=native.
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
 # -Engine rust|python: the Docker daemon. rust pulls the release's published
@@ -162,29 +163,81 @@ param(
     [string]$Engine = ""
 )
 # >>> client engine >>>
-# Which client this installer installs, decided before anything changes: the
-# Python client (the rest of this script) by default and with
-# PSEUDOLIFE_SHIM_ENGINE=python, and the native client, which
-# ops\install-native.ps1 installs with these same parameters, only when
-# PSEUDOLIFE_SHIM_ENGINE=native asks for it (the variable pseudolife-mcp update
-# reads). Case-sensitive, as update reads it.
+# Which client this installer installs, decided before anything changes (the
+# variable pseudolife-mcp update reads too; case-sensitive, as update reads it):
+# - PSEUDOLIFE_SHIM_ENGINE=native: the native client, which
+#   ops\install-native.ps1 installs with these same parameters; a machine it
+#   cannot serve is refused.
+# - PSEUDOLIFE_SHIM_ENGINE=python: the Python client (the rest of this
+#   script), and the choice is recorded in ~\.pseudolife-mcp\client-engine,
+#   which later reruns and updates honour until an explicit native choice.
+# - Unset: the Python client when that record says so, else the native client
+#   by default. The native installer then falls back to the Python client,
+#   with one line saying why, when the native client cannot serve this machine
+#   (no client for the platform, one that does not run here, a checkout whose
+#   release predates this installer, a tunnel the Python client registered to
+#   start by itself): before anything changed it sets
+#   $global:PseudolifeClientFallback to that line and returns, and this script
+#   carries on below with the Python client.
+# The record lives in the home Python's Path.home() names too (USERPROFILE on
+# Windows), and says python when its text, trimmed, is exactly that.
+$clientEngineHome = if ($IsWindows -and $env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$clientEngineRecord = Join-Path (Join-Path $clientEngineHome ".pseudolife-mcp") "client-engine"
+$script:recordPythonChoice = $false
+function Save-ClientEngineChoice {
+    # An explicit PSEUDOLIFE_SHIM_ENGINE=python install is remembered at its end.
+    if (-not $script:recordPythonChoice) { return }
+    try { if (([System.IO.File]::ReadAllText($clientEngineRecord)).Trim() -ceq "python") { return } } catch { }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $clientEngineRecord) | Out-Null
+        [System.IO.File]::WriteAllText($clientEngineRecord, "python`n")
+        Write-Host "Python client chosen: recorded in $clientEngineRecord, so later installer runs and pseudolife-mcp update keep the Python client until you set `$env:PSEUDOLIFE_SHIM_ENGINE = 'native'."
+    } catch {
+        [Console]::Error.WriteLine("WARNING: the Python client choice could not be recorded in $clientEngineRecord ($($_.Exception.Message)), so a later installer run or update without PSEUDOLIFE_SHIM_ENGINE=python moves this machine to the native client.")
+    }
+}
 $clientEngine = "$env:PSEUDOLIFE_SHIM_ENGINE"
-if ($clientEngine -ceq "native") {
+$recorded = $null
+if ($clientEngine -ceq "") {
+    try { $recorded = ([System.IO.File]::ReadAllText($clientEngineRecord)).Trim() } catch { $recorded = $null }
+}
+if (($clientEngine -ceq "") -and ($recorded -ceq "python")) {
+    Write-Host "Python client install: $clientEngineRecord records an earlier PSEUDOLIFE_SHIM_ENGINE=python install; set `$env:PSEUDOLIFE_SHIM_ENGINE = 'native' to move this machine to the native client."
+    $clientEngine = "python"
+} elseif ($clientEngine -ceq "python") {
+    $script:recordPythonChoice = $true
+}
+if (($clientEngine -ceq "native") -or ($clientEngine -ceq "")) {
     # Exit as the native installer would run by itself: 0 when it ends
     # normally (its last native command's code is not its result), its own
     # code when it exits with one, 1 when it stops on an error.
     $nativeInstaller = Join-Path $PSScriptRoot "install-native.ps1"
     if (-not (Test-Path -LiteralPath $nativeInstaller -PathType Leaf)) {
-        [Console]::Error.WriteLine("PSEUDOLIFE_SHIM_ENGINE=native asks for the native client, but this checkout has no $nativeInstaller (it predates the native installer): update the checkout (git pull), or unset PSEUDOLIFE_SHIM_ENGINE for the Python client. Nothing was changed.")
+        [Console]::Error.WriteLine("This checkout has no $nativeInstaller, which installs the native client (it predates the native installer): update the checkout (git pull), or set `$env:PSEUDOLIFE_SHIM_ENGINE = 'python' for the Python client. Nothing was changed.")
         exit 1
     }
+    # The native installer runs in its own script scope, so the two values it
+    # shares with this one are globals, cleared again however it ends: an
+    # open pwsh session keeps neither for a later run.
+    $global:PseudolifeClientDefaulted = ($clientEngine -ceq "")
+    $global:PseudolifeClientFallback = $null
     $global:LASTEXITCODE = 0
-    & $nativeInstaller @PSBoundParameters
-    if ($?) { exit 0 }
-    exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })
+    try {
+        & $nativeInstaller @PSBoundParameters
+        $nativeOk = $?
+        $fallback = $global:PseudolifeClientFallback
+    } finally {
+        Remove-Variable -Name PseudolifeClientDefaulted, PseudolifeClientFallback -Scope Global -ErrorAction SilentlyContinue
+    }
+    if (-not $fallback) {
+        if ($nativeOk) { exit 0 }
+        exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })
+    }
+    Write-Host "==> $fallback"
+    $clientEngine = "python"
 }
-if (($clientEngine -cne "") -and ($clientEngine -cne "python")) {
-    [Console]::Error.WriteLine("PSEUDOLIFE_SHIM_ENGINE=$clientEngine is not a client this installer installs: use python (the Python client, the default) or native (the native client), or unset it. Nothing was changed.")
+if ($clientEngine -cne "python") {
+    [Console]::Error.WriteLine("PSEUDOLIFE_SHIM_ENGINE=$clientEngine is not a client this installer installs: use native (the native client, the default) or python (the Python client), or unset it. Nothing was changed.")
     exit 2
 }
 # <<< client engine <<<
@@ -3871,6 +3924,7 @@ function Invoke-ClientUpdateScheduleOffer {
 # <<< client update schedule offer <<<
 if ($ClientOnly) { Invoke-ClientUpdateScheduleOffer }
 Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly) -PairingHintUrl "$script:pairingHintUrl" -Scheduled:($script:clientScheduleState -eq "scheduled")
+Save-ClientEngineChoice
 if ($Tunnel -and -not $interactive) {
     Write-Host "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
 } elseif ($Tunnel) {
