@@ -679,26 +679,24 @@ mod tests {
         }
     }
 
-    /// An unknown outcome is answered from the arguments alone: before the
-    /// service initializes, so before the write queue, the lock or the bank.
-    /// The fixture holds the service mutex every initialization takes, and
-    /// its bank is unreachable: a body that went on to initialize would
-    /// wait here instead of answering.
+    /// An unknown outcome is answered from the arguments alone: on the
+    /// body's first poll, before the service initializes, so before the
+    /// write queue, the lock or the bank. Initialization runs in a spawned
+    /// task the body awaits, so a body that went on to initialize could not
+    /// answer on its first poll (no timer: polled once, it is ready or not).
+    /// The test also holds the service mutex every initialization takes, so
+    /// a left-behind initialization never reaches the (unreachable) bank.
     #[tokio::test]
     async fn an_unknown_outcome_is_refused_before_any_state_is_touched() {
+        use futures::FutureExt;
         let app = crate::http::tests::mcp_refusal_app();
         let _held = app.service.hold_service_lock().await;
         for refused in ["failed", "Success", ""] {
             let args = json!({"task": "deploy thing", "outcome": refused});
-            let answer =
-                tokio::time::timeout(std::time::Duration::from_secs(5), outcome_body(&app, args))
-                    .await
-                    .unwrap_or_else(|_| {
-                        panic!("{refused:?}: the refusal waited for initialization")
-                    })
-                    .unwrap_or_else(|e| {
-                        panic!("{refused:?}: refused with an error, not an answer: {e:?}")
-                    });
+            let answer = outcome_body(&app, args)
+                .now_or_never()
+                .unwrap_or_else(|| panic!("{refused:?}: the refusal waited for initialization"))
+                .unwrap_or_else(|e| panic!("{refused:?}: refused with an error: {e:?}"));
             // Exactly the refusal: not recorded, no signal id, the accepted
             // values listed.
             assert_eq!(
@@ -708,16 +706,11 @@ mod tests {
                 "{refused:?}"
             );
         }
-        // The seam is not vacuous: an accepted outcome goes on to initialize
-        // and so waits on the held mutex.
+        // The first-poll check is not vacuous: an accepted outcome goes on to
+        // initialize, so it is still pending after one poll.
         let args = json!({"task": "deploy thing", "outcome": "success"});
         assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(300),
-                outcome_body(&app, args)
-            )
-            .await
-            .is_err(),
+            outcome_body(&app, args).now_or_never().is_none(),
             "an accepted outcome answered without initializing"
         );
     }

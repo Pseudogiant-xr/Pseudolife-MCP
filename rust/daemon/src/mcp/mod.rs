@@ -1633,6 +1633,40 @@ mod sessions {
         });
         assert!(matches!(state.lookup("cancelled"), Lookup::Unknown));
     }
+
+    /// What a client gets for an unknown memory_outcome value: the binder's
+    /// error result naming the accepted values, never a success, and before
+    /// any state. The test holds the service mutex every initialization
+    /// takes, so a call that reached the body's initialization could not
+    /// answer on its first poll (no timer: polled once, it is ready or not).
+    #[tokio::test]
+    async fn an_unknown_outcome_is_an_error_result_before_any_state() {
+        use futures::FutureExt;
+        let app = crate::http::tests::mcp_refusal_app();
+        let _held = app.service.hold_service_lock().await;
+        let headers = HeaderMap::new();
+        for refused in ["failed", "Success", ""] {
+            let args = json!({"task": "deploy thing", "outcome": refused});
+            let answer = call_tool(
+                &app,
+                "default",
+                "fixture-session",
+                &headers,
+                "memory_outcome",
+                args.as_object().unwrap(),
+            )
+            .now_or_never()
+            .unwrap_or_else(|| panic!("{refused:?}: the refusal waited for initialization"));
+            assert_eq!(answer["isError"], json!(true), "{refused:?}: {answer}");
+            assert_eq!(
+                answer["structuredContent"],
+                json!({"error": "invalid_argument",
+                       "message": "outcome: Input should be 'success', 'failure' or 'correction'",
+                       "param": "outcome"}),
+                "{refused:?}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1713,41 +1747,6 @@ mod goldens {
                     "{principal} {args:?}"
                 );
             }
-        }
-    }
-
-    /// What a client gets for an unknown memory_outcome value: the binder's
-    /// error result naming the accepted values, never a success, and before
-    /// any state. The fixture holds the service mutex every initialization
-    /// takes and its bank is unreachable, so a call that reached the body's
-    /// initialization would wait here instead of answering.
-    #[tokio::test]
-    async fn an_unknown_outcome_is_an_error_result_before_any_state() {
-        let app = crate::http::tests::mcp_refusal_app();
-        let _held = app.service.hold_service_lock().await;
-        for refused in ["failed", "Success", ""] {
-            let args = json!({"task": "deploy thing", "outcome": refused});
-            let answer = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                call_tool(
-                    &app,
-                    "default",
-                    "fixture-session",
-                    &HeaderMap::new(),
-                    "memory_outcome",
-                    args.as_object().unwrap(),
-                ),
-            )
-            .await
-            .unwrap_or_else(|_| panic!("{refused:?}: the refusal waited for initialization"));
-            assert_eq!(answer["isError"], json!(true), "{refused:?}: {answer}");
-            assert_eq!(
-                answer["structuredContent"],
-                json!({"error": "invalid_argument",
-                       "message": "outcome: Input should be 'success', 'failure' or 'correction'",
-                       "param": "outcome"}),
-                "{refused:?}"
-            );
         }
     }
 
