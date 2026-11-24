@@ -3683,7 +3683,8 @@ def test_a_client_machine_with_a_tunnel_service_stays_on_the_python_client(tmp_p
         assert result.returncode == 2, result.stdout + result.stderr
         out = result.stdout + result.stderr
         assert "this machine stays on the Python client" in out, out
-        assert "rerun the same command without PSEUDOLIFE_SHIM_ENGINE=native" in out, out
+        assert "rerun the same command with PSEUDOLIFE_SHIM_ENGINE=python in front of it" in out, out
+        assert "without PSEUDOLIFE_SHIM_ENGINE=native" not in out, out
         assert f"pseudolife-mcp tunnel service remove --profile dot), then rerun it. Registered: systemd user unit {unit}" in out, out
         assert launcher.read_bytes() == before
         assert not Path(env["PSEUDOLIFE_SHIM_RUNTIMES"]).exists()
@@ -3714,7 +3715,7 @@ def test_runtime_install_refuses_the_move_before_reading_its_archive(tmp_path):
                                 env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60)
         assert result.returncode == 3, result.stdout + result.stderr
         assert "runtime install refused: this machine stays on the Python client" in result.stderr
-        assert "rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native" in result.stderr
+        assert "rerun the installer with PSEUDOLIFE_SHIM_ENGINE=python in front of it" in result.stderr
         assert launcher.read_bytes() == before
         assert not Path(env["PSEUDOLIFE_SHIM_RUNTIMES"]).exists()
 
