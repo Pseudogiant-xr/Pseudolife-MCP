@@ -2,9 +2,10 @@
 
 Export cases read one seeded source bank (both arms export the same bank; its
 dump after each arm proves the export left it untouched). Import cases load
-an archive written by the oracle's own ``perform_export`` (or a hand-varied
-copy, the same edits ``tests/test_transfer_cli.py`` makes) into a fresh
-target bank recreated by the oracle's ``ensure_schema`` before each arm, and
+an archive the frozen Python ``perform_export`` wrote from those banks
+(captured at 6ca817d70 in ``fixtures/transfer-archives/``), or a hand-varied
+copy (the same edits ``tests/test_transfer_cli.py`` makes), into a fresh
+target bank created from the committed schema plan before each arm, and
 compare both arms' full dumps.
 
 Where the candidate defers by design, or fails with its named PostgreSQL
@@ -26,12 +27,16 @@ import json
 import re
 import time
 import zipfile
+from pathlib import Path
 
 from .. import core, normalize
-# The oracle's schema version: the candidate's refusal names the one it
-# was built for, pinned to this constant by tests/test_schema_version.py.
-from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 from . import _bank
+from ._builtin_relations import _BUILTIN_RELATIONS
+from ._transfer_seed import _seed_bank
+
+# The input archives (rebuilt after a schema bump by
+# rust/cli_harness/regenerate_transfer_archives.py).
+ARCHIVE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "transfer-archives"
 
 ROW = "transfer"
 SRC = _bank.name("pl_cf_w1c_transfer_src")
@@ -90,9 +95,25 @@ def _wait_idle(name: str) -> None:
 
 
 def _seed(name: str) -> None:
-    from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415 (oracle checkout)
     with _bank.connect(name) as conn:
         _seed_bank(conn)
+
+
+def _seed_relations(conn, created_at: float) -> None:
+    """What the frozen storage wrote when it opened a bank: the built-in
+    relations (``PostgresStorage._seed_relations``), stamped ``created_at``
+    (the callers pin that stamp, as they did after the storage's wall clock),
+    and its writer-lease epoch (``_bump_lease_epoch``, the same statement)."""
+    for relation, description, transitive, inverse in _BUILTIN_RELATIONS:
+        conn.execute(
+            "INSERT INTO relations (name, description, transitive, inverse_of, builtin, created_at) "
+            "VALUES (%s, %s, %s, %s, TRUE, %s) ON CONFLICT (name) DO NOTHING",
+            (relation, description, transitive, inverse, created_at))
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('writer_lease_epoch', '1'::jsonb) "
+        "ON CONFLICT (key) DO UPDATE SET value = to_jsonb(COALESCE("
+        "CASE WHEN jsonb_typeof(meta.value) = 'number' "
+        "THEN (meta.value #>> '{}')::numeric::bigint END, 0) + 1)")
 
 
 _TRICKY_SQL = r"""
@@ -159,33 +180,26 @@ FLOAT_TIES = (float.fromhex("0x1.526daef896bc8p+46"),   # 93026504287663.12
 
 
 def _seed_ties(name: str) -> None:
-    """The tie values as the daemon writes a meta value (jsonb), through the
-    oracle's own ``PostgresStorage.set_meta``."""
-    from pseudolife_memory.storage.postgres import PostgresStorage  # noqa: PLC0415
+    """The tie values as the frozen storage writes a meta value
+    (``PostgresStorage.set_meta``: ``json.dumps`` cast to jsonb), and the
+    built-in relations its opening seeded, their stamp pinned to 1000.0 so
+    the bank and its archive (and the goldens) are the same on every run."""
     _seed(name)
-    storage = PostgresStorage(_bank.url(name))
-    try:
-        storage.set_meta("w1c_float_ties", {"ties": list(FLOAT_TIES),
-                                            "nested": [{"v": FLOAT_TIES[0]}]})
-    finally:
-        storage.close()
-    # Opening the storage seeds the built-in relations stamped with the wall
-    # clock: pinned, so the bank and its archive (and the goldens) are the
-    # same on every run.
     with _bank.connect(name) as conn:
-        conn.execute("UPDATE relations SET created_at = 1000.0 WHERE created_at > 1000.0")
+        _seed_relations(conn, 1000.0)
+        conn.execute("INSERT INTO meta (key, value) VALUES (%s, %s::jsonb) "
+                     "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                     ("w1c_float_ties", json.dumps({"ties": list(FLOAT_TIES),
+                                                    "nested": [{"v": FLOAT_TIES[0]}]})))
         conn.commit()
 
 
 def _sources() -> None:
-    """Both source banks and the oracle's archives, built once per process."""
+    """The source banks, built once per process, and the archives the frozen
+    ``perform_export`` wrote from them (captured)."""
     _bank.NAMES.require_process()
     if _ARCHIVES:
         return
-    import tempfile  # noqa: PLC0415
-    from pathlib import Path  # noqa: PLC0415
-
-    from pseudolife_memory.transfer_cli import perform_export  # noqa: PLC0415
     _create(SRC)
     _seed(SRC)
     _create(TRICKY)
@@ -223,11 +237,10 @@ def _sources() -> None:
     with _bank._admin() as conn:  # noqa: SLF001
         for name in (NYC, NYC_EMPTY):
             conn.execute(f'ALTER DATABASE "{name}" SET timezone = \'America/New_York\'')
-    with tempfile.TemporaryDirectory() as tmp:
-        for key, name in (("current", SRC), ("tricky", TRICKY), ("ties", TIES)):
-            path = Path(tmp) / f"{key}.zip"
-            perform_export(_bank.url(name), path)
-            _ARCHIVES[key] = _rewrite(path.read_bytes(), _pin_created_at)
+    for key in ("current", "tricky", "ties"):
+        # perform_export of SRC, TRICKY and TIES, then _pin_created_at,
+        # captured from the frozen Python at 6ca817d70.
+        _ARCHIVES[key] = (ARCHIVE_DIR / f"{key}.zip").read_bytes()
     for key, mutate in _VARIANTS.items():
         _ARCHIVES[key] = _rewrite(_ARCHIVES["current"], mutate)
     for name in (SRC, TRICKY, INF, DEEP, NYC, NYC_EMPTY, OLD54, FUTURE, TIES):
@@ -584,27 +597,22 @@ def _import_after(arm: core.Arm, obs: dict) -> None:
 
 
 def _seed_target(conn) -> None:
-    from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415
     _seed_bank(conn)
 
 
 def _seed_null_stamps(conn) -> None:
-    """A non-empty bank at the oracle's schema holding an edge as the daemon writes it
-    (``PostgresStorage.upsert_edge``: tx_time, valid_time, writer_id NULL),
-    which the oracle's ensure_schema backfills before refusing the import."""
-    from pseudolife_memory.storage.postgres import PostgresStorage  # noqa: PLC0415
-    from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415
+    """A non-empty bank at the committed schema holding an edge as the frozen
+    daemon wrote it (``PostgresStorage.upsert_edge``: tx_time, valid_time,
+    writer_id NULL), which ensure_schema backfills before refusing the import,
+    beside the built-in relations that storage seeded when it opened (their
+    stamp pinned to 90, and the edge's to 150.0, so the seed is deterministic;
+    runtime backfilled edge stamps still compare)."""
     _seed_bank(conn)
-    conn.commit()
-    storage = PostgresStorage(_bank.url(TGT))
-    try:
-        storage.upsert_edge(2, "uses", 1, origin="agent")
-    finally:
-        storage.close()
-    conn.execute("UPDATE edges SET asserted_at=150.0 WHERE tx_time IS NULL")
-    # PostgresStorage initializes built-in relations before this arm starts.
-    # Keep that seed deterministic; runtime backfilled edge stamps still compare.
-    conn.execute("UPDATE relations SET created_at=90 WHERE builtin AND created_at>90")
+    _seed_relations(conn, 90.0)
+    # upsert_edge's insert: confidence 0.8, the origin given, asserted now
+    # (pinned below).
+    conn.execute("INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) "
+                 "VALUES (2, 'uses', 1, 0.8, 'agent', 150.0)")
     row = conn.execute("SELECT count(*) FROM edges WHERE tx_time IS NULL").fetchone()
     assert row[0] == 1, "the daemon writer no longer leaves NULL stamps"
 

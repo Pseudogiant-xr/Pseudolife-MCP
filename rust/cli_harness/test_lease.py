@@ -188,3 +188,76 @@ def test_http_defaults_are_narrow_and_custom_headers_stay_visible():
     _command_path(obs)
     assert obs["requests"][0]["headers"]["accept-encoding"] == "identity"
     assert obs["requests"][0]["headers"]["connection"] == "close"
+
+
+def test_recorded_board_answers_as_recorded_and_refuses_an_unrecorded_request():
+    import http.client
+    from rust.harness_support.import_blocker import cold_harness_imports
+    from .rows import lease
+
+    with cold_harness_imports():
+        board = lease.Board("free", bank=True)
+    try:
+        first = lease._recorded("free")["transcripts"][0][0]
+        action, body, agent, key = first["key"]
+        host, port = board.url.rsplit("//", 1)[1].split(":")
+
+        def post(payload, headers):
+            connection = http.client.HTTPConnection(host, int(port), timeout=10)
+            data = json.dumps(payload).encode()
+            connection.request("POST", f"/api/coordination/{action}", body=data, headers={
+                "Content-Type": "application/json", "Authorization": f"Bearer {lease.TOKEN}",
+                **headers})
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+
+        headers = {k: v for k, v in (("X-PL-Agent", agent), ("X-PL-Agent-Key", key)) if v}
+        assert post(body, headers) == (first["status"], first["reply"])
+        assert board.states == first["states"]
+        # A request the frozen store was never asked, at this point of the
+        # history, is answered 500 and fails the case in _after.
+        status, reply = post({**body, "w107-unrecorded": True}, headers)
+        assert status == 500 and "not in the recording" in reply["error"]
+        arm = SimpleNamespace(daemon=board, name="rust", state={})
+        with pytest.raises(AssertionError, match="never answered"):
+            lease._after(arm, {})
+    finally:
+        board.close()
+
+
+def test_board_recording_covers_both_platforms_and_every_board_scenario():
+    from .rows import lease
+
+    recording = json.loads(lease.RECORDING.read_text(encoding="utf-8"))["platforms"]
+    assert sorted(recording) == ["linux", "windows"]
+    scenarios = {"claim", "free", "held", "malformed", "other-mirror", "queue", "refused",
+                 "same-mirror", "transient"}
+    for platform, recorded in recording.items():
+        assert set(recorded) == scenarios, platform
+        assert all(recorded[name]["transcripts"] for name in ("free", "claim", "queue")), platform
+
+
+def test_board_recording_keeps_the_stores_holder_field_order():
+    # The CLI prints a board holder's fields in the order it receives them, so
+    # a recording written with sorted keys replays a different --json output.
+    from .rows import lease
+
+    store_order = ("agent_id", "label", "name", "principal", "purpose",
+                   "acquired_at", "expires_at", "expected_end")
+
+    def holders(value):
+        if isinstance(value, dict):
+            if "agent_id" in value and "acquired_at" in value:
+                yield list(value)
+            for item in value.values():
+                yield from holders(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from holders(item)
+
+    recording = json.loads(lease.RECORDING.read_text(encoding="utf-8"))["platforms"]
+    for platform, recorded in recording.items():
+        found = list(holders(recorded))
+        assert found, platform
+        for keys in found:
+            assert keys == [key for key in store_order if key in keys], (platform, keys)
