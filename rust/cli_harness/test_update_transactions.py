@@ -555,7 +555,13 @@ def host(tmp_path, failure="", mode="release"):
         (ops / name).write_text("services:\n  pseudolife-daemon:\n    image: pseudolife-daemon:0.21.0\n")
     (ops / ".env").write_text("PSEUDOLIFE_MCP_TOKEN=fixture-bearer\n")
     repo = ops.parent
+    # The checkout's release version is its native client crate's; the
+    # frozen Python updater these cases also run still knows a checkout by
+    # pyproject.toml, so both carry the version, as every checkout does
+    # while the wheel is published.
     (repo / "pyproject.toml").write_text('[project]\nversion = "0.21.1"\n')
+    (repo / "rust/shim").mkdir(parents=True)
+    (repo / "rust/shim/Cargo.toml").write_text('[package]\nname = "pseudolife-stdio"\nversion = "0.21.1"\n')
     plan = repo / CHECKOUT_SCHEMA_PLAN
     plan.parent.mkdir(parents=True)
     plan.write_text(json.dumps({"schema_version": 58}), encoding="utf-8")
