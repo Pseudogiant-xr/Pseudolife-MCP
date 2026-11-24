@@ -7,9 +7,10 @@ the budget check). A Python environment that can import the package is refused.
 The temporary checkout and home are made under your home directory. Probe
 failures produce exit 1. Setup errors produce exit 2.
 
-The checks import live test modules and shared fixtures, check the CI budget and
-producer census, and request harness help. A successful import or --help does
-not exercise a test body, a build, an installation or a daemon.
+The checks import live test modules and shared fixtures, collect the suite with
+pytest (which loads tests/conftest.py), check the CI budget and producer census,
+and request harness help. A successful import, collection or --help does not
+exercise a test body, a build, an installation or a daemon.
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ from package_consumers import ACTIVE, CATEGORIES, PACKAGE, ROOT, TESTING
 
 
 PER_PROBE_SECONDS = 12
-TOTAL_PROBE_SECONDS = 240
+TOTAL_PROBE_SECONDS = 600
 BOOTSTRAP = """
 from importlib.util import find_spec
 from pathlib import Path
@@ -58,6 +59,12 @@ elif mode == "module":
     sys.path.insert(0, str(root))
     sys.argv = [target, *arguments]
     runpy.run_module(target, run_name="__main__", alter_sys=True)
+elif mode == "collect":
+    # Collection loads tests/conftest.py and its fixtures, which importing a
+    # test module alone does not. Nothing is run.
+    sys.path.insert(0, str(root))
+    import pytest
+    raise SystemExit(pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider", target]))
 else:
     script = root / target
     sys.path[:0] = [str(root), str(script.parent)]
@@ -73,6 +80,7 @@ class Probe:
     mode: str
     target: str
     arguments: tuple[str, ...] = ()
+    seconds: float = PER_PROBE_SECONDS
 
     @property
     def label(self) -> str:
@@ -100,6 +108,10 @@ def plan(checkout: Path) -> list[Probe]:
         Probe(TESTING, "script", "rust/daemon/harness/run.py", ("--help",)),
         Probe(TESTING, "module", "evals.rust_port.cli_dispatch", ("--help",)),
         *(Probe(TESTING, "import", f"tests/{filename}") for filename in fixtures),
+        # pytest itself: the suite's conftest and fixtures load (one file whose
+        # own imports are package-free), then the whole default collection.
+        Probe(TESTING, "collect", "tests/test_fixture_guards_package_absent.py", seconds=60),
+        Probe(TESTING, "collect", "tests", seconds=180),
         *live,
     ]
 
@@ -207,7 +219,7 @@ def run(commit: str) -> int:
             for probe in group:
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
-                    code, reason = run_probe(probe, checkout, env, min(PER_PROBE_SECONDS, remaining))
+                    code, reason = run_probe(probe, checkout, env, min(probe.seconds, remaining))
                 else:
                     code, reason = 124, "not run: overall time limit reached"
                 failed |= code != 0

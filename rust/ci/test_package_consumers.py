@@ -191,3 +191,5 @@ def test_probe_plan_uses_live_suite_manifest(tmp_path):
     assert "import tests/conftest.py" in labels
     assert "script rust/ci/ci_budget.py check" in labels
     assert "script rust/cli_harness/__main__.py --help" in labels
+    assert "collect tests/test_fixture_guards_package_absent.py" in labels
+    assert "collect tests" in labels

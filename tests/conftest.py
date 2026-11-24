@@ -151,8 +151,13 @@ def scrub_live_bank_dsn(environ) -> str:
     controller) is kept. A DSN that leaves its database implicit (libpq's
     user-name default, or a service file) is recorded as unresolved, which
     stops the run in pytest_configure — the DSN is about to be gone, and
-    with it the only clue to the bank's name. Returns the recorded name."""
-    from pseudolife_memory.storage.schema import (
+    with it the only clue to the bank's name. Returns the recorded name.
+
+    The guard is the package-free one in rust/harness_support, which reads
+    and writes the same record, so the suite loads and refuses the same
+    banks whether or not the frozen package is importable
+    (tests/test_fixture_guards_package_absent.py)."""
+    from rust.harness_support.database_guard import (
         DEFAULT_PRODUCTION_DATABASE, PRODUCTION_DATABASE_ENV,
         UNRESOLVED_PRODUCTION_DATABASE, dsn_database_name,
     )
@@ -320,7 +325,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     except ImportError:
         raise pytest.UsageError("Required test PostgreSQL needs psycopg") from None
 
-    from pseudolife_memory.storage.schema import ProductionDatabaseError
+    # The class ensure_test_db raises: tests/pg_fixtures.py uses this guard.
+    from rust.harness_support.database_guard import ProductionDatabaseError
     from tests.helpers import pg_reachable
     from tests.pg_defaults import (
         PostgresAuthError, PostgresSetupError, PostgresUnavailableError,
@@ -404,7 +410,7 @@ def pytest_configure(config: pytest.Config) -> None:
     # Before anything else: refuse to run when the exported daemon DSN hid
     # its database (scrub_live_bank_dsn above). Every PG reset would refuse
     # anyway; one message here beats a thousand errors.
-    from pseudolife_memory.storage.schema import (
+    from rust.harness_support.database_guard import (
         PRODUCTION_DATABASE_ENV, UNRESOLVED_PRODUCTION_DATABASE,
     )
 
@@ -502,6 +508,14 @@ def pytest_configure(config: pytest.Config) -> None:
     refuse_live_bank()  # pytest_unconfigure releases the lock on a refusal
 
     embedder_mode(os.environ)  # a bad PSEUDOLIFE_TEST_EMBEDDER fails here
+    # The memoized load below wraps the frozen package's embedding pipeline,
+    # which only the package's own tests build. Without the package (no
+    # module to find, the state after its deletion) there is nothing to
+    # wrap; a package that is present but fails to import still fails here.
+    from importlib.util import find_spec
+
+    if find_spec("pseudolife_memory") is None:
+        return
     from pseudolife_memory.memory import embedding as embedding_module
     from pseudolife_memory.utils.config import EmbeddingConfig
 
