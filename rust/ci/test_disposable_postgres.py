@@ -136,6 +136,59 @@ class FakeServer:
         return Connection()
 
 
+class FakeWinApi:
+    """The _winapi calls the Windows signal pipe makes, on a fake clock:
+    ``busy`` CreateFile attempts fail with ERROR_PIPE_BUSY first, and each
+    WaitNamedPipe advances the clock by ``wait_takes`` seconds."""
+    GENERIC_READ, GENERIC_WRITE, OPEN_EXISTING, NULL = 0x80000000, 0x40000000, 3, 0
+    ERROR_PIPE_BUSY, ERROR_SEM_TIMEOUT = 231, 121
+
+    def __init__(self, monkeypatch, *, busy=0, wait_takes=0.0, wait_error=None, create_error=None,
+                 read_error=None):
+        self.busy, self.wait_takes, self.wait_error = busy, wait_takes, wait_error
+        self.create_error, self.read_error = create_error, read_error
+        self.calls, self.now = [], 1000.0
+        monkeypatch.setattr(postgres, "_windows_api", lambda: self)
+        monkeypatch.setattr(postgres.time, "monotonic", lambda: self.now)
+
+    @staticmethod
+    def _error(winerror, text):
+        error = OSError(text)
+        error.winerror = winerror
+        return error
+
+    def CreateFile(self, name, access, share, security, disposition, flags, template):
+        self.calls.append(("CreateFile", name, access, disposition))
+        if self.create_error is not None:
+            raise self.create_error
+        if self.busy:
+            self.busy -= 1
+            raise self._error(self.ERROR_PIPE_BUSY, "All pipe instances are busy")
+        return "handle"
+
+    def WaitNamedPipe(self, name, timeout_ms):
+        self.calls.append(("WaitNamedPipe", name, timeout_ms))
+        self.now += self.wait_takes
+        if self.wait_error is not None:
+            raise self._error(self.wait_error, "wait failed")
+
+    def WriteFile(self, handle, data):
+        self.calls.append(("WriteFile", handle, data))
+        return len(data), 0
+
+    def ReadFile(self, handle, size):
+        self.calls.append(("ReadFile", handle, size))
+        if self.read_error is not None:
+            raise self.read_error
+        return b"\x02", 0
+
+    def CloseHandle(self, handle):
+        self.calls.append(("CloseHandle", handle))
+
+    def names(self):
+        return [call[0] for call in self.calls]
+
+
 @pytest.fixture
 def fakes(monkeypatch, tmp_path):
     server = FakeServer()
@@ -185,6 +238,20 @@ def test_start_owns_a_fresh_loopback_cluster(fakes):
     assert Path(started["data_dir"]).parent.parent == fakes.parent
     assert server.admin_conninfo() == "host=127.0.0.1 port=55432 user=postgres dbname=postgres"
     assert server.password not in server.admin_conninfo() and server.password not in repr(server)
+
+
+@pytest.mark.parametrize("prefix", ["../pl-", "pl/../", "a/b-", "a\\b-", "pl..x-"])
+def test_start_refuses_a_prefix_that_is_not_one_path_component(fakes, prefix):
+    with pytest.raises(postgres.SetupError, match="one path component"):
+        postgres.start(fakes.parent, prefix)
+    assert list(fakes.parent.iterdir()) == [] and list(fakes.parent.parent.iterdir()) == [
+        fakes.home, fakes.parent] and fakes.pg0.instances == []
+
+
+@pytest.mark.parametrize("prefix", ["pl.ci-", "pl-cli-lease-postgres-", "-_"])
+def test_start_takes_a_plain_prefix(fakes, prefix):
+    """The near misses: one dot, the lease fixture's own prefix, an empty one."""
+    assert postgres.start(fakes.parent, prefix).owned
 
 
 def test_start_rotates_off_the_command_line_password(fakes):
@@ -288,7 +355,7 @@ def test_start_refuses_a_uri_host_other_than_the_verified_one(fakes, host):
     """Every check connects to 127.0.0.1, so only 127.0.0.1 is exported:
     pg0 naming any other host, loopback or not, is refused."""
     fakes.pg0.uri_host = f"[{host}]" if ":" in host else host
-    with pytest.raises(postgres.SetupError, match="another host than 127.0.0.1"):
+    with pytest.raises(postgres.SetupError, match="another host than 127.0.0.1.*requirements-postgres.txt"):
         postgres.start(fakes.parent, "pl-test-")
     assert len(fakes.stops) == 1  # our own server is stopped
 
@@ -375,27 +442,13 @@ def test_shutdown_signals_the_verified_pid_itself(monkeypatch):
     postgres._signal_shutdown(4242)
     assert sent == [("kill", 4242, signal_module.SIGINT)]
 
-    class Pipe:
-        def __init__(self, name, mode, buffering):
-            sent.append(("open", name, mode, buffering))
-
-        def write(self, data):
-            sent.append(("write", data))
-
-        def read(self, size):
-            return b"\x02"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    sent.clear()
     monkeypatch.setattr(postgres.os, "name", "nt")
-    monkeypatch.setattr(postgres, "open", Pipe, raising=False)
+    api = FakeWinApi(monkeypatch)
     postgres._signal_shutdown(4242)
-    assert sent == [("open", r"\\.\pipe\pgsignal_4242", "r+b", 0), ("write", b"\x02")]
+    name = r"\\.\pipe\pgsignal_4242"
+    assert api.calls == [("CreateFile", name, api.GENERIC_READ | api.GENERIC_WRITE, api.OPEN_EXISTING),
+                         ("WriteFile", "handle", b"\x02"), ("ReadFile", "handle", 1),
+                         ("CloseHandle", "handle")]
 
 
 def test_exited_waits_for_the_pid_file_to_go(tmp_path):
@@ -506,6 +559,59 @@ def test_no_exception_leaves_start_with_the_start_up_password(fakes):
         postgres.start(fakes.parent, "pl-test-")
     password = fakes.pg0.instances[0]["password"]
     assert password not in str(raised.value) and "***" in str(raised.value)
+    assert all(password not in str(arg) for error in _chain(raised.value) for arg in error.args)
+
+
+def _chain(error):
+    """Every exception reachable through __cause__ and __context__."""
+    seen, pending = [], [error]
+    while pending:
+        error = pending.pop()
+        if error is not None and all(error is not other for other in seen):
+            seen.append(error)
+            pending += [error.__cause__, error.__context__]
+    return seen
+
+
+def test_scrub_walks_both_the_cause_and_the_context():
+    try:
+        try:
+            raise OSError("context with secret-b")
+        except OSError:
+            cause = ValueError("cause with secret-a")
+            cause.__context__ = KeyError("deeper with secret-a and secret-b")
+            raise RuntimeError("top with secret-a") from cause
+    except RuntimeError as error:
+        top = error
+    top.__context__.__context__ = top  # a cycle ends the walk, not the process
+    postgres._scrub(top, ["secret-a", "secret-b"])
+    chain = _chain(top)
+    assert len(chain) == 4
+    assert all("secret" not in str(arg) for error in chain for arg in error.args)
+    assert all("***" in str(error.args[0]) for error in chain)
+
+
+def test_no_exception_leaves_start_with_the_rotated_password(fakes, monkeypatch):
+    """A failure after rotation carries the new password: it is scrubbed
+    throughout the chain, on the context branch beside a cause too."""
+    seen = []
+
+    def login(port, password):
+        seen.append(password)
+        try:
+            raise OSError(f"socket note for {password}")
+        except OSError:
+            raise RuntimeError("login probe failed") from ValueError(f"probe of {password}")
+
+    monkeypatch.setattr(postgres, "_login", login)
+    with pytest.raises(RuntimeError) as raised:
+        postgres.start(fakes.parent, "pl-test-")
+    rotated, first = seen[0], fakes.pg0.instances[0]["password"]
+    assert rotated != first
+    chain = _chain(raised.value)
+    assert len(chain) == 3
+    text = " ".join(str(arg) for error in chain for arg in error.args)
+    assert rotated not in text and first not in text and text.count("***") == 2
 
 
 def test_a_partly_written_pid_file_is_not_an_exit(tmp_path, monkeypatch):
@@ -530,6 +636,21 @@ def test_a_failed_start_leaves_a_directory_whose_pid_file_cannot_be_read(fakes):
     assert fakes.stops == []
     (data_dir,) = fakes.parent.iterdir()  # something may run there: kept
     assert (data_dir / "pgdata" / "postmaster.pid").is_file()
+
+
+def test_start_names_an_unreadable_pid_file_after_a_good_start(fakes):
+    original = fakes.pg0.Pg0.start
+
+    def start(self):
+        info = original(self)
+        (Path(self.kwargs["data_dir"]) / "postmaster.pid").write_text("42", encoding="utf-8")
+        return info
+
+    fakes.pg0.Pg0.start = start
+    with pytest.raises(postgres.SetupError, match="pid file in .* cannot be read; stop any server") as raised:
+        postgres.start(fakes.parent, "pl-test-")
+    assert "already running" not in str(raised.value)
+    assert fakes.stops == [] and len(list(fakes.parent.iterdir())) == 1  # something may run there: kept
 
 
 def test_pid_file_settle_waits_for_a_complete_file(tmp_path, monkeypatch):
@@ -559,48 +680,93 @@ def test_deregister_removes_only_the_record_of_its_own_directory(tmp_path, monke
     assert (tmp_path / ".pg0" / "instances" / "other").exists()
 
 
-def test_a_busy_signal_pipe_is_retried(monkeypatch):
+@pytest.mark.parametrize("document", ["[]", '{"data_dir": null}', '{"data_dir": 7}', '{"data_dir": ""}',
+                                      '"text"', "null"])
+def test_deregister_leaves_a_record_of_another_shape(tmp_path, monkeypatch, document):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    record = tmp_path / ".pg0" / "instances" / "mine"
+    record.mkdir(parents=True)
+    (record / "instance.json").write_text(document, encoding="utf-8")
+    postgres._deregister("mine", tmp_path / "ours" / "pgdata")
+    assert (record / "instance.json").read_text(encoding="utf-8") == document
+
+
+def test_stop_removes_the_directory_beside_a_record_of_another_shape(fakes):
+    server = postgres.start(fakes.parent, "pl-test-")
+    (fakes.home / ".pg0" / "instances" / server.name / "instance.json").write_text("[]", encoding="utf-8")
+    assert server.stop() is True and not server.data_dir.exists()
+
+
+def test_a_record_of_another_shape_keeps_the_start_error(fakes):
+    fakes.pg0.fail_after_launch = True
+    original = fakes.pg0.Pg0.start
+
+    def start(self):
+        try:
+            original(self)
+        finally:
+            record = Path.home() / ".pg0" / "instances" / self.kwargs["name"] / "instance.json"
+            record.write_text('{"data_dir": null}', encoding="utf-8")
+
+    fakes.pg0.Pg0.start = start
+    with pytest.raises(_Pg0Error, match="timed out"):
+        postgres.start(fakes.parent, "pl-test-")
+    assert len(fakes.stops) == 1 and list(fakes.parent.iterdir()) == []
+
+
+def test_a_busy_signal_pipe_waits_for_a_free_instance(monkeypatch):
+    """CreateFile reports a busy pipe as ERROR_PIPE_BUSY; WaitNamedPipe then
+    waits for the next free instance and the byte goes through."""
     monkeypatch.setattr(postgres.os, "name", "nt")
-    monkeypatch.setattr(postgres.time, "sleep", lambda seconds: None)
-    attempts, written = [], []
-
-    class Pipe:
-        def __init__(self, name, mode, buffering):
-            attempts.append(name)
-            if len(attempts) < 3:
-                error = OSError("All pipe instances are busy")
-                error.winerror = 231
-                raise error
-
-        def write(self, data):
-            written.append(data)
-
-        def read(self, size):
-            return b"\x02"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(postgres, "open", Pipe, raising=False)
+    api = FakeWinApi(monkeypatch, busy=2, wait_takes=0.5)
     postgres._signal_shutdown(4242)
-    assert len(attempts) == 3 and written == [b"\x02"]
+    assert api.names() == ["CreateFile", "WaitNamedPipe", "CreateFile", "WaitNamedPipe", "CreateFile",
+                           "WriteFile", "ReadFile", "CloseHandle"]
+    waits = [call[2] for call in api.calls if call[0] == "WaitNamedPipe"]
+    assert waits == [5000, 4500]  # what is left of the 5 s, in milliseconds
 
 
-def test_another_pipe_error_is_not_retried(monkeypatch):
+def test_a_signal_pipe_busy_for_five_seconds_gives_up(monkeypatch):
     monkeypatch.setattr(postgres.os, "name", "nt")
-    attempts = []
-
-    def refuse(name, mode, buffering):
-        attempts.append(name)
-        raise FileNotFoundError(name)
-
-    monkeypatch.setattr(postgres, "open", refuse, raising=False)
-    with pytest.raises(FileNotFoundError):
+    api = FakeWinApi(monkeypatch, busy=10**6, wait_takes=2.0, wait_error=FakeWinApi.ERROR_SEM_TIMEOUT)
+    started = api.now
+    with pytest.raises(OSError) as raised:
         postgres._signal_shutdown(4242)
-    assert len(attempts) == 1
+    assert raised.value.winerror == api.ERROR_PIPE_BUSY
+    assert api.now - started == pytest.approx(postgres.PIPE_GIVE_UP + 1.0)  # three waits of 2 s
+    assert api.names().count("WaitNamedPipe") == 3 and "WriteFile" not in api.names()
+    assert "CloseHandle" not in api.names()  # nothing was opened
+
+
+def test_a_busy_signal_pipe_is_a_failed_stop_not_an_error(fakes, monkeypatch):
+    server = postgres.start(fakes.parent, "pl-test-")
+    monkeypatch.setattr(postgres, "_signal_shutdown", postgres.__dict__["_signal_pipe"])
+    FakeWinApi(monkeypatch, busy=10**6, wait_takes=3.0, wait_error=FakeWinApi.ERROR_SEM_TIMEOUT)
+    assert server.stop() is False and server.data_dir.exists() and server.owned
+
+
+@pytest.mark.parametrize("winerror", [2, 5, 22])  # gone, denied, invalid
+def test_another_pipe_error_is_not_retried(monkeypatch, winerror):
+    monkeypatch.setattr(postgres.os, "name", "nt")
+    api = FakeWinApi(monkeypatch, create_error=FakeWinApi._error(winerror, "refused"))
+    with pytest.raises(OSError) as raised:
+        postgres._signal_shutdown(4242)
+    assert raised.value.winerror == winerror and api.names() == ["CreateFile"]
+
+
+def test_a_failed_wait_is_not_retried(monkeypatch):
+    monkeypatch.setattr(postgres.os, "name", "nt")
+    api = FakeWinApi(monkeypatch, busy=1, wait_error=2)  # the pipe went away
+    with pytest.raises(OSError) as raised:
+        postgres._signal_shutdown(4242)
+    assert raised.value.winerror == 2 and api.names() == ["CreateFile", "WaitNamedPipe"]
+
+
+def test_the_signal_pipe_is_closed_when_the_acknowledgement_fails(monkeypatch):
+    monkeypatch.setattr(postgres.os, "name", "nt")
+    api = FakeWinApi(monkeypatch, read_error=FakeWinApi._error(109, "The pipe has been ended"))
+    postgres._signal_shutdown(4242)
+    assert api.names() == ["CreateFile", "WriteFile", "ReadFile", "CloseHandle"]
 
 
 def test_the_native_child_opens_no_console_window_on_windows(monkeypatch, tmp_path):
@@ -769,7 +935,8 @@ def test_lease_fixture_refuses_a_login_it_cannot_find(lease_ci, monkeypatch, cap
     monkeypatch.setattr(postgres.subprocess, "run", lambda command, **kwargs:
                         subprocess.CompletedProcess(command, 0, json.dumps({"exit": 0, "error": None}), ""))
     assert lease_ci.module.main() == 1
-    assert "wrote no login file" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "wrote no login file" in err and "PSEUDOLIFE_LEASE_CI_BINARY" in err
     assert not lease_ci.env_file.exists() and len(lease_ci.fakes.stops) == 1
 
 

@@ -84,7 +84,9 @@ def main() -> int:
             print(diagnostic(RuntimeError(reason), f"password={secret}"), file=sys.stderr)
             return result.returncode
         if not login_file.is_file():
-            raise postgres.SetupError(f"test-login create reported success but wrote no login file at {login_file}")
+            raise postgres.SetupError(f"test-login create reported success but wrote no login file at {login_file}; "
+                                      "check that the native client at PSEUDOLIFE_LEASE_CI_BINARY (or the job's "
+                                      "release pseudolife-stdio) is this checkout's, and that RUNNER_TEMP is writable")
 
         with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="") as env_file:
             env_file.write(f"PSEUDOLIFE_TEST_PG_HOST_PORT={host_port}\n")

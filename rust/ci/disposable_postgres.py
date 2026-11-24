@@ -70,8 +70,9 @@ _URI_HOSTS = frozenset({"127.0.0.1", "localhost"})
 # How long a postmaster.pid that exists but does not parse yet (the
 # postmaster writes it in steps) is re-read before it counts as unreadable.
 PIDFILE_SETTLE = 2.0
-# ERROR_PIPE_BUSY: the postmaster serves one signal-pipe client at a time.
-_PIPE_BUSY = 231
+# The postmaster serves one signal-pipe client at a time; a busy pipe is
+# waited for this long before the stop counts as failed.
+PIPE_GIVE_UP = 5.0
 
 
 class SetupError(RuntimeError):
@@ -210,21 +211,48 @@ def _signal_shutdown(pid: int) -> None:
     -D``, which signals whatever pid the file names when it runs, this reaches
     only the process just verified."""
     if os.name == "nt":
-        deadline = time.monotonic() + 5
-        while True:
-            try:
-                pipe = open(rf"\\.\pipe\pgsignal_{pid}", "r+b", buffering=0)
-                break
-            except OSError as error:
-                if getattr(error, "winerror", None) != _PIPE_BUSY or time.monotonic() >= deadline:
-                    raise
-                time.sleep(0.1)
-        with pipe:
-            pipe.write(bytes([_FAST_SHUTDOWN]))
-            pipe.read(1)
+        _signal_pipe(pid)
     else:
         import signal  # noqa: PLC0415
         os.kill(pid, signal.SIGINT)
+
+
+def _windows_api():
+    import _winapi  # noqa: PLC0415 - Windows only
+    return _winapi
+
+
+def _signal_pipe(pid: int) -> None:
+    """The fast-shutdown byte on postmaster ``pid``'s own signal pipe, as
+    pg_ctl's pgkill sends it. CreateFile (not open(), which reports a busy
+    pipe as EINVAL with no winerror) says ERROR_PIPE_BUSY while another
+    client holds the one listening instance; WaitNamedPipe then waits for it,
+    up to PIPE_GIVE_UP seconds in all, and anything else is raised at once."""
+    api = _windows_api()
+    name = rf"\\.\pipe\pgsignal_{pid}"
+    deadline = time.monotonic() + PIPE_GIVE_UP
+    while True:
+        try:
+            handle = api.CreateFile(name, api.GENERIC_READ | api.GENERIC_WRITE, 0, api.NULL,
+                                    api.OPEN_EXISTING, 0, api.NULL)
+            break
+        except OSError as error:
+            remaining = deadline - time.monotonic()
+            if getattr(error, "winerror", None) != api.ERROR_PIPE_BUSY or remaining <= 0:
+                raise
+        try:
+            api.WaitNamedPipe(name, max(1, int(remaining * 1000)))
+        except OSError as error:
+            if getattr(error, "winerror", None) != api.ERROR_SEM_TIMEOUT:
+                raise
+    try:
+        api.WriteFile(handle, bytes([_FAST_SHUTDOWN]))
+        try:
+            api.ReadFile(handle, 1)  # the postmaster's acknowledgement
+        except OSError:
+            pass  # the byte is delivered; _exited confirms the stop
+    finally:
+        api.CloseHandle(handle)
 
 
 def _exited(pgdata: Path, pid: int, wait: float) -> bool:
@@ -244,7 +272,15 @@ def _exited(pgdata: Path, pid: int, wait: float) -> bool:
 
 def _registry_record(name: str) -> Path:
     """pg0's record of instance ``name`` (pg0 keeps ~/.pg0/instances/<name>)."""
+    _check_name(name)
     return Path.home() / ".pg0" / "instances" / name
+
+
+def _check_name(name: str) -> None:
+    """An instance name is one path component: pg0 files it by name."""
+    if not name or "/" in name or "\\" in name or ".." in name:
+        raise SetupError(f"pg0 instance name {name!r} must be one path component without '..'; "
+                         "pass a plain prefix such as 'pl-ci-postgres-'")
 
 
 def _deregister(name: str, pgdata: Path) -> None:
@@ -253,9 +289,12 @@ def _deregister(name: str, pgdata: Path) -> None:
     dead by now and may be reused. Only a record naming ``pgdata`` goes."""
     record = _registry_record(name)
     try:
-        data_dir = json.loads((record / "instance.json").read_text(encoding="utf-8")).get("data_dir", "")
+        document = json.loads((record / "instance.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
+    data_dir = document.get("data_dir") if isinstance(document, dict) else None
+    if not isinstance(data_dir, str) or not data_dir:
+        return  # not a record this helper wrote: left as it is
     if os.path.normcase(os.path.abspath(data_dir)) == os.path.normcase(os.path.abspath(pgdata)):
         shutil.rmtree(record, ignore_errors=True)
 
@@ -308,8 +347,11 @@ def _abandon(name: str, data_dir: Path, pgdata: Path, passwords: list[str]) -> N
 def _scrub(error: BaseException, secrets_: list[str]) -> None:
     """Remove ``secrets_`` from the text of ``error`` and its chain (pg0's
     stderr can carry the start-up password it was given on its argv)."""
-    seen = set()
-    while error is not None and id(error) not in seen:
+    seen, pending = set(), [error]
+    while pending:
+        error = pending.pop()
+        if error is None or id(error) in seen:
+            continue
         seen.add(id(error))
         args = list(error.args)
         for index, arg in enumerate(args):
@@ -318,7 +360,7 @@ def _scrub(error: BaseException, secrets_: list[str]) -> None:
                     arg = arg.replace(secret, "***")
                 args[index] = arg
         error.args = tuple(args)
-        error = error.__cause__ or error.__context__
+        pending += [error.__cause__, error.__context__]
 
 
 def start(parent: Path, prefix: str) -> Server:
@@ -339,10 +381,11 @@ def start(parent: Path, prefix: str) -> Server:
 
 def _start(parent: Path, prefix: str, first: str, holder: list) -> Server:
     import pg0  # noqa: PLC0415
+    name = f"{prefix.strip('-_') or 'pl-ci'}-{secrets.token_hex(6)}"
+    _check_name(name)  # before mkdtemp, which takes the prefix as a path part
     data_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
     pgdata = data_dir / "pgdata"
     pgdata.mkdir()
-    name = f"{prefix.strip('-_') or 'pl-ci'}-{secrets.token_hex(6)}"
     instance = pg0.Pg0(name=name, data_dir=str(pgdata), username=SUPERUSER, password=first,
                        config=SERVER_SETTINGS)
     try:
@@ -356,7 +399,11 @@ def _start(parent: Path, prefix: str, first: str, holder: list) -> Server:
         # server in this fresh directory is ours and must not outlive this.
         _abandon(name, data_dir, pgdata, [first])
         raise
-    record, _ = _pidfile_settled(pgdata)
+    record, present = _pidfile_settled(pgdata)
+    if record is None and present:
+        _abandon(name, data_dir, pgdata, [first])  # leaves it: something may run there
+        raise SetupError(f"PostgreSQL started, but its pid file in {pgdata} cannot be read; "
+                         "stop any server on that directory, remove it and retry")
     if record is None:
         # pg0 reports a server, but none runs in our fresh directory: it
         # attached to something else, which is not ours to use or stop.
@@ -372,7 +419,8 @@ def _start(parent: Path, prefix: str, first: str, holder: list) -> Server:
         # naming any other host than the one every check connects to is
         # refused: only HOST is verified, so only HOST is exported.
         if info.uri and (urlsplit(info.uri).hostname or "") not in _URI_HOSTS:
-            raise SetupError(f"pg0 reported a server on another host than {HOST}; refusing it")
+            raise SetupError(f"pg0 reported a server on another host than {HOST}; refusing it. Install the "
+                             "pg0-embedded version rust/ci/requirements-postgres.txt pins and retry")
         server = Server(name=name, data_dir=data_dir, pgdata=pgdata, port=port, pid=pid,
                         password=first, owned=True)
         holder.append(server)
