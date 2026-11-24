@@ -74,6 +74,10 @@ def test_a_bearer_the_install_cannot_mint_is_decided_before_anything_is_pulled(t
         # The cause is the flag this install was given, never missing pip tooling
         # (#1609): the native client needs no pipx or pip.
         assert ("-NoToken" if script.endswith(".ps1") else "--no-token") in output, output
+        if script.endswith(".ps1"):
+            # A recorded opt-out is cleared only by an explicit -NoToken:$false,
+            # printed literally (not PowerShell's expanded "False").
+            assert "rerun with -NoToken:$false -Transport shim" in output, output
         assert "pipx" not in output and "pip-capable" not in output, output
         assert prepares == []
     else:
