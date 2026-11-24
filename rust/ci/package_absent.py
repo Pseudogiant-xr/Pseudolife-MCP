@@ -206,6 +206,9 @@ def run(commit: str) -> int:
         if pin:
             subprocess.run([git, "fetch", "--quiet", "--no-tags", "--depth=1", ROOT.as_uri(), pin[1]],
                            cwd=checkout, env=env, check=True)
+            code, reason = run_probe(Probe(ACTIVE, "check", ""), checkout, env, PER_PROBE_SECONDS)
+            if code:
+                raise RuntimeError(reason)
 
         print(f"Package-absent probe at {sha}", flush=True)
         probes = plan(checkout)

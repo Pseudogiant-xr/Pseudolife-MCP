@@ -32,6 +32,19 @@ FROZEN_SOURCES_COMMIT = "09d23dcf621e5c3e2c8429f1ed123c387d10b2ce"
 FROZEN_SOURCES = frozenset(path for path in CONTRACT_SOURCES if path.startswith("pseudolife_memory/"))
 
 
+def fetch_frozen_sources(root: Path = ROOT) -> bool:
+    """Fetch FROZEN_SOURCES_COMMIT into a shallow checkout that lacks it,
+    as the hosted docs lanes' one- and two-commit checkouts do. Returns
+    whether a fetch ran."""
+    have = subprocess.run(["git", "cat-file", "-e", f"{FROZEN_SOURCES_COMMIT}^{{commit}}"],
+                          cwd=root, capture_output=True)
+    if have.returncode == 0:
+        return False
+    subprocess.run(["git", "fetch", "--quiet", "--no-tags", "--depth=1", "origin", FROZEN_SOURCES_COMMIT],
+                   cwd=root, check=True, timeout=120)
+    return True
+
+
 def contract_text(root: Path, path: str) -> str:
     """A scanned file's text: frozen package sources from Git at
     FROZEN_SOURCES_COMMIT, everything else from the working tree."""
@@ -42,7 +55,8 @@ def contract_text(root: Path, path: str) -> str:
     if result.returncode:
         raise SystemExit(f"producer census: cannot read {path} at {FROZEN_SOURCES_COMMIT[:12]} "
                          "(the frozen package's contract sources); fetch that commit, for "
-                         "example with full history (git fetch --unshallow)")
+                         "example with full history (git fetch --unshallow). git said: "
+                         + (result.stderr.strip() or "nothing"))
     return result.stdout
 
 # Changed fingerprints withdraw trusted manual shapes and report unresolved drift.
