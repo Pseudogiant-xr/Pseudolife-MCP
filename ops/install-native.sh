@@ -1012,8 +1012,9 @@ show_generic_snippets() {
   Add pseudolife-memory to your agent's MCP config. Two ready-to-paste
   shapes (pick ONE):
 
-  stdio shim (recommended - per-session identity; needs
-  `pip install pseudolife-mcp` or pipx):
+  stdio shim (recommended - per-session identity; needs the native
+  client this installer installs: while PATH does not find
+  pseudolife-mcp, put its full path in "command"):
     { "mcpServers": { "pseudolife-memory": {
         "command": "pseudolife-mcp",
         "env": { "PSEUDOLIFE_WRITER_ID": "mcp-client",
