@@ -505,6 +505,36 @@ def test_endpoint_keeps_exact_matching_for_ids_that_are_not_gguf_files(request_m
         retained_daemon.Endpoint(url, request_model, "fixture-profile", served_model).verify()
 
 
+def test_endpoint_errors_print_hub_ids_that_differ_only_in_org_in_full():
+    with llama_cpp_server("org-b/model") as (url, _):
+        endpoint = retained_daemon.Endpoint(url, "bench", "fixture-profile", "org-a/model")
+        with pytest.raises(BenchError) as refused:
+            endpoint.verify()
+        assert "advertises 'org-b/model', not the expected 'org-a/model'" in str(refused.value)
+        with pytest.raises(BenchError) as served:
+            endpoint.chat("Reply with one word.", "Say ok.", max_tokens=8)
+        assert str(served.value) == "chat completion was served by 'org-b/model', not the expected 'org-a/model'"
+
+
+@pytest.mark.parametrize("model_id", [
+    "/home/<user>/models/other-model",
+    "C:\\Users\\<user>\\models\\other-model",
+    "~/models/other-model",
+    "\\\\<host>\\models\\other-model",
+], ids=["posix", "drive letter", "home", "unc"])
+def test_endpoint_errors_print_an_absolute_directory_by_its_leaf(model_id):
+    with llama_cpp_server(model_id) as (url, _):
+        endpoint = retained_daemon.Endpoint(url, "bench", "fixture-profile")
+        with pytest.raises(BenchError) as refused:
+            endpoint.verify()
+        assert "advertises 'other-model', not the expected 'bench'" in str(refused.value)
+        with pytest.raises(BenchError) as served:
+            endpoint.chat("Reply with one word.", "Say ok.", max_tokens=8)
+        assert str(served.value) == "chat completion was served by 'other-model', not the expected 'bench'"
+    for message in (str(refused.value), str(served.value)):
+        assert "<user>" not in message and "<host>" not in message and "models" not in message
+
+
 @pytest.mark.parametrize("primary", [SERVED_PATH, SERVED_GGUF, "/home/<user>/models/" + SERVED_GGUF])
 def test_rejudge_refuses_the_primary_judge_pinned_by_path_or_file_name(tmp_path, monkeypatch, primary):
     monkeypatch.setattr(lme, "validated_scores",

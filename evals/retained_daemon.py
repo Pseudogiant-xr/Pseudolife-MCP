@@ -95,9 +95,22 @@ def served_name(model_id):
     in /v1/models and in every chat response, whatever model the request named (engine
     b10488, probed on the maintainer's Windows PC on 25 November 2026). The pinned GGUF
     file name is the identity; the directory differs from machine to machine and holds a
-    home path, so only the file name is ever printed.
+    home path, so `shown_model` prints a path by its file name.
     """
     return re.split(r"[\\/]", model_id)[-1] if isinstance(model_id, str) else None
+
+
+def shown_model(model_id):
+    """A model id as an error prints it: a filesystem path by its file name, any other id whole.
+
+    A path is a .gguf id or an absolute one (a leading / or \\, a drive letter, or ~), whose
+    directory can hold a home path. A hub id such as `org-a/model` is printed in full, so two
+    ids that differ only in their organisation stay distinguishable.
+    """
+    if isinstance(model_id, str) and (model_id.lower().endswith(".gguf")
+                                      or re.match(r"[\\/~]|[A-Za-z]:", model_id)):
+        return served_name(model_id)
+    return model_id
 
 
 def model_identity(model_id):
@@ -148,9 +161,9 @@ class Endpoint:
         models = result.get("data")
         ids = [row.get("id") for row in models if isinstance(row, dict)] if isinstance(models, list) else []
         if not any(self.serves(model_id) for model_id in ids):
-            advertised = ", ".join(repr(served_name(model_id)) for model_id in ids) or "no model"
+            advertised = ", ".join(repr(shown_model(model_id)) for model_id in ids) or "no model"
             raise BenchError(f"the model endpoint advertises {advertised}, not the expected "
-                             f"{served_name(self.expected_model)!r}. Serve that model file, or pass the served "
+                             f"{shown_model(self.expected_model)!r}. Serve that model file, or pass the served "
                              "file name as the endpoint's --<role>-served-model (-ServedModel in "
                              "regression_gate.ps1).")
 
@@ -163,8 +176,8 @@ class Endpoint:
                                     "messages": [{"role": "system", "content": system},
                                                  {"role": "user", "content": user}]})
         if not self.serves(result.get("model")):
-            raise BenchError(f"chat completion was served by {served_name(result.get('model'))!r}, "
-                             f"not the expected {served_name(self.expected_model)!r}")
+            raise BenchError(f"chat completion was served by {shown_model(result.get('model'))!r}, "
+                             f"not the expected {shown_model(self.expected_model)!r}")
         try:
             text = result["choices"][0]["message"]["content"]
         except (IndexError, KeyError, TypeError):
