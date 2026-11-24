@@ -1239,16 +1239,37 @@ def test_a_github_actions_run_is_never_asked_for_a_password(tmp_path, procs,
 # was imported at collection, after the lock: the run tested the old defaults
 # against the new test files, and 9 tests failed that passed alone.
 
+def _package_in_checkout() -> bool:
+    """Whether this checkout still carries the frozen package: its
+    ``__init__.py``, as conftest asks (a deleted package's ignored
+    __pycache__ folders leave the directory behind)."""
+    return (ROOT / "pseudolife_memory" / "__init__.py").is_file()
+
+
+def _package_imported_from_checkout() -> bool:
+    """Whether conftest imported the frozen package from this checkout's own
+    source: it does only when the package is importable (blocked or deleted,
+    it is not), and a copy the interpreter finds elsewhere is not the
+    checkout's code, an install in a .venv inside the checkout included
+    (imported_sources leaves interpreter prefixes out)."""
+    package = importlib.util.find_spec("pseudolife_memory")
+    return (package is not None and package.origin is not None
+            and Path(package.origin).resolve()
+            == (ROOT / "pseudolife_memory" / "__init__.py").resolve())
+
+
 def _copy_of_the_checkout(dest: Path) -> Path:
     """What a full run imports before it queues, copied to ``dest``: the
     package-free guard conftest loads (rust/harness_support), the frozen
-    package (imported only after the lock, by package tests' fixtures), the
-    non-test files of tests/ (conftest and its helpers), and pyproject.toml
-    (rootdir, markers). No test files: nothing is collected."""
+    package while the checkout has it (imported only after the lock, by
+    package tests' fixtures), the non-test files of tests/ (conftest and its
+    helpers), and pyproject.toml (rootdir, markers). No test files: nothing
+    is collected."""
     shutil.copytree(ROOT / "rust" / "harness_support", dest / "rust" / "harness_support",
                     ignore=shutil.ignore_patterns("__pycache__", "test_*.py"))
-    shutil.copytree(ROOT / "pseudolife_memory", dest / "pseudolife_memory",
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    if _package_in_checkout():
+        shutil.copytree(ROOT / "pseudolife_memory", dest / "pseudolife_memory",
+                        ignore=shutil.ignore_patterns("__pycache__"))
     (dest / "tests").mkdir()
     for path in TESTS.glob("*.py"):
         if not path.name.startswith("test_"):
@@ -1402,12 +1423,17 @@ def test_the_interpreter_under_the_checkout_is_not_the_checkout_code(tmp_path,
 
 def test_the_scan_finds_the_modules_conftest_imports_at_load():
     # Only that the scanner reaches them in a real session: the lock itself,
-    # a test helper, and package code. That they are fingerprinted before a
+    # a test helper, and the package-free database guard conftest imports at
+    # load, plus the frozen package's config while conftest imported the
+    # package from this checkout. That they are fingerprinted before a
     # queued run waits is the end-to-end test's job.
     sources = {path.relative_to(ROOT).as_posix()
                for path in suite_lock.imported_sources(ROOT)}
-    assert {"tests/conftest.py", "tests/suite_lock.py", "tests/fake_embedder.py",
-            "pseudolife_memory/utils/config.py"} <= sources
+    expected = {"tests/conftest.py", "tests/suite_lock.py", "tests/fake_embedder.py",
+                "rust/harness_support/database_guard.py"}
+    if _package_imported_from_checkout():
+        expected.add("pseudolife_memory/utils/config.py")
+    assert expected <= sources
 
 
 # --- the board mirror -----------------------------------------------------------
@@ -2296,8 +2322,19 @@ def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick
 
 
 def suite_lock_is_free(directory):
-    from pseudolife_memory import os_lock
-    return os_lock.probe(directory / suite_lock.LOCK_FILE) is False
+    """Whether the suite lock file in ``directory`` exists and nobody holds
+    it, probed with the lock's own primitives (the frozen package's os_lock
+    probe made the same flock / msvcrt call). A free lock is taken for an
+    instant and let go; a missing file is never created."""
+    try:
+        handle = open(directory / suite_lock.LOCK_FILE, "rb")  # not "a": no create
+    except FileNotFoundError:
+        return False
+    with handle:
+        if not suite_lock._try_lock(handle):
+            return False
+        suite_lock._unlock(handle)
+        return True
 
 
 @pytest.mark.parametrize("abort", [suite_lock.TreeChanged("changed"), KeyboardInterrupt()],
