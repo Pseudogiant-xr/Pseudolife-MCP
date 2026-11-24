@@ -554,12 +554,13 @@ def test_an_unpublished_release_hands_back_but_a_mirror_without_it_refuses(tmp_p
     assert "has no SHA256SUMS at https://github.com/" in line and "not published yet" in line
     mirror = tmp_path / "mirror"
     mirror.mkdir()
-    log.unlink()
+    # Its own hand-back wrapper, so a hand-back here would happen and show.
+    mirror_log = _python_path(mirror)
     refused = _run(mirror, f"{_fake_curl(mirror, 'printf 404' + chr(10) + 'exit 0' + chr(10))}; native_stage",
-                   release=False, env={**canonical, "HANDBACK_LOG": _p(log),
+                   release=False, env={**canonical, "HANDBACK_LOG": _p(mirror_log),
                                        "PSEUDOLIFE_NATIVE_ARCHIVE_URL": "https://mirror.example.invalid/v9.8.7"})
     assert refused.returncode == 1, refused.stdout + refused.stderr
-    assert "has no SHA256SUMS" in refused.stderr and not log.exists()
+    assert "has no SHA256SUMS" in refused.stderr and not mirror_log.exists()
 
 
 @pytest.mark.parametrize("case, prefix, env, cause", FALLBACK_CAUSES, ids=[c[0] for c in FALLBACK_CAUSES])
