@@ -8,7 +8,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 HERE = Path(__file__).resolve().parent
@@ -152,7 +151,7 @@ class StartupParts(unittest.TestCase):
         for part in (1, 2):
             ran = []
 
-            def fake_cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
+            def fake_cell(binary, number, case, result, mutant=None, expected=None):
                 ran.append((case, mutant))
                 result["stages"] = []
 
@@ -193,9 +192,56 @@ class StartupParts(unittest.TestCase):
         self.assertEqual(len(retries), 1)
         self.assertTrue(guarded)
 
-    def test_a_part_cannot_record_goldens(self):
-        with self.assertRaises(SystemExit), patch("sys.stderr"):
-            startup_ci.main(["--part", "1", "--record-goldens", "--out", "startup.json"])
+    def test_the_retired_oracle_recording_names_the_candidate_recorder(self):
+        # --record-goldens recorded the frozen Python service; every entry
+        # point refuses it, before any check, build or database, and says
+        # what records a golden now.
+        calls = [
+            (startup_ci.main, ["--record-goldens", "--out", "startup.json"]),
+            (startup_ci.main, ["--part", "1", "--record-goldens", "--out", "startup.json"]),
+            (schema_ci.main, ["--record-goldens", "--out", "schema.json"]),
+            (startup_cases.main, ["--record-goldens", "--rust-test-bin", "x", "--out", "startup.json"]),
+            (clock_retry_cases.main, ["--record-goldens", "--rust-test-bin", "x", "--out", "retry.json"]),
+            (schema_cases.main, ["--record-goldens", "--rust-test-bin", "x", "--out", "schema.json"]),
+        ]
+        for main, arguments in calls:
+            module = sys.modules[main.__module__]
+            # No slice, and a database-turn marker that fails if it is read.
+            turn = MagicMock()
+            turn.exists.side_effect = AssertionError("took the database turn")
+            with self.subTest(main=main.__module__, arguments=arguments), \
+                    patch.dict(os.environ), \
+                    patch.object(module, "_DATABASE_TURN_MARKER", turn), \
+                    patch.object(subprocess, "run", side_effect=AssertionError("ran a command")), \
+                    patch("sys.stderr") as stderr, self.assertRaises(SystemExit) as refused:
+                os.environ.pop("PL_HARNESS_SLICE", None)
+                main(arguments)
+            self.assertEqual(refused.exception.code, 2)
+            written = "".join(call.args[0] for call in stderr.write.call_args_list)
+            self.assertIn(candidate_record.RECORD_GOLDENS_RETIRED, written)
+
+    def test_the_retired_writer_oracle_is_refused_with_its_reason(self):
+        turn = MagicMock()
+        turn.exists.side_effect = AssertionError("took the database turn")
+        with patch.dict(os.environ), patch.object(writer_session_cases, "_DATABASE_TURN_MARKER", turn), \
+                patch("sys.stderr") as stderr, self.assertRaises(SystemExit) as refused:
+            os.environ.pop("PL_HARNESS_SLICE", None)
+            writer_session_cases.main(["--oracle", "--rust-test-bin", "x", "--out", "writer.json"])
+        self.assertEqual(refused.exception.code, 2)
+        self.assertIn(writer_session_cases.ORACLE_RETIRED,
+                      "".join(call.args[0] for call in stderr.write.call_args_list))
+
+    def test_the_startup_harnesses_name_the_frozen_package_only_for_historical_schemas(self):
+        # The one remaining name is schema_cases.historical_schema reading
+        # old schema sources from recorded Git objects, not the package.
+        counts = {name: (HERE / name).read_text(encoding="utf-8").count("pseudolife_memory")
+                  for name in ("clock_retry_cases.py", "writer_session_cases.py", "startup_cases.py",
+                               "schema_cases.py", "startup_ci.py", "schema_ci.py")}
+        self.assertEqual(counts, {"clock_retry_cases.py": 0, "writer_session_cases.py": 0,
+                                  "startup_cases.py": 0, "schema_cases.py": 1,
+                                  "startup_ci.py": 0, "schema_ci.py": 0})
+        self.assertIn('f"{commit}:pseudolife_memory/storage/schema.py"',
+                      (HERE / "schema_cases.py").read_text(encoding="utf-8"))
 
 
 class SchemaBuildOnly(unittest.TestCase):
@@ -326,19 +372,10 @@ class GoldenChecking(unittest.TestCase):
         """The same for the schema cells: which storages opened, in order."""
         opened = []
 
-        class Storage:
-            def __init__(self, dsn):
-                opened.append("python")
-
-            def close(self):
-                pass
-
         def rust_open(binary, dsn, refusal=None):
             opened.append("rust")
 
-        with patch.dict(sys.modules, {"pseudolife_memory.storage.postgres":
-                                      SimpleNamespace(PostgresStorage=Storage)}), \
-                patch.object(test_schema_executor, "check_equivalence", return_value={}), \
+        with patch.object(test_schema_executor, "check_equivalence", return_value={}), \
                 patch.object(schema_cases, "rust_open", rust_open), \
                 patch.object(schema_cases.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
                 patch.object(schema_cases.pg, "drop", lambda name, *args: None), \
@@ -377,11 +414,62 @@ class GoldenChecking(unittest.TestCase):
             self.assertEqual(self.starts(clock_retry_cases, ["--record-candidate"]), ["rust"])
         self.assertEqual([path.read_bytes() for path in goldens], before)
 
-    def test_without_golden_checking_both_sides_still_run(self):
-        # Recording (and a plain run) still compares the two live.
-        self.assertEqual(self.starts(startup_cases, ["--only", "empty"]), ["python", "rust"] * 2)
-        self.assertEqual(self.starts(clock_retry_cases, []), ["python", "rust"])
-        self.assertEqual(self.opens([]), ["python", "rust"] * 2)
+    def test_a_plain_run_hands_each_cell_its_committed_golden(self):
+        # Golden checking is the default: with no mode flag every cell, and
+        # every mutant control, is compared with its committed entry.
+        goldens = {name: json.loads((HERE / "goldens" / name).read_text())
+                   for name in ("startup-hydration.json", "clock-retry.json", "schema-startup.json")}
+        seen = []
+
+        def startup_cell(binary, number, case, result, mutant=None, expected=None):
+            seen.append(("startup", case, mutant, expected))
+            result["stages"] = []
+
+        def retry_cell(binary, number, result, mutant=None, expected=None):
+            seen.append(("retry", None, mutant, expected))
+
+        def schema_cell(binary, number, commit=None, dimension=1024, expected=None):
+            seen.append(("schema", commit, None, expected))
+            return {"source_commit": commit, "stages": [], "_observed": []}
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}), \
+                patch("sys.stdout"):
+            binary = Path(tmp) / "daemon-test"
+            binary.write_bytes(b"")
+            out = ["--rust-test-bin", str(binary), "--out", str(Path(tmp) / "out.json")]
+            with patch.object(startup_cases, "cell", startup_cell):
+                startup_cases.main([*out, "--only", "empty"])
+            with patch.object(clock_retry_cases, "cell", retry_cell), \
+                    patch.object(clock_retry_cases.subprocess, "check_output", return_value=b"head"):
+                clock_retry_cases.main(out)
+            with patch.object(schema_cases, "cell", schema_cell), \
+                    patch.object(test_schema_executor, "check_equivalence", return_value={}), \
+                    patch.object(schema_cases.subprocess, "check_output", return_value=b"head"):
+                schema_cases.main(out)
+        self.assertEqual(seen, [
+            ("startup", "empty", None, {"snapshot": goldens["startup-hydration.json"]["cases"]["empty"],
+                                        "database": goldens["startup-hydration.json"]["database"]["empty"]}),
+            ("retry", None, None, goldens["clock-retry.json"]),
+            ("schema", None, None, goldens["schema-startup.json"]["cases"]["fresh"]),
+        ])
+
+    def test_an_unlisted_schema_commit_is_refused_before_any_database_work(self):
+        with patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}), \
+                patch.object(test_schema_executor, "check_equivalence",
+                             side_effect=AssertionError("ran the executor check")), \
+                patch.object(schema_cases, "cell", side_effect=AssertionError("ran a cell")), \
+                patch("sys.stderr") as stderr, self.assertRaises(SystemExit) as refused:
+            schema_cases.main(["--rust-test-bin", "x", "--out", "schema.json", "--commit", "0123abcd"])
+        self.assertEqual(refused.exception.code, 2)
+        self.assertIn("add it to schema_history.json, then record it with --record-candidate",
+                      "".join(call.args[0] for call in stderr.write.call_args_list))
+
+    def test_a_plain_run_checks_the_goldens_with_rust_alone(self):
+        # The frozen Python arm is retired: without a mode flag each harness
+        # checks the committed golden, as --check-goldens does.
+        self.assertEqual(self.starts(startup_cases, ["--only", "empty"]), ["rust", "rust"])
+        self.assertEqual(self.starts(clock_retry_cases, []), ["rust"])
+        self.assertEqual(self.opens([]), ["rust", "rust"])
 
 
 

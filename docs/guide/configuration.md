@@ -2631,6 +2631,16 @@ after the MCP server starts, and turns itself off after a failed
 `codex queue`, so a thread idle since a reconnect has no armed path until
 someone types into it.
 
+A host that unloads idle Codex threads ends the doorbell with them, because
+unloading a thread stops its MCP servers and with them the shim that watches
+it. T3 Code does this about two minutes after the last turn it started
+itself (as of T3 Code 0.1.12); once the shim's board attachment then lapses,
+within about a minute, a sender's receipt is `no_path` with
+`listener_expired` and the mail waits for the session's next turn, so a
+Codex session parked under T3 Code says `next-turn-only`. A turn the
+doorbell does start under T3 Code runs, but T3's thread view does not show
+it (`pingdotgg/t3code#23919`).
+
 A coordinator waiting on verdicts from several peers parks
 `park_clear_by: anyone`, or names the need so a verdict's `clears` matches
 it: a park naming one peer withholds the others' plain mail, and the
@@ -3796,9 +3806,10 @@ browser on Windows, macOS and Linux desktops. If the browser cannot open,
 the client prints the validated sign-in link and the cause. See
 [Signing in to the Console](#signing-in-to-the-console) and
 [Moving a bank](remote-bank.md#moving-a-bank) for native `move` requirements.
-Unsupported `tunnel` operations still exit 1 with the deferral message.
+`tunnel` refuses the forms that are not part of the native client with the
+cause and what to run instead (exit 2).
 See [Tunnels](tunnels.md) for the supported foreground lifecycle and the
-commands that still need the Python client.
+forms only the Python client has.
 
 The native tunnel step reports a verified matching launch as `current`. A compatible supervisor can reconnect on the verified installed shim. It reports `refreshed` after the live vendor answers its local readiness probe and the bridge acknowledges the signed launch. It verifies the pinned tunnel client, the candidate's readiness protocol and the saved daemon connection before interrupting the old process. A failed check leaves the running child alone. A candidate that fails readiness triggers a rollback to the previous shim when the supervisor confirms the candidate exited. Reports of a refusal, successful rollback or a reply deadline with the launch still owned are `stale` and exit 0. Older foreground supervisors and vendor version changes need the stop and run commands in the report. Restart an older service-managed launch through its manager. See [Tunnels](tunnels.md) for Python-supervised launches and cloud verification. The tunnel step exits 2 if it cannot safely read the store or a profile, if the tunnel stops during refresh, if rollback fails, or if the supervisor cannot confirm the child exited. A supervisor that disappears before reporting also yields exit 2. The outer update reports that failure with exit 5.
 

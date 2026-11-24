@@ -503,14 +503,16 @@ def clean_install(receipt, release, repo, profile, peer, scratch):
 #   hook step before `codex mcp add`, so the memory_message approval their hook
 #   consent asked for was never written, and an update never grants one. The
 #   first consented native run adds it.
-# - Issue #1908, not fixed yet: those installers register Codex's own token
-#   copy, and a rerun with the install's own --token-file re-points the
-#   registration at that file once. Remove this entry when a candidate
-#   carries #1908's fix; run 1 must then leave the token file alone.
-# A starting release whose installer carries both fixes expects no change.
+# - Issue #1908: those installers also register Codex's own copy of the
+#   --token-file's token. A candidate whose native installers carry #1908's
+#   fix keeps that registration, so its run 1 must leave
+#   PSEUDOLIFE_MCP_TOKEN_FILE alone. A candidate up to v0.25.1 predates the fix
+#   and re-points it at the file once (first_rerun_settings adds that entry).
+# A starting release whose installer carries the #1903 fix expects no change.
 LOST_APPROVAL = "mcp_servers.pseudolife-memory.tools.memory_message.approval_mode"
 REPOINTED_TOKEN_FILE = "mcp_servers.pseudolife-memory.env.PSEUDOLIFE_MCP_TOKEN_FILE"
-LEGACY_FIRST_RERUN = {LOST_APPROVAL: ("added", "approve"), REPOINTED_TOKEN_FILE: ("changed", None)}
+LAST_CANDIDATE_BEFORE_1908 = (0, 25, 1)
+LEGACY_FIRST_RERUN = {LOST_APPROVAL: ("added", "approve")}
 FIRST_RERUN_SETTINGS = {"v0.23.1": LEGACY_FIRST_RERUN, "v0.24.0": LEGACY_FIRST_RERUN}
 FIRST_RERUN_ASSERTION = ("The first native installer rerun changed only the Codex settings expected for its "
                          "starting release (#1903) and kept the installed runtime.")
@@ -518,13 +520,26 @@ SECOND_RERUN_ASSERTION = "The second identical native installer run changed noth
 UNCHANGED_LINE = re.compile(rb"Native client \S+ already installed at [^\n]+; nothing changed")
 
 
-def first_rerun_kept(tag, before, after, changes, config_after, config):
+def first_rerun_settings(tag, candidate=None):
+    """What run 1 from the starting release `tag` may change: FIRST_RERUN_SETTINGS,
+    plus the #1908 re-point when the candidate (a version such as "0.25.1",
+    pre-releases included; None for one with the fix) is
+    LAST_CANDIDATE_BEFORE_1908 or older by its release numbers."""
+    expected = dict(FIRST_RERUN_SETTINGS[tag])
+    numbers = re.match(r"([0-9]+)\.([0-9]+)\.([0-9]+)", candidate or "")
+    if expected and numbers and tuple(map(int, numbers.groups())) <= LAST_CANDIDATE_BEFORE_1908:
+        expected[REPOINTED_TOKEN_FILE] = ("changed", None)
+    return expected
+
+
+def first_rerun_kept(tag, before, after, changes, config_after, config, candidate=None):
     """Whether run 1 after the hand-off changed exactly the Codex settings
-    FIRST_RERUN_SETTINGS expects for `tag`, each the expected way and to the
-    expected value, and no fingerprinted file but the Codex configuration
-    `config` (profile-relative). `changes` is setting_changes' answer and
-    `config_after` the configuration text after the run."""
-    expected = FIRST_RERUN_SETTINGS[tag]
+    first_rerun_settings expects for `tag` and the candidate, each the
+    expected way and to the expected value, and no fingerprinted file but the
+    Codex configuration `config` (profile-relative). `changes` is
+    setting_changes' answer and `config_after` the configuration text after
+    the run."""
+    expected = first_rerun_settings(tag, candidate)
 
     def others(prints):
         return {name: digest for name, digest in prints.items() if name != config}
@@ -607,21 +622,21 @@ def upgrade(receipt, release, repo, path, peer, scratch):
         def config_text():
             return config.read_text(encoding="utf-8") if config.is_file() else ""
 
-        # Run 1 after the hand-off may change only what FIRST_RERUN_SETTINGS
-        # expects for this start; any other change fails the row.
+        # Run 1 after the hand-off may change only what first_rerun_settings
+        # expects for this start and candidate; any other change fails the row.
         before, config_before = profile.fingerprint(), config_text()
         result = live_install(peer, repo, profile, flags)
         after, config_after = profile.fingerprint(), config_text()
         changes = setting_changes(config_before, config_after)
         kept = result.code == 0 and first_rerun_kept(tag, before, after, changes, config_after,
-                                                     config.relative_to(profile.folder))
+                                                     config.relative_to(profile.folder), release.version)
         receipt.observe(f"{INSTALL} <rerun>", result, kept, FIRST_RERUN_ASSERTION,
                         template=next(templates), required=False)
         receipt.steps[-1]["changed_files"] = changed_files(before, after)
         receipt.steps[-1]["changed_codex_settings"] = sorted(changes)
         receipt.steps[-1]["codex_setting_changes"] = changes
         receipt.steps[-1]["expected_codex_settings"] = {name: kind for name, (kind, _) in
-                                                        sorted(FIRST_RERUN_SETTINGS[tag].items())}
+                                                        sorted(first_rerun_settings(tag, release.version).items())}
         require(kept, FIRST_RERUN_ASSERTION)
         # Run 2, the same inputs: byte-identical to run 1, and it says so.
         result = live_install(peer, repo, profile, flags)

@@ -259,6 +259,7 @@ live test_fact_render_enum.py
 frozen test_fail_closed_hydration.py
 live test_fake_embedder.py
 frozen test_fixture_contract.py
+live test_fixture_guards_package_absent.py
 frozen test_flat_migration.py
 frozen test_forget_cascade.py
 live test_forgetting_sweep_probe.py

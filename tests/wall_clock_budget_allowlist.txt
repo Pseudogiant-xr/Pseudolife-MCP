@@ -120,6 +120,7 @@ tests/test_memory_changes_hook.py | test_a_registered_sessions_first_turn_counts
 tests/test_migrate_embeddings.py | test_daemon_reachable_treats_hung_socket_as_up | assert migrate_embeddings._daemon_reachable(hung_health_server, timeout=0.2) is True | product input: the socket accepts and never answers, so the check can only end in its timeout
 
 tests/test_pg_run_isolation.py | test_wait_for_background_dreams_joins_only_dream_threads._dream | time.sleep(0.3) | minimum: the fake dream thread's work; the test joins it with a 10 s budget
+tests/test_pg_run_isolation.py | test_wait_for_background_dreams_without_the_dream_module_loaded | assert stuck in pg_fixtures.wait_for_background_dreams(timeout=0.05) | product input: the stuck thread never finishes, so it is a straggler at any budget
 tests/test_pg_run_isolation.py | test_wait_for_background_dreams_returns_stragglers_past_the_budget | stragglers = pg_fixtures.wait_for_background_dreams(timeout=0.05) | product input: the stuck thread never finishes, so it is a straggler at any budget
 
 tests/test_service.py | TestEpisodes.test_episode_list_returns_newest_first | time.sleep(0.02)  # Windows clock resolution — distinguish timestamps | minimum: separates two episode start times so newest-first is defined
