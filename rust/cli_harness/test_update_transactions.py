@@ -1,8 +1,11 @@
 """Fault-injected updater acceptance against isolated subprocess Docker stubs.
 
 The native arm accepts the standard PSEUDOLIFE_RUST_BINARY lane candidate
-or the explicit PSEUDOLIFE_UPDATE_TEST_BINARY override.
-Python is an oracle/test fixture only; no real Docker command can resolve.
+or the explicit PSEUDOLIFE_UPDATE_TEST_BINARY override. No real Docker
+command can resolve. The tests marked ``only_frozen_python`` also run the
+frozen Python updater; they are deleted with the package, and the native
+side of what they test runs from the host state that updater leaves
+(``fixtures/python-updater-hosts.json``).
 """
 from contextlib import contextmanager, ExitStack
 import gzip
@@ -20,6 +23,8 @@ import threading
 import time
 
 import pytest
+
+from .frozen_python import only_frozen_python
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = "pseudolife-daemon"
@@ -708,8 +713,11 @@ def host(tmp_path, failure="", mode="release"):
 # ``native`` parameter is kept so each case still reads as it did. The two
 # interop tests (test_release_rust_selection_is_shared_by_both_updaters,
 # test_release_updaters_can_follow_each_other) still run the Python updater
-# on purpose: what they test is the two updaters acting on one host, which
-# an install with the Python updater still meets.
+# on purpose, while the package is present: what they test is the two
+# updaters acting on one host, which an install with the Python updater
+# still meets. The native updater following a host the Python updater left,
+# the upgrade every existing user makes, runs without the package from the
+# captured host state (test_native_updater_follows_*).
 def run_arm(repo, env, native, args):
     if native:
         command = [native, "update", *args]
@@ -2765,6 +2773,7 @@ def test_release_rust_import_uses_distinct_rollback_tags_when_target_already_run
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
 
 
+@only_frozen_python
 @pytest.mark.parametrize("native_first", [True, False], ids=["native-first", "python-first"])
 def test_release_rust_selection_is_shared_by_both_updaters(tmp_path, native_first):
     binary = _native_binary()
@@ -2797,6 +2806,7 @@ def test_native_release_rollback_supplies_required_compose_image_tag(tmp_path):
         assert "--pull never" in result.stdout
 
 
+@only_frozen_python
 @pytest.mark.parametrize("native_first", [True, False])
 @pytest.mark.parametrize("explicit_python", [False, True])
 def test_release_updaters_can_follow_each_other(tmp_path, native_first, explicit_python):
@@ -2816,6 +2826,126 @@ def test_release_updaters_can_follow_each_other(tmp_path, native_first, explicit
                 assert not labels.get("org.pseudolife.activation")
             for backup in (repo / "data/backups").glob("pseudolife_*"):
                 backup.unlink()
+
+
+PYTHON_UPDATER_HOSTS = json.loads(
+    (Path(__file__).with_name("fixtures") / "python-updater-hosts.json").read_text(encoding="utf-8"))["hosts"]
+
+
+def _as_python_updater_left_it(state_path, round_name, platform=None):
+    """Make the fixture host what the frozen Python updater left after one
+    release round (``round_name``, captured in python-updater-hosts.json):
+    its changed fixture state and the files it wrote under the data
+    directory, byte for byte. The calls it made are not replayed; the next
+    updater starts a fresh call log."""
+    platform = platform or ("windows" if os.name == "nt" else "linux")
+    captured = PYTHON_UPDATER_HOSTS[platform][round_name]
+    home = state_path.parent
+    spelled = json.dumps(str(home))[1:-1]
+    state = json.loads(state_path.read_text())
+    state.update(json.loads(json.dumps(captured["state"]).replace("{HOME}", spelled)))
+    state_path.write_text(json.dumps(state))
+    for relative, body in captured["files"].items():
+        target = home / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Inside a JSON file the home is spelled as a JSON string's content.
+        # Bytes, not text: the captured bodies keep the line endings the
+        # updater wrote (CRLF on Windows), which a text write would double.
+        target.write_bytes(body.replace("{HOME}", spelled if relative.endswith(".json") else str(home))
+                           .encode("utf-8"))
+    return captured
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+@pytest.mark.parametrize("round_name", ["engine-rust", "engine-rust-then-plain", "plain"])
+def test_python_updater_host_files_are_written_byte_for_byte(tmp_path, platform, round_name):
+    home = tmp_path / "home"
+    home.mkdir()
+    state_path = home / "fixture-state.json"
+    state_path.write_text(json.dumps({"calls": []}))
+    captured = _as_python_updater_left_it(state_path, round_name, platform)
+    spelled = json.dumps(str(home))[1:-1]
+    # A plain round writes no data files (its update lock is left out of the capture).
+    assert bool(captured["files"]) is (round_name != "plain")
+    for relative, body in captured["files"].items():
+        expected = body.replace("{HOME}", spelled if relative.endswith(".json") else str(home))
+        assert (home / relative).read_bytes() == expected.encode("utf-8"), relative
+    if platform == "windows" and captured["files"]:
+        assert any("\r\n" in body for body in captured["files"].values())
+    assert not any("\r\r\n" in body for body in captured["files"].values())
+
+
+def test_python_updater_host_capture_is_the_round_it_names():
+    # Both platforms: each runs the replay cases with its own capture.
+    assert sorted(PYTHON_UPDATER_HOSTS) == ["linux", "windows"]
+    for rounds in PYTHON_UPDATER_HOSTS.values():
+        assert sorted(rounds) == ["engine-rust", "engine-rust-then-plain", "plain"]
+        rust, plain = rounds["engine-rust"], rounds["plain"]
+        kept = rounds["engine-rust-then-plain"]
+        assert "--engine" not in kept["args"]
+        assert kept["state"]["running"]["Config"]["Labels"]["org.pseudolife.engine"] == "rust"
+        assert rust["args"][:2] == ["--engine", "rust"] and "--engine" not in plain["args"]
+        assert rust["state"]["running"]["Config"]["Labels"]["org.pseudolife.engine"] == "rust"
+        assert "org.pseudolife.engine" not in plain["state"]["running"]["Config"]["Labels"]
+        assert rust["state"]["deployed"] is plain["state"]["deployed"] is True
+
+
+def test_native_updater_follows_the_python_updaters_rust_selection(tmp_path):
+    """A plain native update keeps the Rust engine the Python updater chose."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        _as_python_updater_left_it(state_path, "engine-rust")
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--reinstall", "--daemon-only", "--json",
+                                             "--health-retries", "1", "--rollback-tag", "pre-round-1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        # A real reinstall over the Python updater's host: backup, rollback
+        # tag and a recreated daemon, in this run's own call log.
+        assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+
+
+def test_native_updater_returns_to_python_after_the_python_updater_kept_rust(tmp_path):
+    """An explicit native --engine python leaves the Rust engine a plain
+    Python update kept (after its own --engine rust round)."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        _as_python_updater_left_it(state_path, "engine-rust-then-plain")
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust"
+        result = run_arm(repo, env, binary, ["--engine", "python", "--tag", "0.21.1", "--reinstall",
+                                             "--daemon-only", "--json", "--health-retries", "1",
+                                             "--rollback-tag", "pre-round-2"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
+        assert _labels(state_path)["org.pseudolife.engine"] == "python"
+
+
+@pytest.mark.parametrize("explicit_python", [False, True])
+def test_native_updater_follows_a_plain_python_update(tmp_path, explicit_python):
+    """The native updater completes over a host a plain Python update left,
+    and only an explicit engine choice activates anything."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        _as_python_updater_left_it(state_path, "plain")
+        args = ["--tag", "0.21.1", "--daemon-only", "--reinstall", "--json",
+                "--health-retries", "1", "--rollback-tag", "pre-round-1"]
+        if explicit_python:
+            args += ["--engine", "python"]
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        assert stages(state) == ["pull", "backup", "tag", "up"]
+        labels = state["running"]["Config"]["Labels"]
+        if explicit_python:
+            assert labels["org.pseudolife.engine"] == "python"
+        else:
+            assert not labels.get("org.pseudolife.activation")
 
 
 @pytest.mark.parametrize("mode", ["release", "checkout"])
@@ -2881,8 +3011,7 @@ def test_maintainer_setup_explicit_container_scope(tmp_path, native, container):
     if native and not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY")
     with host(tmp_path) as (repo, env, state_path):
-        command = [binary] if native else [sys.executable, "-P", "-m", "pseudolife_memory.cli"]
-        command += ["maintainer", "setup", "--check"]
+        command = [binary, "maintainer", "setup", "--check"]
         if container is not None:
             command += ["--container", container]
         result = subprocess.run(command, env=env, cwd=repo, capture_output=True, text=True, timeout=30)

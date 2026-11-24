@@ -184,6 +184,12 @@ class = "retained test tooling"
 reason = "The PDFium test embeds the Python requirements lock to check the pin."
 
 [[rules]]
+globs = ["rust/cli_harness/test_maintainer_setup_native.py", "rust/cli_harness/test_native_unattended.py", "rust/cli_harness/test_update_transactions.py", "rust/cli_harness/rows/test_doctor_proof.py"]
+kinds = ["command", "python-import"]
+class = "retained test tooling"
+reason = "Only the tests marked frozen_python.only_frozen_python run the frozen package, while it is present; delete those tests with it and keep the native tests of each file."
+
+[[rules]]
 globs = ["rust/daemon/harness/*.py", "rust/cli_harness/*.py", "rust/harness_support/test_*.py"]
 kinds = ["command", "metadata", "path", "python-import"]
 class = "retained test tooling"
