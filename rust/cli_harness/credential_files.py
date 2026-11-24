@@ -29,9 +29,14 @@ BOM = "﻿"
 
 def write_token_file(path: Path, token: str) -> None:
     """Create or replace ``path`` holding ``token`` as an owner-only file,
-    the way the client's token writer (``credentials._write_token_file``)
-    leaves one: the token checked first, parents created with the default
-    mode, the file 0600 or owner-only on Windows, replaced atomically."""
+    as the client's token writer (``credentials._write_token_file``) leaves
+    one: the token checked first, parents created with the default mode, the
+    file 0600 or owner-only on Windows, replaced atomically (a refused
+    replace retried on Windows as that writer does). Unlike that writer it
+    does not refuse to replace a link, a hard link or another account's
+    file, nor read the file back: the rows seed only fresh disposable homes
+    and their own files. On Windows the descriptor also carries the DACL's
+    auto-inherited flag, which no owner-only check reads."""
     data = token.encode("utf-8")
     checks._decode_token(data)
     write_owner_only(Path(os.path.abspath(Path(path).expanduser())), data)

@@ -2860,3 +2860,67 @@ def test_test_login_seed_runs_with_frozen_imports_blocked(tmp_path):
         assert login.stat().st_mode & 0o777 == 0o600
         # The folder keeps the default mode, as the command's own writer leaves it.
         assert login.parent.stat().st_mode & 0o777 == 0o777 & ~umask
+
+
+@pytest.mark.parametrize("retried", [True, False])
+def test_owner_only_writer_retries_a_refused_replace_as_the_client_writer_does(tmp_path, monkeypatch, retried):
+    from rust.harness_support import private_fixture
+
+    real, refusals = os.replace, []
+
+    def replace(source, target):
+        if not refusals:
+            refusals.append(target)
+            raise PermissionError(13, "the file is open in another process")
+        return real(source, target)
+
+    monkeypatch.setattr(private_fixture, "_RETRY_REPLACE", retried)
+    monkeypatch.setattr(private_fixture.os, "replace", replace)
+    path = tmp_path / ".pseudolife-mcp" / "x.token"
+    if retried:
+        private_fixture.write_owner_only(path, b"rotated-token")
+        assert path.read_bytes() == b"rotated-token"
+    else:
+        with pytest.raises(PermissionError):
+            private_fixture.write_owner_only(path, b"rotated-token")
+        assert not path.exists()
+    assert refusals == [path]
+    assert [p.name for p in path.parent.iterdir()] == ([path.name] if retried else [])
+
+
+def test_copied_hook_script_list_is_the_daemons():
+    import re
+    from cli_harness import _plugin_hooks
+
+    health = (Path(__file__).resolve().parents[1] / "daemon/src/health.rs").read_text(encoding="utf-8")
+    block = re.search(r"const HOOK_SCRIPTS: \[&str; \d+\] = \[(.*?)\];", health, re.S)[1]
+    assert tuple(re.findall(r'"([^"]+)"', block)) == _plugin_hooks.HOOK_SCRIPTS
+    hooks = Path(__file__).resolve().parents[2] / "plugin" / "hooks"
+    assert re.fullmatch(r"[0-9a-f]{64}", _plugin_hooks.hooks_digest(hooks))
+    assert _plugin_hooks.hooks_digest(hooks.parent) is None
+
+
+def test_transport_credential_fixtures_run_with_frozen_imports_blocked(tmp_path):
+    from rust.harness_support.import_blocker import cold_harness_imports
+    from cli_harness import credential_files
+    from cli_harness.rows import _process_start
+
+    token = tmp_path / ".pseudolife-mcp" / "claude-code.token"
+    bom = tmp_path / "bom.token"
+    with cold_harness_imports():
+        credential_files.write_token_file(token, "fixture-token")
+        credential_files.write_token_file(bom, "\ufefffixture-token")
+        status = credential_files.token_file_status(token)
+        bom_status = credential_files.token_file_status(bom)
+        missing = credential_files.token_file_status(tmp_path / "missing.token")
+        started = _process_start._process_start(os.getpid())
+        owner_only = credential_files.windows_owner_only(token) if os.name == "nt" else None
+    assert token.read_bytes() == b"fixture-token"
+    assert (status, bom_status, missing) == ("ready", "failed", "failed")
+    assert started and started == _process_start._process_start(os.getpid())
+    if os.name == "nt":
+        assert owner_only is True
+    else:
+        assert token.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(Exception):
+        credential_files.write_token_file(tmp_path / "bad.token", "white space")

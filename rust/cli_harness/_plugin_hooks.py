@@ -1,6 +1,6 @@
 """The plugin hook scripts and their digest, as the frozen daemon reports it
 on /health (rust/daemon/src/health.rs keeps the same list and rule;
-tests/test_hooks_digest.py pins the implementations to each other).
+rust/cli_harness/test_cli_harness.py pins this list to that one).
 
 Copied verbatim, by syntax tree, from pseudolife_memory/plugin_hooks.py at 6ca817d70:
 HOOK_SCRIPTS :30-32, hooks_digest :35-46.
