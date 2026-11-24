@@ -430,13 +430,27 @@ def seed_real_runs(dsn):
                      "'scalar','kept','inserted',1.6e9+12)")
 
 
+def seeded_runs(dsn):
+    """The bank's runs and the runs its journal rows belong to."""
+    import psycopg
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        runs = conn.execute("SELECT id, status FROM dream_runs ORDER BY id").fetchall()
+        journal = [r[0] for r in conn.execute("SELECT run_id FROM dream_run_slots ORDER BY run_id, seq")]
+    return runs, journal
+
+
 def test_dream_rollback_seeds_its_runs_past_a_real_banks_own(route_bank):
     seed_real_runs(route_bank)
     assert rollback_template(route_bank).first_run == 502
+    # Its committed run with a journal row, then its newer failed run, both
+    # after the bank's own runs, which are left as they were.
+    assert seeded_runs(route_bank) == (
+        [(500, "committed"), (501, "committed"), (502, "committed"), (503, "failed")], [501, 502])
 
 
 def test_dream_rollback_on_an_empty_bank_seeds_runs_1_and_2(route_bank):
     assert rollback_template(route_bank).first_run == 1
+    assert seeded_runs(route_bank) == ([(1, "committed"), (2, "failed")], [1])
 
 
 def walk_rollback_calls(dsn):
