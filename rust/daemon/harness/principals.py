@@ -1,15 +1,17 @@
-"""Principal-store differential harness, using the existing disposable DB and
-catalog/row dumper. Run `live --rust-bin ... --record`, `golden`, or `mutants`.
+"""Principal-store golden harness, using the existing disposable DB and
+catalog/row dumper. Run `golden`, `golden --record-candidate [--write]`, or
+`mutants`; all three run the native principal probe alone and compare each
+step with the committed golden (the frozen Python arm is retired).
 
 Secrets are generated in memory, never included in results or failure text.
-Clock values are checked against each arm's database-clock window before they
+Clock values are checked against the bank's database-clock window before they
 become event labels; unchanged timestamps keep their original event labels.
+The fixture DDL is the daemon's own (``schema.sql``), the operator routes the
+daemon's own (``http.rs``), and invites are written by the SQL fixture below.
 """
 from __future__ import annotations
 
 import argparse
-import ast
-from dataclasses import asdict
 import hashlib
 import json
 import math
@@ -19,52 +21,69 @@ from pathlib import Path
 _DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 import queue
 import random
+import re
 import subprocess
 import sys
 import threading
-import time
-from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO))
 import psycopg
+import candidate_record
 import dbstate
 import pgdisposable
-from pseudolife_memory import principal_store as oracle
-from pseudolife_memory import principals as identities
-from pseudolife_memory.storage.schema import PRINCIPALS_SCHEMA_SQL, SCHEMA_SQL
 
 pg = pgdisposable.Slice("prn")
+SCHEMA_SOURCE = REPO / "rust/daemon/src/storage/schema.sql"
+HTTP_SOURCE = REPO / "rust/daemon/src/http.rs"
+# The pairing-code alphabet (rust/daemon/src/routes/pair.rs). The seeded
+# codes drawn from it reach the golden only as their stored hashes, so a
+# changed alphabet shows as a golden difference.
+PAIRING_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+# The probe's clock column (principal_probe.rs): epoch seconds from the database.
+DB_NOW = "EXTRACT(EPOCH FROM clock_timestamp())::double precision"
+OWNED_SQL = "COALESCE((to_jsonb(p) ->> 'owned')::boolean, TRUE)"
 
 
-def operator_post_paths():
-    tree = ast.parse((REPO / "pseudolife_memory/web/api.py").read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-                isinstance(target, ast.Name) and target.id == "_OPERATOR_POST_PATHS"
-                for target in node.targets):
-            value = node.value
-            if not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name) \
-                    or value.func.id != "frozenset" or len(value.args) != 1:
-                raise AssertionError("oracle operator route declaration changed")
-            paths = ast.literal_eval(value.args[0])
-            if not isinstance(paths, set) or not all(isinstance(path, str) for path in paths):
-                raise AssertionError("oracle operator routes are not strings")
-            return paths
-    raise AssertionError("oracle operator routes missing")
+def secret_sha256(value):
+    """How the daemon stores a token or pairing code: lowercase SHA-256 hex."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def schema_statement(start, end, source=None):
+    """The one statement of the daemon's schema that begins ``start`` and ends
+    at the first ``end`` after it. No DDL is copied into this harness."""
+    text = SCHEMA_SOURCE.read_text(encoding="utf-8") if source is None else source
+    if text.count(start) != 1:
+        raise AssertionError(f"daemon schema has no single {start!r}")
+    begin = text.index(start)
+    stop = text.find(end, begin)
+    if stop < 0:
+        raise AssertionError(f"daemon schema statement {start!r} does not end")
+    return text[begin:stop + len(end)]
+
+
+META_TABLE_SQL = schema_statement("CREATE TABLE IF NOT EXISTS meta (", ");")
+PRINCIPALS_TABLE_SQL = schema_statement("CREATE TABLE IF NOT EXISTS principals (", "END $$;")
+
+
+def operator_post_paths(source=None):
+    """The operator routes the daemon gates (``http.rs``
+    ``OPERATOR_POST_PATHS``), read from the one exact declaration."""
+    text = HTTP_SOURCE.read_text(encoding="utf-8") if source is None else source
+    found = re.findall(r'^const OPERATOR_POST_PATHS: \[&str; (\d+)\] = \[([^\]\n]*)\];$', text, re.M)
+    if len(found) != 1:
+        raise AssertionError("daemon operator route declaration changed")
+    count, body = found[0]
+    paths = re.findall(r'"([^"\\]+)"', body)
+    if (re.sub(r'"[^"\\]+"|[\s,]', "", body) or len(paths) != int(count)
+            or len(set(paths)) != len(paths) or not all(path.startswith("/api/") for path in paths)):
+        raise AssertionError("daemon operator routes are not a plain list of distinct /api/ paths")
+    return frozenset(paths)
 
 
 OPERATOR_POST_PATHS = operator_post_paths()
-
-
-def operator_allowed(source, issued_by):
-    """``web/api.py`` ``_operator`` (a closure there, so modelled here): an
-    environment principal, an open daemon, or a Console session an
-    environment principal issued."""
-    if source in (None, identities.SOURCE_OPEN, identities.SOURCE_ENVIRONMENT):
-        return True
-    return source == identities.SOURCE_SESSION and issued_by == identities.SOURCE_ENVIRONMENT
 OPERATOR_REQUESTS = [{"method": method, "path": path}
                      for path in sorted(OPERATOR_POST_PATHS) + ["/api/stats"]
                      for method in ("GET", "POST")]
@@ -216,157 +235,42 @@ def prefix_mutant_control():
     return {"near_miss_refusals": refused, "mutant_caught": True, "mutants_caught": 2}
 
 
-class PythonArm:
-    def __init__(self, dsn):
-        self.dsn = dsn
-        self.conn = psycopg.connect(dsn, autocommit=True)
-        self.env = ({}, None)
-        self.clock = 10000.0
-        self.snapshot = oracle.PrincipalSnapshot(clock=lambda: self.clock)
-        self.pending = None
+KEEP = object()
 
-    def call(self, v):
-        op = v["op"]
-        if op == "reset":
-            self.env = (identities.parse_token_map(v.get("env_map")), v.get("single"))
-            self.snapshot = oracle.PrincipalSnapshot(
-                shadowed=set(v.get("shadowed", [])) | set(self.env[0].values()), clock=lambda: self.clock)
-            self.pending = None
-        elif op in ("refresh", "begin_refresh", "finish_refresh"):
-            rows = [oracle.StoredPrincipal(**r) for r in v.get("rows", [])]
-            if op == "begin_refresh":
-                # A blocked loader captures Python's real refresh entry path.
-                entered, release = threading.Event(), threading.Event()
-                result = {"rows": [], "bank": None}
-                old_clock = self.clock
-                self.clock -= v.get("age_s", 0)
-                def loader():
-                    entered.set()
-                    if not release.wait(15):
-                        raise TimeoutError("refresh fixture timed out")
-                    return result["rows"], result["bank"]
-                thread = threading.Thread(target=lambda: self.snapshot.refresh(loader), daemon=True)
-                thread.start()
-                if not entered.wait(10):
-                    raise TimeoutError("refresh fixture did not enter")
-                self.clock = old_clock
-                self.pending = (release, thread, result)
-            elif op == "finish_refresh":
-                release, thread, result = self.pending
-                result.update(rows=rows, bank=v.get("bank"))
-                release.set(); thread.join(10)
-                if thread.is_alive():
-                    raise TimeoutError("refresh fixture did not finish")
-                self.pending = None
-            else:
-                self.clock -= v.get("age_s", 0)
-                self.snapshot.refresh(lambda: (rows, v.get("bank")))
-                self.clock += v.get("age_s", 0)
-        elif op == "add":
-            self.snapshot.add(oracle.StoredPrincipal(**v["row"]))
-        elif op == "load":
-            try:
-                self.snapshot.refresh(lambda: oracle.load_rows(self.conn))
-            except psycopg.Error:
-                return {"ok": False, "error": "database"}
-        elif op == "list":
-            return {"rows": oracle.list_principals(self.conn)}
-        elif op == "revoke":
-            return {"found": oracle.revoke(self.conn, v["name"])}
-        elif op == "redeem":
-            row = oracle.redeem(self.dsn, v["code_hash"], v["token_hash"],
-                                excluded=v.get("excluded", self.snapshot.excluded_names))
-            if row and v.get("add"):
-                self.snapshot.add(row)
-            return {"row": asdict(row) if row else None}
-        elif op == "redeem_race":
-            results = []
-            failures = []
-            pids = []
-            connections = [psycopg.connect(self.dsn, autocommit=True) for _ in range(2)]
-            for conn in connections:
-                pids.append(conn.execute("SELECT pg_backend_pid()").fetchone()[0])
-            # Route the oracle's two _connect calls to the already observed
-            # connections, so the queued-backend check proves this very race.
-            local = threading.local()
-            old_connect = oracle._connect
-            oracle._connect = lambda *a, **kw: local.conn
-            holder = psycopg.connect(self.dsn)
-            holder.execute("SELECT principal FROM principals WHERE principal=%s FOR UPDATE", (v["name"],))
-            def compete(conn, token):
-                try:
-                    local.conn = conn
-                    conn.autocommit = False
-                    results.append(oracle.redeem(self.dsn, v["code_hash"], token))
-                except Exception as exc:
-                    failures.append(type(exc).__name__)
-            threads = [threading.Thread(target=compete, args=(conn, token))
-                       for conn, token in zip(connections, v["token_hashes"])]
-            try:
-                for thread in threads:
-                    thread.start()
-                deadline = time.monotonic() + 4
-                queued = False
-                while time.monotonic() < deadline:
-                    count = self.conn.execute("SELECT count(*) FROM pg_stat_activity "
-                                              "WHERE pid=ANY(%s) AND wait_event_type='Lock'", (pids,)).fetchone()[0]
-                    if count == 2:
-                        queued = True
-                        break
-                    time.sleep(.01)
-                holder.rollback()
-                for thread in threads:
-                    thread.join(10)
-                    if thread.is_alive():
-                        raise TimeoutError("concurrent oracle redemption did not finish")
-            finally:
-                holder.close()
-                oracle._connect = old_connect
-                for conn in connections:
-                    conn.close()
-            winners = [row for row in results if row]
-            durable = self.conn.execute("SELECT token_hash FROM principals WHERE principal=%s", (v["name"],)).fetchone()[0]
-            valid = (len(winners) == 1 and winners[0].principal == v["name"]
-                     and winners[0].token_hash == durable and durable in v["token_hashes"])
-            if failures or len(results) != 2 or not queued or not valid:
-                raise AssertionError("oracle race did not prove two queued callers and one durable winner")
-            return {"both_queued": queued, "winners": len(winners), "durable_winner_matches": valid}
-        elif op == "inspect":
-            resolved = []
-            for header in v.get("headers", []):
-                try:
-                    principal, source = identities.resolve_principal_detailed(header, *self.env, self.snapshot)
-                    status = "principal" if principal is not None else "unauthorized"
-                except identities.PrincipalsUnavailable:
-                    principal = source = None
-                    status = "unavailable"
-                # web/api.py ``_operator``: the allowlist (spec 2026-11-02,
-                # section 3). This resolver never yields a Console session,
-                # so ``issued_by`` is always None here and the answers equal
-                # the old store-only denylist's: the goldens do not move.
-                policy = [{**request, "allowed": request["method"] != "POST"
-                           or request["path"] not in OPERATOR_POST_PATHS
-                           or operator_allowed(source, None)}
-                          for request in v.get("operator_requests", [])]
-                resolved.append({"status": status, "principal": principal, "source": source,
-                                 "operator_policy": policy})
-            return {"available": self.snapshot.available(), "len": len(self.snapshot),
-                    "bank": self.snapshot.bank, "shadowed": self.snapshot.shadowed_rows,
-                    "invalid": self.snapshot.invalid_rows, "excluded": sorted(self.snapshot.excluded_names),
-                    "owned": sorted(self.snapshot.owned_principals()),
-                    "names": [{"principal": n, "has": self.snapshot.has(n),
-                               "admitted": self.snapshot.admitted(n), "tier": self.snapshot.tier_of(n),
-                               "board_allowed": identities.principal_admitted(
-                                   SimpleNamespace(allowed_principals=v.get("allowed", [])), n, store=self.snapshot)}
-                              for n in v.get("names", [])], "resolved": resolved}
+
+def create_invite(conn, name, code_hash, *, tier, board, ttl_seconds, replace, owned=KEEP):
+    """The invite fixture: the statements the native ``invite`` runs
+    (``rust/shim/src/cli/pairing/invite_db.rs`` ``create_invite``) for the
+    states this scenario reaches. A new name is inserted; a pending one, or
+    a paired one with ``replace``, gets the new code. ``tier`` and ``board``
+    are always given; ``owned`` only when the scenario sets it. A revoked
+    name (whose reset also ends its Console sessions) and a paired name
+    without ``replace`` are refused, since no step here invites one."""
+    with conn.transaction():
+        existing = conn.execute(
+            "SELECT token_hash IS NOT NULL, revoked_at IS NOT NULL "
+            "FROM public.principals WHERE principal = %s FOR UPDATE", (name,)).fetchone()
+        params = {"name": name, "code": code_hash, "ttl": float(ttl_seconds), "tier": tier,
+                  "board": bool(board), "owned": None if owned is KEEP else bool(owned)}
+        if existing is None:
+            state = "new"
+            column, value = ("", "") if owned is KEEP else (", owned", ", %(owned)s")
+            row = conn.execute(
+                f"INSERT INTO public.principals AS p (principal, tier, board{column}, code_hash, "
+                f"code_expires_at, created_at) VALUES (%(name)s, %(tier)s, %(board)s{value}, "
+                f"%(code)s, {DB_NOW} + %(ttl)s, {DB_NOW}) "
+                f"RETURNING code_expires_at, tier, board, {OWNED_SQL}", params).fetchone()
         else:
-            raise AssertionError("unknown oracle operation")
-        return {"ok": True}
-
-    def close(self):
-        if self.pending:
-            self.pending[0].set(); self.pending[1].join(10)
-        self.conn.close()
+            paired, revoked = existing
+            state = "revoked" if revoked else "paired" if paired else "pending"
+            if state == "revoked" or (state == "paired" and not replace):
+                raise AssertionError(f"invite fixture does not model a {state} name without its reset")
+            given = ", tier = %(tier)s, board = %(board)s" + ("" if owned is KEEP else ", owned = %(owned)s")
+            row = conn.execute(
+                f"UPDATE public.principals p SET code_hash = %(code)s, code_expires_at = {DB_NOW} + "
+                f"%(ttl)s, paired_code_hash = NULL{given} WHERE principal = %(name)s "
+                f"RETURNING code_expires_at, tier, board, {OWNED_SQL}", params).fetchone()
+    return {"state": state, "tier": row[1], "board": bool(row[2]), "owned": bool(row[3])}
 
 
 class RustArm:
@@ -408,33 +312,32 @@ class RustArm:
             raise RuntimeError("principal probe exited unsuccessfully")
 
 
-class Paired:
-    def __init__(self, binary=None, mutant=None, golden=None):
-        self.names = [pg.name(f"pl_cf_prn_{os.getpid()}_{i}") for i in (1, 2)]
-        self.dsns = []
-        self.arms = []
-        self.trackers = []
+class Replay:
+    """The native probe on one disposable bank, each step compared with the
+    golden's record at the same position (case label, output and state)."""
+
+    def __init__(self, binary, golden, mutant=None):
+        self.name = pg.name(f"pl_cf_prn_{os.getpid()}_1")
+        self.dsn = None
+        self.arm = None
         self.records = []
         self.differences = []
         self.golden = golden
         self.codes = {}
         self.raw_secrets = []
         self.race_tokens = {}
-        self.race_winners = [{}, {}]
+        self.race_winners = {}
         self.rng = random.Random(53)
         try:
-            for name in self.names:
-                dsn = pg.create(name)
-                self.dsns.append(dsn)
-                with psycopg.connect(dsn, autocommit=True) as conn:
-                    fixture_role = conn.execute("SELECT current_user").fetchone()[0]
-                    vector_extension = conn.execute(
-                        "SELECT e.extversion,n.nspname FROM pg_extension e "
-                        "JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='vector'").fetchone()
-                    self.trackers.append(ClockState(fixture_role, vector_extension))
-                    conn.execute(PRINCIPALS_SCHEMA_SQL)
-            self.arms = ([PythonArm(self.dsns[0])] if golden is None else [None]) + [
-                RustArm(binary, self.dsns[1], mutant) if binary else PythonArm(self.dsns[1])]
+            self.dsn = pg.create(self.name)
+            with psycopg.connect(self.dsn, autocommit=True) as conn:
+                fixture_role = conn.execute("SELECT current_user").fetchone()[0]
+                vector_extension = conn.execute(
+                    "SELECT e.extversion,n.nspname FROM pg_extension e "
+                    "JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='vector'").fetchone()
+                self.tracker = ClockState(fixture_role, vector_extension)
+                conn.execute(PRINCIPALS_TABLE_SQL)
+            self.arm = RustArm(binary, self.dsn, mutant)
         except BaseException:
             self.close()
             raise
@@ -445,7 +348,7 @@ class Paired:
         return value
 
     def code(self):
-        value = "".join(self.rng.choice(identities.PAIRING_CODE_ALPHABET) for _ in range(12))
+        value = "".join(self.rng.choice(PAIRING_CODE_ALPHABET) for _ in range(12))
         self.raw_secrets.append(value)
         return value
 
@@ -457,104 +360,104 @@ class Paired:
 
     def step(self, label, v=None, *, mutation=None, offsets=None):
         index = len(self.records)
-        outputs, states = [], []
-        for i, (arm, dsn) in enumerate(zip(self.arms, self.dsns)):
-            if arm is None:
-                outputs.append(self.golden[index]["output"])
-                states.append(self.golden[index].get("state"))
-                continue
-            with psycopg.connect(dsn, autocommit=True) as conn:
-                before = conn.execute(NOW).fetchone()[0]
-                answer = mutation(conn, i) if mutation else arm.call(v)
-                after = conn.execute(NOW).fetchone()[0]
-            state = None
-            if mutation is not None or (v and v["op"] in ("redeem", "redeem_race", "revoke")):
-                state = self.trackers[i].normalize(dbstate.dump(dsn), label,
-                                                  (before, after), offsets)
-                if v and v["op"] == "redeem_race":
-                    self.race_tokens[v["name"]] = v["token_hashes"]
-                if self.race_tokens and "public.principals" in state["rows"]:
-                    table = state["rows"]["public.principals"]
-                    columns = table["columns"]
-                    for row in table["rows"]:
-                        name = row[columns.index("principal")]
-                        if name in self.race_tokens:
-                            idx = columns.index("token_hash")
-                            if row[idx] not in self.race_tokens[name]:
-                                raise AssertionError("race stored a token outside competing candidates")
-                            winner = self.race_winners[i].setdefault(name, row[idx])
-                            if winner != row[idx]:
-                                raise AssertionError("durable race winner changed after redemption")
-                            row[idx] = "<concurrent-winner>"
-            if v and v["op"] == "list":
-                # List times must equal the normalized durable DB times; this
-                # catches fabricated timestamps as well as wrong state labels.
-                for row in answer["rows"]:
-                    for column in CLOCK_COLUMNS:
-                        value = row[column]
-                        if value is not None:
-                            stored, normalized = self.trackers[i].values[(row["principal"], column)]
-                            if value != stored:
-                                raise AssertionError("list timestamp differs from durable row")
-                            row[column] = normalized
-            outputs.append(self.safe(answer)); states.append(self.safe(state))
-        diffs = dbstate.diff(outputs[0], outputs[1])
-        if states[0] is not None or states[1] is not None:
-            diffs += dbstate.diff(states[0], states[1], "/database")
+        with psycopg.connect(self.dsn, autocommit=True) as conn:
+            before = conn.execute(NOW).fetchone()[0]
+            answer = mutation(conn) if mutation else self.arm.call(v)
+            after = conn.execute(NOW).fetchone()[0]
+        state = None
+        if mutation is not None or (v and v["op"] in ("redeem", "redeem_race", "revoke")):
+            state = self.tracker.normalize(dbstate.dump(self.dsn), label, (before, after), offsets)
+            if v and v["op"] == "redeem_race":
+                self.race_tokens[v["name"]] = v["token_hashes"]
+            if self.race_tokens and "public.principals" in state["rows"]:
+                table = state["rows"]["public.principals"]
+                columns = table["columns"]
+                for row in table["rows"]:
+                    name = row[columns.index("principal")]
+                    if name in self.race_tokens:
+                        idx = columns.index("token_hash")
+                        if row[idx] not in self.race_tokens[name]:
+                            raise AssertionError("race stored a token outside competing candidates")
+                        winner = self.race_winners.setdefault(name, row[idx])
+                        if winner != row[idx]:
+                            raise AssertionError("durable race winner changed after redemption")
+                        row[idx] = "<concurrent-winner>"
+        if v and v["op"] == "list":
+            # List times must equal the normalized durable DB times; this
+            # catches fabricated timestamps as well as wrong state labels.
+            for row in answer["rows"]:
+                for column in CLOCK_COLUMNS:
+                    value = row[column]
+                    if value is not None:
+                        stored, normalized = self.tracker.values[(row["principal"], column)]
+                        if value != stored:
+                            raise AssertionError("list timestamp differs from durable row")
+                        row[column] = normalized
+        record = {"case": label, "output": self.safe(answer), "state": self.safe(state)}
+        self.records.append(record)
+        # Paths only: never print credential-bearing inputs or DB errors.
+        diffs = step_diffs(self.golden[index] if index < len(self.golden) else None, record)
         if diffs:
-            # Paths only: never print credential-bearing inputs or DB errors.
             self.differences.append({"case": label, "diffs": diffs})
-        self.records.append({"case": label, "output": outputs[0], "state": states[0]})
+
+    def finish(self):
+        """A golden record past the scenario's last step is a difference too."""
+        for record in self.golden[len(self.records):]:
+            self.differences.append({"case": record.get("case"), "diffs": ["/: only in the golden"]})
 
     def invite(self, name, tier=None, board=True, replace=False, ttl=900, adversarial=False,
-               owned=oracle.KEEP):
-        code = self.code()
-        self.codes[name] = identities.secret_sha256(code)
-        def mutate(conn, _i):
-            old = oracle.new_pairing_code
-            oracle.new_pairing_code = lambda: code
-            try:
-                result = oracle.create_invite(conn, name, tier=tier, board=board, owned=owned,
-                                              ttl_seconds=ttl, replace=replace)
-                return {"state": result["state"], "tier": result["tier"], "board": result["board"],
-                        "owned": result["owned"]}
-            finally:
-                oracle.new_pairing_code = old
+               owned=KEEP):
+        code_hash = secret_sha256(self.code())
+        self.codes[name] = code_hash
+        def mutate(conn):
+            return create_invite(conn, name, code_hash, tier=tier, board=board, owned=owned,
+                                 ttl_seconds=ttl, replace=replace)
         offsets = {(name, "created_at"): 0, (name, "code_expires_at"): ttl}
         self.step(("adversarial-invite-" if adversarial else "invite-") + name +
                   ("-replace" if replace else ""), mutation=mutate, offsets=offsets)
 
     def adversarial(self, label, query, offsets=None, params=()):
-        def mutate(conn, _i):
+        def mutate(conn):
             conn.execute(query, params)
             return {"adversarial_fixture": True}
         self.step("adversarial-" + label, mutation=mutate, offsets=offsets)
 
     def close(self):
         errors = []
-        for arm in self.arms:
-            if arm is not None:
-                try:
-                    arm.close()
-                except Exception as exc:
-                    errors.append(type(exc).__name__)
-        for name in self.names:
+        if self.arm is not None:
             try:
-                pg.drop(name)
+                self.arm.close()
             except Exception as exc:
                 errors.append(type(exc).__name__)
+        try:
+            pg.drop(self.name)
+        except Exception as exc:
+            errors.append(type(exc).__name__)
         if errors:
             raise RuntimeError("principal harness cleanup failed")
 
 
+def step_diffs(expected, record):
+    """The differences between a golden record and the candidate's step:
+    the case label at that position, its output, then its database state."""
+    if expected is None:
+        return ["/: only in the candidate"]
+    diffs = [] if expected.get("case") == record["case"] else ["/case: golden and candidate steps differ"]
+    diffs += dbstate.diff(expected.get("output"), record["output"])
+    if expected.get("state") is not None or record["state"] is not None:
+        diffs += dbstate.diff(expected.get("state"), record["state"], "/database")
+    return candidate_record.labelled(diffs)
+
+
 def scenarios(p):
-    p.step("initial-oracle-schema", mutation=lambda _conn, _i: {"oracle_schema": True})
+    # The label predates the Python arm's retirement; the golden pins it.
+    p.step("initial-oracle-schema", mutation=lambda _conn: {"oracle_schema": True})
     env_token, single = p.secret("env"), p.secret("single")
     a, b, bad = (p.secret(n) for n in ("a", "b", "bad"))
     unicode_token = p.secret("nonascii") + "é"
     nbsp_token = unicode_token + "\u00a0"
     p.raw_secrets.extend((unicode_token, nbsp_token))
-    h = identities.secret_sha256
+    h = secret_sha256
     def row(name, token=None, tier=None, board=True, revoked=False, owned=True):
         return {"principal": name, "token_hash": h(token) if token else None,
                 "tier": tier, "board": board, "revoked": revoked, "owned": owned}
@@ -605,7 +508,7 @@ def scenarios(p):
     p.step("reset-for-db", reset)
     p.step("load-empty-db", {"op": "load"})
     inspect("missing-meta-empty-bank", tokens=(a,))
-    p.adversarial("meta-table", SCHEMA_SQL.split(";", 1)[0] + ";")
+    p.adversarial("meta-table", META_TABLE_SQL)
     p.adversarial("bank-id", "INSERT INTO meta(key,value) VALUES('coordination_bank_id', '" +
                   '"principal-harness-bank"' + "'::jsonb)")
     p.step("load-real-bank-fingerprint", {"op": "load"})
@@ -688,14 +591,41 @@ def scenarios(p):
     inspect("missing-table-no-ddl", names=("laptop",), tokens=(c,))
 
 
-def run(binary, mutant=None, golden=None):
-    p = Paired(binary, mutant, golden)
+def run(binary, golden, mutant=None):
+    p = Replay(binary, golden, mutant)
     try:
         scenarios(p)
+        p.finish()
         return {"cases": len(p.records), "db_mutations": sum(r["state"] is not None for r in p.records),
                 "diffs": p.differences, "records": p.records}
     finally:
         p.close()
+
+
+NORMALIZERS = ("per-arm database-clock windows; verified fixture owners and initial vector version; "
+               "controls=9")
+
+
+def record_candidate(result, committed, write, binary):
+    """Class each step of a clean candidate run against the committed golden
+    (unchanged, changed, new, removed) and, with ``write``, replace the
+    golden with the candidate's records: what ``golden`` then compares."""
+    report = {"unchanged": 0, "changed": [], "new": [], "removed": [], "written": False}
+    for index, record in enumerate(result["records"]):
+        if index >= len(committed):
+            report["new"].append(f"{index}:{record['case']}")
+        elif step_diffs(committed[index], record):
+            report["changed"].append(f"{index}:{record['case']}")
+        else:
+            report["unchanged"] += 1
+    report["removed"] = [f"{index}:{record.get('case')}" for index, record
+                         in enumerate(committed[len(result["records"]):], len(result["records"]))]
+    if write and (report["changed"] or report["new"] or report["removed"]):
+        GOLDEN.write_text(json.dumps({"normalizers": NORMALIZERS, "records": result["records"],
+                                      candidate_record.PROVENANCE_KEY: candidate_record.provenance(binary)},
+                                     indent=1) + "\n", encoding="utf-8", newline="\n")
+        report["written"] = True
+    return report
 
 
 def provenance(binary):
@@ -716,12 +646,20 @@ def provenance(binary):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("live", "golden", "mutants", "oracle"))
-    parser.add_argument("--rust-bin", type=Path)
-    parser.add_argument("--record", action="store_true")
+    parser.add_argument("mode", choices=("golden", "mutants"))
+    parser.add_argument("--rust-bin", type=Path, required=True)
+    parser.add_argument("--record-candidate", action="store_true",
+                        help="golden only: class each step against the golden; a dry run unless --write")
+    parser.add_argument("--write", action="store_true", help="with --record-candidate: write the golden")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--mutants", nargs="+", choices=MUTANTS)
     args = parser.parse_args()
+    if args.record_candidate and args.mode != "golden":
+        parser.error("--record-candidate records the golden run; check mutants afterwards with mutants")
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if args.record_candidate and candidate_record.refuse_mutant_environment():
+        parser.error(candidate_record.refuse_mutant_environment())
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
@@ -734,20 +672,22 @@ def main():
             _turn_sys.path.remove(_turn_root)
     normalizer_controls()
     prefix_controls = prefix_mutant_control()
-    if args.mode != "oracle" and args.rust_bin is None:
-        parser.error("--rust-bin required")
     try:
-        golden = json.loads(GOLDEN.read_text(encoding="utf-8"))["records"] if args.mode == "golden" else None
-        result = run(args.rust_bin, golden=golden)
-        if args.record and not result["diffs"]:
-            GOLDEN.write_text(json.dumps({"normalizers": "per-arm database-clock windows; verified fixture owners and initial vector version; controls=9",
-                                         "records": result["records"]}, indent=1) + "\n", encoding="utf-8")
+        golden = json.loads(GOLDEN.read_text(encoding="utf-8"))["records"]
+        result = run(args.rust_bin, golden)
+        if args.record_candidate:
+            result["record_candidate"] = record_candidate(result, golden, args.write, args.rust_bin)
+            for kind in ("changed", "new", "removed"):
+                for case in result["record_candidate"][kind]:
+                    print(f"  {kind} {case}", flush=True)
+            # The run is the candidate's own; its differences are what it records.
+            result["recorded_diffs"], result["diffs"] = result["diffs"], []
         if args.mode == "mutants":
             if result["diffs"]:
                 raise AssertionError("mutant control differs")
             results = {}
             for mutant in args.mutants or MUTANTS:
-                changed = run(args.rust_bin, mutant)
+                changed = run(args.rust_bin, golden, mutant)
                 results[mutant] = {"caught": bool(changed["diffs"]), "diff_cases": changed["diffs"]}
                 print(f"{mutant}: {'caught' if changed['diffs'] else 'SURVIVED'}", flush=True)
             result = {"control_cases": result["cases"], "control_db_mutations": result["db_mutations"],
@@ -756,7 +696,7 @@ def main():
         result["provenance"] = provenance(args.rust_bin)
         result["prefix_controls"] = prefix_controls
         args.out.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
-        print(json.dumps({k: v for k, v in result.items() if k not in ("records", "mutants")}))
+        print(json.dumps({k: v for k, v in result.items() if k not in ("records", "mutants", "recorded_diffs")}))
         return int(bool(result.get("diffs") or result.get("survivors")))
     except Exception as exc:
         # Exceptions from database drivers can carry connection parameters.
