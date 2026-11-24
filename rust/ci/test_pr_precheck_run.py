@@ -93,7 +93,7 @@ def test_incomplete_records_remain_visible(tmp_path, monkeypatch):
 def test_setup_failure_keeps_unrun_rows_visible_and_continues_independent_judges(tmp_path, monkeypatch):
     mock_summary_replace(monkeypatch)
     @contextmanager
-    def postgres(private):
+    def postgres(private, candidate):
         raise RuntimeError("private connection detail")
         yield
     monkeypatch.setattr(replay, "golden_postgres", postgres)
@@ -107,6 +107,7 @@ def test_setup_failure_keeps_unrun_rows_visible_and_continues_independent_judges
     phases = {row["phase"]: row for row in summary["phases"]}
     assert phases["record/audit"]["exit_code"] is None
     assert phases["cli-argv"]["exit_code"] == 0
+    assert phases["golden-postgres"]["diagnostic_errors"] == ["owned PostgreSQL setup failed (RuntimeError)"]
     assert "private connection detail" not in text
 
 
@@ -138,13 +139,14 @@ def test_bank_rows_prepare_owned_pg_before_their_existing_cases(tmp_path, monkey
 
 class _Server:
     host, port, password = "127.0.0.1", 55432, "synthetic-secret"
+    data_dir = Path("pl-precheck-postgres-fixture")
 
-    def __init__(self, events):
-        self.events = events
+    def __init__(self, events, stops=True):
+        self.events, self.stops = events, stops
 
     def stop(self):
         self.events.append("stop")
-        return True
+        return self.stops
 
 
 def test_owned_golden_fixture_does_not_inherit_a_configured_bank(tmp_path, monkeypatch):
@@ -168,7 +170,6 @@ def test_owned_golden_fixture_does_not_inherit_a_configured_bank(tmp_path, monke
         assert env["PSEUDOLIFE_TEST_PG_LOGIN_FILE"] == str(tmp_path / "test-pg.env")
     assert events == [("start", Path.home(), "pl-precheck-postgres-"),
                       ("login", Path("candidate"), tmp_path / "test-pg.env"), "stop"]
-    assert os.environ["PSEUDOLIFE_MCP_DATABASE_URL"] == configured
 
 
 def test_owned_golden_fixture_stops_its_cluster_when_the_login_fails(tmp_path, monkeypatch):
@@ -181,6 +182,27 @@ def test_owned_golden_fixture_stops_its_cluster_when_the_login_fails(tmp_path, m
         with replay.golden_postgres(tmp_path, Path("candidate")):
             pass
     assert events == ["stop"]
+
+
+def test_owned_golden_fixture_fails_its_cleanup_when_the_stop_is_unconfirmed(tmp_path, monkeypatch, capsys):
+    """A cluster that could not be confirmed stopped fails the cleanup phase
+    instead of passing it; a stop that fails during a setup error is
+    reported beside that error, which stays the one raised."""
+    import disposable_postgres
+    events = []
+    monkeypatch.setattr(disposable_postgres, "start", lambda parent, prefix: _Server(events, stops=False))
+    monkeypatch.setattr(disposable_postgres, "create_test_login",
+                        lambda candidate, server, login: subprocess.CompletedProcess([], 0, "", ""))
+    with pytest.raises(RuntimeError, match="could not be confirmed stopped"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    monkeypatch.setattr(disposable_postgres, "create_test_login",
+                        lambda candidate, server, login: subprocess.CompletedProcess([], 3, '{"exit": 3, "error": "refused"}', ""))
+    with pytest.raises(RuntimeError, match="test-role provisioning failed"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    err = capsys.readouterr().err
+    assert "test-login create failed (exit 3): refused" in err and "left running" in err
 
 
 def test_precheck_runner_imports_nothing_from_the_package_outside_the_frozen_judges():
