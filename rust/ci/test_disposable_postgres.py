@@ -1034,6 +1034,12 @@ def command_line(fakes, monkeypatch, tmp_path):
     return types.SimpleNamespace(env_file=env_file, fakes=fakes, tmp=tmp_path)
 
 
+def test_the_url_quotes_the_password(tmp_path):
+    server = postgres.Server(name="n", data_dir=tmp_path, pgdata=tmp_path, port=55432, pid=1,
+                             password="a b/@:%", owned=True)
+    assert server.url("pl_test") == "postgresql://postgres:a%20b%2F%40%3A%25@127.0.0.1:55432/pl_test"
+
+
 def test_command_line_exports_a_superuser_url_and_leaves_the_cluster_running(command_line, capsys):
     assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
     line, = command_line.env_file.read_text(encoding="utf-8").splitlines()

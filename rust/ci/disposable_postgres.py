@@ -43,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 SUPERUSER = "postgres"
 # Variables libpq and the native client read; the native client refuses
@@ -185,6 +185,11 @@ class Server:
     def admin_conninfo(self, dbname: str = "postgres") -> str:
         """Key/value conninfo without the password (PGPASSWORD carries it)."""
         return f"host={self.host} port={self.port} user={SUPERUSER} dbname={dbname}"
+
+    def url(self, dbname: str) -> str:
+        """A superuser URL with the password, for the command line's export
+        to a CI job's later steps (``main``)."""
+        return f"postgresql://{SUPERUSER}:{quote(self.password, safe='')}@{self.host}:{self.port}/{dbname}"
 
     def stop(self) -> bool:
         """Stop and remove the server if this process started it and it is
