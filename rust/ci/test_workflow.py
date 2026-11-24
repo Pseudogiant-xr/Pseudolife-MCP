@@ -388,14 +388,24 @@ def workflow():
     return resolve(yaml.safe_load(WORKFLOW.read_text(encoding="utf-8")))
 
 
-HARNESS_SCRIPT = re.compile(r"rust/(?:daemon/harness|cli_harness)/[\w./-]+\.py")
-RECORDING_FLAGS = {"--record-candidate", "--write"}
+# A harness named by path in any spelling (rust/cli_harness runs as a
+# directory; ./, ${{ github.workspace }}/ and backslash forms) or by module.
+HARNESS = re.compile(r"rust[/\\.](?:daemon[/\\.]harness|cli_harness)")
+RECORDING_FLAGS = ("--record-candidate", "--write")
+LOGGING = {"echo", "printf", "Write-Host", "Write-Output", "Write-Warning", "Write-Error"}
+
+
+def recording_flag(word):
+    """A recording flag, or an abbreviation argparse could expand to one."""
+    flag = word.split("=", 1)[0]
+    return len(flag) > 2 and flag.startswith("--") and any(full.startswith(flag) for full in RECORDING_FLAGS)
 
 
 def recording_harness_lines(script):
-    """Each harness invocation in a step's script that passes a recording
-    flag. Continued lines (a trailing backslash or backtick) are joined
-    first, so a flag on a continuation line still counts."""
+    """Each line of a step's script that names a harness and passes a
+    recording flag. Continued lines (a trailing backslash or backtick) are
+    joined first; a line that names a harness but does not parse counts,
+    so the scan fails closed; a logging command does not."""
     found, pending = [], ""
     for raw in script.splitlines():
         line = pending + raw.strip()
@@ -403,25 +413,47 @@ def recording_harness_lines(script):
             pending = line[:-1] + " "
             continue
         pending = ""
+        if not HARNESS.search(line):
+            continue
         try:
             words = shlex.split(line, comments=True)
         except ValueError:
+            found.append(line)
             continue
-        if any(HARNESS_SCRIPT.fullmatch(word) for word in words) \
-                and RECORDING_FLAGS & {word.split("=", 1)[0] for word in words}:
+        if words and words[0] in LOGGING:
+            continue
+        if any(recording_flag(word) for word in words):
             found.append(line)
     return found
 
 
-def test_the_recording_flag_scan_finds_flags_and_only_flags():
-    assert recording_harness_lines(
-        "python rust/daemon/harness/principals.py golden --rust-bin $c --out o.json --write") != []
-    assert recording_harness_lines("python rust/cli_harness/run.py rows \\\n  --record-candidate=1") != []
-    assert recording_harness_lines("& python rust/daemon/harness/schema_ci.py `\n  --record-candidate") != []
-    # Near misses: a value that merely names the flag, a pytest filter, a comment.
-    assert recording_harness_lines("python rust/daemon/harness/principals.py golden --out write.json") == []
-    assert recording_harness_lines("python -m pytest -q rust/daemon/harness/test_x.py -k write") == []
-    assert recording_harness_lines("python rust/daemon/harness/startup_ci.py --out o  # never --write") == []
+@pytest.mark.parametrize("line", [
+    "python rust/daemon/harness/principals.py golden --rust-bin $c --out o.json --write",
+    "python rust/cli_harness --row mail --golden --candidate $candidate --record-candidate --out x",
+    "python rust/cli_harness/runner.py rows \\\n  --record-candidate=1",
+    "& python rust/daemon/harness/schema_ci.py `\n  --record-candidate",
+    "python rust/daemon/harness/startup_ci.py --record-c --w --out o",
+    "python ./rust/daemon/harness/startup_ci.py --out o --write",
+    "python ${{ github.workspace }}/rust/daemon/harness/startup_ci.py --out o --write",
+    "python rust\\daemon\\harness\\startup_ci.py --out o --write",
+    "python -m rust.cli_harness --row mail --write",
+    'python rust/daemon/harness/startup_ci.py --out "a --write',
+])
+def test_the_recording_flag_scan_finds_a_recording_harness_run(line):
+    assert recording_harness_lines(line) != []
+
+
+@pytest.mark.parametrize("line", [
+    # A value that merely names the flag, a pytest filter, a comment, a log line.
+    "python rust/daemon/harness/principals.py golden --out write.json",
+    "python -m pytest -q rust/daemon/harness/test_x.py -k write",
+    "python rust/daemon/harness/startup_ci.py --out o  # never --write",
+    'Write-Host "python rust/daemon/harness/startup_ci.py --record-candidate --write records goldens"',
+    "python rust/cli_harness --row mail --golden --candidate $candidate -v --out x",
+    "python tools/other.py --write",
+])
+def test_the_recording_flag_scan_passes_a_checking_run(line):
+    assert recording_harness_lines(line) == []
 
 
 def test_no_workflow_step_turns_a_golden_check_into_a_rewrite():
@@ -429,14 +461,16 @@ def test_no_workflow_step_turns_a_golden_check_into_a_rewrite():
     --record-candidate or --write a step would record the candidate and
     could rewrite the golden it is meant to check."""
     harness_lines = 0
-    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
+    for path in workflows:
         jobs = yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}
         for job, spec in jobs.items():
             for step in spec.get("steps") or []:
                 script = str(step.get("run", ""))
-                harness_lines += len(HARNESS_SCRIPT.findall(script))
+                harness_lines += sum(1 for line in script.splitlines() if HARNESS.search(line))
                 assert recording_harness_lines(script) == [], (path.name, job, step.get("name"))
-    assert harness_lines > 20
+    # rust.yml alone runs the CLI harness rows and the daemon harnesses.
+    assert harness_lines > 20 and any(path.name == "rust.yml" for path in workflows)
 
 
 def test_shards_cover_both_systems_and_build_once():

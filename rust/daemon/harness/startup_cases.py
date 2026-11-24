@@ -372,7 +372,8 @@ def failed(result):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--only", nargs="+", choices=CASES)
@@ -426,7 +427,7 @@ def main(argv=None):
     def expected(case):
         if case not in goldens["cases"] or case not in goldens.get("database", {}):
             raise RuntimeError(f"startup-hydration.json has no committed golden for {case}; "
-                               + candidate_record.STARTUP_RECORDING)
+                               + candidate_record.startup_recording("startup_cases.py"))
         return {"snapshot": goldens["cases"][case], "database": goldens["database"][case]}
 
     for index, case in enumerate(args.only or (part_cases(args.part) if args.part else CASES)):

@@ -85,9 +85,9 @@ def operator_post_paths(source=None, auth=None):
     # (which may leave a trailing comma after the last route).
     policy = re.findall(r'fn operator_route\(\s*path:\s*&str\s*\)\s*->\s*bool\s*\{\s*'
                         r'matches!\(\s*path\s*,([^)]*?),?\s*\)\s*\}', text)
-    if len(policy) != 1:
+    if len(policy) != 1 or re.sub(r'"[^"\\]+"|[\s|]', "", policy[0]):
         raise AssertionError("auth.rs operator_route is no longer one matches!(path, ...) over string routes")
-    if set(re.findall(r'"([^"\\]+)"', policy[0])) != set(paths) or re.sub(r'"[^"\\]+"|[\s|]', "", policy[0]):
+    if set(re.findall(r'"([^"\\]+)"', policy[0])) != set(paths):
         raise AssertionError("auth.rs operator_route and http.rs OPERATOR_POST_PATHS name different routes")
     return frozenset(paths)
 
@@ -721,18 +721,20 @@ MODES_RETIRED = ("live, oracle and --record ran or recorded the frozen Python se
 def main():
     # No abbreviations: the retired --record must not mean --record-candidate.
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    parser.add_argument("mode", choices=("golden", "mutants") + RETIRED_MODES, metavar="{golden,mutants}")
-    parser.add_argument("--rust-bin", type=Path)
+    parser.add_argument("mode", metavar="{golden,mutants}")
+    parser.add_argument("--rust-bin", type=Path, help="the release daemon (required)")
     parser.add_argument("--record-candidate", action="store_true",
                         help="golden only: class each step against the golden; a dry run unless --write")
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the golden")
     parser.add_argument("--record", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--out", type=Path)
+    parser.add_argument("--out", type=Path, help="report JSON path (required)")
     parser.add_argument("--mutants", nargs="+", choices=MUTANTS)
     args = parser.parse_args()
     # Retired modes refuse first, before the required options they no longer need.
     if args.mode in RETIRED_MODES or args.record:
         parser.error(MODES_RETIRED)
+    if args.mode not in ("golden", "mutants"):
+        parser.error(f"argument mode: invalid choice: {args.mode!r} (choose from 'golden', 'mutants')")
     missing = [flag for flag, value in (("--rust-bin", args.rust_bin), ("--out", args.out)) if value is None]
     if missing:
         parser.error("the following arguments are required: " + ", ".join(missing))

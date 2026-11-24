@@ -204,7 +204,8 @@ def failed(result):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--mutants", action="store_true")
@@ -249,7 +250,8 @@ def main(argv=None):
     number = time.time_ns()
     expected = json.loads(GOLDEN.read_text())
     if "database" not in expected:
-        parser.error("clock-retry.json has no database section; " + candidate_record.STARTUP_RECORDING)
+        parser.error("clock-retry.json has no database section; "
+                     + candidate_record.startup_recording("clock_retry_cases.py"))
     try:
         cell(args.rust_test_bin.resolve(), number, result, expected=expected)
     except Exception as error:

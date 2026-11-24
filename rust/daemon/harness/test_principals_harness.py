@@ -109,6 +109,10 @@ def test_operator_routes_accept_a_wrapped_auth_policy(policy):
     'path == "/api/config" || path == "/api/daemon-notice"',
     'matches!(path.as_str(), "/api/config" | "/api/daemon-notice")',
     POLICY + "\n}\npub fn operator_route(path: &str) -> bool {\n    " + POLICY,
+    # Arms that are not plain string routes, one of them opening every route.
+    'matches!(path, "/api/config" | OTHER)',
+    'matches!(path, "/api/config" | "/api/daemon-notice" | _)',
+    'matches!(path, "/api/config" | "/api/daemon-notice" if true)',
 ])
 def test_operator_routes_name_a_changed_auth_policy_shape_as_such(policy):
     with pytest.raises(AssertionError, match="is no longer one matches"):
@@ -118,7 +122,6 @@ def test_operator_routes_name_a_changed_auth_policy_shape_as_such(policy):
 @pytest.mark.parametrize("policy", [
     f'matches!(path, "/api/config" | "/api/daemon-notice" | "{ADDED}")',
     'matches!(path, "/api/config")',
-    'matches!(path, "/api/config" | OTHER)',
 ])
 def test_operator_routes_refuse_a_policy_that_names_other_routes(policy):
     with pytest.raises(AssertionError, match="name different routes"):
@@ -316,7 +319,7 @@ def test_committed_golden_holds_its_records_and_at_most_provenance():
     (["golden", "--rust-bin", "x", "--out", "o", "--record"], principals.MODES_RETIRED),
     (["golden", "--rust-bin", "x", "--out", "o", "--record-c"], "unrecognized arguments: --record-c"),
     (["mutants", "--rust-bin", "x", "--out", "o", "--mut", "principal-shadow"], "unrecognized arguments"),
-    (["unknown", "--rust-bin", "x", "--out", "o"], "invalid choice"),
+    (["unknown", "--rust-bin", "x", "--out", "o"], "invalid choice: 'unknown' (choose from 'golden', 'mutants')"),
     (["golden", "--out", "o"], "required: --rust-bin"),
     (["golden", "--rust-bin", "x"], "required: --out"),
     (["golden", "--rust-bin", "x", "--out", str(principals.GOLDEN)], "--out names the committed golden"),

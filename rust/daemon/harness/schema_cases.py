@@ -175,8 +175,9 @@ def stage_diffs(stage):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--rust-test-bin", required=True, type=Path)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    ap = argparse.ArgumentParser(allow_abbrev=False)
+    ap.add_argument("--rust-test-bin", type=Path, help="the daemon mutants test executable (required)")
     ap.add_argument("--commit", action="append", default=[])
     ap.add_argument("--all-versions", action="store_true")
     ap.add_argument("--refusals", action="store_true")
@@ -189,11 +190,15 @@ def main(argv=None):
                       help="re-record the golden from the Rust candidate (candidate_record.py); a dry run "
                            "unless --write")
     ap.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
-    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--out", type=Path, help="report JSON path (required)")
     args = ap.parse_args(argv)
     # Retired modes refuse first: before the database turn and any check.
     if args.record_goldens:
         ap.error(candidate_record.RECORD_GOLDENS_RETIRED)
+    missing = [flag for flag, value in (("--rust-test-bin", args.rust_test_bin), ("--out", args.out))
+               if value is None]
+    if missing:
+        ap.error("the following arguments are required: " + ", ".join(missing))
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
