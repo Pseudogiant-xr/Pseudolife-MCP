@@ -252,7 +252,7 @@ fn dim_refusal(value: Option<&Value>, live: Option<i64>) -> Result<Option<String
     };
     Ok(match live {
         Some(live) if !equal => Some(format!(
-            "export embeddings are {spelled}-dimensional but this bank's columns are vector({live}) — the vectors cannot load verbatim. Import on a matching build, or re-embed via the migration path (ops/migrate_embeddings.py) after importing there."
+            "export embeddings are {spelled}-dimensional but this bank's columns are vector({live}) — the vectors cannot load verbatim. Import into a bank whose embedding columns are vector({spelled}); this client has no step that re-embeds a bank."
         )),
         _ => None,
     })
@@ -1026,5 +1026,23 @@ fn outcome(stop: Stop) -> Outcome {
         Stop::SchemaRefuse(message) => Outcome::SchemaRefused(message),
         Stop::Fail => Outcome::Failed,
         Stop::CommitUnknown => Outcome::CommitUnknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dimension_mismatch_names_no_python_migration() {
+        let refusal = dim_refusal(Some(&Value::Int("384".into())), Some(1024))
+            .ok()
+            .flatten()
+            .expect("a 384-d export into a 1024-d bank is refused");
+        assert_eq!(
+            refusal,
+            "export embeddings are 384-dimensional but this bank's columns are vector(1024) — the vectors cannot load verbatim. Import into a bank whose embedding columns are vector(384); this client has no step that re-embeds a bank."
+        );
+        assert!(!refusal.contains(".py"), "{refusal}");
     }
 }

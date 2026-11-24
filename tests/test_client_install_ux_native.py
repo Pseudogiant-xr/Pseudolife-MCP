@@ -4,6 +4,7 @@ that the native client path changed, run against the native installer.
 test_client_install_ux.py keeps the default (Python client) installer's tests.
 """
 
+import os
 import re
 import shlex
 import shutil
@@ -169,6 +170,20 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
             '} elseif (($Transport -eq "shim")', 1)[0]
     assert 'CODEX_RUNTIME_DEFAULTS=failed' in sh
     assert '$script:codexRuntimeDefaults = "failed"' in ps
+
+
+@pytest.mark.parametrize("bash", _bash_variants() or [None], ids=lambda name: Path(name).name if name else "none")
+def test_remove_legacy_for_codex_names_the_installer_not_a_python_script(tmp_path, bash):
+    """#1609: the refusal names a step an installed client has."""
+    if bash is None:
+        pytest.skip("Bash unavailable")
+    proc = subprocess.run([bash, str(ROOT / "ops/install-hook-native.sh"), "--client", "codex", "--remove-legacy"],
+                          cwd=tmp_path, capture_output=True, text=True, timeout=60,
+                          env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)})
+    assert proc.returncode == 2, proc
+    assert proc.stderr == "--remove-legacy is for Claude Code; for Codex hooks, rerun the installer with --client codex.
+"
+    assert ".py" not in proc.stderr
 
 
 INSTALLER_SHELLS = [*_bash_variants(), "powershell"]

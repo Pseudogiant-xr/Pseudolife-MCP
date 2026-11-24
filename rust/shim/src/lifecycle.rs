@@ -878,7 +878,7 @@ impl Runtime {
                 instructions_note = updates.version_note(&url, health);
                 if !instructions_note.is_empty() {
                     eprintln!(
-                        "[shim] this shim is pseudolife-mcp {PACKAGE_VERSION} but the daemon at {url} is {} — run {command} update --clients-only --tag {} (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon ({command} update); then start a new session.",
+                        "[shim] this shim is pseudolife-mcp {PACKAGE_VERSION} but the daemon at {url} is {} — run {command} update --clients-only --tag {} (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache), or update the daemon ({command} update); then start a new session.",
                         health["version"].as_str().unwrap_or(""),
                         health["version"].as_str().unwrap_or("")
                     );
@@ -1195,7 +1195,7 @@ impl ClientUpdates {
             return note.clone();
         }
         format!(
-            "Pseudolife-MCP: this shim is pseudolife-mcp {} but the daemon at {url} is {version}; run {} update --clients-only --tag {version} (from a checkout: python ops/update_clients.py --only shim) or update the daemon with {} update, then start a new session.",
+            "Pseudolife-MCP: this shim is pseudolife-mcp {} but the daemon at {url} is {version}; run {} update --clients-only --tag {version} or update the daemon with {} update, then start a new session.",
             self.own_version, self.command, self.command
         )
     }

@@ -23,9 +23,9 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
         // SHA-256 of cli_help.txt (cli.py::_USAGE with serve and embedded refused and move's
         // installed-release target), with Windows CRLF.
         let expected = if cfg!(windows) {
-            "d345d2272d96edf8a4fed77201eac20640cb9af773cdb5e181dbacd42d2827b7"
+            "ceb5efe014f334751ce0b47ec0230d6ecc3dd92c500ea93d7197c731ff83b172"
         } else {
-            "f4d45df2afdc8add3fe62fe87aab841c31abc0c18a4f9b6c64707c65f5bf05ca"
+            "646c96e4c444de170d9a38ca06d82f3a81ea7e643f7b2a70b99bd54109793deb"
         };
         assert_eq!(format!("{:x}", Sha256::digest(&output.stdout)), expected);
         assert!(output.stderr.is_empty());

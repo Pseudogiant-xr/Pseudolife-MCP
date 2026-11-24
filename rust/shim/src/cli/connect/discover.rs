@@ -256,7 +256,7 @@ pub(super) fn notes(env: &Dict, ctx: &Ctx, edits: &Edits, command: Option<&str>)
         && !paths::same_path(Path::new(command), &layout.launcher)
     {
         found.push(format!(
-            "runs {command}, not the shim launcher; connect leaves the command alone (`pseudolife-mcp update --clients-only`, or `python ops/shim_runtime.py migrate` from a checkout, moves it)"
+            "runs {command}, not the shim launcher; connect leaves the command alone (`pseudolife-mcp update --clients-only` moves it)"
         ));
     }
     found
@@ -300,7 +300,7 @@ fn register_command(client: &str, ctx: &Ctx) -> Result<String, Refusal> {
             flags("-e", "gemini")
         ),
         _ => format!(
-            "python ops/register_claude_desktop.py --command {shim} --daemon-url {} --token-file {token} (from a checkout; the installers run it for --client claude-desktop)",
+            "rerun the installer with --client claude-desktop (ops/install.sh --client claude-desktop, or ops\\install.ps1 -Client claude-desktop on Windows), adding --daemon-url {} (-DaemonUrl) when the daemon runs on another machine",
             ctx.url
         ),
     })
@@ -503,6 +503,14 @@ fn settings_row(ctx: &Ctx, registration: &Row) -> Result<Row, Refusal> {
     Ok(found)
 }
 
+/// The manual row for a Desktop entry this client's registrar wrote under the
+/// old server name.
+fn legacy_desktop_note() -> String {
+    format!(
+        "the entry's old name {SERVER}: the Desktop registrar moves it to {DESKTOP_SERVER} (rerun ops/install.* with --client claude-desktop); re-run connect after that"
+    )
+}
+
 fn desktop_rows(ctx: &Ctx) -> Result<Vec<Row>, Refusal> {
     let mut rows = Vec::new();
     for path in paths::desktop_configs()? {
@@ -540,9 +548,7 @@ fn desktop_rows(ctx: &Ctx) -> Result<Vec<Row>, Refusal> {
                 Some(&path),
                 Some(SERVER),
                 if own {
-                    format!(
-                        "the entry's old name {SERVER}: the Desktop registrar moves it to {DESKTOP_SERVER} (ops/install.* --client claude-desktop, or python ops/register_claude_desktop.py); re-run connect after that"
-                    )
+                    legacy_desktop_note()
                 } else {
                     format!(
                         "a {SERVER} entry the Desktop registrar did not write (its env does not set PSEUDOLIFE_WRITER_ID=claude-desktop); left as it is"
@@ -680,4 +686,19 @@ pub(super) fn discover(ctx: &Ctx, codex: Vec<Row>) -> Result<Vec<Row>, Refusal> 
         rows.extend(super::schedule::rows(ctx)?);
     }
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_legacy_desktop_note_names_the_installer_step() {
+        let note = legacy_desktop_note();
+        assert!(
+            note.contains("(rerun ops/install.* with --client claude-desktop)"),
+            "{note}"
+        );
+        assert!(!note.contains("register_claude_desktop.py"), "{note}");
+    }
 }

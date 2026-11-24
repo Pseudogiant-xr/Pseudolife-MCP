@@ -43,9 +43,9 @@ When loaded by a current Codex runtime, the plugin's lifecycle hooks use the
 same events. On Windows, Codex runs each entry's `commandWindows`, a native
 PowerShell 7 helper (`lifecycle.ps1`); Claude Code has no such field and
 runs the Bash `command` through Git Bash (see [Windows](#windows)). With the
-daemon running, use
-`python ops/setup-codex-hooks.py` from the repository, or the Docker installer,
-to approve the PseudoLife hook definitions and verify their lifecycle (the
+daemon running, rerun the installer with `--client codex` to set up the
+PseudoLife hook definitions and verify their lifecycle, and review and trust
+them in Codex (`/hooks` in the CLI, Settings > Hooks in the app) (the
 `Stop` entry is Claude Code's wake hook, on by default; in Codex it runs only
 the park gate, and the `SubagentStop` entry runs that gate for a Codex child
 thread under the child's own address, doing nothing in Claude Code; the
@@ -267,8 +267,8 @@ listed for review and left alone. By hand:
 
 The plugin lives in a cache Claude Code refreshes only on request, so it
 does not move when the daemon is redeployed. The updater moves it with the
-daemon: `pseudolife-mcp update` (from a checkout, `ops\update.ps1 -All` /
-`ops/update.sh --all`, or `python ops/update_clients.py` on its own)
+daemon: `pseudolife-mcp update` (`pseudolife-mcp update --clients-only` on its
+own; from a checkout, `ops\update.ps1 -All` / `ops/update.sh --all`)
 refreshes the marketplace clone, compares the plugin tree byte for byte
 against the cache, and runs `claude plugin update` only when they differ.
 The manifest carries no version, so Claude Code names each marketplace

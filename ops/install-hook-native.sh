@@ -34,7 +34,7 @@ case "$CLIENT" in claude|codex) ;; *)
   echo "invalid --client '$CLIENT' (claude|codex)" >&2; exit 2 ;;
 esac
 if [ -n "$REMOVE_LEGACY" ] && [ "$CLIENT" != claude ]; then
-  echo "--remove-legacy is for Claude Code; ops/setup-codex-hooks.py migrates Codex hooks." >&2
+  echo "--remove-legacy is for Claude Code; for Codex hooks, rerun the installer with --client codex." >&2
   exit 2
 fi
 if [ -n "$DRY_RUN" ] && [ -z "$REMOVE_LEGACY" ]; then

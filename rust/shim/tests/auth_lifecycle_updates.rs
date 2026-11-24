@@ -233,7 +233,7 @@ fn test_shim_version_note_repeats_only_a_version_shaped_daemon_value() {
     let note = updates.version_note("http://fixture.invalid", &health("0.0.1"));
     assert_eq!(
         note,
-        "Pseudolife-MCP: this shim is pseudolife-mcp 0.16.0 but the daemon at http://fixture.invalid is 0.0.1; run fixture-command update --clients-only --tag 0.0.1 (from a checkout: python ops/update_clients.py --only shim) or update the daemon with fixture-command update, then start a new session."
+        "Pseudolife-MCP: this shim is pseudolife-mcp 0.16.0 but the daemon at http://fixture.invalid is 0.0.1; run fixture-command update --clients-only --tag 0.0.1 or update the daemon with fixture-command update, then start a new session."
     );
 }
 

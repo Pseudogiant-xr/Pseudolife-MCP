@@ -1195,9 +1195,7 @@ async fn diagnose(
                     put(
                         &mut report,
                         "recovery",
-                        json!(format!(
-                            "The shim is pseudolife-mcp {installed} but the daemon is {daemon_version}. Run pseudolife-mcp update --clients-only --tag {daemon_version} (the daemon's release as a new shim runtime beside the running one; from a checkout: python ops/update_clients.py --only shim; no session has to close), or update the daemon with pseudolife-mcp update; then start a new session and retry."
-                        )),
+                        json!(version_recovery(installed, &daemon_version)),
                     );
                 }
             }
@@ -1216,9 +1214,7 @@ async fn diagnose(
                 put(
                     &mut report,
                     "recovery",
-                    json!(proxy_hint(
-                        "Check daemon health and the exact registered interpreter. Run that interpreter with -m pip check and -m pip show pseudolife-mcp mcp; reinstall there if stale, then retry."
-                    )),
+                    json!(proxy_hint(HANDSHAKE_FAILED_RECOVERY)),
                 );
             }
         }
@@ -1291,12 +1287,43 @@ async fn diagnose(
     (report, ok)
 }
 
+/// What doctor says when the daemon and this client run different releases.
+fn version_recovery(installed: &str, daemon_version: &str) -> String {
+    format!(
+        "The shim is pseudolife-mcp {installed} but the daemon is {daemon_version}. Run pseudolife-mcp update --clients-only --tag {daemon_version} (the daemon's release as a new shim runtime beside the running one; no session has to close), or update the daemon with pseudolife-mcp update; then start a new session and retry."
+    )
+}
+
+/// What doctor says when its own stdio shim, this executable started with
+/// the daemon spawn off, does not finish the MCP handshake.
+const HANDSHAKE_FAILED_RECOVERY: &str = "Check daemon health and the shim's stderr above: doctor started this pseudolife-mcp as a stdio shim and it did not finish the MCP handshake. If the daemon is healthy, rerun the installer to reinstall this client, then retry.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn report(pairs: Value) -> Map<String, Value> {
         pairs.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn the_version_recovery_names_only_native_steps() {
+        let text = version_recovery("0.25.0", "0.25.1");
+        assert_eq!(
+            text,
+            "The shim is pseudolife-mcp 0.25.0 but the daemon is 0.25.1. Run pseudolife-mcp update --clients-only --tag 0.25.1 (the daemon's release as a new shim runtime beside the running one; no session has to close), or update the daemon with pseudolife-mcp update; then start a new session and retry."
+        );
+        assert!(!text.contains("update_clients.py"), "{text}");
+    }
+
+    #[test]
+    fn a_failed_handshake_names_no_python_interpreter() {
+        let text = HANDSHAKE_FAILED_RECOVERY;
+        assert!(text.contains("rerun the installer"), "{text}");
+        assert!(
+            !text.contains("pip") && !text.contains("interpreter"),
+            "{text}"
+        );
     }
 
     #[test]
