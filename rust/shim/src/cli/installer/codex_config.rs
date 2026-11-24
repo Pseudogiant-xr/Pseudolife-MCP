@@ -266,15 +266,30 @@ pub(super) fn run_runtime_defaults(arguments: &[String]) -> u8 {
             Ok(report)
         })
     })();
-    let report = report.unwrap_or_else(
-        |error| json!({"status":"needs-configuration","recovery":error.to_string()}),
-    );
+    let report = report.unwrap_or_else(|error| {
+        let (report, line) = unstarted_report(&error, approve_mailbox);
+        notice = line;
+        report
+    });
     let ok = report["status"] == "ready";
     let code = emit_report(&report, ok);
     if let Some(line) = notice {
         let _ = writeln!(io::stderr().lock(), "{line}");
     }
     code
+}
+
+/// The report when Codex could not be reached at all; with the approval
+/// switch, the deferred `memory_message` approval is reported as not
+/// applied, with its reason and line, instead of being dropped silently.
+fn unstarted_report(error: &SetupError, approve_mailbox: bool) -> (Value, Option<String>) {
+    let mut report = json!({"status":"needs-configuration","recovery":error.to_string()});
+    if !approve_mailbox {
+        return (report, None);
+    }
+    let (fields, line) = super::codex_hooks::unapplied_mailbox(&error.to_string());
+    report.as_object_mut().unwrap().extend(fields);
+    (report, Some(line))
 }
 
 /// The steps after `codex mcp add`: the runtime defaults, then (when the
@@ -578,6 +593,32 @@ mod tests {
             line.unwrap()
                 .starts_with("Codex server registered; setup approved memory_message")
         );
+    }
+
+    #[test]
+    fn an_unreachable_codex_reports_the_deferred_approval_as_not_applied() {
+        let error = SetupError("The setup runtime could not start.");
+        let (report, line) = unstarted_report(&error, true);
+        assert_eq!(report["status"], "needs-configuration");
+        assert_eq!(report["recovery"], "The setup runtime could not start.");
+        assert_eq!(report["mailbox_approval"], "unavailable");
+        assert_eq!(
+            report["mailbox_approval_detail"],
+            "Codex could not be reached: The setup runtime could not start."
+        );
+        // The registration is unverified here, so the line names the fix
+        // and the rerun, never a hand edit of config.toml.
+        assert_eq!(
+            line.unwrap(),
+            "Codex server registered; setup could not reach Codex to approve memory_message: \
+             The setup runtime could not start. Fix that, then rerun the installer \
+             interactively or with --codex-hook-trust yes (install.ps1: -CodexHookTrust yes).\n\
+             See docs/guide/configuration.md (Experimental agent coordination)."
+        );
+        // Without the switch nothing about the approval is said.
+        let (report, line) = unstarted_report(&error, false);
+        assert!(report.get("mailbox_approval").is_none());
+        assert_eq!(line, None);
     }
 
     #[test]
