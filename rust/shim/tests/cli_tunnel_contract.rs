@@ -1114,7 +1114,7 @@ fn setup_names_a_daemon_url_spelling_it_does_not_accept() {
             "--accept-access",
         ],
         &[],
-        "--daemon-url http://LOCALHOST:8123 is a URL spelling this client does not accept",
+        "the URL in --daemon-url is a spelling this client does not accept",
     );
 }
 

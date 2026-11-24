@@ -1043,12 +1043,12 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
 }
 
 /// `validate_url`, naming where an http(s) URL in a spelling this client
-/// does not accept came from and the spellings it does.
+/// does not accept came from and the spellings it does. The URL itself is
+/// not echoed: it may carry credentials.
 fn checked_url(url: &str, source: &str) -> Result<(), Fail> {
     match syntax::validate_url(url) {
         Err(Fail::Defer) => Err(Fail::Detail(format!(
-            "{source} {} is a URL spelling this client does not accept; use http://127.0.0.1:<port> or http://localhost:<port> in lower case, or an https:// URL with a plain host name",
-            quote_tunnel_arg(url)
+            "the URL in {source} is a spelling this client does not accept; use http://127.0.0.1:<port> or http://localhost:<port> in lower case, or an https:// URL with a plain host name"
         ))),
         other => other,
     }
