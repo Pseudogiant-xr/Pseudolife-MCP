@@ -59,8 +59,11 @@ def test_meta_matches_shipped_version(atlas: dict) -> None:
     version = release_version.read(ROOT)
     assert atlas["meta"]["version"] == version, (
         f"atlas meta.version {atlas['meta']['version']!r} != release version "
-        f"{version!r} — re-verify the map and update docs/atlas/atlas.json "
-        "meta (version cut checklist)"
+        f"{version!r} ({release_version.AUTHORITY}): the version cut writes both. "
+        "If the atlas is the stale side, re-verify the map and update "
+        f"docs/atlas/atlas.json meta; if {release_version.AUTHORITY} is, bump it "
+        "(version cut checklist; `python rust/ci/release_version.py check` names "
+        "every field that differs)"
     )
 
 
