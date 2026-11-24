@@ -1072,6 +1072,10 @@ mod tests {
                 .message
                 .contains("this checkout's rust/shim/Cargo.toml")
         );
+        // Invalid TOML is a broken checkout too: refused without the fallback.
+        fs::write(&manifest, "[package]\nversion = \"0.26.0\"\nnot toml [\n").unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(!refused.unavailable, "{}", refused.message);
         // No manifest: a broken checkout, refused without the fallback.
         fs::remove_file(&manifest).unwrap();
         let refused = checkout_version(&repo).unwrap_err();

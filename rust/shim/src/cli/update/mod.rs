@@ -370,31 +370,47 @@ pub(crate) fn plain_release(v: &str) -> bool {
 /// manifest (`rust/ci/release_version.py` reads the same field).
 pub(crate) const RELEASE_MANIFEST: &str = "rust/shim/Cargo.toml";
 
-/// The release version a checkout carries: `[package] version` in
-/// [`RELEASE_MANIFEST`]. `Err` when the file cannot be read; `Ok(None)` when
-/// it names no string version (`version.workspace = true`, none at all).
-pub(crate) fn checkout_release_version(repo: &Path) -> std::io::Result<Option<String>> {
-    let text = fs::read_to_string(repo.join(RELEASE_MANIFEST))?;
-    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-    Ok(text
-        .parse::<toml::Table>()
-        .ok()
-        .and_then(|manifest| {
-            manifest
-                .get("package")?
-                .as_table()?
-                .get("version")?
-                .as_str()
-                .map(str::to_owned)
-        })
-        .filter(|version| !version.is_empty()))
+/// The native client crate's package name, which identifies the release
+/// manifest as this repository's.
+const RELEASE_PACKAGE: &str = "pseudolife-stdio";
+
+fn release_manifest(dir: &Path) -> std::io::Result<toml::Table> {
+    let text = fs::read_to_string(dir.join(RELEASE_MANIFEST))?;
+    text.parse::<toml::Table>().map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("not valid TOML: {}", error.message()),
+        )
+    })
 }
 
-/// Whether `dir` is a checkout of this repository: it carries the release
-/// manifest, or `pyproject.toml` as a checkout from before the native
-/// release version did.
+/// The release version a checkout carries: `[package] version` in
+/// [`RELEASE_MANIFEST`]. `Err` when the file cannot be read or is not
+/// valid TOML (a broken checkout); `Ok(None)` when it names no string
+/// version (`version.workspace = true`, none at all).
+pub(crate) fn checkout_release_version(repo: &Path) -> std::io::Result<Option<String>> {
+    Ok(release_manifest(repo)?
+        .get("package")
+        .and_then(toml::Value::as_table)
+        .and_then(|package| package.get("version"))
+        .and_then(toml::Value::as_str)
+        .filter(|version| !version.is_empty())
+        .map(str::to_owned))
+}
+
+/// Whether `dir` is a checkout of this repository: its release manifest
+/// names this repository's crate, or, for a checkout from before the
+/// native release version, it carries `pyproject.toml`.
 pub(crate) fn is_checkout_root(dir: &Path) -> bool {
-    dir.join(RELEASE_MANIFEST).is_file() || dir.join("pyproject.toml").is_file()
+    let ours = release_manifest(dir).is_ok_and(|manifest| {
+        manifest
+            .get("package")
+            .and_then(toml::Value::as_table)
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            == Some(RELEASE_PACKAGE)
+    });
+    ours || dir.join("pyproject.toml").is_file()
 }
 
 pub(crate) fn safe_tag(v: &str) -> bool {

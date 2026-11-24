@@ -699,7 +699,6 @@ fn checkout_release_version_reads_the_native_crate() {
         ("[package]\nversion.workspace = true\n", None),
         ("[package]\nversion = \"\"\n", None),
         ("[workspace]\nversion = \"1.2.3\"\n", None),
-        ("not toml [", None),
     ] {
         fs::write(&manifest, text).unwrap();
         assert_eq!(
@@ -708,11 +707,42 @@ fn checkout_release_version_reads_the_native_crate() {
             "{text:?}"
         );
     }
+    // Invalid TOML is a broken checkout, not a manifest without a version.
+    fs::write(&manifest, "[package]\nversion = \"1.2.3\"\nnot toml [\n").unwrap();
+    let broken = super::checkout_release_version(&repo.0).unwrap_err();
+    assert_eq!(broken.kind(), std::io::ErrorKind::InvalidData);
+    assert!(broken.to_string().starts_with("not valid TOML"), "{broken}");
+    // A checkout of this repository: its manifest names this crate. The
+    // near miss, another project's rust/shim/Cargo.toml, is none.
+    fs::write(&manifest, "[package]\nname = \"pseudolife-stdio\"\n").unwrap();
     assert!(super::is_checkout_root(&repo.0));
+    fs::write(
+        &manifest,
+        "[package]\nname = \"another-shim\"\nversion = \"1.2.3\"\n",
+    )
+    .unwrap();
+    assert!(!super::is_checkout_root(&repo.0));
     // A checkout from before the native release version is still one.
     fs::remove_file(&manifest).unwrap();
     fs::write(repo.0.join("pyproject.toml"), "[project]\n").unwrap();
     assert!(super::is_checkout_root(&repo.0));
+}
+
+#[test]
+fn checkout_schema_names_a_missing_release_manifest() {
+    let (repo, plan) = checkout_schema_fixture();
+    fs::write(plan, br#"{"format":1,"schema_version":71,"steps":[]}"#).unwrap();
+    fs::remove_file(repo.0.join(super::RELEASE_MANIFEST)).unwrap();
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(
+        refused
+            .message
+            .starts_with("cannot read rust/shim/Cargo.toml in this checkout (")
+            && refused.message.ends_with("Restore that file and retry."),
+        "{}",
+        refused.message
+    );
 }
 
 #[test]

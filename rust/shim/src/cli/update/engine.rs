@@ -210,12 +210,18 @@ pub(super) fn build_environment(tree: &seams::Tree) -> Environment {
 const CHECKOUT_SCHEMA_PLAN: &str = "rust/daemon/src/storage/schema_plan.json";
 
 pub(super) fn checkout_version_schema(repo: &Path) -> Result<(String, i64)> {
-    let version = crate::cli::update::checkout_release_version(repo)?.ok_or_else(|| {
-        UpdateError::usage(format!(
-            "cannot read the checkout version from {}",
-            crate::cli::update::RELEASE_MANIFEST
-        ))
-    })?;
+    use crate::cli::update::RELEASE_MANIFEST;
+    let version = crate::cli::update::checkout_release_version(repo)
+        .map_err(|error| {
+            UpdateError::usage(format!(
+                "cannot read {RELEASE_MANIFEST} in this checkout ({error}). Restore that file and retry."
+            ))
+        })?
+        .ok_or_else(|| {
+            UpdateError::usage(format!(
+                "cannot read the checkout version from {RELEASE_MANIFEST}"
+            ))
+        })?;
     let plan = fs::read(repo.join(CHECKOUT_SCHEMA_PLAN)).map_err(|error| {
         UpdateError::usage(format!(
             "cannot read {CHECKOUT_SCHEMA_PLAN} in this checkout ({error}). Restore that file and retry."
