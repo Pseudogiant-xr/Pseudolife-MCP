@@ -539,10 +539,17 @@ def main(argv: list[str] | None = None) -> int:
     github_env = os.environ.get("GITHUB_ENV")
     if not github_env:
         parser.error("GITHUB_ENV is not set: run this as a GitHub Actions step")
-    server = start(Path.home(), "pl-ci-postgres-")
+    try:
+        server = start(Path.home(), "pl-ci-postgres-")
+    except ImportError as error:  # start() imports the pg0 wheel and psycopg
+        raise SystemExit(f"cannot start PostgreSQL: the {error.name or 'pg0 or psycopg'} module is not installed; "
+                         "run `pip install -r rust/ci/requirements-postgres.txt` in an earlier step") from error
     try:
         if os.environ.get("GITHUB_ACTIONS") == "true":
-            print(f"::add-mask::{server.password}", flush=True)
+            # Masked before anything carries it: the raw password and the
+            # form the URL quotes it in (the same text while it is hex).
+            for secret in dict.fromkeys((server.password, quote(server.password, safe=""))):
+                print(f"::add-mask::{secret}", flush=True)
         with open(github_env, "a", encoding="utf-8", newline="") as stream:
             stream.write(f"{options.github_env}={server.url(options.database)}\n")
     except BaseException:

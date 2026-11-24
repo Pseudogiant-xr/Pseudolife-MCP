@@ -194,6 +194,11 @@ def test_both_lanes_run_their_postgres_tests_instead_of_skipping_them():
     for job_id in (REQUIRED, NIGHTLY):
         steps = jobs()[job_id]["steps"]
         start = next(i for i, s in enumerate(steps) if "rust/ci/disposable_postgres.py" in s.get("run", ""))
+        # The step imports the pg0 wheel and psycopg: an earlier step installs
+        # them (the lite extra, or the helper's own pins).
+        install = next(i for i, s in enumerate(steps) if ".[dev,lite]" in s.get("run", "")
+                       or "rust/ci/requirements-postgres.txt" in s.get("run", ""))
+        assert install < start, job_id
         tests = next(i for i, s in enumerate(steps)
                      if "pytest" in s.get("run", "") or WRAPPER in s.get("run", ""))
         assert start < tests, job_id

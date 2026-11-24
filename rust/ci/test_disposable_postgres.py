@@ -1055,6 +1055,41 @@ def test_command_line_exports_a_superuser_url_and_leaves_the_cluster_running(com
     assert started.parent.parent == command_line.tmp  # under home, not RUNNER_TEMP
 
 
+def test_command_line_masks_the_password_before_it_writes_the_url(command_line, capsys, monkeypatch):
+    import builtins
+    seen = []
+
+    def spy(path, *args, **kwargs):
+        seen.append((str(path), capsys.readouterr().out))
+        return builtins.open(path, *args, **kwargs)
+
+    monkeypatch.setattr(postgres, "open", spy, raising=False)
+    assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
+    (path, before), = seen
+    password = command_line.env_file.read_text(encoding="utf-8").split(":")[2].split("@")[0]
+    assert path == str(command_line.env_file) and f"::add-mask::{password}" in before
+
+
+def test_command_line_masks_the_quoted_form_of_a_password_that_needs_it(command_line, capsys, monkeypatch):
+    server = postgres.Server(name="n", data_dir=command_line.tmp, pgdata=command_line.tmp, port=55432, pid=1,
+                             password="a b/", owned=False)
+    monkeypatch.setattr(postgres, "start", lambda parent, prefix: server)
+    assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
+    masks = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::add-mask::")]
+    assert masks == ["::add-mask::a b/", "::add-mask::a%20b%2F"]
+
+
+def test_command_line_names_the_install_when_a_wheel_is_missing(command_line, monkeypatch):
+    def start(parent, prefix):
+        raise ModuleNotFoundError("No module named 'pg0'", name="pg0")
+    monkeypatch.setattr(postgres, "start", start)
+    with pytest.raises(SystemExit) as refused:
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"])
+    assert "the pg0 module is not installed" in str(refused.value.code)
+    assert "pip install -r rust/ci/requirements-postgres.txt" in str(refused.value.code)
+    assert not command_line.env_file.exists()
+
+
 @pytest.mark.parametrize("argv", [["--github-env", "lower", "--database", "ok_db"],
                                   ["--github-env", "A=B", "--database", "ok_db"],
                                   ["--github-env", "OK", "--database", "Bad-Name"],
