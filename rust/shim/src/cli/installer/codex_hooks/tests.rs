@@ -1688,3 +1688,38 @@ async fn after_the_handoff_two_identical_installer_runs_converge_after_the_first
     );
     assert_eq!(approval(&world.codex().user), "approve");
 }
+
+#[test]
+fn an_installer_rerun_replaces_an_earlier_releases_launchers() {
+    let world = installed_world();
+    let root = hooks_root(&world.home);
+    let definitions = fs::read(world.home.join("hooks.json")).unwrap();
+    for (name, _) in LAUNCHERS {
+        fs::write(
+            root.join(name),
+            crate::setup::codex_launchers::earlier_release(name),
+        )
+        .unwrap();
+    }
+    let hooks = listed_manual(&world);
+    let refs: Vec<&Hook> = hooks.iter().collect();
+    manual::vet(&refs, &world.home, true)
+        .expect("an earlier release's launchers pass verification");
+    let legacy = legacy_commands(&checkout()).unwrap();
+    manual::install(
+        &world.home,
+        &mut Report::default(),
+        false,
+        &checkout().join("plugin/hooks"),
+        &legacy,
+    )
+    .unwrap();
+    for (name, bytes) in LAUNCHERS {
+        assert_eq!(fs::read(root.join(name)).unwrap(), bytes, "{name}");
+    }
+    assert_eq!(
+        fs::read(world.home.join("hooks.json")).unwrap(),
+        definitions,
+        "the approved commands stay byte for byte"
+    );
+}

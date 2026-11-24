@@ -665,14 +665,132 @@ impl Drop for Temp {
 
 fn checkout_schema_fixture() -> (Temp, PathBuf) {
     let repo = Temp::new();
+    let manifest = repo.0.join(super::RELEASE_MANIFEST);
+    fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    fs::write(
+        manifest,
+        "[package]\nname = \"pseudolife-stdio\"\nversion = \"0.99.1\"\n\n[dependencies]\nversion = \"0.0.1\"\n",
+    )
+    .unwrap();
+    // A decoy: pyproject.toml leaves with the Python package and is not read.
     fs::write(
         repo.0.join("pyproject.toml"),
-        "[project]\nversion = \"0.99.1\"\n",
+        "[project]\nversion = \"0.0.9\"\n",
     )
     .unwrap();
     let plan = repo.0.join("rust/daemon/src/storage/schema_plan.json");
     fs::create_dir_all(plan.parent().unwrap()).unwrap();
     (repo, plan)
+}
+
+#[test]
+fn checkout_release_version_reads_the_native_crate() {
+    let repo = Temp::new();
+    assert!(super::checkout_release_version(&repo.0).is_err());
+    assert!(!super::is_checkout_root(&repo.0));
+    let manifest = repo.0.join(super::RELEASE_MANIFEST);
+    fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    for (text, version) in [
+        ("[package]\nversion = \"1.2.3\"\n", Some("1.2.3")),
+        (
+            "\u{feff}[package]\r\nversion = '1.2.3' # cut\r\n",
+            Some("1.2.3"),
+        ),
+        ("[package]\nversion.workspace = true\n", None),
+        ("[package]\nversion = \"\"\n", None),
+        ("[workspace]\nversion = \"1.2.3\"\n", None),
+    ] {
+        fs::write(&manifest, text).unwrap();
+        assert_eq!(
+            super::checkout_release_version(&repo.0).unwrap().as_deref(),
+            version,
+            "{text:?}"
+        );
+    }
+    // Invalid TOML is a broken checkout, not a manifest without a version.
+    fs::write(&manifest, "[package]\nversion = \"1.2.3\"\nnot toml [\n").unwrap();
+    let broken = super::checkout_release_version(&repo.0).unwrap_err();
+    assert_eq!(broken.kind(), std::io::ErrorKind::InvalidData);
+    assert!(broken.to_string().starts_with("not valid TOML"), "{broken}");
+    // A checkout of this repository: its manifest names this crate. The
+    // near miss, another project's rust/shim/Cargo.toml, is none.
+    fs::write(&manifest, "[package]\nname = \"pseudolife-stdio\"\n").unwrap();
+    assert!(super::is_checkout_root(&repo.0));
+    fs::write(
+        &manifest,
+        "[package]\nname = \"another-shim\"\nversion = \"1.2.3\"\n",
+    )
+    .unwrap();
+    assert!(!super::is_checkout_root(&repo.0));
+    // A checkout from before the native release version is still one.
+    fs::remove_file(&manifest).unwrap();
+    fs::write(repo.0.join("pyproject.toml"), "[project]\n").unwrap();
+    assert!(super::is_checkout_root(&repo.0));
+}
+
+#[test]
+fn checkout_schema_names_a_missing_release_manifest() {
+    let (repo, plan) = checkout_schema_fixture();
+    fs::write(plan, br#"{"format":1,"schema_version":71,"steps":[]}"#).unwrap();
+    fs::remove_file(repo.0.join(super::RELEASE_MANIFEST)).unwrap();
+    let restore = |refused: &UpdateError| {
+        refused
+            .message
+            .starts_with("cannot read rust/shim/Cargo.toml in this checkout (")
+            && refused
+                .message
+                .ends_with("restore it (git checkout -- rust/shim/Cargo.toml) and retry.")
+    };
+    // A current checkout (rust/shim/ is there) whose manifest was deleted:
+    // restore it, even beside pyproject.toml; a pull would not bring it back.
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(restore(&refused), "{}", refused.message);
+    // No rust/shim/ at all: a checkout from before the native client
+    // crate, which never had the manifest, is told to update.
+    fs::remove_dir_all(repo.0.join("rust/shim")).unwrap();
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert_eq!(
+        refused.message,
+        "this checkout has no rust/shim/Cargo.toml, so it predates the native release version; update the checkout (git pull, or check out a newer release tag) and retry."
+    );
+    // The same without pyproject.toml.
+    fs::remove_file(repo.0.join("pyproject.toml")).unwrap();
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(
+        refused
+            .message
+            .starts_with("this checkout has no rust/shim/Cargo.toml"),
+        "{}",
+        refused.message
+    );
+    // rust/shim/ back without its manifest, and no pyproject.toml: restore.
+    fs::create_dir_all(repo.0.join("rust/shim")).unwrap();
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(restore(&refused), "{}", refused.message);
+}
+
+#[test]
+fn checkout_schema_names_the_release_manifest_without_a_version() {
+    let (repo, plan) = checkout_schema_fixture();
+    fs::write(plan, br#"{"format":1,"schema_version":71,"steps":[]}"#).unwrap();
+    fs::write(
+        repo.0.join(super::RELEASE_MANIFEST),
+        "[package]\nname = \"x\"\n",
+    )
+    .unwrap();
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(
+        refused
+            .message
+            .contains("cannot read the checkout version from rust/shim/Cargo.toml: its [package] table needs a plain `version = \"<x.y.z>\"` line"),
+        "{}",
+        refused.message
+    );
 }
 
 #[test]

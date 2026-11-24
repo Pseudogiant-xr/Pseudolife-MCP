@@ -1,4 +1,8 @@
-"""Enrolment child diagnostics keep Python's merged output stream."""
+"""Enrolment child diagnostics keep Python's merged output stream.
+
+Since the Python freeze this runs the native client only: its Python arm
+ran the frozen CLI under the same assertions, so it could fail only on
+frozen code."""
 import json
 import os
 from pathlib import Path
@@ -11,11 +15,10 @@ import pytest
 from .fixture_daemon import FixtureDaemon, json_body
 
 
-@pytest.mark.parametrize("arm", ["python", "rust"])
-def test_enrolment_refusal_is_forwarded_to_stdout(tmp_path, arm):
+def test_enrolment_refusal_is_forwarded_to_stdout(tmp_path):
     candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
-    if arm == "rust" and not candidate:
-        pytest.skip("R1_PAIR_CANDIDATE is required for the native arm")
+    if not candidate:
+        pytest.skip("R1_PAIR_CANDIDATE is required for the native proof")
     daemon = FixtureDaemon({"/health": json_body({"status": "ok", "auth": True})})
     try:
         port = daemon.url.rsplit(":", 1)[1]
@@ -42,9 +45,7 @@ def test_enrolment_refusal_is_forwarded_to_stdout(tmp_path, arm):
             f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(script))} "$@"\n',
             encoding="utf-8")
         docker.chmod(0o700)
-        command = ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
-                   else [candidate])
-        command += ["maintainer", "setup", "--local", "--yes", "--port", port]
+        command = [candidate, "maintainer", "setup", "--local", "--yes", "--port", port]
         env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
         env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
                    PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "data"),

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "ce09bac9cf45865e",
+  "fingerprint": "941fbe66291a2ded",
+  "reason": "W109 (#1947): the guards step that runs only on Rust-only changes ('Live tests that read rust/ files') gains tests/test_installer_engine.py, which now writes a rust/shim/Cargo.toml fixture; the file ran 96 tests in 21 s in-process on the Windows host (docker and health are mocked), against a 25-minute job limit, and ordinary pull requests skip the step"
+}

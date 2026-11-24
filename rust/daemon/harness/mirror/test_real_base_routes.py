@@ -17,9 +17,15 @@ proposals. The synthetic arms passed while these errored on that copy:
 Each case seeds a disposable bank with the kind of rows a real bank holds,
 and its near miss keeps the empty-bank behaviour or the check that matters.
 Needs the disposable-bank login (``pgdisposable``); without one it skips.
+
+Banks are set up from the daemon's own schema (``rust/harness_support``).
+The cases that drive only the frozen Python service (its storage
+constructor, its search route and its dream-run storage API) go through
+``frozen``: they skip once the package is gone and are deleted with it.
 """
 from __future__ import annotations
 
+import importlib
 import json
 import math
 import random
@@ -47,6 +53,49 @@ def require_login():
         database_gate.unavailable("no disposable-bank login here",
                                   "create it once on the daemon host with `pseudolife-mcp test-login "
                                   "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
+
+
+FROZEN = "pseudolife_memory"
+
+
+def frozen(load):
+    """A module of the frozen Python package, for a case that drives only
+    the Python service. ``load`` is a literal
+    ``importlib.import_module("pseudolife_memory...")`` call, so
+    ``rust/ci/package_consumers.py`` still counts this file as a consumer.
+
+    The case skips when the missing module is the package itself, as it is
+    in a checkout without the package. Any other import failure still
+    errors: a submodule gone from a present package, a missing dependency,
+    or a leftover package directory (untracked ``__pycache__`` folders, say)
+    that imports as a namespace package and so names the submodule."""
+    try:
+        return load()
+    except ModuleNotFoundError as exc:
+        if exc.name != FROZEN:
+            raise
+        pytest.skip(f"drives only the frozen Python service, and {FROZEN} is not in this "
+                    "checkout; this case is deleted with the package")
+
+
+def test_frozen_cases_skip_only_when_the_package_itself_is_missing():
+    def missing(name):
+        def load():
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return load
+
+    with pytest.raises(pytest.skip.Exception, match="deleted with the package"):
+        frozen(missing(FROZEN))
+    # Near misses: a present package missing a submodule, a lookalike name,
+    # a dependency. A skip would escape pytest.raises and report this test
+    # skipped instead of red, so it fails the test here.
+    for name in ("pseudolife_memory.web.routes", "pseudolife_memoryx", "torch"):
+        try:
+            with pytest.raises(ModuleNotFoundError):
+                frozen(missing(name))
+        except pytest.skip.Exception:
+            pytest.fail(f"a missing {name!r} skipped the case instead of erroring")
+    assert frozen(lambda: "loaded") == "loaded"
 
 
 def unit(vector):
@@ -85,12 +134,14 @@ def route_bank(monkeypatch):
     any other), initialized, with no entries unless the test seeds them."""
     require_login()
     monkeypatch.delenv(pgdisposable.BASE_ENV, raising=False)
+    import psycopg
     import run
-    from pseudolife_memory.storage.postgres import PostgresStorage
+    from rust.harness_support.bank_fixture import initialize_bank
     name = run.pg.name(run.pg.PREFIX + "realbase")
     dsn = run.pg.create(name)
     try:
-        PostgresStorage(dsn).close()  # the schema and its builtin relations
+        with psycopg.connect(dsn) as conn:
+            initialize_bank(conn)  # the daemon's schema and its builtin relations
         yield dsn
     finally:
         monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
@@ -115,19 +166,28 @@ def embedding_dim(conn):
                         "to_regclass('public.entries') AND attname = 'embedding'").fetchone()[0]
 
 
-def test_dim_mismatch_prepares_a_bank_that_already_has_entries(route_bank):
+def dim_mismatch_on_a_real_bank(dsn):
     import psycopg
     import run
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    with psycopg.connect(route_bank, autocommit=True) as conn:
+    with psycopg.connect(dsn, autocommit=True) as conn:
         seed_like_a_real_bank(conn)
-    run.DimMismatch().prepare_template(route_bank)
+    run.DimMismatch().prepare_template(dsn)
+
+
+def test_dim_mismatch_prepares_a_bank_that_already_has_entries(route_bank):
+    import psycopg
+    dim_mismatch_on_a_real_bank(route_bank)
     with psycopg.connect(route_bank, autocommit=True) as conn:
         assert embedding_dim(conn) == 384
         assert conn.execute("SELECT count(*) FROM entries").fetchone()[0] == 40
+
+
+def test_the_frozen_service_refuses_the_dim_mismatch_bank(route_bank):
+    postgres = frozen(lambda: importlib.import_module("pseudolife_memory.storage.postgres"))
+    dim_mismatch_on_a_real_bank(route_bank)
     # What the scenario is for: the daemon refuses this bank before any DDL.
     with pytest.raises(RuntimeError, match=r"entries\.embedding is vector\(384\)"):
-        PostgresStorage(route_bank)
+        postgres.PostgresStorage(route_bank)
 
 
 def test_dim_mismatch_on_an_empty_bank_still_creates_its_one_table(empty_route_bank):
@@ -148,14 +208,19 @@ def relations(conn):
     return {r[0] for r in conn.execute("SELECT name FROM relations").fetchall()}
 
 
-def test_stamped_prepares_a_bank_whose_relations_are_referenced(route_bank):
+def stamped_on_a_real_bank(dsn):
     import psycopg
     import run
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    with psycopg.connect(route_bank, autocommit=True) as conn:
+    with psycopg.connect(dsn, autocommit=True) as conn:
         seed_like_a_real_bank(conn)
         seeded = relations(conn)
-    run.StampedBank().prepare_template(route_bank)
+    run.StampedBank().prepare_template(dsn)
+    return seeded
+
+
+def test_stamped_prepares_a_bank_whose_relations_are_referenced(route_bank):
+    import psycopg
+    seeded = stamped_on_a_real_bank(route_bank)
     with psycopg.connect(route_bank, autocommit=True) as conn:
         left = relations(conn)
         assert conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == 99
@@ -166,8 +231,13 @@ def test_stamped_prepares_a_bank_whose_relations_are_referenced(route_bank):
     gone = seeded - left
     assert len(gone) == 1 and left < seeded
     assert {"uses", "part-of", "hosts"} <= left
+
+
+def test_the_frozen_service_refuses_the_stamped_bank(route_bank):
+    postgres = frozen(lambda: importlib.import_module("pseudolife_memory.storage.postgres"))
+    stamped_on_a_real_bank(route_bank)
     with pytest.raises(RuntimeError, match="newer than"):
-        PostgresStorage(route_bank)
+        postgres.PostgresStorage(route_bank)
 
 
 def test_stamped_on_an_empty_bank_still_deletes_uses(empty_route_bank):
@@ -186,8 +256,8 @@ def fixture_search(dsn, tmp_path, monkeypatch):
     pytest.importorskip("torch")
     import torch
     import run
-    import pseudolife_memory.service as service_mod
-    from pseudolife_memory.web.routes import ConsoleRoutes
+    service_mod = frozen(lambda: importlib.import_module("pseudolife_memory.service"))
+    ConsoleRoutes = frozen(lambda: importlib.import_module("pseudolife_memory.web.routes")).ConsoleRoutes
 
     class FixtureDirection:
         backend, _device, dtype, embedding_dim = "fixture", "cpu", "fp32", 1024
@@ -270,7 +340,7 @@ def close_base(monkeypatch):
     monkeypatch.delenv(pgdisposable.BASE_ENV, raising=False)
     import psycopg
     from psycopg.types.json import Jsonb
-    from pseudolife_memory.storage.schema import ensure_schema
+    from rust.harness_support.schema import ensure_schema
     name = mir.name("pl_cf_mir_closebase")
     with psycopg.connect(mir.create(name), autocommit=True) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -341,15 +411,55 @@ def rollback_decision(storage, run_id=None):
     return {"reverts": target["id"]}
 
 
+def rollback_template(dsn):
+    """The scenario, with its template prepared on ``dsn``."""
+    import run
+    scenario = run.SCENARIOS["mcp-dream-rollback"]()
+    scenario.prepare_template(dsn)
+    return scenario
+
+
+def seed_real_runs(dsn):
+    """Two committed runs of the bank's own, the newer with a journal row."""
+    import psycopg
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("INSERT INTO dream_runs (id,started_at,finished_at,cursor_before,cursor_after,status) "
+                     "VALUES (500,1.6e9,1.6e9+5,0,7,'committed'), (501,1.6e9+10,1.6e9+15,7,9,'committed')")
+        conn.execute("INSERT INTO dream_run_slots (run_id,seq,entity,attribute,entity_norm,attribute_norm,"
+                     "kind,new_value,action,at) VALUES (501,1,'Real','note','real','note',"
+                     "'scalar','kept','inserted',1.6e9+12)")
+
+
+def seeded_runs(dsn):
+    """The bank's runs and the runs its journal rows belong to."""
+    import psycopg
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        runs = conn.execute("SELECT id, status FROM dream_runs ORDER BY id").fetchall()
+        journal = [r[0] for r in conn.execute("SELECT run_id FROM dream_run_slots ORDER BY run_id, seq")]
+    return runs, journal
+
+
+def test_dream_rollback_seeds_its_runs_past_a_real_banks_own(route_bank):
+    seed_real_runs(route_bank)
+    assert rollback_template(route_bank).first_run == 502
+    # Its committed run with a journal row, then its newer failed run, both
+    # after the bank's own runs, which are left as they were.
+    assert seeded_runs(route_bank) == (
+        [(500, "committed"), (501, "committed"), (502, "committed"), (503, "failed")], [501, 502])
+
+
+def test_dream_rollback_on_an_empty_bank_seeds_runs_1_and_2(route_bank):
+    assert rollback_template(route_bank).first_run == 1
+    assert seeded_runs(route_bank) == ([(1, "committed"), (2, "failed")], [1])
+
+
 def walk_rollback_calls(dsn):
     """The scenario's template on ``dsn``, then each of its calls' decision,
     applying its pre-call SQL and a revert's own status change as it goes."""
+    postgres = frozen(lambda: importlib.import_module("pseudolife_memory.storage.postgres"))
     import psycopg
-    import run
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    scenario = run.SCENARIOS["mcp-dream-rollback"]()
-    scenario.prepare_template(dsn)
-    storage = PostgresStorage(dsn, writer_lease=False)
+    scenario = rollback_template(dsn)
+    storage = postgres.PostgresStorage(dsn, writer_lease=False)
     out = {}
     try:
         for label, args, setup in scenario.calls():
@@ -367,13 +477,7 @@ def walk_rollback_calls(dsn):
 def test_dream_rollback_refusals_still_refuse_on_a_bank_with_its_own_runs(route_bank):
     """A real bank's own newer committed runs were the latest, so the
     scenario's first and last calls reverted real runs instead of refusing."""
-    import psycopg
-    with psycopg.connect(route_bank, autocommit=True) as conn:
-        conn.execute("INSERT INTO dream_runs (id,started_at,finished_at,cursor_before,cursor_after,status) "
-                     "VALUES (500,1.6e9,1.6e9+5,0,7,'committed'), (501,1.6e9+10,1.6e9+15,7,9,'committed')")
-        conn.execute("INSERT INTO dream_run_slots (run_id,seq,entity,attribute,entity_norm,attribute_norm,"
-                     "kind,new_value,action,at) VALUES (501,1,'Real','note','real','note',"
-                     "'scalar','kept','inserted',1.6e9+12)")
+    seed_real_runs(route_bank)
     scenario, decided = walk_rollback_calls(route_bank)
     assert decided == {
         "newer failed run refuses": {"error": "newer_unjournaled_runs", "runs": [{"id": 503, "status": "failed"}]},

@@ -49,7 +49,8 @@ def test_artifact(output: str) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--out", type=Path, help="schema evidence JSON path (required unless --build-only)")
     parser.add_argument("--build-only", action="store_true",
                         help="build the daemon test executable and write its path to --test-bin-out")

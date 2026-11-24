@@ -315,11 +315,13 @@ def check_executable_coverage(jobs):
     schema = commands(parity["Daemon schema startup parity"]["run"])
     # Both run the storage test executable the fixtures job built.
     require_command(schema, ("python", "rust/daemon/harness/schema_ci.py"),
-                    ("--out", "--no-build", "--rust-test-bin", "$storageTest"), ("--record-goldens", "--build-only"))
+                    ("--out", "--no-build", "--rust-test-bin", "$storageTest"),
+                    ("--record-goldens", "--record-candidate", "--write", "--build-only"))
     assert not any(words[0] == "cargo" for words in schema)
     startup = commands(parity["Daemon resident startup parity"]["run"])
     require_command(startup, ("python", "rust/daemon/harness/startup_ci.py"),
-                    ("--out", "--no-build", "--rust-test-bin", "--part"), ("--record-goldens",))
+                    ("--out", "--no-build", "--rust-test-bin", "--part"),
+                    ("--record-goldens", "--record-candidate", "--write"))
     assert not any(words[0] == "cargo" for words in startup)
     for name in ("Daemon schema startup parity", "Daemon resident startup parity"):
         assert "Join-Path 'rust/target/storage-test' $testName" in parity[name]["run"], name
@@ -329,14 +331,14 @@ def check_executable_coverage(jobs):
                     ("rust/daemon/harness/test_embedding.py",), PYTEST_FILTERS)
     require_command(invocations, ("python", "rust/daemon/harness/run.py", "embedding"),
                     ("--fixture", "--golden", "rust/daemon/harness/goldens/embedding-fixture.json", "--rust-bin", "--out"),
-                    ("--record", "--model", "--mutant"))
+                    ("--record", "--record-candidate", "--write", "--model", "--mutant"))
     assert "rust/target/release" in embedding["run"]
     assert not any(words[:2] == ["cargo", "build"] for words in invocations)
 
     principal = parity["Principal store golden harness"]
     invocations = commands(principal["run"])
     require_command(invocations, ("python", "rust/daemon/harness/principals.py", "golden"),
-                    ("--rust-bin", "--out"), ("--record", "--mutants"))
+                    ("--rust-bin", "--out"), ("--record", "--record-candidate", "--write", "--mutants"))
     lines = [line.strip() for line in principal["run"].splitlines()]
     assert [line for line in lines if re.match(r"\$binaryName\s*=", line)] == [
         "$binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }"]
@@ -384,6 +386,137 @@ def workflow():
     pins the expressions and the per-pull-request selection)."""
     from parity_scope import resolve
     return resolve(yaml.safe_load(WORKFLOW.read_text(encoding="utf-8")))
+
+
+# A harness named by path in any spelling (rust/cli_harness runs as a
+# directory; ./, ${{ github.workspace }}/ and backslash forms) or by module.
+HARNESS = re.compile(r"rust[/\\.](?:daemon[/\\.]harness|cli_harness)")
+RECORDING_FLAGS = ("--record-candidate", "--write")
+LOGGING = {"echo", "printf", "Write-Host", "Write-Output", "Write-Warning", "Write-Error"}
+SEPARATORS = {";", "&&", "||", "|", "&"}
+# The variables rust.yml's harness commands use today, allowed by name; any
+# other $var, $env:VAR or @var in a harness command could carry a recording
+# flag the scan cannot see, so it fails closed. ${{ }} is a GitHub
+# expression, filled in from workflow data before the step runs.
+ALLOWED_VARIABLES = {"candidate", "storageTest", "handoff", "binaryName", "cancelLog", "RUNNER_TEMP", "golden"}
+VARIABLE = re.compile(r"\$\{\{|\$\{?(?:env:)?(\w+)|(?:^|(?<==))@(\w+)")
+
+
+def recording_flag(word):
+    """A recording flag, or an abbreviation argparse could expand to one."""
+    flag = word.split("=", 1)[0]
+    return len(flag) > 2 and flag.startswith("--") and any(full.startswith(flag) for full in RECORDING_FLAGS)
+
+
+def unexplained_variables(words):
+    names = []
+    for word in words:
+        for match in VARIABLE.finditer(word):
+            if match.group(0) != "${{" and (match.group(1) or match.group(2)) not in ALLOWED_VARIABLES:
+                names.append(match.group(0))
+    return names
+
+
+def recording_harness_lines(script):
+    """Each line of a step's script with a harness command that passes a
+    recording flag or an unexplained variable. Continued lines (a trailing
+    backslash or backtick) are joined first, and each line is split into
+    commands on ; && || | and &, so a logging command does not exempt the
+    harness run beside it. A line that names a harness but does not parse
+    counts, so the scan fails closed."""
+    found, pending = [], ""
+    for raw in script.splitlines():
+        line = pending + raw.strip()
+        if line.endswith(("\\", "`")):
+            pending = line[:-1] + " "
+            continue
+        pending = ""
+        if not HARNESS.search(line):
+            continue
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        # Backslash is a path separator in PowerShell, not an escape; a quote
+        # it would have escaped leaves the line unparsable, which counts.
+        lexer.escape = ""
+        try:
+            tokens = list(lexer)
+        except ValueError:
+            found.append(line)
+            continue
+        commands, command = [], []
+        for token in tokens + [";"]:
+            if token in SEPARATORS:
+                commands.append(command)
+                command = []
+            else:
+                command.append(token)
+        for words in commands:
+            if not words or words[0] in LOGGING or not any(HARNESS.search(word) for word in words):
+                continue
+            if any(recording_flag(word) for word in words) or unexplained_variables(words):
+                found.append(line)
+                break
+    return found
+
+
+@pytest.mark.parametrize("line", [
+    "python rust/daemon/harness/principals.py golden --rust-bin $c --out o.json --write",
+    "python rust/cli_harness --row mail --golden --candidate $candidate --record-candidate --out x",
+    "python rust/cli_harness/runner.py rows \\\n  --record-candidate=1",
+    "& python rust/daemon/harness/schema_ci.py `\n  --record-candidate",
+    "python rust/daemon/harness/startup_ci.py --record-c --w --out o",
+    "python ./rust/daemon/harness/startup_ci.py --out o --write",
+    "python ${{ github.workspace }}/rust/daemon/harness/startup_ci.py --out o --write",
+    "python rust\\daemon\\harness\\startup_ci.py --out o --write",
+    "python -m rust.cli_harness --row mail --write",
+    'python rust/daemon/harness/startup_ci.py --out "a --write',
+    # A logging command beside the run does not exempt it, nor does a flag
+    # carried in a variable.
+    "echo start; python rust/daemon/harness/startup_ci.py --out o --write",
+    "Write-Host go && python rust/cli_harness --row x --record-candidate",
+    '$f = "--write"; python rust/daemon/harness/startup_ci.py --out o $f',
+    "python rust/daemon/harness/startup_ci.py --out o @extra",
+    "python rust/daemon/harness/startup_ci.py --out $env:OTHER_FLAGS",
+    "python rust/daemon/harness/startup_ci.py --out o | tee log; python rust/cli_harness --write",
+])
+def test_the_recording_flag_scan_finds_a_recording_harness_run(line):
+    assert recording_harness_lines(line) != []
+
+
+@pytest.mark.parametrize("line", [
+    # A value that merely names the flag, a pytest filter, a comment, a log line.
+    "python rust/daemon/harness/principals.py golden --out write.json",
+    "python -m pytest -q rust/daemon/harness/test_x.py -k write",
+    "python rust/daemon/harness/startup_ci.py --out o  # never --write",
+    'Write-Host "python rust/daemon/harness/startup_ci.py --record-candidate --write records goldens"',
+    "python rust/cli_harness --row mail --golden --candidate $candidate -v --out x",
+    "python tools/other.py --write",
+    "echo python rust/cli_harness --row x --write",
+    "echo done; python rust/daemon/harness/startup_ci.py --out o",
+    # The variables rust.yml uses, and a GitHub expression.
+    "python rust/cli_harness @golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'x.json')",
+    "python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --part ${{ matrix.part }} --out o",
+])
+def test_the_recording_flag_scan_passes_a_checking_run(line):
+    assert recording_harness_lines(line) == []
+
+
+def test_no_workflow_step_turns_a_golden_check_into_a_rewrite():
+    """CI's harness steps compare against committed goldens; with
+    --record-candidate or --write a step would record the candidate and
+    could rewrite the golden it is meant to check."""
+    harness_lines = 0
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
+    for path in workflows:
+        jobs = yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}
+        for job, spec in jobs.items():
+            for step in spec.get("steps") or []:
+                script = str(step.get("run", ""))
+                harness_lines += sum(1 for line in script.splitlines() if HARNESS.search(line))
+                assert recording_harness_lines(script) == [], (path.name, job, step.get("name"))
+    # rust.yml alone runs the CLI harness rows and the daemon harnesses.
+    assert harness_lines > 20 and any(path.name == "rust.yml" for path in workflows)
 
 
 def test_shards_cover_both_systems_and_build_once():

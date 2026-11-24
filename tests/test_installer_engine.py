@@ -56,8 +56,14 @@ def helper(tmp_path, monkeypatch):
     state["env"] = env
     repo = tmp_path / "checkout"
     (repo / "ops").mkdir(parents=True)
-    (repo / "pyproject.toml").write_text('[project]\nversion = "0.23.0"\n')
+    _write_crate(repo, "0.23.0")
     return module, state, repo
+
+
+def _write_crate(repo, version):
+    """The checkout's release version lives in its native client crate."""
+    (repo / "rust" / "shim").mkdir(parents=True, exist_ok=True)
+    (repo / "rust" / "shim" / "Cargo.toml").write_text(f'[package]\nname = "pseudolife-stdio"\nversion = "{version}"\n')
 
 
 def _started(module, state):
@@ -175,7 +181,7 @@ def test_rerun_on_an_accepted_host_reproduces_the_overlay_without_pulling(helper
     _started(module, state)
     module.accept()
     before, calls = overlay.read_bytes(), len(state["calls"])
-    (repo / "pyproject.toml").write_text('[project]\nversion = "0.24.0"\n')
+    _write_crate(repo, "0.24.0")
     assert module.prepare(repo, "rust") == [overlay]
     assert overlay.read_bytes() == before
     assert not any(c[0] in ("pull", "run") for c in state["calls"][calls:])
@@ -417,10 +423,34 @@ def test_python_and_checkout_selections(helper):
 
 def test_unreleased_checkout_version_refuses_rust(helper):
     module, state, repo = helper
-    (repo / "pyproject.toml").write_text('[project]\nversion = "0.23.0.dev1"\n')
+    _write_crate(repo, "0.23.0.dev1")
     with pytest.raises(module.Refusal, match="--engine python"):
         module.prepare(repo, "rust")
     assert not state["calls"] or all(c[0] == "inspect" for c in state["calls"])
+
+
+def test_the_checkout_version_is_the_native_crate_not_pyproject(helper):
+    """pyproject.toml leaves with the Python package; the crate's version is
+    the one read, and a checkout without it is refused naming the file."""
+    module, state, repo = helper
+    (repo / "pyproject.toml").write_text('[project]\nversion = "0.99.0"\n')
+    assert module.checkout_version(repo) == "0.23.0"
+    message = "this checkout's rust/shim/Cargo.toml; rerun with --engine python"
+    (repo / "rust" / "shim" / "Cargo.toml").write_text('[package]\nname = "pseudolife-stdio"\n')
+    with pytest.raises(module.Unavailable, match=message):
+        module.checkout_version(repo)
+    # A missing or undecodable crate file means a broken checkout: refused
+    # with the step that repairs it, never the default's fallback to Python.
+    restore = r"restore it \(git checkout -- rust/shim/Cargo.toml\) and rerun"
+    (repo / "rust" / "shim" / "Cargo.toml").write_bytes(b"[package]\nversion = \"\xff\"\n")
+    with pytest.raises(module.Refusal, match=r"Cannot read rust/shim/Cargo.toml in this checkout \(not UTF-8 text\); "
+                       + restore) as refused:
+        module.checkout_version(repo)
+    assert not isinstance(refused.value, module.Unavailable)
+    (repo / "rust" / "shim" / "Cargo.toml").unlink()
+    with pytest.raises(module.Refusal, match=restore) as refused:
+        module.checkout_version(repo)
+    assert not isinstance(refused.value, module.Unavailable)
 
 
 def test_planner_checks_the_engine_overlays_it_was_given(tmp_path, monkeypatch):

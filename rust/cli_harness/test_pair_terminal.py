@@ -12,19 +12,24 @@ import threading
 import pytest
 
 
+def _candidate() -> str:
+    """The native client under test. Since the Python freeze these
+    scenarios run the native client only: their Python arm ran the frozen
+    CLI under the same assertions, so it could fail only on frozen code."""
+    candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
+    if not candidate:
+        pytest.skip("R1_PAIR_CANDIDATE is required for the native proof")
+    return candidate
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX pipe interruption regression")
-@pytest.mark.parametrize("arm", ["python", "rust"])
 @pytest.mark.parametrize("termination", ["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"])
-def test_interrupt_with_open_partial_stdin(tmp_path, arm, termination):
+def test_interrupt_with_open_partial_stdin(tmp_path, termination):
     import array
     import fcntl
     import termios
 
-    candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
-    if arm == "rust" and not candidate:
-        pytest.skip("a native candidate is required")
-    command = ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
-               else [candidate])
+    command = [_candidate()]
     token = tmp_path / "token"
     command += ["pair", "http://localhost:1", "--read-code", "--token-file", str(token)]
     env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
@@ -63,17 +68,12 @@ def test_interrupt_with_open_partial_stdin(tmp_path, arm, termination):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX controlling-terminal regression")
-@pytest.mark.parametrize("arm", ["python", "rust"])
 @pytest.mark.parametrize("phase", ["prompt", "health", "redemption"])
-def test_interrupt_restores_terminal_echo(tmp_path, arm, phase):
+def test_interrupt_restores_terminal_echo(tmp_path, phase):
     import pty
     import termios
 
-    candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
-    if arm == "rust" and not candidate:
-        pytest.skip("R1_PAIR_CANDIDATE is required for the native arm")
-    command = ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
-               else [candidate])
+    command = [_candidate()]
     from .fixture_daemon import FixtureDaemon, json_body
     received, release = threading.Event(), threading.Event()
 
@@ -133,14 +133,9 @@ def test_interrupt_restores_terminal_echo(tmp_path, arm, phase):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows console regression")
-@pytest.mark.parametrize("arm", ["python", "rust"])
 @pytest.mark.parametrize("action", ["interrupt", "backspace"])
-def test_windows_prompt_restores_console_modes(tmp_path, arm, action):
-    candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
-    if arm == "rust" and not candidate:
-        pytest.skip("R1_PAIR_CANDIDATE is required for the native arm")
-    command = ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
-               else [candidate])
+def test_windows_prompt_restores_console_modes(tmp_path, action):
+    command = [_candidate()]
     token = tmp_path / "token"
     command += ["pair", "http://localhost:1", "--read-code", "--token-file", str(token)]
     env = {k: v for k, v in os.environ.items() if not k.startswith("PSEUDOLIFE_")}
@@ -235,21 +230,16 @@ def _converse(command: list[str], env: dict, cwd: Path, steps: list[tuple[bytes,
         os.close(master)
 
 
-def _connect_command(arm: str) -> list[str]:
-    candidate = os.environ.get("R1_PAIR_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
-    if arm == "rust" and not candidate:
-        pytest.skip("R1_PAIR_CANDIDATE is required for the native arm")
-    return ([sys.executable, "-m", "pseudolife_memory.cli"] if arm == "python"
-            else [candidate]) + ["connect"]
+def _connect_command() -> list[str]:
+    return [_candidate(), "connect"]
 
 
 CODE = b"ABCD-EFGH-JKMN"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX controlling-terminal regression")
-@pytest.mark.parametrize("arm", ["python", "rust"])
 @pytest.mark.parametrize("answer", [b"n\n", b"\n", b"y\n"])
-def test_connect_reads_the_code_without_echo_and_redeems_only_after_yes(tmp_path, arm, answer):
+def test_connect_reads_the_code_without_echo_and_redeems_only_after_yes(tmp_path, answer):
     from .fixture_daemon import FixtureDaemon, json_body
     daemon = FixtureDaemon({
         "/health": json_body({"status": "ok", "auth": True}),
@@ -259,7 +249,7 @@ def test_connect_reads_the_code_without_echo_and_redeems_only_after_yes(tmp_path
     try:
         env, registration = _connect_home(tmp_path, "http://10.0.0.5:8765")
         before = registration.read_bytes()
-        command = _connect_command(arm) + [daemon.url, "--client", "claude-code", "--read-code"]
+        command = _connect_command() + [daemon.url, "--client", "claude-code", "--read-code"]
         output, echoes, code = _converse(command, env, tmp_path / "cwd", [
             (b"pairing code: ", CODE + b"\n"),
             (b"Apply these changes? [y/N] ", answer),
@@ -285,15 +275,14 @@ def test_connect_reads_the_code_without_echo_and_redeems_only_after_yes(tmp_path
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX controlling-terminal regression")
-@pytest.mark.parametrize("arm", ["python", "rust"])
-def test_connect_asks_before_it_reads_a_token_without_echo(tmp_path, arm):
+def test_connect_asks_before_it_reads_a_token_without_echo(tmp_path):
     from .fixture_daemon import FixtureDaemon, json_body
     daemon = FixtureDaemon({"/health": json_body({"status": "ok", "auth": True})})
     try:
         env, registration = _connect_home(tmp_path, "http://10.0.0.5:8765")
         token = tmp_path / "chosen.token"
         secret = b"fixture-terminal-token-0123456789"
-        command = _connect_command(arm) + [daemon.url, "--client", "claude-code",
+        command = _connect_command() + [daemon.url, "--client", "claude-code",
                                            "--read-token", "--token-file", str(token)]
         output, echoes, code = _converse(command, env, tmp_path / "cwd", [
             (b"Apply these changes? [y/N] ", b"y\n"),
@@ -308,8 +297,7 @@ def test_connect_asks_before_it_reads_a_token_without_echo(tmp_path, arm):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX controlling-terminal regression")
-@pytest.mark.parametrize("arm", ["python", "rust"])
-def test_connect_stops_on_ctrl_c_at_the_question_after_a_code_prompt(tmp_path, arm):
+def test_connect_stops_on_ctrl_c_at_the_question_after_a_code_prompt(tmp_path):
     # The code prompt listens for SIGINT; on the native arm that listener
     # leaves Tokio's handler installed, which must not swallow a later Ctrl-C.
     from .fixture_daemon import FixtureDaemon, json_body
@@ -317,7 +305,7 @@ def test_connect_stops_on_ctrl_c_at_the_question_after_a_code_prompt(tmp_path, a
     try:
         env, registration = _connect_home(tmp_path, "http://10.0.0.5:8765")
         before = registration.read_bytes()
-        command = _connect_command(arm) + [daemon.url, "--client", "claude-code", "--read-code"]
+        command = _connect_command() + [daemon.url, "--client", "claude-code", "--read-code"]
         output, _, code = _converse(command, env, tmp_path / "cwd", [
             (b"pairing code: ", CODE + b"\n"),
             (b"Apply these changes? [y/N] ", b"\x03"),

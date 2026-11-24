@@ -164,8 +164,9 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", required=True, type=Path, help="startup evidence JSON path")
+    # No abbreviations: a shortened flag must not select a recording mode.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--out", type=Path, help="startup evidence JSON path (required)")
     parser.add_argument("--no-build", action="store_true", help="use an existing daemon test executable")
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
     parser.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
@@ -179,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.record_goldens:
         import candidate_record
         parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
+    if args.out is None:
+        parser.error("the following arguments are required: --out")
     if _DATABASE_TURN_MARKER.exists():
         _turn_sys = __import__("sys")
         _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
