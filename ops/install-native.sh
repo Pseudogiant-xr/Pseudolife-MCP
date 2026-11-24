@@ -615,8 +615,15 @@ native_refuse() {  # $1 = cause, $2 = fix
     exit 1
 }
 native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
-    NATIVE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" 2>/dev/null | head -1)" || NATIVE_VERSION=""
-    [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    # The release version is the native client crate's: `version` in the
+    # [package] table of rust/shim/Cargo.toml (rust/ci/release_version.py).
+    NATIVE_VERSION="$(awk '
+        { sub(/\r$/, "") }
+        /^[[:space:]]*\[/ { t = $0; sub(/#.*/, "", t); gsub(/[[:space:]]/, "", t); next }
+        t == "[package]" && /^[[:space:]]*version[[:space:]]*=[[:space:]]*"[^"]+"/ {
+            v = $0; sub(/^[^"]*"/, "", v); sub(/".*/, "", v); print v; exit
+        }' "$repo/rust/shim/Cargo.toml" 2>/dev/null)" || NATIVE_VERSION=""
+    [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's rust/shim/Cargo.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
     NATIVE_TARGET="$(native_target)"
     if [ -z "$NATIVE_TARGET" ] && [ -n "${PSEUDOLIFE_NATIVE_TARGET:-}" ]; then
         native_refuse "PSEUDOLIFE_NATIVE_TARGET names $PSEUDOLIFE_NATIVE_TARGET, which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."

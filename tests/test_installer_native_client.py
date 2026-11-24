@@ -156,13 +156,24 @@ def _release(directory: Path, *, sums_override: str | None = None, extra_line: b
 
 
 def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, release: bool = True, host_only: bool = False,
-         version: str = VERSION, **release_kwargs) -> subprocess.CompletedProcess:
-    """Use the same sandbox for either the installer or its host-only control."""
+         version: str = VERSION, manifest: str | None = None, **release_kwargs) -> subprocess.CompletedProcess:
+    """Use the same sandbox for either the installer or its host-only control.
+    The checkout's release version is its native client crate's (``manifest``
+    replaces that file's text; ``""`` removes it); pyproject.toml carries a
+    decoy version the installer must not read."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
-    (repo / "pyproject.toml").write_text(f'[project]\nname = "x"\nversion = "{version}"\n', encoding="utf-8")
+    crate = repo / "rust" / "shim" / "Cargo.toml"
+    crate.parent.mkdir(parents=True, exist_ok=True)
+    if manifest == "":
+        crate.unlink(missing_ok=True)
+    else:
+        crate.write_text(manifest if manifest is not None else
+                         f'[package]\nname = "pseudolife-stdio"\nversion = "{version}"\n\n[dependencies]\nversion = "0.0.1"\n',
+                         encoding="utf-8", newline="\n")
+    (repo / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.9"\n', encoding="utf-8")
     base = tmp_path / "release"
     if release:
         _release(base, **release_kwargs)
@@ -229,6 +240,16 @@ def test_fresh_install_verifies_the_archive_and_installs_it_natively(tmp_path):
     assert install == (f"runtime install --archive {_p(downloads / ASSET)} "
                        f"--sha256sums {_p(downloads / 'SHA256SUMS')} --version {VERSION}")
     assert "installer expose --json" in calls
+
+
+@pytest.mark.parametrize("manifest", ["", '[package]\nname = "pseudolife-stdio"\nversion.workspace = true\n'],
+                         ids=["no-crate", "no-literal-version"])
+def test_a_checkout_without_a_native_release_version_is_refused_naming_the_crate(tmp_path, manifest):
+    result = _run(tmp_path, "native_stage", manifest=manifest)
+    assert result.returncode == 1
+    assert ("The native pseudolife-mcp client cannot be installed: this checkout's rust/shim/Cargo.toml "
+            "names no version. Check out a release tag (git checkout v<version>) and rerun.") in result.stderr
+    assert _calls(tmp_path) == []
 
 
 def test_rerun_on_a_native_host_says_nothing_changed(tmp_path):

@@ -447,11 +447,22 @@ function Get-NativeAsset([string]$Base, [string]$Name, [string]$Destination) {
 }
 function Initialize-NativeClient {
     # Fetch, verify, extract and run the release binary; refuses on any failure.
-    $pyproject = Get-Content -LiteralPath (Join-Path $repo "pyproject.toml") -Raw -ErrorAction SilentlyContinue
-    if ("$pyproject" -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
-        Stop-NativeInstall "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    # The release version is the native client crate's: `version` in the
+    # [package] table of rust/shim/Cargo.toml (rust/ci/release_version.py).
+    $manifest = Get-Content -LiteralPath (Join-Path $repo "rust/shim/Cargo.toml") -ErrorAction SilentlyContinue
+    $table = $null
+    $script:nativeVersion = $null
+    foreach ($line in @($manifest)) {
+        if ("$line" -match '^\s*\[') {
+            $table = (("$line" -replace '#.*$', '') -replace '\s', '')
+        } elseif ($table -eq '[package]' -and "$line" -match '^\s*version\s*=\s*"([^"]+)"') {
+            $script:nativeVersion = $Matches[1]
+            break
+        }
     }
-    $script:nativeVersion = $Matches[1]
+    if (-not $script:nativeVersion) {
+        Stop-NativeInstall "this checkout's rust/shim/Cargo.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    }
     $target = Get-NativeTarget
     if (-not $target) {
         if ($env:PSEUDOLIFE_NATIVE_TARGET) {

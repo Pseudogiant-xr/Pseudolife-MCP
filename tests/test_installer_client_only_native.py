@@ -17,6 +17,8 @@ import threading
 
 import pytest
 
+from rust.ci import release_version
+
 from tests import installer_sandbox
 from tests import native_client_stub as native_stub
 
@@ -1333,7 +1335,8 @@ def _copy_repo(tmp_path: Path) -> Path:
     wrote ops/.env or the compose override must not touch the real tree."""
     repo = tmp_path / "repo"
     for rel in ("ops/install-native.sh", "ops/install-hook-native.sh", "ops/client_credentials.py",
-                "ops/.env.example", "examples/CLAUDE.memory.md", "pyproject.toml"):
+                "ops/.env.example", "examples/CLAUDE.memory.md", "pyproject.toml",
+                "rust/shim/Cargo.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)
     (repo / "ops" / "install-native.sh").chmod(0o755)
@@ -1353,7 +1356,7 @@ def _whole_client_only_run(bash, tmp_path, board_server, *, connect_report: str 
     repo = _copy_repo(tmp_path)
     installed = tmp_path / "installed-bin"
     installed.mkdir()
-    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
+    version = release_version.read(ROOT)
     # The staged client's installer steps are answered by the stand-in, which
     # runs this checkout's helpers as the native client carries its own.
     standin = shell.path(ROOT / "tests" / "native_helper_standin.py")

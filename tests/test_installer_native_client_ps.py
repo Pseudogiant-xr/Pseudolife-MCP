@@ -131,8 +131,20 @@ def _release(directory: Path, *, client: str, digest_override: str | None = None
     (directory / "SHA256SUMS").write_text("" if omit else f"{digest}  {asset}\n", encoding="utf-8")
 
 
+def _write_crate(repo: Path, manifest: str | None = None) -> None:
+    crate = repo / "rust" / "shim" / "Cargo.toml"
+    crate.parent.mkdir(parents=True, exist_ok=True)
+    if manifest == "":
+        crate.unlink(missing_ok=True)
+        return
+    crate.write_text(manifest if manifest is not None else
+                     f'[package]\nname = "pseudolife-stdio"\nversion = "{VERSION}"\n\n[dependencies]\nversion = "0.0.1"\n',
+                     encoding="utf-8", newline="\n")
+
+
 def _run(client: str, tmp_path: Path, body: str, *, release: bool = True, host_only: bool = False,
-         extra_env: dict[str, str] | None = None, **release_kwargs) -> subprocess.CompletedProcess:
+         extra_env: dict[str, str] | None = None, manifest: str | None = None,
+         **release_kwargs) -> subprocess.CompletedProcess:
     """``body`` run after the installer's native-client block; ``client``
     ("stub" or "real") is the release ``_release`` packs. A host-only
     control runs the body with the same sandbox setup and no installer code."""
@@ -140,7 +152,11 @@ def _run(client: str, tmp_path: Path, body: str, *, release: bool = True, host_o
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
-    (repo / "pyproject.toml").write_text(f'[project]\nversion = "{VERSION}"\n', encoding="utf-8")
+    # The checkout's release version is its native client crate's
+    # (``manifest`` replaces that file's text; ``""`` removes it);
+    # pyproject.toml carries a decoy version the installer must not read.
+    _write_crate(repo, manifest)
+    (repo / "pyproject.toml").write_text('[project]\nversion = "0.0.9"\n', encoding="utf-8")
     base = tmp_path / "release"
     if release:
         _release(base, client=client, **release_kwargs)
@@ -356,6 +372,18 @@ def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case
     assert "STAGED" not in result.stdout
     assert not (tmp_path / "home" / "runtimes").exists()
     assert not (tmp_path / "home" / "bin").exists()
+
+
+@pytest.mark.parametrize("manifest", ["", '[package]\nname = "pseudolife-stdio"\nversion.workspace = true\n'],
+                         ids=["no-crate", "no-literal-version"])
+def test_a_checkout_without_a_native_release_version_is_refused_naming_the_crate(tmp_path, manifest):
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', manifest=manifest)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert ("this checkout's rust/shim/Cargo.toml names no version. "
+            "Check out a release tag (git checkout v<version>) and rerun.") in line
+    assert not (tmp_path / "home" / "runtimes").exists()
 
 
 @pytest.mark.skipif(WINDOWS, reason="the v0.24.0 stand-in is a shell script; on Windows the fixture is a real client")
@@ -640,9 +668,8 @@ def _whole_repo(tmp_path: Path) -> Path:
     shutil.copytree(ROOT / "ops", repo / "ops", ignore=shutil.ignore_patterns(".env", "__pycache__", "*.log"))
     if (ROOT / "examples").is_dir():
         shutil.copytree(ROOT / "examples", repo / "examples")
-    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    (repo / "pyproject.toml").write_text(re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{VERSION}"', text, count=1),
-                                         encoding="utf-8")
+    shutil.copy2(ROOT / "pyproject.toml", repo / "pyproject.toml")
+    _write_crate(repo)
     return repo
 
 

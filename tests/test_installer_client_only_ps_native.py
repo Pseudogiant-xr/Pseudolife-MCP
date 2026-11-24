@@ -17,6 +17,8 @@ import threading
 
 import pytest
 
+from rust.ci import release_version
+
 from tests import installer_sandbox
 from tests import native_client_stub as native_stub
 
@@ -1322,7 +1324,7 @@ def _copy_repo(tmp_path: Path) -> Path:
     # runs from a checkout, where the file is always beside it.
     for rel in ("ops/install-native.ps1", "ops/install-hook.ps1", "ops/scheduled_task_lock.ps1",
                 "ops/client_credentials.py", "ops/.env.example", "examples/CLAUDE.memory.md",
-                "pyproject.toml"):
+                "pyproject.toml", "rust/shim/Cargo.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)
     return repo
@@ -1362,7 +1364,7 @@ def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRE
             "if [ \"$1 $2 $3\" = 'installer credentials verify-token-file' ]; then\n"
             f"  printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'; echo '{report}'; exit 1\nfi\n"
         )
-    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
+    version = release_version.read(ROOT)
     release_env = native_stub.write_release(
         tmp_path / "release", version,
         verify + "if [ \"$1\" = installer ] && [ \"$2\" != migrate-registrations ]; then\n"
