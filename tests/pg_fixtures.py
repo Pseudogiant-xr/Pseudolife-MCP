@@ -312,6 +312,10 @@ def _foreign_owner_refusal(conn, db_name: str) -> str | None:
 # CI run 35556355319). Anything near this budget is a hung dream.
 DREAM_WAIT_BUDGET_SECONDS = 60.0
 
+# The thread name the frozen package's end-of-session dream runs under
+# (pseudolife_memory.service_dream.SESSION_END_DREAM_THREAD_NAME).
+SESSION_END_DREAM_THREAD_NAME = "session-end-dream"
+
 # Thread idents already reported as stragglers. A thread stuck past the
 # budget once is not re-joined on every later PG test — that would turn one
 # hung dream into a full budget plus a failure per remaining test.
@@ -335,12 +339,14 @@ def wait_for_background_dreams(
     returned so the caller can fail loudly instead of racing it. A thread
     reported once is returned again without a second wait.
     """
-    # Only the frozen package's service starts these threads, so a process
-    # that never imported its dream module has none to wait for.
+    # The name the frozen package's service gives these threads. Read from
+    # its module when this process imported it; otherwise the same literal
+    # (pinned equal by tests/test_fixture_guards_package_absent.py), so a
+    # dream thread is still waited for if the module was imported in an
+    # unusual way, and the wait works without the package.
     service_dream = sys.modules.get("pseudolife_memory.service_dream")
-    if service_dream is None:
-        return []
-    thread_name = service_dream.SESSION_END_DREAM_THREAD_NAME
+    thread_name = getattr(service_dream, "SESSION_END_DREAM_THREAD_NAME",
+                          SESSION_END_DREAM_THREAD_NAME)
     deadline = _time.monotonic() + timeout
     stragglers: list[threading.Thread] = []
     for thread in threading.enumerate():

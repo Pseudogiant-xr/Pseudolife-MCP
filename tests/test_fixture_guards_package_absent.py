@@ -243,10 +243,17 @@ def test_an_implicit_daemon_dsn_stops_the_run_and_refuses_every_reset(state):
 def test_the_record_conftest_writes_is_the_one_the_frozen_package_reads():
     """Migration bridge only: DELETE this test when the package is retired.
     conftest writes the record through the package-free guard; the package's
-    own resets (its tests' MemoryService) must read the same variable."""
+    own resets (its tests' MemoryService) must read the same variable, and
+    pg_fixtures' dream wait must use the thread name the package gives."""
     from pseudolife_memory.storage import schema
     from rust.harness_support import database_guard as guard
 
     for name in ("DEFAULT_PRODUCTION_DATABASE", "PRODUCTION_DATABASES",
                  "PRODUCTION_DATABASE_ENV", "UNRESOLVED_PRODUCTION_DATABASE"):
         assert getattr(guard, name) == getattr(schema, name), name
+    # pg_fixtures waits for the package's dream threads by this name, also
+    # when the package's dream module is not loaded.
+    from pseudolife_memory import service_dream
+    from tests import pg_fixtures
+
+    assert pg_fixtures.SESSION_END_DREAM_THREAD_NAME == service_dream.SESSION_END_DREAM_THREAD_NAME

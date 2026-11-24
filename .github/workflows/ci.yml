@@ -317,6 +317,9 @@ jobs:
         # embedder mode; its one real_model case is left to the test job.
         # test_installer_bash32.py scans the installers' shell files for what
         # macOS's bash 3.2 misreads, before a batch reaches the macOS lane.
+        # rust/harness_support/test_database_guard.py proves the test suite's
+        # package-free production-bank guard decides as the frozen
+        # package's does; no other job collects rust/harness_support.
         # Catch Rust workflow/harness drift on the PR that introduces it.
         run: >-
           python -m pytest -q -m "not real_model"
@@ -328,6 +331,7 @@ jobs:
           tests/test_changelog_fragments.py tests/test_wall_clock_budgets.py
           "tests/test_disposable_database_guard.py::test_every_reap_and_full_bank_truncate_is_guarded_first"
           tests/test_fake_embedder.py tests/test_installer_bash32.py
+          rust/harness_support/test_database_guard.py
           tests/test_integrate_script.py::test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness
           tests/test_integrate_script.py::test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips
 
@@ -359,7 +363,7 @@ jobs:
           tests/test_update_engine.py tests/test_suite_classes.py
           tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
           tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
-          tests/test_scheduled_task_lock.py tests/test_fixture_guards_package_absent.py tests/test_fake_embedder.py
+          tests/test_scheduled_task_lock.py tests/test_fixture_guards_package_absent.py
           tests/test_suite_lock.py
 
   lock-resolve:
