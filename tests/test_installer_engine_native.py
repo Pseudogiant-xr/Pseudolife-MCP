@@ -71,6 +71,14 @@ def test_a_bearer_the_install_cannot_mint_is_decided_before_anything_is_pulled(t
         # A Rust install that is not a default refuses before it pulls anything.
         assert proc.returncode == 2, output
         assert "cannot mint one" in output and "Nothing was pulled or started" in output
+        # The cause is the flag this install was given, never missing pip tooling
+        # (#1609): the native client needs no pipx or pip.
+        assert ("-NoToken" if script.endswith(".ps1") else "--no-token") in output, output
+        if script.endswith(".ps1"):
+            # A recorded opt-out is cleared only by an explicit -NoToken:$false,
+            # printed literally (not PowerShell's expanded "False").
+            assert "rerun with -NoToken:$false -Transport shim" in output, output
+        assert "pipx" not in output and "pip-capable" not in output, output
         assert prepares == []
     else:
         assert proc.returncode == 0, output
@@ -122,3 +130,16 @@ def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script
 def _stage(script, start, end):
     source = (ROOT / "ops" / script).read_text(encoding="utf-8")
     return source[source.index(start):source.index(end)]
+
+
+@pytest.mark.parametrize("script,start", [("install-native.sh", "show_generic_snippets() {"),
+                                          ("install-native.ps1", "function Show-GenericSnippets {")])
+def test_the_generic_snippet_needs_the_native_client_not_pip(script, start):
+    # #1609: the stdio-shim snippet a native install prints names the client
+    # that install put in place, not `pip install pseudolife-mcp` or pipx.
+    source = (ROOT / "ops" / script).read_text(encoding="utf-8").replace("\r\n", "\n")
+    body = source[source.index(start):]
+    body = body[:body.index("\n}\n")]
+    assert ("stdio shim (recommended - per-session identity; needs the native\n"
+            "  pseudolife-mcp client, on PATH or by its full path in \"command\"):") in body
+    assert "pip install" not in body and "pipx" not in body

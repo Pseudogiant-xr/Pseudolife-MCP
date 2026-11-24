@@ -366,6 +366,76 @@ pub(crate) fn plain_release(v: &str) -> bool {
         && p.iter()
             .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
 }
+/// The release version's home in a checkout: the native client crate's
+/// manifest (the field the release tooling's reader, `rust/ci/release_version.py`
+/// from #1922, reads too).
+pub(crate) const RELEASE_MANIFEST: &str = "rust/shim/Cargo.toml";
+
+/// What to do when [`RELEASE_MANIFEST`] names no usable version.
+pub(crate) const RELEASE_MANIFEST_NO_VERSION_FIX: &str = "its [package] table needs a plain `version = \"<x.y.z>\"` line: restore it (git checkout -- rust/shim/Cargo.toml) or update the checkout, then retry";
+
+/// Why a checkout's release manifest could not be read, and its fix: a
+/// checkout from before the native client crate (no `rust/shim/` at all;
+/// the crate dates from 4 October 2026) is updated, any other, a current
+/// checkout whose manifest was deleted included, is repaired.
+pub(crate) fn release_manifest_unreadable(repo: &Path, error: &std::io::Error) -> String {
+    let crate_dir = Path::new(RELEASE_MANIFEST)
+        .parent()
+        .unwrap_or(Path::new("rust/shim"));
+    if error.kind() == std::io::ErrorKind::NotFound && !repo.join(crate_dir).is_dir() {
+        format!(
+            "this checkout has no {RELEASE_MANIFEST}, so it predates the native release version; update the checkout (git pull, or check out a newer release tag) and retry"
+        )
+    } else {
+        format!(
+            "cannot read {RELEASE_MANIFEST} in this checkout ({error}); restore it (git checkout -- {RELEASE_MANIFEST}) and retry"
+        )
+    }
+}
+
+/// The native client crate's package name, which identifies the release
+/// manifest as this repository's.
+const RELEASE_PACKAGE: &str = "pseudolife-stdio";
+
+fn release_manifest(dir: &Path) -> std::io::Result<toml::Table> {
+    let text = fs::read_to_string(dir.join(RELEASE_MANIFEST))?;
+    text.parse::<toml::Table>().map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("not valid TOML: {}", error.message()),
+        )
+    })
+}
+
+/// The release version a checkout carries: `[package] version` in
+/// [`RELEASE_MANIFEST`]. `Err` when the file cannot be read or is not
+/// valid TOML (a broken checkout); `Ok(None)` when it names no string
+/// version (`version.workspace = true`, none at all).
+pub(crate) fn checkout_release_version(repo: &Path) -> std::io::Result<Option<String>> {
+    Ok(release_manifest(repo)?
+        .get("package")
+        .and_then(toml::Value::as_table)
+        .and_then(|package| package.get("version"))
+        .and_then(toml::Value::as_str)
+        .filter(|version| !version.is_empty())
+        .map(str::to_owned))
+}
+
+/// Whether `dir` is a checkout of this repository: its release manifest
+/// names this repository's crate, or, for a checkout from before the
+/// native release version, it carries `pyproject.toml`.
+pub(crate) fn is_checkout_root(dir: &Path) -> bool {
+    let ours = release_manifest(dir).is_ok_and(|manifest| {
+        manifest
+            .get("package")
+            .and_then(toml::Value::as_table)
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            == Some(RELEASE_PACKAGE)
+    });
+    ours || dir.join("pyproject.toml").is_file()
+}
+
 pub(crate) fn safe_tag(v: &str) -> bool {
     !v.is_empty()
         && v.bytes()

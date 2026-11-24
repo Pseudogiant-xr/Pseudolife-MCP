@@ -294,7 +294,8 @@ def failed(result):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--mutants", action="store_true")

@@ -154,10 +154,10 @@ class = "intentional legacy compatibility"
 reason = "Registration migration recognizes installed Python modules and launcher arguments."
 
 [[rules]]
-globs = ["rust/shim/src/cli/installer/codex_hooks/definitions.rs", "rust/shim/src/cli/update/clients/codex.rs"]
+globs = ["rust/shim/src/setup/codex_launchers.rs"]
 kinds = ["command"]
-class = "active dependency"
-reason = "Approved launcher definitions still print the Python repair command."
+class = "intentional legacy compatibility"
+reason = "A test fixture rebuilds the launchers earlier releases shipped, which the installer and update replace."
 
 [[rules]]
 globs = ["rust/shim/src/cli/update/*.rs", "rust/shim/src/cli/installer/*.rs"]
@@ -166,7 +166,7 @@ class = "active dependency"
 reason = "Native install and update use Python release metadata, version or checkout markers."
 
 [[rules]]
-globs = ["rust/shim/src/cli/update/mod.rs", "rust/shim/src/cli/maintainer/setup/system.rs", "rust/shim/src/cli/connect/discover.rs", "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/pg/resolution.rs", "rust/shim/src/setup/codex.rs", "rust/shim/src/lifecycle.rs", "rust/daemon/src/service.rs", "rust/daemon/src/storage/schema.rs"]
+globs = ["rust/shim/src/cli/update/mod.rs", "rust/shim/src/cli/maintainer/setup/system.rs", "rust/shim/src/cli/connect/discover.rs", "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/pg/resolution.rs", "rust/shim/src/setup/codex.rs", "rust/shim/src/lifecycle.rs"]
 kinds = ["command"]
 class = "active dependency"
 reason = "Native paths can launch the Python CLI or still direct operators to Python helpers."
@@ -182,6 +182,12 @@ globs = ["rust/daemon/src/native/pdfium_tests.rs"]
 kinds = ["rust-include"]
 class = "retained test tooling"
 reason = "The PDFium test embeds the Python requirements lock to check the pin."
+
+[[rules]]
+globs = ["rust/cli_harness/test_maintainer_setup_native.py", "rust/cli_harness/test_native_unattended.py", "rust/cli_harness/test_update_transactions.py", "rust/cli_harness/rows/test_doctor_proof.py"]
+kinds = ["command", "python-import"]
+class = "retained test tooling"
+reason = "Only the tests marked frozen_python.only_frozen_python run the frozen package, while it is present; delete those tests with it and keep the native tests of each file."
 
 [[rules]]
 globs = ["rust/daemon/harness/*.py", "rust/cli_harness/*.py", "rust/harness_support/test_*.py"]

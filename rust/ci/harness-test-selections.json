@@ -92,7 +92,7 @@
     },
     "rust/cli_harness/test_maintainer_setup_terminal.py": {
       "kind": "native",
-      "reason": "The same parametrized terminal scenario runs Python and a built native candidate; retain the complete scenario in its parity lane."
+      "reason": "The terminal scenario runs a built native candidate; retain the complete scenario in its parity lane."
     },
     "rust/cli_harness/test_operator_transport.py": {
       "kind": "unit",
@@ -100,7 +100,7 @@
     },
     "rust/cli_harness/test_pair_terminal.py": {
       "kind": "native",
-      "reason": "The same parametrized terminal scenario runs Python and a built native candidate; retain the complete scenario in its parity lane."
+      "reason": "The terminal scenario runs a built native candidate; retain the complete scenario in its parity lane."
     },
     "rust/cli_harness/test_pairing_native.py": {
       "kind": "mixed",
@@ -123,7 +123,8 @@
         "test_native_transactions_use_the_standard_lane_candidate",
         "test_fixture_df_emits_one_terminated_filesystem_record",
         "test_fixture_running_format_preserves_pre_recreate_state",
-        "test_fixture_backup_finds_bash_when_powershell_is_in_a_separate_directory"
+        "test_fixture_backup_finds_bash_when_powershell_is_in_a_separate_directory",
+        "test_python_updater_host_capture_is_the_round_it_names"
       ]
     },
     "rust/cli_harness/test_update_wrappers_native.py": {
