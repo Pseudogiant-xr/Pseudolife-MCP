@@ -223,3 +223,15 @@ def test_recorded_board_answers_as_recorded_and_refuses_an_unrecorded_request():
             lease._after(arm, {})
     finally:
         board.close()
+
+
+def test_board_recording_covers_both_platforms_and_every_board_scenario():
+    from .rows import lease
+
+    recording = json.loads(lease.RECORDING.read_text(encoding="utf-8"))["platforms"]
+    assert sorted(recording) == ["linux", "windows"]
+    scenarios = {"claim", "free", "held", "malformed", "other-mirror", "queue", "refused",
+                 "same-mirror", "transient"}
+    for platform, recorded in recording.items():
+        assert set(recorded) == scenarios, platform
+        assert all(recorded[name]["transcripts"] for name in ("free", "claim", "queue")), platform

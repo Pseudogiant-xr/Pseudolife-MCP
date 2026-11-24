@@ -39,7 +39,7 @@ from ._transfer_seed import _seed_bank
 # The committed schema plan's version: the candidate's refusal names the one
 # it was built for (tests/test_schema_version.py pins the frozen constant to
 # the same plan).
-SCHEMA_META_VERSION = load_plan()["schema_version"]
+SCHEMA_META_VERSION = load_plan()[0]["schema_version"]
 ARCHIVE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "transfer-archives"
 
 ROW = "transfer"
@@ -104,14 +104,20 @@ def _seed(name: str) -> None:
 
 
 def _seed_relations(conn, created_at: float) -> None:
-    """The built-in relations as the frozen storage seeds them when it opens a
-    bank (``PostgresStorage._seed_relations``), stamped ``created_at``: the
-    callers pin that stamp, as they did after the storage's wall clock."""
+    """What the frozen storage wrote when it opened a bank: the built-in
+    relations (``PostgresStorage._seed_relations``), stamped ``created_at``
+    (the callers pin that stamp, as they did after the storage's wall clock),
+    and its writer-lease epoch (``_bump_lease_epoch``, the same statement)."""
     for relation, description, transitive, inverse in _BUILTIN_RELATIONS:
         conn.execute(
             "INSERT INTO relations (name, description, transitive, inverse_of, builtin, created_at) "
             "VALUES (%s, %s, %s, %s, TRUE, %s) ON CONFLICT (name) DO NOTHING",
             (relation, description, transitive, inverse, created_at))
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('writer_lease_epoch', '1'::jsonb) "
+        "ON CONFLICT (key) DO UPDATE SET value = to_jsonb(COALESCE("
+        "CASE WHEN jsonb_typeof(meta.value) = 'number' "
+        "THEN (meta.value #>> '{}')::numeric::bigint END, 0) + 1)")
 
 
 _TRICKY_SQL = r"""

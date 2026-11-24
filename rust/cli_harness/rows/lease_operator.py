@@ -18,7 +18,7 @@ from unittest.mock import patch
 from .. import core, lease_fixture, normalize
 from ..core import Case
 from . import _bank
-from .lease import TOKEN, T0, _Holder, _after, _local, _release_local, coordination_state
+from .lease import NAME, TOKEN, T0, _Holder, _after, _local, _release_local, coordination_state
 
 
 class _Storage:

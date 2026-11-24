@@ -2,7 +2,8 @@
 
 The board fake answers the leases API as the frozen Python store did
 (``CoordinationStore`` on disposable PostgreSQL, a fixed clock and fixed
-identities): ``fixtures/lease-board.json`` holds, per scenario, the
+identities): ``fixtures/lease-board.json`` holds, per platform (the run
+command the clients name differs) and scenario, the
 coordination state the scenario starts from and every store-backed request
 the clients made, with the store's answer and the coordination state after
 it (the complete post-state, audit chain included). The fake replays it: a
@@ -76,7 +77,7 @@ _RECORDED: dict | None = None
 def _recorded(scenario: str) -> dict:
     global _RECORDED
     if _RECORDED is None:
-        _RECORDED = json.loads(RECORDING.read_text(encoding="utf-8"))["scenarios"]
+        _RECORDED = json.loads(RECORDING.read_text(encoding="utf-8"))["platforms"][core.PLATFORM]
     return _RECORDED[scenario]
 
 
