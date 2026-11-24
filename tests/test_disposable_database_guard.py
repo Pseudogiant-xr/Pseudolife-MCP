@@ -53,8 +53,11 @@ def _package_schema():
 
     Only pg_conn's reset reads it, and only once the guard has passed: it
     runs the package's DDL (pg_fixtures._pg_conn_session). A package that
-    is present but fails to import is an error, never a skip."""
-    if importlib.util.find_spec("pseudolife_memory") is None:
+    is present but fails to import is an error, never a skip. A namespace
+    package (what a deleted package's leftover __pycache__ folders give an
+    existing checkout) counts as absent, as in tests/conftest.py."""
+    package = importlib.util.find_spec("pseudolife_memory")
+    if package is None or package.origin is None:
         return None
     from pseudolife_memory.storage import schema
 
@@ -525,8 +528,9 @@ _PRODUCTION_REAPS = {
         "the bank is being moved away, and its daemon is already stopped",
 }
 
-# Reset sites the scan must find, or it is guarding nothing. These survive
-# the frozen package and the Python evals, so each is required outright.
+# Reset sites the scan must find, or it is guarding nothing: the suite's own
+# session reset and the Rust harness rows' bank drops and reaps, each required
+# outright (removing one of them is a change to this list, made on purpose).
 _REQUIRED_RESET_SITES = {
     ("tests/pg_fixtures.py", "_pg_conn_session"),
     ("rust/cli_harness/rows/_bank.py", "drop"),
@@ -611,7 +615,8 @@ def test_every_reap_and_full_bank_truncate_is_guarded_first():
         (f, fn) for f, fn in _RETIRING_RESET_SITES if (ROOT / f).is_file()}
     missing = required - {(f, fn) for f, fn, _, _ in found}
     assert not missing, f"the scan no longer finds these reset sites: {sorted(missing)}"
-    stale = set(_PRODUCTION_REAPS) - {(f, fn) for f, fn, _, _ in found}
+    stale = {(f, fn) for f, fn in _PRODUCTION_REAPS if (ROOT / f).is_file()} - {
+        (f, fn) for f, fn, _, _ in found}
     assert not stale, f"exempted production reaps no longer found: {sorted(stale)}"
     unguarded = [f"{f}::{fn} (line {line})" for f, fn, line, first_guard in found
                  if (first_guard is None or first_guard > line)
