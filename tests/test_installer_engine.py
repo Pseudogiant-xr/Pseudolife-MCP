@@ -314,8 +314,12 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
     prepares = [call for call in calls if "prepare" in call]
     python_way = "rerun with -Engine python" if script.endswith(".ps1") else "rerun with --engine python"
     if flag == "python" and installed == "rust-unaccepted":
-        # The refusal's last way out works where it is offered: an unfinished
-        # Rust install reruns as Python.
+        # The refusal's last way out works where it is offered: this
+        # checkout's own unfinished Rust install reruns as Python. (Another
+        # release's unfinished container is refused by prepare whichever
+        # engine is asked for, ops/installer_engine.py
+        # refuse_foreign_unaccepted, and that refusal names its own fix; the
+        # stub here stands for the same-release case.)
         assert proc.returncode == 0, output
         assert "RESULT:python" in output
         assert [call for call in prepares if "--engine rust" in call] == []
