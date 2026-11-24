@@ -6,7 +6,7 @@ use super::{Command, Options, Setup};
 
 /// What the argv asks for: a command to run, or help to print.
 pub(super) enum Parsed {
-    Run(Options),
+    Run(Box<Options>),
     Help(String),
 }
 
@@ -300,5 +300,5 @@ pub(super) fn read(values: &[OsString]) -> Result<Parsed, String> {
             }
         }
     }
-    Ok(Parsed::Run(options))
+    Ok(Parsed::Run(Box::new(options)))
 }

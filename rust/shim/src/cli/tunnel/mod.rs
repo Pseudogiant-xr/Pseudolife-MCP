@@ -120,7 +120,7 @@ struct Options {
 #[cfg(test)]
 fn parse(values: &[OsString]) -> Option<Options> {
     match argv::read(values) {
-        Ok(argv::Parsed::Run(options)) => Some(options),
+        Ok(argv::Parsed::Run(options)) => Some(*options),
         _ => None,
     }
 }
