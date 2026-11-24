@@ -502,12 +502,18 @@ def _docs_preview(world, head, *, preview_head=None):
     return base, tree
 
 
+# What rust/ci/docs_scope.py imports from the census module, stubbed: the
+# extension set, and the pinned-commit fetch that a test world's history
+# never needs (it reads no frozen package source).
+_CENSUS_IMPORTS = "EXTENSIONS = set()\ndef fetch_frozen_sources(root=None):\n    return True\n"
+
+
 @pytest.fixture
 def docs_world(world, monkeypatch):
     # The disposable origin carries the same classifier as CI in production.
     files = {path: (ROOT / path).read_text(encoding="utf-8")
              for path in (*integrate.DOCS_SCOPE_FILES, "tests/suite_classes.py")}
-    files.update({integrate.CENSUS: "EXTENSIONS = set()\n", "tests/__init__.py": "",
+    files.update({integrate.CENSUS: _CENSUS_IMPORTS, "tests/__init__.py": "",
                   "tests/suite_classes.txt": "live test_docs.py\n",
                   "tests/test_docs.py": "def test_docs(): pass\n"})
     world.advance_master(files)
@@ -928,9 +934,8 @@ def test_merge_docs_refuses_when_the_shared_scope_breaks(docs_world, capsys, fai
 
 def test_merge_docs_reports_census_drift_after_a_successful_merge(docs_world, capsys):
     world = docs_world
-    world.advance_master({integrate.CENSUS: """
+    world.advance_master({integrate.CENSUS: _CENSUS_IMPORTS + """
 import sys
-EXTENSIONS = set()
 if __name__ == "__main__":
     assert sys.argv[1:] == ["--ci-check"]
     print("producer census is stale (report only); regenerate before using it in a port slice")
@@ -979,7 +984,7 @@ def test_doc_guards_use_a_synthetic_username(monkeypatch):
 def test_merge_docs_refuses_a_hard_census_failure(docs_world, capsys):
     world = docs_world
     world.advance_master({integrate.CENSUS:
-                          "EXTENSIONS = set()\nif __name__ == '__main__': raise SystemExit(1)\n"})
+                          _CENSUS_IMPORTS + "if __name__ == '__main__': raise SystemExit(1)\n"})
     _docs_preview(world, _docs_pr(world))
     assert integrate.main(["merge-docs", "42"]) == 2
     assert "producer census check failed" in capsys.readouterr().err
