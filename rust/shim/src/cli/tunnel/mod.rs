@@ -1904,7 +1904,7 @@ mod tests {
             ),
             (
                 &["setup", "--catalog", "all"],
-                "--catalog takes current or full, not all",
+                "--catalog takes current or full",
             ),
             (
                 &["setup", "--read-key", "--read-key"],

@@ -168,11 +168,9 @@ fn option(command: Command, name: &str) -> Option<Takes> {
             Ok(())
         }),
         ("--catalog", Command::Setup) => Value(|o, v| {
+            // The value is not echoed: it may be a secret typed in the wrong place.
             if !matches!(v.as_str(), "current" | "full") {
-                return Err(format!(
-                    "--catalog takes current or full, not {}",
-                    shown(&v)
-                ));
+                return Err("--catalog takes current or full".to_owned());
             }
             setup(o).catalog = Some(v);
             Ok(())
