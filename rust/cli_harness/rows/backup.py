@@ -55,7 +55,7 @@ def _source() -> str:
     if not _SEEDED:
         _CREATED = True
         _bank.create(DB)
-        from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415 (oracle seeder)
+        from ._transfer_seed import _seed_bank  # noqa: PLC0415 (the transfer row's seed)
         with _bank.connect(DB) as conn:
             _seed_bank(conn)
             conn.commit()
