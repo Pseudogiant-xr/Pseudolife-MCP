@@ -644,6 +644,20 @@ def test_lease_fixture_reports_a_failed_cleanup_beside_the_setup_error(lease_ci,
     assert "is still running" in err and "stop it by that directory" in err
 
 
+def test_lease_fixture_keeps_the_setup_exit_when_cleanup_raises(lease_ci, monkeypatch, capsys):
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 3, '{"exit": 3, "error": "refused"}', "")
+
+    def stop(self):
+        raise RuntimeError("cleanup broke")
+
+    monkeypatch.setattr(postgres.subprocess, "run", run)
+    monkeypatch.setattr(postgres.Server, "stop", stop)
+    assert lease_ci.module.main() == 3
+    err = capsys.readouterr().err
+    assert "cleanup failed (RuntimeError)" in err and "is still running" in err
+
+
 def test_lease_fixture_stops_the_cluster_when_the_native_client_cannot_run(lease_ci, monkeypatch, capsys):
     def run(command, **kwargs):
         raise subprocess.TimeoutExpired(command, 240)
