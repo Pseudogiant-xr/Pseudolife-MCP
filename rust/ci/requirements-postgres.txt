@@ -1,0 +1,7 @@
+# What rust/ci/disposable_postgres.py needs to start CI's throwaway
+# PostgreSQL. Today pyproject.toml's extras bring both (the lite extra and the
+# core dependencies), with these exact pins; test_disposable_postgres.py keeps
+# the two in step. When the Python package goes, the workflows install this
+# file instead, so the pins outlive the extras.
+pg0-embedded>=0.15.2,<0.16
+psycopg[binary]>=3.3.8

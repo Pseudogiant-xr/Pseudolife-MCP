@@ -157,7 +157,10 @@ SHIM_COMMANDS = {
     # maintainer imports update's code, so it reaches the cycle's rows.
     "maintainer": ("maintainer", "maintainer_setup") + UPDATE_CYCLE,
     "coordination_recovery": ("coordination_recovery",),
-    "move_cli.rs": ("move", "console", "conductor_watch", "expose"), "test_login": ("test_login",),
+    "move_cli.rs": ("move", "console", "conductor_watch", "expose"),
+    # No test_login entry: every cli and W1-C shard prepares its PostgreSQL
+    # with rust/cli_harness/lease_ci.py, which runs the native `test-login
+    # create`, so that command's code reaches the whole binary's rows.
     "transfer": ("transfer",), "transfer.rs": ("transfer",),
     # doctor reads saved profiles through tunnel's store (doctor_section),
     # so tunnel's rows include doctor's, and console's with them.
