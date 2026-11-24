@@ -32,11 +32,11 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     let broken = |fail: Fail| match fail {
         Fail::Defer => Fail::Defer,
         Fail::Tunnel(reason) => Fail::Detail(format!(
-            "{reason}: {}; fix that file or move it aside and save the profile again with tunnel setup",
+            "{reason}: {}; fix that file or move it aside and save the profile again with `pseudolife-mcp tunnel setup --daemon-url <url> --token-file <owner-only file> --accept-access`",
             path.display()
         )),
         Fail::Detail(reason) => Fail::Detail(format!(
-            "{reason} ({}); fix that file or move it aside and save the profile again with tunnel setup",
+            "{reason} ({}); fix that file or move it aside and save the profile again with `pseudolife-mcp tunnel setup --daemon-url <url> --token-file <owner-only file> --accept-access`",
             path.display()
         )),
     };

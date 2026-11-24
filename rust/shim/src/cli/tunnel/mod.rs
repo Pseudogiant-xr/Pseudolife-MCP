@@ -597,8 +597,23 @@ fn report(
         .map_or("unknown; check Platform key settings", |(text, _)| text);
     text.push_str(&format!("API key expiry: {shown}.\n"));
     if refresh.needs_attention() && native_refresh.is_none() {
+        let run = tunnel_command("run", name, options.profile_dir.as_deref());
+        let next = if profile.state != "ready" {
+            let status = tunnel_command("status", name, options.profile_dir.as_deref());
+            format!(
+                "finish this profile's setup first (`{status}` shows the step it needs), then start it with `{run}`"
+            )
+        } else if !key.saved {
+            format!(
+                "import its runtime key with `{command} --read-key` first, then start it with `{run}`"
+            )
+        } else if running == Some(Liveness::Gone) || running.is_none() {
+            format!("start it with `{run}`")
+        } else {
+            format!("stop that tunnel with the client that started it, then start it with `{run}`")
+        };
         text.push_str(&format!(
-            "Last tunnel refresh: {}; needs attention. The Python client recorded it; stop the tunnel and start it with `pseudolife-mcp tunnel run` to run it on this client.\n",
+            "Last tunnel refresh: {}; needs attention. The Python client recorded it; {next} to run it on this client.\n",
             refresh.state()
         ));
     }
@@ -1011,11 +1026,18 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
     let env_token = environment("PSEUDOLIFE_MCP_TOKEN")?;
     if env_file.is_none() && env_token.is_none() {
         // Registration env blocks: only their absence is decided here.
-        let claude = match environment("CLAUDE_CONFIG_DIR")? {
+        let claude_dir = environment("CLAUDE_CONFIG_DIR")?;
+        let codex_dir = environment("CODEX_HOME")?;
+        let named = if claude_dir.is_some() || codex_dir.is_some() {
+            " (CLAUDE_CONFIG_DIR and CODEX_HOME must name directories)"
+        } else {
+            ""
+        };
+        let claude = match claude_dir {
             Some(directory) => PathBuf::from(directory).join(".claude.json"),
             None => home()?.join(".claude.json"),
         };
-        let codex = match environment("CODEX_HOME")? {
+        let codex = match codex_dir {
             Some(directory) => PathBuf::from(directory),
             None => home()?.join(".codex"),
         }
@@ -1023,7 +1045,7 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
         let inspect = |path: &Path| {
             occupied(path).map_err(|_| {
                 Fail::Detail(format!(
-                    "cannot inspect {} to look for a client registration (CLAUDE_CONFIG_DIR and CODEX_HOME must name directories); fix that path, or pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
+                    "cannot inspect {} to look for a client registration{named}; fix that path, or pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
                     path.display()
                 ))
             })
@@ -1842,6 +1864,58 @@ mod tests {
                 .map(|o| (o.profile, o.profile_dir)),
             Some(("alpha".to_owned(), Some("d".to_owned())))
         );
+    }
+
+    #[test]
+    fn a_python_refresh_line_names_this_profiles_commands_and_its_first_step() {
+        let result = r#"{"id": "0123456789abcdef0123456789abcdef", "state": "failed"}"#;
+        let dir = |store: &Store| store.0.to_str().unwrap().to_owned();
+        let text = |store: &Store| {
+            let options = parse(&argv(&[
+                "status",
+                "--profile",
+                "work-2",
+                "--profile-dir",
+                &dir(store),
+            ]))
+            .unwrap();
+            status(&options, &store.0).unwrap().0
+        };
+        let run = |store: &Store| tunnel_command("run", "work-2", Some(&dir(store)));
+        // Pending: setup comes first, with this profile's status command.
+        let store = Store::new();
+        store.profile("work-2", false);
+        store.put("work-2.reload.result.json", result.as_bytes());
+        let pending = text(&store);
+        let status_command = tunnel_command("status", "work-2", Some(&dir(&store)));
+        assert!(
+            pending.contains(&format!(
+                "finish this profile's setup first (`{status_command}` shows the step it needs), then start it with `{}`",
+                run(&store)
+            )),
+            "{pending}"
+        );
+        // Ready without a key: import it first.
+        let store = Store::new();
+        store.profile("work-2", true);
+        store.put("work-2.reload.result.json", result.as_bytes());
+        let keyless = text(&store);
+        assert!(
+            keyless.contains("--read-key` first, then start it with `"),
+            "{keyless}"
+        );
+        assert!(keyless.contains(&run(&store)), "{keyless}");
+        // Ready with a key and no record: just run it, never "stop".
+        store.key("work-2");
+        let idle = text(&store);
+        assert!(
+            idle.contains(&format!(
+                "The Python client recorded it; start it with `{}` to run it on this client.",
+                run(&store)
+            )),
+            "{idle}"
+        );
+        assert!(!idle.contains("stop"), "{idle}");
     }
 
     #[test]
