@@ -19,6 +19,12 @@
 //! where Codex has no value for them; an explicit value (false and zero
 //! included) is kept. Report: `status` ("ready" or "needs-configuration"),
 //! `runtime_defaults` ("configured" or "preserved"), `backup`, `recovery`.
+//! With `--approve-memory-message`, which the installers pass only when the
+//! hook step reported `mailbox_approval` "after-registration" (consent given
+//! before the server existed), it then applies that approval too:
+//! `mailbox_approval` ("set", "already", "kept-explicit" or "unavailable"),
+//! `mailbox_approval_detail` and `mailbox_backup`, with one line on stderr.
+//! That never changes `status`.
 use crate::setup::codex::{self, Client, Edit, Rpc, SERVER, SetupError, WritePlan};
 use serde_json::{Map, Value, json};
 use std::{
@@ -27,7 +33,8 @@ use std::{
 };
 
 pub(super) const CREDENTIALS_USAGE: &str = "usage: pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]";
-pub(super) const RUNTIME_USAGE: &str = "usage: pseudolife-mcp installer codex-runtime-defaults";
+pub(super) const RUNTIME_USAGE: &str =
+    "usage: pseudolife-mcp installer codex-runtime-defaults [--approve-memory-message]";
 
 /// The defaults a first install gives the Pseudolife server. Zero, false and
 /// any other explicit value are the user's choice and stay.
@@ -228,14 +235,23 @@ fn credentials_report(result: Result<Value, SetupError>) -> Value {
 }
 
 pub(super) fn run_runtime_defaults(arguments: &[String]) -> u8 {
-    match arguments.first().map(String::as_str) {
-        None => {}
-        Some("--help" | "-h") if arguments.len() == 1 => {
+    let approve_mailbox = match arguments {
+        [] => false,
+        [flag] if flag == "--approve-memory-message" => true,
+        [flag] if flag == "--help" || flag == "-h" => {
             let _ = writeln!(io::stdout().lock(), "{RUNTIME_USAGE}");
             return 0;
         }
-        Some(other) => return usage(&format!("unknown option {other:?}"), RUNTIME_USAGE),
-    }
+        [first, rest @ ..] => {
+            let message = if first == "--approve-memory-message" {
+                format!("unexpected argument {:?}", rest[0])
+            } else {
+                format!("unknown option {first:?}")
+            };
+            return usage(&message, RUNTIME_USAGE);
+        }
+    };
+    let mut notice = None;
     let report = (|| -> Result<Value, SetupError> {
         let home = codex_home()?;
         let neutral = Neutral::new("pseudolife-codex-config-")?;
@@ -243,16 +259,45 @@ pub(super) fn run_runtime_defaults(arguments: &[String]) -> u8 {
         let runtime = runtime().ok_or(SetupError("The setup runtime could not start."))?;
         runtime.block_on(async {
             let mut client = Client::open(&executable, &home, &neutral.0).await?;
-            let result = configure_runtime_defaults(&mut client, &home, &neutral.0).await;
+            let (report, line) =
+                registered_setup(&mut client, &home, &neutral.0, approve_mailbox).await;
             client.close().await;
-            result
+            notice = line;
+            Ok(report)
         })
     })();
     let report = report.unwrap_or_else(
         |error| json!({"status":"needs-configuration","recovery":error.to_string()}),
     );
     let ok = report["status"] == "ready";
-    emit_report(&report, ok)
+    let code = emit_report(&report, ok);
+    if let Some(line) = notice {
+        let _ = writeln!(io::stderr().lock(), "{line}");
+    }
+    code
+}
+
+/// The steps after `codex mcp add`: the runtime defaults, then (when the
+/// hook step deferred it) the `memory_message` approval, with its line. The
+/// approval is attempted even when the defaults were refused, since the
+/// consent was given and it reads Codex's configuration afresh.
+pub(super) async fn registered_setup(
+    client: &mut impl Rpc,
+    home: &Path,
+    cwd: &Path,
+    approve_mailbox: bool,
+) -> (Value, Option<String>) {
+    let mut report = configure_runtime_defaults(client, home, cwd)
+        .await
+        .unwrap_or_else(
+            |error| json!({"status":"needs-configuration","recovery":error.to_string()}),
+        );
+    if !approve_mailbox {
+        return (report, None);
+    }
+    let (fields, line) = super::codex_hooks::approve_registered_mailbox(client, home, cwd).await;
+    report.as_object_mut().unwrap().extend(fields);
+    (report, Some(line))
 }
 
 /// The defaults Codex has no value for. Codex's typed API reports an omitted
@@ -467,6 +512,72 @@ mod tests {
         for key in ["startup_timeout_sec", "tool_timeout_sec", "required"] {
             assert!(server[key].is_null(), "{key} left behind: {server}");
         }
+    }
+
+    #[test]
+    fn runtime_defaults_take_only_the_approval_switch() {
+        assert_eq!(run_runtime_defaults(&strings(&["--bogus"])), 2);
+        assert_eq!(
+            run_runtime_defaults(&strings(&[
+                "--approve-memory-message",
+                "--approve-memory-message"
+            ])),
+            2
+        );
+        assert_eq!(run_runtime_defaults(&strings(&["--help"])), 0);
+    }
+
+    #[tokio::test]
+    async fn the_deferred_approval_keeps_an_explicit_choice_and_reports_it() {
+        let home = TempHome::new();
+        let mut codex = FakeCodex::new(
+            &home.0,
+            registered(json!({"tools": {"memory_message": {"approval_mode": "prompt"}}})),
+        );
+        let (report, line) = registered_setup(&mut codex, &home.0, &home.0, true).await;
+        assert_eq!(report["status"], "ready");
+        assert_eq!(report["mailbox_approval"], "kept-explicit");
+        assert_eq!(
+            codex.user["mcp_servers"][SERVER]["tools"]["memory_message"]["approval_mode"],
+            "prompt"
+        );
+        let line = line.unwrap();
+        assert!(
+            line.starts_with("Codex server registered; setup kept your memory_message"),
+            "{line}"
+        );
+        // Without the switch the step is the runtime defaults alone.
+        let mut codex = FakeCodex::new(&home.0, registered(json!({})));
+        let (report, line) = registered_setup(&mut codex, &home.0, &home.0, false).await;
+        assert!(report.get("mailbox_approval").is_none());
+        assert_eq!(line, None);
+        assert!(
+            codex.user["mcp_servers"][SERVER]["tools"].is_null(),
+            "no approval without the switch"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_default_still_applies_the_deferred_approval() {
+        let home = TempHome::new();
+        let mut codex = FakeCodex::new(&home.0, registered(json!({})));
+        // A stronger layer wins over the defaults, so they are rolled back
+        // and refused; the approval is its own write and still lands.
+        codex.shadow = Some((
+            vec!["mcp_servers".into(), SERVER.into(), "required".into()],
+            Value::Null,
+        ));
+        let (report, line) = registered_setup(&mut codex, &home.0, &home.0, true).await;
+        assert_eq!(report["status"], "needs-configuration");
+        assert_eq!(report["mailbox_approval"], "set");
+        assert_eq!(
+            codex.user["mcp_servers"][SERVER]["tools"]["memory_message"]["approval_mode"],
+            "approve"
+        );
+        assert!(
+            line.unwrap()
+                .starts_with("Codex server registered; setup approved memory_message")
+        );
     }
 
     #[test]

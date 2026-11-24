@@ -974,7 +974,7 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
                   requested: str | None = None, add_exit: int = 0, missing: bool = False,
                   runtime_failed: bool = False, gemini_list: str = "", show_ladder: bool = False,
                   hook_report: str = "", hook_trust: str = "yes",
-                  hook_interactive: bool = False):
+                  hook_interactive: bool = False, log_runtime: bool = False):
     """Sections 9 to 11 for a Codex-only client-only install, with canned
     Codex steps, the native client (``native_exit`` is its install result)
     and a stub codex. Returns the run and the codex calls."""
@@ -994,6 +994,10 @@ def _codex_wiring(shell: _Shell, *, cred: str | None = None,
         (shell.bin / "codex").unlink()
     if runtime_failed:
         steps = steps.replace("codex-runtime-defaults)\n", "codex-runtime-defaults) return 1\n", 1)
+    if log_runtime:
+        steps = steps.replace(
+            "        codex-runtime-defaults)\n",
+            "        codex-runtime-defaults)\n            printf 'runtime-defaults|%s\\n' \"$*\" >> \"$CALL_LOG\"\n", 1)
     if hook_report:
         steps = steps.replace(
             _HOOKS_READY,
@@ -1614,3 +1618,22 @@ def test_client_only_current_registration_with_refused_token_is_incomplete(bash,
     assert len([call for call in calls if call.startswith("shim|installer credentials verify-token-file")]) == 1
     assert not any(call.startswith("shim|connect") and "--yes" in call for call in calls)
     assert any(call.startswith("gemini|mcp add -s user") for call in calls)
+
+
+@pytest.mark.parametrize(("state", "switch"), [("after-registration", True), ("set", False),
+                                               ("already", False), ("declined", False)])
+@BASH
+def test_a_deferred_memory_message_approval_follows_the_registration(bash, tmp_path, state, switch):
+    """Issue #1903: the hook step runs before `codex mcp add`, so with
+    consent it defers the memory_message approval ("after-registration");
+    the runtime-defaults step right after the registration applies it."""
+    report = json.dumps({"status": "ready", "source": "manual", "instructions": "covered-by-hooks",
+                         "recovery": None, "mailbox_approval": state})
+    shell = _Shell(bash, tmp_path)
+    proc, adds = _codex_wiring(shell, hook_report=report, log_runtime=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert len(adds) == 1
+    calls = [call for call in shell.logged()
+             if call.startswith("runtime-defaults|") or (call.startswith("codex|mcp add") and "--help" not in call)]
+    expected = "runtime-defaults|codex-runtime-defaults" + (" --approve-memory-message" if switch else "")
+    assert calls == [adds[0], expected]

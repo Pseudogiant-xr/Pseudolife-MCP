@@ -871,6 +871,154 @@ def test_rerun_names_changed_codex_settings_without_their_values():
     changed = linux.changed_settings(before, after)
     assert changed == ["mcp_servers.pseudolife-memory.command", "mcp_servers.pseudolife-memory.env.B"]
     assert "fixture-secret-path" not in json.dumps(changed)
+    kinds = linux.setting_changes(after, before.replace('A = "1"', ''))
+    assert kinds == {"mcp_servers.pseudolife-memory.command": "changed",
+                     "mcp_servers.pseudolife-memory.env.A": "removed",
+                     "mcp_servers.pseudolife-memory.env.B": "removed"}
+    assert linux.setting_changes(before, after)["mcp_servers.pseudolife-memory.env.B"] == "added"
+    assert "fixture-secret-path" not in json.dumps(kinds)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_first_rerun_after_the_handoff_may_change_only_the_expected_settings(monkeypatch):
+    # From v0.23.1 and v0.24.0: the lost memory_message approval added as
+    # "approve" (#1903) and the token file re-pointed (#1908, not fixed yet);
+    # anything else, another value, another kind or nothing fails the row.
+    from ops.acceptance import hosted_linux as linux
+
+    config, runtime = Path(".codex/config.toml"), Path("data/runtime.json")
+    before = {config: "a", runtime: "r"}
+    changed = {config: "b", runtime: "r"}
+
+    def kept(tag, after_text, prints=changed, before_text=LEGACY_CONFIG, start=before):
+        changes = linux.setting_changes(before_text, after_text)
+        return linux.first_rerun_kept(tag, start, prints, changes, after_text, config)
+
+    for tag in ("v0.23.1", "v0.24.0"):
+        assert kept(tag, RERUN_CONFIG)
+        assert not kept(tag, APPROVED_CONFIG), "the #1908 entry must go when its fix ships"
+        assert not kept(tag, RERUN_CONFIG.replace('"approve"', '"prompt"'))
+        assert not kept(tag, RERUN_CONFIG + '[mcp_servers.other]\ncommand = "x"\n')
+        assert not kept(tag, LEGACY_CONFIG, prints=before)
+        assert not kept(tag, RERUN_CONFIG, prints={config: "b", runtime: "s"})
+        # An approval the start already had, removed, is not the lost one added.
+        assert not kept(tag, LEGACY_CONFIG.replace('"copy"', '"operator"'), before_text=APPROVED_CONFIG)
+    # A start whose installer carries both fixes expects no change at all.
+    monkeypatch.setitem(linux.FIRST_RERUN_SETTINGS, "v9.9.9", {})
+    assert linux.first_rerun_kept("v9.9.9", before, dict(before), {}, LEGACY_CONFIG, config)
+    assert not linux.first_rerun_kept("v9.9.9", before, changed, {}, LEGACY_CONFIG, config)
+    assert not kept("v9.9.9", RERUN_CONFIG)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_second_rerun_needs_the_installers_own_nothing_changed_line():
+    from ops.acceptance import hosted_linux as linux
+
+    installer = (Path(__file__).resolve().parents[2] / "ops" / "install-native.sh").read_text(encoding="utf-8")
+    assert 'step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"' in installer
+    line = b"==> Native client 0.25.1 already installed at /tmp/home/data/pseudolife-mcp/bin/pseudolife-mcp; nothing changed\n"
+    assert linux.UNCHANGED_LINE.search(b"Installing\n" + line)
+    assert not linux.UNCHANGED_LINE.search(b"==> Native client 0.25.1 installed at /tmp/x (running sessions keep it)\n")
+
+
+LEGACY_CONFIG = ('[mcp_servers.pseudolife-memory]\ncommand = "launcher"\nargs = []\n'
+                 '[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN_FILE = "copy"\n')
+APPROVED_CONFIG = LEGACY_CONFIG + '[mcp_servers.pseudolife-memory.tools.memory_message]\napproval_mode = "approve"\n'
+# What run 1 from a legacy start does on a release without #1908's fix.
+RERUN_CONFIG = APPROVED_CONFIG.replace('"copy"', '"operator"')
+UNCHANGED = b"==> Native client 0.25.1 already installed at /fixture/bin/pseudolife-mcp; nothing changed\n"
+
+
+def _upgrade_with(tmp_path, monkeypatch, first, second):
+    """Run hosted_linux.upgrade from one legacy start, with every external step
+    faked: the legacy install writes LEGACY_CONFIG, the first native rerun
+    `first` and the second `second` (each a config text and its output)."""
+    from ops.acceptance import hosted_linux as linux
+
+    calls = []
+
+    def live_install(peer, repo, profile, flags, *, overrides=None, engine="native"):
+        calls.append(engine)
+        step = len(calls) % 4  # per starting tag: legacy, run 1, run 2, rollback
+        config, launcher = profile.codex / "config.toml", profile.installed_launcher
+        if step == 1:
+            config.write_text(LEGACY_CONFIG, encoding="utf-8")
+            return hosted.Result(0, b"legacy installed\n", 1)
+        if step == 0:  # the rollback
+            launcher.unlink()
+            return hosted.Result(0, b"rolled back\n", 1)
+        text, output = first if step == 2 else second
+        config.write_text(text, encoding="utf-8")
+        return hosted.Result(0, output, 1)
+
+    def update(argv, **options):
+        if "update" in argv:
+            launcher = Path(options["env"]["HOME"]) / "data" / "pseudolife-mcp" / "bin" / "pseudolife-mcp"
+            launcher.parent.mkdir(parents=True, exist_ok=True)
+            launcher.write_bytes(b"native")
+        return hosted.Result(0, b"", 1)
+
+    monkeypatch.setattr(linux, "live_install", live_install)
+    monkeypatch.setattr(linux, "command", update)
+    monkeypatch.setattr(linux, "first_session", lambda *a, **k: None)
+    monkeypatch.setattr(hosted.Profile, "native_marker", lambda self, release: self.installed_launcher.is_file())
+    monkeypatch.setattr(hosted.Profile, "launcher", lambda self: "launcher")
+    monkeypatch.setattr(hosted.Profile, "registration", lambda self: {"env": {}})
+    row = hosted.Receipt("upgrade-and-rollback", "macos-arm64")
+    peer = SimpleNamespace(url="http://127.0.0.1:1", token_file=tmp_path / "token", during=lambda r, fn: fn())
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    try:
+        linux.upgrade(row, SimpleNamespace(tag="v0.25.1", version="0.25.1"), tmp_path, "", peer, scratch)
+    except hosted.Observation as error:
+        return row, error, calls
+    return row, None, calls
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_upgrade_row_completes_the_lost_approval_once_then_holds_run_two_to_run_one(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    row, error, calls = _upgrade_with(tmp_path, monkeypatch, (RERUN_CONFIG, UNCHANGED),
+                                      (RERUN_CONFIG, UNCHANGED))
+    assert error is None, error
+    # Both starts: legacy install, two native reruns, rollback.
+    assert calls == ["python", "native", "native", "python"] * 2
+    reruns = [step for step in row.steps if step["command"].endswith(("<rerun>", "<second rerun>"))]
+    assert [step["observed"] for step in reruns] == [True] * 4, reruns
+    assert reruns[0]["changed_codex_settings"] == sorted([linux.LOST_APPROVAL, linux.REPOINTED_TOKEN_FILE])
+    assert reruns[0]["codex_setting_changes"] == {linux.LOST_APPROVAL: "added",
+                                                  linux.REPOINTED_TOKEN_FILE: "changed"}
+    assert reruns[0]["expected_codex_settings"] == {linux.LOST_APPROVAL: "added",
+                                                   linux.REPOINTED_TOKEN_FILE: "changed"}
+    assert "approve" not in json.dumps(reruns[0]) and "operator" not in json.dumps(reruns[0])
+    assert reruns[1]["changed_codex_settings"] == []
+    # The ledger's rerun step records run 1, as before the second run existed.
+    assert sum(entry["command"].endswith("<rerun-from-0.23.x>") for entry in row.commands) == 1, row.commands
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+@pytest.mark.parametrize(("first", "second", "failed"), [
+    # Run 1 changing more than expected.
+    ((RERUN_CONFIG + "# extra\n[mcp_servers.other]\ncommand = \"x\"\n", UNCHANGED), (RERUN_CONFIG, UNCHANGED),
+     "<rerun>"),
+    # Run 1 approving with another value.
+    ((RERUN_CONFIG.replace('"approve"', '"prompt"'), UNCHANGED), (RERUN_CONFIG, UNCHANGED), "<rerun>"),
+    # Run 1 changing nothing where the approval was lost.
+    ((LEGACY_CONFIG, UNCHANGED), (LEGACY_CONFIG, UNCHANGED), "<rerun>"),
+    # Run 2 changing the registration again.
+    ((RERUN_CONFIG, UNCHANGED), (RERUN_CONFIG + "# moved\n", UNCHANGED), "<second rerun>"),
+    # Run 2 without the installer's "nothing changed" line.
+    ((RERUN_CONFIG, UNCHANGED), (RERUN_CONFIG, b"==> Native client 0.25.1 installed at /x\n"),
+     "<second rerun>"),
+])
+def test_the_upgrade_row_fails_any_other_rerun_change(tmp_path, monkeypatch, first, second, failed):
+    row, error, _ = _upgrade_with(tmp_path, monkeypatch, first, second)
+    assert isinstance(error, hosted.Failed), error
+    reruns = [step for step in row.steps if step["command"].endswith(("<rerun>", "<second rerun>"))]
+    assert reruns[-1]["command"].endswith(failed), reruns
+    assert reruns[-1]["observed"] is False
+    assert reruns[-1]["assertion"] in str(error)
 
 
 # --- Review fixes ---
