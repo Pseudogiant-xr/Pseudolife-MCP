@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "edf7c89844208f89",
+  "fingerprint": "69bdf189fc018713",
+  "reason": "The embedded PostgreSQL step now runs rust/ci/disposable_postgres.py (the pg0 wheel driven directly) instead of an inline script importing the Python package's attach_or_start: the same pg0 start of one cluster in the same place in the job, no new step, job or shard, so the measured minutes hold."
+}

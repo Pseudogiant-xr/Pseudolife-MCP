@@ -28,12 +28,14 @@ password as text over the loopback interface of a discarded runner.
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import contextlib
 import hashlib
 import hmac
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import shutil
@@ -499,3 +501,47 @@ def native_binary(root: Path) -> Path:
     """The native client a job built or downloaded, at its release path."""
     name = "pseudolife-stdio.exe" if os.name == "nt" else "pseudolife-stdio"
     return root / "rust" / "target" / "release" / name
+
+
+_ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
+_DATABASE = re.compile(r"[a-z_][a-z0-9_]*")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Start a cluster for a CI job's later steps and export its URL.
+
+    ``python rust/ci/disposable_postgres.py --github-env NAME [--database DB]``
+    starts a cluster under the home directory (initdb's chmod; see
+    ``start``), leaves it running for the rest of the job (the runner is
+    discarded afterwards), masks its superuser password in the job log and
+    appends ``NAME=<superuser URL of DB>`` to ``$GITHUB_ENV``.
+    """
+    parser = argparse.ArgumentParser(description=main.__doc__.splitlines()[0])
+    parser.add_argument("--github-env", required=True, metavar="NAME",
+                        help="the variable later steps read the superuser URL from")
+    parser.add_argument("--database", default="postgres", help="the database the URL names")
+    options = parser.parse_args(argv)
+    if not _ENV_NAME.fullmatch(options.github_env):
+        parser.error("--github-env takes an environment variable name (A-Z, 0-9, _)")
+    if not _DATABASE.fullmatch(options.database):
+        parser.error("--database takes a lowercase identifier (a-z, 0-9, _)")
+    github_env = os.environ.get("GITHUB_ENV")
+    if not github_env:
+        parser.error("GITHUB_ENV is not set: run this as a GitHub Actions step")
+    server = start(Path.home(), "pl-ci-postgres-")
+    try:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::add-mask::{server.password}", flush=True)
+        with open(github_env, "a", encoding="utf-8", newline="") as stream:
+            stream.write(f"{options.github_env}={server.url(options.database)}\n")
+    except BaseException:
+        if not server.stop():
+            print(f"the disposable PostgreSQL in {server.data_dir} is still running", file=sys.stderr)
+        raise
+    print(f"Disposable PostgreSQL is ready on {server.host}:{server.port}; {options.github_env} names "
+          f"database {options.database}.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

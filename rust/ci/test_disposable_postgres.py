@@ -1021,3 +1021,52 @@ def test_lease_fixture_refuses_values_github_env_cannot_hold_before_starting(lea
 def test_lease_fixture_imports_nothing_from_the_package(lease_ci):
     assert lease_ci.module.main() == 0
     assert not any(name.startswith("pseudolife_memory") for name in sys.modules)
+
+
+# ── the command line the Windows ci.yml lanes run ────────────────────────────
+
+@pytest.fixture
+def command_line(fakes, monkeypatch, tmp_path):
+    env_file = tmp_path / "github-env"
+    monkeypatch.setenv("GITHUB_ENV", str(env_file))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    return types.SimpleNamespace(env_file=env_file, fakes=fakes, tmp=tmp_path)
+
+
+def test_command_line_exports_a_superuser_url_and_leaves_the_cluster_running(command_line, capsys):
+    assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
+    line, = command_line.env_file.read_text(encoding="utf-8").splitlines()
+    name, _, url = line.partition("=")
+    assert name == "PSEUDOLIFE_TEST_DATABASE_URL"
+    assert re.fullmatch(r"postgresql://postgres:[0-9a-f]{32}@127\.0\.0\.1:55432/pseudolife_memory_test", url)
+    password = url.split(":")[2].split("@")[0]
+    assert command_line.fakes.server.accepts(password)  # the rotated password, not pg0's start-up one
+    out = capsys.readouterr().out
+    assert f"::add-mask::{password}" in out and out.index("::add-mask::") < out.index("ready")
+    assert command_line.fakes.stops == []  # later steps use it
+    started = Path(command_line.fakes.pg0.instances[0]["data_dir"])
+    assert started.parent.parent == command_line.tmp  # under home, not RUNNER_TEMP
+
+
+@pytest.mark.parametrize("argv", [["--github-env", "lower"], ["--github-env", "A=B"],
+                                  ["--github-env", "OK", "--database", "Bad-Name"], []])
+def test_command_line_refuses_bad_arguments_before_starting(command_line, argv):
+    with pytest.raises(SystemExit) as refused:
+        postgres.main(argv)
+    assert refused.value.code == 2
+    assert command_line.fakes.pg0.instances == [] and not command_line.env_file.exists()
+
+
+def test_command_line_refuses_outside_github_actions(command_line, monkeypatch):
+    monkeypatch.delenv("GITHUB_ENV")
+    with pytest.raises(SystemExit):
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL"])
+    assert command_line.fakes.pg0.instances == []
+
+
+def test_command_line_stops_the_cluster_when_it_cannot_export(command_line, monkeypatch):
+    monkeypatch.setenv("GITHUB_ENV", str(command_line.tmp / "missing-dir" / "github-env"))
+    with pytest.raises(OSError):
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL"])
+    assert len(command_line.fakes.stops) == 1
