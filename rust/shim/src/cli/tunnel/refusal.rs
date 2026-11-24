@@ -34,12 +34,12 @@ pub(super) fn unread(options: &Options, root: &Path) -> String {
             .as_deref()
             .is_some_and(|file| store::checked_path(Path::new(file)) == Err(Fail::Defer))
         {
-            return "--token-file is a path form this client does not read (a UNC or device path); give a local absolute path".to_owned();
+            return "--token-file is a path this client cannot inspect (a UNC or device path, a dangling junction, or one whose details cannot be read); give a local absolute path to an owner-only file".to_owned();
         }
     }
     if matches!(store::load(root, name), Err(Fail::Defer)) {
         return format!(
-            "this client could not read profile {}: {}. Move that file aside and save the profile again with `pseudolife-mcp tunnel setup`, then retry tunnel {word}",
+            "this client could not read profile {}: {}. Move that file aside and save the profile again with `pseudolife-mcp tunnel setup --daemon-url <url> --token-file <owner-only file> --accept-access`, then retry tunnel {word}",
             store::profile_file(root, name).display(),
             store::unread_reason(root, name)
         );
@@ -81,7 +81,7 @@ pub(super) fn unread(options: &Options, root: &Path) -> String {
         return store::list_refusal(root);
     }
     format!(
-        "tunnel {word} met a file in {} that this client cannot read (a link, a junction, a pipe, or a name or record it cannot decode). `pseudolife-mcp tunnel update` names each such file; move it aside, then retry",
+        "tunnel {word} met a file in {} that this client cannot read (a link, a junction, a pipe, or a name or record it cannot decode). `pseudolife-mcp tunnel status` and `pseudolife-mcp doctor` check the saved tunnels without changing them; move the file they name aside, then retry",
         root.display()
     )
 }

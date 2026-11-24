@@ -1229,7 +1229,9 @@ mod tunnel_profiles {
         let recovery = entries[0]["recovery"].as_str().unwrap();
         assert!(recovery.contains("bad.profile.json"), "{recovery}");
         assert!(
-            recovery.ends_with("move it aside; this client cannot set a tunnel up yet."),
+            recovery.ends_with(
+                "move it aside and save it again with tunnel setup --daemon-url and --token-file."
+            ),
             "{recovery}"
         );
         assert_eq!(entries[1]["profile"], json!("dot"));

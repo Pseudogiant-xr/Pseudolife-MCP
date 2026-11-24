@@ -2716,40 +2716,6 @@
    },
    "modes": {}
   },
-  "defer-verify-process-record": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 2,
-   "stdout": "",
-   "stderr": "YWN0aXZlIHR1bm5lbCBpZGVudGl0eSBpcyB1bmF2YWlsYWJsZSBvciBjaGFuZ2VkOyByZWZyZXNoIHRoZSB0dW5uZWwgYmVmb3JlIHZlcmlmaWNhdGlvbg0K",
-   "window": [
-    1791586099.8293812,
-    1791586100.55327
-   ],
-   "requests": [],
-   "arm": "python",
-   "before": {
-    "cwd": "dir",
-    "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
-    "tunnels": "dir",
-    "tunnels/dot.key": "file:RFBBUEkAAQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAIKhxCqtCsUek6V/gdSIEoAAAAAACAAAAAAAQZgAAAAEAACAAAADj8CwiB1g+LOcEJbkg8CAiIQdZ/p8sVrw/je5t2isRngAAAAAOgAAAAAIAACAAAAC+7wGzH6coxsGno7mwRtNete/VvnZfX66izpMdcoROaiAAAABWzpIHMaTFnEEdewwlbrQLleMaW+K8vlkVxn7z3IfNSEAAAAANg8eAau+Bk8aR4G4oHtZMHBhkiLl6VXavG9Swidh9p9bJbLpIMTRiqBTxiIc31Dte+0geJitX+Q0c2mdBrm0x",
-    "tunnels/dot.process.json": "file:eyJwaWQiOiAxLCAiY3JlYXRlZCI6IDAuMCwgImV4ZSI6ICJub25lIiwgImFyZ3YiOiBbIm5vbmUiXX0=",
-    "tunnels/dot.profile.json": "file:ewogICJuYW1lIjogImRvdCIsCiAgImRhZW1vbl91cmwiOiAie0RBRU1PTn0iLAogICJ0b2tlbl9maWxlIjogIntIT01FfVxcdG9rZW4iLAogICJ0dW5uZWxfaWQiOiAidHVubmVsXzAxMjMiLAogICJvcmdhbml6YXRpb25faWQiOiBudWxsLAogICJzdGF0ZSI6ICJyZWFkeSIsCiAgImNvbnNlbnQiOiB0cnVlLAogICJhdXRvc3RhcnRfY29uc2VudCI6IGZhbHNlLAogICJydW50aW1lX3ZlcnNpb24iOiBudWxsLAogICJtaW5pbXVtX2NhdGFsb2ciOiAiY3VycmVudCIsCiAgInJ1bnRpbWVfa2V5X2V4cGlyZXNfYXQiOiBudWxsLAogICJjbG91ZF92ZXJpZmljYXRpb25fZmlsZSI6IG51bGwKfQ=="
-   },
-   "before_modes": {},
-   "dpapi_fixture": [
-    "tunnels/dot.key"
-   ],
-   "files": {
-    "cwd": "dir",
-    "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
-    "tunnels": "dir",
-    "tunnels/dot.key": "file:RFBBUEkAAQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAIKhxCqtCsUek6V/gdSIEoAAAAAACAAAAAAAQZgAAAAEAACAAAADj8CwiB1g+LOcEJbkg8CAiIQdZ/p8sVrw/je5t2isRngAAAAAOgAAAAAIAACAAAAC+7wGzH6coxsGno7mwRtNete/VvnZfX66izpMdcoROaiAAAABWzpIHMaTFnEEdewwlbrQLleMaW+K8vlkVxn7z3IfNSEAAAAANg8eAau+Bk8aR4G4oHtZMHBhkiLl6VXavG9Swidh9p9bJbLpIMTRiqBTxiIc31Dte+0geJitX+Q0c2mdBrm0x",
-    "tunnels/dot.process.json": "file:eyJwaWQiOiAxLCAiY3JlYXRlZCI6IDAuMCwgImV4ZSI6ICJub25lIiwgImFyZ3YiOiBbIm5vbmUiXX0=",
-    "tunnels/dot.profile.json": "file:ewogICJuYW1lIjogImRvdCIsCiAgImRhZW1vbl91cmwiOiAie0RBRU1PTn0iLAogICJ0b2tlbl9maWxlIjogIntIT01FfVxcdG9rZW4iLAogICJ0dW5uZWxfaWQiOiAidHVubmVsXzAxMjMiLAogICJvcmdhbml6YXRpb25faWQiOiBudWxsLAogICJzdGF0ZSI6ICJyZWFkeSIsCiAgImNvbnNlbnQiOiB0cnVlLAogICJhdXRvc3RhcnRfY29uc2VudCI6IGZhbHNlLAogICJydW50aW1lX3ZlcnNpb24iOiBudWxsLAogICJtaW5pbXVtX2NhdGFsb2ciOiAiY3VycmVudCIsCiAgInJ1bnRpbWVfa2V5X2V4cGlyZXNfYXQiOiBudWxsLAogICJjbG91ZF92ZXJpZmljYXRpb25fZmlsZSI6IG51bGwKfQ=="
-   },
-   "modes": {}
-  },
   "defer-status-seven-digit-fraction": {
    "home": null,
    "utc_offset": 39600,

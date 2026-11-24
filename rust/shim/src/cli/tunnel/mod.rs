@@ -598,7 +598,7 @@ fn report(
     text.push_str(&format!("API key expiry: {shown}.\n"));
     if refresh.needs_attention() && native_refresh.is_none() {
         text.push_str(&format!(
-            "Last tunnel refresh: {}; needs attention. Inspect tunnel doctor before retrying the update.\n",
+            "Last tunnel refresh: {}; needs attention. The Python client recorded it; stop the tunnel and start it with `pseudolife-mcp tunnel run` to run it on this client.\n",
             refresh.state()
         ));
     }
@@ -1020,7 +1020,15 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
             None => home()?.join(".codex"),
         }
         .join("config.toml");
-        if occupied(&claude)? || occupied(&codex)? {
+        let inspect = |path: &Path| {
+            occupied(path).map_err(|_| {
+                Fail::Detail(format!(
+                    "cannot inspect {} to look for a client registration (CLAUDE_CONFIG_DIR and CODEX_HOME must name directories); fix that path, or pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
+                    path.display()
+                ))
+            })
+        };
+        if inspect(&claude)? || inspect(&codex)? {
             return Err(Fail::Tunnel(
                 "this client does not read the daemon connection from a Claude Code or Codex registration; pass --daemon-url and --token-file (an owner-only credential file) explicitly, with --accept-access",
             ));
@@ -1897,6 +1905,10 @@ mod tests {
                 &["setup", "--read-key", "sk-fixture"],
                 "tunnel setup takes no positional arguments",
             ),
+            (
+                &["setup", "-k=sk-fixture"],
+                "tunnel setup does not take -k;",
+            ),
             (&["update", "--json"], "tunnel update does not take --json"),
             (
                 &["verify", "--accept-access"],
@@ -2033,7 +2045,7 @@ mod tests {
         assert_eq!(
             recovery,
             format!(
-                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside; this client cannot set a tunnel up yet.",
+                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside and save it again with tunnel setup --daemon-url and --token-file.",
                 store.0.join("bad.profile.json").display()
             )
         );

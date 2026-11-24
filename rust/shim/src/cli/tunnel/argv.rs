@@ -96,13 +96,13 @@ impl Command {
 fn not_built(form: &str) -> Option<String> {
     let instead = match form {
         "setup --start" => {
-            "Rerun tunnel setup without --start, then run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself; `pseudolife-mcp tunnel stop` ends it"
+            "Rerun tunnel setup without --start, then run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open; `pseudolife-mcp tunnel stop` ends it"
         }
         "start" => {
-            "Run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself; `pseudolife-mcp tunnel stop` ends it"
+            "Run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open; `pseudolife-mcp tunnel stop` ends it"
         }
         "service" => {
-            "To keep a tunnel running, run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself. A service the Python client registered is managed with the service manager's own commands, which `pseudolife-mcp update` prints"
+            "To keep a tunnel running, run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open; `pseudolife-mcp tunnel stop` ends it. A service the Python client registered is managed with the service manager's own commands, which `pseudolife-mcp update` prints"
         }
         "doctor" => {
             "`pseudolife-mcp tunnel status` and `pseudolife-mcp doctor` check the saved tunnels"
@@ -243,8 +243,10 @@ pub(super) fn read(values: &[OsString]) -> Result<Parsed, String> {
         if matches!(*argument, "-h" | "--help") {
             return Ok(Parsed::Help(help(command)));
         }
+        // Any `-`-led word splits at its first `=`, so a value joined to an
+        // option this command does not take is never echoed with it.
         let (name, joined) = match argument.split_once('=') {
-            Some((name, value)) if name.starts_with("--") => (name, Some(value)),
+            Some((name, value)) if name.starts_with('-') => (name, Some(value)),
             _ => (*argument, None),
         };
         if command == Command::Setup {

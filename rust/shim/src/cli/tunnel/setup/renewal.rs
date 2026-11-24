@@ -71,12 +71,17 @@ fn replace(path: &Path, saved: &[u8], next: &[u8]) -> Result<(), Fail> {
         |stage| {
             if !store::private_read(path, saved.len()).is_ok_and(|bytes| KeyBytes(bytes).0 == saved)
             {
-                return Err(Fail::Tunnel(
-                    "a private tunnel file changed during the key renewal",
-                ));
+                return Err(Fail::Detail(format!(
+                    "{} changed during the key renewal; check tunnel status, then rerun tunnel setup for the same profile",
+                    path.display()
+                )));
             }
-            store::sharing_retry(|| fs::rename(stage, path))
-                .map_err(|_| Fail::Tunnel("could not replace a private tunnel file"))
+            store::sharing_retry(|| fs::rename(stage, path)).map_err(|_| {
+                Fail::Detail(format!(
+                    "could not replace {}; check write access to the tunnel directory, then rerun tunnel setup for the same profile",
+                    path.display()
+                ))
+            })
         },
     )
 }

@@ -159,7 +159,7 @@ fn every_tunnel_argv_answers_or_refuses_with_its_cause_without_effect() {
         ),
         (
             &["start", "--profile-dir", &dir],
-            "Run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself",
+            "Run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open; `pseudolife-mcp tunnel stop` ends it",
         ),
         (
             &["service", "preview", "--profile-dir", &dir],
@@ -2192,6 +2192,26 @@ mod seeded {
                     .contains("cannot read the verification challenge")
             );
         }
+    }
+
+    #[test]
+    fn a_registration_path_it_cannot_inspect_is_named() {
+        let home = Home::new();
+        let dir = home.dir();
+        // CODEX_HOME names a regular file, so its config.toml cannot be
+        // inspected: the refusal names that path, never the tunnel store.
+        let codex = home.path("codex-file");
+        std::fs::write(&codex, b"not a directory").unwrap();
+        let config = codex.join("config.toml");
+        assert_refused_with(
+            &home,
+            &["setup", "--profile-dir", &dir],
+            &[("CODEX_HOME", codex.to_str().unwrap())],
+            &format!(
+                "cannot inspect {} to look for a client registration",
+                config.display()
+            ),
+        );
     }
 
     #[test]

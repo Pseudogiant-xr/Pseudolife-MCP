@@ -32,9 +32,8 @@ supervisor to stop its runtime. Pass the same `--profile` and
 `--profile-dir` in both commands if you selected a different profile or
 store. Use the same client to manage a running tunnel. The Python client's
 status can report a native launch as stopped, and Python stop leaves that
-launch running. The native client has no background start of its own: keep
-`tunnel run` open in a terminal, or register that command with a service
-manager you set up yourself.
+launch running. The native client has no background start: keep `tunnel run`
+open in a terminal, and end it with `tunnel stop`.
 
 To renew a key with the native client, stop the tunnel, then run
 `pseudolife-mcp tunnel setup --profile dot --read-key --key-expires-at <ISO timestamp>`
@@ -116,8 +115,7 @@ Anything else it does not run is refused with one line naming the cause
 and what to run instead (exit 2), having changed nothing. `start`,
 `doctor`, `service`, `setup --start` and `setup --open-browser` are not part of
 the native client; the refusal names `tunnel run` in a terminal you keep open
-(or under a service manager you set up yourself), `tunnel status`, or the
-Platform pages. Guided setup is not either: the
+(ended with `tunnel stop`), `tunnel status`, or the Platform pages. Guided setup is not either: the
 refusal names the explicit `--daemon-url` and `--token-file` to use. A file
 it cannot read (a profile, key, verification challenge or refresh file in a
 form it does not read) is named with the fix, as are verification of a launch
@@ -193,7 +191,7 @@ separate connections. `--profile-dir <directory>` selects private profile storag
    association separately from the Platform organization and app creation.
    Availability and access follow those account/workspace settings.
 
-`setup --open-browser tunnels`, `keys`, or `app` opens the selected step without
+With the Python client only, `setup --open-browser tunnels`, `keys`, or `app` opens the selected step without
 inventing an OAuth or device-code flow. Use the commands printed by setup to resume.
 The local profile and key survive interrupted browser work.
 
@@ -252,8 +250,9 @@ Status shows this last refresh outcome separately from current runtime readiness
 Cloud proof binds to the active snapshot: a successful source refresh needs a new
 challenge, while restoration of the same identity preserves existing proof files.
 
-Older running records without a safe snapshot are refused unchanged; use an explicit
-`tunnel stop` then `tunnel start` to adopt the managed refresh path. Rollback freezes
+Older running records without a safe snapshot are refused unchanged; with the
+Python client, use an explicit `tunnel stop` then `tunnel start` to adopt the
+managed refresh path. Rollback freezes
 the bridge and stdio shim files plus their launcher, while shared helpers and
 dependencies retain their installed versions. Changes to those shared components
 can therefore require further repair or fresh cloud verification after rollback.
@@ -264,7 +263,7 @@ latest or change profiles, keys, autostart consent or local client registrations
 Renew with `tunnel setup --read-key --key-expires-at <ISO-timestamp>`. A replacement
 key is staged through local configuration checks before replacing the saved key;
 a rejected candidate leaves the existing key and profile intact. These checks do
-not prove cloud identity. Use `tunnel setup --start` to adopt the saved replacement
+not prove cloud identity. With the Python client, use `tunnel setup --start` to adopt the saved replacement
 in a ready managed launch, then repeat `tunnel verify`. Failed refreshes restore
 the previous launch; cloud proof is valid only when the saved selection agrees
 with the actual restored configuration and credentials.
@@ -273,7 +272,8 @@ restart; the CLI still checks that expiry before starting a tunnel.
 
 ## Autostart and private storage
 
-`tunnel service preview` shows the host service definition. Install it only after
+`tunnel service` is the Python client's: the native client has none. With the
+Python client, `tunnel service preview` shows the host service definition. Install it only after
 reviewing it with `tunnel service install --accept-autostart`. Use
 `tunnel service status`, `stop` or `remove` to manage the owned service;
 `tunnel stop` stops an owned managed tunnel process. A tunnel stopped that way
