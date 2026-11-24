@@ -50,6 +50,8 @@ from test_principals_harness import (  # noqa: F401
     test_operator_routes_are_the_daemons_declaration,
     test_operator_routes_refuse_a_changed_declaration,
     test_operator_routes_accept_a_new_route_in_both_daemon_lists_even_wrapped,
+    test_operator_routes_accept_a_wrapped_auth_policy,
+    test_operator_routes_name_a_changed_auth_policy_shape_as_such,
     test_operator_routes_refuse_a_policy_that_names_other_routes,
     test_pairing_alphabet_is_the_daemons_and_refuses_a_changed_declaration,
     test_golden_inspections_ask_exactly_the_current_operator_requests,

@@ -287,8 +287,9 @@ def throwaway_pg():
             time.sleep(1)
         else:
             raise RuntimeError("the throwaway PostgreSQL did not become ready in 60 s")
-        from pseudolife_memory.storage.schema import SCHEMA_SQL
-        seed.Docker().psql(cid, "pl_cf_mir_seed", "CREATE EXTENSION IF NOT EXISTS vector;\n" + SCHEMA_SQL)
+        # The daemon's own base DDL (its first line is a version comment).
+        schema = (REPO / "rust/daemon/src/storage/schema.sql").read_text(encoding="utf-8")
+        seed.Docker().psql(cid, "pl_cf_mir_seed", "CREATE EXTENSION IF NOT EXISTS vector;\n" + schema)
         yield cid
     finally:
         subprocess.run(["docker", "stop", cid], capture_output=True)
