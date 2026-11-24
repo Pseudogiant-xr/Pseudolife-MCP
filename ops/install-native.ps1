@@ -2429,6 +2429,27 @@ function Test-CurrentClientToken([string]$Name) {
     }
     return -not $script:currentClientTokenFailure
 }
+# A client-only install registers Codex's own copy of the token file's token,
+# and connect --token-file would re-point it at the file although nothing
+# changed (issue #1908). A plan is treated as current when its only changes
+# are Codex's rows (connect-report codex-only) and the native step answers
+# exactly "same": the registration names that copy, it holds the same token,
+# and Codex's rows change nothing but that pointer. Any other answer, or none,
+# applies the plan as before.
+function Test-CodexTokenCopyCurrent([string]$Name, [string]$PlanJson) {
+    if (@($Name -split ",") -notcontains "codex") { return $false }
+    $PSNativeCommandUseErrorActionPreference = $false
+    try {
+        if (($PlanJson | Invoke-NativeHelper connect-report codex-only 2>$null) -cne "codex-only") { return $false }
+        $global:LASTEXITCODE = 0
+        $raw = Invoke-NativeHelper codex-token-copy --daemon-url $DaemonUrl --token-file $TokenFile 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
+        $report = (@($raw) -join "`n") | ConvertFrom-Json
+        return ($report -is [pscustomobject]) -and ($report.state -ceq "same")
+    } catch {
+        return $false
+    }
+}
 function Connect-ExistingRegistration([string[]]$Provider, [string]$Name, [switch]$Grouped) {
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
         Write-Warning "Existing registrations were not checked against $($DaemonUrl): the pseudolife-mcp shim is unavailable (see above). One that names another daemon stays as it is."
@@ -2477,6 +2498,17 @@ function Connect-ExistingRegistration([string[]]$Provider, [string]$Name, [switc
             return $false
         }
         Step "Verified the current credential for $Name at $DaemonUrl. Nothing to write."
+    } elseif (Test-CodexTokenCopyCurrent $Name $planJson) {
+        # Only Codex's token-file pointer would change: as a current plan.
+        if (-not (Test-CurrentClientToken $Name)) {
+            if (-not $Grouped) { Write-ClientSetupFailure $Provider[0] $script:currentClientTokenFailure }
+            return $false
+        }
+        Step "Verified the current credential for $Name at $($DaemonUrl): Codex's registration already names its own copy of the token in $TokenFile. Nothing to write."
+        if (@(Get-ConnectRows $report | Where-Object { $_.state -eq "manual" }).Count -gt 0) {
+            Write-Warning "pseudolife-mcp connect found entries it does not rewrite; change them by hand:"
+            Write-ConnectPlan $report -ManualOnly
+        }
     } else {
         Step "Existing registrations: pseudolife-mcp connect points them at $($DaemonUrl):"
         Write-ConnectPlan $report

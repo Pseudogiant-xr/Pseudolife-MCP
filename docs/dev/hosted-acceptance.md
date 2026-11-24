@@ -68,9 +68,11 @@ inputs of the legacy install. The first run may change only the Codex settings
 the harness expects for that starting release, each the expected way. For
 v0.23.1 and v0.24.0 that is the `memory_message` approval those installers
 lost, added as `"approve"` ([issue
-#1903](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1903)), and,
-until [issue #1908](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1908)
-is fixed, the token-file setting the rerun re-points. The second run must leave
+#1903](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1903)). A
+candidate that carries the fix for [issue
+#1908](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1908) must keep
+the token-file setting on Codex's own token copy; a candidate up to v0.25.1
+predates it and re-points that setting once. The second run must leave
 every fingerprinted file byte-identical and print the installer's "nothing
 changed" line. On Intel the upgrade cannot start: the v0.23.1 Python client
 it upgrades from no longer installs there, because one of its dependencies

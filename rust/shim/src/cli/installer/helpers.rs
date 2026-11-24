@@ -53,7 +53,22 @@ fn needs_current_verification(report: &Value) -> bool {
             .any(|row| row["place"] == "registration" && row["state"] == "current")
 }
 
-/// `connect-report valid|error|plan|manual|handled|current` over `connect --json`.
+/// A plan whose every change is a Codex row (its registration or the hooks'
+/// connection file): the installers then ask `installer codex-token-copy`
+/// whether that change is only the token-file pointer (issue #1908). A change
+/// to any other client, the environment or a schedule is never this.
+fn only_codex_changes(report: &Value) -> bool {
+    let Some(rows) = report["rows"].as_array() else {
+        return false;
+    };
+    let mut changes = rows
+        .iter()
+        .filter(|row| row["state"] == "change")
+        .peekable();
+    report["exit"] == 0 && changes.peek().is_some() && changes.all(|row| row["client"] == "codex")
+}
+
+/// `connect-report valid|error|plan|manual|handled|current|codex-only` over `connect --json`.
 pub(super) fn connect_report(mode: &str) -> u8 {
     let report = stdin_json();
     let valid = report.as_ref().is_some_and(|r| {
@@ -65,6 +80,13 @@ pub(super) fn connect_report(mode: &str) -> u8 {
     if mode == "current" {
         return out(if report.as_ref().is_some_and(needs_current_verification) {
             "current"
+        } else {
+            ""
+        });
+    }
+    if mode == "codex-only" {
+        return out(if report.as_ref().is_some_and(only_codex_changes) {
+            "codex-only"
         } else {
             ""
         });
@@ -290,6 +312,38 @@ mod tests {
         assert!(!check(
             &json!({"exit": 0, "rows": [{"place":"schedule","state":"current"}]})
         ));
+    }
+
+    /// Issue #1908: only a plan whose every change is a Codex row may skip
+    /// connect's apply; the environment, schedules and other clients never.
+    #[test]
+    fn only_a_plan_changing_nothing_but_codex_rows_is_codex_only() {
+        use serde_json::json;
+        let row = |client: &str, place: &str, state: &str| json!({"client": client, "place": place, "state": state});
+        let codex = [
+            row("codex", "registration", "change"),
+            row("codex", "connection", "change"),
+        ];
+        let check = super::only_codex_changes;
+        assert!(check(&json!({"exit": 0, "rows": codex})));
+        assert!(check(&json!({"exit": 0, "rows": [
+            codex[0], row("gemini", "registration", "current"), row("claude-code", "registration", "absent"),
+        ]})));
+        for other in [
+            row("gemini", "registration", "change"),
+            row("environment", "user", "change"),
+            row("schedule", "task", "change"),
+        ] {
+            assert!(
+                !check(&json!({"exit": 0, "rows": [codex[0], other]})),
+                "{other}"
+            );
+        }
+        assert!(!check(
+            &json!({"exit": 0, "rows": [row("codex", "registration", "current")]})
+        ));
+        assert!(!check(&json!({"exit": 3, "rows": codex})));
+        assert!(!check(&json!({"exit": 0})));
     }
 
     use serde_json::json;

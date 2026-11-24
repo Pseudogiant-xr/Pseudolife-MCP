@@ -3,6 +3,7 @@
 mod credentials;
 mod outcome;
 mod rpc;
+pub mod token_copy;
 pub(crate) use credentials::{
     CredentialCheck, ProbeFailure, verify_installer_credential, wait_for_credential,
 };
