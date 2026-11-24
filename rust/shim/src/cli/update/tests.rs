@@ -733,13 +733,25 @@ fn checkout_schema_names_a_missing_release_manifest() {
     let (repo, plan) = checkout_schema_fixture();
     fs::write(plan, br#"{"format":1,"schema_version":71,"steps":[]}"#).unwrap();
     fs::remove_file(repo.0.join(super::RELEASE_MANIFEST)).unwrap();
+    // Beside pyproject.toml: a checkout from before the native release
+    // version, which never had the manifest, is told to update.
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert_eq!(
+        refused.message,
+        "this checkout has no rust/shim/Cargo.toml, so it predates the native release version; update the checkout (git pull, or check out a newer release tag) and retry."
+    );
+    // Without it, the manifest went missing: restore it.
+    fs::remove_file(repo.0.join("pyproject.toml")).unwrap();
     let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
     assert_eq!(refused.exit_code, 2);
     assert!(
         refused
             .message
             .starts_with("cannot read rust/shim/Cargo.toml in this checkout (")
-            && refused.message.ends_with("Restore that file and retry."),
+            && refused
+                .message
+                .ends_with("restore it (git checkout -- rust/shim/Cargo.toml) and retry."),
         "{}",
         refused.message
     );
@@ -759,7 +771,7 @@ fn checkout_schema_names_the_release_manifest_without_a_version() {
     assert!(
         refused
             .message
-            .contains("cannot read the checkout version from rust/shim/Cargo.toml"),
+            .contains("cannot read the checkout version from rust/shim/Cargo.toml: its [package] table needs a plain `version = \"<x.y.z>\"` line"),
         "{}",
         refused.message
     );
