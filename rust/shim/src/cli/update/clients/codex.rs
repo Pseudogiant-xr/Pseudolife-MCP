@@ -726,7 +726,7 @@ fn release_manual_hooks(root: &Path, refresh: bool, write: LauncherWrite) -> Val
         return result(
             "bundle-present",
             format!(
-                "{BUNDLE_PRESENT}; an earlier release's hook launcher in {} could not be replaced ({error}): rerun pseudolife-mcp update --clients-only once no Codex session holds it",
+                "{BUNDLE_PRESENT}; an earlier release's hook launcher in {} could not be replaced ({error}): fix that cause (often a Codex session holding the file), then rerun pseudolife-mcp update --clients-only",
                 root.display()
             ),
         );
@@ -953,7 +953,7 @@ mod runtime_trust_tests {
 #[cfg(test)]
 mod launcher_refresh_tests {
     use super::*;
-    use crate::setup::codex_launchers::{LAUNCHERS, earlier_release};
+    use crate::setup::codex_launchers::{LAUNCHERS, RUN_PS1, RUN_SH, earlier_release};
 
     struct Home(PathBuf);
     impl Drop for Home {
@@ -1070,26 +1070,74 @@ mod launcher_refresh_tests {
 
     #[test]
     fn release_mode_reports_a_launcher_it_could_not_replace_instead_of_failing() {
-        fn refused(_: &Path, _: &[u8], _: &[u8]) -> Result<PathBuf, String> {
+        fn held(_: &Path, _: &[u8], _: &[u8]) -> Result<PathBuf, String> {
             Err("Access is denied. (os error 5)".into())
+        }
+        // A cause no rerun clears on its own: the next step must still be
+        // to fix the stated cause first, not a bare rerun.
+        fn foreign(path: &Path, _: &[u8], _: &[u8]) -> Result<PathBuf, String> {
+            Err(format!("{} is owned by another account", path.display()))
         }
         let home = home_with(&earlier());
         let root = home.0.join("pseudolife/hooks");
-        let state = release_manual_hooks(&root, true, refused);
+        for (write, cause) in [
+            (
+                held as LauncherWrite,
+                "Access is denied. (os error 5)".to_owned(),
+            ),
+            (
+                foreign as LauncherWrite,
+                format!(
+                    "{} is owned by another account",
+                    root.join("run.sh").display()
+                ),
+            ),
+        ] {
+            let state = release_manual_hooks(&root, true, write);
+            assert_eq!(state["state"], "bundle-present", "{state}");
+            let detail = state["detail"].as_str().unwrap();
+            assert!(
+                detail.contains(&format!("could not be replaced ({cause})")),
+                "{detail}"
+            );
+            assert!(
+                detail.contains(
+                    ": fix that cause (often a Codex session holding the file), then rerun pseudolife-mcp update --clients-only"
+                ),
+                "{detail}"
+            );
+            assert_eq!(launcher(&home, "run.sh"), earlier_release("run.sh"));
+        }
+        // Without a refresh nothing is written, so nothing can be refused.
+        let state = release_manual_hooks(&root, false, held);
+        assert_eq!(state["detail"], BUNDLE_PRESENT, "{state}");
+    }
+
+    #[test]
+    fn release_mode_reports_the_launcher_it_could_not_replace_after_replacing_another() {
+        // run.sh is replaced, then run.ps1 is refused: the detail names the
+        // refusal, and the launcher already replaced stays this release's.
+        fn ps1_refused(path: &Path, before: &[u8], after: &[u8]) -> Result<PathBuf, String> {
+            if path.file_name().is_some_and(|name| name == "run.ps1") {
+                return Err("The process cannot access the file because it is being used by another process. (os error 32)".into());
+            }
+            registrations::write_config(path, before, after)
+        }
+        let home = home_with(&earlier());
+        let root = home.0.join("pseudolife/hooks");
+        let state = release_manual_hooks(&root, true, ps1_refused);
         assert_eq!(state["state"], "bundle-present", "{state}");
         let detail = state["detail"].as_str().unwrap();
         assert!(
-            detail.contains("could not be replaced (Access is denied. (os error 5))"),
+            detail.contains("(os error 32)): fix that cause"),
             "{detail}"
         );
-        assert!(
-            detail.contains("rerun pseudolife-mcp update --clients-only"),
-            "{detail}"
-        );
-        assert_eq!(launcher(&home, "run.sh"), earlier_release("run.sh"));
-        // Without a refresh nothing is written, so nothing can be refused.
-        let state = release_manual_hooks(&root, false, refused);
+        assert_eq!(launcher(&home, "run.sh"), RUN_SH);
+        assert_eq!(launcher(&home, "run.ps1"), earlier_release("run.ps1"));
+        // The next refresh replaces the one left behind.
+        let state = release_manual_hooks(&root, true, registrations::write_config);
         assert_eq!(state["detail"], BUNDLE_PRESENT, "{state}");
+        assert_eq!(launcher(&home, "run.ps1"), RUN_PS1);
     }
 
     #[test]
