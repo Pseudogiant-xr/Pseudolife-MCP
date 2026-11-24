@@ -235,3 +235,29 @@ def test_board_recording_covers_both_platforms_and_every_board_scenario():
     for platform, recorded in recording.items():
         assert set(recorded) == scenarios, platform
         assert all(recorded[name]["transcripts"] for name in ("free", "claim", "queue")), platform
+
+
+def test_board_recording_keeps_the_stores_holder_field_order():
+    # The CLI prints a board holder's fields in the order it receives them, so
+    # a recording written with sorted keys replays a different --json output.
+    from .rows import lease
+
+    store_order = ("agent_id", "label", "name", "principal", "purpose",
+                   "acquired_at", "expires_at", "expected_end")
+
+    def holders(value):
+        if isinstance(value, dict):
+            if "agent_id" in value and "acquired_at" in value:
+                yield list(value)
+            for item in value.values():
+                yield from holders(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from holders(item)
+
+    recording = json.loads(lease.RECORDING.read_text(encoding="utf-8"))["platforms"]
+    for platform, recorded in recording.items():
+        found = list(holders(recorded))
+        assert found, platform
+        for keys in found:
+            assert keys == [key for key in store_order if key in keys], (platform, keys)
