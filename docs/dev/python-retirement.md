@@ -194,11 +194,11 @@ that still tests the native product.
 
 Keep production prompt assets under `evals/prompts/`: Rust embeds them, and
 the Docker builder copies them. An eval-directory cleanup must distinguish
-those inputs from obsolete Python drivers. Also inspect recovery messages and
-generated hook launchers: `cli/installer/codex_hooks/definitions.rs` still
-preserves a `python ops/setup-codex-hooks.py` repair instruction. Give users a
-working native repair path without silently changing approved hook definitions;
-the hook approval rules still apply.
+those inputs from obsolete Python drivers. Also inspect recovery messages: the
+generated hook launchers (`rust/shim/src/setup/codex_launchers.rs`) name the
+installer as their repair step, and their earlier bytes stay in
+`PREVIOUS_LAUNCHERS` so a refresh replaces them; changing a launcher keeps the
+approved hook definitions as they are, and the hook approval rules still apply.
 
 Read `tests/suite_classes.txt` as collection policy, not proof that live tests
 are package-independent: a live guard can import Python helpers. The source
