@@ -698,3 +698,33 @@ def test_teardown_propagates_when_the_check_fails_or_a_guard_refuses(monkeypatch
         monkeypatch.setattr(_bank, "drop", refusing_drop)
         with pytest.raises(type(refusal)):
             _bank.teardown(_bank.name("pl_cf_teardown_guard"))
+
+
+def test_invite_seeds_run_with_frozen_imports_blocked():
+    from rust.harness_support.import_blocker import cold_harness_imports
+    from rust.cli_harness.rows import invite
+
+    statements = []
+
+    class Connection:
+        def execute(self, query, params=None):
+            statements.append((query, params))
+
+            class Result:
+                def fetchone(self):
+                    return (invite._bank.name(invite.PREFIX + "arm"),)
+
+                def fetchall(self):
+                    return [("bravo",)]
+            return Result()
+
+    with cold_harness_imports():
+        invite.seed_states(Connection(), "unused")
+    writes = [(q, p) for q, p in statements if "current_database" not in q]
+    assert writes[0][1] == ("coordination_bank_id", invite.BANK_ID)
+    inserted = [p["name"] for q, p in writes if q.startswith("INSERT INTO public.principals")]
+    assert inserted == ["alpha", "bravo", "charlie", "delta", "a-rather-long-principal-name.x", "echo"]
+    owned = [p["owned"] for q, p in writes if q.startswith("INSERT INTO public.principals")]
+    assert owned == [None, None, None, None, None, False]
+    assert any("token_hash" in q and "WHERE principal = 'bravo'" in q for q, _ in writes)
+    assert any("revoked_at = COALESCE" in q and "WHERE principal = 'charlie'" in q for q, _ in writes)

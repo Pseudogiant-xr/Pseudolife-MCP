@@ -204,6 +204,11 @@ def _suite(state="absent", slot=0):
     return setup
 
 
+def coordination_state(state):
+    return {"tables": {key: value for key, value in state["tables"].items() if key.startswith("coordination_")},
+            "sequences": {key: value for key, value in state["sequences"].items() if key.startswith("coordination_")}}
+
+
 def _after(arm, obs):
     # Every write, rather than only the final released state (the recorded
     # coordination tables and sequences after each store-backed request).

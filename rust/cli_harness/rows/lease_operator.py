@@ -4,24 +4,167 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import json
 import math
 import re
+import threading
 import time
+import uuid
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import patch
 
 from .. import core, lease_fixture, normalize
 from ..core import Case
 from . import _bank
-from .lease import Board, TOKEN, T0, _Holder, _after, _local, _release_local, coordination_state
+from .lease import TOKEN, T0, _Holder, _after, _local, _release_local, coordination_state
 
 
-class OperatorBoard(Board):
+class _Storage:
+    def __init__(self, conn):
+        self.conn = conn
+
+    @contextmanager
+    def _txn(self):
+        with self.conn.transaction():
+            yield
+
+
+class StoreBoard:
+    """Loopback HTTP boundary backed by the oracle CoordinationStore: the
+    operator row seeds leases and grants through the store and its clients
+    act on the same disposable bank, so it keeps the live store (moved here
+    from rows/lease.py, whose row replays a recording of it)."""
+
+    def __init__(self, scenario="free", bank=True):
+        self.name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}") if bank else None
+        self.conn = None
+        self.records = []
+        self.states = []
+        self.locals = []
+        self.unrecorded = []
+        if not bank:
+            self.url = core.DEAD_DAEMON_URL
+            return
+        from pseudolife_memory.storage.coordination import CoordinationStore
+
+        with _bank._admin() as conn:
+            if conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (self.name,)).fetchone():
+                raise RuntimeError("disposable name collision")
+        _bank.create(self.name)
+        self.conn = _bank.connect(self.name, autocommit=True)
+        self.store = CoordinationStore(_Storage(self.conn), clock=lambda: T0)
+        self.lock = threading.RLock()
+        self.counter = 0
+        self.scenario = scenario
+        self.calls = {}
+        self.holder = None
+        if scenario in ("held", "queue", "claim", "other-mirror", "same-mirror"):
+            label = {"other-mirror": "lease-hold@0123456789ab", "same-mirror": "lease-hold@abcdef123456"}.get(scenario, "codex")
+            self.holder = self.register(label=label, project="fixture", task="peer work")
+            self.store.acquire_lease("alice", self.holder["agent_id"], self.holder["credential"],
+                                     name=NAME, ttl=120, expect=60, purpose="peer work")
+            if scenario == "queue":
+                self.waiter = self.register(label="codex", project="fixture", task="first waiter")
+                self.store.acquire_lease("alice", self.waiter["agent_id"], self.waiter["credential"],
+                                         name=NAME, ttl=120, purpose="first waiter")
+        fixture = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                raw = self.rfile.read(int(self.headers["Content-Length"]))
+                body = json.loads(raw)
+                action = self.path.rsplit("/", 1)[-1]
+                with fixture.lock:
+                    fixture.records.append({"method": "POST", "target": self.path,
+                                            "headers": list(self.headers.items()),
+                                            "body": raw.decode()})
+                    status, reply = fixture.dispatch(action, body, self.headers)
+                data = json.dumps(reply).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_port}"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def register(self, **fields):
+        self.counter += 1
+        # Fixed test entropy at the writer boundary, rather than SQL inserts
+        # or erasing identity/hash columns from compared database state.
+        identifier = uuid.UUID(int=self.counter, version=4)
+        credential = base64.urlsafe_b64encode(hashlib.sha256(f"fixture-{self.counter}".encode()).digest()).decode().rstrip("=")
+        with patch("pseudolife_memory.storage.coordination.uuid.uuid4", return_value=identifier), \
+                patch("pseudolife_memory.storage.coordination.secrets.token_urlsafe", return_value=credential):
+            return self.store.register("alice", **fields)
+
+    def dispatch(self, action, body, headers):
+        from pseudolife_memory.storage.coordination import CoordinationError
+        self.calls[action] = self.calls.get(action, 0) + 1
+        if headers.get("Authorization") != f"Bearer {TOKEN}":
+            return 401, {"error": "unauthorized"}
+        if self.scenario == "refused" and action == "register":
+            return 403, {"error": "forbidden"}
+        if self.scenario == "malformed" and action == "register":
+            return 200, {"registered": True}
+        if self.scenario == "transient" and action == "lease" and self.calls[action] == 1:
+            return 503, {"error": "temporarily_unavailable"}
+        creds = ("alice", headers.get("X-PL-Agent"), headers.get("X-PL-Agent-Key"))
+        try:
+            if action == "register":
+                reply = self.register(**body)
+            elif action == "lease":
+                reply = self.store.acquire_lease(*creds, **body)
+            elif action == "release":
+                reply = self.store.release_lease(*creds, **body)
+            elif action == "leases":
+                reply = self.store.list_leases(**body)
+            else:
+                raise RuntimeError(f"unexpected fixture action {action}")
+        except CoordinationError as error:
+            return 400, {"error": error.code}
+        if action in ("register", "lease", "release"):
+            self.states.append({"action": action, "state": coordination_state(_bank.dump(self.name))})
+        if self.scenario == "queue" and action == "lease" and reply["state"] == "queued":
+            self.store.release_lease("alice", self.holder["agent_id"], self.holder["credential"], name=NAME)
+            self.states.append({"action": "fixture-release", "state": coordination_state(_bank.dump(self.name))})
+            self.store.release_lease("alice", self.waiter["agent_id"], self.waiter["credential"], name=NAME)
+            self.states.append({"action": "fixture-release-waiter", "state": coordination_state(_bank.dump(self.name))})
+        return 200, reply
+
+    def final_state(self) -> dict:
+        return coordination_state(_bank.dump(self.name))
+
+    def requests(self):
+        return self.records
+
+    def close(self):
+        for holder in self.locals:
+            holder.stop()
+        if self.conn is None:
+            return
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(5)
+        self.conn.close()
+        _bank.teardown(self.name)
+
+
+class OperatorBoard(StoreBoard):
     def dispatch(self, action, body, headers):
         if action == "agents":
             assert headers.get("Authorization") == f"Bearer {TOKEN}"
             self.calls[action] = self.calls.get(action, 0) + 1
             reply = self.store.list_agents("alice", headers.get("X-PL-Agent"), headers.get("X-PL-Agent-Key"), **body)
-            self.states.append({"action": action, "state": _bank.dump(self.name)})
+            self.states.append({"action": action, "state": coordination_state(_bank.dump(self.name))})
             return 200, reply
         return super().dispatch(action, body, headers)
 
