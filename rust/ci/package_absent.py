@@ -30,6 +30,8 @@ from package_consumers import ACTIVE, CATEGORIES, PACKAGE, ROOT, TESTING
 
 
 PER_PROBE_SECONDS = 12
+# A ceiling, not a measurement: room for the two collection probes beside the
+# few hundred imports the 240 s it replaced was sized for.
 TOTAL_PROBE_SECONDS = 600
 BOOTSTRAP = """
 from importlib.util import find_spec
@@ -110,6 +112,9 @@ def plan(checkout: Path) -> list[Probe]:
         *(Probe(TESTING, "import", f"tests/{filename}") for filename in fixtures),
         # pytest itself: the suite's conftest and fixtures load (one file whose
         # own imports are package-free), then the whole default collection.
+        # The limits are ceilings, not measurements: pytest's start-up and a
+        # collection that imports every live test module outlast the 12 s
+        # an import gets.
         Probe(TESTING, "collect", "tests/test_fixture_guards_package_absent.py", seconds=60),
         Probe(TESTING, "collect", "tests", seconds=180),
         *live,
@@ -160,6 +165,13 @@ def probe_env(directory: Path, git: str) -> dict[str, str]:
         "GIT_TERMINAL_PROMPT": "0",
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:1",
         "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+        # libpq connects outside the audit hook below, so every PostgreSQL
+        # setting conftest reads points nowhere: an explicit test URL (which
+        # also ends the suite's password preflight before it opens a socket),
+        # and a bench name and admin URL that keep its exit-time DROP inert.
+        "PSEUDOLIFE_TEST_DATABASE_URL": "postgresql://probe@127.0.0.1:1/pl_cf_prb_absent",
+        "PSEUDOLIFE_BENCH_DB": "pl_cf_prb_absent_bench",
+        "PSEUDOLIFE_BENCH_ADMIN_URL": "postgresql://probe@127.0.0.1:1/postgres",
         "CUDA_VISIBLE_DEVICES": "-1",
         "HF_HUB_OFFLINE": "1",
         "BROWSER": str(bin_dir / "no-browser"),
@@ -181,6 +193,12 @@ def run_probe(probe: Probe, checkout: Path, env: dict[str, str], seconds: float)
     output = result.stdout.replace(str(checkout), "<checkout>").replace(env["HOME"], "<home>")
     lines = output.splitlines()
     reason = next((line.strip() for line in reversed(lines) if line.strip()), "no output")
+    if probe.mode == "collect" and result.returncode:
+        # pytest's last line is a count; name the first modules it could not
+        # collect, or its internal error, so the cause is visible.
+        causes = [line.strip() for line in lines
+                  if line.startswith(("ERROR ", "INTERNALERROR> E ", "E   "))][:3]
+        reason = "; ".join([*causes, reason])
     return result.returncode, reason if result.returncode else "completed"
 
 

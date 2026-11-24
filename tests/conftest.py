@@ -509,12 +509,15 @@ def pytest_configure(config: pytest.Config) -> None:
 
     embedder_mode(os.environ)  # a bad PSEUDOLIFE_TEST_EMBEDDER fails here
     # The memoized load below wraps the frozen package's embedding pipeline,
-    # which only the package's own tests build. Without the package (no
-    # module to find, the state after its deletion) there is nothing to
-    # wrap; a package that is present but fails to import still fails here.
+    # which only the package's own tests build. Without the package there is
+    # nothing to wrap: no module to find, or only a namespace package (no
+    # __init__.py, so no origin) that a deleted package's ignored
+    # __pycache__ folders leave in an existing checkout. A package that is
+    # present but fails to import still fails here.
     from importlib.util import find_spec
 
-    if find_spec("pseudolife_memory") is None:
+    package = find_spec("pseudolife_memory")
+    if package is None or package.origin is None:
         return
     from pseudolife_memory.memory import embedding as embedding_module
     from pseudolife_memory.utils.config import EmbeddingConfig

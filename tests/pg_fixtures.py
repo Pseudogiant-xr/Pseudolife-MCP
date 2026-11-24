@@ -4,7 +4,7 @@ Resolution order for the test server:
 
 1. ``PSEUDOLIFE_TEST_DATABASE_URL`` env var (any reachable PG 16+vector;
    refused if it names a production bank — see
-   ``storage.schema.assert_disposable_database``).
+   ``rust/harness_support/database_guard.py``, ``assert_disposable_database``).
 2. The repo's dev container at ``127.0.0.1:5433`` (ops/docker-compose.yml).
 
 If neither is reachable, PG-backed tests skip cleanly so the pure-logic

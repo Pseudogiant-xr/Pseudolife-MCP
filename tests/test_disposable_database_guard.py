@@ -584,7 +584,8 @@ def test_every_harness_guard_allows_a_replay_copy(harness, clean_env):
 # The two statements that wreck a bank the reset did not own: the mass reap
 # of every other backend on the database, and a TRUNCATE assembled from a
 # table list (the tree's only spelling of a full-bank reset —
-# BENCH_RESET_TABLES, or pg_fixtures'/ladder_sweep's _ALL_TABLES alias).
+# BENCH_RESET_TABLES, read by pg_fixtures' _reset_tables() and aliased as
+# ladder_sweep's _ALL_TABLES).
 # Killing ONE known pid (a test's own storage connection) is not a reap.
 _REAP_ALL = "pg_terminate_backend(pid) FROM pg_stat_activity"
 _TRUNCATE_HEAD = "TRUNCATE "

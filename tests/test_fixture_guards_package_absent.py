@@ -22,9 +22,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-REFUSED = "ProductionDatabaseError"
+# Outcomes name the exception class with its module, so the package's
+# same-named class cannot stand in for the guard's.
+REFUSED = "rust.harness_support.database_guard.ProductionDatabaseError"
 LIVE_DSN = "postgresql://u:secret@127.0.0.1:5433/Live_Bank_Name"
 IMPLICIT_DSN = "host=127.0.0.1 port=5433 user=u"
+# "present" is a migration bridge: delete that arm with the package.
 PACKAGE_STATES = ("present", "absent")
 
 
@@ -38,11 +41,14 @@ def _child(state: str) -> None:
     from rust.harness_support import database_guard as guard
     from tests import pg_defaults, pg_fixtures
 
+    def name_of(exc):
+        return f"{type(exc).__module__}.{type(exc).__qualname__}"
+
     def outcome(action):
         try:
             result = action()
         except Exception as exc:  # noqa: BLE001 - the class is the outcome
-            return type(exc).__name__
+            return name_of(exc)
         return "allowed" if result is None else result
 
     def no_connection(*args, **kwargs):
@@ -80,7 +86,7 @@ def _child(state: str) -> None:
     except child_pytest.UsageError as exc:
         report["sessionstart"] = "UsageError: " + str(exc).split(":", 1)[0]
     except Exception as exc:  # noqa: BLE001 - an uncaught refusal is the failure shown
-        report["sessionstart"] = type(exc).__name__
+        report["sessionstart"] = name_of(exc)
     os.environ.pop("PSEUDOLIFE_REQUIRE_TEST_POSTGRES")
     os.environ.pop("PSEUDOLIFE_TEST_DATABASE_URL")
 
@@ -139,6 +145,8 @@ def _child(state: str) -> None:
             conftest.pytest_configure(None)
         except child_pytest.UsageError as exc:
             report["configure"] = "UsageError: " + str(exc).split(" (", 1)[0]
+        except Exception as exc:  # noqa: BLE001 - anything but the stop is the failure shown
+            report["configure"] = name_of(exc)
     report["package"] = repr(sys.modules.get("pseudolife_memory")) if state == "absent" else "present"
     print(json.dumps(report))
 
@@ -163,7 +171,7 @@ def _run(state: str, **env_changes) -> dict:
 PROBE = ["SELECT current_database()"]
 # An allowed name reaches ensure_test_db's admin connection, which the stub
 # refuses; ensure_test_db reports that as a setup failure, not a refusal.
-PAST_NAMES = "PostgresSetupError"
+PAST_NAMES = "tests.pg_defaults.PostgresSetupError"
 
 
 def _past_the_guard(state):
@@ -171,8 +179,9 @@ def _past_the_guard(state):
     the package the next statement is sent (and the stub stops it there);
     without it the import fails before a second statement is sent."""
     if state == "present":
-        return {"outcome": "_Reached", "statements": PROBE + ["SET search_path TO public"]}
-    return {"outcome": "ModuleNotFoundError", "statements": PROBE}
+        return {"outcome": "tests.test_fixture_guards_package_absent._child.<locals>._Reached",
+                "statements": PROBE + ["SET search_path TO public"]}
+    return {"outcome": "builtins.ModuleNotFoundError", "statements": PROBE}
 
 
 def _expected(state, live_refused):
@@ -224,7 +233,7 @@ def test_an_implicit_daemon_dsn_stops_the_run_and_refuses_every_reset(state):
     assert got["recorded"] == "<unresolved>"
     assert got["dsn_left"] is None
     assert set(got["names"].values()) == {REFUSED}
-    assert got["override"]["pseudolife_memory_test_1"][0] == REFUSED
+    assert got["override"]["pseudolife_memory_test_1"] == [REFUSED, REFUSED]
     assert {cell["outcome"] for cell in got["server"].values()} == {REFUSED}
     assert got["sessionstart"] == "UsageError: refusing every test/bench reset"
     assert set(got["dispatched"].values()) == {REFUSED}
