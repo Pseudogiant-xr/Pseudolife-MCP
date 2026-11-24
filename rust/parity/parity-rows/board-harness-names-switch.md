@@ -1,0 +1,3 @@
+| Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
+|---|---:|---|---|---|
+| BOARD-HARNESS-NAMES-SWITCH | 1 | The Python-only `PSEUDOLIFE_BOARD_HARNESS_NAMES` off switch for harness session titles is retired by the maintainer's 2026-11-24 ruling: dropped, not ported, and no longer documented or tested. The native daemon and client never read it, and the native client reads no harness title. `harness_names.py`, `codex_coordination.py` | The frozen package still reads it until the package is removed; its off-switch assertions are gone from `test_harness_names.py` and `test_coordination_names.py`, and the environment variable appendix keeps its pinned reader row | retired-by-decision |
