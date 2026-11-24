@@ -304,7 +304,7 @@ fn a_registered_user_unit_refuses_the_move_and_changes_nothing() {
     assert!(line.contains("Nothing was changed"), "{line}");
     assert!(
         line.starts_with(
-            "this machine stays on the Python client: a tunnel is registered to start by itself. Nothing was changed; to stay on it, rerun the same command"
+            "this machine stays on the Python client: a tunnel is registered to start by itself. Nothing was changed; to stay on it, rerun the same command with PSEUDOLIFE_SHIM_ENGINE=python in front of it, in place of any PSEUDOLIFE_SHIM_ENGINE=native (on the daemon's host --daemon-only updates the daemon alone)."
         ),
         "{line}"
     );
@@ -318,13 +318,20 @@ fn a_registered_user_unit_refuses_the_move_and_changes_nothing() {
             && !line.contains(concat!("cannot run ", "a tunnel yet")),
         "{line}"
     );
+    // True before and after the native client became the default: without
+    // the variable a later release moves the machine, with python it stays.
     assert!(
-        line.contains("rerun the same command without PSEUDOLIFE_SHIM_ENGINE=native (unset PSEUDOLIFE_SHIM_ENGINE"),
+        !line.contains("without PSEUDOLIFE_SHIM_ENGINE=native"),
         "{line}"
     );
+    // The removal that needs no Python client comes first; the Python
+    // client's own command, which also clears its records, is the
+    // alternative while the machine still runs it.
     assert!(
         line.contains(&format!(
-            "(pseudolife-mcp tunnel service remove --profile dot --profile-dir {}), then rerun it.",
+            "first remove the autostart with the service manager: systemctl --user disable --now pseudolife-tunnel-dot.service && rm {} && systemctl --user daemon-reload && rm {} (or, while this machine runs the Python client, with pseudolife-mcp tunnel service remove --profile dot --profile-dir {}), then rerun it.",
+            quote(&unit.to_string_lossy(), false),
+            quote(&Path::new(&f.store()).join("pseudolife-tunnel-dot.service-owner").to_string_lossy(), false),
             quote(&f.store(), false)
         )),
         "{line}"
@@ -383,6 +390,19 @@ fn a_root_system_unit_refuses_and_names_the_system_service_removal() {
         line.contains(&format!(
             "pseudolife-mcp tunnel service remove --profile dot --profile-dir {} --system-service",
             quote(&f.store(), false)
+        )),
+        "{line}"
+    );
+    assert!(
+        line.contains(&format!(
+            "with the service manager: It is a system unit, so only root can change it. systemctl disable --now pseudolife-tunnel-dot.service && rm {} && systemctl daemon-reload && rm {} (or,",
+            quote(
+                &system
+                    .join("pseudolife-tunnel-dot.service")
+                    .to_string_lossy(),
+                false
+            ),
+            quote(&Path::new(&f.store()).join("pseudolife-tunnel-dot.service-owner").to_string_lossy(), false)
         )),
         "{line}"
     );
@@ -568,7 +588,7 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
         lines[0].contains("can run a tunnel in the foreground and has no tunnel service command")
             && !lines[0].contains("fails at each logon")
             && lines[0]
-                .contains("Remove it with: schtasks /Delete /TN \\pseudolife-tunnel-dot /F ;"),
+                .contains("Remove it with: schtasks /End /TN \\pseudolife-tunnel-dot and then, even if /End says the task is not running, schtasks /Delete /TN \\pseudolife-tunnel-dot /F ;"),
         "{lines:?}"
     );
     let system = f.path.join("etc-systemd-system");
@@ -634,7 +654,13 @@ fn the_installer_refusal_names_the_installer_rerun() {
         || true,
     ));
     assert!(
-        line.contains("rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native"),
+        line.contains(
+            "Nothing was changed; to stay on it, rerun the installer with PSEUDOLIFE_SHIM_ENGINE=python in front of it, in place of any PSEUDOLIFE_SHIM_ENGINE=native."
+        ),
+        "{line}"
+    );
+    assert!(
+        !line.contains("without PSEUDOLIFE_SHIM_ENGINE=native"),
         "{line}"
     );
     assert!(
@@ -654,8 +680,15 @@ fn an_unreadable_unit_directory_proceeds_and_says_what_was_not_checked() {
     };
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(notes[0].contains("could not be read"), "{notes:?}");
+    // The removal works without the Python client.
     assert!(
-        notes[0].contains("pseudolife-mcp tunnel service remove"),
+        notes[0].contains("to remove that registration, run systemctl --user disable --now <unit> && rm <unit file> && systemctl --user daemon-reload")
+            && notes[0].contains("whose definition carries the PseudolifeTunnelOwner marker and starts this machine's pseudolife-mcp launcher with tunnel run")
+            && notes[0].contains("Leave any other service alone"),
+        "{notes:?}"
+    );
+    assert!(
+        !notes[0].contains("switch back to the Python client"),
         "{notes:?}"
     );
 }
@@ -710,7 +743,15 @@ fn a_registered_scheduled_task_refuses_after_read_only_queries() {
         "{line}"
     );
     assert!(
-        line.contains("in PowerShell: Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE"),
+        line.contains(
+            "rerun the same command after $env:PSEUDOLIFE_SHIM_ENGINE='python' in PowerShell"
+        ),
+        "{line}"
+    );
+    assert!(
+        line.contains(
+            "with the service manager: schtasks /End /TN \\pseudolife-tunnel-dot and then, even if /End says the task is not running, schtasks /Delete /TN \\pseudolife-tunnel-dot /F (or,"
+        ),
         "{line}"
     );
     assert!(
@@ -860,7 +901,9 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
         place:
             "systemd user unit /home/alexandra/.config/systemd/user/pseudolife-tunnel-dot.service"
                 .into(),
-        file: None,
+        file: Some(PathBuf::from(
+            "/home/alexandra/.config/systemd/user/pseudolife-tunnel-dot.service",
+        )),
         command: Some(vec![
             "/home/alexandra/.local/bin/pseudolife-mcp".into(),
             "tunnel".into(),
@@ -871,25 +914,89 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
             "/home/alexandra/.local/share/pseudolife/tunnel profiles".into(),
         ]),
     };
-    let checkout = refusal(std::slice::from_ref(&service), false, Mover::Checkout);
+    let checkout = refusal(
+        std::slice::from_ref(&service),
+        false,
+        Mover::Checkout,
+        Path::new("/home/alexandra"),
+    );
     assert!(
         checkout.contains("rerun ops/update.sh or ops/update.ps1 without --native, PSEUDOLIFE_NATIVE_UPDATE and PSEUDOLIFE_NATIVE_CLI"),
         "{checkout}"
     );
-    let unattended = refusal(std::slice::from_ref(&service), false, Mover::Unattended);
+    let unattended = refusal(
+        std::slice::from_ref(&service),
+        false,
+        Mover::Unattended,
+        Path::new("/home/alexandra"),
+    );
     assert!(
         unattended.contains("Nothing was changed; this unattended run leaves the client as it is"),
         "{unattended}"
     );
+    // An unattended run never says a later unattended run moves the
+    // machine: only a person's run does, and the line names it exactly.
     assert!(
-        unattended.contains("then the next run moves it."),
+        unattended.contains(
+            "then move it with `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`."
+        ) && !unattended.contains("next run"),
         "{unattended}"
     );
-    let update = refusal(std::slice::from_ref(&service), false, Mover::Update);
+    let daemon = refusal(
+        std::slice::from_ref(&service),
+        false,
+        Mover::UnattendedDaemon,
+        Path::new("/home/alexandra"),
+    );
+    assert!(
+        daemon.starts_with(
+            "this machine stays on the Python client: a tunnel is registered to start by itself. This unattended run updates the daemon alone and leaves this machine's client as it is."
+        ) && daemon.contains(
+            "then move it with `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`."
+        ) && !daemon.contains("next unattended run"),
+        "{daemon}"
+    );
+    let windows_daemon = refusal(
+        std::slice::from_ref(&service),
+        true,
+        Mover::UnattendedDaemon,
+        Path::new("/home/alexandra"),
+    );
+    assert!(
+        windows_daemon.contains(
+            "then move it in PowerShell with `$env:PSEUDOLIFE_SHIM_ENGINE='native'; pseudolife-mcp update --clients-only`."
+        ),
+        "{windows_daemon}"
+    );
+    let update = refusal(
+        std::slice::from_ref(&service),
+        false,
+        Mover::Update,
+        Path::new("/home/alexandra"),
+    );
     assert!(
         update.contains("--daemon-only updates the daemon alone"),
         "{update}"
     );
+    let installer = refusal(
+        std::slice::from_ref(&service),
+        true,
+        Mover::Installer,
+        Path::new("/home/alexandra"),
+    );
+    assert!(
+        installer.contains(
+            "to stay on it, rerun the installer after $env:PSEUDOLIFE_SHIM_ENGINE='python' in PowerShell, without setting it to native again."
+        ),
+        "{installer}"
+    );
+    for line in [&checkout, &unattended, &daemon, &update, &installer] {
+        assert!(
+            !line.contains("without PSEUDOLIFE_SHIM_ENGINE=native")
+                && !line.contains("Remove-Item Env:"),
+            "{line}"
+        );
+    }
     for line in [checkout, unattended, update] {
         // What a 0.23.x hand-off parent keeps of a warning.
         let kept: String = line.chars().take(400).collect();
@@ -1016,14 +1123,159 @@ fn schtasks_failures_are_said_as_what_happened() {
 }
 
 #[test]
+fn every_refusal_keeps_its_cause_and_stay_fix_in_the_first_400_characters() {
+    let unit = |name: &str, kind: Kind, dir: &str| Registered {
+        kind,
+        name: format!("pseudolife-tunnel-{name}.service"),
+        place: format!("systemd unit {dir}/pseudolife-tunnel-{name}.service"),
+        file: Some(PathBuf::from(format!(
+            "{dir}/pseudolife-tunnel-{name}.service"
+        ))),
+        command: Some(vec![
+            "/home/alexandra/.local/bin/pseudolife-mcp".into(),
+            "tunnel".into(),
+            "run".into(),
+            "--profile".into(),
+            name.into(),
+        ]),
+    };
+    // Two services, one of them a root system unit: the longest case.
+    let found = [
+        unit("dot", Kind::SystemUnit, "/etc/systemd/system"),
+        unit(
+            "second",
+            Kind::UserUnit,
+            "/home/alexandra/.config/systemd/user",
+        ),
+    ];
+    let home = Path::new("/home/alexandra");
+    for windows in [false, true] {
+        for mover in [
+            Mover::Update,
+            Mover::Checkout,
+            Mover::Unattended,
+            Mover::UnattendedDaemon,
+            Mover::Installer,
+        ] {
+            let line = refusal(&found, windows, mover, home);
+            let kept: String = line.chars().take(400).collect();
+            let stay = match mover {
+                Mover::Update | Mover::Installer if windows => {
+                    "$env:PSEUDOLIFE_SHIM_ENGINE='python' in PowerShell, without setting it to native again"
+                }
+                Mover::Update | Mover::Installer => {
+                    "PSEUDOLIFE_SHIM_ENGINE=python in front of it, in place of any PSEUDOLIFE_SHIM_ENGINE=native"
+                }
+                Mover::Checkout => {
+                    "without --native, PSEUDOLIFE_NATIVE_UPDATE and PSEUDOLIFE_NATIVE_CLI"
+                }
+                Mover::Unattended => "this unattended run leaves the client as it is",
+                Mover::UnattendedDaemon => "leaves this machine's client as it is",
+            };
+            assert!(
+                kept.starts_with("this machine stays on the Python client: a tunnel is registered to start by itself.")
+                    && kept.contains(stay),
+                "{mover:?} windows={windows}: {kept}"
+            );
+            // Both services are removed, each with its own commands and its
+            // Python record (built as the product joins the path).
+            let record = |name: &str| {
+                quote(
+                    &home
+                        .join(".pseudolife-mcp")
+                        .join("tunnel")
+                        .join(format!("pseudolife-tunnel-{name}.service-owner"))
+                        .to_string_lossy(),
+                    false,
+                )
+            };
+            assert!(
+                line.contains(&format!(
+                    "It is a system unit, so only root can change it. systemctl disable --now pseudolife-tunnel-dot.service && rm /etc/systemd/system/pseudolife-tunnel-dot.service && systemctl daemon-reload && rm {} ; systemctl --user disable --now pseudolife-tunnel-second.service && rm /home/alexandra/.config/systemd/user/pseudolife-tunnel-second.service && systemctl --user daemon-reload && rm {} (or,",
+                    record("dot"),
+                    record("second")
+                )),
+                "{line}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_launchd_refusal_removes_the_plist_and_the_python_record() {
+    let f = Fixture::new();
+    f.python_launcher();
+    let job = f.write(
+        "Library/LaunchAgents/pseudolife-tunnel-dot.plist",
+        &plist(&f.launcher()),
+    );
+    let line = refused(update(&f, &Host::Mac, &Untouched));
+    let record = f
+        .home()
+        .join(".pseudolife-mcp")
+        .join("tunnel")
+        .join("pseudolife-tunnel-dot.service-owner");
+    assert!(
+        line.contains(&format!(
+            "with the service manager: launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot ; rm {} && rm {} (or,",
+            quote(&job.to_string_lossy(), false),
+            quote(&record.to_string_lossy(), false)
+        )),
+        "{line}"
+    );
+}
+
+#[test]
+fn a_hand_made_task_names_the_powershell_way_to_keep_the_python_client() {
+    let task = Registered {
+        kind: Kind::Task,
+        name: "\\pseudolife-tunnel-dot".into(),
+        place: "scheduled task \\pseudolife-tunnel-dot".into(),
+        file: None,
+        command: None,
+    };
+    let line = made_by_hand(&task, false, Mover::Installer);
+    assert!(
+        line.ends_with(
+            "(or keep the Python client: rerun the installer after $env:PSEUDOLIFE_SHIM_ENGINE='python' in PowerShell, without setting it to native again)"
+        ),
+        "{line}"
+    );
+}
+
+#[test]
 fn the_could_not_check_note_names_a_stop_command_and_a_public_page() {
     let note = unchecked("x could not be read", Kind::UserUnit);
     assert!(
         note.contains("disable it with systemctl --user disable --now <unit>"),
         "{note}"
     );
-    assert!(note.contains("To remove the registration"), "{note}");
+    assert!(note.contains("to remove that registration"), "{note}");
     assert!(note.contains(NATIVE_CLIENT_DOCS), "{note}");
+    assert!(
+        note.contains("&& systemctl --user daemon-reload, then delete the Python client's record of it, pseudolife-tunnel-<profile>.service-owner in the tunnel profile directory (see"),
+        "{note}"
+    );
+    for kind in [Kind::SystemUnit, Kind::LaunchAgent] {
+        let other = unchecked("x", kind);
+        assert!(
+            other.contains(".service-owner in the tunnel profile directory"),
+            "{other}"
+        );
+    }
+    let task = unchecked("x", Kind::Task);
+    assert!(!task.contains(".service-owner"), "{task}");
+    assert!(!note.contains("switch back to the Python client"), "{note}");
+    assert!(
+        unchecked("x", Kind::Task)
+            .contains("to remove that registration, run schtasks /End /TN <task> and then, even if /End says the task is not running, schtasks /Delete /TN <task> /F (see")
+    );
+    assert!(unchecked("x", Kind::LaunchAgent).contains(
+        "to remove that registration, run launchctl bootout gui/$(id -u)/<label> ; rm <plist file>"
+    ));
+    assert!(unchecked("x", Kind::SystemUnit).contains(
+        "to remove that registration, run systemctl disable --now <unit> && rm <unit file> && systemctl daemon-reload"
+    ));
     assert!(
         !note.contains("docs/guide/configuration.md describes"),
         "{note}"
@@ -1119,7 +1371,7 @@ fn a_service_made_by_hand_is_warned_about_never_refused() {
     };
     assert!(
         installer[0].ends_with(
-            "can then be deleted. (or keep the Python client: rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native)"
+            "can then be deleted. (or keep the Python client: rerun the installer with PSEUDOLIFE_SHIM_ENGINE=python in front of it, in place of any PSEUDOLIFE_SHIM_ENGINE=native)"
         ),
         "{installer:?}"
     );
@@ -1239,7 +1491,7 @@ fn exec_start_is_read_with_the_spacing_and_prefixes_systemd_accepts() {
     );
     let line = refused(update(&f, &linux(), &Untouched));
     assert!(
-        line.contains("(pseudolife-mcp tunnel service remove --profile dot)"),
+        line.contains("with pseudolife-mcp tunnel service remove --profile dot)"),
         "{line}"
     );
     // A later word that does not decode leaves a known program known.

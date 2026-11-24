@@ -14378,15 +14378,30 @@ tunnel service is registered and runs that launcher, including a disabled
 service. An update with
 `PSEUDOLIFE_SHIM_ENGINE=native` exits 2, and the installer with it stops in
 its preflight; `runtime install --check` is the check both use. The refusal
-names the service and changes nothing. Rerun without
-`PSEUDOLIFE_SHIM_ENGINE=native` to stay on the Python client. To move anyway,
-first run the `pseudolife-mcp tunnel service remove` command the refusal
-prints (it carries the service's `--profile`, `--profile-dir` and, for a root
-service, `--system-service`), then rerun. Removing autostart means the tunnel
-will no longer start on its own. An unattended update on the
-daemon's host that was configured to opt in instead updates the daemon alone
-and says why. Once the autostart is gone, a release update can move the
-client when it runs with `PSEUDOLIFE_SHIM_ENGINE=native`.
+names the service and changes nothing. Rerun with
+`PSEUDOLIFE_SHIM_ENGINE=python` in place of any `PSEUDOLIFE_SHIM_ENGINE=native`
+to stay on the Python client. To move anyway, first remove the autostart,
+then rerun. The refusal prints the service manager's own commands for that,
+which need no Python client:
+- `systemctl disable --now`, then delete the unit file and run
+  `daemon-reload`;
+- or `launchctl bootout`, then delete the plist;
+- or `schtasks /End` and then `schtasks /Delete`, even when `/End` says
+  the task is not running.
+
+On Linux and macOS, also delete the Python client's record of the service
+(`pseudolife-tunnel-<profile>.service-owner` in the profile directory). The
+refusal names it. A record left behind makes that client's later `tunnel
+service` commands refuse the profile. The refusal also prints the Python
+client's `pseudolife-mcp tunnel service remove` command, which does all of
+this itself. It carries the service's `--profile`, `--profile-dir` and, for
+a root service, `--system-service`.
+
+Removing autostart means the tunnel will no longer start on its own. An
+unattended update on the daemon's host that was configured to opt in
+instead updates the daemon alone and says why. Once the autostart is gone,
+move the client with
+`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`.
 
 A saved profile without a service, or a service that runs another program,
 does not block the move. A service you made by hand (no owner marker, but its

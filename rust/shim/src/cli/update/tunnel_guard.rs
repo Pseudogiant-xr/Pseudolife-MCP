@@ -231,7 +231,15 @@ impl Registered {
             // bootout fails only for a job not loaded (already stopped), which
             // must not keep its plist: `;`, not `&&`.
             Kind::LaunchAgent => format!("launchctl bootout gui/$(id -u)/{name} ; rm {file}"),
-            Kind::Task => format!("{}schtasks /Delete /TN {name} /F", powershell_note(&name)),
+            // /Delete does not stop a running task's program: end it first,
+            // as the Python client's removal does. Two commands, not joined
+            // by a separator, since cmd.exe and PowerShell 5.1 share none.
+            // /End fails for a task that is not running, and the Python
+            // client ignores that (check=False), so the text says to go on.
+            Kind::Task => format!(
+                "{}schtasks /End /TN {name} and then, even if /End says the task is not running, schtasks /Delete /TN {name} /F",
+                powershell_note(&name)
+            ),
         }
     }
     /// For a service the user wrote: the service manager's commands that
@@ -266,6 +274,22 @@ impl Registered {
             Kind::SystemUnit => "systemctl disable --now <unit>",
             Kind::LaunchAgent => "launchctl bootout gui/$(id -u)/<label>",
             Kind::Task => "schtasks /Change /TN <task> /Disable",
+        }
+    }
+    /// The service manager's commands that remove it, for a note: the
+    /// same steps as `remove_native`, which need no Python client.
+    fn remove_hint(kind: Kind) -> &'static str {
+        match kind {
+            Kind::UserUnit => {
+                "systemctl --user disable --now <unit> && rm <unit file> && systemctl --user daemon-reload"
+            }
+            Kind::SystemUnit => {
+                "systemctl disable --now <unit> && rm <unit file> && systemctl daemon-reload"
+            }
+            Kind::LaunchAgent => "launchctl bootout gui/$(id -u)/<label> ; rm <plist file>",
+            Kind::Task => {
+                "schtasks /End /TN <task> and then, even if /End says the task is not running, schtasks /Delete /TN <task> /F"
+            }
         }
     }
 }
@@ -373,6 +397,7 @@ pub(crate) fn decide(
             &affected,
             matches!(host, Host::Windows { .. }),
             mover,
+            home,
         ))
     }
 }
@@ -983,8 +1008,18 @@ fn quote(path: &str, powershell: bool) -> String {
 
 fn unchecked(what: &str, kind: Kind) -> String {
     format!(
-        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you find a service, disable it with {}. To remove the registration, switch back to the Python client ({NATIVE_CLIENT_DOCS}) and run pseudolife-mcp tunnel service remove --profile <name>",
-        Registered::stop_hint(kind)
+        "{what}, so this run could not check for a tunnel registered to start by itself. The native client can run a tunnel in the foreground and has no tunnel service command. If you find a service whose definition carries the {} marker and starts this machine's pseudolife-mcp launcher with tunnel run, disable it with {}; to remove that registration, run {}{} (see {NATIVE_CLIENT_DOCS}). Leave any other service alone",
+        OWNER.trim_end_matches(':'),
+        Registered::stop_hint(kind),
+        Registered::remove_hint(kind),
+        // As in the refusal: a record left behind with its unit gone makes
+        // the Python client refuse the profile; a task keeps its pair.
+        match kind {
+            Kind::Task => String::new(),
+            _ => format!(
+                ", then delete the Python client's record of it, {PREFIX}<profile>.service-owner in the tunnel profile directory"
+            ),
+        }
     )
 }
 
@@ -1012,7 +1047,10 @@ fn made_by_hand(service: &Registered, native: bool, mover: Mover) -> String {
     let after = if native {
         String::new()
     } else if mover == Mover::Installer {
-        format!(" (or keep the Python client: rerun the installer without {ENGINE}=native)")
+        format!(
+            " (or keep the Python client: rerun the installer {})",
+            python_first(matches!(service.kind, Kind::Task))
+        )
     } else {
         format!(
             " This run moves the client now; to go back to the Python client see {NATIVE_CLIENT_DOCS}"
@@ -1026,48 +1064,84 @@ fn made_by_hand(service: &Registered, native: bool, mover: Mover) -> String {
     )
 }
 
-fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
+fn refusal(found: &[Registered], windows: bool, mover: Mover, home: &Path) -> String {
     let places = found
         .iter()
         .map(|r| r.place.as_str())
         .collect::<Vec<_>>()
         .join(", ");
+    // The service manager's own commands need no Python client; the Python
+    // client's command is the alternative while this machine still runs it
+    // (it does here: the refusal keeps it on that client).
+    let native_removes = found
+        .iter()
+        .map(|r| {
+            // A unit or plist gone while the Python client's record of it
+            // stays makes that client's later `tunnel service` commands
+            // refuse the profile, so the record goes with it. A task leaves
+            // its saved definition beside the record, a pair that client
+            // still accepts.
+            let record = match r.kind {
+                Kind::Task => String::new(),
+                _ => format!(" && rm {}", r.records(home)),
+            };
+            format!("{}{}{record}", r.root_note(), r.remove_native())
+        })
+        .collect::<Vec<_>>()
+        .join(" ; ");
     let removes = found
         .iter()
         .map(Registered::removal)
         .collect::<Vec<_>>()
         .join("; ");
-    let unset = if windows {
-        format!("in PowerShell: Remove-Item Env:{ENGINE}")
+    // Each way out holds whichever client a release installs by default:
+    // PSEUDOLIFE_SHIM_ENGINE=python keeps the Python client and =native moves
+    // the machine, while an unset variable means the release's default.
+    let python = python_first(windows);
+    let move_now = if windows {
+        format!("in PowerShell with `$env:{ENGINE}='native'; pseudolife-mcp update --clients-only`")
     } else {
-        format!("unset {ENGINE}")
+        format!("with `{ENGINE}=native pseudolife-mcp update --clients-only`")
     };
     // Cause and fix first: a 0.23.x hand-off parent keeps 400 characters.
     let (stay, again) = match mover {
         Mover::Update => (
-            format!("Nothing was changed; to stay on it, rerun the same command without {ENGINE}=native ({unset}, or set it to python; on the daemon's host --daemon-only updates the daemon alone)"),
-            "rerun it",
+            format!("Nothing was changed; to stay on it, rerun the same command {python} (on the daemon's host --daemon-only updates the daemon alone)"),
+            "rerun it".to_owned(),
         ),
         Mover::Checkout => (
             "Nothing was changed; to stay on it, rerun ops/update.sh or ops/update.ps1 without --native, PSEUDOLIFE_NATIVE_UPDATE and PSEUDOLIFE_NATIVE_CLI (or pseudolife-mcp update --checkout without --all, which leaves the clients alone)".to_owned(),
-            "rerun it",
+            "rerun it".to_owned(),
         ),
+        // An unattended run never names a later unattended run as the way
+        // to move: a person moves the machine.
         Mover::Unattended => (
-            "Nothing was changed; this unattended run leaves the client as it is and tries again at its next run".to_owned(),
-            "the next run moves it",
+            "Nothing was changed; this unattended run leaves the client as it is".to_owned(),
+            format!("move it {move_now}"),
         ),
         Mover::UnattendedDaemon => (
-            "This unattended run updates the daemon alone and leaves this machine's client as it is until the autostart is gone".to_owned(),
-            "the next unattended run that installs a release moves it",
+            "This unattended run updates the daemon alone and leaves this machine's client as it is".to_owned(),
+            format!("move it {move_now}"),
         ),
         Mover::Installer => (
-            format!("Nothing was changed; to stay on it, rerun the installer without {ENGINE}=native ({unset}, or set it to python)"),
-            "rerun the installer",
+            format!("Nothing was changed; to stay on it, rerun the installer {python}"),
+            "rerun the installer".to_owned(),
         ),
     };
     format!(
-        "this machine stays on the Python client: a tunnel is registered to start by itself. {stay}. The native client has no tunnel service command to manage that registration after the move. To move to the native client, first remove the autostart with the Python client ({removes}), then {again}. Registered: {places}. Removing autostart means the tunnel will no longer start on its own. Run it in the foreground with pseudolife-mcp tunnel run. The native client has no automatic or background start"
+        "this machine stays on the Python client: a tunnel is registered to start by itself. {stay}. The native client has no tunnel service command to manage that registration after the move. To move to the native client, first remove the autostart with the service manager: {native_removes} (or, while this machine runs the Python client, with {removes}), then {again}. Registered: {places}. Removing autostart means the tunnel will no longer start on its own. Run it in the foreground with pseudolife-mcp tunnel run. The native client has no automatic or background start"
     )
+}
+
+/// How to rerun a command with the Python client selected, in the shell the
+/// platform's commands are printed for. The command being rerun may set
+/// =native itself (the documented move command does), which would win.
+fn python_first(windows: bool) -> String {
+    if windows {
+        format!("after $env:{ENGINE}='python' in PowerShell, without setting it to native again")
+    } else {
+        format!("with {ENGINE}=python in front of it, in place of any {ENGINE}=native")
+    }
 }
 
 #[cfg(test)]
