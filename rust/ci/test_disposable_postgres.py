@@ -2,16 +2,20 @@
 server and the native client faked: nothing here starts a process."""
 from __future__ import annotations
 
+import base64
 import contextlib
 import importlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tomllib
 import types
 from unittest.mock import patch
 
+import psycopg
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,19 +24,26 @@ if str(ROOT) not in sys.path:
 
 from rust.ci import disposable_postgres as postgres  # noqa: E402
 
+START_TIME = "2026-11-24 04:40:54.449893+00"
+
 
 class _AlreadyRunning(Exception):
+    pass
+
+
+class _Pg0Error(Exception):
     pass
 
 
 class FakePg0:
     """The pg0 module: ``start`` writes postmaster.pid as a server would."""
 
-    def __init__(self, *, pid=4242, port=55432, uri_host="localhost", already_running=False,
-                 pidfile=True, info_pid=None):
-        self.pid, self.port, self.uri_host = pid, port, uri_host
-        self.already_running, self.pidfile = already_running, pidfile
-        self.info_pid = pid if info_pid is None else info_pid
+    def __init__(self, server):
+        self.server = server
+        self.pid, self.port, self.uri_host = 4242, 55432, "localhost"
+        self.already_running = self.fail_after_launch = False
+        self.pidfile = True
+        self.info_pid = self.info_port = None
         self.instances, self.drops = [], []
         self.Pg0AlreadyRunningError = _AlreadyRunning
         fake = self
@@ -43,39 +54,65 @@ class FakePg0:
                 fake.instances.append(kwargs)
 
             def start(self):
+                fake.env_during_start = dict(os.environ)
                 if fake.already_running:
                     raise _AlreadyRunning("instance already running")
+                data_dir = Path(self.kwargs["data_dir"])
                 if fake.pidfile:
-                    Path(self.kwargs["data_dir"], "postmaster.pid").write_text(
-                        f"{fake.pid}\n{self.kwargs['data_dir']}\n0\n{fake.port}\n", encoding="utf-8")
+                    (data_dir / "postmaster.pid").write_text(
+                        f"{fake.pid}\n{data_dir}\n0\n{fake.port}\n", encoding="utf-8")
+                    fake.server.boot(data_dir, self.kwargs["password"])
+                if fake.fail_after_launch:
+                    raise _Pg0Error("timed out waiting for the server")
+                port = fake.port if fake.info_port is None else fake.info_port
                 return types.SimpleNamespace(
-                    pid=fake.info_pid, port=fake.port,
-                    uri=f"postgresql://postgres:{self.kwargs['password']}@{fake.uri_host}:{fake.port}/postgres")
+                    pid=fake.pid if fake.info_pid is None else fake.info_pid, port=port,
+                    uri=f"postgresql://postgres:{self.kwargs['password']}@{fake.uri_host}:{port}/postgres")
 
             def drop(self, force=True):
                 fake.drops.append(self.kwargs["name"])
+                fake.server.running = False
 
         self.Pg0 = Pg0
 
 
-class FakeServerAuth:
-    """Which superuser passwords the faked server accepts."""
+class FakeServer:
+    """The server pg0 started: which passwords it accepts and what it says
+    about itself."""
 
-    def __init__(self, *, honour_alter=True):
-        self.accepted, self.statements, self.honour_alter = set(), [], honour_alter
+    def __init__(self):
+        self.running = False
+        self.data_directory = None
+        self.started = START_TIME
+        self.honour_alter = True
+        self.plain, self.verifier = None, None
+        self.statements = []
+
+    def boot(self, data_dir, password):
+        self.running, self.data_directory, self.plain = True, str(data_dir), password
+
+    def accepts(self, password):
+        if self.verifier is not None:
+            match = re.fullmatch(r"SCRAM-SHA-256\$(\d+):([^$]+)\$.+", self.verifier)
+            salt = base64.b64decode(match.group(2))
+            return postgres.scram_verifier(password, salt, int(match.group(1))) == self.verifier
+        return password == self.plain
 
     def connect(self, port, password, dbname="postgres"):
-        if password not in self.accepted:
-            raise _Refused("password authentication failed")
-        auth = self
+        if not self.running:
+            raise psycopg.OperationalError("connection failed: Connection refused")
+        if not self.accepts(password):
+            raise psycopg.OperationalError('FATAL:  password authentication failed for user "postgres"')
+        server = self
 
         class Connection:
             def execute(self, statement):
-                text = repr(statement)
-                auth.statements.append(text)
-                match = re.search(r"Literal\('([0-9a-f]+)'\)", text)
-                if auth.honour_alter and match:
-                    auth.accepted = {match.group(1)}
+                text = statement if isinstance(statement, str) else repr(statement)
+                server.statements.append(text)
+                match = re.search(r"Literal\('(SCRAM-SHA-256[^']+)'\)", text)
+                if match and server.honour_alter:
+                    server.verifier = match.group(1)
+                return types.SimpleNamespace(fetchone=lambda: (server.started, server.data_directory))
 
             def __enter__(self):
                 return self
@@ -86,33 +123,22 @@ class FakeServerAuth:
         return Connection()
 
 
-class _Refused(Exception):
-    pass
-
-
 @pytest.fixture
 def fakes(monkeypatch, tmp_path):
-    pg0 = FakePg0()
-    auth = FakeServerAuth()
+    server = FakeServer()
+    pg0 = FakePg0(server)
+    pg0.Pg0Error = _Pg0Error
     monkeypatch.setitem(sys.modules, "pg0", pg0)
-    real_pg0_init = pg0.Pg0.__init__
-
-    def init(self, **kwargs):
-        real_pg0_init(self, **kwargs)
-        if "password" in kwargs:
-            auth.accepted = {kwargs["password"]}
-
-    monkeypatch.setattr(pg0.Pg0, "__init__", init)
-    monkeypatch.setattr(postgres, "_connect", auth.connect)
-    monkeypatch.setattr(postgres, "_refused", lambda port, password: password not in auth.accepted)
-    return types.SimpleNamespace(pg0=pg0, auth=auth, parent=tmp_path)
+    monkeypatch.setattr(postgres, "_connect", server.connect)
+    return types.SimpleNamespace(pg0=pg0, server=server, parent=tmp_path)
 
 
 def test_start_owns_a_fresh_loopback_cluster(fakes):
     server = postgres.start(fakes.parent, "pl-test-")
     assert server.owned and server.port == 55432 and server.pid == 4242 and server.host == "127.0.0.1"
     started = fakes.pg0.instances[0]
-    assert started["config"] == {"listen_addresses": "127.0.0.1", "unix_socket_directories": ""}
+    assert started["config"] == {"listen_addresses": "127.0.0.1", "unix_socket_directories": "",
+                                 "lc_messages": "C"}
     assert Path(started["data_dir"]).parent.parent == fakes.parent
     assert server.admin_conninfo() == "host=127.0.0.1 port=55432 user=postgres dbname=postgres"
     assert server.password not in server.admin_conninfo() and server.password not in repr(server)
@@ -122,15 +148,24 @@ def test_start_rotates_off_the_command_line_password(fakes):
     server = postgres.start(fakes.parent, "pl-test-")
     argv_password = fakes.pg0.instances[0]["password"]
     assert server.password != argv_password
-    assert fakes.auth.accepted == {server.password}
-    assert any(f"Literal('{server.password}')" in text for text in fakes.auth.statements)
+    assert fakes.server.accepts(server.password) and not fakes.server.accepts(argv_password)
+    # Only the verifier crosses the connection, never the password itself.
+    assert not any(server.password in text for text in fakes.server.statements)
 
 
 def test_start_refuses_when_the_old_password_still_works(fakes):
-    fakes.auth.honour_alter = False
+    fakes.server.honour_alter = False
     with pytest.raises(postgres.SetupError, match="still accepts the start-up password"):
         postgres.start(fakes.parent, "pl-test-")
     assert len(fakes.pg0.drops) == 1  # the owned server is stopped, not left running
+
+
+def test_start_refuses_a_server_that_does_not_serve_its_directory(fakes):
+    original = fakes.server.boot
+    fakes.server.boot = lambda data_dir, password: original(data_dir.parent, password)
+    with pytest.raises(postgres.SetupError, match="does not serve the fresh data directory"):
+        postgres.start(fakes.parent, "pl-test-")
+    assert len(fakes.pg0.drops) == 1
 
 
 def test_start_refuses_a_server_that_was_already_running(fakes):
@@ -140,31 +175,46 @@ def test_start_refuses_a_server_that_was_already_running(fakes):
     assert fakes.pg0.drops == []
 
 
-@pytest.mark.parametrize("change", ["no_pidfile", "other_port", "other_pid"])
-def test_start_refuses_a_server_outside_its_fresh_directory(fakes, change):
-    if change == "no_pidfile":
-        fakes.pg0.pidfile = False
-    elif change == "other_port":
-        fakes.pg0.port, fakes.pg0.pidfile = 55432, True
-        original = fakes.pg0.Pg0.start
-
-        def start(self):
-            info = original(self)
-            info.port = 55433
-            return info
-
-        fakes.pg0.Pg0.start = start
-    else:
-        fakes.pg0.info_pid = 999
+def test_start_refuses_a_server_outside_its_fresh_directory(fakes):
+    fakes.pg0.pidfile = False
     with pytest.raises(postgres.SetupError, match="refusing to adopt it"):
         postgres.start(fakes.parent, "pl-test-")
-    assert fakes.pg0.drops == []
+    assert fakes.pg0.drops == []  # nothing of ours runs
+
+
+@pytest.mark.parametrize("field", ["info_port", "info_pid"])
+def test_start_stops_its_own_server_when_pg0_reports_another(fakes, field):
+    setattr(fakes.pg0, field, 999)
+    with pytest.raises(postgres.SetupError, match="another server"):
+        postgres.start(fakes.parent, "pl-test-")
+    assert len(fakes.pg0.drops) == 1
+
+
+def test_start_stops_a_server_pg0_launched_before_failing(fakes):
+    fakes.pg0.fail_after_launch = True
+    with pytest.raises(_Pg0Error):
+        postgres.start(fakes.parent, "pl-test-")
+    assert len(fakes.pg0.drops) == 1
+
+
+def test_start_uses_its_own_server_when_pg0_omits_the_uri(fakes):
+    original = fakes.pg0.Pg0.start
+
+    def start(self):
+        info = original(self)
+        info.uri, info.port, info.pid = None, None, None
+        return info
+
+    fakes.pg0.Pg0.start = start
+    server = postgres.start(fakes.parent, "pl-test-")
+    assert (server.port, server.pid, server.host) == (55432, 4242, "127.0.0.1")
 
 
 def test_start_refuses_a_non_loopback_endpoint(fakes):
     fakes.pg0.uri_host = "10.0.0.5"
     with pytest.raises(postgres.SetupError, match="loopback"):
         postgres.start(fakes.parent, "pl-test-")
+    assert len(fakes.pg0.drops) == 1
 
 
 @pytest.mark.parametrize("host", ["10.0.0.5", "0.0.0.0", "::1", "example.com", ""])
@@ -176,6 +226,44 @@ def test_loopback_host_refuses_everything_but_ipv4_loopback(host):
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "127.0.0.2"])
 def test_loopback_host_accepts_ipv4_loopback(host):
     assert postgres.loopback_host(host).startswith("127.")
+
+
+def test_pg0_and_connections_never_see_the_runners_libpq_variables(fakes, monkeypatch):
+    monkeypatch.setenv("PGHOSTADDR", "10.0.0.5")
+    monkeypatch.setenv("PGSSLMODE", "require")
+    postgres.start(fakes.parent, "pl-test-")
+    assert not any(key.upper().startswith("PG") for key in fakes.pg0.env_during_start)
+    assert os.environ["PGHOSTADDR"] == "10.0.0.5"  # restored afterwards
+
+
+def test_connect_pins_the_loopback_address_and_hides_libpq_variables(monkeypatch):
+    monkeypatch.setenv("PGHOSTADDR", "10.0.0.5")
+    seen = {}
+
+    def connect(**kwargs):
+        seen.update(kwargs, environment=dict(os.environ))
+        return "connection"
+
+    monkeypatch.setattr(psycopg, "connect", connect)
+    assert postgres._connect(55432, "synthetic-secret") == "connection"
+    assert seen["hostaddr"] == "127.0.0.1" and seen["sslmode"] == "disable"
+    assert "PGHOSTADDR" not in seen["environment"]
+    assert os.environ["PGHOSTADDR"] == "10.0.0.5"
+
+
+def test_refused_means_the_server_answered_with_an_authentication_failure(fakes):
+    fakes.server.boot(fakes.parent, "right")
+    assert postgres._refused(1, "wrong") is True
+    assert postgres._refused(1, "right") is False
+    fakes.server.running = False
+    assert postgres._refused(1, "wrong") is False  # unreachable proves nothing
+
+
+def test_scram_verifier_has_postgres_layout():
+    verifier = postgres.scram_verifier("synthetic", salt=b"\x00" * 16)
+    assert re.fullmatch(r"SCRAM-SHA-256\$4096:[A-Za-z0-9+/=]{24}\$[A-Za-z0-9+/=]{44}:[A-Za-z0-9+/=]{44}", verifier)
+    assert verifier == postgres.scram_verifier("synthetic", salt=b"\x00" * 16)
+    assert verifier != postgres.scram_verifier("synthetic", salt=b"\x01" * 16)
 
 
 def test_stop_stops_only_the_server_it_started(fakes):
@@ -190,8 +278,9 @@ def test_stop_leaves_an_attached_server_running(fakes, tmp_path):
     pgdata = tmp_path / "pgdata"
     pgdata.mkdir()
     (pgdata / "postmaster.pid").write_text("4242\nx\n0\n55432\n", encoding="utf-8")
+    fakes.server.boot(pgdata, "x")
     server = postgres.Server(name="theirs", data_dir=tmp_path, pgdata=pgdata, port=55432, pid=4242,
-                             password="x", owned=False)
+                             password="x", owned=False, started=START_TIME)
     assert server.stop() is False
     assert fakes.pg0.drops == []
 
@@ -202,6 +291,21 @@ def test_stop_leaves_a_server_that_replaced_its_own(fakes):
     assert server.stop() is False
     assert fakes.pg0.drops == []
     assert server.data_dir.exists()
+
+
+@pytest.mark.parametrize("change", ["restarted", "unreachable", "other_directory"])
+def test_stop_leaves_a_server_it_cannot_identify(fakes, change):
+    """A stale postmaster.pid whose pid another process reuses must not be
+    signalled: the server must still answer as the one this process started."""
+    server = postgres.start(fakes.parent, "pl-test-")
+    if change == "restarted":
+        fakes.server.started = "2026-11-24 05:00:00+00"
+    elif change == "unreachable":
+        fakes.server.running = False
+    else:
+        fakes.server.data_directory = str(fakes.parent)
+    assert server.stop() is False
+    assert fakes.pg0.drops == []
 
 
 def test_child_environment_drops_libpq_controls_and_the_daemon_url():
@@ -227,17 +331,27 @@ def test_create_test_login_runs_the_native_client_without_the_password_on_argv(m
                        "host=127.0.0.1 port=55432 user=postgres dbname=postgres"]
     assert not any("synthetic-secret" in part for part in command)
     assert kwargs["env"]["PGPASSWORD"] == "synthetic-secret"
+    assert kwargs["timeout"] < 300  # inside the shortest calling step's five minutes
+
+
+@pytest.mark.parametrize(("stdout", "stderr", "reason"), [
+    ('{"exit": 3, "error": "the admin login is not a superuser", "changes": []}\n', "", "the admin login is not a superuser"),
+    ('{"exit": 2, "error": null, "changes": []}\n', "usage: --file is required", "usage: --file is required"),
+    ("", "", "no reason printed (exit 3)"),
+])
+def test_failure_reason_reads_the_json_report_first(stdout, stderr, reason):
+    assert postgres.failure_reason(subprocess.CompletedProcess([], 3, stdout, stderr)) == reason
 
 
 def test_the_pins_match_the_package_extras_they_replace():
-    """rust/ci/requirements-postgres.txt carries the pins pyproject's extras
-    bring today, so the package's deletion cannot loosen them."""
+    """rust/ci/requirements-postgres.txt carries the pins pyproject's
+    dependencies bring today, so the package's deletion cannot loosen them."""
     pins = [line.strip() for line in (ROOT / "rust/ci/requirements-postgres.txt").read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.startswith("#")]
-    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    declared = set(project["dependencies"]) | {pin for extra in project["optional-dependencies"].values() for pin in extra}
     assert pins == ["pg0-embedded>=0.15.2,<0.16", "psycopg[binary]>=3.3.8"]
-    for pin in pins:
-        assert f'"{pin}"' in pyproject
+    assert set(pins) <= declared
 
 
 # ── the lease row's fixture ──────────────────────────────────────────────────
@@ -261,6 +375,25 @@ def package_blocked():
         sys.modules.update(saved)
 
 
+def test_neither_module_imports_the_package_when_loaded():
+    names = ("rust.ci.disposable_postgres", "rust.cli_harness.lease_ci")
+    parents = [(importlib.import_module(name.rpartition(".")[0]), name.rpartition(".")[2]) for name in names]
+    bound = [vars(parent).get(child) for parent, child in parents]
+    try:
+        with package_blocked(), patch.dict(sys.modules):
+            for name in names:
+                sys.modules.pop(name, None)
+                importlib.import_module(name)
+    finally:
+        # The re-import rebinds each parent package's attribute; later tests
+        # patch the module objects the rest of this file imported.
+        for (parent, child), module in zip(parents, bound):
+            if module is None:
+                vars(parent).pop(child, None)
+            else:
+                setattr(parent, child, module)
+
+
 @pytest.fixture
 def lease_ci(monkeypatch, tmp_path, fakes):
     binary = tmp_path / "pseudolife-stdio"
@@ -274,7 +407,7 @@ def lease_ci(monkeypatch, tmp_path, fakes):
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, json.dumps({"ok": True}), "")
+        return subprocess.CompletedProcess(command, 0, json.dumps({"exit": 0, "error": None}), "")
 
     monkeypatch.setattr(postgres.subprocess, "run", run)
     with package_blocked():
@@ -303,27 +436,31 @@ def test_lease_fixture_refuses_without_the_native_client(lease_ci, capsys):
     assert lease_ci.fakes.pg0.instances == [] and lease_ci.calls == []
 
 
-def test_lease_fixture_reports_a_failed_login_without_its_secret(lease_ci, monkeypatch, capsys):
+def test_lease_fixture_reports_why_the_login_failed_without_its_secret(lease_ci, monkeypatch, capsys):
     def run(command, **kwargs):
         secret = kwargs["env"]["PGPASSWORD"]
         seen.append(secret)
-        # A bare secret: only the redaction by value can remove it.
-        return subprocess.CompletedProcess(command, 3, "", f"refused for {secret}")
+        # The report's reason, carrying the bare secret: only the redaction by
+        # value can remove it.
+        report = {"exit": 3, "error": f"admin connection refused for {secret}", "changes": []}
+        return subprocess.CompletedProcess(command, 3, json.dumps(report) + "\n", "")
 
     seen = []
     monkeypatch.setattr(postgres.subprocess, "run", run)
     assert lease_ci.module.main() == 3
     err = capsys.readouterr().err
     assert "test-login fixture provisioning failed (exit 3)" in err
+    assert "admin connection refused for ***" in err
     assert not lease_ci.env_file.exists()
     assert seen and seen[0] not in err
 
 
-def test_lease_fixture_refuses_values_github_env_cannot_hold(lease_ci, monkeypatch, capsys):
+def test_lease_fixture_refuses_values_github_env_cannot_hold_before_starting(lease_ci, monkeypatch, capsys):
     monkeypatch.setenv("RUNNER_TEMP", str(lease_ci.tmp / "runner\ntemp"))
     assert lease_ci.module.main() == 1
     assert "cannot be written to GITHUB_ENV" in capsys.readouterr().err
     assert not lease_ci.env_file.exists()
+    assert lease_ci.fakes.pg0.instances == []
 
 
 def test_lease_fixture_imports_nothing_from_the_package(lease_ci):
