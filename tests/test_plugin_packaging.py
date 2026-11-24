@@ -164,8 +164,15 @@ def _pyproject_version() -> str:
 
 def _release_version() -> str:
     """The release version's native authority, ``[package] version`` in
-    rust/shim/Cargo.toml, through its one reader (rust/ci/release_version.py)."""
-    return release_version.read(ROOT)
+    rust/shim/Cargo.toml, through its one reader (rust/ci/release_version.py).
+    While the Python package is published, pyproject.toml must equal it, so
+    each pin that compares with it pins to pyproject's version as well, even
+    when run alone (the release procedure runs some of them by name)."""
+    value = release_version.read(ROOT)
+    assert _pyproject_version() == value, (
+        f"pyproject.toml version {_pyproject_version()!r} != release version {value!r} "
+        f"({release_version.AUTHORITY}): the version cut writes both")
+    return value
 
 
 def test_pyproject_version_matches_the_native_release():
@@ -195,7 +202,7 @@ def test_server_json_versions_match_pyproject():
     was unguarded against pyproject.toml too. Pin all three here so a bad
     version cut fails locally, before any workflow runs. They are pinned to
     the release version, which pyproject.toml must equal while the package
-    is published (test_release_matches_the_native_release)."""
+    is published (test_pyproject_version_matches_the_native_release)."""
     release = _release_version()
 
     server = json.loads(_read("server.json"))

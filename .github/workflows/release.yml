@@ -56,9 +56,9 @@ jobs:
 
       - name: Guard — release tag must match the release version
         # The release version is the shim crate's (rust/shim/Cargo.toml);
-        # `check` also requires every field the version cut writes, the
-        # pyproject.toml version among them, to equal it, naming the first
-        # that differs (rust/ci/release_version.py).
+        # `check` also requires every version field the cut writes outside
+        # the frozen package, the pyproject.toml version among them, to
+        # equal it, naming the one to fix (rust/ci/release_version.py).
         run: python rust/ci/release_version.py check --tag "$GITHUB_REF_NAME"
 
       - name: Guard — server.json versions must match the release tag

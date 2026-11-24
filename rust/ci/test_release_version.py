@@ -80,19 +80,33 @@ def test_drift_in_each_field_is_refused_by_name(tmp_path, label):
     assert str(refused.value).startswith(f"{label} is 9.9.9 but the release version is {value} ")
 
 
-def test_a_moved_authority_is_refused_at_the_first_field(tmp_path):
-    copy_fields(tmp_path)
+def test_a_stale_authority_is_named_as_the_one_to_fix(tmp_path):
+    """A cut that wrote every field but the shim crate: the message names
+    the crate, not the first field, so following it literally fixes the cut."""
+    value = copy_fields(tmp_path)
     _sub(rv.AUTHORITY, r'^version = "([^"]+)"')(tmp_path, "9.9.9")
     assert rv.read(tmp_path) == "9.9.9"
-    with pytest.raises(rv.VersionError, match=re.escape(f"{LABELS[0]} is ")):
+    with pytest.raises(rv.VersionError) as refused:
+        rv.check(tmp_path)
+    assert str(refused.value) == (f"{rv.AUTHORITY} [package] version is 9.9.9 but every other version "
+                                  f"field is {value}; the version cut must write {rv.AUTHORITY} too")
+
+
+def test_a_lone_moved_field_is_named_even_when_only_two_agree(tmp_path):
+    """Only when every field agrees is the authority blamed."""
+    value = copy_fields(tmp_path)
+    MUTATE[LABELS[-1]](tmp_path, "9.9.9")
+    with pytest.raises(rv.VersionError, match=re.escape(f"{LABELS[-1]} is 9.9.9 but the release version is {value} ")):
         rv.check(tmp_path)
 
 
-def test_pyproject_is_checked_only_while_it_exists(tmp_path):
+def test_pyproject_is_required_while_the_wheel_is_published(tmp_path):
+    """The release workflow still builds and publishes the wheel, so a tag
+    whose checkout lost pyproject.toml must stop before either build."""
     value = copy_fields(tmp_path)
     (tmp_path / "pyproject.toml").unlink()
-    assert rv.check(tmp_path) == value
-    assert all(label != LABELS[0] for label, _ in rv.fields(tmp_path))
+    with pytest.raises(rv.VersionError, match=re.escape(f"{LABELS[0]} is unreadable or missing")):
+        rv.check(tmp_path, f"v{value}")
 
 
 @pytest.mark.parametrize("path", sorted({row[1] for row in rv.FIELDS if row[3]}))
@@ -126,11 +140,32 @@ def test_table_string_reads_only_the_named_table():
     assert rv.table_string(text, "dependencies", "version") == "0.0.3"
 
 
-@pytest.mark.parametrize("line", ["version.workspace = true", "version = '1.2.3'", 'version = """1.2.3"""',
-                                  'versions = "1.2.3"', '# version = "1.2.3"', 'version = ""'])
+def test_headers_with_quoted_keys_and_comments_end_the_table():
+    text = ('[package]\nname = "x"\n'
+            "[target.'cfg(target_os = \"windows\")'.dependencies]\nversion = \"9\"\n")
+    assert rv.table_string(text, "package", "version") is None
+    assert rv.table_string("[ package ] # a ] note\nversion = '1.2.3'\n", "package", "version") == "1.2.3"
+    assert rv.table_string('[[package]]\nversion = "1"\n', "package", "version") is None
+
+
+@pytest.mark.parametrize("line, value", [('version = "1.2.3"', "1.2.3"), ("version = '1.2.3'", "1.2.3"),
+                                         ('  version="1.2.3"  # cut', "1.2.3")])
+def test_a_manifest_with_a_one_line_string_version_is_read(line, value):
+    assert rv.from_manifest(f'[package]\nname = "pseudolife-stdio"\n{line}\n') == value
+
+
+@pytest.mark.parametrize("line", ["version.workspace = true", "version = '''1.2.3'''", 'version = """1.2.3"""',
+                                  'version = "1.2\\u002e3"', 'versions = "1.2.3"', '# version = "1.2.3"',
+                                  'version = ""'])
 def test_a_manifest_without_a_plain_version_is_refused(line):
     with pytest.raises(rv.VersionError, match=r"names no \[package\] version"):
         rv.from_manifest(f'[package]\nname = "pseudolife-stdio"\n{line}\n')
+
+
+def test_a_byte_order_mark_does_not_hide_the_version(tmp_path):
+    (tmp_path / "rust" / "shim").mkdir(parents=True)
+    (tmp_path / rv.AUTHORITY).write_bytes(b'\xef\xbb\xbf[package]\r\nversion = "1.2.3"\r\n')
+    assert rv.read(tmp_path) == "1.2.3"
 
 
 def test_lock_version_reads_the_named_package_entry():

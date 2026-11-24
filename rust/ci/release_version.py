@@ -1,15 +1,20 @@
 """The release version: one native authority, one reader, one drift check.
 
 The authority is ``[package] version`` in ``rust/shim/Cargo.toml``: the shim
-crate is the native client the release archives ship, and it has carried the
-release version since 0.18.0, so the reader also works on older checkouts
-and at older revisions. Every other place a release cut writes the version
-is a *field* that must equal it; ``check`` names the first that differs.
+crate is the native client the release archives ship, and every release
+since 0.18.1 has carried the release version there (tag ``v0.18.0`` still
+said 0.17.0), so the reader also works on older checkouts and at older
+revisions back to that release. Every other place a release cut writes the
+version (``FIELDS``) is a *field* that must equal it; ``check`` names the
+one that differs.
 
-``pyproject.toml`` is one of those fields while the Python package is still
-published: the release cut keeps writing it, and ``check`` keeps it equal.
-The pull request that deletes the package removes that field from
-``FIELDS`` (with the file), so the drift guard never goes quiet by accident.
+``pyproject.toml`` is one of those fields, and a required one, while the
+Python package is still published: the release cut keeps writing it, and
+``check`` keeps it equal. The pull request that deletes the package removes
+that field from ``FIELDS`` with the file, so the drift guard never goes
+quiet by accident. The compose copy packaged inside the frozen package
+(``pseudolife_memory/compose/docker-compose.yml``) is not a field here: the
+release procedure has it checked by hand.
 
 Standard library only and no ``tomllib``, so it runs on Python 3.10 (the
 oldest interpreter ``ops/integrate.py`` supports) and reads text taken from
@@ -31,30 +36,51 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parents[2]
 AUTHORITY = "rust/shim/Cargo.toml"
 
-_HEADER = re.compile(r"^\s*(\[\[?)\s*([^\]\s]+)\s*(\]\]?)\s*(?:#.*)?$")
-_STRING_KEY = r'^\s*{key}\s*=\s*"([^"\\]*)"\s*(?:#.*)?$'
+# A table header, `[name]` or `[[name]]`, whose name may hold quoted keys
+# with spaces (`[target.'cfg(a = "b")'.dependencies]`): the name ends at the
+# first `]` (or `]]`) that only whitespace or a comment follows.
+_TABLE = re.compile(r"^\s*\[(?!\[)(.*?)\]\s*(?:#.*)?$")
+_ARRAY = re.compile(r"^\s*\[\[(.*?)\]\]\s*(?:#.*)?$")
+# A one-line basic string without escapes, or a one-line literal string.
+_STRING_KEY = r"""^\s*{key}\s*=\s*(?:"([^"\\]*)"|'([^']*)')\s*(?:#.*)?$"""
 
 
 class VersionError(ValueError):
     """A version that cannot be read, or two that differ."""
 
 
+def _header(line: str) -> tuple[str, str] | None:
+    """("table" or "array", the name with no spaces around its dots), or None."""
+    for kind, pattern in (("array", _ARRAY), ("table", _TABLE)):
+        match = pattern.match(line)
+        if match:
+            return kind, ".".join(part.strip() for part in match[1].split("."))
+    return None
+
+
+def _string(pattern: re.Pattern, line: str) -> str | None:
+    match = pattern.match(line)
+    if not match:
+        return None
+    return match[1] if match[1] is not None else match[2]
+
+
 def table_string(text: str, table: str, key: str) -> str | None:
-    """The basic-string value of ``key`` in TOML table ``[table]`` (not an
-    array of tables), read line by line: the first assignment wins, and a
-    value that is not a plain one-line string (``version.workspace = true``,
-    a literal string, a multi-line one) reads as absent."""
+    """The string value of ``key`` in TOML table ``[table]`` (not an array
+    of tables), read line by line: the first assignment wins, and a value
+    that is not a one-line string (``version.workspace = true``, a
+    multi-line string, one with escapes) reads as absent."""
     current = None
     pattern = re.compile(_STRING_KEY.format(key=re.escape(key)))
     for line in text.splitlines():
-        header = _HEADER.match(line)
+        header = _header(line)
         if header:
-            current = header[2] if header[1] == "[" and header[3] == "]" else None
+            current = header[1] if header[0] == "table" else None
             continue
         if current == table:
-            match = pattern.match(line)
-            if match:
-                return match[1]
+            value = _string(pattern, line)
+            if value is not None:
+                return value
     return None
 
 
@@ -65,18 +91,18 @@ def lock_version(text: str, package: str) -> str | None:
     name = version = None
     in_package = False
     for line in [*text.splitlines(), "[[end]]"]:
-        header = _HEADER.match(line)
+        header = _header(line)
         if header:
             if in_package and name == package:
                 return version
-            in_package = header[1] == "[[" and header[2] == "package"
+            in_package = header == ("array", "package")
             name = version = None
             continue
         if in_package:
-            if name is None and (match := name_re.match(line)):
-                name = match[1]
-            elif version is None and (match := version_re.match(line)):
-                version = match[1]
+            if name is None and (value := _string(name_re, line)) is not None:
+                name = value
+            elif version is None and (value := _string(version_re, line)) is not None:
+                version = value
     return None
 
 
@@ -92,7 +118,7 @@ def from_manifest(text: str) -> str:
 def read(root: Path = ROOT) -> str:
     """The release version of the checkout at ``root``."""
     try:
-        text = (Path(root) / AUTHORITY).read_text(encoding="utf-8")
+        text = (Path(root) / AUTHORITY).read_text(encoding="utf-8-sig")
     except OSError as error:
         raise VersionError(f"cannot read {AUTHORITY} ({error.strerror or error})") from None
     return from_manifest(text)
@@ -102,7 +128,7 @@ def at_rev(rev: str, root: Path = ROOT) -> str | None:
     """The release version at git revision ``rev``, or None when the
     revision has no readable authority."""
     shown = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{AUTHORITY}"],
-                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+                           capture_output=True, text=True, encoding="utf-8-sig", errors="replace")
     if shown.returncode != 0:
         return None
     try:
@@ -132,10 +158,11 @@ def _regex(pattern: str) -> Callable[[str], str | None]:
 # required is skipped while its file is absent; every one that exists must
 # equal the authority. Order is the order `check` reports in.
 FIELDS: tuple[tuple[str, str, Callable[[str], str | None], bool], ...] = (
-    # The Python package's metadata, while the package is still published
-    # (removed with the package; see the module docstring).
+    # The Python package's metadata. Required while the release workflow
+    # still builds and publishes the wheel, so its metadata is checked before
+    # either build; removed with the package (see the module docstring).
     ("pyproject.toml [project] version", "pyproject.toml",
-     lambda text: table_string(text, "project", "version"), False),
+     lambda text: table_string(text, "project", "version"), True),
     ("rust/daemon/Cargo.toml [package] version", "rust/daemon/Cargo.toml",
      lambda text: table_string(text, "package", "version"), True),
     ("rust/Cargo.lock pseudolife-stdio", "rust/Cargo.lock",
@@ -155,8 +182,8 @@ FIELDS: tuple[tuple[str, str, Callable[[str], str | None], bool], ...] = (
 
 
 def fields(root: Path = ROOT) -> list[tuple[str, str | None]]:
-    """Every version field present at ``root``, as (label, value); a value
-    that cannot be read is None."""
+    """Every version field at ``root``, as (label, value); a value that
+    cannot be read, or a required field whose file is missing, is None."""
     found = []
     for label, path, get, required in FIELDS:
         file = Path(root) / path
@@ -165,7 +192,7 @@ def fields(root: Path = ROOT) -> list[tuple[str, str | None]]:
                 found.append((label, None))
             continue
         try:
-            value = get(file.read_text(encoding="utf-8"))
+            value = get(file.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError, KeyError, IndexError, TypeError):
             value = None
         found.append((label, value))
@@ -175,16 +202,24 @@ def fields(root: Path = ROOT) -> list[tuple[str, str | None]]:
 def check(root: Path = ROOT, tag: str | None = None) -> str:
     """The release version, after checking every field (and ``tag``, a
     release tag ``v<version>``) equals it; raises VersionError naming the
-    first that differs."""
+    one to fix."""
     value = read(root)
     if tag is not None:
         bare = tag[1:] if tag.startswith("v") else None
         if bare != value:
             raise VersionError(f"release tag {tag} does not match the release version {value} "
                                f"({AUTHORITY}); fix the tag or the version cut before publishing")
-    for label, found in fields(root):
-        if found != value:
-            shown = "unreadable or missing" if found is None else found
+    found = fields(root)
+    others = {seen for _, seen in found}
+    if len(found) > 1 and len(others) == 1 and None not in others and value not in others:
+        # Every field agrees and only the authority differs: the authority
+        # is the one the cut missed.
+        raise VersionError(f"{AUTHORITY} [package] version is {value} but every other version "
+                           f"field is {next(iter(others))}; the version cut must write "
+                           f"{AUTHORITY} too")
+    for label, seen in found:
+        if seen != value:
+            shown = "unreadable or missing" if seen is None else seen
             raise VersionError(f"{label} is {shown} but the release version is {value} "
                                f"({AUTHORITY}); the version cut must write it too")
     return value

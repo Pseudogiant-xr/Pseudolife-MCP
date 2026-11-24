@@ -138,7 +138,7 @@ def test_version_refuses_either_mismatched_native_crate(tmp_path, crate):
     manifest = tmp_path / "rust" / crate / "Cargo.toml"
     text = manifest.read_text(encoding="utf-8")
     manifest.write_text(text.replace(f'\nversion = "{value}"', '\nversion = "1.2.4"', 1), encoding="utf-8")
-    with pytest.raises(ValueError, match="1.2.4" if crate == "daemon" else "but the release version is 1.2.4"):
+    with pytest.raises(ValueError, match=f"rust/{crate}/Cargo.toml \\[package\\] version is 1.2.4 "):
         assets.version(tmp_path)
 
 
