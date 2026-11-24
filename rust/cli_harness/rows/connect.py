@@ -1197,8 +1197,8 @@ def cases() -> list[Case]:
 
     def bom_token(arm):
         path = arm.home / ".pseudolife-mcp" / "bom.token"
-        _oracle_token_writer()(path, GOOD)
-        # The oracle's writer refuses a BOM; rewrite the owner-only file's bytes.
+        credential_files.write_token_file(path, GOOD)
+        # The client's writer refuses a BOM; rewrite the owner-only file's bytes.
         with open(path, "r+b") as stream:
             stream.write(("﻿" + GOOD).encode())
         claude_json(arm.home, entry("shim", claude_env(arm.home, token=path)))
