@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -70,8 +71,10 @@ class FakePg0:
                     uri=f"postgresql://postgres:{self.kwargs['password']}@{fake.uri_host}:{port}/postgres")
 
             def drop(self, force=True):
+                # pg0 drop: stop the server, delete its data directory.
                 fake.drops.append(self.kwargs["name"])
                 fake.server.running = False
+                shutil.rmtree(self.kwargs["data_dir"], ignore_errors=True)
 
         self.Pg0 = Pg0
 
@@ -158,6 +161,7 @@ def test_start_refuses_when_the_old_password_still_works(fakes):
     with pytest.raises(postgres.SetupError, match="still accepts the start-up password"):
         postgres.start(fakes.parent, "pl-test-")
     assert len(fakes.pg0.drops) == 1  # the owned server is stopped, not left running
+    assert list(fakes.parent.iterdir()) == []  # and its fresh directory is gone
 
 
 def test_start_refuses_a_server_that_does_not_serve_its_directory(fakes):
@@ -173,6 +177,7 @@ def test_start_refuses_a_server_that_was_already_running(fakes):
     with pytest.raises(postgres.SetupError, match="refusing to adopt it"):
         postgres.start(fakes.parent, "pl-test-")
     assert fakes.pg0.drops == []
+    assert list(fakes.parent.iterdir()) == []
 
 
 def test_start_refuses_a_server_outside_its_fresh_directory(fakes):
@@ -180,6 +185,17 @@ def test_start_refuses_a_server_outside_its_fresh_directory(fakes):
     with pytest.raises(postgres.SetupError, match="refusing to adopt it"):
         postgres.start(fakes.parent, "pl-test-")
     assert fakes.pg0.drops == []  # nothing of ours runs
+    assert list(fakes.parent.iterdir()) == []
+
+
+def test_start_removes_its_directory_when_pg0_fails_before_launching(fakes):
+    """An initdb failure (an unknown locale, say) leaves no server: the
+    fresh directory goes and nothing is stopped."""
+    fakes.pg0.pidfile, fakes.pg0.fail_after_launch = False, True
+    with pytest.raises(_Pg0Error):
+        postgres.start(fakes.parent, "pl-test-")
+    assert fakes.pg0.drops == []
+    assert list(fakes.parent.iterdir()) == []
 
 
 @pytest.mark.parametrize("field", ["info_port", "info_pid"])
@@ -190,11 +206,23 @@ def test_start_stops_its_own_server_when_pg0_reports_another(fakes, field):
     assert len(fakes.pg0.drops) == 1
 
 
+def test_start_keeps_the_directory_of_a_server_it_could_not_stop(fakes, monkeypatch):
+    """A server still running in the fresh directory keeps its files."""
+    monkeypatch.setattr(fakes.pg0.Pg0, "drop", lambda self, force=True: fakes.pg0.drops.append(self.kwargs["name"]))
+    fakes.server.honour_alter = False
+    with pytest.raises(postgres.SetupError):
+        postgres.start(fakes.parent, "pl-test-")
+    assert len(fakes.pg0.drops) == 1
+    (data_dir,) = fakes.parent.iterdir()
+    assert (data_dir / "pgdata" / "postmaster.pid").is_file()
+
+
 def test_start_stops_a_server_pg0_launched_before_failing(fakes):
     fakes.pg0.fail_after_launch = True
     with pytest.raises(_Pg0Error):
         postgres.start(fakes.parent, "pl-test-")
     assert len(fakes.pg0.drops) == 1
+    assert list(fakes.parent.iterdir()) == []
 
 
 def test_start_uses_its_own_server_when_pg0_omits_the_uri(fakes):

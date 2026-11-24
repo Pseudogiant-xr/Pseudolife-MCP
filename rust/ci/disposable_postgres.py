@@ -196,6 +196,15 @@ def _drop(name: str, pgdata: Path) -> None:
         pg0.Pg0(name=name, data_dir=str(pgdata)).drop(force=True)
 
 
+def _abandon(name: str, data_dir: Path, pgdata: Path) -> None:
+    """Undo a start that failed: stop a server pg0 launched in our fresh
+    directory, then remove the directory once nothing runs in it."""
+    if _pidfile(pgdata) is not None:
+        _drop(name, pgdata)
+    if _pidfile(pgdata) is None:
+        shutil.rmtree(data_dir, ignore_errors=True)
+
+
 def start(parent: Path, prefix: str) -> Server:
     """A fresh cluster under ``parent``, owned by this process.
 
@@ -215,17 +224,18 @@ def start(parent: Path, prefix: str) -> Server:
         with _without_libpq_environment():
             info = instance.start()
     except pg0.Pg0AlreadyRunningError:
+        _abandon(name, data_dir, pgdata)
         raise SetupError("PostgreSQL was unexpectedly already running; refusing to adopt it") from None
     except BaseException:
         # pg0 can fail after postgres launched (a readiness timeout): a
         # server in this fresh directory is ours and must not outlive this.
-        if _pidfile(pgdata) is not None:
-            _drop(name, pgdata)
+        _abandon(name, data_dir, pgdata)
         raise
     record = _pidfile(pgdata)
     if record is None:
         # pg0 reports a server, but none runs in our fresh directory: it
         # attached to something else, which is not ours to use or stop.
+        _abandon(name, data_dir, pgdata)
         raise SetupError("PostgreSQL was unexpectedly already running; refusing to adopt it")
     pid, port = record
     try:
@@ -238,7 +248,7 @@ def start(parent: Path, prefix: str) -> Server:
                         password=first, owned=True, host=host)
         rotate_password(server)
     except BaseException:
-        _drop(name, pgdata)  # ours: our fresh directory's own postmaster
+        _abandon(name, data_dir, pgdata)  # ours: our fresh directory's own postmaster
         raise
     return server
 
