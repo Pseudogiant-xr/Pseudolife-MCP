@@ -299,21 +299,59 @@ fn register_command(client: &str, ctx: &Ctx) -> Result<String, Refusal> {
             "gemini mcp add -s user {} {SERVER} {shim}",
             flags("-e", "gemini")
         ),
-        _ => desktop_install_command(ctx.remote, &ctx.url, token),
+        _ => desktop_install_command(ctx.remote, &ctx.url, ctx.token_file.as_deref()),
     })
 }
 
-/// The installer run that registers Claude Desktop with the native client:
-/// on a machine without the daemon it needs the daemon's URL and token file.
-fn desktop_install_command(remote: bool, url: &str, token: &str) -> String {
-    let (sh, ps) = if remote {
-        (
-            format!(" --daemon-url {url} --token-file {token}"),
-            format!(" -DaemonUrl {url} -TokenFile {token}"),
-        )
-    } else {
-        (String::new(), String::new())
-    };
+/// A word a POSIX shell reads back unchanged (single quotes when needed).
+fn sh_word(text: &str) -> String {
+    if !text.is_empty()
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&b))
+    {
+        return text.to_owned();
+    }
+    format!("'{}'", text.replace('\'', "'\"'\"'"))
+}
+
+/// A word PowerShell reads back unchanged (single quotes when needed).
+fn ps_word(text: &str) -> String {
+    if !text.is_empty()
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_@%+=:,./\\-".contains(&b))
+    {
+        return text.to_owned();
+    }
+    format!("'{}'", text.replace('\'', "''"))
+}
+
+/// The installer run that registers Claude Desktop with the native client.
+/// The daemon URL and token file are kept whenever they differ from the
+/// installer's defaults (a remote daemon, a non-default local port, an SSH
+/// tunnel to a loopback port), and a loopback URL that carries a token file
+/// is a client-only install, so the installer wires Desktop to that daemon
+/// instead of setting one up here. Values are quoted for each shell.
+fn desktop_install_command(remote: bool, url: &str, token: Option<&str>) -> String {
+    let keep_url = remote || url != DEFAULT_URL || token.is_some();
+    let token = token
+        .map(|t| (sh_word(t), ps_word(t)))
+        .or_else(|| remote.then(|| ("<token file>".to_owned(), "<token file>".to_owned())));
+    let client_only = !remote && token.is_some();
+    let (mut sh, mut ps) = (String::new(), String::new());
+    if keep_url {
+        sh += &format!(" --daemon-url {}", sh_word(url));
+        ps += &format!(" -DaemonUrl {}", ps_word(url));
+    }
+    if let Some((sh_token, ps_token)) = &token {
+        sh += &format!(" --token-file {sh_token}");
+        ps += &format!(" -TokenFile {ps_token}");
+    }
+    if client_only {
+        sh += " --client-only";
+        ps += " -ClientOnly";
+    }
     format!(
         "rerun the native installer for Claude Desktop: PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh --client claude-desktop{sh} (Windows: $env:PSEUDOLIFE_SHIM_ENGINE='native'; ops\\install.ps1 -Client claude-desktop{ps})"
     )
@@ -719,15 +757,74 @@ mod tests {
 
     #[test]
     fn the_desktop_install_command_selects_the_native_client_and_carries_the_credential() {
+        const HEAD: &str = "rerun the native installer for Claude Desktop: PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh --client claude-desktop";
+        const WIN: &str = " (Windows: $env:PSEUDOLIFE_SHIM_ENGINE='native'; ops\\install.ps1 -Client claude-desktop";
+        // The installer's own defaults: the short command.
         assert_eq!(
-            desktop_install_command(false, "http://127.0.0.1:8765", "<token file>"),
-            "rerun the native installer for Claude Desktop: PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh --client claude-desktop (Windows: $env:PSEUDOLIFE_SHIM_ENGINE='native'; ops\\install.ps1 -Client claude-desktop)"
+            desktop_install_command(false, "http://127.0.0.1:8765", None),
+            format!("{HEAD}{WIN})")
         );
-        let remote = desktop_install_command(true, "http://10.0.0.5:8765", "/t/desktop.token");
+        // A remote daemon: its URL and token file.
+        let remote =
+            desktop_install_command(true, "http://10.0.0.5:8765", Some("/t/desktop.token"));
         assert_eq!(
             remote,
-            "rerun the native installer for Claude Desktop: PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh --client claude-desktop --daemon-url http://10.0.0.5:8765 --token-file /t/desktop.token (Windows: $env:PSEUDOLIFE_SHIM_ENGINE='native'; ops\\install.ps1 -Client claude-desktop -DaemonUrl http://10.0.0.5:8765 -TokenFile /t/desktop.token)"
+            format!(
+                "{HEAD} --daemon-url http://10.0.0.5:8765 --token-file /t/desktop.token{WIN} -DaemonUrl http://10.0.0.5:8765 -TokenFile /t/desktop.token)"
+            )
         );
         assert!(!remote.contains(".py"), "{remote}");
+        // A remote daemon whose token file connect was not given.
+        assert_eq!(
+            desktop_install_command(true, "http://10.0.0.5:8765", None),
+            format!(
+                "{HEAD} --daemon-url http://10.0.0.5:8765 --token-file <token file>{WIN} -DaemonUrl http://10.0.0.5:8765 -TokenFile <token file>)"
+            )
+        );
+    }
+
+    #[test]
+    fn the_desktop_install_command_keeps_a_local_daemon_the_installer_would_not_choose() {
+        const HEAD: &str = "rerun the native installer for Claude Desktop: PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh --client claude-desktop";
+        const WIN: &str = " (Windows: $env:PSEUDOLIFE_SHIM_ENGINE='native'; ops\\install.ps1 -Client claude-desktop";
+        // A local daemon on a port the installer would not use.
+        assert_eq!(
+            desktop_install_command(false, "http://127.0.0.1:9000", None),
+            format!(
+                "{HEAD} --daemon-url http://127.0.0.1:9000{WIN} -DaemonUrl http://127.0.0.1:9000)"
+            )
+        );
+        // An SSH tunnel to a remote daemon: loopback URL plus a token file is client-only.
+        assert_eq!(
+            desktop_install_command(false, "http://127.0.0.1:9000", Some("/home/u/t.token")),
+            format!(
+                "{HEAD} --daemon-url http://127.0.0.1:9000 --token-file /home/u/t.token --client-only{WIN} -DaemonUrl http://127.0.0.1:9000 -TokenFile /home/u/t.token -ClientOnly)"
+            )
+        );
+        // The default URL with a token file is still a tunnel, not the installer's own daemon.
+        assert!(
+            desktop_install_command(false, "http://127.0.0.1:8765", Some("/t/t.token")).contains(
+                "--daemon-url http://127.0.0.1:8765 --token-file /t/t.token --client-only"
+            )
+        );
+    }
+
+    #[test]
+    fn the_desktop_install_command_quotes_a_path_for_each_shell() {
+        let command = desktop_install_command(
+            true,
+            "http://10.0.0.5:8765",
+            Some(r"C:\Users\A B\it's.token"),
+        );
+        assert!(
+            command.contains(r#"--token-file 'C:\Users\A B\it'"'"'s.token'"#),
+            "{command}"
+        );
+        assert!(
+            command.contains(r"-TokenFile 'C:\Users\A B\it''s.token'"),
+            "{command}"
+        );
+        assert_eq!(sh_word("/plain/path.token"), "/plain/path.token");
+        assert_eq!(ps_word(r"C:\plain\path.token"), r"C:\plain\path.token");
     }
 }
