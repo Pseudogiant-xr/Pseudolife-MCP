@@ -850,16 +850,16 @@
   },
   "status-refresh-pending-text": {
    "home": null,
-   "utc_offset": 39600,
+   "utc_offset": 0,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLgpBUEkga2V5IGV4cGlyeTogdW5rbm93bjsgY2hlY2sgUGxhdGZvcm0ga2V5IHNldHRpbmdzLgpMYXN0IHR1bm5lbCByZWZyZXNoOiBwZW5kaW5nOyBuZWVkcyBhdHRlbnRpb24uIEluc3BlY3QgdHVubmVsIGRvY3RvciBiZWZvcmUgcmV0cnlpbmcgdGhlIHVwZGF0ZS4K",
+   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLgpBUEkga2V5IGV4cGlyeTogdW5rbm93bjsgY2hlY2sgUGxhdGZvcm0ga2V5IHNldHRpbmdzLgpMYXN0IHR1bm5lbCByZWZyZXNoOiBwZW5kaW5nOyBuZWVkcyBhdHRlbnRpb24uIFRoZSBQeXRob24gY2xpZW50IHJlY29yZGVkIGl0OyBzdG9wIHRoZSB0dW5uZWwgYW5kIHN0YXJ0IGl0IHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBydW5gIHRvIHJ1biBpdCBvbiB0aGlzIGNsaWVudC4K",
    "stderr": "",
    "window": [
-    1791588236.1149063,
-    1791588236.5207002
+    1795495530.103887,
+    1795495530.1082888
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -1102,16 +1102,16 @@
   },
   "status-refresh-rolled-back-text": {
    "home": null,
-   "utc_offset": 39600,
+   "utc_offset": 0,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4KTGFzdCB0dW5uZWwgcmVmcmVzaDogcm9sbGVkLWJhY2s7IG5lZWRzIGF0dGVudGlvbi4gSW5zcGVjdCB0dW5uZWwgZG9jdG9yIGJlZm9yZSByZXRyeWluZyB0aGUgdXBkYXRlLgo=",
+   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4KTGFzdCB0dW5uZWwgcmVmcmVzaDogcm9sbGVkLWJhY2s7IG5lZWRzIGF0dGVudGlvbi4gVGhlIFB5dGhvbiBjbGllbnQgcmVjb3JkZWQgaXQ7IHN0b3AgdGhlIHR1bm5lbCBhbmQgc3RhcnQgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHJ1bmAgdG8gcnVuIGl0IG9uIHRoaXMgY2xpZW50Lgo=",
    "stderr": "",
    "window": [
-    1791588239.1254332,
-    1791588239.546578
+    1795495530.7156215,
+    1795495530.720865
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -3647,10 +3647,10 @@
    "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX0vdHVubmVscy9kb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cGAsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cwo=",
+   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX0vdHVubmVscy9kb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLWRhZW1vbi11cmwgPHVybD4gLS10b2tlbi1maWxlIDxvd25lci1vbmx5IGZpbGU+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cwo=",
    "window": [
-    1795493314.6392627,
-    1795493314.6432488
+    1795495537.977825,
+    1795495537.9822395
    ],
    "requests": [],
    "arm": "rust",
@@ -3686,10 +3686,10 @@
    "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX0vdHVubmVscy9kb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cGAsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cwo=",
+   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX0vdHVubmVscy9kb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLWRhZW1vbi11cmwgPHVybD4gLS10b2tlbi1maWxlIDxvd25lci1vbmx5IGZpbGU+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cwo=",
    "window": [
-    1795493314.7410064,
-    1795493314.7452133
+    1795495538.0795362,
+    1795495538.0839522
    ],
    "requests": [],
    "arm": "rust",
@@ -3725,10 +3725,10 @@
    "utc_offset": 0,
    "exit": 2,
    "stdout": "",
-   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX0vdHVubmVscy9kb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cGAsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cwo=",
+   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX0vdHVubmVscy9kb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLWRhZW1vbi11cmwgPHVybD4gLS10b2tlbi1maWxlIDxvd25lci1vbmx5IGZpbGU+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cwo=",
    "window": [
-    1795493314.8437347,
-    1795493314.847813
+    1795495538.183602,
+    1795495538.188953
    ],
    "requests": [],
    "arm": "rust",
@@ -4159,16 +4159,16 @@
    "candidate_sha256": "92ff96ae3b3e34936366a1ae2e14b7a7aa5431fec7f6f45b84f37c9770069663"
   },
   "defer-status-hour-24-expiry": {
-   "commit": "2be3da30b58c75a7156c40b7e90766cfaa631eec",
+   "commit": "b963ac3df47885555b87a65873248d886582f374",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "92ff96ae3b3e34936366a1ae2e14b7a7aa5431fec7f6f45b84f37c9770069663"
+   "candidate_sha256": "b6f394e659ab09183cdedd2f7a0312b77cc5a1b68e7d635d88688817b5966209"
   },
   "defer-status-one-digit-fraction": {
-   "commit": "2be3da30b58c75a7156c40b7e90766cfaa631eec",
+   "commit": "b963ac3df47885555b87a65873248d886582f374",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "92ff96ae3b3e34936366a1ae2e14b7a7aa5431fec7f6f45b84f37c9770069663"
+   "candidate_sha256": "b6f394e659ab09183cdedd2f7a0312b77cc5a1b68e7d635d88688817b5966209"
   },
   "defer-status-refresh-reserved-id": {
    "commit": "2be3da30b58c75a7156c40b7e90766cfaa631eec",
@@ -4183,10 +4183,10 @@
    "candidate_sha256": "92ff96ae3b3e34936366a1ae2e14b7a7aa5431fec7f6f45b84f37c9770069663"
   },
   "defer-status-seven-digit-fraction": {
-   "commit": "2be3da30b58c75a7156c40b7e90766cfaa631eec",
+   "commit": "b963ac3df47885555b87a65873248d886582f374",
    "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "92ff96ae3b3e34936366a1ae2e14b7a7aa5431fec7f6f45b84f37c9770069663"
+   "candidate_sha256": "b6f394e659ab09183cdedd2f7a0312b77cc5a1b68e7d635d88688817b5966209"
   },
   "defer-verify-process-record": {
    "commit": "2be3da30b58c75a7156c40b7e90766cfaa631eec",
@@ -4211,6 +4211,18 @@
    "rust_tree": "clean",
    "platform": "linux",
    "candidate_sha256": "8ca638522d60a063594f3d9743dfca1881e96665eba4e3254ef9ab3bbdaa6f6e"
+  },
+  "status-refresh-pending-text": {
+   "commit": "b963ac3df47885555b87a65873248d886582f374",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "b6f394e659ab09183cdedd2f7a0312b77cc5a1b68e7d635d88688817b5966209"
+  },
+  "status-refresh-rolled-back-text": {
+   "commit": "b963ac3df47885555b87a65873248d886582f374",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "b6f394e659ab09183cdedd2f7a0312b77cc5a1b68e7d635d88688817b5966209"
   },
   "update-corrupt-profile": {
    "commit": "ebbb36a52f3566210ced9185a336d3eb003feabe",
