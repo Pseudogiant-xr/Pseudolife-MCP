@@ -12183,8 +12183,9 @@ judging behavior. No measured Rust regression baseline exists yet.
   One is a shorter rewrite that repeats most of its words (its
   compression-echo rule, issue #1924). The other is a value equal to it after
   case and space normalisation. The gate accepts a fixture write that does
-  not become a version only when `memory_fact_set` answers `confirmed` and
-  returns the slot's previous value unchanged. The response does not name
+  not become a version only when `memory_fact_set` answers `confirmed` on
+  the same entity and attribute and returns the slot's previous value
+  unchanged. The response does not name
   the rule, so both cases are listed the same way: in `contexts.json` and the
   candidate under `echo_confirmed`, with the question, slot, written value
   and kept value. Any other difference from the fixture's history still
@@ -12193,7 +12194,9 @@ judging behavior. No measured Rust regression baseline exists yet.
 - **Gate context cells.** Each cell has its own test database and daemon,
   and each daemon embeds on one ORT thread. Cells therefore run in parallel
   without changing a context, and the rows are recorded in question order.
-  The contexts are built before the model server starts.
+  A cell stopped because another failed saves no daemon log, so the saved
+  log is the failing cell's. The contexts are built before the model server
+  starts.
 
 ## Commands in evals/README.md that changed
 
