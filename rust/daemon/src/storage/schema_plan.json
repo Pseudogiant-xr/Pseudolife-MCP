@@ -3,7 +3,7 @@
   "schema_version": 59,
   "embedding_dimension": 1024,
   "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
-  "embedding_refusal": "Refusing to start: entries.embedding is vector({live_dim}) but this build's schema expects vector(1024). ensure_schema is additive-only and will NOT alter vector dimensions in place -- that would either half-migrate four tables at startup or write 1024-d vectors into a {live_dim}-d column, corrupting the bank. Run the human-gated migration first: `python ops/migrate_embeddings.py` (backs up, requires the daemon stopped, re-embeds every row through the real embedder, and moves all four embedding columns from vector({live_dim}) to vector(1024)). Never run the daemon against a bank you have not migrated.",
+  "embedding_refusal": "Refusing to start: entries.embedding is vector({live_dim}) but this build's schema expects vector(1024). ensure_schema is additive-only and will NOT alter vector dimensions in place: that would either half-migrate four tables at startup or write 1024-d vectors into a {live_dim}-d column, corrupting the bank, so the bank is left untouched. If this is the wrong bank, set PSEUDOLIFE_MCP_DATABASE_URL to the intended one. This release has no step that re-embeds a vector({live_dim}) bank (#1938); do not run the daemon against it.",
   "steps": [
     {
       "op": "version_guard"

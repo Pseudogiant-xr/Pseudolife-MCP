@@ -8,7 +8,7 @@ use crate::embed::Embedder;
 use crate::startup::StartupState;
 use crate::storage::{OpenError, Storage};
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -1469,22 +1469,7 @@ impl Service {
 
     /// `_refuse_on_stale_hydrated_dims`'s message.
     fn stale_dims_message(&self, s: &crate::bank::StaleDims, dim: usize) -> String {
-        let dims: Vec<String> = s.dims.iter().map(|d| d.to_string()).collect();
-        format!(
-            "Refusing to serve: {} hydrated row(s) in the bank at {} are embedded at {} dims, but the live \
-             embedder ({}) produces {}-d vectors — every search/store would crash with a torch shape error. \
-             If this daemon was started by accident against an old or retired bank (e.g. a shim-spawned \
-             fallback while the real Docker daemon was still booting), stop it and point the client at the \
-             intended daemon. Otherwise migrate deliberately: a file-mode bank is re-embedded on import when \
-             the daemon is given Postgres storage (set PSEUDOLIFE_MCP_DATABASE_URL, or install \
-             pseudolife-mcp[lite]); a Postgres bank migrates with `python ops/migrate_embeddings.py`. Or \
-             configure the embedding model that produced these vectors.",
-            s.count,
-            self.data_dir.display(),
-            dims.join(", "),
-            self.config.embedding.model_name,
-            dim,
-        )
+        stale_dims_text(s, &self.data_dir, &self.config.embedding.model_name, dim)
     }
 
     /// `MemoryService.warmup`: retry only a retryable failure whose window
@@ -1704,6 +1689,30 @@ impl crate::background::Duties for Service {
     }
 }
 
+/// The stale-dimensions refusal: the cause, the wrong-bank fix, and the one
+/// setting that serves these vectors. No native step re-embeds them (#1938).
+fn stale_dims_text(
+    s: &crate::bank::StaleDims,
+    data_dir: &Path,
+    model_name: &str,
+    dim: usize,
+) -> String {
+    let dims: Vec<String> = s.dims.iter().map(|d| d.to_string()).collect();
+    format!(
+        "Refusing to serve: {} hydrated row(s) in the bank at {} are embedded at {} dims, but the live \
+         embedder ({}) produces {}-d vectors, so every search and store would fail. If this daemon \
+         was started against the wrong bank, stop it and point the client at the intended daemon. \
+         Otherwise set embedding.model_name to the model that produced these vectors (its ONNX \
+         artifact must be in the local model or Hub cache) and restart the daemon; this release has \
+         no step that re-embeds them (#1938).",
+        s.count,
+        data_dir.display(),
+        dims.join(", "),
+        model_name,
+        dim,
+    )
+}
+
 #[cfg(test)]
 #[path = "service_shadow_tests.rs"]
 mod shadow_refresh_tests;
@@ -1711,6 +1720,38 @@ mod shadow_refresh_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stale_dims_refusal_names_the_model_setting_not_a_python_migration() {
+        let stale = crate::bank::StaleDims {
+            count: 3,
+            dims: vec![384],
+        };
+        let message = stale_dims_text(
+            &stale,
+            Path::new("/bank"),
+            "Qwen/Qwen3-Embedding-0.6B",
+            1024,
+        );
+        assert_eq!(
+            message,
+            "Refusing to serve: 3 hydrated row(s) in the bank at /bank are embedded at 384 dims, \
+             but the live embedder (Qwen/Qwen3-Embedding-0.6B) produces 1024-d vectors, so every \
+             search and store would fail. If this daemon was started against the wrong bank, stop \
+             it and point the client at the intended daemon. Otherwise set embedding.model_name to \
+             the model that produced these vectors (its ONNX artifact must be in the local model or \
+             Hub cache) and restart the daemon; this release has no step that re-embeds them (#1938)."
+        );
+        for gone in [
+            "python",
+            ".py",
+            "pseudolife-mcp[lite]",
+            "file-mode",
+            "torch",
+        ] {
+            assert!(!message.contains(gone), "{gone}: {message}");
+        }
+    }
 
     fn identity_test_dsn() -> String {
         let dsn =
