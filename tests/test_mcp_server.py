@@ -1004,7 +1004,7 @@ def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monke
 
 _FULL_LESSON = {
     "task": "deploy daemon", "aspect": "procedure", "lesson": "backup first",
-    "about": "ops/update.ps1", "polarity": "+", "outcome": "success",
+    "about": "deploy procedure", "polarity": "+", "outcome": "success",
     "status": "current", "confidence": 0.9, "origin": "action",
     "provenance": ["action"], "asserted_at": 1.0, "last_confirmed": 2.0,
     "supersedes_value": None, "superseded_by_value": None,
