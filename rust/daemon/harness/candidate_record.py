@@ -91,6 +91,10 @@ def write_json(path: Path, data: dict, *, newline_at_end: bool) -> None:
 # the expected outcome) or produced no entry, or when its entry names a host
 # path; a whole run is refused with ``PSEUDOLIFE_DAEMON_MUTANT`` set.
 MUTANT_ENV = "PSEUDOLIFE_DAEMON_MUTANT"
+# What the retired oracle recording flag of the startup harnesses answers.
+RECORD_GOLDENS_RETIRED = ("--record-goldens recorded the frozen Python service, which is retired; "
+                          "re-record a golden from the Rust candidate with --record-candidate "
+                          "(a dry run), then --record-candidate --write")
 
 
 def refuse_mutant_environment() -> str | None:

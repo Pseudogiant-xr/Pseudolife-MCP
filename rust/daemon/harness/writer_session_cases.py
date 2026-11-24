@@ -8,9 +8,8 @@ bank (``handover``); it is killed a third time while a second writer holds
 the lease, so the call and ``/health``'s database probe are refused
 (``held``) until the holder leaves and the retry window passes
 (``released``). Each phase compares the whole bank with the expected changes
-to its writer epoch and board clock. ``--oracle`` also compares the frozen
-Python service on its own clone. The native embedder loads the offline ONNX
-fixture.
+to its writer epoch and board clock. The native embedder loads the offline
+ONNX fixture. The frozen Python arm (``--oracle``) is retired.
 """
 from __future__ import annotations
 
@@ -26,8 +25,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from types import SimpleNamespace
-from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -54,19 +51,11 @@ memory:
   miras:
     preset: flat
 """
-NOOP_CALLBACKS = (
-    "_recover_correction_locked", "_recover_entry_reinstatement_locked",
-    "_recover_lesson_synthesis", "_refresh_source_retired_lessons_locked",
-    "_carry_over_listing_spelling",
-)
-# Past _SESSION_PROBE_INTERVAL (1 s), so Python probes the killed session
-# too; inside it Python serves without probing (see divergences.md).
-PAST_PROBE = 1.1
-# Past _LEASE_RETRY_SECONDS (5 s).
-PAST_LEASE_RETRY = 5.1
 MUTANTS = ("writer-no-reconnect", "writer-epoch-unchecked")
 PHASE_EPOCH_INCREMENTS = dict(zip(PHASES, (1, 2, 4, 5, 6)))
 WRITER_LEASE_KEY = "pseudolife-bank-writer"
+ORACLE_RETIRED = ("--oracle compared the frozen Python service, which is retired; the cell checks the "
+                  "native service against its expected phases and bank states without it")
 
 
 def _dsn() -> str:
@@ -133,117 +122,6 @@ def hold_lease():
         ready.unlink(missing_ok=True)
 
 
-def helper(*args):
-    run = subprocess.run([sys.executable, str(Path(__file__).resolve()), *args],
-                         cwd=REPO, env=os.environ.copy(), capture_output=True, text=True, timeout=120)
-    if run.returncode:
-        raise RuntimeError(f"writer helper {args} exit {run.returncode}: {run.stderr[-1800:]}")
-
-
-def kill(storage):
-    """End the writer session from a side connection, as a server restart
-    would, and wait until its backend (and lease) has gone. psycopg learns
-    of it only on the next use."""
-    pid = storage._conn.info.backend_pid
-    with psycopg.connect(_dsn(), autocommit=True) as side:
-        side.execute("SELECT pg_terminate_backend(%s)", (pid,))
-        deadline = time.monotonic() + 10
-        while side.execute("SELECT count(*) FROM pg_stat_activity WHERE pid = %s",
-                           (pid,)).fetchone()[0]:
-            if time.monotonic() > deadline:
-                raise RuntimeError("the killed session never ended")
-            time.sleep(0.02)
-
-
-def oracle_cell():
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    storage = PostgresStorage(_dsn())
-    import torch
-    from pseudolife_memory.memory.hlc import HybridLogicalClock
-    from pseudolife_memory.service import MemoryService
-    torch.set_num_threads(1)
-    config = Path(os.environ["PL_PGS_WRITER_CONFIG"])
-    service = MemoryService(data_dir=config.parent, config_path=config,
-                            database_url=_dsn())
-    service._storage = storage
-    service._embedder = SimpleNamespace(embedding_dim=4)
-    service._hlc = HybridLogicalClock(now_ms=lambda: 100)
-    for name in NOOP_CALLBACKS:
-        setattr(service, name, lambda: None)
-    service._hydrate_resident_stores = lambda: startup.python_hydrate(
-        service._storage, config, resident_service=service)
-    phases = []
-    try:
-        with patch("pseudolife_memory.curation_safety.recover_slot_curation", return_value=None):
-            service._ensure_init()
-            # The resident stores the previous successful phase served.
-            before = [(service._cms, service._world, service._cortex)]
-
-            def observe(phase, call, pid_before, dump=True):
-                try:
-                    call()
-                except Exception as error:
-                    ok, error_text, same, replaced = False, str(error), None, None
-                else:
-                    ok, error_text = True, None
-                    bank, world, cortex = before[0]
-                    same = {"bank": service._cms is bank, "world": service._world is world,
-                            "cortex": service._cortex is cortex}
-                    replaced = service._storage._conn.info.backend_pid != pid_before
-                    before[0] = (service._cms, service._world, service._cortex)
-                try:
-                    service._storage.ping()
-                    ping = "ok"
-                except Exception as error:
-                    ping = f"error: {error}"
-                phases.append({"phase": phase, "observed": {
-                    "ok": ok, "error": error_text, "same_as_before": same, "session_replaced": replaced,
-                    "epoch": service._storage._lease_epoch, "health_db": ping,
-                    "resident_invalidated": service._storage.resident_invalidated}})
-                if dump:
-                    dump_phase(phase)
-
-            pid = service._storage._conn.info.backend_pid
-            observe("initial", lambda: None, pid)
-
-            pid = service._storage._conn.info.backend_pid
-            kill(service._storage)
-            time.sleep(PAST_PROBE)
-            observe("death", service._ensure_init, pid)
-
-            pid = service._storage._conn.info.backend_pid
-            kill(service._storage)
-            helper("--other-writer")
-            time.sleep(PAST_PROBE)
-            observe("handover", service._ensure_init, pid)
-
-            pid = service._storage._conn.info.backend_pid
-            kill(service._storage)
-            gate = Path(os.environ["PL_PGS_WRITER_GATE"])
-            ready = gate.with_suffix(".ready")
-            gate.write_text("hold", encoding="utf-8")
-            holder = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--hold-lease"],
-                                      cwd=REPO, env=os.environ.copy())
-            deadline = time.monotonic() + 60
-            while not ready.exists():
-                if time.monotonic() > deadline or holder.poll() is not None:
-                    raise RuntimeError("the lease holder never took the lease")
-                time.sleep(0.05)
-            time.sleep(PAST_PROBE)
-            # The phase dump comes after the holder leaves, as in the Rust arm.
-            observe("held", service._ensure_init, pid, dump=False)
-            gate.unlink()
-            if holder.wait(timeout=60):
-                raise RuntimeError("lease holder failed")
-            dump_phase("held")
-            time.sleep(PAST_LEASE_RETRY)
-            observe("released", service._ensure_init, pid)
-        Path(os.environ["PL_PGS_WRITER_OUT"]).write_text(json.dumps({"phases": phases}, allow_nan=False),
-                                                        encoding="utf-8")
-    finally:
-        service._storage.close()
-
-
 LEASE_HOLDER = re.compile(r"backend pid [0-9]+ \(application_name '[^']*'\)")
 
 
@@ -251,11 +129,6 @@ def normalized(result):
     """Only the second writer's backend pid and application name vary."""
     text = LEASE_HOLDER.sub("backend pid <pid> (application_name <holder>)", json.dumps(result))
     return json.loads(text)
-
-
-def compare_phases(python, rust):
-    python, rust = normalized(python), normalized(rust)
-    return dbstate.diff(python, rust)
 
 
 def runtime_library():
@@ -286,12 +159,9 @@ def invoke(binary, kind, dsn, home, model, phases, output, gate, mutant=None):
     for key in list(env):
         if key.startswith("PL_") and key != "PL_HARNESS_SLICE" and not key.startswith("PL_PGS_WRITER_"):
             env.pop(key)
-    if kind == "python":
-        command = [sys.executable, str(Path(__file__).resolve()), "--oracle-cell"]
-    else:
-        command = [str(binary), "--exact", "service::tests::db_writer_session_phases", "--nocapture"]
-        if mutant:
-            env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
+    command = [str(binary), "--exact", "service::tests::db_writer_session_phases", "--nocapture"]
+    if mutant:
+        env["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
     run = subprocess.run(command, cwd=REPO, env=env, capture_output=True, text=True, timeout=300)
     if run.returncode:
         raise ProbeFailure(kind, run)
@@ -369,8 +239,8 @@ def mutant_witness(mutant, run, phases, before):
     return marker
 
 
-def cell(binary, number, result, mutant=None, oracle=False):
-    arms = ("python", "rust") if oracle else ("rust",)
+def cell(binary, number, result, mutant=None):
+    arms = ("rust",)
     names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []
     try:
@@ -403,16 +273,12 @@ def cell(binary, number, result, mutant=None, oracle=False):
                 outputs.append(json.loads(json.dumps(output).replace(f"'{bank}'", "'<bank>'")))
                 states.append({phase: json.loads((phases / f"{phase}.json").read_text()) for phase in PHASES})
             result["observed"] = dict(zip(arms, (normalized(o) for o in outputs)))
-            result["observed_diffs"] = compare_phases(*outputs) if oracle else []
             result["expectation_diffs"] = [f"{kind}{difference}" for kind, output in zip(arms, outputs)
                                            for difference in expectations(output, startup.epoch(before))]
             result["db_diffs"] = {
                 kind: {phase: dbstate.diff(expected_state(before, phase), state[phase]) for phase in PHASES}
                 for kind, state in zip(arms, states)
             }
-            if oracle:
-                result["db_diffs"]["oracle_comparison"] = {
-                    phase: dbstate.diff(states[0][phase], states[1][phase]) for phase in PHASES}
     finally:
         for name in reversed(created):
             try:
@@ -432,9 +298,8 @@ def main(argv=None):
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--mutants", action="store_true")
-    parser.add_argument("--oracle", action="store_true", help="also compare the frozen Python service")
+    parser.add_argument("--oracle", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--dump-db", choices=PHASES, help=argparse.SUPPRESS)
-    parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--other-writer", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--hold-lease", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -459,17 +324,15 @@ def main(argv=None):
     if args.hold_lease:
         hold_lease()
         return 0
-    if args.oracle_cell:
-        oracle_cell()
-        return 0
+    if args.oracle:
+        parser.error(ORACLE_RETIRED)
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
-              "declared_noop_callbacks": [*NOOP_CALLBACKS, "curation_safety.recover_slot_curation"]}
+    result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip()}
     number = time.time_ns()
     try:
-        cell(args.rust_test_bin.resolve(), number, result, oracle=args.oracle)
+        cell(args.rust_test_bin.resolve(), number, result)
     except Exception as error:
         result["error"] = str(error)
     if args.mutants and not failed(result):

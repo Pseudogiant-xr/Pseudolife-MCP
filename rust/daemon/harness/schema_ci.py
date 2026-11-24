@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-build", action="store_true", help="use an existing daemon test executable")
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
     parser.add_argument("--test-bin-out", type=Path, help="write the selected executable path for another parity step")
-    parser.add_argument("--record-goldens", action="store_true", help="record oracle post-state fixtures after a clean run")
+    parser.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--record-candidate", action="store_true",
                         help="re-record schema-startup.json from the Rust candidate (candidate_record.py): a dry "
                              "run that exits 1 if anything would change, unless --write")
@@ -72,8 +72,9 @@ def main(argv: list[str] | None = None) -> int:
             require_turn(holder="standalone database harness", contain=True)
         finally:
             _turn_sys.path.remove(_turn_root)
-    if args.record_goldens and args.record_candidate:
-        parser.error("--record-goldens records the oracle and --record-candidate the candidate; give one")
+    if args.record_goldens:
+        import candidate_record
+        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if args.write and not args.record_candidate:
         parser.error("--write needs --record-candidate")
     if args.record_candidate:
@@ -84,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(why)
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
-    if args.build_only and (args.no_build or args.out or args.record_goldens or args.record_candidate
+    if args.build_only and (args.no_build or args.out or args.record_candidate
                             or not args.test_bin_out):
         parser.error("--build-only takes only --test-bin-out")
     if not args.build_only and args.out is None:
@@ -142,8 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.write:
                 command.append("--write")
         else:
-            command.extend(["--refusals", "--mutants",
-                            "--record-goldens" if args.record_goldens else "--check-goldens"])
+            command.extend(["--refusals", "--mutants", "--check-goldens"])
         return subprocess.run(command, cwd=REPO, env=env).returncode
     except ValueError as exc:
         print(f"schema CI refused: {exc}", file=sys.stderr)

@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, type=Path, help="startup evidence JSON path")
     parser.add_argument("--no-build", action="store_true", help="use an existing daemon test executable")
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
-    parser.add_argument("--record-goldens", action="store_true", help="record oracle fixtures, then check replay")
+    parser.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--part", type=int, choices=(1, 2), help="run one CI part of the startup cells")
     parser.add_argument("--record-candidate", action="store_true",
                         help="re-record startup-hydration.json and clock-retry.json from the Rust candidate "
@@ -185,8 +185,9 @@ def main(argv: list[str] | None = None) -> int:
             require_turn(holder="standalone database harness", contain=True)
         finally:
             _turn_sys.path.remove(_turn_root)
-    if args.record_goldens and args.record_candidate:
-        parser.error("--record-goldens records the oracle and --record-candidate the candidate; give one")
+    if args.record_goldens:
+        import candidate_record
+        parser.error(candidate_record.RECORD_GOLDENS_RETIRED)
     if args.write and not args.record_candidate:
         parser.error("--write needs --record-candidate")
     if args.record_candidate:
@@ -199,8 +200,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--record-candidate records the complete startup matrix, not --part")
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
-    if args.part and args.record_goldens:
-        parser.error("--record-goldens requires the complete startup matrix, not --part")
 
     env = dict(os.environ, PL_HARNESS_SLICE="pgs", CUDA_VISIBLE_DEVICES="-1",
                HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
@@ -253,31 +252,13 @@ def main(argv: list[str] | None = None) -> int:
             return startup or retry
         if args.part:
             command += ["--part", str(args.part)]
-        if args.record_goldens:
-            code = subprocess.run(
-                [*command, "--record-goldens", "--mutants", "--out", str(output)],
-                cwd=REPO, env=env,
-            ).returncode
-            if code:
-                return code
-            output = output.with_name(output.stem + "-replay" + output.suffix)
-            flags = ["--check-goldens"]
-        else:
-            flags = ["--check-goldens"] + ([] if args.part == 1 else ["--mutants"])
+        flags = ["--check-goldens"] + ([] if args.part == 1 else ["--mutants"])
         code = subprocess.run([*command, *flags, "--out", str(output)], cwd=REPO, env=env).returncode
         if code or args.part == 1:
             return code
         retry_output = args.out.resolve().with_name(args.out.stem + "-clock-retry" + args.out.suffix)
         retry = [sys.executable, str(HERE / "clock_retry_cases.py"), "--rust-test-bin", str(binary)]
-        if args.record_goldens:
-            code = subprocess.run([*retry, "--record-goldens", "--mutants", "--out", str(retry_output)],
-                                  cwd=REPO, env=env).returncode
-            if code:
-                return code
-            retry_output = retry_output.with_name(retry_output.stem + "-replay" + retry_output.suffix)
-            retry_flags = ["--check-goldens"]
-        else:
-            retry_flags = ["--check-goldens", "--mutants"]
+        retry_flags = ["--check-goldens", "--mutants"]
         code = subprocess.run([*retry, *retry_flags, "--out", str(retry_output)], cwd=REPO, env=env).returncode
         if code:
             return code
