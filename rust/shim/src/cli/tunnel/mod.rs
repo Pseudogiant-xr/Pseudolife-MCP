@@ -921,9 +921,23 @@ fn verify(options: &Options, root: &Path) -> Output {
     // A native challenge needs an active native record. Legacy launch
     // identities are outside this path.
     if occupied(&root.join(format!("{}.process.json", profile.name)))? {
-        if record::read(record::path(root, &profile.name), None).is_some_and(|record| record.native)
-        {
+        let path = record::path(root, &profile.name);
+        let record = record::read(path.clone(), None);
+        if record.as_ref().is_some_and(|record| record.native) {
             return runtime::restart::verify(root, &profile.name);
+        }
+        if record.is_none_or(|record| {
+            matches!(
+                record.why,
+                Some(record::Why::Unreadable | record::Why::NoProcessId)
+            )
+        }) {
+            return Err(Fail::Detail(format!(
+                "cannot tell which launch the process record {} belongs to: it cannot be read or names no process. Check `{}`; once it reports the tunnel stopped, move that record aside, start the tunnel with `{}`, then retry",
+                path.display(),
+                tunnel_command("status", &profile.name, options.profile_dir.as_deref()),
+                tunnel_command("run", &profile.name, options.profile_dir.as_deref())
+            )));
         }
         return Err(Fail::Detail(format!(
             "tunnel verify checks only a launch this client started, and {} is not one. Stop that tunnel with the client that started it, start it with `{}`, then retry",
@@ -989,7 +1003,7 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
     let (url, token) = (truthy(&setup.daemon_url), truthy(&setup.token_file));
     if let (Some(url), Some(token)) = (url, token) {
         // The returned tuple validates the URL before resolving the path.
-        syntax::validate_url(url)?;
+        checked_url(url, "--daemon-url")?;
         return Ok((url.to_owned(), absolute_token(token)?));
     }
     let env_file = environment("PSEUDOLIFE_MCP_TOKEN_FILE")?;
@@ -1017,12 +1031,27 @@ fn discover(setup: &Setup) -> Result<(String, String), Fail> {
         return Err(Fail::Tunnel(AMBIGUOUS));
     };
     let token = absolute_token(&file)?;
-    let selected = match url {
-        Some(url) => url.to_owned(),
-        None => environment("PSEUDOLIFE_MCP_DAEMON_URL")?.unwrap_or_else(|| DEFAULT_URL.into()),
+    let (selected, source) = match url {
+        Some(url) => (url.to_owned(), "--daemon-url"),
+        None => (
+            environment("PSEUDOLIFE_MCP_DAEMON_URL")?.unwrap_or_else(|| DEFAULT_URL.into()),
+            "PSEUDOLIFE_MCP_DAEMON_URL",
+        ),
     };
-    syntax::validate_url(&selected)?;
+    checked_url(&selected, source)?;
     Ok((selected, token))
+}
+
+/// `validate_url`, naming where an http(s) URL in a spelling this client
+/// does not accept came from and the spellings it does.
+fn checked_url(url: &str, source: &str) -> Result<(), Fail> {
+    match syntax::validate_url(url) {
+        Err(Fail::Defer) => Err(Fail::Detail(format!(
+            "{source} {} is a URL spelling this client does not accept; use http://127.0.0.1:<port> or http://localhost:<port> in lower case, or an https:// URL with a plain host name",
+            quote_tunnel_arg(url)
+        ))),
+        other => other,
+    }
 }
 
 const KEY_RENEWAL: &str = "renew the runtime key with tunnel setup --read-key or --key-file and an optional new --key-expires-at";
@@ -1839,7 +1868,7 @@ mod tests {
         };
         for (shape, says) in [
             (&[][..], "tunnel needs a command: setup, status"),
-            (&["bogus"], "unknown tunnel command bogus; the commands are"),
+            (&["sk-fixture"], "unknown tunnel command; the commands are"),
             (
                 &["doctor"],
                 "tunnel doctor is not part of the native client",
@@ -1861,7 +1890,11 @@ mod tests {
             ),
             (
                 &["status", "extra"],
-                "tunnel status takes no argument extra",
+                "tunnel status takes no positional arguments",
+            ),
+            (
+                &["setup", "--read-key", "sk-fixture"],
+                "tunnel setup takes no positional arguments",
             ),
             (&["update", "--json"], "tunnel update does not take --json"),
             (
@@ -1890,6 +1923,8 @@ mod tests {
             let message = refused(shape);
             assert!(message.starts_with(says), "{shape:?}: {message}");
             assert!(!message.contains("candidate"), "{shape:?}: {message}");
+            // A word typed in the wrong place may be a secret: never echoed.
+            assert!(!message.contains("sk-fixture"), "{shape:?}: {message}");
         }
         for help in [&["--help"][..], &["-h"], &["help"]] {
             assert!(

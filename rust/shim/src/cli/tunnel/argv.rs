@@ -94,8 +94,11 @@ impl Command {
 /// The refusal for a form of `tunnel` this client does not provide.
 fn not_built(form: &str) -> Option<String> {
     let instead = match form {
-        "start" | "setup --start" | "service" => {
-            "Run `pseudolife-mcp tunnel run` in a terminal you keep open, or register that command with a service manager you set up yourself; `pseudolife-mcp tunnel stop` ends it"
+        "setup --start" => {
+            "Rerun tunnel setup without --start, then run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself; `pseudolife-mcp tunnel stop` ends it"
+        }
+        "start" | "service" => {
+            "Run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself; `pseudolife-mcp tunnel stop` ends it"
         }
         "doctor" => {
             "`pseudolife-mcp tunnel status` and `pseudolife-mcp doctor` check the saved tunnels"
@@ -215,11 +218,11 @@ pub(super) fn read(values: &[OsString]) -> Result<Parsed, String> {
         "setup" => Command::Setup,
         "run" => Command::Run,
         "stop" => Command::Stop,
+        // The word is not echoed: it may be a secret typed in the wrong place.
         other => {
             return Err(not_built(other).unwrap_or_else(|| {
                 format!(
-                    "unknown tunnel command {}; the commands are {COMMANDS}; see `pseudolife-mcp tunnel --help`",
-                    shown(other)
+                    "unknown tunnel command; the commands are {COMMANDS}; see `pseudolife-mcp tunnel --help`"
                 )
             }));
         }
@@ -249,17 +252,23 @@ pub(super) fn read(values: &[OsString]) -> Result<Parsed, String> {
                 _ => {}
             }
         }
+        // A positional argument is never echoed: it may be a key given to
+        // an option that takes no value. Only a short option name is shown.
         let Some(takes) = option(command, name) else {
-            return Err(if name.starts_with('-') {
+            return Err(if name.starts_with('-') && name.len() <= 40 {
                 format!(
                     "tunnel {word} does not take {}; {}",
                     shown(name),
                     usage_hint(word)
                 )
+            } else if name.starts_with('-') {
+                format!(
+                    "tunnel {word} does not take one of the options given; {}",
+                    usage_hint(word)
+                )
             } else {
                 format!(
-                    "tunnel {word} takes no argument {}; {}",
-                    shown(name),
+                    "tunnel {word} takes no positional arguments; {}",
                     usage_hint(word)
                 )
             });

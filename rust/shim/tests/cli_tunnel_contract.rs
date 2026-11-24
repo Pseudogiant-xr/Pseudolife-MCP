@@ -159,7 +159,7 @@ fn every_tunnel_argv_answers_or_refuses_with_its_cause_without_effect() {
         ),
         (
             &["start", "--profile-dir", &dir],
-            "Run `pseudolife-mcp tunnel run` in a terminal you keep open, or register that command with a service manager you set up yourself",
+            "Run `pseudolife-mcp tunnel run` with the same --profile and --profile-dir in a terminal you keep open, or register that command with a service manager you set up yourself",
         ),
         (
             &["service", "preview", "--profile-dir", &dir],
@@ -1018,6 +1018,104 @@ fn setup_changes_a_keyed_profile_and_keeps_its_key() {
     assert_eq!(profile["autostart_consent"], true);
     assert_eq!(std::fs::read(&key).unwrap(), b"opaque key fixture");
     ambient.assert_untouched();
+}
+
+/// A ready profile with a saved (opaque) key, served by a fixture daemon.
+fn keyed_profile(home: &Home, daemon: &common::Fixture) {
+    seed_setup_profile(
+        home,
+        &serde_json::json!({
+            "name": "dot", "daemon_url": daemon.url, "token_file": home.path("token"),
+            "tunnel_id": "tunnel_abcd", "state": "ready", "consent": true,
+            "runtime_key_expires_at": "2099-01-01T00:00:00Z",
+        }),
+    );
+    pseudolife_stdio::board::state::atomic_create(
+        &home.path("tunnels").join("dot.key"),
+        b"opaque key fixture",
+    )
+    .unwrap();
+}
+
+#[test]
+fn setup_changes_the_expiry_of_a_saved_key_only_by_renewing_it() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    keyed_profile(&home, &daemon);
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--catalog",
+            "current",
+            "--key-expires-at",
+            "2099-12-31T00:00:00Z",
+        ],
+        &[],
+        "renew the runtime key with tunnel setup --read-key or --key-file",
+    );
+}
+
+#[test]
+fn setup_waits_for_no_launch_before_changing_a_keyed_profile() {
+    let home = setup_home();
+    let daemon = common::Fixture::start();
+    keyed_profile(&home, &daemon);
+    // A launch preparing to start holds this lock before it writes a record.
+    let lock_path = home.path("tunnels").join("dot.native-run.lock");
+    pseudolife_stdio::board::state::atomic_create(&lock_path, b"").unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    lock.try_lock().unwrap();
+    let profile = home.path("tunnels").join("dot.profile.json");
+    let before = std::fs::read(&profile).unwrap();
+    let ambient = Listener::new();
+    let output = command(&home, &ambient)
+        .args([
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--tunnel-id",
+            "tunnel_ef01",
+            "--accept-access",
+        ])
+        .output()
+        .unwrap();
+    drop(lock);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.contains("stop the tunnel first, then retry tunnel setup"),
+        "{stderr}"
+    );
+    assert_eq!(std::fs::read(&profile).unwrap(), before);
+    ambient.assert_untouched();
+}
+
+#[test]
+fn setup_names_a_daemon_url_spelling_it_does_not_accept() {
+    let home = setup_home();
+    let token = home.path("token");
+    assert_refused_with(
+        &home,
+        &[
+            "setup",
+            "--profile-dir",
+            &home.dir(),
+            "--daemon-url",
+            "http://LOCALHOST:8123",
+            "--token-file",
+            token.to_str().unwrap(),
+            "--accept-access",
+        ],
+        &[],
+        "--daemon-url http://LOCALHOST:8123 is a URL spelling this client does not accept",
+    );
 }
 
 #[test]
@@ -1936,7 +2034,7 @@ mod seeded {
             &home,
             &["verify", "--profile-dir", &dir],
             &[],
-            "tunnel verify checks only a launch this client started",
+            "cannot tell which launch the process record ",
         );
         // A record naming no process id proves nothing: unknown, never
         // called deletable, and status says so.

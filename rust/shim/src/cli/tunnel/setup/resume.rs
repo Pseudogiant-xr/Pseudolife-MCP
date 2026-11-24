@@ -14,7 +14,7 @@ use super::{
 use crate::{
     board::state,
     cli::tunnel::{
-        Fail, KEY_RENEWAL, Options, Output, Setup, absolute_token, bridge::status_command, record,
+        Fail, KEY_RENEWAL, Options, Output, absolute_token, bridge::status_command, record,
         runtime, setup_command, store,
     },
     credentials::{CredentialProvider, MAX_TOKEN_BYTES, decode_token},
@@ -170,6 +170,7 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     match (&setup.daemon_url, &setup.token_file) {
         (None, None) => {}
         (Some(url), Some(token)) if !url.is_empty() && !token.is_empty() => {
+            crate::cli::tunnel::checked_url(url, "--daemon-url")?;
             desired.insert("daemon_url".into(), Value::from(url.clone()));
             desired.insert("token_file".into(), Value::from(absolute_token(token)?));
         }
@@ -206,25 +207,15 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
             0,
         ));
     }
-    if matches!(
-        setup,
-        Setup {
-            key_expires_at: Some(_),
-            daemon_url: None,
-            token_file: None,
-            tunnel_id: None,
-            organization_id: None,
-            catalog: None,
-            ..
-        }
-    ) && store::occupied(&store::key_path(root, &profile.name))?
-    {
-        return Err(Fail::Tunnel(KEY_RENEWAL));
-    }
-    require_inactive(root, &profile.name, false, &status)?;
     // A key saved before setup started stays; one that appears during the
     // handshake belongs to another setup, so the commit refuses it.
     let had_key = store::occupied(&store::key_path(root, &profile.name))?;
+    // The saved key's expiry changes only with a renewal of that key, alone
+    // or beside other settings.
+    if had_key && saved.get("runtime_key_expires_at") != desired.get("runtime_key_expires_at") {
+        return Err(Fail::Tunnel(KEY_RENEWAL));
+    }
+    require_inactive(root, &profile.name, false, &status)?;
     let updated = store::validate(&desired)?;
     if needs_consent && !setup.accept_access {
         return Err(consent_required(&updated));
@@ -234,8 +225,24 @@ pub(in crate::cli::tunnel) fn resume(options: &Options, root: &Path, path: &Path
     if needs_consent && disclose(&updated).is_err() {
         return Ok((String::new(), crate::cli::tunnel::STDOUT_REFUSED));
     }
+    // With a saved key a launch or a renewal may be starting: hold their
+    // locks, then check again that neither left anything behind.
+    let _runtime = if had_key {
+        Some(runtime::key_change_locks(root, &updated.name)?)
+    } else {
+        None
+    };
     let (_lock, expected) = commit_lock(root, path, &original)?;
     recheck_inactive(root, &updated.name, &status, !had_key)?;
+    if had_key {
+        renewal::check_pending(root, &updated.name)?;
+        if renewal::validate_previous_key(root, &updated.name)? {
+            return Err(Fail::Detail(format!(
+                "a key renewal of profile {} began during setup and still retains its previous key; finish it with tunnel setup --restore-key or --discard-previous-key, then change the settings",
+                updated.name
+            )));
+        }
+    }
     stage_and_publish(
         path,
         |file| file.write_all(&bytes),

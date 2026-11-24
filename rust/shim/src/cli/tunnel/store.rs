@@ -452,7 +452,7 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
 }
 
 /// A Windows key this session cannot unseal, which is never called absent.
-pub(super) const SEALED: &str = "the saved runtime key cannot be unsealed in this session: it was sealed by another account, or this logon has no access to the account's credentials (such as a key-based SSH logon). Run the command from a desktop session of the account that saved the key, or import the key again with tunnel setup --read-key or --key-file";
+pub(super) const SEALED: &str = "the saved runtime key cannot be unsealed in this session: it was sealed by another account, or this logon has no access to the account's credentials (such as a key-based SSH logon). Run the command from a desktop session of the account that saved the key";
 
 /// `_key_present`: `ProfileStore.read_key` succeeds. A Windows key this
 /// session cannot unseal is refused rather than called absent.
