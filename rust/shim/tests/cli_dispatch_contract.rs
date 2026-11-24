@@ -24,9 +24,9 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
         // installed-release target, and the native installer and tunnel steps), with
         // Windows CRLF.
         let expected = if cfg!(windows) {
-            "2c4847c8e729b14632844705cc623cb42d1aeffde9d0cea7a7d5b1dd09d0879e"
+            "e89720a67b9b6fef9b096b6f16f6587e7e06eb89b332130707b5a0f535877496"
         } else {
-            "5a6ea22da916d479c8704fee58e85777c0f9ab3681bb0b4d647f3c524a3c3139"
+            "ed92593d31b0e0c75b9997c85b14456fb9de6d7a2b1437230aadc010156dd9da"
         };
         assert_eq!(format!("{:x}", Sha256::digest(&output.stdout)), expected);
         assert!(output.stderr.is_empty());
@@ -44,8 +44,9 @@ fn the_tunnel_help_line_names_only_the_native_tunnel_commands() {
     let lines = [
         "  tunnel         optional Secure MCP Tunnel for a ChatGPT developer app: save",
         "                 or resume a profile and import or renew its runtime key, show",
-        "                 status, verify cloud access, run it in this terminal and stop",
-        "                 it (`tunnel --help`)",
+        "                 status, print a prompt that proves cloud access, run it in",
+        "                 this terminal, stop it, and check saved tunnels after a client",
+        "                 update (`tunnel --help`)",
     ];
     assert!(help.contains(&(lines.join("\n") + "\n")), "{help}");
     for gone in ["guided optional", "status/doctor", "opted-in autostart"] {

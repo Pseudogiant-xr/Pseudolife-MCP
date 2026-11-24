@@ -22,8 +22,9 @@ modes:
                  --disposable-proof writes only to an explicit fixture server)
   tunnel         optional Secure MCP Tunnel for a ChatGPT developer app: save
                  or resume a profile and import or renew its runtime key, show
-                 status, verify cloud access, run it in this terminal and stop
-                 it (`tunnel --help`)
+                 status, print a prompt that proves cloud access, run it in
+                 this terminal, stop it, and check saved tunnels after a client
+                 update (`tunnel --help`)
   connect        point this machine's client registrations at a daemon URL
                  (`connect <url>`): replaces the old URL and, with
                  --token-file, the token file; verifies the daemon accepts
