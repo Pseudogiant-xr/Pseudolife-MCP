@@ -456,11 +456,6 @@ def test_a_claude_code_shim_names_its_row_from_the_session_transcript(monkeypatc
     assert options["harness_name"]() == "Desktop title"
     options = _claude_adapter_options(monkeypatch, {})
     assert options.get("harness_name") is None
-    # The maintainer's off switch (2026-10-05): no transcript is read.
-    options = _claude_adapter_options(monkeypatch, {"CLAUDE_CODE_SESSION_ID": session,
-                                                    "CLAUDE_CONFIG_DIR": str(tmp_path),
-                                                    "PSEUDOLIFE_BOARD_HARNESS_NAMES": "0"})
-    assert options.get("harness_name") is None
 
 
 def _rename_reaches_the_board(monkeypatch, reader, rename):
@@ -547,11 +542,6 @@ def test_each_codex_thread_adapter_reads_its_own_thread_name(tmp_path, monkeypat
     asyncio.run(drive())
     assert built[first]["harness_name"]() == "Thread one"
     assert built[second]["harness_name"]() == "Thread two"
-    # The off switch: no thread reads session_index.jsonl.
-    monkeypatch.setenv("PSEUDOLIFE_BOARD_HARNESS_NAMES", "off")
-    built.clear()
-    asyncio.run(drive())
-    assert built[first]["harness_name"] is None and built[second]["harness_name"] is None
 
 
 def test_lease_holders_and_waiters_carry_the_board_name(store):

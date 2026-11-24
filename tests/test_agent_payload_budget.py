@@ -359,7 +359,7 @@ def test_fact_get_lean_record_keeps_source_entries(
     surfaces name it as the default-tier contract — the poisoned-memory
     procedure in ``docs/guide/security-posture.md`` ("follow the engram
     links"), ``memory_get``'s core-tier justification, and
-    ``test_release_ux.py::test_core_tier_can_close_its_own_loops``. A lean
+    ``test_release_ux.py::test_the_core_tier_can_close_its_own_loops``. A lean
     projection that dropped it would break all three silently (2026-09-04
     review finding)."""
     mod = _reload(tmp_path, monkeypatch)

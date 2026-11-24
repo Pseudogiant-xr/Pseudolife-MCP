@@ -12,10 +12,17 @@ Every test here drives the real reset code against a STUB connection that
 records what it was sent and never reaches a server. That is deliberate:
 while the guard was absent, the same test pointed at a real server would have
 reaped the daemon and truncated the live bank.
+
+This file runs without the frozen package: it drives the suite's own reset
+site (tests/pg_fixtures.py) and the package-free guard it uses. The reset
+sites in the Python evals and in tests/test_transfer_cli.py, and the eval
+harnesses' DSN guards, are pinned in tests/test_eval_reset_guards.py, which
+retires with them.
 """
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import re
@@ -27,16 +34,10 @@ import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
-from pseudolife_memory.storage import schema
 from rust.harness_support import database_guard as guard
+from tests import pg_fixtures
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "evals"))
-
-import _python_ladder_sweep as ladder_sweep  # noqa: E402
-
-from tests import pg_fixtures  # noqa: E402
-from tests import test_transfer_cli as transfer_tests  # noqa: E402
 
 _PROBE = "SELECT current_database()"
 # Anything a reset must not have sent before the guard refused it.
@@ -45,6 +46,22 @@ _DESTRUCTIVE = re.compile(
     r"|\bINSERT\b|\bDELETE\b|\bUPDATE\b",
     re.IGNORECASE,
 )
+
+
+def _package_schema():
+    """The frozen package's schema module, or None without the package.
+
+    Only pg_conn's reset reads it, and only once the guard has passed: it
+    runs the package's DDL (pg_fixtures._pg_conn_session). A package that
+    is present but fails to import is an error, never a skip. A namespace
+    package (what a deleted package's leftover __pycache__ folders give an
+    existing checkout) counts as absent, as in tests/conftest.py."""
+    package = importlib.util.find_spec("pseudolife_memory")
+    if package is None or package.origin is None:
+        return None
+    from pseudolife_memory.storage import schema
+
+    return schema
 
 
 class _Result:
@@ -138,11 +155,23 @@ def stub_server(monkeypatch):
         ddl.append(conn.server_db)
 
     monkeypatch.setattr(psycopg, "connect", _connect)
-    monkeypatch.setattr(schema, "ensure_schema", _ensure_schema)
-    monkeypatch.setattr(transfer_tests, "ensure_schema", _ensure_schema)
+    schema = _package_schema()
+    if schema is not None:
+        # pg_conn imports ensure_schema from the package after the guard.
+        monkeypatch.setattr(schema, "ensure_schema", _ensure_schema)
     monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
-    monkeypatch.delenv(schema.PRODUCTION_DATABASE_ENV, raising=False)
+    monkeypatch.delenv(guard.PRODUCTION_DATABASE_ENV, raising=False)
     return _Server
+
+
+@pytest.fixture
+def package_ddl():
+    """Skip a test that follows pg_conn's reset PAST the guard without the
+    package: from there it runs the package's DDL. Every refusal test here
+    stops at the guard and runs either way."""
+    if _package_schema() is None:
+        pytest.skip("pg_conn's reset runs the frozen package's DDL once the "
+                    "guard has passed; the package is not importable")
 
 
 # ── the reset sites that open their own connection ────────────────────────
@@ -158,41 +187,22 @@ def _run_pg_conn_fixture():
         session.close()
 
 
-def _run_ladder_reset_bench():
-    ladder_sweep.reset_bench()
-
-
-def _run_transfer_bank():
-    with transfer_tests._bank(_STUB_URL):
-        pass
-
-
+# The eval's reset_bench and the transfer test's _bank are driven by the same
+# tests in tests/test_eval_reset_guards.py.
 _RESET_SITES = {
     "tests/pg_fixtures.py::_pg_conn_session": _run_pg_conn_fixture,
-    "evals/_python_ladder_sweep.py::reset_bench": _run_ladder_reset_bench,
-    "tests/test_transfer_cli.py::_bank": _run_transfer_bank,
 }
 # The refusal each site raises: the suite's own fixtures use the package-free
-# guard (rust/harness_support), the frozen eval and the transfer test the
-# package's copy, which decides the same way.
+# guard (rust/harness_support).
 _REFUSALS = {
     "tests/pg_fixtures.py::_pg_conn_session": guard.ProductionDatabaseError,
-    "evals/_python_ladder_sweep.py::reset_bench": schema.ProductionDatabaseError,
-    "tests/test_transfer_cli.py::_bank": schema.ProductionDatabaseError,
 }
-
-
-@pytest.fixture
-def allowed_bench_name(monkeypatch):
-    # A name the name-level check accepts, so reset_bench reaches the
-    # server-side check: the server, not the DSN, reports the bank.
-    monkeypatch.setenv("PSEUDOLIFE_BENCH_DB", "pl_guard_stub")
 
 
 @pytest.mark.parametrize("site", sorted(_RESET_SITES))
 @pytest.mark.parametrize("server_db", ["pseudolife_memory", "PSEUDOLIFE_MEMORY"])
 def test_reset_refuses_the_production_bank_before_touching_it(
-        site, server_db, stub_server, allowed_bench_name):
+        site, server_db, stub_server):
     stub_server.target = server_db
     with pytest.raises(_REFUSALS[site]):
         _RESET_SITES[site]()
@@ -209,7 +219,7 @@ def test_reset_refuses_the_production_bank_before_touching_it(
 
 @pytest.mark.parametrize("site", sorted(_RESET_SITES))
 def test_reset_refuses_the_bank_the_daemon_dsn_names(
-        site, stub_server, allowed_bench_name, monkeypatch):
+        site, stub_server, monkeypatch):
     stub_server.target = "renamed_bank"
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL",
                        "host=127.0.0.1 port=5433 dbname=renamed_bank user=u")
@@ -221,7 +231,7 @@ def test_reset_refuses_the_bank_the_daemon_dsn_names(
 
 @pytest.mark.parametrize("site", sorted(_RESET_SITES))
 def test_reset_checks_the_server_first_then_proceeds_on_a_disposable_db(
-        site, stub_server, allowed_bench_name):
+        site, stub_server, package_ddl):
     """The guard is the FIRST statement, ahead of the reap — a check that
     ran after pg_terminate_backend would already have killed the daemon."""
     stub_server.target = "pseudolife_memory_test_4242"
@@ -240,14 +250,14 @@ def test_reset_checks_the_server_first_then_proceeds_on_a_disposable_db(
 @pytest.fixture
 def clean_env(monkeypatch):
     monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
-    monkeypatch.delenv(schema.PRODUCTION_DATABASE_ENV, raising=False)
+    monkeypatch.delenv(guard.PRODUCTION_DATABASE_ENV, raising=False)
 
 
 @pytest.mark.parametrize("name", ["pseudolife_memory", "Pseudolife_Memory"])
 def test_assert_disposable_refuses_the_default_bank(name, clean_env):
     log: list[tuple[str, str]] = []
-    with pytest.raises(schema.ProductionDatabaseError, match="refusing"):
-        schema.assert_disposable_database(_StubConn(name, log))
+    with pytest.raises(guard.ProductionDatabaseError, match="refusing"):
+        guard.assert_disposable_database(_StubConn(name, log))
     assert log == [(name, _PROBE)]
 
 
@@ -257,7 +267,7 @@ def test_assert_disposable_refuses_the_default_bank(name, clean_env):
     "pseudolife_memory_bench_99", "pl_bench_wabl_flat", "postgres",
 ])
 def test_assert_disposable_accepts_test_bench_and_ci_names(name, clean_env):
-    assert schema.assert_disposable_database(_StubConn(name, [])) == name
+    assert guard.assert_disposable_database(_StubConn(name, [])) == name
 
 
 @pytest.mark.parametrize("dsn", [
@@ -268,16 +278,16 @@ def test_assert_disposable_accepts_test_bench_and_ci_names(name, clean_env):
 ])
 def test_the_daemon_dsn_bank_is_refused_too(dsn, clean_env, monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
-    with pytest.raises(schema.ProductionDatabaseError):
-        schema.assert_disposable_database(_StubConn("my_bank", []))
-    assert schema.assert_disposable_database(
+    with pytest.raises(guard.ProductionDatabaseError):
+        guard.assert_disposable_database(_StubConn("my_bank", []))
+    assert guard.assert_disposable_database(
         _StubConn("pseudolife_memory_test_1", [])) == "pseudolife_memory_test_1"
 
 
 def test_the_bank_conftest_recorded_is_refused(clean_env, monkeypatch):
-    monkeypatch.setenv(schema.PRODUCTION_DATABASE_ENV, "Recorded_Bank")
-    with pytest.raises(schema.ProductionDatabaseError):
-        schema.assert_disposable_database(_StubConn("recorded_bank", []))
+    monkeypatch.setenv(guard.PRODUCTION_DATABASE_ENV, "Recorded_Bank")
+    with pytest.raises(guard.ProductionDatabaseError):
+        guard.assert_disposable_database(_StubConn("recorded_bank", []))
 
 
 def test_inside_the_suite_the_snapshot_supersedes_the_live_dsn(
@@ -287,27 +297,27 @@ def test_inside_the_suite_the_snapshot_supersedes_the_live_dsn(
     first cut read the live variable and so refused the suite's own database
     (2026-09-23 review). Inside the suite conftest has removed the operator's
     DSN and recorded its name, and that record is what counts."""
-    monkeypatch.setenv(schema.PRODUCTION_DATABASE_ENV, "recorded_bank")
+    monkeypatch.setenv(guard.PRODUCTION_DATABASE_ENV, "recorded_bank")
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL",
                        "postgresql://u:p@127.0.0.1:5433/pseudolife_memory_test_7")
-    assert schema.assert_disposable_database(
+    assert guard.assert_disposable_database(
         _StubConn("pseudolife_memory_test_7", [])) == "pseudolife_memory_test_7"
     for refused in ("recorded_bank", "pseudolife_memory"):
-        with pytest.raises(schema.ProductionDatabaseError):
-            schema.assert_disposable_database(_StubConn(refused, []))
+        with pytest.raises(guard.ProductionDatabaseError):
+            guard.assert_disposable_database(_StubConn(refused, []))
 
 
 def test_conftest_left_a_snapshot_for_this_run():
     """conftest records one even when no daemon DSN was exported, so the
     guard never falls back to the live variable inside the suite."""
-    assert os.environ.get(schema.PRODUCTION_DATABASE_ENV)
+    assert os.environ.get(guard.PRODUCTION_DATABASE_ENV)
 
 
 @pytest.mark.parametrize("site", sorted(_RESET_SITES))
 def test_a_test_pointing_the_daemon_dsn_at_its_own_db_can_still_reset(
-        site, stub_server, allowed_bench_name, monkeypatch):
+        site, stub_server, package_ddl, monkeypatch):
     # What conftest leaves behind when no daemon DSN was exported.
-    monkeypatch.setenv(schema.PRODUCTION_DATABASE_ENV, "pseudolife_memory")
+    monkeypatch.setenv(guard.PRODUCTION_DATABASE_ENV, "pseudolife_memory")
     monkeypatch.setenv(
         "PSEUDOLIFE_MCP_DATABASE_URL",
         "postgresql://u:p@127.0.0.1:5433/pseudolife_memory_test_4242")
@@ -321,9 +331,9 @@ def test_a_test_pointing_the_daemon_dsn_at_its_own_db_can_still_reset(
 
 @pytest.mark.parametrize("name", ["pseudolife_memory/", "PSEUDOLIFE_MEMORY/"])
 def test_a_trailing_slash_does_not_launder_the_bank_name(name, clean_env):
-    assert schema.is_production_database(name)
-    with pytest.raises(schema.ProductionDatabaseError):
-        schema.refuse_production_database(name)
+    assert guard.is_production_database(name)
+    with pytest.raises(guard.ProductionDatabaseError):
+        guard.refuse_production_database(name)
 
 
 @pytest.mark.parametrize("dsn, name", [
@@ -346,19 +356,18 @@ def test_a_trailing_slash_does_not_launder_the_bank_name(name, clean_env):
 def test_dsn_database_name_parses_like_libpq(dsn, name, monkeypatch):
     monkeypatch.delenv("PGDATABASE", raising=False)
     monkeypatch.delenv("PGSERVICE", raising=False)
-    assert schema.dsn_database_name(dsn) == name
+    assert guard.dsn_database_name(dsn) == name
 
 
 def test_a_dsn_naming_no_database_falls_back_to_pgdatabase_like_libpq(
         clean_env, monkeypatch):
+    # The eval harnesses' half of this check (they refuse such a DSN) is in
+    # tests/test_eval_reset_guards.py.
     monkeypatch.setenv("PGDATABASE", "pseudolife_memory")
     monkeypatch.delenv("PGSERVICE", raising=False)
-    assert schema.dsn_database_name("host=h port=5433") == "pseudolife_memory"
-    assert schema.dsn_database_name(
+    assert guard.dsn_database_name("host=h port=5433") == "pseudolife_memory"
+    assert guard.dsn_database_name(
         "host=h dbname=replay_copy") == "replay_copy"
-    for guard in _harness_guards().values():
-        with pytest.raises(SystemExit):
-            guard("host=h port=5433 user=u")
 
 
 @pytest.mark.parametrize("dsn, pgservice", [
@@ -374,7 +383,7 @@ def test_a_service_beats_pgdatabase_so_the_name_is_unknown(
         monkeypatch.setenv("PGSERVICE", pgservice)
     else:
         monkeypatch.delenv("PGSERVICE", raising=False)
-    assert schema.dsn_database_name(dsn) is None
+    assert guard.dsn_database_name(dsn) is None
 
 
 # The P1 from the Codex review of #344: an exported daemon DSN that leaves its
@@ -395,17 +404,17 @@ def test_an_implicit_daemon_dsn_fails_every_check_closed(
     monkeypatch.delenv("PGSERVICE", raising=False)
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
     for server_db in ("live_bank", "prod_bank", "pseudolife_memory_test_1"):
-        with pytest.raises(schema.ProductionDatabaseError,
+        with pytest.raises(guard.ProductionDatabaseError,
                            match="does not name its database"):
-            schema.assert_disposable_database(_StubConn(server_db, []))
-    with pytest.raises(schema.ProductionDatabaseError):
-        schema.refuse_production_database("pseudolife_memory_bench")
+            guard.assert_disposable_database(_StubConn(server_db, []))
+    with pytest.raises(guard.ProductionDatabaseError):
+        guard.refuse_production_database("pseudolife_memory_bench")
 
 
 @pytest.mark.parametrize("site", sorted(_RESET_SITES))
 @pytest.mark.parametrize("dsn", _IMPLICIT_DAEMON_DSNS)
 def test_reset_refuses_before_touching_a_bank_the_daemon_dsn_names_implicitly(
-        site, dsn, stub_server, allowed_bench_name, monkeypatch):
+        site, dsn, stub_server, monkeypatch):
     monkeypatch.delenv("PGDATABASE", raising=False)
     monkeypatch.delenv("PGSERVICE", raising=False)
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
@@ -428,42 +437,29 @@ def test_an_explicit_empty_dbname_is_the_user_name_not_pgdatabase(
     service file and PGDATABASE, then falls back to the user name."""
     monkeypatch.setenv("PGDATABASE", "scratch")
     monkeypatch.delenv("PGSERVICE", raising=False)
-    assert schema.dsn_database_name(dsn) is None
+    assert guard.dsn_database_name(dsn) is None
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
-    with pytest.raises(schema.ProductionDatabaseError):
-        schema.assert_disposable_database(_StubConn("live_bank", []))
+    with pytest.raises(guard.ProductionDatabaseError):
+        guard.assert_disposable_database(_StubConn("live_bank", []))
 
 
 def test_an_unresolved_record_fails_every_check_closed(clean_env, monkeypatch):
     """What conftest records when the exported DSN hid its database."""
-    monkeypatch.setenv(schema.PRODUCTION_DATABASE_ENV,
-                       schema.UNRESOLVED_PRODUCTION_DATABASE)
-    with pytest.raises(schema.ProductionDatabaseError,
+    monkeypatch.setenv(guard.PRODUCTION_DATABASE_ENV,
+                       guard.UNRESOLVED_PRODUCTION_DATABASE)
+    with pytest.raises(guard.ProductionDatabaseError,
                        match="does not name its database"):
-        schema.assert_disposable_database(
+        guard.assert_disposable_database(
             _StubConn("pseudolife_memory_test_1", []))
 
 
 def test_the_suite_stops_at_start_up_on_an_unresolved_record(monkeypatch):
     from tests import conftest
 
-    monkeypatch.setenv(schema.PRODUCTION_DATABASE_ENV,
-                       schema.UNRESOLVED_PRODUCTION_DATABASE)
+    monkeypatch.setenv(guard.PRODUCTION_DATABASE_ENV,
+                       guard.UNRESOLVED_PRODUCTION_DATABASE)
     with pytest.raises(pytest.UsageError, match="PSEUDOLIFE_MCP_DATABASE_URL"):
         conftest.pytest_configure(None)
-
-
-@pytest.mark.parametrize("harness", ["graph_ablation", "live_replay_flat_ab",
-                                     "recall_fanout_bench", "retrieval_replay",
-                                     "retrieval_telemetry_review"])
-@pytest.mark.parametrize("dsn", ["host=h port=5433 user=u", "service=replay",
-                                 "postgresql://u:p@h:5433"])
-def test_every_harness_guard_refuses_a_dsn_whose_database_it_cannot_tell(
-        harness, dsn, clean_env, monkeypatch):
-    monkeypatch.delenv("PGDATABASE", raising=False)
-    monkeypatch.delenv("PGSERVICE", raising=False)
-    with pytest.raises(SystemExit):
-        _harness_guards()[harness](dsn)
 
 
 # ── name-level refusals where test and bench names resolve ────────────────
@@ -509,76 +505,6 @@ def test_test_db_override_naming_a_disposable_db_still_resolves(
         pg_fixtures.resolve_test_db_url())["dbname"] == "pseudolife_memory_test"
 
 
-@pytest.mark.parametrize("bench_db", ["pseudolife_memory", "PseudoLife_Memory",
-                                      "pseudolife_memory/"])
-def test_bench_db_naming_the_bank_is_refused(bench_db, clean_env, no_connect,
-                                             monkeypatch):
-    monkeypatch.setenv("PSEUDOLIFE_BENCH_DB", bench_db)
-    with pytest.raises(schema.ProductionDatabaseError):
-        ladder_sweep._bench_db_name()
-    with pytest.raises(schema.ProductionDatabaseError):
-        ladder_sweep.reset_bench()
-
-
-def test_bench_db_default_name_still_works(clean_env, monkeypatch):
-    """The eval CLIs' fixed default must keep resolving."""
-    monkeypatch.delenv("PSEUDOLIFE_BENCH_DB", raising=False)
-    assert ladder_sweep._bench_db_name() == "pseudolife_memory_bench"
-
-
-# ── the eval harnesses' own DSN guards share the parser ───────────────────
-
-def _harness_guards():
-    import graph_ablation
-    import live_replay_flat_ab
-    import recall_fanout_bench
-    import retrieval_replay
-    import retrieval_telemetry_review
-
-    return {
-        "graph_ablation": graph_ablation.guard_dsn,
-        "live_replay_flat_ab": live_replay_flat_ab._guard_dsn,
-        "recall_fanout_bench": recall_fanout_bench.guard_dsn,
-        "retrieval_replay": retrieval_replay.guard_dsn,
-        "retrieval_telemetry_review": retrieval_telemetry_review.guard_dsn,
-    }
-
-
-# Two spellings each of the hardened guards' regex missed: a ?dbname= query
-# parameter (libpq lets it override the path) and a percent-encoded name.
-_BYPASS_FORMS = [
-    "postgresql://u:p@h:5433/{db}",
-    "postgresql://u:p@h:5433/{db}/",
-    "postgresql://u:p@h:5433/{DB}",
-    "host=h port=5433 dbname={db}",
-    "dbname={DB} user=u",
-    "postgresql://u:p@h:5433/replay_copy?dbname={db}",
-    "postgresql://u:p@h:5433/{pct}",
-]
-
-
-@pytest.mark.parametrize("harness", ["graph_ablation", "live_replay_flat_ab",
-                                     "recall_fanout_bench", "retrieval_replay",
-                                     "retrieval_telemetry_review"])
-@pytest.mark.parametrize("form", _BYPASS_FORMS)
-@pytest.mark.parametrize("db", ["pseudolife_memory", "pseudolife_memory_bench"])
-def test_every_harness_guard_refuses_every_spelling(harness, form, db,
-                                                    clean_env):
-    guard = _harness_guards()[harness]
-    dsn = form.format(db=db, DB=db.upper(), pct=db.replace("_", "%5F"))
-    with pytest.raises(SystemExit):
-        guard(dsn)
-
-
-@pytest.mark.parametrize("harness", ["graph_ablation", "live_replay_flat_ab",
-                                     "recall_fanout_bench", "retrieval_replay",
-                                     "retrieval_telemetry_review"])
-def test_every_harness_guard_allows_a_replay_copy(harness, clean_env):
-    guard = _harness_guards()[harness]
-    guard("postgresql://u:p@127.0.0.1:5433/pseudolife_memory_replay_20260904")
-    guard("host=127.0.0.1 dbname=pseudolife_memory_replay_20260904")
-
-
 # ── structural: no reap or full-bank TRUNCATE without the guard ───────────
 
 # The two statements that wreck a bank the reset did not own: the mass reap
@@ -600,6 +526,28 @@ _PRODUCTION_REAPS = {
         "pseudolife-mcp move cuts the SOURCE bank's other connections off "
         "before its final dump and after the fence (spec Part 3, step 5); "
         "the bank is being moved away, and its daemon is already stopped",
+}
+
+# Reset sites the scan must find, or it is guarding nothing: the suite's own
+# session reset and the Rust harness rows' bank drops and reaps, each required
+# outright (removing one of them is a change to this list, made on purpose).
+_REQUIRED_RESET_SITES = {
+    ("tests/pg_fixtures.py", "_pg_conn_session"),
+    ("rust/cli_harness/rows/_bank.py", "drop"),
+    ("rust/cli_harness/rows/coordination_recovery.py", "_drop"),
+    ("rust/cli_harness/rows/maintainer.py", "terminate_during"),
+}
+# Reset sites in files that retire with the frozen package or the Python
+# evals: each is required while its file is in the checkout, and leaves the
+# check only with that whole file (a function renamed or moved inside a file
+# that is still here still fails).
+_RETIRING_RESET_SITES = {
+    ("evals/_python_ladder_sweep.py", "reset_bench"),
+    ("evals/coordination_audit_volume.py", "measure"),
+    ("tests/test_transfer_cli.py", "_bank"),
+    ("tests/test_transfer_cli.py", "_truncate_all"),
+    ("tests/test_graph.py", "svc"),
+    ("tests/test_dream_ack_storage.py", "_truncate"),
 }
 
 
@@ -658,26 +606,24 @@ def test_every_reap_and_full_bank_truncate_is_guarded_first():
     A tripwire for the tree's existing spellings, not a proof: it matches the
     ``"TRUNCATE "`` prefix and the full reap string, and it does not
     check that the guard runs on the same connection or ahead of
-    ``ensure_schema``. The stub-driven tests above pin that ordering at the
-    three shared reset sites."""
+    ``ensure_schema``. The stub-driven tests above, and those in
+    tests/test_eval_reset_guards.py, pin that ordering at the shared reset
+    sites."""
     found = list(_reset_functions())
     # The scan must be finding the known sites, or it is guarding nothing.
-    assert {(f, fn) for f, fn, _, _ in found} >= {
-        ("tests/pg_fixtures.py", "_pg_conn_session"),
-        ("evals/_python_ladder_sweep.py", "reset_bench"),
-        ("evals/coordination_audit_volume.py", "measure"),
-        ("tests/test_transfer_cli.py", "_bank"),
-        ("tests/test_transfer_cli.py", "_truncate_all"),
-        ("tests/test_graph.py", "svc"),
-        ("tests/test_dream_ack_storage.py", "_truncate"),
-    }
-    stale = set(_PRODUCTION_REAPS) - {(f, fn) for f, fn, _, _ in found}
+    required = _REQUIRED_RESET_SITES | {
+        (f, fn) for f, fn in _RETIRING_RESET_SITES if (ROOT / f).is_file()}
+    missing = required - {(f, fn) for f, fn, _, _ in found}
+    assert not missing, f"the scan no longer finds these reset sites: {sorted(missing)}"
+    stale = {(f, fn) for f, fn in _PRODUCTION_REAPS if (ROOT / f).is_file()} - {
+        (f, fn) for f, fn, _, _ in found}
     assert not stale, f"exempted production reaps no longer found: {sorted(stale)}"
-    unguarded = [f"{f}::{fn} (line {line})" for f, fn, line, guard in found
-                 if (guard is None or guard > line) and (f, fn) not in _PRODUCTION_REAPS]
+    unguarded = [f"{f}::{fn} (line {line})" for f, fn, line, first_guard in found
+                 if (first_guard is None or first_guard > line)
+                 and (f, fn) not in _PRODUCTION_REAPS]
     assert not unguarded, (
         "these functions reap backends or TRUNCATE the whole bank without "
-        "calling schema.assert_disposable_database(conn) first:\n  "
+        "calling assert_disposable_database(conn) first:\n  "
         + "\n  ".join(unguarded))
 
 
@@ -687,10 +633,11 @@ def _import_conftest_in_child(**env_changes) -> dict:
     """Import tests/conftest.py in a fresh interpreter and report what it
     left in the environment. A child, because this machine's ambient
     environment has no daemon DSN: an in-process check would pass whether or
-    not conftest removes one. ``None`` in ``env_changes`` unsets a name."""
+    not conftest removes one. ``None`` in ``env_changes`` unsets a name.
+    The child asks the package-free guard, the one the suite's fixtures use."""
     env = dict(os.environ)
     env.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
-    env.pop(schema.PRODUCTION_DATABASE_ENV, None)
+    env.pop(guard.PRODUCTION_DATABASE_ENV, None)
     # Hermetic child: an operator bench name disables the per-run autopin
     # (and its atexit DROP against the real server); the admin URL is inert.
     env["PSEUDOLIFE_BENCH_DB"] = "pl_guard_child_unused"
@@ -702,14 +649,14 @@ def _import_conftest_in_child(**env_changes) -> dict:
             env[name] = value
     probe = (
         "import json, os, tests.conftest\n"
-        "from pseudolife_memory.storage import schema\n"
+        "from rust.harness_support import database_guard as guard\n"
         "try:\n"
-        "    protected = sorted(schema._production_database_names())\n"
-        "except schema.ProductionDatabaseError as exc:\n"
+        "    protected = sorted(guard._production_database_names())\n"
+        "except guard.ProductionDatabaseError as exc:\n"
         "    protected = 'refused: ' + str(exc)\n"
         "print(json.dumps({\n"
         "  'dsn': os.environ.get('PSEUDOLIFE_MCP_DATABASE_URL'),\n"
-        "  'recorded': os.environ.get(schema.PRODUCTION_DATABASE_ENV),\n"
+        "  'recorded': os.environ.get(guard.PRODUCTION_DATABASE_ENV),\n"
         "  'protected': protected,\n"
         "}))\n"
     )
@@ -738,7 +685,7 @@ def test_conftest_records_an_implicit_daemon_dsn_as_unresolved(dsn):
     got = _import_conftest_in_child(PSEUDOLIFE_MCP_DATABASE_URL=dsn,
                                     PGDATABASE=None, PGSERVICE=None)
     assert got["dsn"] is None
-    assert got["recorded"] == schema.UNRESOLVED_PRODUCTION_DATABASE
+    assert got["recorded"] == guard.UNRESOLVED_PRODUCTION_DATABASE
     assert got["protected"].startswith("refused: ")
     assert "secret" not in json.dumps(got)
 
@@ -757,7 +704,7 @@ def test_conftest_keeps_an_inherited_snapshot():
     controller's conftest removed the DSN; the worker's own conftest import
     must not replace the recorded bank with the default."""
     got = _import_conftest_in_child(
-        **{schema.PRODUCTION_DATABASE_ENV: "Inherited_Bank"})
+        **{guard.PRODUCTION_DATABASE_ENV: "Inherited_Bank"})
     assert got["recorded"] == "Inherited_Bank"
     assert "inherited_bank" in got["protected"]
 
@@ -789,23 +736,3 @@ def test_the_exit_time_bench_drop_drops_only_the_pinned_name(monkeypatch):
     conftest._drop_run_bench_db()
     assert executed == [
         f'DROP DATABASE IF EXISTS "{conftest._bench_pin}" WITH (FORCE)']
-
-
-def test_audit_volume_refuses_configured_live_bank_with_scratch_prefix(monkeypatch):
-    from types import SimpleNamespace
-    from evals.coordination_audit_volume import measure
-    from pseudolife_memory.storage import coordination
-
-    name = "pseudolife_memory_bench_live"
-    monkeypatch.delenv(schema.PRODUCTION_DATABASE_ENV, raising=False)
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", f"dbname={name}")
-    sent = []
-    closed = []
-    conn = _StubConn(name, sent)
-    monkeypatch.setattr(coordination, "CoordinationConnection",
-                        lambda dsn: SimpleNamespace(conn=conn, close=lambda: closed.append(True)))
-    with pytest.raises(schema.ProductionDatabaseError):
-        measure("dbname=ignored", agents=0, messages=0, updates_per_agent=0,
-                attaches_per_agent=0, seed=1)
-    assert closed == [True]
-    assert not any(_DESTRUCTIVE.search(sql) for _, sql in sent)

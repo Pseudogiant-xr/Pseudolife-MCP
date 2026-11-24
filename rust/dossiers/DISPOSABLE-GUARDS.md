@@ -67,7 +67,8 @@ The following are **developer test/evaluation producers**, not daemon requests:
 `assert_disposable_database`. `evals/rust_baseline/daemon.py:40,53` verifies its
 owned generated database is also the actual connected name. Other reset sites
 are enumerated by the original static guard test
-`tests/test_disposable_database_guard.py:643`; reconcile that inventory rather
+`tests/test_disposable_database_guard.py` (`_REQUIRED_RESET_SITES` and
+`_RETIRING_RESET_SITES`); reconcile that inventory rather
 than inventing a new list of authorized prefixes.
 
 ## 5. Python incidentals to defer
@@ -92,7 +93,7 @@ Behavioral pins:
 - `tests/test_disposable_database_guard.py::test_an_implicit_daemon_dsn_fails_every_check_closed`
 - `tests/test_disposable_database_guard.py::test_an_explicit_empty_dbname_is_the_user_name_not_pgdatabase`
 - `tests/test_disposable_database_guard.py::test_an_unresolved_record_fails_every_check_closed`
-- `tests/test_disposable_database_guard.py::test_every_harness_guard_allows_a_replay_copy`
+- `tests/test_eval_reset_guards.py::test_every_harness_guard_allows_a_replay_copy`
 
 Implementation/inventory pins:
 

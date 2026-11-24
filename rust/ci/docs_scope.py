@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 from ops.ci_batch_passed import BATCH_PREFIX, MASTER, ApiError, github_get
-from rust.producer_census import EXTENSIONS as CENSUS_EXTENSIONS
+from rust.producer_census import EXTENSIONS as CENSUS_EXTENSIONS, fetch_frozen_sources
 
 from .parity_scope import RUST_PLAN_DOCS, is_docs, is_documentation_excluded, is_documentation_path
 
@@ -251,6 +251,9 @@ def docs_selection(env: Mapping[str, str]) -> tuple[str, list[str]]:
 def report_census(env: Mapping[str, str]) -> None:
     # --ci-check reports drift for a push that changes only docs. Its
     # currency gate still applies to batch PRs and census/inventory changes.
+    # The scope job's two-commit checkout lacks the census's pinned frozen
+    # sources; fetch that one commit first.
+    fetch_frozen_sources(ROOT)
     result = subprocess.check_output([sys.executable, str(ROOT / "rust/producer_census.py"), "--ci-check"],
                                      cwd=ROOT, env=env, timeout=60, encoding="utf-8")
     print(result, end="")
@@ -297,6 +300,10 @@ def main() -> None:
         if (not isinstance(tests, list) or not all(isinstance(path, str) and TEST_TARGET.fullmatch(path) for path in tests)
                 or not set(DOC_GUARDS) <= set(tests)):
             parser.error("invalid docs test selection")
+        if any(test.startswith("rust/test_producer_census.py") for test in tests):
+            # The guards job's one-commit checkout lacks the census's pinned
+            # frozen sources; fetch that one commit for its readers.
+            fetch_frozen_sources(ROOT)
         raise SystemExit(subprocess.call([sys.executable, "-m", "pytest", "-q", "-m", "not real_model", *tests],
                                          cwd=ROOT))
     decision, tests = docs_selection(os.environ)
