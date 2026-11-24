@@ -532,11 +532,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLg0KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4NCkxhc3QgdHVubmVsIHJlZnJlc2g6IHBlbmRpbmc7IG5lZWRzIGF0dGVudGlvbi4gVGhlIFB5dGhvbiBjbGllbnQgcmVjb3JkZWQgaXQ7IHN0b3AgdGhlIHR1bm5lbCBhbmQgc3RhcnQgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHJ1bmAgdG8gcnVuIGl0IG9uIHRoaXMgY2xpZW50Lg0K",
+   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLg0KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4NCkxhc3QgdHVubmVsIHJlZnJlc2g6IHBlbmRpbmc7IG5lZWRzIGF0dGVudGlvbi4gVGhlIFB5dGhvbiBjbGllbnQgcmVjb3JkZWQgaXQ7IHRvIHJ1biB0aGUgdHVubmVsIG9uIHRoaXMgY2xpZW50LCBzYXZlIGl0cyB0dW5uZWwgSUQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHNldHVwIC0tcHJvZmlsZSBkb3QgLS1wcm9maWxlLWRpciAne0hPTUV9XHR1bm5lbHMnIC0tdHVubmVsLWlkIDx0dW5uZWxfaWQ+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gaW1wb3J0IGl0cyBydW50aW1lIGtleSB3aXRoIGBwc2V1ZG9saWZlLW1jcCB0dW5uZWwgc2V0dXAgLS1wcm9maWxlIGRvdCAtLXByb2ZpbGUtZGlyICd7SE9NRX1cdHVubmVscycgLS1yZWFkLWtleWAsIHRoZW4gc3RhcnQgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHJ1biAtLXByb2ZpbGUgZG90IC0tcHJvZmlsZS1kaXIgJ3tIT01FfVx0dW5uZWxzJ2AuDQo=",
    "stderr": "",
    "window": [
-    1795499294.7830708,
-    1795499294.8310714
+    1795508176.7428098,
+    1795508176.8023472
    ],
    "requests": [],
    "arm": "rust",
@@ -712,11 +712,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4NCkFQSSBrZXkgZXhwaXJ5OiB1bmtub3duOyBjaGVjayBQbGF0Zm9ybSBrZXkgc2V0dGluZ3MuDQpMYXN0IHR1bm5lbCByZWZyZXNoOiByb2xsZWQtYmFjazsgbmVlZHMgYXR0ZW50aW9uLiBUaGUgUHl0aG9uIGNsaWVudCByZWNvcmRlZCBpdDsgc3RvcCB0aGUgdHVubmVsIGFuZCBzdGFydCBpdCB3aXRoIGBwc2V1ZG9saWZlLW1jcCB0dW5uZWwgcnVuYCB0byBydW4gaXQgb24gdGhpcyBjbGllbnQuDQo=",
+   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4NCkFQSSBrZXkgZXhwaXJ5OiB1bmtub3duOyBjaGVjayBQbGF0Zm9ybSBrZXkgc2V0dGluZ3MuDQpMYXN0IHR1bm5lbCByZWZyZXNoOiByb2xsZWQtYmFjazsgbmVlZHMgYXR0ZW50aW9uLiBUaGUgUHl0aG9uIGNsaWVudCByZWNvcmRlZCBpdDsgdG8gcnVuIHRoZSB0dW5uZWwgb24gdGhpcyBjbGllbnQsIGltcG9ydCBpdHMgcnVudGltZSBrZXkgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHNldHVwIC0tcHJvZmlsZSBkb3QgLS1wcm9maWxlLWRpciAne0hPTUV9XHR1bm5lbHMnIC0tcmVhZC1rZXlgLCB0aGVuIHN0YXJ0IGl0IHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBydW4gLS1wcm9maWxlIGRvdCAtLXByb2ZpbGUtZGlyICd7SE9NRX1cdHVubmVscydgLg0K",
    "stderr": "",
    "window": [
-    1795499294.9436157,
-    1795499294.9916325
+    1795508176.905741,
+    1795508176.9593291
    ],
    "requests": [],
    "arm": "rust",
@@ -3219,16 +3219,16 @@
    "candidate_sha256": "15badd5228da1cf7c1bf2bef19e136f35ed0f0d0e01c29fe76aa41ae002df372"
   },
   "status-refresh-pending-text": {
-   "commit": "8cafc766289e044366f42baa0c12d2c0a52a5a17",
+   "commit": "ca28d13eac2f6d067fbed974f31531c5266e47b5",
    "rust_tree": "clean",
    "platform": "windows",
-   "candidate_sha256": "07ec3a829500f1b499ca3231016f387dd9517ff8c8eecea056e4ef74ccdd8791"
+   "candidate_sha256": "58fe18f426d58ea1c886da9d98d8d6ff44cd44e17a3ecae88c0d68a0c92be224"
   },
   "status-refresh-rolled-back-text": {
-   "commit": "8cafc766289e044366f42baa0c12d2c0a52a5a17",
+   "commit": "ca28d13eac2f6d067fbed974f31531c5266e47b5",
    "rust_tree": "clean",
    "platform": "windows",
-   "candidate_sha256": "07ec3a829500f1b499ca3231016f387dd9517ff8c8eecea056e4ef74ccdd8791"
+   "candidate_sha256": "58fe18f426d58ea1c886da9d98d8d6ff44cd44e17a3ecae88c0d68a0c92be224"
   },
   "update-case-folded-suffix": {
    "commit": "1b57a6ebc82ad7e61073a33760864081f0659d18",
