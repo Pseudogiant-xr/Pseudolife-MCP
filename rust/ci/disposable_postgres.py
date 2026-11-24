@@ -190,27 +190,37 @@ class Server:
         return True
 
 
-def _pg_ctl(pgdata: Path) -> tuple[Path, dict[str, str]]:
-    """pg_ctl from the pg0 bundle of the cluster's major, and its environment
-    (no libpq variables; on Linux the bundle's lib first, as pg0 runs it)."""
-    major = (pgdata / "PG_VERSION").read_text(encoding="ascii").strip()
-    installs = sorted(path for path in (Path.home() / ".pg0" / "installation").glob(f"{major}.*") if path.is_dir())
-    if not installs:
-        raise SetupError(f"no pg0 PostgreSQL {major} bundle under ~/.pg0/installation to stop the server with")
-    program = installs[-1] / "bin" / ("pg_ctl.exe" if os.name == "nt" else "pg_ctl")
-    env = child_environment()
-    if os.name != "nt":
-        env["LD_LIBRARY_PATH"] = os.pathsep.join(
-            part for part in (str(installs[-1] / "lib"), env.get("LD_LIBRARY_PATH", "")) if part)
-    return program, env
+# PostgreSQL's fast shutdown is SIGINT; on Windows the postmaster reads its
+# signals as one byte on the pipe named for its pid (what pg_ctl's pgkill
+# writes), so only a postgres process can be signalled there.
+_FAST_SHUTDOWN = 2
+STOP_WAIT = 60
 
 
-def _pg_ctl_stop(pgdata: Path) -> None:
-    """Stop the postmaster of ``pgdata`` and wait for it to exit."""
-    program, env = _pg_ctl(pgdata)
-    subprocess.run([str(program), "stop", "-D", str(pgdata), "-m", "fast", "-w", "-t", "60"],
-                   env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                   timeout=90, check=False)
+def _signal_shutdown(pid: int) -> None:
+    """Ask postmaster ``pid`` itself for a fast shutdown. Unlike ``pg_ctl stop
+    -D``, which signals whatever pid the file names when it runs, this reaches
+    only the process just verified."""
+    if os.name == "nt":
+        with open(rf"\\.\pipe\pgsignal_{pid}", "r+b", buffering=0) as pipe:
+            pipe.write(bytes([_FAST_SHUTDOWN]))
+            pipe.read(1)
+    else:
+        import signal  # noqa: PLC0415
+        os.kill(pid, signal.SIGINT)
+
+
+def _exited(pgdata: Path, pid: int, wait: float) -> bool:
+    """Whether postmaster ``pid`` has left ``pgdata``'s pid file, which it
+    removes as the last step of a clean shutdown."""
+    deadline = time.monotonic() + wait
+    while True:
+        record = _pidfile(pgdata)
+        if record is None or record[0] != pid:
+            return record is None
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
 
 
 def _deregister(name: str, pgdata: Path) -> None:
@@ -223,7 +233,7 @@ def _deregister(name: str, pgdata: Path) -> None:
 
 def _stop_verified(name: str, pgdata: Path, port: int, pid: int, passwords: list[str], *,
                    started: str | None = None, wait: float = 0) -> bool:
-    """Stop the postmaster ``pid`` of ``pgdata`` only once the server on
+    """Stop postmaster ``pid`` of ``pgdata`` only once the server on
     ``port`` answers one of ``passwords`` as the server of that directory
     (with ``started`` as its start time, when known) and ``pid`` still holds
     the directory's pid file, and report success only once it has exited.
@@ -236,13 +246,16 @@ def _stop_verified(name: str, pgdata: Path, port: int, pid: int, passwords: list
         if time.monotonic() >= deadline:
             return False
         time.sleep(1)
-    # pg_ctl signals whichever pid the file names when it runs: it must still
-    # be the one that just answered (a restart in between leaves it alone).
+    # The pid file must still name the pid that just answered (a restart in
+    # between is left alone), and only that pid is signalled.
     record = _pidfile(pgdata)
     if record is None or record[0] != pid:
         return False
-    _pg_ctl_stop(pgdata)
-    if _pidfile(pgdata) is not None:
+    try:
+        _signal_shutdown(pid)
+    except OSError:
+        return False
+    if not _exited(pgdata, pid, STOP_WAIT):
         return False
     _deregister(name, pgdata)
     return True

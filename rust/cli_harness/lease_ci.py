@@ -94,8 +94,17 @@ def main() -> int:
         return 1
     finally:
         # The cluster outlives this step only when the next steps can use it.
+        # A failed cleanup is reported beside the setup error, never instead.
         if server is not None and not exported:
-            server.stop()
+            try:
+                stopped = server.stop()
+            except Exception as exc:  # noqa: BLE001
+                stopped = False
+                print(f"cleanup failed ({type(exc).__name__}): {diagnostic(exc, f'password={secret}')}",
+                      file=sys.stderr)
+            if not stopped:
+                print(f"cleanup: the disposable PostgreSQL in {server.data_dir} is still running "
+                      f"(port {server.port}); stop it by that directory", file=sys.stderr)
 
     print("Disposable PostgreSQL and isolated test login are ready for the lease row.")
     return 0

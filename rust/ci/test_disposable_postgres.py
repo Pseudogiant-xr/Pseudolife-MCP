@@ -141,14 +141,18 @@ def fakes(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "pg0", pg0)
     monkeypatch.setattr(postgres, "_connect", server.connect)
     monkeypatch.setattr(postgres, "ABANDON_WAIT", 0)
+    monkeypatch.setattr(postgres, "STOP_WAIT", 0)
     stops = []
 
-    def pg_ctl_stop(pgdata):
-        stops.append(pgdata)
-        (pgdata / "postmaster.pid").unlink(missing_ok=True)
+    def signal_shutdown(pid):
+        # The postmaster exits and removes its pid file.
+        stops.append(pid)
+        for pidfile in tmp_path.rglob("postmaster.pid"):
+            if pidfile.read_text(encoding="utf-8").splitlines()[0] == str(pid):
+                pidfile.unlink()
         server.running = False
 
-    monkeypatch.setattr(postgres, "_pg_ctl_stop", pg_ctl_stop)
+    monkeypatch.setattr(postgres, "_signal_shutdown", signal_shutdown)
     return types.SimpleNamespace(pg0=pg0, server=server, parent=tmp_path, stops=stops)
 
 
@@ -228,7 +232,7 @@ def test_start_stops_its_own_server_when_pg0_reports_another(fakes, field):
 
 def test_start_keeps_the_directory_of_a_server_it_could_not_stop(fakes, monkeypatch):
     """A server still running in the fresh directory keeps its files."""
-    monkeypatch.setattr(postgres, "_pg_ctl_stop", lambda pgdata: fakes.stops.append(pgdata))
+    monkeypatch.setattr(postgres, "_signal_shutdown", lambda pid: fakes.stops.append(pid))
     fakes.server.honour_alter = False
     with pytest.raises(postgres.SetupError):
         postgres.start(fakes.parent, "pl-test-")
@@ -334,31 +338,62 @@ def test_a_failed_start_leaves_a_server_that_never_answers_as_ours(fakes):
 
 def test_stop_reports_failure_while_the_postmaster_survives(fakes, monkeypatch):
     server = postgres.start(fakes.parent, "pl-test-")
-    monkeypatch.setattr(postgres, "_pg_ctl_stop", lambda pgdata: fakes.stops.append(pgdata))
+    monkeypatch.setattr(postgres, "_signal_shutdown", lambda pid: fakes.stops.append(pid))
     assert server.stop() is False
     assert len(fakes.stops) == 1 and fakes.pg0.drops == []  # registry kept, files kept
     assert server.data_dir.exists() and server.owned
 
 
-def test_pg_ctl_comes_from_the_clusters_major_bundle(monkeypatch, tmp_path):
-    home = tmp_path / "home"
-    for version in ("17.6.0", "18.0.0", "18.1.0"):
-        (home / ".pg0" / "installation" / version / "bin").mkdir(parents=True)
-    pgdata = tmp_path / "pgdata"
-    pgdata.mkdir()
-    (pgdata / "PG_VERSION").write_text("18\n", encoding="ascii")
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    monkeypatch.setenv("PGHOST", "10.0.0.5")
-    program, env = postgres._pg_ctl(pgdata)
-    assert program.parent == home / ".pg0" / "installation" / "18.1.0" / "bin"
-    assert program.name in ("pg_ctl", "pg_ctl.exe")
-    assert "PGHOST" not in env
-    if os.name != "nt":
-        assert env["LD_LIBRARY_PATH"].split(os.pathsep)[0] == str(home / ".pg0" / "installation" / "18.1.0" / "lib")
-    (pgdata / "PG_VERSION").write_text("19\n", encoding="ascii")
-    with pytest.raises(postgres.SetupError, match="no pg0 PostgreSQL 19 bundle"):
-        postgres._pg_ctl(pgdata)
+def test_shutdown_signals_the_verified_pid_itself(monkeypatch):
+    """POSIX: SIGINT (fast shutdown) to that pid. Windows: the byte on the
+    postmaster's own signal pipe, as pg_ctl's pgkill sends it."""
+    import signal as signal_module
+    sent = []
+    monkeypatch.setattr(postgres.os, "name", "posix")
+    monkeypatch.setattr(postgres.os, "kill", lambda pid, sig: sent.append(("kill", pid, sig)))
+    postgres._signal_shutdown(4242)
+    assert sent == [("kill", 4242, signal_module.SIGINT)]
 
+    class Pipe:
+        def __init__(self, name, mode, buffering):
+            sent.append(("open", name, mode, buffering))
+
+        def write(self, data):
+            sent.append(("write", data))
+
+        def read(self, size):
+            return b"\x02"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    sent.clear()
+    monkeypatch.setattr(postgres.os, "name", "nt")
+    monkeypatch.setattr(postgres, "open", Pipe, raising=False)
+    postgres._signal_shutdown(4242)
+    assert sent == [("open", r"\\.\pipe\pgsignal_4242", "r+b", 0), ("write", b"\x02")]
+
+
+def test_exited_waits_for_the_pid_file_to_go(tmp_path):
+    (tmp_path / "postmaster.pid").write_text("4242\nx\n0\n55432\n", encoding="utf-8")
+    assert postgres._exited(tmp_path, 4242, 0) is False
+    (tmp_path / "postmaster.pid").write_text("5151\nx\n0\n55432\n", encoding="utf-8")
+    assert postgres._exited(tmp_path, 4242, 0) is False  # another server holds the directory now
+    (tmp_path / "postmaster.pid").unlink()
+    assert postgres._exited(tmp_path, 4242, 0) is True
+
+
+def test_stop_reports_failure_when_the_signal_cannot_be_sent(fakes, monkeypatch):
+    server = postgres.start(fakes.parent, "pl-test-")
+
+    def refuse(pid):
+        raise ProcessLookupError(pid)
+
+    monkeypatch.setattr(postgres, "_signal_shutdown", refuse)
+    assert server.stop() is False and fakes.pg0.drops == [] and server.data_dir.exists()
 
 def test_scram_verifier_has_postgres_layout():
     verifier = postgres.scram_verifier("synthetic", salt=b"\x00" * 16)
@@ -370,7 +405,7 @@ def test_scram_verifier_has_postgres_layout():
 def test_stop_stops_only_the_server_it_started(fakes):
     server = postgres.start(fakes.parent, "pl-test-")
     assert server.stop() is True
-    assert fakes.stops == [server.pgdata] and fakes.pg0.drops == [server.name]
+    assert fakes.stops == [server.pid] and fakes.pg0.drops == [server.name]
     assert not server.data_dir.exists()
     assert server.stop() is False and fakes.pg0.drops == [server.name]
 
@@ -590,7 +625,23 @@ def test_lease_fixture_reports_why_the_login_failed_without_its_secret(lease_ci,
     assert seen and seen[0] not in err
     # Nobody can use a cluster with no login: it is stopped and removed.
     assert len(lease_ci.fakes.stops) == 1
+    assert "still running" not in err
     assert not list(lease_ci.tmp.glob("pl-cli-lease-postgres-*"))
+
+
+def test_lease_fixture_reports_a_failed_cleanup_beside_the_setup_error(lease_ci, monkeypatch, capsys):
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 3, '{"exit": 3, "error": "refused"}', "")
+
+    def boom(pid):
+        raise OSError("signal pipe unavailable")
+
+    monkeypatch.setattr(postgres.subprocess, "run", run)
+    monkeypatch.setattr(postgres, "_signal_shutdown", boom)
+    assert lease_ci.module.main() == 3  # the setup's own exit, not the cleanup's
+    err = capsys.readouterr().err
+    assert "test-login fixture provisioning failed (exit 3)" in err
+    assert "is still running" in err and "stop it by that directory" in err
 
 
 def test_lease_fixture_stops_the_cluster_when_the_native_client_cannot_run(lease_ci, monkeypatch, capsys):
