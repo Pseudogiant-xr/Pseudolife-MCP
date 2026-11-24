@@ -1,6 +1,7 @@
 """The precheck retains IDs and continues independent failures."""
 import json
 import os
+import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -113,13 +114,16 @@ def test_setup_failure_keeps_unrun_rows_visible_and_continues_independent_judges
 def test_bank_rows_prepare_owned_pg_before_their_existing_cases(tmp_path, monkeypatch, row):
     mock_summary_replace(monkeypatch)
     events = []
+    commands = {}
     @contextmanager
-    def postgres(private):
+    def postgres(private, candidate):
         events.append("pg-open")
+        assert candidate == Path("candidate")
         yield {"owned": "fixture"}
         events.append("pg-close")
-    def execute(phase, *args, env=None, **kwargs):
+    def execute(phase, command, *args, env=None, **kwargs):
         events.append(phase)
+        commands[phase] = command
         if phase == f"golden/{row}":
             assert env == {"owned": "fixture"}
         return {"phase": phase, "exit_code": 0, "seconds": 0, "failed_cases": [], "diagnostic_errors": []}
@@ -128,28 +132,67 @@ def test_bank_rows_prepare_owned_pg_before_their_existing_cases(tmp_path, monkey
     value = plan(linux=[row], windows=[row])
     assert replay.run(value, Path("candidate"), tmp_path / "private", tmp_path / "public") == 0
     assert events == ["golden-lease-check", "pg-open", f"golden/{row}", "pg-close"]
+    # The suite-lease check is the candidate's own native command now.
+    assert commands["golden-lease-check"] == ["candidate", "lease", "check", "full-suite"]
+
+
+class _Server:
+    host, port, password = "127.0.0.1", 55432, "synthetic-secret"
+
+    def __init__(self, events):
+        self.events = events
+
+    def stop(self):
+        self.events.append("stop")
+        return True
 
 
 def test_owned_golden_fixture_does_not_inherit_a_configured_bank(tmp_path, monkeypatch):
-    from evals.rust_port import phase1_ci
-    from pseudolife_memory import test_login_cli
+    """The cluster comes from disposable_postgres and the login from the
+    candidate's native test-login; the daemon's bank never reaches the rows."""
+    import disposable_postgres
     configured = "postgresql://fixture.invalid/configured-bank"
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", configured)
-    @contextmanager
-    def postgres():
-        monkeypatch.setenv("PSEUDOLIFE_BENCH_ADMIN_URL", "host=127.0.0.1 port=1 user=fixture dbname=postgres")
-        yield
-    def provision(args, **kwargs):
-        assert "PSEUDOLIFE_MCP_DATABASE_URL" not in os.environ
-        assert args[args.index("--admin-url") + 1] == os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"]
-        return 0
-    monkeypatch.setattr(phase1_ci, "postgres", postgres)
-    monkeypatch.setattr(test_login_cli, "main", provision)
-    with replay.golden_postgres(tmp_path) as env:
+    events = []
+    def start(parent, prefix):
+        events.append(("start", parent, prefix))
+        return _Server(events)
+    def create_test_login(candidate, server, login):
+        events.append(("login", candidate, login))
+        return subprocess.CompletedProcess([], 0, "", "")
+    monkeypatch.setattr(disposable_postgres, "start", start)
+    monkeypatch.setattr(disposable_postgres, "create_test_login", create_test_login)
+    with replay.golden_postgres(tmp_path, Path("candidate")) as env:
         assert "PSEUDOLIFE_MCP_DATABASE_URL" not in env
-        assert env["PSEUDOLIFE_TEST_PG_HOST_PORT"] == "127.0.0.1:1"
+        assert env["PSEUDOLIFE_TEST_PG_HOST_PORT"] == "127.0.0.1:55432"
+        assert env["PSEUDOLIFE_TEST_PG_LOGIN_FILE"] == str(tmp_path / "test-pg.env")
+    assert events == [("start", Path.home(), "pl-precheck-postgres-"),
+                      ("login", Path("candidate"), tmp_path / "test-pg.env"), "stop"]
     assert os.environ["PSEUDOLIFE_MCP_DATABASE_URL"] == configured
 
+
+def test_owned_golden_fixture_stops_its_cluster_when_the_login_fails(tmp_path, monkeypatch):
+    import disposable_postgres
+    events = []
+    monkeypatch.setattr(disposable_postgres, "start", lambda parent, prefix: _Server(events))
+    monkeypatch.setattr(disposable_postgres, "create_test_login",
+                        lambda candidate, server, login: subprocess.CompletedProcess([], 3, "", ""))
+    with pytest.raises(RuntimeError, match="test-role provisioning failed"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    assert events == ["stop"]
+
+
+def test_precheck_runner_imports_nothing_from_the_package_outside_the_frozen_judges():
+    """The golden path is package-free; PROCESS_BOOTSTRAP's import is a string
+    the frozen merge-base oracle's own runtime runs (--only judges)."""
+    import ast
+    source = Path(replay.__file__).read_text(encoding="utf-8")
+    imports = [node for node in ast.walk(ast.parse(source)) if isinstance(node, (ast.Import, ast.ImportFrom))]
+    names = [alias.name for node in imports if isinstance(node, ast.Import) for alias in node.names]
+    names += [node.module or "" for node in imports if isinstance(node, ast.ImportFrom)]
+    assert not [name for name in names if name.split(".")[0] == "pseudolife_memory"]
+    assert "pseudolife_memory" not in source.replace(replay.PROCESS_BOOTSTRAP, "")
 
 def test_real_bank_exit_differences_retain_the_actual_protocol_era(tmp_path):
     from evals.rust_port.stdio_judge import StdioPolicy, judge_with_evidence
@@ -260,3 +303,14 @@ def test_published_ids_are_exact_in_json_and_safe_in_markdown(tmp_path):
     assert json.loads(report)["groups"][0]["phases"][0]["failed_cases"] == [case]
     assert "private stream omitted" not in report
     assert "case\\|&lt;id&gt;&#96;" in target.read_text()
+
+
+def test_the_frozen_judges_are_recorded_as_retiring_with_the_package():
+    """package_consumers.toml classes the runner's one remaining package
+    import (the judges' PROCESS_BOOTSTRAP) as tooling that retires with it."""
+    import fnmatch
+    import tomllib
+    rules = tomllib.loads((replay.ROOT / "rust/ci/package_consumers.toml").read_text(encoding="utf-8"))["rules"]
+    rule = next(rule for rule in rules if "python-import" in rule["kinds"]
+                and any(fnmatch.fnmatchcase("rust/ci/pr_precheck_run.py", glob) for glob in rule["globs"]))
+    assert rule["class"] == "retained test tooling" and rule.get("retire_with_package") is True

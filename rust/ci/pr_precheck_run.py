@@ -5,7 +5,6 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import html
-import io
 import json
 import math
 import os
@@ -95,27 +94,31 @@ def row_commands(row: str, candidate: Path, private: Path) -> list[tuple[str, li
 
 
 @contextmanager
-def golden_postgres(private: Path):
-    """Use the same owned provider and test-role provisioning as parity."""
-    from evals.rust_port.phase1_ci import postgres
-    from pseudolife_memory.test_login_cli import main as test_login_main
-    from psycopg.conninfo import conninfo_to_dict
-    with postgres():
-        admin = os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"]
+def golden_postgres(private: Path, candidate: Path):
+    """The cluster and isolated test login every parity shard gets from
+    rust/cli_harness/lease_ci.py: disposable_postgres starts it (the pg0
+    wheel, not the Python package) and the candidate's own native
+    ``test-login create`` provisions the login. Stopped on the way out."""
+    from disposable_postgres import create_test_login, start
+    # Under the home directory, as lease_ci keeps it: on hosted Windows the
+    # runner's staging root carries a group ACL that denies initdb's chmod.
+    server = start(Path.home(), "pl-precheck-postgres-")
+    try:
         login = private / "test-pg.env"
-        configured = os.environ.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
-        try:
-            code = test_login_main(["create", "--rotate", "--file", str(login), "--admin-url", admin], out=io.StringIO())
-        finally:
-            if configured is not None:
-                os.environ["PSEUDOLIFE_MCP_DATABASE_URL"] = configured
-        if code:
+        if create_test_login(candidate, server, login).returncode:
             raise RuntimeError("owned golden test-role provisioning failed")
-        options = conninfo_to_dict(admin)
-        env = dict(os.environ, PSEUDOLIFE_TEST_PG_HOST_PORT=f"{options['host']}:{options['port']}",
+        env = dict(os.environ, PSEUDOLIFE_TEST_PG_HOST_PORT=f"{server.host}:{server.port}",
                    PSEUDOLIFE_TEST_PG_LOGIN_FILE=str(login))
         env.pop("PSEUDOLIFE_MCP_DATABASE_URL", None)
         yield env
+    finally:
+        server.stop()
+
+
+def lease_check_command(candidate: Path) -> list[str]:
+    """The suite-lease check before PostgreSQL work, by the candidate's own
+    native ``lease check`` (the Python CLI's is frozen with the package)."""
+    return [str(candidate), "lease", "check", "full-suite"]
 
 
 def judge_command(phase: str, python: Path, source: Path, candidate: Path, private: Path,
@@ -276,13 +279,13 @@ def run(plan: dict, candidate: Path, private: Path, public: Path, only="all") ->
 
     rows(direct)
     if fixture_rows:
-        if stage("golden-lease-check", [sys.executable, "-m", "pseudolife_memory.cli", "lease", "check", "full-suite"]):
+        if stage("golden-lease-check", lease_check_command(candidate)):
             return 1
         setup, cleanup = by_name["golden-postgres"], by_name["golden-postgres-cleanup"]
         setup["diagnostic_errors"] = []
         started, cleanup_started = time.monotonic(), None
         try:
-            with golden_postgres(private) as env:
+            with golden_postgres(private, candidate) as env:
                 setup.update(exit_code=0, seconds=round(time.monotonic() - started, 3))
                 write_summary(public, records)
                 rows(fixture_rows, env)
@@ -301,7 +304,7 @@ def run(plan: dict, candidate: Path, private: Path, public: Path, only="all") ->
         oracle = private / "oracle"
         if stage("oracle-setup", [sys.executable, "-m", "evals.rust_port.phase1_oracle", "--destination", str(oracle)]):
             return 1
-        if stage("lease-check", [sys.executable, "-m", "pseudolife_memory.cli", "lease", "check", "full-suite"]):
+        if stage("lease-check", lease_check_command(candidate)):
             return 1
         checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         python = oracle / ("runtime/Scripts/python.exe" if os.name == "nt" else "runtime/bin/python")
