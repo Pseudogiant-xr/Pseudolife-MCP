@@ -618,8 +618,8 @@ fn packaged_compose(path: &Path) -> bool {
         || (name(Some(parent)).as_deref() == Some("compose")
             && name(grandparent).as_deref() == Some(".pseudolife-mcp"));
     // <checkout>/ops/: the installers' layout.
-    let checkout = name(Some(parent)).as_deref() == Some("ops")
-        && grandparent.is_some_and(|c| c.join("pyproject.toml").is_file());
+    let checkout =
+        name(Some(parent)).as_deref() == Some("ops") && grandparent.is_some_and(is_checkout_root);
     archive || bundled || checkout
 }
 
@@ -940,7 +940,7 @@ impl Update {
             project_dir.parent().unwrap_or(&project_dir).to_owned(),
         ]
         .into_iter()
-        .find(|p| p.join("pyproject.toml").is_file() && p.join("ops").is_dir());
+        .find(|p| is_checkout_root(p) && p.join("ops").is_dir());
         Ok(Context {
             args,
             env_files,

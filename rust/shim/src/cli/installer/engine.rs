@@ -255,19 +255,11 @@ fn detect(repo: Option<&Path>) -> Result<&'static str> {
 }
 
 fn checkout_version(repo: &Path) -> Result<String> {
-    const NO_VERSION: &str = "Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. Nothing was started.";
-    // An unreadable pyproject.toml is a refusal, not unavailability: it is
+    const NO_VERSION: &str = "Cannot read a release version from this checkout's rust/shim/Cargo.toml; rerun with --engine python. Nothing was started.";
+    // An unreadable release manifest is a refusal, not unavailability: it is
     // the checkout that is broken, so the default does not fall back.
-    let text = fs::read_to_string(repo.join("pyproject.toml")).map_err(|_| refusal(NO_VERSION))?;
-    let version = text.lines().find_map(|line| {
-        let rest = line
-            .strip_prefix("version")?
-            .trim_start_matches([' ', '\t']);
-        let rest = rest.strip_prefix('=')?.trim_start_matches([' ', '\t']);
-        let value = rest.strip_prefix('"')?;
-        let end = value.find('"')?;
-        (end > 0).then(|| value[..end].to_owned())
-    });
+    let version =
+        crate::cli::update::checkout_release_version(repo).map_err(|_| refusal(NO_VERSION))?;
     match version {
         Some(version) if crate::cli::update::plain_release(&version) => Ok(version),
         _ => Err(unavailable(NO_VERSION)),
@@ -1048,6 +1040,51 @@ mod tests {
     }
 
     #[test]
+    fn the_checkout_version_is_the_native_crate_not_pyproject() {
+        let repo = std::env::temp_dir().join(format!(
+            "pl-installer-checkout-version-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let manifest = repo.join("rust/shim/Cargo.toml");
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        // pyproject.toml leaves with the Python package; it is not read.
+        fs::write(
+            repo.join("pyproject.toml"),
+            "[project]\nversion = \"0.0.9\"\n",
+        )
+        .unwrap();
+        fs::write(
+            &manifest,
+            "[package]\nname = \"pseudolife-stdio\"\nversion = \"0.26.0\"\n",
+        )
+        .unwrap();
+        assert_eq!(checkout_version(&repo).unwrap(), "0.26.0");
+        // A version that is no plain release: Rust is unavailable here.
+        fs::write(&manifest, "[package]\nversion = \"0.26.0.dev1\"\n").unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(refused.unavailable, "{}", refused.message);
+        assert!(
+            refused
+                .message
+                .contains("this checkout's rust/shim/Cargo.toml")
+        );
+        // No manifest: a broken checkout, refused without the fallback.
+        fs::remove_file(&manifest).unwrap();
+        let refused = checkout_version(&repo).unwrap_err();
+        assert!(!refused.unavailable, "{}", refused.message);
+        assert!(
+            refused
+                .message
+                .contains("this checkout's rust/shim/Cargo.toml")
+        );
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
     fn the_fallback_line_keeps_only_the_cause() {
         assert_eq!(
             cause(
@@ -1061,9 +1098,9 @@ mod tests {
         );
         assert_eq!(
             cause(
-                "Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. Nothing was started."
+                "Cannot read a release version from this checkout's rust/shim/Cargo.toml; rerun with --engine python. Nothing was started."
             ),
-            "Cannot read a release version from this checkout's pyproject.toml"
+            "Cannot read a release version from this checkout's rust/shim/Cargo.toml"
         );
     }
 

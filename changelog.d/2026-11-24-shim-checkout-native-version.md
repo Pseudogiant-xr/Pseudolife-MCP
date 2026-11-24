@@ -1,0 +1,3 @@
+### Changed (2026-11-24 — the native client's checkout mode reads the release version from its own crate)
+- The native client's installer engine (`pseudolife-mcp installer engine`) and checkout-mode `update` read a checkout's release version from `[package] version` in `rust/shim/Cargo.toml`, no longer from `pyproject.toml`, and their refusals name that file. This is the same field `rust/ci/release_version.py` reads.
+- A directory counts as a checkout when it has `rust/shim/Cargo.toml` or, for a checkout from before this change, `pyproject.toml`. So checkout detection keeps working once the Python package and its `pyproject.toml` are gone.

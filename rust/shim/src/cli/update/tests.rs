@@ -665,14 +665,74 @@ impl Drop for Temp {
 
 fn checkout_schema_fixture() -> (Temp, PathBuf) {
     let repo = Temp::new();
+    let manifest = repo.0.join(super::RELEASE_MANIFEST);
+    fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    fs::write(
+        manifest,
+        "[package]\nname = \"pseudolife-stdio\"\nversion = \"0.99.1\"\n\n[dependencies]\nversion = \"0.0.1\"\n",
+    )
+    .unwrap();
+    // A decoy: pyproject.toml leaves with the Python package and is not read.
     fs::write(
         repo.0.join("pyproject.toml"),
-        "[project]\nversion = \"0.99.1\"\n",
+        "[project]\nversion = \"0.0.9\"\n",
     )
     .unwrap();
     let plan = repo.0.join("rust/daemon/src/storage/schema_plan.json");
     fs::create_dir_all(plan.parent().unwrap()).unwrap();
     (repo, plan)
+}
+
+#[test]
+fn checkout_release_version_reads_the_native_crate() {
+    let repo = Temp::new();
+    assert!(super::checkout_release_version(&repo.0).is_err());
+    assert!(!super::is_checkout_root(&repo.0));
+    let manifest = repo.0.join(super::RELEASE_MANIFEST);
+    fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    for (text, version) in [
+        ("[package]\nversion = \"1.2.3\"\n", Some("1.2.3")),
+        (
+            "\u{feff}[package]\r\nversion = '1.2.3' # cut\r\n",
+            Some("1.2.3"),
+        ),
+        ("[package]\nversion.workspace = true\n", None),
+        ("[package]\nversion = \"\"\n", None),
+        ("[workspace]\nversion = \"1.2.3\"\n", None),
+        ("not toml [", None),
+    ] {
+        fs::write(&manifest, text).unwrap();
+        assert_eq!(
+            super::checkout_release_version(&repo.0).unwrap().as_deref(),
+            version,
+            "{text:?}"
+        );
+    }
+    assert!(super::is_checkout_root(&repo.0));
+    // A checkout from before the native release version is still one.
+    fs::remove_file(&manifest).unwrap();
+    fs::write(repo.0.join("pyproject.toml"), "[project]\n").unwrap();
+    assert!(super::is_checkout_root(&repo.0));
+}
+
+#[test]
+fn checkout_schema_names_the_release_manifest_without_a_version() {
+    let (repo, plan) = checkout_schema_fixture();
+    fs::write(plan, br#"{"format":1,"schema_version":71,"steps":[]}"#).unwrap();
+    fs::write(
+        repo.0.join(super::RELEASE_MANIFEST),
+        "[package]\nname = \"x\"\n",
+    )
+    .unwrap();
+    let refused = engine::checkout_version_schema(&repo.0).unwrap_err();
+    assert_eq!(refused.exit_code, 2);
+    assert!(
+        refused
+            .message
+            .contains("cannot read the checkout version from rust/shim/Cargo.toml"),
+        "{}",
+        refused.message
+    );
 }
 
 #[test]

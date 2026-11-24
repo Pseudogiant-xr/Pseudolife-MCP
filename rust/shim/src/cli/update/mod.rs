@@ -366,6 +366,37 @@ pub(crate) fn plain_release(v: &str) -> bool {
         && p.iter()
             .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
 }
+/// The release version's home in a checkout: the native client crate's
+/// manifest (`rust/ci/release_version.py` reads the same field).
+pub(crate) const RELEASE_MANIFEST: &str = "rust/shim/Cargo.toml";
+
+/// The release version a checkout carries: `[package] version` in
+/// [`RELEASE_MANIFEST`]. `Err` when the file cannot be read; `Ok(None)` when
+/// it names no string version (`version.workspace = true`, none at all).
+pub(crate) fn checkout_release_version(repo: &Path) -> std::io::Result<Option<String>> {
+    let text = fs::read_to_string(repo.join(RELEASE_MANIFEST))?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    Ok(text
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|manifest| {
+            manifest
+                .get("package")?
+                .as_table()?
+                .get("version")?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .filter(|version| !version.is_empty()))
+}
+
+/// Whether `dir` is a checkout of this repository: it carries the release
+/// manifest, or `pyproject.toml` as a checkout from before the native
+/// release version did.
+pub(crate) fn is_checkout_root(dir: &Path) -> bool {
+    dir.join(RELEASE_MANIFEST).is_file() || dir.join("pyproject.toml").is_file()
+}
+
 pub(crate) fn safe_tag(v: &str) -> bool {
     !v.is_empty()
         && v.bytes()

@@ -210,14 +210,12 @@ pub(super) fn build_environment(tree: &seams::Tree) -> Environment {
 const CHECKOUT_SCHEMA_PLAN: &str = "rust/daemon/src/storage/schema_plan.json";
 
 pub(super) fn checkout_version_schema(repo: &Path) -> Result<(String, i64)> {
-    let project = fs::read_to_string(repo.join("pyproject.toml"))?;
-    let version = regex::Regex::new(r#"(?m)^version\s*=\s*"([^"]+)""#)
-        .expect("version")
-        .captures(&project)
-        .map(|c| c[1].to_owned())
-        .ok_or_else(|| {
-            UpdateError::usage("cannot read the checkout version from pyproject.toml")
-        })?;
+    let version = crate::cli::update::checkout_release_version(repo)?.ok_or_else(|| {
+        UpdateError::usage(format!(
+            "cannot read the checkout version from {}",
+            crate::cli::update::RELEASE_MANIFEST
+        ))
+    })?;
     let plan = fs::read(repo.join(CHECKOUT_SCHEMA_PLAN)).map_err(|error| {
         UpdateError::usage(format!(
             "cannot read {CHECKOUT_SCHEMA_PLAN} in this checkout ({error}). Restore that file and retry."
