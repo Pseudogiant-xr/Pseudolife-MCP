@@ -489,3 +489,33 @@ def test_a_census_reporting_error_keeps_the_rust_lanes(monkeypatch):
     monkeypatch.setattr(docs_scope, "docs_selection", lambda _: ("docs", []))
     monkeypatch.setattr(docs_scope, "report_census", broken_report)
     assert docs_scope.rust_scope({"EVENT_NAME": "push"}) == (True, True)
+
+
+@pytest.mark.parametrize("reader, fetches", [
+    (docs_scope.CENSUS_READERS[0], True),
+    (RERANK_READER, False),
+])
+def test_the_docs_runner_fetches_the_census_pin_only_for_census_readers(monkeypatch, reader, fetches):
+    """The guards job checks out one commit; the census's readers need its
+    pinned frozen sources, which nothing else does."""
+    monkeypatch.setattr(sys, "argv", ["docs_scope", "tests"])
+    monkeypatch.setenv("DOC_TESTS", json.dumps([*docs_scope.DOC_GUARDS, reader]))
+    fetched = []
+    monkeypatch.setattr(docs_scope, "fetch_frozen_sources", lambda root: fetched.append(root))
+    monkeypatch.setattr(subprocess, "call", lambda argv, *, cwd: 0)
+    with pytest.raises(SystemExit):
+        docs_scope.main()
+    assert fetched == ([ROOT] if fetches else [])
+
+
+def test_the_push_census_report_fetches_the_pin_first(tmp_path, monkeypatch):
+    order = []
+    monkeypatch.setattr(docs_scope, "fetch_frozen_sources", lambda root: order.append("fetch"))
+
+    def census(args, **kwargs):
+        order.append("census")
+        return "producer census is current\n"
+
+    monkeypatch.setattr(subprocess, "check_output", census)
+    docs_scope.report_census({"GITHUB_STEP_SUMMARY": str(tmp_path / "summary")})
+    assert order == ["fetch", "census"]
