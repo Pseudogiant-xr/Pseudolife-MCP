@@ -332,7 +332,8 @@ mod tests {
         for other in [
             row("gemini", "registration", "change"),
             row("environment", "user", "change"),
-            row("schedule", "task", "change"),
+            row("unattended-update", "client-schedule", "change"),
+            row("unattended-update", "schedule", "change"),
         ] {
             assert!(
                 !check(&json!({"exit": 0, "rows": [codex[0], other]})),

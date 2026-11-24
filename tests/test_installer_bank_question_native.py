@@ -187,7 +187,7 @@ def test_connect_runs_before_the_codex_credential_setup_in_both_installers():
 # shim's connect re-points the fake Codex registration (a file naming the
 # registered token file) at --token-file when Codex is in its --client list,
 # as the real connect does, and can add a change row of another kind
-# (FAKE_EXTRA_CHANGE); the fake step answers from the same files.
+# (FAKE_EXTRA_CHANGE, as client/place); the fake step answers from the same files.
 
 TOKEN_COPY_SHIM = r'''printf 'shim|%s\n' "$*" >>"$CALL_LOG"
 list="" file="" prev=""
@@ -209,7 +209,7 @@ case " $* " in *' --dry-run '*)
         fi
     done
     if [ -n "${FAKE_EXTRA_CHANGE:-}" ]; then
-        rows="$rows$sep{\"client\":\"$FAKE_EXTRA_CHANGE\",\"place\":\"user\",\"state\":\"change\"}"
+        rows="$rows$sep{\"client\":\"${FAKE_EXTRA_CHANGE%%/*}\",\"place\":\"${FAKE_EXTRA_CHANGE#*/}\",\"state\":\"change\"}"
     fi
     if [ -n "${FAKE_EXTRA_MANUAL:-}" ]; then
         rows="$rows$sep{\"client\":\"environment\",\"place\":\"process\",\"state\":\"manual\",\"detail\":\"$FAKE_EXTRA_MANUAL\"}"
@@ -381,8 +381,9 @@ TOKEN_COPY_NEAR_MISSES = [
     pytest.param({"other": True}, "real", 0, id="another-file"),
     # The reviewer's case: connect also changes something of another kind
     # (the environment, a schedule), so the plan is applied as before.
-    pytest.param({"extra": "environment"}, "real", 0, id="environment-changes-too"),
-    pytest.param({"extra": "schedule"}, "real", 0, id="schedule-changes-too"),
+    pytest.param({"extra": "environment/user"}, "real", 0, id="environment-changes-too"),
+    # The row connect writes for an unattended-update schedule (connect/schedule.rs).
+    pytest.param({"extra": "unattended-update/client-schedule"}, "real", 0, id="schedule-changes-too"),
     pytest.param({}, '{"state":"other-changes","detail":"fixture"}', 0, id="other-changes"),
     pytest.param({}, '{"state":"unknown","detail":"fixture"}', 1, id="could-not-tell"),
     pytest.param({}, '{"state":"same","detail":"fixture"}', 1, id="same-but-failed"),
@@ -428,7 +429,10 @@ function fake-shim {
             @{ client = $client; place = 'registration'; state = $state }
             if ($client -eq 'codex') { @{ client = 'codex'; place = 'connection'; state = $state } }
         })
-        if ($env:FAKE_EXTRA_CHANGE) { $rows += @{ client = $env:FAKE_EXTRA_CHANGE; place = 'user'; state = 'change' } }
+        if ($env:FAKE_EXTRA_CHANGE) {
+            $extraClient, $extraPlace = $env:FAKE_EXTRA_CHANGE -split '/', 2
+            $rows += @{ client = $extraClient; place = $extraPlace; state = 'change' }
+        }
         if ($env:FAKE_EXTRA_MANUAL) { $rows += @{ client = 'environment'; place = 'process'; state = 'manual'; detail = $env:FAKE_EXTRA_MANUAL } }
         return (@{ exit = 0; rows = $rows } | ConvertTo-Json -Depth 5 -Compress)
     }
