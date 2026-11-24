@@ -5,8 +5,9 @@ use pseudolife_stdio::runtime::{self, BINARY, Layout, UpdateLock};
 use serde_json::{Value, json};
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
 };
 
 struct Home(PathBuf);
@@ -28,6 +29,26 @@ impl Home {
         }
     }
     fn run(&self, args: &[&str]) -> Output {
+        self.command(args).output().unwrap()
+    }
+    /// The same run with `input` on stdin, as the installers pipe connect's plan.
+    fn run_with_input(&self, args: &[&str], input: &str) -> Output {
+        let mut child = self
+            .command(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    }
+    fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
         command.env_clear();
         for key in ["SystemRoot", "WINDIR", "TEMP", "TMP"] {
@@ -49,9 +70,8 @@ impl Home {
             .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:1")
             .arg("installer")
             .args(args)
-            .current_dir(&self.0)
-            .output()
-            .unwrap()
+            .current_dir(&self.0);
+        command
     }
     fn install_native(&self) {
         let layout = self.layout();
@@ -405,6 +425,80 @@ fn usage_errors_exit_two_before_reading_anything() {
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert!(output.stdout.is_empty(), "{args:?}");
     }
+}
+
+/// Issue #1908: the installers' `connect-report codex-only` probe through the
+/// real dispatch. A plan whose only changes are Codex rows answers
+/// `codex-only`; a change of any other client, the environment or an
+/// unattended-update schedule answers an empty line.
+#[test]
+fn the_codex_only_probe_answers_through_the_installer_dispatch() {
+    let home = Home::new();
+    let row = |client: &str, place: &str, state: &str| json!({"client": client, "place": place, "state": state});
+    let codex = [
+        row("codex", "registration", "change"),
+        row("codex", "connection", "change"),
+        row("gemini", "registration", "current"),
+    ];
+    let probe = |rows: Vec<Value>| {
+        let plan = json!({"exit": 0, "rows": rows}).to_string();
+        let output = home.run_with_input(&["connect-report", "codex-only"], &plan);
+        assert_eq!(output.status.code(), Some(0), "{plan}");
+        assert!(output.stderr.is_empty(), "{plan}");
+        String::from_utf8(output.stdout).unwrap()
+    };
+    assert_eq!(probe(codex.to_vec()), "codex-only\n");
+    for other in [
+        row("gemini", "registration", "change"),
+        row("environment", "user", "change"),
+        row("unattended-update", "client-schedule", "change"),
+    ] {
+        let mut rows = codex.to_vec();
+        rows.push(other.clone());
+        assert_eq!(probe(rows), "\n", "{other}");
+    }
+}
+
+/// Issue #1908: `installer codex-token-copy` through the real dispatch, on
+/// the two answers that start no Codex app-server. A Codex home without
+/// config.toml holds no registration (and is not created); a configured home
+/// with no Codex CLI to ask is unknown, exit 1, so the installers apply
+/// connect's plan as before.
+#[test]
+fn the_token_copy_step_answers_without_starting_codex() {
+    let home = Home::new();
+    let token = home.0.join("token");
+    let args = [
+        "codex-token-copy",
+        "--daemon-url",
+        "http://10.0.0.9:8765",
+        "--token-file",
+        token.to_str().unwrap(),
+    ];
+    let codex = home.0.join("codex");
+    let output = home.run(&args);
+    let result = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{result}");
+    assert_eq!(result["state"], "unregistered", "{result}");
+    assert_eq!(fs::read_dir(&codex).unwrap().count(), 0, "{result}");
+
+    // No codex on PATH (an empty folder), no CODEX_CLI_PATH, an empty LOCALAPPDATA.
+    fs::write(codex.join("config.toml"), "model = \"fixture\"\n").unwrap();
+    let output = home.run(&args);
+    let result = report(&output);
+    assert_eq!(output.status.code(), Some(1), "{result}");
+    assert_eq!(result["state"], "unknown", "{result}");
+    assert!(
+        result["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Codex CLI is unavailable"),
+        "{result}"
+    );
+    assert_eq!(
+        fs::read_to_string(codex.join("config.toml")).unwrap(),
+        "model = \"fixture\"\n"
+    );
 }
 
 #[test]

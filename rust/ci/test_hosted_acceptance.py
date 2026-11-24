@@ -882,21 +882,30 @@ def test_rerun_names_changed_codex_settings_without_their_values():
 @pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
 def test_the_first_rerun_after_the_handoff_may_change_only_the_expected_settings(monkeypatch):
     # From v0.23.1 and v0.24.0: the lost memory_message approval added as
-    # "approve" (#1903) and the token file re-pointed (#1908, not fixed yet);
-    # anything else, another value, another kind or nothing fails the row.
+    # "approve" (#1903). A candidate with #1908's fix keeps Codex's token
+    # copy registered, and one up to v0.25.1 re-points it once; the other
+    # way round, anything else, another value, another kind or nothing fails
+    # the row.
     from ops.acceptance import hosted_linux as linux
 
     config, runtime = Path(".codex/config.toml"), Path("data/runtime.json")
     before = {config: "a", runtime: "r"}
     changed = {config: "b", runtime: "r"}
 
-    def kept(tag, after_text, prints=changed, before_text=LEGACY_CONFIG, start=before):
+    def kept(tag, after_text, prints=changed, before_text=LEGACY_CONFIG, start=before, candidate=None):
         changes = linux.setting_changes(before_text, after_text)
-        return linux.first_rerun_kept(tag, start, prints, changes, after_text, config)
+        return linux.first_rerun_kept(tag, start, prints, changes, after_text, config, candidate)
 
     for tag in ("v0.23.1", "v0.24.0"):
         assert kept(tag, RERUN_CONFIG)
-        assert not kept(tag, APPROVED_CONFIG), "the #1908 entry must go when its fix ships"
+        assert not kept(tag, REPOINTED_CONFIG), "run 1 must keep Codex's token copy registered (#1908)"
+        assert kept(tag, RERUN_CONFIG, candidate="0.25.2")
+        assert not kept(tag, REPOINTED_CONFIG, candidate="0.26.0")
+        # A published candidate without the fix re-points it, exactly once.
+        assert kept(tag, RERUN_CONFIG, candidate="0.26.0rc1")
+        for unfixed in ("0.25.1", "0.25.0", "0.25.1rc2"):
+            assert kept(tag, REPOINTED_CONFIG, candidate=unfixed)
+            assert not kept(tag, RERUN_CONFIG, candidate=unfixed)
         assert not kept(tag, RERUN_CONFIG.replace('"approve"', '"prompt"'))
         assert not kept(tag, RERUN_CONFIG + '[mcp_servers.other]\ncommand = "x"\n')
         assert not kept(tag, LEGACY_CONFIG, prints=before)
@@ -905,6 +914,7 @@ def test_the_first_rerun_after_the_handoff_may_change_only_the_expected_settings
         assert not kept(tag, LEGACY_CONFIG.replace('"copy"', '"operator"'), before_text=APPROVED_CONFIG)
     # A start whose installer carries both fixes expects no change at all.
     monkeypatch.setitem(linux.FIRST_RERUN_SETTINGS, "v9.9.9", {})
+    assert linux.first_rerun_settings("v9.9.9", "0.25.1") == {}
     assert linux.first_rerun_kept("v9.9.9", before, dict(before), {}, LEGACY_CONFIG, config)
     assert not linux.first_rerun_kept("v9.9.9", before, changed, {}, LEGACY_CONFIG, config)
     assert not kept("v9.9.9", RERUN_CONFIG)
@@ -924,15 +934,21 @@ def test_the_second_rerun_needs_the_installers_own_nothing_changed_line():
 LEGACY_CONFIG = ('[mcp_servers.pseudolife-memory]\ncommand = "launcher"\nargs = []\n'
                  '[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN_FILE = "copy"\n')
 APPROVED_CONFIG = LEGACY_CONFIG + '[mcp_servers.pseudolife-memory.tools.memory_message]\napproval_mode = "approve"\n'
-# What run 1 from a legacy start does on a release without #1908's fix.
-RERUN_CONFIG = APPROVED_CONFIG.replace('"copy"', '"operator"')
+# What run 1 from a legacy start does: the lost approval added, Codex's own
+# token copy kept (#1908).
+RERUN_CONFIG = APPROVED_CONFIG
+# What run 1 did before #1908's fix: the registration re-pointed at the
+# operator's --token-file.
+REPOINTED_CONFIG = APPROVED_CONFIG.replace('"copy"', '"operator"')
 UNCHANGED = b"==> Native client 0.25.1 already installed at /fixture/bin/pseudolife-mcp; nothing changed\n"
 
 
-def _upgrade_with(tmp_path, monkeypatch, first, second):
+def _upgrade_with(tmp_path, monkeypatch, first, second, candidate="0.25.2"):
     """Run hosted_linux.upgrade from one legacy start, with every external step
     faked: the legacy install writes LEGACY_CONFIG, the first native rerun
-    `first` and the second `second` (each a config text and its output)."""
+    `first` and the second `second` (each a config text and its output).
+    `candidate` is the release under test (0.25.2 stands for one carrying
+    #1908's fix)."""
     from ops.acceptance import hosted_linux as linux
 
     calls = []
@@ -969,7 +985,7 @@ def _upgrade_with(tmp_path, monkeypatch, first, second):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     try:
-        linux.upgrade(row, SimpleNamespace(tag="v0.25.1", version="0.25.1"), tmp_path, "", peer, scratch)
+        linux.upgrade(row, SimpleNamespace(tag=f"v{candidate}", version=candidate), tmp_path, "", peer, scratch)
     except hosted.Observation as error:
         return row, error, calls
     return row, None, calls
@@ -986,13 +1002,26 @@ def test_the_upgrade_row_completes_the_lost_approval_once_then_holds_run_two_to_
     assert calls == ["python", "native", "native", "python"] * 2
     reruns = [step for step in row.steps if step["command"].endswith(("<rerun>", "<second rerun>"))]
     assert [step["observed"] for step in reruns] == [True] * 4, reruns
-    assert reruns[0]["changed_codex_settings"] == sorted([linux.LOST_APPROVAL, linux.REPOINTED_TOKEN_FILE])
-    assert reruns[0]["codex_setting_changes"] == {linux.LOST_APPROVAL: "added",
-                                                  linux.REPOINTED_TOKEN_FILE: "changed"}
-    assert reruns[0]["expected_codex_settings"] == {linux.LOST_APPROVAL: "added",
-                                                   linux.REPOINTED_TOKEN_FILE: "changed"}
+    assert reruns[0]["changed_codex_settings"] == [linux.LOST_APPROVAL]
+    assert reruns[0]["codex_setting_changes"] == {linux.LOST_APPROVAL: "added"}
+    assert reruns[0]["expected_codex_settings"] == {linux.LOST_APPROVAL: "added"}
     assert "approve" not in json.dumps(reruns[0]) and "operator" not in json.dumps(reruns[0])
     assert reruns[1]["changed_codex_settings"] == []
+    # The ledger's rerun step records run 1, as before the second run existed.
+    assert sum(entry["command"].endswith("<rerun-from-0.23.x>") for entry in row.commands) == 1, row.commands
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_a_published_candidate_without_the_1908_fix_may_still_re_point_once(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    row, error, _ = _upgrade_with(tmp_path, monkeypatch, (REPOINTED_CONFIG, UNCHANGED),
+                                  (REPOINTED_CONFIG, UNCHANGED), candidate="0.25.1")
+    assert error is None, error
+    reruns = [step for step in row.steps if step["command"].endswith(("<rerun>", "<second rerun>"))]
+    assert [step["observed"] for step in reruns] == [True] * 4, reruns
+    assert reruns[0]["expected_codex_settings"] == {linux.LOST_APPROVAL: "added",
+                                                   linux.REPOINTED_TOKEN_FILE: "changed"}
     # The ledger's rerun step records run 1, as before the second run existed.
     assert sum(entry["command"].endswith("<rerun-from-0.23.x>") for entry in row.commands) == 1, row.commands
 
@@ -1002,6 +1031,8 @@ def test_the_upgrade_row_completes_the_lost_approval_once_then_holds_run_two_to_
     # Run 1 changing more than expected.
     ((RERUN_CONFIG + "# extra\n[mcp_servers.other]\ncommand = \"x\"\n", UNCHANGED), (RERUN_CONFIG, UNCHANGED),
      "<rerun>"),
+    # Run 1 re-pointing Codex's token copy at the --token-file (#1908).
+    ((REPOINTED_CONFIG, UNCHANGED), (REPOINTED_CONFIG, UNCHANGED), "<rerun>"),
     # Run 1 approving with another value.
     ((RERUN_CONFIG.replace('"approve"', '"prompt"'), UNCHANGED), (RERUN_CONFIG, UNCHANGED), "<rerun>"),
     # Run 1 changing nothing where the approval was lost.

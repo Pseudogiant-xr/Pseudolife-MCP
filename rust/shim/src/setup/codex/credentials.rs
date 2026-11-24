@@ -581,6 +581,47 @@ mod tests {
         assert!(!format!("{error:?}").contains(TOKEN));
     }
 
+    /// Issue #1908, option (c). A client-only install with `--token-file X`
+    /// stores the token in Codex's own copy and registers that copy; the
+    /// identical command again asks `installer codex-token-copy` first, which
+    /// must answer "same", so the installer leaves Codex out of `connect`.
+    /// `connect --token-file X` itself still selects X (the near miss).
+    #[tokio::test(start_paused = true)]
+    async fn an_identical_rerun_finds_the_token_copy_the_install_registered() {
+        let home = Home::new();
+        let report = home
+            .configure(async |_, _| Ok(StatusCode::OK))
+            .await
+            .unwrap();
+        let copy = report["credential_file_path"].as_str().unwrap().to_owned();
+        assert_eq!(Path::new(&copy), token_copy_path(&home.0));
+        let operator = home.0.join("operator.token");
+        crate::board::state::atomic_create(&operator, format!("{TOKEN}\n").as_bytes()).unwrap();
+        // What `codex mcp add` registers after the credential step.
+        let env = json!({
+            "PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+            "PSEUDOLIFE_MCP_DAEMON_URL": URL, FILE_KEY: copy,
+        });
+        let server = json!({"command": "/opt/pseudolife-mcp", "args": [], "env": env});
+        let config = json!({
+            "config": {"mcp_servers": {SERVER: server}},
+            "layers": [{"name": {"type": "user", "file": home.0.join("config.toml")},
+                        "version": "fixture-version-2", "config": {"mcp_servers": {SERVER: server}}}]
+        });
+        let answer = super::super::token_copy::token_copy_state(&config, &home.0, URL, &operator);
+        assert_eq!(answer["state"], "same", "{answer}");
+        assert!(!answer.to_string().contains(TOKEN));
+        for no_spawn in [false, true] {
+            let plan =
+                plan_replace(&config, &home.0, URL, Some(operator.as_path()), no_spawn).unwrap();
+            assert_eq!(
+                plan.env()[FILE_KEY],
+                json!(operator),
+                "connect --token-file selects the file it is given"
+            );
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn installer_stops_at_the_budget_when_the_daemon_never_becomes_ready() {
         let home = Home::new();

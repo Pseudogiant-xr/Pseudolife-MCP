@@ -5,6 +5,7 @@
 mod claude_desktop;
 mod codex_config;
 mod codex_hooks;
+mod codex_token_copy;
 pub(in crate::cli) mod credentials;
 mod engine;
 #[cfg(test)]
@@ -23,12 +24,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]\n       pseudolife-mcp installer --capability\n       pseudolife-mcp installer credentials STEP ... (installer credentials --help)\n       pseudolife-mcp installer state ACTION ... | volume-names --repo R --env-file F | engine detect|prepare|accept|choose ...\n       pseudolife-mcp installer json-field FIELD | json-string | connect-report valid|error|plan|manual|handled|current (JSON on stdin)\n       pseudolife-mcp installer is-loopback URL | pairing-code-valid (code on stdin) | codex-fields credentials|hooks|runtime-defaults (JSON on stdin)\n       pseudolife-mcp installer plugin-marketplace | preflight-check --repo R --env-file F | hook-settings install|remove-legacy\n       pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]\n       pseudolife-mcp installer codex-runtime-defaults [--approve-memory-message]\n       pseudolife-mcp installer codex-hooks --checkout DIR [--source S] [--trust T] [--instructions I] [--non-interactive]\n       pseudolife-mcp installer claude-desktop --command ABSOLUTE_PATH [options; see --help]";
+const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]\n       pseudolife-mcp installer --capability\n       pseudolife-mcp installer credentials STEP ... (installer credentials --help)\n       pseudolife-mcp installer state ACTION ... | volume-names --repo R --env-file F | engine detect|prepare|accept|choose ...\n       pseudolife-mcp installer json-field FIELD | json-string | connect-report valid|error|plan|manual|handled|current|codex-only (JSON on stdin)\n       pseudolife-mcp installer is-loopback URL | pairing-code-valid (code on stdin) | codex-fields credentials|hooks|runtime-defaults (JSON on stdin)\n       pseudolife-mcp installer plugin-marketplace | preflight-check --repo R --env-file F | hook-settings install|remove-legacy\n       pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]\n       pseudolife-mcp installer codex-runtime-defaults [--approve-memory-message]\n       pseudolife-mcp installer codex-token-copy --daemon-url URL --token-file PATH\n       pseudolife-mcp installer codex-hooks --checkout DIR [--source S] [--trust T] [--instructions I] [--non-interactive]\n       pseudolife-mcp installer claude-desktop --command ABSOLUTE_PATH [options; see --help]";
 /// The installer steps this binary carries, as a level the installers probe
 /// before running any of them (`installer --capability`;
 /// ops/install-native.sh `NATIVE_INSTALLER_PROTOCOL`). Raise it when a step the
 /// installers call is added or changes meaning, and raise the installers'
-/// required level with it.
+/// required level with it. A level no release has shipped yet may still gain
+/// a step whose absence the installers treat as today's behaviour:
+/// `codex-token-copy` and `connect-report codex-only` joined level 5 before any
+/// release answered 5, and an installer that gets no answer from them applies
+/// connect's plan as before.
 pub const INSTALLER_PROTOCOL: u32 = 5;
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 
@@ -66,12 +71,22 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         Some("json-string") if arguments.len() == 1 => helpers::json_string(),
         Some("connect-report") => match &arguments[1..] {
             [mode]
-                if ["valid", "error", "plan", "manual", "handled", "current"]
-                    .contains(&mode.as_str()) =>
+                if [
+                    "valid",
+                    "error",
+                    "plan",
+                    "manual",
+                    "handled",
+                    "current",
+                    "codex-only",
+                ]
+                .contains(&mode.as_str()) =>
             {
                 helpers::connect_report(mode)
             }
-            _ => usage("connect-report takes valid, error, plan, manual, handled or current"),
+            _ => usage(
+                "connect-report takes valid, error, plan, manual, handled, current or codex-only",
+            ),
         },
         Some("is-loopback") => match &arguments[1..] {
             [url] => helpers::is_loopback(url),
@@ -87,6 +102,7 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         Some("codex-credentials") => codex_config::run_credentials(&arguments[1..]),
         Some("codex-runtime-defaults") => codex_config::run_runtime_defaults(&arguments[1..]),
         Some("codex-hooks") => codex_hooks::run(&arguments[1..]),
+        Some("codex-token-copy") => codex_token_copy::run(&arguments[1..]),
         Some("claude-desktop") => claude_desktop::run(&arguments[1..]),
         Some("preflight-check") => preflight::run(&arguments[1..]),
         Some("hook-settings") => hook_settings::run(&arguments[1..]),
@@ -101,7 +117,7 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         },
         Some("--help" | "-h") => emit(USAGE),
         _ => usage(
-            "expected an installer step: migrate-registrations, expose, credentials, state, volume-names, engine, json-field, json-string, connect-report, is-loopback, pairing-code-valid, codex-fields, preflight-check, hook-settings, plugin-marketplace, codex-credentials, codex-runtime-defaults, codex-hooks or claude-desktop",
+            "expected an installer step: migrate-registrations, expose, credentials, state, volume-names, engine, json-field, json-string, connect-report, is-loopback, pairing-code-valid, codex-fields, preflight-check, hook-settings, plugin-marketplace, codex-credentials, codex-runtime-defaults, codex-hooks, codex-token-copy or claude-desktop",
         ),
     }
 }
