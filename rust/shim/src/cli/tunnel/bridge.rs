@@ -258,7 +258,7 @@ fn prepare(values: &[OsString]) -> Result<Start, String> {
     // (store::validate refuses one without them).
     if profile.state != "ready" {
         return Err(format!(
-            "tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `{command}` shows what is missing"
+            "tunnel profile is not ready: its setup is unfinished; `{command}` shows what is missing"
         ));
     }
     // The profile's store admits an https address with a path; the shim

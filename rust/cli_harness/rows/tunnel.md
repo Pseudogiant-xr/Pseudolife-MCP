@@ -4,7 +4,7 @@ Oracle: `pseudolife_memory/tunnel_cli.py`, `tunnel_profiles.py`,
 `tunnel_bridge.py`, `tunnel_runtime.py`, `credentials.py`,
 `doctor_cli.py` at the branch base. The oracle snapshots used CPython 3.11.9.
 Line numbers refer to that tree. Where CPython
-versions disagree on an input (`datetime.fromisoformat`), the leaf defers
+versions disagree on an input (`datetime.fromisoformat`), the leaf refuses
 rather than pick one.
 
 ## Canonical argv
@@ -26,18 +26,21 @@ once, each value as the next argument and never `-`-led
 - `setup [--profile N] [--profile-dir D] (--restore-key | --discard-previous-key)`
   resolves a retained key on a stopped tunnel.
 
-Every other shape defers: other commands (`doctor`, `run`, `start`, `stop`,
-`shim`, `service ...`), no command, `-h`/`--help`, abbreviations,
-`--opt=value`, repeated options, `-`-led values, `--catalog` outside its
-choices, `setup --open-browser / --start`, an empty
-`--profile-dir`, non-Unicode argv. argparse usage and error text are not
-reproduced (item 4 of the scope is deferred).
+`--opt=value` is the same option. `-h`/`--help` (alone or after a command)
+prints native help on stdout, exit 0. Nothing defers: every other shape is
+refused (exit 2) with its cause and the next step, changing nothing. That
+covers no command, an unknown command, the forms the native client does not
+provide (`doctor`,
+`start`, `service ...`, `setup --start`, `setup --open-browser`, each naming
+what to run instead), abbreviations, repeated options, a missing or `-`-led
+value, `--catalog` outside its choices, an empty `--profile-dir` and
+non-Unicode argv. argparse usage and error text are not reproduced.
 
 ## Contract items
 
 | Item | Oracle |
 |---|---|
-| `ProfileStore(args.profile_dir)` runs outside the error handler (a failure is a traceback): every failure to open the root defers | `tunnel_cli.py:318`, `tunnel_profiles.py:242-243` |
+| `ProfileStore(args.profile_dir)` runs outside the error handler (a failure is a traceback); natively every failure to open the root is refused, naming the directory rules | `tunnel_cli.py:318`, `tunnel_profiles.py:242-243` |
 | Default root `~/.pseudolife-mcp/tunnel` (USERPROFILE / HOME) | `tunnel_profiles.py:237-238` |
 | `checked_path`: abspath, no redirect among the ancestors (`tunnel path cannot be inspected safely`), no redirect at the leaf (`tunnel paths must not contain redirects`) | `tunnel_profiles.py:53-62`, `credentials.py:43-60` |
 | `private_read`: owner-only regular file with one link (POSIX uid/mode, Windows protected owner DACL), `limit+1` read, `private tunnel file is too large`, otherwise `private tunnel file is unavailable or not owner-only` | `tunnel_profiles.py:154-168`, `credentials.py:237-248` |
@@ -48,12 +51,12 @@ reproduced (item 4 of the scope is deferred).
 | Key presence: `read_key` succeeds (POSIX `PLAIN\0` + valid token; Windows `DPAPI\0`), any `TunnelError` is absent | `tunnel_cli.py:76-81`, `tunnel_profiles.py:299-311`, `credentials.py:251-260` |
 | `key_expiry` dict and runtime class (`unknown` / `expired` / `near-expiry` under 7 days / `valid`) | `tunnel_cli.py:84-89`, `tunnel_profiles.py:333-339` |
 | Runtime without a process record: `running=false, ready=false` | `tunnel_runtime.py:404-408` |
-| Cloud without a process record: `identity()` raises inside `verification_status`'s guard, so `{verified: false, successful_calls: 0, challenge_current: false}`. The challenge record is read only as `_challenge` reads it, through `private_read` (a redirect, an unsafe, missing or oversized file is `{}`); a readable one with more than 100 brackets (near the recursion limit) defers | `tunnel_bridge.py:24-49`, `52-70`, `79-95` |
+| Cloud without a process record: `identity()` raises inside `verification_status`'s guard, so `{verified: false, successful_calls: 0, challenge_current: false}`. The challenge record is read only as `_challenge` reads it, through `private_read` (a redirect, an unsafe, missing or oversized file is `{}`); a readable one with more than 100 brackets (near the recursion limit) is refused, naming the file to move aside | `tunnel_bridge.py:24-49`, `52-70`, `79-95` |
 | Refresh outcome: `.reload.json` (pending / unavailable), else `.reload.result.json` (allowlisted state, `rolled_back is True`), else none; `str(id)` matched against `[a-f0-9]{32}` (a string, or an integer token of ASCII digits only; any float or signed token is never a match) | `tunnel_cli.py:210-233` |
 | Status text lines and JSON key order (`json.dumps` default separators, ensure_ascii) | `tunnel_cli.py:179-207` |
 | `update`: absent root or no profiles prints one line, exit 3; root `_prepare` checks (owner-only directory); `*.profile.json` glob (case-insensitive on Windows) with `validate_name` on each stem; profiles sorted; each loaded; pending (not ready, or ready without a key) summarized as JSON, exit 0 | `tunnel_cli.py:261-282`, `322-328`, `tunnel_profiles.py:245-257`, `283-287` |
 | `verify`: load; unfinished (not ready, or no key) refused; ready with a key and no process record fails `identity()`'s private read before `begin_challenge` writes | `tunnel_cli.py:331-335`, `tunnel_bridge.py:24-49`, `75-78`, `tunnel_runtime.py:310-326` |
-| `setup` refusals before `_verify_local`: profile name, connection discovery and profile validation. Discovery matches the explicit pair and the environment cases covered below. Resuming a saved profile without the explicit pair defers. | `tunnel_cli.py:41-62`, `99-123`, `doctor_cli.py:144-163` |
+| `setup` refusals before `_verify_local`: profile name, connection discovery and profile validation. Discovery matches the explicit pair and the environment cases covered below. Resuming a saved profile with no option is refused, naming `tunnel status` and the options that resume it. | `tunnel_cli.py:41-62`, `99-123`, `doctor_cli.py:144-163` |
 | Errors: `TunnelError` text on stderr, exit 2 | `tunnel_cli.py:371-375` |
 | Streams: UTF-8, LF translated to CRLF on Windows | `cli.rs::text_bytes` |
 
@@ -72,13 +75,15 @@ those steps for a pending profile. Renewal requires key input. Omitting the expi
 previous deadline, and repeating the same key and expiry leaves both files
 unchanged. An expiry-only request with a new deadline asks for key input.
 Setup requires a saved tunnel ID before first-key intake and both connection
-flags when repointing the daemon. A key or process record that appears during
-setup gets a refusal naming its path. Edits to a profile with an existing key, a process record or approved
-autostart still defer at preflight. Combining key
-intake with other profile settings and unreadable saved profiles still defer.
-These effects are covered in
+flags when repointing the daemon. A process record that appears during
+setup gets a refusal naming its path. Settings edits keep a saved key and
+approved autostart, and ask for consent again on any connection or access
+change; a process
+record refuses them, naming it. Combining key intake with other profile
+settings, and a saved profile that does not load, are refused naming the
+cause. These effects are covered in
 `shim/tests/cli_tunnel_contract.rs` against a disposable daemon fixture.
-The setup cases in this row exercise preflight refusals and deferrals.
+The setup cases in this row exercise preflight refusals.
 
 Native `run` supervises a foreground launch of the pinned runtime. It checks
 the loopback readiness endpoint and links the existing stdio bridge to a
@@ -154,30 +159,29 @@ these cases are recorded from the candidate, not the oracle:
   (each refusal names its file or directory), and `status-dpapi-key-json`
   (Windows).
 
-## Deferred (before any effect)
+## Refused natively (before any effect)
 
-- `verify` with a process record present, or with a Windows `DPAPI` key
-  this session cannot unseal. With a key that unseals and no record it
+These shapes once deferred; each is now a one-line refusal (exit 2) that
+names its cause and the next step, and changes nothing (the `defer-*` cases
+keep their recorded ids; `defer-status-help` prints help and
+`defer-joined-option` now answers status, since `--option=value` is accepted):
+
+- `verify` of a launch this client did not start, or with a Windows `DPAPI`
+  key this session cannot unseal. With a key that unseals and no record it
   refuses as on POSIX (`verify-ready-key-no-record`, both platforms).
-- `service install` without `--accept-autostart`: the refusal follows
-  `shim_command()` (`tunnel_cli.py:344`), so whether it or the launcher
-  refusal prints depends on the host install. All of `service` defers.
-- `setup` whose profile validates (next: `_verify_local`'s handshake), an
-  existing profile, a present client registration file, `~`-led or
-  drive-relative/UNC token paths.
+- `service`, `start`, `doctor`, `setup --start` and `setup --open-browser`:
+  not part of the native client, each naming what to run instead.
+- `setup` that discovers its connection from the environment (the refusal
+  prints the explicit flags), a present client registration file, `~`-led
+  or drive-relative token paths, and a saved profile resumed with no option.
 - Python-only JSON (BOM/UTF-16/32, surrogates, NaN/Infinity, more than 100
-  brackets, digit runs over 4000), and any object key that decodes to
-  serde_json's reserved `$serde_json::private::Number` (arbitrary_precision
-  would read that object as a number).
-- Expiry spellings outside the decided set: basic format, other separators,
-  a fraction of other than 3 or 6 digits (3.10 refuses, 3.11+ admits), hour
-  24 (3.14 admits, 3.11 refuses), offset minutes 60+, years 1 and 9999 with
-  an offset.
-- A FIFO where a private file is read (Python's blocking open waits for a
-  writer). URLs outside the decided set, non-ASCII
-  runtime versions, UNC/device paths, dangling Windows junctions, a
-  non-directory root, glob entries that are not regular files, non-ASCII
-  names on Windows, a challenge record with more than 100 brackets.
+  brackets, digit runs over 4000), object keys serde_json reserves, expiry
+  spellings outside the decided set, a FIFO where a private file is read,
+  URLs outside the decided set, non-ASCII runtime versions, UNC/device
+  paths, dangling Windows junctions, a non-directory root, glob entries that
+  are not regular files and non-ASCII names on Windows: the refusal names the
+  profile, key, challenge or refresh file (or the directory) and says to
+  move it aside or rewrite it.
 
 ## Free items
 
@@ -186,7 +190,7 @@ None: every byte of stdout, stderr and the home is compared.
 ## Harness
 
 `python rust/cli_harness --row tunnel`. Seeds use the oracle's writers.
-Rules: `tunnel-deferral` (deferral expectation), `tunnel-dpapi-key`
+Rules: `tunnel-dpapi-key`
 (per-arm DPAPI ciphertext, tokenized only after the oracle's `_dpapi`
 unprotects it to the fixture key), `tunnel-near-expiry` (below). No clock
 or uuid reaches any output: all expiry and refresh ids are seeded
@@ -241,7 +245,7 @@ Both Parity lanes run the row live and against `goldens/tunnel.<os>.json`.
 What keeps a golden replayable in another process, on another host and on
 another day:
 
-- The setup snapshot a deferral case compares against is stored with the
+- The setup snapshot a refusal case compares against is stored with the
   home and daemon tokens already applied (the case's `after`), so it never
   carries the recording arm's home path or port.
 - Rule `tunnel-dpapi-key`: whether a Windows key file still holds exactly
