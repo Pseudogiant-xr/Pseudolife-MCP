@@ -166,7 +166,7 @@ class = "active dependency"
 reason = "Native install and update use Python release metadata, version or checkout markers."
 
 [[rules]]
-globs = ["rust/shim/src/cli/update/mod.rs", "rust/shim/src/cli/maintainer/setup/system.rs", "rust/shim/src/cli/connect/discover.rs", "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/pg/resolution.rs", "rust/shim/src/setup/codex.rs", "rust/shim/src/lifecycle.rs", "rust/daemon/src/service.rs", "rust/daemon/src/storage/schema.rs"]
+globs = ["rust/shim/src/cli/update/mod.rs", "rust/shim/src/cli/maintainer/setup/system.rs", "rust/shim/src/cli/connect/discover.rs", "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/pg/resolution.rs", "rust/shim/src/setup/codex.rs", "rust/shim/src/lifecycle.rs"]
 kinds = ["command"]
 class = "active dependency"
 reason = "Native paths can launch the Python CLI or still direct operators to Python helpers."
