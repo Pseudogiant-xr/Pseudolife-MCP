@@ -1198,7 +1198,8 @@ def cases() -> list[Case]:
     def bom_token(arm):
         path = arm.home / ".pseudolife-mcp" / "bom.token"
         credential_files.write_token_file(path, GOOD)
-        # The client's writer refuses a BOM; rewrite the owner-only file's bytes.
+        # The writer would accept a BOM-prefixed token too; write the bytes in
+        # place so the owner-only file holds exactly a BOM and the token.
         with open(path, "r+b") as stream:
             stream.write(("﻿" + GOOD).encode())
         claude_json(arm.home, entry("shim", claude_env(arm.home, token=path)))

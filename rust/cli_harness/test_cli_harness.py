@@ -2922,5 +2922,28 @@ def test_transport_credential_fixtures_run_with_frozen_imports_blocked(tmp_path)
         assert owner_only is True
     else:
         assert token.stat().st_mode & 0o777 == 0o600
-    with pytest.raises(Exception):
+    from cli_harness._credential_checks import CredentialError
+    with pytest.raises(CredentialError, match="invalid bearer token"):
         credential_files.write_token_file(tmp_path / "bad.token", "white space")
+
+
+def test_transport_credential_rows_import_without_the_frozen_package():
+    # A fresh interpreter, so the modules' top-level imports run under the
+    # blocker (collection has already imported them here). Only imports: no
+    # case is built, so no test login or database is read.
+    import subprocess
+    script = """\
+import importlib
+import sys
+sys.path.insert(0, sys.argv[1])
+from rust.harness_support.import_blocker import cold_harness_imports
+with cold_harness_imports():
+    for name in ("credential_files", "_credential_checks", "_plugin_hooks", "rows._process_start",
+                 "rows.connect", "rows.console", "rows.doctor", "rows.pair", "rows.conductor_watch"):
+        importlib.import_module("rust.cli_harness." + name)
+assert not any(name == "pseudolife_memory" or name.startswith("pseudolife_memory.") for name in sys.modules)
+"""
+    repo = Path(__file__).resolve().parents[2]
+    child = subprocess.run([sys.executable, "-I", "-c", script, str(repo)],
+                           capture_output=True, text=True, timeout=60)
+    assert child.returncode == 0, child.stderr
