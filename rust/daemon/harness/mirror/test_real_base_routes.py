@@ -17,9 +17,15 @@ proposals. The synthetic arms passed while these errored on that copy:
 Each case seeds a disposable bank with the kind of rows a real bank holds,
 and its near miss keeps the empty-bank behaviour or the check that matters.
 Needs the disposable-bank login (``pgdisposable``); without one it skips.
+
+Banks are set up from the daemon's own schema (``rust/harness_support``).
+The cases that drive only the frozen Python service (its storage
+constructor, its search route and its dream-run storage API) go through
+``frozen``: they skip once the package is gone and are deleted with it.
 """
 from __future__ import annotations
 
+import importlib
 import json
 import math
 import random
@@ -47,6 +53,42 @@ def require_login():
         database_gate.unavailable("no disposable-bank login here",
                                   "create it once on the daemon host with `pseudolife-mcp test-login "
                                   "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
+
+
+FROZEN = "pseudolife_memory"
+
+
+def frozen(module):
+    """A module of the frozen Python package, for a case that drives only
+    the Python service. The case skips when the missing module is the
+    package itself, as it is once the package is deleted; any other import
+    failure (a submodule gone from a present package, a missing dependency)
+    still errors."""
+    try:
+        return importlib.import_module(module)
+    except ModuleNotFoundError as exc:
+        if exc.name != FROZEN:
+            raise
+        pytest.skip(f"drives only the frozen Python service, and {FROZEN} is not in this "
+                    "checkout; this case is deleted with the package")
+
+
+def test_frozen_cases_skip_only_when_the_package_itself_is_missing(monkeypatch):
+    def missing(name):
+        def import_module(module):
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return import_module
+
+    monkeypatch.setattr(importlib, "import_module", missing(FROZEN))
+    with pytest.raises(pytest.skip.Exception, match="deleted with the package"):
+        frozen("pseudolife_memory.storage.postgres")
+    # Near misses: a present package missing a submodule, or a dependency.
+    for name in ("pseudolife_memory.web.routes", "pseudolife_memoryx", "torch"):
+        monkeypatch.setattr(importlib, "import_module", missing(name))
+        with pytest.raises(ModuleNotFoundError):
+            frozen("pseudolife_memory.web.routes")
+    monkeypatch.setattr(importlib, "import_module", lambda module: ("loaded", module))
+    assert frozen("pseudolife_memory.service") == ("loaded", "pseudolife_memory.service")
 
 
 def unit(vector):
@@ -85,12 +127,14 @@ def route_bank(monkeypatch):
     any other), initialized, with no entries unless the test seeds them."""
     require_login()
     monkeypatch.delenv(pgdisposable.BASE_ENV, raising=False)
+    import psycopg
     import run
-    from pseudolife_memory.storage.postgres import PostgresStorage
+    from rust.harness_support.bank_fixture import initialize_bank
     name = run.pg.name(run.pg.PREFIX + "realbase")
     dsn = run.pg.create(name)
     try:
-        PostgresStorage(dsn).close()  # the schema and its builtin relations
+        with psycopg.connect(dsn) as conn:
+            initialize_bank(conn)  # the daemon's schema and its builtin relations
         yield dsn
     finally:
         monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
@@ -115,19 +159,28 @@ def embedding_dim(conn):
                         "to_regclass('public.entries') AND attname = 'embedding'").fetchone()[0]
 
 
-def test_dim_mismatch_prepares_a_bank_that_already_has_entries(route_bank):
+def dim_mismatch_on_a_real_bank(dsn):
     import psycopg
     import run
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    with psycopg.connect(route_bank, autocommit=True) as conn:
+    with psycopg.connect(dsn, autocommit=True) as conn:
         seed_like_a_real_bank(conn)
-    run.DimMismatch().prepare_template(route_bank)
+    run.DimMismatch().prepare_template(dsn)
+
+
+def test_dim_mismatch_prepares_a_bank_that_already_has_entries(route_bank):
+    import psycopg
+    dim_mismatch_on_a_real_bank(route_bank)
     with psycopg.connect(route_bank, autocommit=True) as conn:
         assert embedding_dim(conn) == 384
         assert conn.execute("SELECT count(*) FROM entries").fetchone()[0] == 40
+
+
+def test_the_frozen_service_refuses_the_dim_mismatch_bank(route_bank):
+    postgres = frozen("pseudolife_memory.storage.postgres")
+    dim_mismatch_on_a_real_bank(route_bank)
     # What the scenario is for: the daemon refuses this bank before any DDL.
     with pytest.raises(RuntimeError, match=r"entries\.embedding is vector\(384\)"):
-        PostgresStorage(route_bank)
+        postgres.PostgresStorage(route_bank)
 
 
 def test_dim_mismatch_on_an_empty_bank_still_creates_its_one_table(empty_route_bank):
@@ -148,14 +201,19 @@ def relations(conn):
     return {r[0] for r in conn.execute("SELECT name FROM relations").fetchall()}
 
 
-def test_stamped_prepares_a_bank_whose_relations_are_referenced(route_bank):
+def stamped_on_a_real_bank(dsn):
     import psycopg
     import run
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    with psycopg.connect(route_bank, autocommit=True) as conn:
+    with psycopg.connect(dsn, autocommit=True) as conn:
         seed_like_a_real_bank(conn)
         seeded = relations(conn)
-    run.StampedBank().prepare_template(route_bank)
+    run.StampedBank().prepare_template(dsn)
+    return seeded
+
+
+def test_stamped_prepares_a_bank_whose_relations_are_referenced(route_bank):
+    import psycopg
+    seeded = stamped_on_a_real_bank(route_bank)
     with psycopg.connect(route_bank, autocommit=True) as conn:
         left = relations(conn)
         assert conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == 99
@@ -166,8 +224,13 @@ def test_stamped_prepares_a_bank_whose_relations_are_referenced(route_bank):
     gone = seeded - left
     assert len(gone) == 1 and left < seeded
     assert {"uses", "part-of", "hosts"} <= left
+
+
+def test_the_frozen_service_refuses_the_stamped_bank(route_bank):
+    postgres = frozen("pseudolife_memory.storage.postgres")
+    stamped_on_a_real_bank(route_bank)
     with pytest.raises(RuntimeError, match="newer than"):
-        PostgresStorage(route_bank)
+        postgres.PostgresStorage(route_bank)
 
 
 def test_stamped_on_an_empty_bank_still_deletes_uses(empty_route_bank):
@@ -186,8 +249,8 @@ def fixture_search(dsn, tmp_path, monkeypatch):
     pytest.importorskip("torch")
     import torch
     import run
-    import pseudolife_memory.service as service_mod
-    from pseudolife_memory.web.routes import ConsoleRoutes
+    service_mod = frozen("pseudolife_memory.service")
+    ConsoleRoutes = frozen("pseudolife_memory.web.routes").ConsoleRoutes
 
     class FixtureDirection:
         backend, _device, dtype, embedding_dim = "fixture", "cpu", "fp32", 1024
@@ -270,7 +333,7 @@ def close_base(monkeypatch):
     monkeypatch.delenv(pgdisposable.BASE_ENV, raising=False)
     import psycopg
     from psycopg.types.json import Jsonb
-    from pseudolife_memory.storage.schema import ensure_schema
+    from rust.harness_support.schema import ensure_schema
     name = mir.name("pl_cf_mir_closebase")
     with psycopg.connect(mir.create(name), autocommit=True) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -344,12 +407,12 @@ def rollback_decision(storage, run_id=None):
 def walk_rollback_calls(dsn):
     """The scenario's template on ``dsn``, then each of its calls' decision,
     applying its pre-call SQL and a revert's own status change as it goes."""
+    postgres = frozen("pseudolife_memory.storage.postgres")
     import psycopg
     import run
-    from pseudolife_memory.storage.postgres import PostgresStorage
     scenario = run.SCENARIOS["mcp-dream-rollback"]()
     scenario.prepare_template(dsn)
-    storage = PostgresStorage(dsn, writer_lease=False)
+    storage = postgres.PostgresStorage(dsn, writer_lease=False)
     out = {}
     try:
         for label, args, setup in scenario.calls():
