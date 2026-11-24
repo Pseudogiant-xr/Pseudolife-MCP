@@ -276,12 +276,13 @@ touched, with no retrofit sweep.
   (`full-suite@<name>` on a dev machine) and notifies peers whose status
   shows `suite=running|queued` or `gpu=` or who parked with
   `park_clear_by:` that lease.
-- A mirrored run needs no hand-written SUITE-START/END; any other run (a
-  lock-off or bearer-less run, a GPU launch outside `Start-Qwen`, any
-  saturating window) sends a `memory_message` SUITE-START (pid, worktree,
-  fixed duration or ETA, a sentinel-file stop switch) to each peer whose
-  status shows the resource and a closing SUITE-END, since peers may not
-  read statuses until their next turn.
+- A mirrored run needs no hand-written SUITE-START/END.
+- A run the mirror does not cover (a lock-off or bearer-less run, a GPU
+  launch outside `Start-Qwen`, any saturating window) is announced by a
+  `memory_message` SUITE-START to every peer whose status shows the
+  resource, with pid, worktree, fixed duration or ETA and a stop switch (a
+  sentinel file), and ended with a SUITE-END, since peers may not read
+  statuses until their next turn.
 - **Machine notices go in your board status, never in mail to a conductor
   or the session that launched you** (taking or releasing a machine, a run
   starting, ending or stopped, an acknowledgement), because mail wakes a
@@ -295,21 +296,23 @@ touched, with no retrofit sweep.
 - Let the lease check run the work (`pseudolife-mcp lease check full-suite
   -- <command>`, `full-suite@<name>` for a dev machine, nested for `gpu`),
   because a `;` after a bare check runs the work whatever it said.
-- Also watch `memory_agents` list for that machine's `suite=running`,
-  stopping at once if its suite starts.
+- Also look for that machine's `suite=running` in `memory_agents` list, and
+  stop at once if its suite starts.
 - **Broadcast a symptom with evidence of shared impact** (a hung
   interpreter, os error 1455, a silent daemon, a failure peers' runs show
-  too) by `memory_message` before debugging it, because it usually breaks
-  theirs too; a failure only your change explains is yours.
+  too) by `memory_message` before debugging it, because it is usually
+  breaking their runs too; a failure only your change explains is yours.
 - Never infer a holder is idle from process stats, a quiet board or an old
   timestamp: ask.
 - A park record does not keep a wake listener alive, the host does: without
   a Claude Code Stop hook listening, arm a main-session background
   `pseudolife-mcp wait-mail --timeout 7000` (re-armed after a ring or
-  timeout) or the Codex doorbell, or say `next-turn-only` in your park
-  (always for Codex under T3 Code, which unloads a thread two minutes after
-  T3's last turn) and tell the maintainer when an urgent dependency cannot
-  wait.
+  timeout) or the Codex doorbell, or say `next-turn-only` in your park and
+  tell the maintainer when an urgent dependency cannot wait.
+- **A Codex session run by T3 Code parks as `next-turn-only`**, because T3
+  releases a thread two minutes after the last turn it started and Codex
+  then stops its MCP server, which ends the doorbell and any `wait-mail` it
+  started.
 - Read `examples/hook-instructions.md` before your first board message, for
   the host dialect, the GPU hand-off and what a wake receipt means.
 
