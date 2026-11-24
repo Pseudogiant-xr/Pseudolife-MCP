@@ -29,9 +29,9 @@ and the Python client is kept with one line saying why:
   ``~/.pseudolife-mcp/client-engine`` records that the installer was run with
   it (unless ``PSEUDOLIFE_SHIM_ENGINE=native`` asks again);
 - when the update runs without a person (maintainer, 20 November 2026): the
-  hand-off parent's own argv holds ``--unattended`` (the scheduled run) or
-  ``--result-file`` (the shim's session-start client update), or cannot be
-  read;
+  hand-off parent's own argv, parsed as the updater parses it, holds
+  ``--unattended`` (the scheduled run) or ``--result-file`` (the shim's
+  session-start client update), or cannot be read or parsed;
 - when the native client cannot serve the machine (no build for it, a
   download or digest failure, a binary that does not run here, or, unless
   asked for, a tunnel the Python client registered to start by itself).
@@ -304,10 +304,25 @@ def engine_record() -> Path:
     return Path.home() / ".pseudolife-mcp" / "client-engine"
 
 
-def _recorded_python() -> bool:
+def _recorded_python() -> str | bool:
+    """True when the record says python (its text trimmed, as the installers
+    read it), False when there is none or it says anything else, and the
+    cause when it exists but cannot be read (then it may say python)."""
     try:
         return engine_record().read_text(encoding="utf-8").strip() == "python"
-    except (OSError, UnicodeDecodeError):
+    except FileNotFoundError:
+        return False
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+
+def _launcher_moved() -> bool:
+    """Whether the stable launcher is no longer the Python client's (native,
+    or on Windows the MZ file a native launcher reads as)."""
+    try:
+        from pseudolife_memory import runtimes
+        return runtimes._launcher_kind(runtimes.default_layout()) in ("native", "unknown")
+    except Exception:  # noqa: BLE001 - a layout that cannot be read moved nothing we can tell
         return False
 
 
@@ -382,14 +397,21 @@ def process_argv(pid: int) -> list[str] | None:
     return None
 
 
-def ran_unattended(marker: str, parent_argv: Callable[[int], list[str] | None] = process_argv) -> bool:
+def ran_unattended(marker: str, parser_factory, parent_argv: Callable[[int], list[str] | None] = process_argv) -> bool:
     """Whether the hand-off parent (``marker`` is its pid) runs without a
-    person: its argv holds one of UNATTENDED_FLAGS, or cannot be read (then
-    it might, so the default keeps the client as it is)."""
+    person: the words after its ``update`` parse, as the updater parses them
+    (abbreviations included), to one of UNATTENDED_FLAGS. An argv that cannot
+    be read, has no ``update`` or does not parse might be one, so it counts."""
     argv = parent_argv(int(marker))
-    if not argv:
+    words = list(argv[1:]) if argv else []
+    if "update" not in words:
         return True
-    return any(word in UNATTENDED_FLAGS or word.startswith("--result-file=") for word in argv[1:])
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            parsed, _ = parser_factory().parse_known_args(words[words.index("update") + 1:])
+    except SystemExit:
+        return True
+    return any(getattr(parsed, flag.lstrip("-").replace("-", "_"), None) for flag in UNATTENDED_FLAGS)
 
 
 def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
@@ -436,16 +458,21 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
         return f"{ENGINE_ENV}=python keeps the Python client; this run's own code finishes the client steps"
     # An update that runs without a person never changes the client
     # (maintainer, 20 November 2026), whatever the setting.
-    if handed_off and ran_unattended(marker, parent_argv):
+    if handed_off and ran_unattended(marker, parser_factory, parent_argv):
         return ("this update ran unattended, so this machine keeps the Python client, and this run's own code "
                 "finishes the client steps; to move it to the native client, run "
                 "`pseudolife-mcp update --clients-only`")
     move = (f"`{ENGINE_ENV}={NATIVE} pseudolife-mcp update --clients-only` (in PowerShell: "
             f"`$env:{ENGINE_ENV}='{NATIVE}'; pseudolife-mcp update --clients-only`)")
-    if engine != NATIVE and _recorded_python():
+    recorded = _recorded_python() if engine != NATIVE else False
+    if recorded is True:
         return (f"{engine_record()} records an earlier {ENGINE_ENV}=python install, so this machine keeps the "
                 f"Python client, and this run's own code finishes the client steps; to move it to the native "
                 f"client, run {move}")
+    if recorded:
+        return (f"{engine_record()} could not be read ({recorded}) and may record a Python install, so this "
+                f"machine keeps the Python client, and this run's own code finishes the client steps; make "
+                f"that file readable or delete it, or run {move}")
     triple = target()
     kept = "the Python client was kept and this run's own code finishes the client steps"
     if handed_off and args.tag != version:
@@ -530,11 +557,17 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
             # while the launcher is still the Python one.
             say(f"==> the native client steps ended with exit {code} (see above); while this machine still "
                 f"runs the Python client, an update with {ENGINE_ENV}=python keeps it")
-        elif engine == NATIVE:
-            # An explicit native choice ends a recorded Python one, as the
-            # native installer's does.
-            with contextlib.suppress(OSError):
+        if engine == NATIVE and engine_record().exists() and _launcher_moved():
+            # An explicit native choice that moved the launcher ends a
+            # recorded Python one, as the native installer's does; whatever
+            # the exit code, since the launcher is what a later run reads.
+            try:
                 engine_record().unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                say(f"==> {engine_record()} still records the Python client ({exc}); delete it, or a later "
+                    f"installer run without {ENGINE_ENV}=native installs the Python client again")
         return code
     finally:
         if scratch is not None:

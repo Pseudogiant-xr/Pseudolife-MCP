@@ -547,9 +547,14 @@ UNATTENDED_NOTE = ("this update ran unattended, so this machine keeps the Python
     ["/x/python", "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", "9.9.9",
      "--result-file", "/s/update-clients.9.9.9.result"],                             # the shim's session start
     ["/x/python", "update", "--clients-only", "--result-file=/s/r"],
+    ["/x/pseudolife-mcp", "update", "--unattend"],                                   # argparse abbreviations
+    ["/x/python", "update", "--clients-only", "--result-f=/s/r"],
+    ["/x/python", "-m", "pseudolife_memory.cli"],                                    # no update word
+    ["/x/pseudolife-mcp", "update", "--tag"],                                        # does not parse
     None,                                                                            # cannot be read
     [],
-], ids=["scheduled", "scheduled-windows", "session-start", "result-file-equals", "unreadable", "empty"])
+], ids=["scheduled", "scheduled-windows", "session-start", "result-file-equals", "abbreviated", "abbreviated-equals",
+        "no-update", "unparsable", "unreadable", "empty"])
 @pytest.mark.parametrize("engine", [None, "native"])
 def test_an_unattended_update_never_changes_the_client(release, parent, engine):
     release.publish()
@@ -599,11 +604,11 @@ def test_this_process_argv_is_read_in_place():
     assert argv, argv
     # The interpreter's own arguments are there, word for word.
     assert all(word in argv for word in sys.argv[1:]), (argv, sys.argv)
-    assert update_bridge.ran_unattended(str(os.getpid())) is False
 
 
 def test_an_argv_that_cannot_be_read_counts_as_unattended():
-    assert update_bridge.ran_unattended("4242", lambda pid: None) is True
+    assert update_bridge.ran_unattended("4242", update_cli.build_parser, lambda pid: None) is True
+    assert update_bridge.ran_unattended("4242", update_cli.build_parser, lambda pid: ATTENDED) is False
     if sys.platform.startswith("linux") or os.name == "nt":
         assert update_bridge.process_argv(0) is None
 
@@ -637,12 +642,46 @@ def test_a_recorded_python_install_keeps_python_by_default(release, home):
     assert record.exists()
 
 
-@pytest.mark.parametrize("code, removed", [(0, True), (7, False)])
-def test_asked_for_native_moves_over_the_record_and_ends_it_once_moved(release, home, code, removed):
+@pytest.mark.parametrize("code, moved", [(0, True), (5, True), (0, False), (7, False)])
+def test_asked_for_native_ends_the_record_only_once_the_launcher_moved(release, home, code, moved, monkeypatch):
+    # The launcher, not the exit code, is what a later run reads: an update
+    # that activated it and then failed a client step still moved, and one
+    # that ended 0 with nothing to move did not.
+    monkeypatch.setattr(update_bridge, "_launcher_moved", lambda: moved)
     record = _record(home, "python\n")
     release.publish()
     assert bridge(handed(release), Native(exit_code=code)) == code
-    assert record.exists() is not removed
+    assert record.exists() is not moved
+
+
+def test_a_record_that_cannot_be_removed_is_said(release, home, monkeypatch):
+    monkeypatch.setattr(update_bridge, "_launcher_moved", lambda: True)
+    record = _record(home, "python\n")
+    release.publish()
+    real_unlink = Path.unlink
+
+    def unlink(self, *args, **kwargs):
+        if self == record:
+            raise PermissionError(13, "Access is denied")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    lines: list[str] = []
+    assert bridge(handed(release), Native(exit_code=0), lines=lines) == 0
+    [said] = [line for line in lines if "still records the Python client" in line]
+    assert str(record) in said and "PSEUDOLIFE_SHIM_ENGINE=native" in said
+
+
+def test_a_record_that_cannot_be_read_keeps_python_unless_native_is_asked_for(release, home):
+    record = home / ".pseudolife-mcp" / "client-engine"
+    record.mkdir(parents=True)          # read_text fails: not FileNotFoundError
+    release.publish()
+    native = Native()
+    note = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native)
+    assert note.startswith(f"{record} could not be read (") and "may record a Python install" in note, note
+    assert "make that file readable or delete it" in note
+    assert native.started == []
+    assert bridge(handed(release), Native()) == 7
 
 
 @pytest.mark.parametrize("text", ["native\n", "", "Python\n", "python python\n"])
