@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "941fbe66291a2ded",
+  "fingerprint": "9fc8b117ea3d158f",
+  "reason": "W109 (#1948): the guards step that runs only on Rust-only changes ('Live tests that read rust/ files') gains the six native installer test files, which now read or write rust/shim/Cargo.toml; together they ran 435 tests in 171 s serially on the first Linux dev box at 939821b82 (the step runs two workers), against a 25-minute job limit, and ordinary pull requests skip the step"
+}

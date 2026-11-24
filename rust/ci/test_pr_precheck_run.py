@@ -1,6 +1,7 @@
 """The precheck retains IDs and continues independent failures."""
 import json
 import os
+import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -92,7 +93,7 @@ def test_incomplete_records_remain_visible(tmp_path, monkeypatch):
 def test_setup_failure_keeps_unrun_rows_visible_and_continues_independent_judges(tmp_path, monkeypatch):
     mock_summary_replace(monkeypatch)
     @contextmanager
-    def postgres(private):
+    def postgres(private, candidate):
         raise RuntimeError("private connection detail")
         yield
     monkeypatch.setattr(replay, "golden_postgres", postgres)
@@ -106,6 +107,7 @@ def test_setup_failure_keeps_unrun_rows_visible_and_continues_independent_judges
     phases = {row["phase"]: row for row in summary["phases"]}
     assert phases["record/audit"]["exit_code"] is None
     assert phases["cli-argv"]["exit_code"] == 0
+    assert phases["golden-postgres"]["diagnostic_errors"] == ["owned PostgreSQL setup failed (RuntimeError)"]
     assert "private connection detail" not in text
 
 
@@ -113,13 +115,16 @@ def test_setup_failure_keeps_unrun_rows_visible_and_continues_independent_judges
 def test_bank_rows_prepare_owned_pg_before_their_existing_cases(tmp_path, monkeypatch, row):
     mock_summary_replace(monkeypatch)
     events = []
+    commands = {}
     @contextmanager
-    def postgres(private):
+    def postgres(private, candidate):
         events.append("pg-open")
+        assert candidate == Path("candidate")
         yield {"owned": "fixture"}
         events.append("pg-close")
-    def execute(phase, *args, env=None, **kwargs):
+    def execute(phase, command, *args, env=None, **kwargs):
         events.append(phase)
+        commands[phase] = command
         if phase == f"golden/{row}":
             assert env == {"owned": "fixture"}
         return {"phase": phase, "exit_code": 0, "seconds": 0, "failed_cases": [], "diagnostic_errors": []}
@@ -128,28 +133,153 @@ def test_bank_rows_prepare_owned_pg_before_their_existing_cases(tmp_path, monkey
     value = plan(linux=[row], windows=[row])
     assert replay.run(value, Path("candidate"), tmp_path / "private", tmp_path / "public") == 0
     assert events == ["golden-lease-check", "pg-open", f"golden/{row}", "pg-close"]
+    # The suite-lease check is the candidate's own native command now.
+    assert commands["golden-lease-check"] == ["candidate", "lease", "check", "full-suite"]
+
+
+class _Server:
+    host, port, password = "127.0.0.1", 55432, "synthetic-secret"
+    data_dir = Path("pl-precheck-postgres-fixture")
+
+    def __init__(self, events, stops=True):
+        self.events, self.stops = events, stops
+
+    def stop(self):
+        self.events.append("stop")
+        if isinstance(self.stops, BaseException):
+            raise self.stops
+        return self.stops
 
 
 def test_owned_golden_fixture_does_not_inherit_a_configured_bank(tmp_path, monkeypatch):
-    from evals.rust_port import phase1_ci
-    from pseudolife_memory import test_login_cli
+    """The cluster comes from disposable_postgres and the login from the
+    candidate's native test-login; the daemon's bank never reaches the rows."""
+    import disposable_postgres
     configured = "postgresql://fixture.invalid/configured-bank"
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", configured)
-    @contextmanager
-    def postgres():
-        monkeypatch.setenv("PSEUDOLIFE_BENCH_ADMIN_URL", "host=127.0.0.1 port=1 user=fixture dbname=postgres")
-        yield
-    def provision(args, **kwargs):
-        assert "PSEUDOLIFE_MCP_DATABASE_URL" not in os.environ
-        assert args[args.index("--admin-url") + 1] == os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"]
-        return 0
-    monkeypatch.setattr(phase1_ci, "postgres", postgres)
-    monkeypatch.setattr(test_login_cli, "main", provision)
-    with replay.golden_postgres(tmp_path) as env:
+    events = []
+    def start(parent, prefix):
+        events.append(("start", parent, prefix))
+        return _Server(events)
+    def create_test_login(candidate, server, login):
+        events.append(("login", candidate, login))
+        return subprocess.CompletedProcess([], 0, "", "")
+    monkeypatch.setattr(disposable_postgres, "start", start)
+    monkeypatch.setattr(disposable_postgres, "create_test_login", create_test_login)
+    with replay.golden_postgres(tmp_path, Path("candidate")) as env:
         assert "PSEUDOLIFE_MCP_DATABASE_URL" not in env
-        assert env["PSEUDOLIFE_TEST_PG_HOST_PORT"] == "127.0.0.1:1"
-    assert os.environ["PSEUDOLIFE_MCP_DATABASE_URL"] == configured
+        assert env["PSEUDOLIFE_TEST_PG_HOST_PORT"] == "127.0.0.1:55432"
+        assert env["PSEUDOLIFE_TEST_PG_LOGIN_FILE"] == str(tmp_path / "test-pg.env")
+    assert events == [("start", Path.home(), "pl-precheck-postgres-"),
+                      ("login", Path("candidate"), tmp_path / "test-pg.env"), "stop"]
 
+
+def test_owned_golden_fixture_stops_its_cluster_when_the_login_fails(tmp_path, monkeypatch):
+    import disposable_postgres
+    events = []
+    monkeypatch.setattr(disposable_postgres, "start", lambda parent, prefix: _Server(events))
+    monkeypatch.setattr(disposable_postgres, "create_test_login",
+                        lambda candidate, server, login: subprocess.CompletedProcess([], 3, "", ""))
+    with pytest.raises(RuntimeError, match="test-role provisioning failed"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    assert events == ["stop"]
+
+
+def test_owned_golden_fixture_fails_its_cleanup_when_the_stop_is_unconfirmed(tmp_path, monkeypatch, capsys):
+    """A cluster that could not be confirmed stopped fails the cleanup phase
+    instead of passing it; a stop that fails during a setup error is
+    reported beside that error, which stays the one raised."""
+    import disposable_postgres
+    events = []
+    monkeypatch.setattr(disposable_postgres, "start", lambda parent, prefix: _Server(events, stops=False))
+    monkeypatch.setattr(disposable_postgres, "create_test_login",
+                        lambda candidate, server, login: subprocess.CompletedProcess([], 0, "", ""))
+    with pytest.raises(RuntimeError, match="could not be confirmed stopped"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    # run() publishes the type only, so the directory to stop is in the step log.
+    first = capsys.readouterr().err
+    assert "left running" in first and "pl-precheck-postgres-fixture" in first
+    monkeypatch.setattr(disposable_postgres, "create_test_login",
+                        lambda candidate, server, login: subprocess.CompletedProcess([], 3, '{"exit": 3, "error": "refused"}', ""))
+    with pytest.raises(RuntimeError, match="test-role provisioning failed"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    err = capsys.readouterr().err
+    assert "test-login create failed (exit 3): refused" in err and "left running" in err
+
+
+def test_a_stop_that_raises_keeps_the_setup_error(tmp_path, monkeypatch, capsys):
+    import disposable_postgres
+    events = []
+    monkeypatch.setattr(disposable_postgres, "start",
+                        lambda parent, prefix: _Server(events, stops=PermissionError("in use")))
+    monkeypatch.setattr(disposable_postgres, "create_test_login",
+                        lambda candidate, server, login: subprocess.CompletedProcess([], 3, "", ""))
+    with pytest.raises(RuntimeError, match="test-role provisioning failed"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    err = capsys.readouterr().err
+    assert events == ["stop"] and "cleanup failed (PermissionError)" in err and "left running" in err
+
+
+def test_a_refused_start_names_its_reason_in_the_step_log(tmp_path, monkeypatch, capsys):
+    import disposable_postgres
+    def start(parent, prefix):
+        raise disposable_postgres.SetupError("pg0 reported a server on another host; install the pinned pg0")
+    monkeypatch.setattr(disposable_postgres, "start", start)
+    with pytest.raises(disposable_postgres.SetupError):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    assert "did not start: pg0 reported a server on another host; install the pinned pg0" in capsys.readouterr().err
+
+
+def test_a_failed_login_without_a_report_never_logs_the_password(tmp_path, monkeypatch, capsys):
+    """The child had the password in PGPASSWORD; its raw stderr is redacted."""
+    import disposable_postgres
+    events = []
+    monkeypatch.setattr(disposable_postgres, "start", lambda parent, prefix: _Server(events))
+    monkeypatch.setattr(disposable_postgres, "create_test_login", lambda candidate, server, login:
+                        subprocess.CompletedProcess([], 101, "", "panicked: PGPASSWORD=synthetic-secret"))
+    with pytest.raises(RuntimeError, match="test-role provisioning failed"):
+        with replay.golden_postgres(tmp_path, Path("candidate")):
+            pass
+    err = capsys.readouterr().err
+    assert "synthetic-secret" not in err and "test-login create failed (exit 101): panicked: PGPASSWORD=***" in err
+
+
+def test_an_unconfirmed_stop_after_the_rows_fails_the_cleanup_phase(tmp_path, monkeypatch):
+    mock_summary_replace(monkeypatch)
+    @contextmanager
+    def postgres(private, candidate):
+        yield {"owned": "fixture"}
+        raise RuntimeError("owned golden PostgreSQL in somewhere could not be confirmed stopped")
+    monkeypatch.setattr(replay, "golden_postgres", postgres)
+    monkeypatch.setattr(replay, "execute", lambda phase, *args, **kwargs: {
+        "phase": phase, "exit_code": 0, "seconds": 0, "failed_cases": [], "diagnostic_errors": []})
+    assert replay.run(plan(linux=["lease"], windows=["lease"]), Path("candidate"),
+                      tmp_path / "private", tmp_path / "public") == 1
+    text = (tmp_path / "public/summary.json").read_text()
+    phases = {row["phase"]: row for row in json.loads(text)["phases"]}
+    assert phases["golden-postgres"]["exit_code"] == 0 and phases["golden/lease"]["exit_code"] == 0
+    assert phases["golden-postgres-cleanup"]["exit_code"] == 1
+    assert phases["golden-postgres-cleanup"]["diagnostic_errors"] == ["owned PostgreSQL scope failed (RuntimeError)"]
+    assert "somewhere" not in text
+
+
+def test_precheck_runner_imports_nothing_from_the_package_outside_the_frozen_judges():
+    """The golden PostgreSQL and lease check are package-free (a recorded
+    row's record/ phase still runs the frozen package through
+    rust/cli_harness); PROCESS_BOOTSTRAP's import is a string the frozen
+    merge-base oracle's own runtime runs (--only judges)."""
+    import ast
+    source = Path(replay.__file__).read_text(encoding="utf-8")
+    imports = [node for node in ast.walk(ast.parse(source)) if isinstance(node, (ast.Import, ast.ImportFrom))]
+    names = [alias.name for node in imports if isinstance(node, ast.Import) for alias in node.names]
+    names += [node.module or "" for node in imports if isinstance(node, ast.ImportFrom)]
+    assert not [name for name in names if name.split(".")[0] == "pseudolife_memory"]
+    assert "pseudolife_memory" not in source.replace(replay.PROCESS_BOOTSTRAP, "")
 
 def test_real_bank_exit_differences_retain_the_actual_protocol_era(tmp_path):
     from evals.rust_port.stdio_judge import StdioPolicy, judge_with_evidence
@@ -260,3 +390,14 @@ def test_published_ids_are_exact_in_json_and_safe_in_markdown(tmp_path):
     assert json.loads(report)["groups"][0]["phases"][0]["failed_cases"] == [case]
     assert "private stream omitted" not in report
     assert "case\\|&lt;id&gt;&#96;" in target.read_text()
+
+
+def test_the_frozen_judges_are_recorded_as_retiring_with_the_package():
+    """package_consumers.toml classes the runner's one remaining package
+    import (the judges' PROCESS_BOOTSTRAP) as tooling that retires with it."""
+    import fnmatch
+    import tomllib
+    rules = tomllib.loads((replay.ROOT / "rust/ci/package_consumers.toml").read_text(encoding="utf-8"))["rules"]
+    rule = next(rule for rule in rules if "python-import" in rule["kinds"]
+                and any(fnmatch.fnmatchcase("rust/ci/pr_precheck_run.py", glob) for glob in rule["globs"]))
+    assert rule["class"] == "retained test tooling" and rule.get("retire_with_package") is True

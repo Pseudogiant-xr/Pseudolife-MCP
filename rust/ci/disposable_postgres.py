@@ -277,9 +277,11 @@ def _registry_record(name: str) -> Path:
 
 
 def _check_name(name: str) -> None:
-    """An instance name is one path component: pg0 files it by name."""
-    if not name or "/" in name or "\\" in name or ".." in name:
-        raise SetupError(f"pg0 instance name {name!r} must be one path component without '..'; "
+    """An instance name is one path component: pg0 files it by name. A ':'
+    is refused on every platform, because on Windows a drive prefix such as
+    'C:' resolves the name outside pg0's instances directory."""
+    if not name or "/" in name or "\\" in name or ".." in name or ":" in name:
+        raise SetupError(f"pg0 instance name {name!r} must be one path component without '..' or ':'; "
                          "pass a plain prefix such as 'pl-ci-postgres-'")
 
 

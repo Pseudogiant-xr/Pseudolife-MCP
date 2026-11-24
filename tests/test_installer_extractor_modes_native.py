@@ -13,6 +13,7 @@ import pytest
 
 from tests.test_installer_existing_upgrade import user_path_unchanged
 
+from rust.ci import release_version
 from tests import native_client_stub as native_stub
 from tests.test_installer_client_only import BASH, ROOT, _q, _stub
 from tests.test_installer_client_only_native import _Shell
@@ -26,8 +27,7 @@ def _block(name: str) -> str:
 def _release_env(shell: _Shell) -> dict[str, str]:
     """A local fake release of this checkout's version: the whole installer
     stages the native client before it reads the client-only flags."""
-    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"',
-                        (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
+    version = release_version.read(ROOT)
     env = native_stub.write_release(shell.tmp / "release", version, "exit 0\n")
     env["PSEUDOLIFE_NATIVE_ARCHIVE_URL"] = shell.path(shell.tmp / "release")
     return env
