@@ -146,6 +146,8 @@ The capture command ran from a disposable checkout of `d81bba3a2`.
 python -X utf8 -c 'import json; from rust.cli_harness.rows import hook, mail; print(json.dumps({"capture":"one-time capture at d81bba3a2","baseline":"d81bba3a233724c008e866a66f308ed0712c5745","wait_mail_digest":mail._body(),"doorbell_records":{"regular":hook.pending_text(hook.THREAD),"maintainer":hook.pending_text(hook.THREAD,count=3,maintainer=1),"legacy":hook.pending_text(hook.THREAD,legacy=True)}},ensure_ascii=False,indent=2))'
 ```
 
+The transfer row imports `fixtures/transfer-archives/{current,tricky,ties}.zip`, which carry the schema version; after a schema bump, rebuild them from the row's own seeders with the native export, then re-record the transfer goldens: `python rust/cli_harness/regenerate_transfer_archives.py --candidate <pseudolife-stdio>` (`--check` compares with the committed archives instead of writing).
+
 ## Retired source mutants
 
 The CLI source-mutant job and its declarations were retired on 17 November

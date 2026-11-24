@@ -4,6 +4,7 @@ import base64
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -698,3 +699,69 @@ def test_teardown_propagates_when_the_check_fails_or_a_guard_refuses(monkeypatch
         monkeypatch.setattr(_bank, "drop", refusing_drop)
         with pytest.raises(type(refusal)):
             _bank.teardown(_bank.name("pl_cf_teardown_guard"))
+
+
+def test_bank_and_pairing_rows_load_without_the_frozen_package():
+    # A fresh interpreter, so the rows' top-level imports run under the blocker
+    # too (collection has already imported them here).
+    script = """\
+import sys
+sys.path.insert(0, sys.argv[1])
+from rust.harness_support.import_blocker import cold_harness_imports
+with cold_harness_imports():
+    from rust.cli_harness.rows import load
+    for row, case in (("invite", "container-rust"), ("transfer", "export-help"), ("backup", "help")):
+        ids = [c.id for c in load(row)]
+        assert case in ids, (row, ids[:5])
+"""
+    repo = Path(__file__).resolve().parents[2]
+    child = subprocess.run([sys.executable, "-I", "-c", script, str(repo)],
+                           capture_output=True, text=True, timeout=60)
+    assert child.returncode == 0, child.stderr
+
+
+class _SeedConnection:
+    """Records the seed's statements; the bravo pairing update returns
+    ``paired`` rows."""
+
+    def __init__(self, invite, paired):
+        self.invite, self.paired, self.statements = invite, paired, []
+
+    def execute(self, query, params=None):
+        self.statements.append((query, params))
+        connection = self
+
+        class Result:
+            def fetchone(self):
+                return (connection.invite._bank.name(connection.invite.PREFIX + "arm"),)
+
+            def fetchall(self):
+                return [("bravo",)] * connection.paired
+        return Result()
+
+
+def test_invite_seed_refuses_when_bravo_was_not_paired():
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    with cold_harness_imports():
+        from rust.cli_harness.rows import invite
+        with pytest.raises(RuntimeError, match="bravo was not paired"):
+            invite.seed_states(_SeedConnection(invite, paired=0), "unused")
+
+
+def test_invite_seeds_run_with_frozen_imports_blocked():
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    with cold_harness_imports():
+        from rust.cli_harness.rows import invite
+        connection = _SeedConnection(invite, paired=1)
+        invite.seed_states(connection, "unused")
+    statements = connection.statements
+    writes = [(q, p) for q, p in statements if "current_database" not in q]
+    assert writes[0][1] == ("coordination_bank_id", invite.BANK_ID)
+    inserted = [p["name"] for q, p in writes if q.startswith("INSERT INTO public.principals")]
+    assert inserted == ["alpha", "bravo", "charlie", "delta", "a-rather-long-principal-name.x", "echo"]
+    owned = [p["owned"] for q, p in writes if q.startswith("INSERT INTO public.principals")]
+    assert owned == [None, None, None, None, None, False]
+    assert any("token_hash" in q and "WHERE principal = 'bravo'" in q for q, _ in writes)
+    assert any("revoked_at = COALESCE" in q and "WHERE principal = 'charlie'" in q for q, _ in writes)
