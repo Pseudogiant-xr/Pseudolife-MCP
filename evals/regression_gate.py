@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import os
 from pathlib import Path
 import re
@@ -16,8 +16,8 @@ from evals import context_format, lme_scoring, longmemeval_bench as lme, rebuild
 from evals import retained_daemon
 from evals.retained_artifacts import fingerprint, read_json, record
 from evals.retained_daemon import (
-    BenchError, add_daemon_arguments, add_endpoint_arguments, bench_config, daemon_setup,
-    endpoint_args, report_incomplete,
+    BenchError, CellStopped, add_daemon_arguments, add_endpoint_arguments, bench_config,
+    daemon_setup, endpoint_args, report_incomplete,
 )
 
 
@@ -67,12 +67,13 @@ def baseline_for(path, manifest):
 
 
 def replay_slots(bank, slots, question_id):
-    """Write the fixture's public inputs and return the writes the daemon kept as echoes.
+    """Write the fixture's public inputs and return the writes the daemon kept.
 
-    A write the daemon answers with action "confirmed" while returning the slot's
-    previous value unchanged kept the standing value: by its compression-echo rule
-    (a shorter rewrite repeating most of its words, issue #1924) or because the
-    two are equal after its case and space normalisation. The response does not
+    A write the daemon answers with action "confirmed" on the same entity and
+    attribute while returning the slot's previous value unchanged kept the
+    standing value: by its compression-echo rule (a shorter rewrite repeating
+    most of its words, issue #1924) or because the two are equal after its case
+    and space normalisation. The response does not
     say which, so the gate records every such write and does not count it as a
     version; any other difference from the fixture's history is still an
     incomplete cell.
@@ -91,7 +92,8 @@ def replay_slots(bank, slots, question_id):
         for value in slot["values"]:
             result = bank.tool("memory_fact_set", **key, value=value)
             if (expected and value != expected[-1] and result.get("action") == "confirmed"
-                    and result.get("value") == expected[-1]):
+                    and result.get("value") == expected[-1]
+                    and (result.get("entity"), result.get("attribute")) == (key["entity"], key["attribute"])):
                 echoes.append({"question_id": question_id, **key, "written": value,
                                "kept": expected[-1]})
                 continue
@@ -110,7 +112,7 @@ def contexts_for(question, frozen_context, slots, open_bank, stop=None):
         for session in lme.chronological_turns(question):
             for turn in session:
                 if stop is not None and stop.is_set():
-                    raise BenchError("gate context build stopped after another cell failed")
+                    raise CellStopped("gate context build stopped after another cell failed")
                 bank.store(turn)
         echoes = replay_slots(bank, slots, question["question_id"])
         hits = bank.search(question["question"], lme.ENTRY_WIDTH)
@@ -165,18 +167,21 @@ def usable_cpus():
 def context_workers(requested, available=None, cpus=None):
     """How many context cells run at once: the request, else what memory and cores allow.
 
-    Unreadable memory means one cell at a time, never the maximum.
+    A request above what free memory allows is lowered to it. Unreadable memory
+    means one cell at a time unless a count was asked for, never the maximum.
     """
     if requested < 0:
         raise BenchError("--context-workers must be 0 (size to this machine) or a positive count")
-    if requested:
-        return requested
-    cpus = cpus if cpus is not None else usable_cpus()
     available = available if available is not None else available_memory()
-    if available is None:
+    by_memory = None if available is None else max(1, (available - MEMORY_RESERVE_BYTES) // CELL_MEMORY_BYTES)
+    if requested:
+        # Free memory caps even an explicit count: daemons past it exhaust the commit
+        # limit, which fails cells with os error 1455 on Windows.
+        return requested if by_memory is None else min(requested, by_memory)
+    if by_memory is None:
         return 1
-    by_memory = (available - MEMORY_RESERVE_BYTES) // CELL_MEMORY_BYTES
-    return max(1, min(MAX_CONTEXT_WORKERS, cpus // 2, by_memory))
+    cpus = cpus if cpus is not None else usable_cpus()
+    return min(MAX_CONTEXT_WORKERS, max(1, cpus // 2), by_memory)
 
 
 def build_contexts(questions, controls, slots, open_bank, workers, stop=None):
@@ -187,17 +192,26 @@ def build_contexts(questions, controls, slots, open_bank, workers, stop=None):
     The first failure, or an interrupt, stops queued cells and tells running ones
     to stop at their next turn, so the run ends within one stored turn.
     """
+    def built(row, count):
+        print(f"Context cell {count}/{len(questions)} built: {row['question_id']}", flush=True)
+        return row
+
     if workers == 1:
-        return [contexts_for(q, controls[q["question_id"]], slots[q["question_id"]], open_bank)
-                for q in questions]
+        return [built(contexts_for(q, controls[q["question_id"]], slots[q["question_id"]], open_bank),
+                      count) for count, q in enumerate(questions, 1)]
     stop = stop if stop is not None else threading.Event()
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gate-cell")
     futures = {pool.submit(contexts_for, q, controls[q["question_id"]], slots[q["question_id"]],
                            open_bank, stop): index for index, q in enumerate(questions)}
-    rows = [None] * len(questions)
+    rows, pending, count = [None] * len(questions), set(futures), 0
     try:
-        for future in as_completed(futures):
-            rows[futures[future]] = future.result()
+        while pending:
+            # A bounded wait returns to Python each second, so Ctrl+C is seen
+            # promptly on Windows instead of after the next cell finishes.
+            done, pending = wait(pending, timeout=1, return_when=FIRST_COMPLETED)
+            for future in done:
+                count += 1
+                rows[futures[future]] = built(future.result(), count)
     except BaseException:
         stop.set()
         pool.shutdown(wait=True, cancel_futures=True)
@@ -241,8 +255,8 @@ def run(root, manifest, setup_id, questions, controls, slots, open_bank, answere
         raise BenchError("gate context checkpoint is incomplete or uses a different raw control")
     echoes = [echo for row in contexts for echo in row["echo_confirmed"]]
     if contexts_only:
-        print(f"Rust gate contexts recorded at {context_file}; {len(echoes)} fixture writes "
-              "were kept by the daemon as compression echoes.", flush=True)
+        print(f"Rust gate contexts recorded at {context_file}; the daemon kept {len(echoes)} "
+              "fixture writes (echo or equal after normalisation).", flush=True)
         return 0
     contexts_sha = fingerprint(contexts)
     answers = []
@@ -275,7 +289,8 @@ def run(root, manifest, setup_id, questions, controls, slots, open_bank, answere
         record(candidate, measured)
         print(f"Rust baseline candidate recorded at {candidate}. The maintainer reviews it and "
               "commits it as evals/results/rust-quality/regression_gate.baseline.json. "
-              f"It lists {len(echoes)} fixture writes the daemon kept as compression echoes.")
+              f"It lists {len(echoes)} fixture writes the daemon kept "
+              "(echo or equal after normalisation).")
         return 0
     if measured["control_score_sha256"] != baseline["control_score_sha256"]:
         raise BenchError("answerer or judge drifted on the pinned raw control")
@@ -285,8 +300,8 @@ def run(root, manifest, setup_id, questions, controls, slots, open_bank, answere
         warnings.append(f"quarantined entries changed from {baseline.get('quarantined', 0)} "
                         f"to {measured['quarantined']}")
     if echoes != baseline.get("echo_confirmed", []):
-        warnings.append(f"fixture writes kept as compression echoes changed from "
-                        f"{len(baseline.get('echo_confirmed', []))} to {len(echoes)}")
+        warnings.append(f"fixture writes the daemon kept (echo or equal after normalisation) "
+                        f"changed from {len(baseline.get('echo_confirmed', []))} to {len(echoes)}")
     record(root / "verdict.json", {"measured": measured, "baseline_sha256": fingerprint(baseline),
                                    "regressions": failures, "warnings": warnings})
     for warning in warnings:

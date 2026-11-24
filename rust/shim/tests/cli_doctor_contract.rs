@@ -1189,10 +1189,19 @@ mod tunnel_profiles {
         );
         assert!(!entry.to_string().contains("Python"), "{entry}");
         // Doctor names the file because `tunnel status` really does not
-        // answer while it is a pipe.
+        // answer while it is a pipe: status refuses with the same cause and
+        // fix for the same file.
         let output = tunnel_status(&home);
-        assert_eq!(output.status.code(), Some(1));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("deferred"));
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!(
+                "cannot read the key file {}; check that it is a plain owner-only file, not a pipe or a link",
+                root(&home).join("dot.key").display()
+            )),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("deferred"), "{stderr}");
     }
 
     #[test]
@@ -1229,7 +1238,9 @@ mod tunnel_profiles {
         let recovery = entries[0]["recovery"].as_str().unwrap();
         assert!(recovery.contains("bad.profile.json"), "{recovery}");
         assert!(
-            recovery.ends_with("move it aside; this client cannot set a tunnel up yet."),
+            recovery.ends_with(
+                "move it aside and save it again with tunnel setup --daemon-url and --token-file."
+            ),
             "{recovery}"
         );
         assert_eq!(entries[1]["profile"], json!("dot"));

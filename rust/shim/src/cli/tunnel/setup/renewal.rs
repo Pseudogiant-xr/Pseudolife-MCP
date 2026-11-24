@@ -9,7 +9,7 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-use super::resume::{KeyBytes, commit_lock, require_no_autostart};
+use super::resume::{KeyBytes, commit_lock};
 use super::{PROFILE_LIMIT, check_directory, publish_new, stage_and_publish, sync_directory};
 use crate::cli::tunnel::{Fail, Options, Output, runtime, store, syntax};
 
@@ -71,9 +71,17 @@ fn replace(path: &Path, saved: &[u8], next: &[u8]) -> Result<(), Fail> {
         |stage| {
             if !store::private_read(path, saved.len()).is_ok_and(|bytes| KeyBytes(bytes).0 == saved)
             {
-                return Err(Fail::Defer);
+                return Err(Fail::Detail(format!(
+                    "{} changed during the key renewal; check tunnel status, then rerun tunnel setup for the same profile",
+                    path.display()
+                )));
             }
-            store::sharing_retry(|| fs::rename(stage, path)).map_err(|_| Fail::Defer)
+            store::sharing_retry(|| fs::rename(stage, path)).map_err(|_| {
+                Fail::Detail(format!(
+                    "could not replace {}; check write access to the tunnel directory, then rerun tunnel setup for the same profile",
+                    path.display()
+                ))
+            })
         },
     )
 }
@@ -294,8 +302,7 @@ pub(in crate::cli::tunnel) fn finish_previous_key(
     }
     let _runtime = runtime::key_change_locks(root, name)?;
     let original = store::private_read(profile, PROFILE_LIMIT)?;
-    let (saved, _) = store::decode_profile(&original, name)?;
-    require_no_autostart(&saved)?;
+    store::decode_profile(&original, name)?;
     let (_setup, _) = commit_lock(root, profile, &original)?;
     check_pending(root, name)?;
     if !has_previous_key(root, name)? {

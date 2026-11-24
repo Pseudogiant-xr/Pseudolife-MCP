@@ -109,7 +109,9 @@ run directory. The historical `results/regression_gate.baseline.json` was
 measured on the Python engine and remains frozen. The gate builds and records
 every context before it starts the model server, so the GPU is held only for
 answering and judging. It builds several cells at once (`-ContextWorkers`; the
-default 0 sizes the pool to free memory and cores, at most eight).
+default 0 sizes the pool to free memory and cores, at most eight; a larger
+request is lowered to what free memory allows) and prints a line as each
+cell is built.
 
 The drivers take a checkout-built daemon, a CPU ONNX embedder and ORT library,
 test PostgreSQL, and explicit model endpoints. Their `--help` lists the inputs

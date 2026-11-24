@@ -532,14 +532,14 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLg0KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4NCkxhc3QgdHVubmVsIHJlZnJlc2g6IHBlbmRpbmc7IG5lZWRzIGF0dGVudGlvbi4gSW5zcGVjdCB0dW5uZWwgZG9jdG9yIGJlZm9yZSByZXRyeWluZyB0aGUgdXBkYXRlLg0K",
+   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLg0KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4NCkxhc3QgdHVubmVsIHJlZnJlc2g6IHBlbmRpbmc7IG5lZWRzIGF0dGVudGlvbi4gVGhlIFB5dGhvbiBjbGllbnQgcmVjb3JkZWQgaXQ7IHRvIHJ1biB0aGUgdHVubmVsIG9uIHRoaXMgY2xpZW50LCBzYXZlIGl0cyB0dW5uZWwgSUQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHNldHVwIC0tcHJvZmlsZSBkb3QgLS1wcm9maWxlLWRpciAne0hPTUV9XHR1bm5lbHMnIC0tdHVubmVsLWlkIDx0dW5uZWxfaWQ+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gaW1wb3J0IGl0cyBydW50aW1lIGtleSB3aXRoIGBwc2V1ZG9saWZlLW1jcCB0dW5uZWwgc2V0dXAgLS1wcm9maWxlIGRvdCAtLXByb2ZpbGUtZGlyICd7SE9NRX1cdHVubmVscycgLS1yZWFkLWtleWAsIHRoZW4gc3RhcnQgaXQgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHJ1biAtLXByb2ZpbGUgZG90IC0tcHJvZmlsZS1kaXIgJ3tIT01FfVx0dW5uZWxzJ2AuDQo=",
    "stderr": "",
    "window": [
-    1791586015.0117338,
-    1791586015.7193468
+    1795508176.7428098,
+    1795508176.8023472
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -712,14 +712,14 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4NCkFQSSBrZXkgZXhwaXJ5OiB1bmtub3duOyBjaGVjayBQbGF0Zm9ybSBrZXkgc2V0dGluZ3MuDQpMYXN0IHR1bm5lbCByZWZyZXNoOiByb2xsZWQtYmFjazsgbmVlZHMgYXR0ZW50aW9uLiBJbnNwZWN0IHR1bm5lbCBkb2N0b3IgYmVmb3JlIHJldHJ5aW5nIHRoZSB1cGRhdGUuDQo=",
+   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4NCkFQSSBrZXkgZXhwaXJ5OiB1bmtub3duOyBjaGVjayBQbGF0Zm9ybSBrZXkgc2V0dGluZ3MuDQpMYXN0IHR1bm5lbCByZWZyZXNoOiByb2xsZWQtYmFjazsgbmVlZHMgYXR0ZW50aW9uLiBUaGUgUHl0aG9uIGNsaWVudCByZWNvcmRlZCBpdDsgdG8gcnVuIHRoZSB0dW5uZWwgb24gdGhpcyBjbGllbnQsIGltcG9ydCBpdHMgcnVudGltZSBrZXkgd2l0aCBgcHNldWRvbGlmZS1tY3AgdHVubmVsIHNldHVwIC0tcHJvZmlsZSBkb3QgLS1wcm9maWxlLWRpciAne0hPTUV9XHR1bm5lbHMnIC0tcmVhZC1rZXlgLCB0aGVuIHN0YXJ0IGl0IHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBydW4gLS1wcm9maWxlIGRvdCAtLXByb2ZpbGUtZGlyICd7SE9NRX1cdHVubmVscydgLg0K",
    "stderr": "",
    "window": [
-    1791586022.2048674,
-    1791586022.9135258
+    1795508176.905741,
+    1795508176.9593291
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -2716,52 +2716,18 @@
    },
    "modes": {}
   },
-  "defer-verify-process-record": {
+  "defer-status-seven-digit-fraction": {
    "home": null,
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "YWN0aXZlIHR1bm5lbCBpZGVudGl0eSBpcyB1bmF2YWlsYWJsZSBvciBjaGFuZ2VkOyByZWZyZXNoIHRoZSB0dW5uZWwgYmVmb3JlIHZlcmlmaWNhdGlvbg0K",
+   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX1cdHVubmVsc1xkb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLWRhZW1vbi11cmwgPHVybD4gLS10b2tlbi1maWxlIDxvd25lci1vbmx5IGZpbGU+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cw0K",
    "window": [
-    1791586099.8293812,
-    1791586100.55327
+    1795499295.0519986,
+    1795499295.0982301
    ],
    "requests": [],
-   "arm": "python",
-   "before": {
-    "cwd": "dir",
-    "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
-    "tunnels": "dir",
-    "tunnels/dot.key": "file:RFBBUEkAAQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAIKhxCqtCsUek6V/gdSIEoAAAAAACAAAAAAAQZgAAAAEAACAAAADj8CwiB1g+LOcEJbkg8CAiIQdZ/p8sVrw/je5t2isRngAAAAAOgAAAAAIAACAAAAC+7wGzH6coxsGno7mwRtNete/VvnZfX66izpMdcoROaiAAAABWzpIHMaTFnEEdewwlbrQLleMaW+K8vlkVxn7z3IfNSEAAAAANg8eAau+Bk8aR4G4oHtZMHBhkiLl6VXavG9Swidh9p9bJbLpIMTRiqBTxiIc31Dte+0geJitX+Q0c2mdBrm0x",
-    "tunnels/dot.process.json": "file:eyJwaWQiOiAxLCAiY3JlYXRlZCI6IDAuMCwgImV4ZSI6ICJub25lIiwgImFyZ3YiOiBbIm5vbmUiXX0=",
-    "tunnels/dot.profile.json": "file:ewogICJuYW1lIjogImRvdCIsCiAgImRhZW1vbl91cmwiOiAie0RBRU1PTn0iLAogICJ0b2tlbl9maWxlIjogIntIT01FfVxcdG9rZW4iLAogICJ0dW5uZWxfaWQiOiAidHVubmVsXzAxMjMiLAogICJvcmdhbml6YXRpb25faWQiOiBudWxsLAogICJzdGF0ZSI6ICJyZWFkeSIsCiAgImNvbnNlbnQiOiB0cnVlLAogICJhdXRvc3RhcnRfY29uc2VudCI6IGZhbHNlLAogICJydW50aW1lX3ZlcnNpb24iOiBudWxsLAogICJtaW5pbXVtX2NhdGFsb2ciOiAiY3VycmVudCIsCiAgInJ1bnRpbWVfa2V5X2V4cGlyZXNfYXQiOiBudWxsLAogICJjbG91ZF92ZXJpZmljYXRpb25fZmlsZSI6IG51bGwKfQ=="
-   },
-   "before_modes": {},
-   "dpapi_fixture": [
-    "tunnels/dot.key"
-   ],
-   "files": {
-    "cwd": "dir",
-    "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
-    "tunnels": "dir",
-    "tunnels/dot.key": "file:RFBBUEkAAQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAIKhxCqtCsUek6V/gdSIEoAAAAAACAAAAAAAQZgAAAAEAACAAAADj8CwiB1g+LOcEJbkg8CAiIQdZ/p8sVrw/je5t2isRngAAAAAOgAAAAAIAACAAAAC+7wGzH6coxsGno7mwRtNete/VvnZfX66izpMdcoROaiAAAABWzpIHMaTFnEEdewwlbrQLleMaW+K8vlkVxn7z3IfNSEAAAAANg8eAau+Bk8aR4G4oHtZMHBhkiLl6VXavG9Swidh9p9bJbLpIMTRiqBTxiIc31Dte+0geJitX+Q0c2mdBrm0x",
-    "tunnels/dot.process.json": "file:eyJwaWQiOiAxLCAiY3JlYXRlZCI6IDAuMCwgImV4ZSI6ICJub25lIiwgImFyZ3YiOiBbIm5vbmUiXX0=",
-    "tunnels/dot.profile.json": "file:ewogICJuYW1lIjogImRvdCIsCiAgImRhZW1vbl91cmwiOiAie0RBRU1PTn0iLAogICJ0b2tlbl9maWxlIjogIntIT01FfVxcdG9rZW4iLAogICJ0dW5uZWxfaWQiOiAidHVubmVsXzAxMjMiLAogICJvcmdhbml6YXRpb25faWQiOiBudWxsLAogICJzdGF0ZSI6ICJyZWFkeSIsCiAgImNvbnNlbnQiOiB0cnVlLAogICJhdXRvc3RhcnRfY29uc2VudCI6IGZhbHNlLAogICJydW50aW1lX3ZlcnNpb24iOiBudWxsLAogICJtaW5pbXVtX2NhdGFsb2ciOiAiY3VycmVudCIsCiAgInJ1bnRpbWVfa2V5X2V4cGlyZXNfYXQiOiBudWxsLAogICJjbG91ZF92ZXJpZmljYXRpb25fZmlsZSI6IG51bGwKfQ=="
-   },
-   "modes": {}
-  },
-  "defer-status-seven-digit-fraction": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLg0KQVBJIGtleSBleHBpcnk6IDIwOTktMTItMzFUMDA6MDA6MDAuMTIzNDU2N1ouDQo=",
-   "stderr": "",
-   "window": [
-    1791586100.9888408,
-    1791586101.6574256
-   ],
-   "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -2782,15 +2748,15 @@
   "defer-status-one-digit-fraction": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLg0KQVBJIGtleSBleHBpcnk6IDIwOTktMTItMzFUMDA6MDA6MDAuNVouDQo=",
-   "stderr": "",
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX1cdHVubmVsc1xkb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLWRhZW1vbi11cmwgPHVybD4gLS10b2tlbi1maWxlIDxvd25lci1vbmx5IGZpbGU+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cw0K",
    "window": [
-    1791586102.0179594,
-    1791586102.7191126
+    1795499295.162598,
+    1795499295.210499
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -2813,13 +2779,13 @@
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "a2V5IGV4cGlyeSByZXF1aXJlcyBhbiBJU08gZGF0ZSBvciB0aW1lc3RhbXAgd2l0aCB0aW1lem9uZQ0K",
+   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX1cdHVubmVsc1xkb3QucHJvZmlsZS5qc29uOiBpdHMgcnVudGltZV9rZXlfZXhwaXJlc19hdCB1c2VzIGEgdGltZXN0YW1wIHNwZWxsaW5nIHRoaXMgY2xpZW50IGRvZXMgbm90IHJlYWQgKGEgZnJhY3Rpb24gb2Ygb3RoZXIgdGhhbiAzIG9yIDYgZGlnaXRzLCBob3VyIDI0LCBvciBhbiB1bnVzdWFsIG9mZnNldCkuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLWRhZW1vbi11cmwgPHVybD4gLS10b2tlbi1maWxlIDxvd25lci1vbmx5IGZpbGU+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cw0K",
    "window": [
-    1791586103.2002676,
-    1791586103.8409293
+    1795499295.2814686,
+    1795499295.333124
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -2839,15 +2805,15 @@
   "defer-status-deep-challenge": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4NCkFQSSBrZXkgZXhwaXJ5OiB1bmtub3duOyBjaGVjayBQbGF0Zm9ybSBrZXkgc2V0dGluZ3MuDQo=",
-   "stderr": "",
+   "exit": 2,
+   "stdout": "",
+   "stderr": "dGhlIHZlcmlmaWNhdGlvbiBjaGFsbGVuZ2Uge0hPTUV9XHR1bm5lbHNcZG90LXZlcmlmaWNhdGlvblxjaGFsbGVuZ2UuanNvbiBpcyBuZXN0ZWQgdG9vIGRlZXBseSB0byBiZSBvbmUgdGhpcyBjbGllbnQgd3JvdGU7IG1vdmUgdGhhdCBmaWxlIGFzaWRlICh0dW5uZWwgdmVyaWZ5IHdyaXRlcyBhIG5ldyBvbmUpLCB0aGVuIHJldHJ5IHR1bm5lbCBzdGF0dXMNCg==",
    "window": [
-    1791586104.3257813,
-    1791586104.9777944
+    1795493491.4374132,
+    1795493491.483736
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -2871,15 +2837,15 @@
   "defer-status-refresh-reserved-id": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHBlbmRpbmc7IHJ1bnRpbWUgcnVubmluZz1GYWxzZSwgcmVhZHk9RmFsc2U7IGNsb3VkIHZlcmlmaWVkPUZhbHNlICgwLzIgY2FsbHMpLg0KQVBJIGtleSBleHBpcnk6IHVua25vd247IGNoZWNrIFBsYXRmb3JtIGtleSBzZXR0aW5ncy4NCkxhc3QgdHVubmVsIHJlZnJlc2g6IHVuYXZhaWxhYmxlOyBuZWVkcyBhdHRlbnRpb24uIEluc3BlY3QgdHVubmVsIGRvY3RvciBiZWZvcmUgcmV0cnlpbmcgdGhlIHVwZGF0ZS4NCg==",
-   "stderr": "",
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Y2Fubm90IHJlYWQgdGhlIHJlZnJlc2ggZmlsZSB7SE9NRX1cdHVubmVsc1xkb3QucmVsb2FkLmpzb246IGl0IGlzIG5vdCBhIHBsYWluIG93bmVyLW9ubHkgZmlsZSwgb3IgaG9sZHMgSlNPTiB0aGlzIGNsaWVudCBkb2VzIG5vdCByZWFkLiBNb3ZlIGl0IGFzaWRlLCB0aGVuIHJldHJ5IHR1bm5lbCBzdGF0dXMNCg==",
    "window": [
-    1791586105.4844065,
-    1791586106.1543636
+    1795493491.5535305,
+    1795493491.6003292
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -2901,15 +2867,15 @@
   "defer-status-result-reserved-id": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 0,
-   "stdout": "UHJvZmlsZSBkb3Q6IHJlYWR5OyBydW50aW1lIHJ1bm5pbmc9RmFsc2UsIHJlYWR5PUZhbHNlOyBjbG91ZCB2ZXJpZmllZD1GYWxzZSAoMC8yIGNhbGxzKS4NCkFQSSBrZXkgZXhwaXJ5OiB1bmtub3duOyBjaGVjayBQbGF0Zm9ybSBrZXkgc2V0dGluZ3MuDQpMYXN0IHR1bm5lbCByZWZyZXNoOiB1bmF2YWlsYWJsZTsgbmVlZHMgYXR0ZW50aW9uLiBJbnNwZWN0IHR1bm5lbCBkb2N0b3IgYmVmb3JlIHJldHJ5aW5nIHRoZSB1cGRhdGUuDQo=",
-   "stderr": "",
+   "exit": 2,
+   "stdout": "",
+   "stderr": "Y2Fubm90IHJlYWQgdGhlIHJlZnJlc2ggZmlsZSB7SE9NRX1cdHVubmVsc1xkb3QucmVsb2FkLnJlc3VsdC5qc29uOiBpdCBpcyBub3QgYSBwbGFpbiBvd25lci1vbmx5IGZpbGUsIG9yIGhvbGRzIEpTT04gdGhpcyBjbGllbnQgZG9lcyBub3QgcmVhZC4gTW92ZSBpdCBhc2lkZSwgdGhlbiByZXRyeSB0dW5uZWwgc3RhdHVzDQo=",
    "window": [
-    1791586106.693263,
-    1791586107.39699
+    1795493491.6807344,
+    1795493491.7268646
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -2933,13 +2899,13 @@
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "cHJpdmF0ZSB0dW5uZWwgZmlsZSBpcyB1bmF2YWlsYWJsZSBvciBub3Qgb3duZXItb25seQ0K",
+   "stderr": "dGhpcyBjbGllbnQgY291bGQgbm90IHJlYWQgcHJvZmlsZSB7SE9NRX1cdHVubmVsc1xkb3QucHJvZmlsZS5qc29uOiB0aGUgcHJvZmlsZSBmaWxlIGNhbm5vdCBiZSBvcGVuZWQgc2FmZWx5IGhlcmUgKGEgcGlwZSwgb3IgYSBsaW5rIG9yIGp1bmN0aW9uIHRoaXMgY2xpZW50IGRvZXMgbm90IGZvbGxvdykuIE1vdmUgdGhhdCBmaWxlIGFzaWRlIGFuZCBzYXZlIHRoZSBwcm9maWxlIGFnYWluIHdpdGggYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzZXR1cCAtLWRhZW1vbi11cmwgPHVybD4gLS10b2tlbi1maWxlIDxvd25lci1vbmx5IGZpbGU+IC0tYWNjZXB0LWFjY2Vzc2AsIHRoZW4gcmV0cnkgdHVubmVsIHN0YXR1cw0K",
    "window": [
-    1791586107.7619846,
-    1791586108.4168608
+    1795499295.8742986,
+    1795499295.9143462
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "tunnels": "dir",
@@ -2959,13 +2925,13 @@
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "ZGFlbW9uIGNyZWRlbnRpYWwgZmlsZSBpcyB1bmF2YWlsYWJsZSBvciB1bnNhZmU7IHJlcGFpciBpdHMgb3duZXItb25seSBhY2Nlc3MgYW5kIHJldHJ5IHNldHVwDQo=",
+   "stderr": "cHJvZmlsZSBkb3QgaXMgc2F2ZWQ7IGd1aWRlZCBzZXR1cCBpcyBub3QgcGFydCBvZiB0aGUgbmF0aXZlIGNsaWVudC4gYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzdGF0dXMgLS1wcm9maWxlIGRvdCAtLXByb2ZpbGUtZGlyICd7SE9NRX1cdHVubmVscydgIHNob3dzIHdoYXQgaXQgc3RpbGwgbmVlZHM7IHJlc3VtZSBpdCB3aXRoIHRoYXQgb3B0aW9uIG9mIHR1bm5lbCBzZXR1cCAoLS10dW5uZWwtaWQsIC0tb3JnYW5pemF0aW9uLWlkLCAtLWNhdGFsb2csIC0ta2V5LWV4cGlyZXMtYXQsIC0tZGFlbW9uLXVybCB3aXRoIC0tdG9rZW4tZmlsZSwgb3IgLS1yZWFkLWtleSBvciAtLWtleS1maWxlKQ0K",
    "window": [
-    1791586109.334899,
-    1791586114.5272717
+    1795493491.921029,
+    1795493491.9568427
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "tunnels": "dir",
@@ -2985,13 +2951,13 @@
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "ZGFlbW9uIGNvbm5lY3Rpb24gaXMgbWlzc2luZyBvciBhbWJpZ3VvdXM7IHBhc3MgLS1kYWVtb24tdXJsIGFuZCAtLXRva2VuLWZpbGUgZXhwbGljaXRseSAoYW4gb3duZXItb25seSBjcmVkZW50aWFsIGZpbGUpDQo=",
+   "stderr": "dGhpcyBjbGllbnQgZG9lcyBub3QgcmVhZCB0aGUgZGFlbW9uIGNvbm5lY3Rpb24gZnJvbSBhIENsYXVkZSBDb2RlIG9yIENvZGV4IHJlZ2lzdHJhdGlvbjsgcGFzcyAtLWRhZW1vbi11cmwgYW5kIC0tdG9rZW4tZmlsZSAoYW4gb3duZXItb25seSBjcmVkZW50aWFsIGZpbGUpIGV4cGxpY2l0bHksIHdpdGggLS1hY2NlcHQtYWNjZXNzDQo=",
    "window": [
-    1791586114.9709046,
-    1791586118.9351575
+    1795493492.020708,
+    1795493492.054828
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     ".codex": "dir",
     "cwd": "dir",
@@ -3011,13 +2977,13 @@
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "ZGFlbW9uIGNvbm5lY3Rpb24gaXMgbWlzc2luZyBvciBhbWJpZ3VvdXM7IHBhc3MgLS1kYWVtb24tdXJsIGFuZCAtLXRva2VuLWZpbGUgZXhwbGljaXRseSAoYW4gb3duZXItb25seSBjcmVkZW50aWFsIGZpbGUpDQo=",
+   "stderr": "dGhpcyBjbGllbnQgZG9lcyBub3QgcmVhZCB0aGUgZGFlbW9uIGNvbm5lY3Rpb24gZnJvbSBhIENsYXVkZSBDb2RlIG9yIENvZGV4IHJlZ2lzdHJhdGlvbjsgcGFzcyAtLWRhZW1vbi11cmwgYW5kIC0tdG9rZW4tZmlsZSAoYW4gb3duZXItb25seSBjcmVkZW50aWFsIGZpbGUpIGV4cGxpY2l0bHksIHdpdGggLS1hY2NlcHQtYWNjZXNzDQo=",
    "window": [
-    1791586119.5450323,
-    1791586120.402349
+    1795493492.1335995,
+    1795493492.1659386
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     ".claude.json": "file:eyJtY3BTZXJ2ZXJzIjoge319",
     "cwd": "dir"
@@ -3034,14 +3000,14 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzdGF0dXMgWy1oXSBbLS1wcm9maWxlIFBST0ZJTEVdDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1wcm9maWxlLWRpciBQUk9GSUxFX0RJUl0gWy0tanNvbl0NCg0Kb3B0aW9uczoNCiAgLWgsIC0taGVscCAgICAgICAgICAgIHNob3cgdGhpcyBoZWxwIG1lc3NhZ2UgYW5kIGV4aXQNCiAgLS1wcm9maWxlIFBST0ZJTEUNCiAgLS1wcm9maWxlLWRpciBQUk9GSUxFX0RJUg0KICAtLWpzb24NCg==",
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBzdGF0dXMgW29wdGlvbnNdDQoNClNob3cgYSBwcm9maWxlJ3Mgc2V0dXAsIGtleSwgbGF1bmNoIGFuZCBjbG91ZCB2ZXJpZmljYXRpb24uDQoNCk9wdGlvbnM6DQogIC0tanNvbiAgICAgICAgICAgICAgcHJpbnQgb25lIEpTT04gb2JqZWN0DQogIC0tcHJvZmlsZSBOQU1FICAgICAgdGhlIHNhdmVkIHByb2ZpbGUgKGRlZmF1bHQgZG90KQ0KICAtLXByb2ZpbGUtZGlyIERJUiAgIHRoZSBwcml2YXRlIHByb2ZpbGUgZGlyZWN0b3J5IChkZWZhdWx0IH4vLnBzZXVkb2xpZmUtbWNwL3R1bm5lbCkNCiAgLWgsIC0taGVscCAgICAgICAgICBzaG93IHRoaXMgaGVscA0K",
    "stderr": "",
    "window": [
-    1791586120.9436066,
-    1791586121.645634
+    1795493492.2406726,
+    1795493492.2748919
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir"
    },
@@ -3057,13 +3023,13 @@
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIHR1bm5lbCBbLWhdDQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIHtzZXR1cCxzdGF0dXMsZG9jdG9yLHZlcmlmeSxydW4sc3RhcnQsc3RvcCxzaGltLHNlcnZpY2UsdXBkYXRlfQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAuLi4NCnBzZXVkb2xpZmUtbWNwIHR1bm5lbDogZXJyb3I6IHRoZSBmb2xsb3dpbmcgYXJndW1lbnRzIGFyZSByZXF1aXJlZDogY29tbWFuZA0K",
+   "stderr": "dHVubmVsIG5lZWRzIGEgY29tbWFuZDogc2V0dXAsIHN0YXR1cywgdmVyaWZ5LCBydW4sIHN0b3Agb3IgdXBkYXRlOyBzZWUgYHBzZXVkb2xpZmUtbWNwIHR1bm5lbCAtLWhlbHBgDQo=",
    "window": [
-    1791586122.157425,
-    1791586122.8830914
+    1795493492.353444,
+    1795493492.3877878
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir"
    },
@@ -3105,15 +3071,15 @@
   "defer-repeated-option": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 0,
-   "stdout": "eyJwcm9maWxlIjogImRvdCIsICJzdGF0ZSI6ICJwZW5kaW5nIiwgImNhdGFsb2ciOiAiY3VycmVudCIsICJwcml2YXRlX2tleV9wcmVzZW50IjogZmFsc2UsICJrZXlfZXhwaXJ5IjogeyJrbm93biI6IGZhbHNlLCAiZXhwaXJlZCI6IG51bGx9LCAicnVudGltZSI6IHsicnVubmluZyI6IGZhbHNlLCAicHJvZmlsZSI6ICJkb3QiLCAicmVhZHkiOiBmYWxzZSwgImtleV9leHBpcnkiOiAidW5rbm93biJ9LCAiY2xvdWQiOiB7InZlcmlmaWVkIjogZmFsc2UsICJzdWNjZXNzZnVsX2NhbGxzIjogMCwgImNoYWxsZW5nZV9jdXJyZW50IjogZmFsc2V9LCAidXBkYXRlIjogeyJzdGF0ZSI6ICJub25lIiwgIm5lZWRzX2F0dGVudGlvbiI6IGZhbHNlfX0NCg==",
-   "stderr": "",
+   "exit": 2,
+   "stdout": "",
+   "stderr": "LS1qc29uIGlzIGdpdmVuIHR3aWNlOyBnaXZlIGl0IG9uY2UNCg==",
    "window": [
-    1791586124.725107,
-    1791586125.4176395
+    1795493492.6145282,
+    1795493492.6467922
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -3132,6 +3098,84 @@
   }
  },
  "recorded_from_candidate": {
+  "defer-no-subcommand": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-profile-dangling-junction": {
+   "commit": "8cafc766289e044366f42baa0c12d2c0a52a5a17",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "07ec3a829500f1b499ca3231016f387dd9517ff8c8eecea056e4ef74ccdd8791"
+  },
+  "defer-repeated-option": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-setup-claude-registration": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-setup-codex-registration": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-setup-existing-profile": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-status-deep-challenge": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-status-help": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-status-hour-24-expiry": {
+   "commit": "8cafc766289e044366f42baa0c12d2c0a52a5a17",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "07ec3a829500f1b499ca3231016f387dd9517ff8c8eecea056e4ef74ccdd8791"
+  },
+  "defer-status-one-digit-fraction": {
+   "commit": "8cafc766289e044366f42baa0c12d2c0a52a5a17",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "07ec3a829500f1b499ca3231016f387dd9517ff8c8eecea056e4ef74ccdd8791"
+  },
+  "defer-status-refresh-reserved-id": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-status-result-reserved-id": {
+   "commit": "43bc915ee02fdf04e2b2c5a21b863da5fb88e09b",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "f4bf49c6b5a6aca23e5a45fd2d4e9a8c8be604653a11eb21b1c391c30221d383"
+  },
+  "defer-status-seven-digit-fraction": {
+   "commit": "8cafc766289e044366f42baa0c12d2c0a52a5a17",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "07ec3a829500f1b499ca3231016f387dd9517ff8c8eecea056e4ef74ccdd8791"
+  },
   "status-challenge-junction": {
    "commit": "cf9550e1173cbee2fa583c66692b86382986dd1f",
    "rust_tree": "clean",
@@ -3173,6 +3217,18 @@
    "rust_tree": "clean",
    "platform": "windows",
    "candidate_sha256": "15badd5228da1cf7c1bf2bef19e136f35ed0f0d0e01c29fe76aa41ae002df372"
+  },
+  "status-refresh-pending-text": {
+   "commit": "ca28d13eac2f6d067fbed974f31531c5266e47b5",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "58fe18f426d58ea1c886da9d98d8d6ff44cd44e17a3ecae88c0d68a0c92be224"
+  },
+  "status-refresh-rolled-back-text": {
+   "commit": "ca28d13eac2f6d067fbed974f31531c5266e47b5",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "58fe18f426d58ea1c886da9d98d8d6ff44cd44e17a3ecae88c0d68a0c92be224"
   },
   "update-case-folded-suffix": {
    "commit": "1b57a6ebc82ad7e61073a33760864081f0659d18",

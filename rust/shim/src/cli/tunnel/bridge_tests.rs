@@ -1941,7 +1941,7 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
     assert_eq!(
         prepare(&argv(&["--profile-dir", dir, "--profile", "draft"])).err(),
         Some(format!(
-            "tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `{}` shows what is missing",
+            "tunnel profile is not ready: its setup is unfinished; `{}` shows what is missing",
             status_command("draft", Some(dir))
         ))
     );

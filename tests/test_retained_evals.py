@@ -433,26 +433,31 @@ class SlotBank:
     confirmed onto the standing value; ``lose`` values are parked (contested,
     the standing value returned) and never reach the history; ``replace``
     values are answered "confirmed" with the written value although the
-    history keeps the old one."""
+    history keeps the old one; ``misfiled`` values are answered "confirmed" with
+    the standing value but name another attribute."""
 
-    def __init__(self, echo=(), lose=(), replace=()):
+    def __init__(self, echo=(), lose=(), replace=(), misfiled=()):
         self.echo, self.lose, self.replace = set(echo), set(lose), set(replace)
+        self.misfiled = set(misfiled)
         self.versions = []
 
     def tool(self, name, **args):
         if name == "memory_fact_set":
             value, current = args["value"], self.versions[-1] if self.versions else None
+            key = {"entity": args["entity"], "attribute": args["attribute"]}
             if current is None:
                 self.versions.append(value)
-                return {"action": "inserted", "value": value}
+                return {"action": "inserted", **key, "value": value}
+            if value in self.misfiled:
+                return {"action": "confirmed", **key, "attribute": "other", "value": current}
             if value == current or value in self.echo:
-                return {"action": "confirmed", "value": current}
+                return {"action": "confirmed", **key, "value": current}
             if value in self.replace:
-                return {"action": "confirmed", "value": value}
+                return {"action": "confirmed", **key, "value": value}
             if value in self.lose:
-                return {"action": "contested", "value": current}
+                return {"action": "contested", **key, "value": current}
             self.versions.append(value)
-            return {"action": "superseded", "value": value}
+            return {"action": "superseded", **key, "value": value}
         if name == "memory_fact_get":
             return {"record": {"value": self.versions[-1]}}
         assert name == "memory_history"
@@ -480,7 +485,8 @@ def test_gate_replay_records_a_compression_echo_the_daemon_kept():
 @pytest.mark.parametrize("bank", [
     SlotBank(lose={"new"}),
     SlotBank(replace={"new"}),
-], ids=["a different value lost", "confirmed with a changed value"])
+    SlotBank(misfiled={"new"}),
+], ids=["a different value lost", "confirmed with a changed value", "confirmed on another key"])
 def test_gate_replay_still_refuses_every_other_history_difference(bank):
     from evals import regression_gate as gate
 
@@ -527,7 +533,7 @@ def test_gate_contexts_and_candidate_list_the_echoes(tmp_path):
     assert gate.run(tmp_path / "moved", *args, repetitions=2,
                     baseline={**baseline, "echo_confirmed": []}) == 0
     assert read_json(tmp_path / "moved" / "verdict.json")["warnings"] == [
-        "fixture writes kept as compression echoes changed from 0 to 1",
+        "fixture writes the daemon kept (echo or equal after normalisation) changed from 0 to 1",
     ]
     unrecorded = tmp_path / "unrecorded"
     record(unrecorded / "contexts.json",
@@ -536,7 +542,7 @@ def test_gate_contexts_and_candidate_list_the_echoes(tmp_path):
         gate.run(unrecorded, *args, repetitions=2, baseline=None)
 
 
-def test_gate_parallel_contexts_keep_question_order_and_match_serial():
+def test_gate_parallel_contexts_keep_question_order_and_match_serial(capsys):
     import threading
     import time
     from evals import regression_gate as gate
@@ -563,10 +569,38 @@ def test_gate_parallel_contexts_keep_question_order_and_match_serial():
 
     serial = gate.build_contexts(questions, controls, slots, open_bank, 1)
     assert peak[0] == 1
+    capsys.readouterr()
     parallel = gate.build_contexts(questions, controls, slots, open_bank, 4)
     assert peak[0] > 1
     assert parallel == serial
     assert [row["question_id"] for row in parallel] == [q["question_id"] for q in questions]
+    # One progress line per built cell, counted in completion order.
+    progress = capsys.readouterr().out.splitlines()
+    assert [line.split(" built: ")[0] for line in progress] == [
+        f"Context cell {count}/6" for count in range(1, 7)]
+    assert sorted(line.split(" built: ")[1] for line in progress) == sorted(controls)
+
+
+def test_gate_parallel_contexts_wait_in_bounded_steps(monkeypatch):
+    """A bounded wait lets Ctrl+C reach the build on Windows between cells."""
+    from evals import regression_gate as gate
+
+    timeouts, real_wait = [], gate.wait
+
+    def recording_wait(futures, timeout=None, return_when=None):
+        timeouts.append(timeout)
+        return real_wait(futures, timeout=timeout, return_when=return_when)
+
+    monkeypatch.setattr(gate, "wait", recording_wait)
+    questions = [{**question(), "question_id": f"q{index}"} for index in range(3)]
+
+    @contextmanager
+    def open_bank():
+        yield Bank(True)
+
+    gate.build_contexts(questions, {q["question_id"]: "raw" for q in questions},
+                        {q["question_id"]: [] for q in questions}, open_bank, 2)
+    assert timeouts and all(timeout is not None and timeout <= 1 for timeout in timeouts)
 
 
 class HeldBank(Bank):
@@ -644,15 +678,58 @@ def test_gate_context_workers_follow_the_request_or_free_memory(monkeypatch):
     from evals import regression_gate as gate
 
     cell, reserve = gate.CELL_MEMORY_BYTES, gate.MEMORY_RESERVE_BYTES
-    assert gate.context_workers(3, available=0, cpus=1) == 3
+    assert gate.context_workers(3, available=reserve + 20 * cell, cpus=1) == 3
+    # An explicit count above what free memory allows is lowered to it.
+    assert gate.context_workers(12, available=reserve + 3 * cell, cpus=64) == 3
+    assert gate.context_workers(3, available=0, cpus=64) == 1
     assert gate.context_workers(0, available=reserve + 20 * cell, cpus=32) == gate.MAX_CONTEXT_WORKERS
     assert gate.context_workers(0, available=reserve + 3 * cell, cpus=32) == 3
     assert gate.context_workers(0, available=reserve + 20 * cell, cpus=4) == 2
     assert gate.context_workers(0, available=0, cpus=32) == 1
     monkeypatch.setattr(gate, "available_memory", lambda: None)
     assert gate.context_workers(0, cpus=32) == 1
+    assert gate.context_workers(5, cpus=1) == 5  # nothing to cap an explicit count by
     with pytest.raises(BenchError, match="context-workers"):
         gate.context_workers(-1)
+
+
+def test_a_stopped_cell_raises_the_stop_not_a_failure():
+    import threading
+    from evals import regression_gate as gate
+
+    stop = threading.Event()
+    stop.set()
+
+    @contextmanager
+    def open_bank():
+        yield Bank(True)
+
+    with pytest.raises(retained_daemon.CellStopped):
+        gate.contexts_for(question(), "raw", [], open_bank, stop)
+
+
+@pytest.mark.parametrize("stopped", [True, False], ids=["stopped by another cell", "failed"])
+def test_a_cell_stopped_by_another_saves_no_daemon_failure_log(tmp_path, monkeypatch, stopped):
+    log, saved = tmp_path / "daemon.log", tmp_path / "out" / "daemon-error"
+    log.write_text("daemon output\n", encoding="utf-8")
+    daemon = SimpleNamespace(start=lambda: None, stop=lambda: None, proc=object(), log=log)
+    monkeypatch.setattr(retained_daemon.daemons, "rust_daemon", lambda *args: daemon)
+    session = SimpleNamespace(
+        init={"status": 200, "headers": [], "body": json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}})},
+        port=9, sid="fixture-session", initialized={"status": 202}, close=lambda: None)
+    monkeypatch.setattr(retained_daemon.mcp_wire, "Session", lambda port, token: session)
+    setup = SimpleNamespace(binary=tmp_path / "daemon", onnx_dir=tmp_path, ort_library=tmp_path / "ort",
+                            failure_log=saved)
+    serving = retained_daemon.DaemonSetup._serve_on(setup, tmp_path / "home", "postgresql://f@127.0.0.1/f",
+                                                    None, 9, "fixture-token")
+    next(serving)
+    error = (retained_daemon.CellStopped("gate context build stopped") if stopped
+             else BenchError("cell failed"))
+    with pytest.raises(BenchError) as raised:
+        serving.throw(error)
+    assert isinstance(raised.value, retained_daemon.CellStopped) is stopped
+    logs = list(saved.parent.glob("daemon-error-*.log")) if saved.parent.exists() else []
+    assert len(logs) == (0 if stopped else 1)
 
 
 def test_parallel_daemons_never_share_a_reserved_port(monkeypatch):
