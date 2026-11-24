@@ -426,3 +426,45 @@ def test_ci_gates_batches_and_census_changes_never_ordinary_pull_requests(tmp_pa
     assert not required(pull("fix/some-change"))
     assert not required({"pull_request": {"base": {"sha": base}}})
     assert not required({"before": "f" * 40})
+
+
+def test_the_census_reads_no_frozen_package_file_from_the_working_tree(monkeypatch):
+    """The frozen package's contract sources come from Git at the pinned
+    commit, so deleting the package from the tree leaves the census as it is."""
+    real = Path.read_text
+
+    def refuse_package(self, *args, **kwargs):
+        if "pseudolife_memory" in Path(self).resolve().relative_to(census.ROOT.resolve()).parts:
+            raise AssertionError(f"read the working-tree package file {self}")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", refuse_package)
+    committed = json.loads(real(census.OUTPUT, encoding="utf-8"))
+    assert census.snapshot() == committed
+
+
+def test_a_checkout_without_the_pinned_commit_is_refused_with_the_fix(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    try:
+        census.contract_text(tmp_path, "pseudolife_memory/mcp_server.py")
+    except SystemExit as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("a missing pinned commit was not refused")
+    assert census.FROZEN_SOURCES_COMMIT[:12] in message
+    assert "git fetch --unshallow" in message
+    # Files outside the frozen package still come from the working tree.
+    (tmp_path / "plugin").mkdir()
+    (tmp_path / "plugin" / "a.sh").write_text("echo ok\n", encoding="utf-8")
+    assert census.contract_text(tmp_path, "plugin/a.sh") == "echo ok\n"
+
+
+def test_temporary_frozen_package_sources_match_the_pinned_commit():
+    """Migration bridge only: DELETE this test when the package is retired.
+    The pin must hold exactly what the working tree's frozen sources say."""
+    assert census.FROZEN_SOURCES == {path for path in census.CONTRACT_SOURCES
+                                     if path.startswith("pseudolife_memory/")}
+    assert len(census.FROZEN_SOURCES) == 5
+    for path in sorted(census.FROZEN_SOURCES):
+        working = (census.ROOT / path).read_text(encoding="utf-8-sig")
+        assert census.contract_text(census.ROOT, path) == working, path

@@ -33,6 +33,7 @@ TOTAL_PROBE_SECONDS = 240
 BOOTSTRAP = """
 from importlib.util import find_spec
 from pathlib import Path
+import re
 import runpy
 import sys
 
@@ -45,7 +46,9 @@ def restrict_probe(event, args):
                  "os.system", "os.exec", "os.posix_spawn", "os.fork", "os.forkpty"}:
         raise RuntimeError(f"Probe blocked {event}")
     if event == "subprocess.Popen" and (
-        target != "rust/producer_census.py" or args[0] != "git" or args[1][1] != "ls-files"
+        target != "rust/producer_census.py" or args[0] != "git"
+        or not (args[1][1] == "ls-files" or args[1][1] == "show" and len(args[1]) == 3
+                and re.fullmatch(r"[0-9a-f]{40}:pseudolife_memory/[\\w/.]+", args[1][2]))
     ):
         raise RuntimeError("Probe blocked an unexpected subprocess")
 
@@ -190,10 +193,19 @@ def run(commit: str) -> int:
         if code:
             raise RuntimeError(reason)
         # The census reads git ls-files. Give it an index of the archive files
-        # without exposing source objects, history, or the original checkout.
+        # without exposing history or the original checkout.
         subprocess.run([git, "-c", "init.templateDir=", "init", "-q"],
                        cwd=checkout, env=env, check=True)
         subprocess.run([git, "add", "-N", "-f", "--", "."], cwd=checkout, env=env, check=True)
+        # It reads the frozen package's contract sources from Git at its pinned
+        # commit, as it does in any clone once the package is deleted: fetch
+        # that one commit's objects. Nothing lands in the working tree, so no
+        # import can reach the package.
+        census = (checkout / "rust/producer_census.py").read_text(encoding="utf-8")
+        pin = re.search(r'^FROZEN_SOURCES_COMMIT = "([0-9a-f]{40})"$', census, re.M)
+        if pin:
+            subprocess.run([git, "fetch", "--quiet", "--no-tags", "--depth=1", ROOT.as_uri(), pin[1]],
+                           cwd=checkout, env=env, check=True)
 
         print(f"Package-absent probe at {sha}", flush=True)
         probes = plan(checkout)

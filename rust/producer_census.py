@@ -23,6 +23,27 @@ EXTENSIONS = {".py", ".sh", ".ps1", ".bat", ".cmd", ".md", ".js", ".json", ".exa
 CONTRACT_SOURCES = (INVENTORY, "pseudolife_memory/mcp_server.py",
                     "pseudolife_memory/web/routes.py", "pseudolife_memory/web/api.py",
                     "pseudolife_memory/coordination.py", "pseudolife_memory/utils/config.py")
+# The frozen Python package's contract sources are read from Git at this
+# commit, the last that changed any of them, so the census works in a checkout
+# without the package (it needs that commit: a clone with history, as the
+# Rust workflow's fetch-depth 0 gives). rust/test_producer_census.py pins
+# these blobs to the working tree while the package exists.
+FROZEN_SOURCES_COMMIT = "09d23dcf621e5c3e2c8429f1ed123c387d10b2ce"
+FROZEN_SOURCES = frozenset(path for path in CONTRACT_SOURCES if path.startswith("pseudolife_memory/"))
+
+
+def contract_text(root: Path, path: str) -> str:
+    """A scanned file's text: frozen package sources from Git at
+    FROZEN_SOURCES_COMMIT, everything else from the working tree."""
+    if path not in FROZEN_SOURCES:
+        return (root / path).read_text(encoding="utf-8-sig")
+    result = subprocess.run(["git", "show", f"{FROZEN_SOURCES_COMMIT}:{path}"], cwd=root,
+                            capture_output=True, text=True, encoding="utf-8-sig")
+    if result.returncode:
+        raise SystemExit(f"producer census: cannot read {path} at {FROZEN_SOURCES_COMMIT[:12]} "
+                         "(the frozen package's contract sources); fetch that commit, for "
+                         "example with full history (git fetch --unshallow)")
+    return result.stdout
 
 # Changed fingerprints withdraw trusted manual shapes and report unresolved drift.
 # Recheck the cited construction/conditions before refreshing any fingerprint.
@@ -122,7 +143,7 @@ def producer_paths(root: Path = ROOT) -> list[str]:
 
 def input_hashes(root: Path, paths: list[str]) -> dict[str, str]:
     # Git's platform checkout newline conversion must not invalidate source identity.
-    return {path: hashlib.sha256((root / path).read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest()
+    return {path: hashlib.sha256(contract_text(root, path).encode("utf-8")).hexdigest()
             for path in sorted(paths)}
 
 
@@ -696,7 +717,7 @@ def rust_coordination_calls(text: str, path: str) -> list[dict]:
 
 def config_aliases(root: Path) -> dict[str, str]:
     """Map actual YAML/dotted paths to the inventory's dataclass field identities."""
-    tree = ast.parse((root / "pseudolife_memory/utils/config.py").read_text(encoding="utf-8-sig"))
+    tree = ast.parse(contract_text(root, "pseudolife_memory/utils/config.py"))
     classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     aliases = {}
 
@@ -760,7 +781,7 @@ def config_calls(text: str, path: str, aliases: dict[str, str]) -> list[dict]:
 def parameter_contracts(root: Path) -> tuple[dict, dict]:
     """Current advertised tool signatures and route optional reads, statically."""
     tools = {}
-    tree = ast.parse((root / "pseudolife_memory/mcp_server.py").read_text(encoding="utf-8-sig"))
+    tree = ast.parse(contract_text(root, "pseudolife_memory/mcp_server.py"))
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(("memory_", "document_")):
             args = node.args.posonlyargs + node.args.args
@@ -769,7 +790,7 @@ def parameter_contracts(root: Path) -> tuple[dict, dict]:
                                 "optional": [a.arg for a in args[required_count:]] +
                                 [a.arg for a, default in zip(node.args.kwonlyargs, node.args.kw_defaults) if default is not None],
                                 "source": f"pseudolife_memory/mcp_server.py:{node.lineno}"}
-    tree = ast.parse((root / "pseudolife_memory/web/routes.py").read_text(encoding="utf-8-sig"))
+    tree = ast.parse(contract_text(root, "pseudolife_memory/web/routes.py"))
     methods = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     routes = {}
 
@@ -800,7 +821,7 @@ def parameter_contracts(root: Path) -> tuple[dict, dict]:
             optional, required = reads(node.args[1], set())
             routes[(method, node.args[0].value)] = {"optional": sorted(optional), "parameters": sorted(optional | required),
                                                   "source": f"pseudolife_memory/web/routes.py:{node.lineno}"}
-    api = ast.parse((root / "pseudolife_memory/web/api.py").read_text(encoding="utf-8-sig"))
+    api = ast.parse(contract_text(root, "pseudolife_memory/web/api.py"))
     for node in ast.walk(api):
         if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
             continue
@@ -839,7 +860,7 @@ def inventory_surface(root: Path, inventory: dict) -> list[dict]:
     for kind, key in (("environment", "environment_variables"), ("cli", "cli_modes"), ("coordination", "coordination_actions")):
         for name in inventory[key]:
             surface.append({"id": f"{kind}:{name}", "kind": kind, "name": name, "optional_parameters": None})
-    coordination = ast.parse((root / "pseudolife_memory/coordination.py").read_text(encoding="utf-8-sig"))
+    coordination = ast.parse(contract_text(root, "pseudolife_memory/coordination.py"))
     constants = {n.targets[0].id: (ast.literal_eval(n.value), n.lineno) for n in coordination.body
                  if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
                  and n.targets[0].id in {"_PARAMETERS", "_REQUIRED"}}
@@ -966,7 +987,7 @@ def snapshot(root: Path = ROOT) -> dict:
             action = call["name"].removeprefix("/api/coordination/")
             calls.append({**call, "kind": "coordination", "name": action})
     # Tool docstrings contain copyable examples, not function implementations.
-    mcp_text = (root / "pseudolife_memory/mcp_server.py").read_text(encoding="utf-8-sig")
+    mcp_text = contract_text(root, "pseudolife_memory/mcp_server.py")
     calls.extend(description_calls(mcp_text))
     calls.extend(forwarded_coordination(calls))
     manual = manual_calls(root)
