@@ -181,9 +181,16 @@ def test_remove_legacy_for_codex_names_the_installer_not_a_python_script(tmp_pat
                           cwd=tmp_path, capture_output=True, text=True, timeout=60,
                           env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)})
     assert proc.returncode == 2, proc
-    assert proc.stderr == "--remove-legacy is for Claude Code; for Codex hooks, rerun the installer with --client codex.
-"
+    assert proc.stderr == "--remove-legacy is for Claude Code; for Codex hooks, rerun the installer with --client codex.\n"
     assert ".py" not in proc.stderr
+
+
+def test_the_plugin_readme_names_no_checkout_python_script():
+    """#1609: the plugin README's Codex and update steps exist on an installed client."""
+    text = _read("plugin/README.md")
+    assert "setup-codex-hooks.py" not in text and "update_clients.py" not in text
+    assert "rerun the installer with `--client codex`" in text
+    assert "`pseudolife-mcp update --clients-only` on its" in text
 
 
 INSTALLER_SHELLS = [*_bash_variants(), "powershell"]
