@@ -88,6 +88,12 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    field fails in the suite rather than mid-CI. Nothing pins the packaged
    compose copy's tag to the version: check it by hand.
 
+   The release version's home is `[package] version` in
+   `rust/shim/Cargo.toml`; before tagging, run
+   `python rust/ci/release_version.py check --tag v<version>`, which names
+   any version field the cut missed (`pyproject.toml` is one of them while
+   the wheel is published).
+
    **While the release still publishes the Python package** (the wheel and
    the Python daemon image, whose dependencies are floors), the cut's local
    validation runs the whole suite with `--include-frozen`
@@ -229,7 +235,10 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    version command for each unpacked target binary and verify the complete
    Compose and checksum artifact. The native matrix checks the crate
    versions. Dispatch skips `guards`, the wheel build, PyPI, GHCR, the
-   registry, GitHub asset attachment and the readiness marker. After an
+   registry, GitHub asset attachment and the readiness marker. The
+   build-only dispatch does not run `guards`, so the tag check
+   (`release_version.py check --tag`) first runs on hosted CI at the real
+   release. After an
    enabled release, inspect the Rust image digest, download the six
    archives plus `SHA256SUMS`, and verify every checksum and the archive-root
    layout in [the asset contract](../../../docs/dev/release-assets.md).

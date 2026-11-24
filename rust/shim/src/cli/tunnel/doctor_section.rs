@@ -104,7 +104,7 @@ pub(in crate::cli) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
         .iter()
         .map(|name| {
             let recovery = format!(
-                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside; this client cannot set a tunnel up yet.",
+                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside and save it again with tunnel setup --daemon-url and --token-file.",
                 store::profile_file(root, name).display()
             );
             let profile = match store::load(root, name) {

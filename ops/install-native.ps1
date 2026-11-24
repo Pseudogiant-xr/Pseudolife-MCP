@@ -850,8 +850,8 @@ function Show-GenericSnippets {
   Add pseudolife-memory to your agent's MCP config. Two ready-to-paste
   shapes (pick ONE):
 
-  stdio shim (recommended - per-session identity; needs
-  `pip install pseudolife-mcp` or pipx):
+  stdio shim (recommended - per-session identity; needs the native
+  pseudolife-mcp client, on PATH or by its full path in "command"):
     { "mcpServers": { "pseudolife-memory": {
         "command": "pseudolife-mcp",
         "env": { "PSEUDOLIFE_WRITER_ID": "mcp-client",
@@ -1804,7 +1804,7 @@ if (-not $ClientOnly) {
     $defaultArgs = @()
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if ($composeEngine -eq 'rust' -and -not $engineDefaulted -and -not (Test-RustTokenExpected)) {
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun; or rerun with -Engine python. Nothing was pulled or started.")
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false; or rerun with -Engine python. Nothing was pulled or started.")
         exit 2
     }
     if ($engineDefaulted) { $defaultArgs = @('--default') }

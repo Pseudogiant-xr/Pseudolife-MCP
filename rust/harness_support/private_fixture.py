@@ -21,6 +21,32 @@ def _check_directory(root: Path, directory: Path) -> None:
         raise OSError("fixture state path is outside its home")
 
 
+def write_owner_only(path: Path, data: bytes) -> None:
+    """Atomically create or replace ``path`` as an owner-only file: mode 0600,
+    or on Windows the current user as owner with a protected owner-only
+    access list. Missing parents are created with the default mode, as the
+    client's own private-file writers leave them, so a fixture written here
+    looks like one the client wrote. Unlike ``write_private`` it neither
+    tightens nor checks the parents: use it only inside a disposable home."""
+    target = Path(os.path.abspath(path))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(dir=target.parent, prefix=".tmp-")
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            if os.name == "nt":
+                from ._windows_fixture_acl import secure_windows_file
+
+                secure_windows_file(temporary)
+            else:
+                os.fchmod(handle.fileno(), 0o600)
+            handle.write(data)
+        os.replace(temporary, target)
+    finally:
+        with suppress(OSError):
+            temporary.unlink(missing_ok=True)
+
+
 def write_private(path: Path, body: str, *, root: Path) -> None:
     """Write a UTF-8 marker in its disposable home and preserve reader retries."""
     try:

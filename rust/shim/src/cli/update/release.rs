@@ -618,9 +618,20 @@ fn packaged_compose(path: &Path) -> bool {
         || (name(Some(parent)).as_deref() == Some("compose")
             && name(grandparent).as_deref() == Some(".pseudolife-mcp"));
     // <checkout>/ops/: the installers' layout.
-    let checkout = name(Some(parent)).as_deref() == Some("ops")
-        && grandparent.is_some_and(|c| c.join("pyproject.toml").is_file());
+    let checkout =
+        name(Some(parent)).as_deref() == Some("ops") && grandparent.is_some_and(is_checkout_root);
     archive || bundled || checkout
+}
+
+/// The checkout a Compose project runs from: its project directory or that
+/// directory's parent, when it is a checkout root with an `ops/` folder.
+fn checkout_of(project_dir: &Path) -> Option<PathBuf> {
+    [
+        project_dir.to_path_buf(),
+        project_dir.parent().unwrap_or(project_dir).to_owned(),
+    ]
+    .into_iter()
+    .find(|p| is_checkout_root(p) && p.join("ops").is_dir())
 }
 
 /// The updater's own overlays (by name, in their own `update-engine`
@@ -935,12 +946,7 @@ impl Update {
         args.extend(compose_args(&files, &env_files));
         let identity_args =
             identity_overlay.map(|overlay| engine::with_rust_overlay(&args, &overlay));
-        let checkout = [
-            project_dir.clone(),
-            project_dir.parent().unwrap_or(&project_dir).to_owned(),
-        ]
-        .into_iter()
-        .find(|p| p.join("pyproject.toml").is_file() && p.join("ops").is_dir());
+        let checkout = checkout_of(&project_dir);
         Ok(Context {
             args,
             env_files,
@@ -2782,6 +2788,71 @@ fn storage_pg(no_backup: bool, resolve: impl FnOnce() -> Result<String>) -> Resu
         Ok(None)
     } else {
         resolve().map(Some)
+    }
+}
+
+#[cfg(test)]
+mod checkout_marker_tests {
+    use super::*;
+
+    #[test]
+    fn a_checkout_compose_file_is_known_by_the_native_crate() {
+        let root = std::env::temp_dir().join(format!(
+            "pl-release-checkout-marker-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let compose = root.join("ops").join("docker-compose.yml");
+        let manifest = root.join(RELEASE_MANIFEST);
+        fs::create_dir_all(compose.parent().unwrap()).unwrap();
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        fs::write(&compose, "services: {}\n").unwrap();
+        // No pyproject.toml: the checkout after the Python package is gone.
+        fs::write(
+            &manifest,
+            "[package]\nname = \"pseudolife-stdio\"\nversion = \"0.26.0\"\n",
+        )
+        .unwrap();
+        assert!(packaged_compose(&compose));
+        // The near miss: another project's crate beside a stack's ops/.
+        fs::write(
+            &manifest,
+            "[package]\nname = \"another-shim\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        assert!(!packaged_compose(&compose));
+        // A checkout from before the native release version.
+        fs::write(root.join("pyproject.toml"), "[project]\n").unwrap();
+        assert!(packaged_compose(&compose));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_context_finds_a_checkout_by_the_native_crate() {
+        let root = std::env::temp_dir().join(format!(
+            "pl-release-checkout-of-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let ops = root.join("ops");
+        let manifest = root.join(RELEASE_MANIFEST);
+        fs::create_dir_all(&ops).unwrap();
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        // No pyproject.toml: the checkout after the Python package is gone,
+        // from the checkout itself or from its ops/ (the installers' project).
+        fs::write(&manifest, "[package]\nname = \"pseudolife-stdio\"\n").unwrap();
+        assert_eq!(checkout_of(&root).as_deref(), Some(root.as_path()));
+        assert_eq!(checkout_of(&ops).as_deref(), Some(root.as_path()));
+        // Another project's crate is no checkout of this repository.
+        fs::write(&manifest, "[package]\nname = \"another-shim\"\n").unwrap();
+        assert_eq!(checkout_of(&ops), None);
+        let _ = fs::remove_dir_all(&root);
     }
 }
 

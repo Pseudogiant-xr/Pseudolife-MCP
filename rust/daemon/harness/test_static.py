@@ -52,7 +52,7 @@ def test_platform_golden_checks_mime_and_cache_without_changing_bytes(kind, cach
     c = {"path": "/ui/assets/logo.webp"}
     response = {"status": 200, "bytes": "exact", "headers": {
         "content-type": "image/webp", "cache-control": "max-age=86400", "content-length": "5"}}
-    with patch("pseudolife_memory.web.api.mimetypes.guess_type", return_value=(kind, None)):
+    with patch("mimetypes.guess_type", return_value=(kind, None)):
         run.platform_static_type(c, response)
     assert response["headers"]["content-type"] == (kind or "application/octet-stream")
     assert response["headers"]["cache-control"] == cache
@@ -71,7 +71,7 @@ def test_platform_golden_checks_mime_and_cache_without_changing_bytes(kind, cach
 def test_static_contract_adds_only_python_312_builtins_missing_from_the_oracle(platform, version, want):
     # On 3.12 the contract is the interpreter's own answer, so the 3.11
     # emulation goes dead once the oracle moves (CUTOVER D7).
-    with patch("pseudolife_memory.web.api.mimetypes.guess_type", return_value=(platform, None)):
+    with patch("mimetypes.guess_type", return_value=(platform, None)):
         assert run.static_contract_type("/ui/vendor/README.md", version=version) == (want, "no-store")
         if platform is None:  # 3.12 has no builtin WebP type either
             assert run.static_contract_type("/ui/a.webp", version=version) == \
@@ -85,7 +85,7 @@ def _markdown_row(oracle_type: str, rust_type: str) -> dict:
     def answer(kind):
         return {"status": 200, "bytes": "# notice", "headers": {
             "content-type": kind, "cache-control": "no-store", "content-length": "8"}}
-    with patch("pseudolife_memory.web.api.mimetypes.guess_type", return_value=(None, None)), \
+    with patch("mimetypes.guess_type", return_value=(None, None)), \
             patch.object(run.sys, "version_info", (3, 11, 9)):
         return run.compare_case(c, answer(oracle_type), answer(rust_type))
 

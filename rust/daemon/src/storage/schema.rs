@@ -299,15 +299,21 @@ mod tests {
     }
 
     #[test]
-    fn dim_message_matches_python() {
-        // Expected text produced by schema.py's f-string for live_dim=384.
+    fn the_dim_refusal_names_no_python_migration() {
+        // The plan's text for live_dim=384: the cause, the wrong-bank setting,
+        // and that no native step re-embeds the bank yet (#1938).
         let want = "Refusing to start: entries.embedding is vector(384) but this build's \
 schema expects vector(1024). ensure_schema is additive-only and will NOT alter vector \
-dimensions in place -- that would either half-migrate four tables at startup or write \
-1024-d vectors into a 384-d column, corrupting the bank. Run the human-gated migration \
-first: `python ops/migrate_embeddings.py` (backs up, requires the daemon stopped, \
-re-embeds every row through the real embedder, and moves all four embedding columns \
-from vector(384) to vector(1024)). Never run the daemon against a bank you have not migrated.";
-        assert_eq!(dim_mismatch_message(384), want);
+dimensions in place: that would either half-migrate four tables at startup or write \
+1024-d vectors into a 384-d column, corrupting the bank, so the bank is left untouched. \
+If this is the wrong bank, set PSEUDOLIFE_MCP_DATABASE_URL to the intended one. This \
+release has no step that re-embeds a vector(384) bank (#1938); do not run the daemon \
+against it.";
+        let message = dim_mismatch_message(384);
+        assert_eq!(message, want);
+        assert!(
+            !message.contains("python") && !message.contains(".py"),
+            "{message}"
+        );
     }
 }

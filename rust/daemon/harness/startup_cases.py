@@ -38,6 +38,7 @@ from startup_fixture import FIDELITY_CASES, LOAD_CLOCK, seed_bank
 from rust.harness_support.bank_fixture import assert_fixture_database
 
 pg = pgdisposable.Slice.from_env("pgs")
+GOLDEN = HERE / "goldens" / "startup-hydration.json"
 # Multi-band presets and retention policies other than balanced are retired
 # (R11, maintainer 2026-11-02) and refuse Rust startup (run.py's retired-layout
 # refusals), so the custom cases run one balanced band: a stored band name
@@ -371,14 +372,16 @@ def failed(result):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    # No abbreviations: a shortened flag must not select a recording mode.
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--rust-test-bin", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--only", nargs="+", choices=CASES)
     parser.add_argument("--part", type=int, choices=(1, 2), help="one CI part's cases (part_cases)")
     parser.add_argument("--mutants", action="store_true")
+    # Outside the group, so its retirement message wins over "not allowed with".
+    parser.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     golden_mode = parser.add_mutually_exclusive_group()
-    golden_mode.add_argument("--record-goldens", action="store_true", help=argparse.SUPPRESS)
     golden_mode.add_argument("--check-goldens", action="store_true")
     golden_mode.add_argument("--record-candidate", action="store_true",
                              help="re-record the golden from the Rust candidate (candidate_record.py); a dry "
@@ -418,13 +421,13 @@ def main(argv=None):
     payload = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
                "normalizers": NORMALIZERS, "cells": []}
     number = time.time_ns()
-    golden_path = HERE / "goldens" / "startup-hydration.json"
+    golden_path = GOLDEN
     goldens = json.loads(golden_path.read_text())
 
     def expected(case):
         if case not in goldens["cases"] or case not in goldens.get("database", {}):
-            raise RuntimeError(f"startup-hydration.json has no committed golden for {case}; record it with "
-                               "`python rust/daemon/harness/startup_ci.py --record-candidate --write`")
+            raise RuntimeError(f"startup-hydration.json has no committed golden for {case}; "
+                               + candidate_record.startup_recording("startup_cases.py"))
         return {"snapshot": goldens["cases"][case], "database": goldens["database"][case]}
 
     for index, case in enumerate(args.only or (part_cases(args.part) if args.part else CASES)):
@@ -475,7 +478,7 @@ def record_candidate(args, binary):
     if why:
         print(f"startup record-candidate refused: {why}", flush=True)
         return 1
-    golden_path = HERE / "goldens" / "startup-hydration.json"
+    golden_path = GOLDEN
     recording = candidate_record.Recording(golden_path, ("cases", "database"), binary, whole=not args.only,
                                            defined=list(CASES))
     recording.write = args.write

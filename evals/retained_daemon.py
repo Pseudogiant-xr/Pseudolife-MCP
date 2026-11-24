@@ -30,6 +30,10 @@ class BenchError(RuntimeError):
     """An incomplete or invalid measurement."""
 
 
+class CellStopped(BenchError):
+    """A parallel cell told to stop because another failed; its daemon did not fail."""
+
+
 def redact(text, secrets=()):
     text = str(text)
     for secret in sorted(filter(None, secrets), key=len, reverse=True):
@@ -446,6 +450,8 @@ class DaemonSetup:
                 if daemon.proc is None and (handle := getattr(daemon, "_out", None)) is not None:
                     handle.close()  # Popen can fail after launch() opens the log.
                 daemon.stop()
+        except CellStopped:
+            raise  # nothing went wrong in this daemon, so no failure log is saved
         except Exception as exc:
             try:
                 save_failure_log(daemon.log, self.failure_log, secrets)
