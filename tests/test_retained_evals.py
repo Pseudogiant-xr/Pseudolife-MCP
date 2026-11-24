@@ -428,6 +428,185 @@ def test_daemon_startup_keeps_failure_detail_and_releases_log(tmp_path, monkeypa
     assert all(secret not in str(error.value) + log for secret in (dsn, token, "private-test-password"))
 
 
+class SlotBank:
+    """A public scalar slot whose writes the test scripts: ``echo`` values are
+    confirmed onto the standing value; ``lose`` values are parked (contested,
+    the standing value returned) and never reach the history; ``replace``
+    values are answered "confirmed" with the written value although the
+    history keeps the old one."""
+
+    def __init__(self, echo=(), lose=(), replace=()):
+        self.echo, self.lose, self.replace = set(echo), set(lose), set(replace)
+        self.versions = []
+
+    def tool(self, name, **args):
+        if name == "memory_fact_set":
+            value, current = args["value"], self.versions[-1] if self.versions else None
+            if current is None:
+                self.versions.append(value)
+                return {"action": "inserted", "value": value}
+            if value == current or value in self.echo:
+                return {"action": "confirmed", "value": current}
+            if value in self.replace:
+                return {"action": "confirmed", "value": value}
+            if value in self.lose:
+                return {"action": "contested", "value": current}
+            self.versions.append(value)
+            return {"action": "superseded", "value": value}
+        if name == "memory_fact_get":
+            return {"record": {"value": self.versions[-1]}}
+        assert name == "memory_history"
+        return {"versions": [{"value": value} for value in self.versions]}
+
+
+def scalar(*values):
+    return [{"entity": "user", "attribute": "plan", "kind": "scalar", "values": list(values)}]
+
+
+def test_gate_replay_records_a_compression_echo_the_daemon_kept():
+    from evals import regression_gate as gate
+
+    bank = SlotBank(echo={"Plans to sign up"})
+    echoes = gate.replay_slots(bank, scalar("Planning to sign up", "Plans to sign up", "Signed up"), "q7")
+    assert echoes == [{"question_id": "q7", "entity": "user", "attribute": "plan",
+                       "written": "Plans to sign up", "kept": "Planning to sign up"}]
+    assert bank.versions == ["Planning to sign up", "Signed up"]
+    assert gate.replay_slots(SlotBank(), scalar("old", "old", "new"), "q8") == []
+
+
+@pytest.mark.parametrize("bank", [
+    SlotBank(lose={"new"}),
+    SlotBank(replace={"new"}),
+], ids=["a different value lost", "confirmed with a changed value"])
+def test_gate_replay_still_refuses_every_other_history_difference(bank):
+    from evals import regression_gate as gate
+
+    with pytest.raises(BenchError, match="public scalar history"):
+        gate.replay_slots(bank, scalar("old", "new"), "q1")
+
+
+def test_gate_contexts_and_candidate_list_the_echoes(tmp_path):
+    from evals import regression_gate as gate
+
+    class EchoBank(Bank):
+        def __init__(self):
+            super().__init__(True)
+            self.slots = SlotBank(echo={"new tool"})
+
+        def tool(self, name, **args):
+            if name.startswith(("memory_fact_", "memory_history")):
+                return self.slots.tool(name, **args)
+            return super().tool(name, **args)
+
+    @contextmanager
+    def open_bank():
+        yield EchoBank()
+
+    identity = {"revision": "0" * 40, "binary_sha256": "1" * 64}
+    manifest = {"engine": "rust", "question_ids": ["q1"]}
+    slots = {"q1": [{"entity": "build", "attribute": "tool", "kind": "scalar",
+                     "values": ["the new tool", "new tool"]}]}
+    echo = {"question_id": "q1", "entity": "build", "attribute": "tool", "written": "new tool",
+            "kept": "the new tool"}
+    judge = Instrument("judge", lambda prompt: "yes" if prompt.endswith("response: new") else "no")
+    answerer = Instrument("answerer", lambda _prompt: "new")
+    args = (manifest, identity, [question()], {"q1": "frozen raw"}, slots, open_bank, answerer, judge)
+    root = tmp_path / "establish"
+    assert gate.run(root, *args, repetitions=2, baseline=None, contexts_only=True) == 0
+    assert not (root / "answers-1.json").exists() and not answerer.calls
+    assert read_json(root / "contexts.json")[0]["echo_confirmed"] == [echo]
+    assert gate.run(root, *args, repetitions=2, baseline=None) == 0
+    candidate = read_json(root / "baseline-candidate.json")
+    assert candidate["echo_confirmed"] == [echo]
+    baseline = gate.baseline_for(root / "baseline-candidate.json", manifest)
+    assert gate.run(tmp_path / "same", *args, repetitions=2, baseline=baseline) == 0
+    assert read_json(tmp_path / "same" / "verdict.json")["warnings"] == []
+    assert gate.run(tmp_path / "moved", *args, repetitions=2,
+                    baseline={**baseline, "echo_confirmed": []}) == 0
+    assert read_json(tmp_path / "moved" / "verdict.json")["warnings"] == [
+        "fixture writes kept as compression echoes changed from 0 to 1",
+    ]
+    unrecorded = tmp_path / "unrecorded"
+    record(unrecorded / "contexts.json",
+           [{k: v for k, v in row.items() if k != "echo_confirmed"} for row in read_json(root / "contexts.json")])
+    with pytest.raises(BenchError, match="checkpoint is incomplete"):
+        gate.run(unrecorded, *args, repetitions=2, baseline=None)
+
+
+def test_gate_parallel_contexts_keep_question_order_and_match_serial():
+    import threading
+    import time
+    from evals import regression_gate as gate
+
+    questions = [{**question(), "question_id": f"q{index}", "question": f"Which tool {index}?"}
+                 for index in range(6)]
+    controls = {q["question_id"]: f"frozen {q['question_id']}" for q in questions}
+    slots = {q["question_id"]: [] for q in questions}
+    active, peak, opened, lock = [0], [0], [0], threading.Lock()
+
+    @contextmanager
+    def open_bank():
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+            opened[0] += 1
+            delay = 0.02 * (8 - opened[0] % 8)  # earlier cells finish later
+        time.sleep(delay)
+        try:
+            yield Bank(True)
+        finally:
+            with lock:
+                active[0] -= 1
+
+    serial = gate.build_contexts(questions, controls, slots, open_bank, 1)
+    assert peak[0] == 1
+    parallel = gate.build_contexts(questions, controls, slots, open_bank, 4)
+    assert peak[0] > 1
+    assert parallel == serial
+    assert [row["question_id"] for row in parallel] == [q["question_id"] for q in questions]
+
+
+def test_gate_parallel_contexts_stop_on_the_first_failed_cell():
+    import time
+    from evals import regression_gate as gate
+
+    questions = [{**question(), "question_id": f"q{index}"} for index in range(12)]
+    opened = []
+
+    @contextmanager
+    def open_bank():
+        opened.append(1)
+        if len(opened) == 1:
+            raise BenchError("cell failed")
+        time.sleep(0.05)  # a cell takes longer than the failure takes to reach the caller
+        yield Bank(True)
+
+    with pytest.raises(BenchError, match="cell failed"):
+        gate.build_contexts(questions, {q["question_id"]: "raw" for q in questions},
+                            {q["question_id"]: [] for q in questions}, open_bank, 2)
+    assert len(opened) < len(questions)
+
+
+def test_gate_context_workers_follow_the_request_or_free_memory():
+    from evals import regression_gate as gate
+
+    cell, reserve = gate.CELL_MEMORY_BYTES, gate.MEMORY_RESERVE_BYTES
+    assert gate.context_workers(3, available=0, cpus=1) == 3
+    assert gate.context_workers(0, available=reserve + 20 * cell, cpus=32) == gate.MAX_CONTEXT_WORKERS
+    assert gate.context_workers(0, available=reserve + 3 * cell, cpus=32) == 3
+    assert gate.context_workers(0, available=reserve + 20 * cell, cpus=4) == 2
+    assert gate.context_workers(0, available=0, cpus=32) == 1
+    with pytest.raises(BenchError, match="context-workers"):
+        gate.context_workers(-1)
+
+
+def test_parallel_daemons_never_share_a_reserved_port(monkeypatch):
+    probes = iter([41000, 41000, 41001])
+    monkeypatch.setattr(retained_daemon.daemons, "free_port", lambda: next(probes))
+    monkeypatch.setattr(retained_daemon, "_RESERVED_PORTS", set())
+    assert [retained_daemon._reserve_port(), retained_daemon._reserve_port()] == [41000, 41001]
+
+
 def test_gate_detects_row_level_replica_drift_even_when_averages_match():
     from evals import regression_gate as gate
 

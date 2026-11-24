@@ -75,6 +75,21 @@ def test_gate_replays_current_sets_and_scalar_history_over_mcp(setup):
     row = gate.contexts_for(question, "frozen raw bytes", slots, lambda: setup.bank(fixture_config()))
     assert row["contexts"]["rag_control"] == "frozen raw bytes"
     assert all(value in row["contexts"]["cortex"] for value in ("maple", "cedar", "memory cache", "cursor query"))
+    assert row["echo_confirmed"] == []
+
+
+def test_gate_records_the_daemons_compression_echo_over_mcp(setup):
+    # The pinned fixture's q59 slot: the shorter rewording is kept as an echo (#1924).
+    kept, written = "Planning to sign up for a triathlon in the fall", "Plans to sign up for a triathlon in the fall"
+    slots = [{"entity": "user", "attribute": "triathlon-goal", "kind": "scalar",
+              "values": [kept, written, "Signed up for the autumn triathlon in Sydney"]}]
+    with setup.bank(fixture_config()) as bank:
+        echoes = gate.replay_slots(bank, slots, "c7dc5443")
+        history = bank.tool("memory_history", entity="user", attribute="triathlon-goal")
+    assert echoes == [{"question_id": "c7dc5443", "entity": "user", "attribute": "triathlon-goal",
+                       "written": written, "kept": kept}]
+    assert [entry["value"] for entry in history["versions"]] == [
+        kept, "Signed up for the autumn triathlon in Sydney"]
 
 
 def test_ladder_uses_rust_dream_results_and_separate_raw_control(setup, monkeypatch):

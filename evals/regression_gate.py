@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
 import re
 import sys
@@ -21,6 +23,15 @@ from evals.retained_daemon import (
 POLICY = "rust-public-search-ku78-v1"
 MEASURED_ARMS = ("rag", "cortex", "hybrid", "cascade")
 BASELINE = Path(__file__).resolve().parent / "results/rust-quality/regression_gate.baseline.json"
+# Context cells built at once. Each cell's daemon embeds on one ORT thread, so
+# eight cells keep eight cores busy. Measured 24 November 2026 on the
+# maintainer's Windows PC: one cell's daemon (pinned fp32 Qwen3 embedding, ORT
+# 1.27.0) peaked at 1.88 GiB working set while storing a 24-turn question, so
+# 2.5 GiB per cell leaves room for its driver thread; the reserve keeps the
+# desktop responsive. Serial cells took about 40 s each (78 cells, ~45 min).
+MAX_CONTEXT_WORKERS = 8
+CELL_MEMORY_BYTES = 5 * 1024 ** 3 // 2
+MEMORY_RESERVE_BYTES = 4 * 1024 ** 3
 
 
 def instrument_digests():
@@ -54,7 +65,15 @@ def baseline_for(path, manifest):
     return baseline
 
 
-def replay_slots(bank, slots):
+def replay_slots(bank, slots, question_id):
+    """Write the fixture's public inputs and return the writes the daemon kept as echoes.
+
+    A write the daemon answers with action "confirmed" while returning the slot's
+    previous value unchanged is its compression-echo rule keeping the standing
+    value (issue #1924). That write is recorded, not counted as a version; any
+    other difference from the fixture's history is still an incomplete cell.
+    """
+    echoes = []
     for slot in slots:
         key = {"entity": slot["entity"], "attribute": slot["attribute"]}
         if slot["kind"] == "set":
@@ -64,15 +83,22 @@ def replay_slots(bank, slots):
             if set(slot["values"]) != {item["value"] for item in current.get("members", [])}:
                 raise BenchError("the Rust bank did not admit every fixture set member")
             continue
+        expected = []
         for value in slot["values"]:
-            bank.tool("memory_fact_set", **key, value=value)
+            result = bank.tool("memory_fact_set", **key, value=value)
+            if (expected and value != expected[-1] and result.get("action") == "confirmed"
+                    and result.get("value") == expected[-1]):
+                echoes.append({"question_id": question_id, **key, "written": value,
+                               "kept": expected[-1]})
+                continue
+            if not expected or value != expected[-1]:
+                expected.append(value)
         current = bank.tool("memory_fact_get", **key, verbose=True).get("record") or {}
         history = bank.tool("memory_history", **key)
-        expected = [val for index, val in enumerate(slot["values"])
-                    if index == 0 or val != slot["values"][index - 1]]
         if (current.get("value") != expected[-1]
                 or [entry["value"] for entry in history.get("versions", [])] != expected):
             raise BenchError("the Rust bank did not reproduce the fixture's public scalar history")
+    return echoes
 
 
 def contexts_for(question, frozen_context, slots, open_bank):
@@ -80,15 +106,75 @@ def contexts_for(question, frozen_context, slots, open_bank):
         for session in lme.chronological_turns(question):
             for turn in session:
                 bank.store(turn)
-        replay_slots(bank, slots)
+        echoes = replay_slots(bank, slots, question["question_id"])
         hits = bank.search(question["question"], lme.ENTRY_WIDTH)
         raw = lme.raw_texts(hits)
         facts = lme.fact_lines(bank, hits)
     row = {key: question[key] for key in (*rebuild_contexts.QUESTION_FIELDS, "question_type")}
     row["quarantined"] = 0  # the gate replays projected slots without running extraction
+    row["echo_confirmed"] = echoes
     row["contexts"] = {"rag": "\n\n".join(raw), "cortex": "\n".join(facts),
                        "hybrid": context_format.hybrid_context(facts, raw), "rag_control": frozen_context}
     return row
+
+
+def available_memory():
+    """Bytes of physical memory available now, or None where it cannot be read."""
+    if os.name == "nt":
+        import ctypes
+
+        class Status(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                        ("total_phys", ctypes.c_ulonglong), ("avail_phys", ctypes.c_ulonglong),
+                        ("total_page", ctypes.c_ulonglong), ("avail_page", ctypes.c_ulonglong),
+                        ("total_virtual", ctypes.c_ulonglong), ("avail_virtual", ctypes.c_ulonglong),
+                        ("avail_extended", ctypes.c_ulonglong)]
+
+        status = Status(length=ctypes.sizeof(Status))
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+        return status.avail_phys
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def context_workers(requested, available=None, cpus=None):
+    """How many context cells run at once: the request, else what memory and cores allow."""
+    if requested < 0:
+        raise BenchError("--context-workers must be 0 (size to this machine) or a positive count")
+    if requested:
+        return requested
+    cpus = cpus if cpus is not None else os.cpu_count() or 1
+    available = available if available is not None else available_memory()
+    by_memory = MAX_CONTEXT_WORKERS if available is None else (
+        (available - MEMORY_RESERVE_BYTES) // CELL_MEMORY_BYTES)
+    return max(1, min(MAX_CONTEXT_WORKERS, cpus // 2, by_memory))
+
+
+def build_contexts(questions, controls, slots, open_bank, workers):
+    """Build every cell, each in its own bank and daemon, returned in question order.
+
+    Cells share nothing: a fresh test database and daemon each, one ORT thread per
+    daemon. Running several at once changes only the wall time, never a context.
+    """
+    if workers == 1:
+        return [contexts_for(q, controls[q["question_id"]], slots[q["question_id"]], open_bank)
+                for q in questions]
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gate-cell")
+    try:
+        futures = [pool.submit(contexts_for, q, controls[q["question_id"]], slots[q["question_id"]],
+                               open_bank) for q in questions]
+        rows = [future.result() for future in futures]
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return rows
 
 
 def aggregate(runs):
@@ -108,7 +194,7 @@ def score_control(rows):
 
 
 def run(root, manifest, setup_id, questions, controls, slots, open_bank, answerer, judge,
-        *, repetitions, baseline):
+        *, repetitions, baseline, workers=1, contexts_only=False):
     if baseline is not None and baseline["manifest"] != manifest:
         raise BenchError("the Rust baseline inputs changed")
     record(root / "inputs.json", {"manifest": manifest, "daemon": setup_id, "replicates": repetitions})
@@ -116,13 +202,19 @@ def run(root, manifest, setup_id, questions, controls, slots, open_bank, answere
     if context_file.exists():
         contexts = read_json(context_file)
     else:
-        contexts = [contexts_for(q, controls[q["question_id"]], slots[q["question_id"]], open_bank)
-                    for q in questions]
+        print(f"Building {len(questions)} gate contexts, {workers} at a time", flush=True)
+        contexts = build_contexts(questions, controls, slots, open_bank, workers)
         record(context_file, contexts)
     if ([row.get("question_id") for row in contexts] != manifest["question_ids"]
             or any(row["contexts"].get("rag_control") != controls[row["question_id"]]
-                   or set(row["contexts"]) != set(lme.ARMS) for row in contexts)):
+                   or set(row["contexts"]) != set(lme.ARMS)
+                   or not isinstance(row.get("echo_confirmed"), list) for row in contexts)):
         raise BenchError("gate context checkpoint is incomplete or uses a different raw control")
+    echoes = [echo for row in contexts for echo in row["echo_confirmed"]]
+    if contexts_only:
+        print(f"Rust gate contexts recorded at {context_file}; {len(echoes)} fixture writes "
+              "were kept by the daemon as compression echoes.", flush=True)
+        return 0
     contexts_sha = fingerprint(contexts)
     answers = []
     answerer.verify()
@@ -147,12 +239,14 @@ def run(root, manifest, setup_id, questions, controls, slots, open_bank, answere
     measured = {"manifest": manifest, "revision": setup_id["revision"], "arms": arms,
                 "replicates": repetitions, "binary_sha256": setup_id["binary_sha256"],
                 "quarantined": sum(row.get("quarantined", 0) for row in contexts),
+                "echo_confirmed": echoes,
                 "control_score_sha256": score_control(answers[0])}
     if baseline is None:
         candidate = root / "baseline-candidate.json"
         record(candidate, measured)
         print(f"Rust baseline candidate recorded at {candidate}. The maintainer reviews it and "
-              "commits it as evals/results/rust-quality/regression_gate.baseline.json.")
+              "commits it as evals/results/rust-quality/regression_gate.baseline.json. "
+              f"It lists {len(echoes)} fixture writes the daemon kept as compression echoes.")
         return 0
     if measured["control_score_sha256"] != baseline["control_score_sha256"]:
         raise BenchError("answerer or judge drifted on the pinned raw control")
@@ -161,6 +255,9 @@ def run(root, manifest, setup_id, questions, controls, slots, open_bank, answere
     if measured["quarantined"] != baseline.get("quarantined", 0):
         warnings.append(f"quarantined entries changed from {baseline.get('quarantined', 0)} "
                         f"to {measured['quarantined']}")
+    if echoes != baseline.get("echo_confirmed", []):
+        warnings.append(f"fixture writes kept as compression echoes changed from "
+                        f"{len(baseline.get('echo_confirmed', []))} to {len(echoes)}")
     record(root / "verdict.json", {"measured": measured, "baseline_sha256": fingerprint(baseline),
                                    "regressions": failures, "warnings": warnings})
     for warning in warnings:
@@ -180,6 +277,10 @@ def build_parser():
     parser.add_argument("--replicates", type=int, default=2)
     parser.add_argument("--establish", action="store_true")
     parser.add_argument("--preflight", action="store_true")
+    parser.add_argument("--contexts-only", action="store_true",
+                        help="build and record the contexts, then stop before any model call")
+    parser.add_argument("--context-workers", type=int, default=0,
+                        help="context cells built at once; 0 sizes the pool to free memory and cores")
     add_daemon_arguments(parser)
     add_endpoint_arguments(parser, "answerer")
     add_endpoint_arguments(parser, "judge")
@@ -215,8 +316,10 @@ def main(argv=None):
         if args.preflight:
             setup.preflight_database()
             return 0
+        workers = context_workers(args.context_workers)
         return run(args.out, manifest, setup_id, questions, controls, slots, lambda: setup.bank(config),
-                   answerer, judge, repetitions=args.replicates, baseline=baseline)
+                   answerer, judge, repetitions=args.replicates, baseline=baseline,
+                   workers=workers, contexts_only=args.contexts_only)
     except (Exception, SystemExit) as exc:
         return report_incomplete("Rust regression gate", exc)
 
