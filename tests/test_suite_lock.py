@@ -1247,13 +1247,15 @@ def _package_in_checkout() -> bool:
 
 
 def _package_imported_from_checkout() -> bool:
-    """Whether conftest imported the frozen package from this checkout: it
-    does only when the package is importable (blocked or deleted, it is
-    not), and an interpreter that finds a copy elsewhere is not the
-    checkout's code."""
+    """Whether conftest imported the frozen package from this checkout's own
+    source: it does only when the package is importable (blocked or deleted,
+    it is not), and a copy the interpreter finds elsewhere is not the
+    checkout's code, an install in a .venv inside the checkout included
+    (imported_sources leaves interpreter prefixes out)."""
     package = importlib.util.find_spec("pseudolife_memory")
     return (package is not None and package.origin is not None
-            and Path(package.origin).resolve().is_relative_to(ROOT.resolve()))
+            and Path(package.origin).resolve()
+            == (ROOT / "pseudolife_memory" / "__init__.py").resolve())
 
 
 def _copy_of_the_checkout(dest: Path) -> Path:
@@ -1423,8 +1425,8 @@ def test_the_scan_finds_the_modules_conftest_imports_at_load():
     # Only that the scanner reaches them in a real session: the lock itself,
     # a test helper, and the package-free database guard conftest imports at
     # load, plus the frozen package's config while conftest imported the
-    # package. That they are fingerprinted before a queued run waits is the
-    # end-to-end test's job.
+    # package from this checkout. That they are fingerprinted before a
+    # queued run waits is the end-to-end test's job.
     sources = {path.relative_to(ROOT).as_posix()
                for path in suite_lock.imported_sources(ROOT)}
     expected = {"tests/conftest.py", "tests/suite_lock.py", "tests/fake_embedder.py",
