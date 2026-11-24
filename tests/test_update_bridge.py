@@ -613,6 +613,15 @@ def test_a_process_argv_is_read_in_place_word_for_word():
     assert argv[-len(words) - 1:] == [root, *words], argv
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the /proc reader")
+def test_any_failure_inside_the_reader_is_an_argv_that_cannot_be_read(monkeypatch):
+    def broken(self):
+        raise IndexError("a reader bug")
+
+    monkeypatch.setattr(update_bridge.Path, "read_bytes", broken)
+    assert update_bridge.process_argv(os.getpid()) is None
+
+
 def test_an_argv_that_cannot_be_read_counts_as_unattended():
     assert update_bridge.ran_unattended("4242", update_cli.build_parser, lambda pid: None) is True
     assert update_bridge.ran_unattended("4242", update_cli.build_parser, lambda pid: ATTENDED) is False
