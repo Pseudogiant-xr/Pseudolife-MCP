@@ -107,8 +107,9 @@ def lock_version(text: str, package: str) -> str | None:
 
 
 def from_manifest(text: str) -> str:
-    """The release version in the text of the authority manifest."""
-    value = table_string(text, "package", "version")
+    """The release version in the text of the authority manifest (a leading
+    byte-order mark, as `git show` text keeps it, is ignored)."""
+    value = table_string(text.removeprefix("﻿"), "package", "version")
     if not value:
         raise VersionError(f"{AUTHORITY} names no [package] version; restore the literal "
                            '`version = "<x.y.z>"` line in its [package] table')

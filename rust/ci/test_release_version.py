@@ -166,6 +166,8 @@ def test_a_byte_order_mark_does_not_hide_the_version(tmp_path):
     (tmp_path / "rust" / "shim").mkdir(parents=True)
     (tmp_path / rv.AUTHORITY).write_bytes(b'\xef\xbb\xbf[package]\r\nversion = "1.2.3"\r\n')
     assert rv.read(tmp_path) == "1.2.3"
+    # Text decoded as plain UTF-8 (a `git show` read) keeps the mark.
+    assert rv.from_manifest('﻿[package]\nversion = "1.2.3"\n') == "1.2.3"
 
 
 def test_lock_version_reads_the_named_package_entry():
