@@ -1413,6 +1413,30 @@ def test_the_upgrade_keeps_its_python_fixtures_and_native_opt_in_under_the_defau
     assert reruns == ["bash ops/install.sh <rerun>", "bash ops/install.sh <second rerun>"] * 2
 
 
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_stock_update_hand_off_stays_an_explicit_native_opt_in(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    monkeypatch.setattr(hosted, "ENGINE", "default", raising=False)
+    previous = {"version": "0.24.0", "authenticated": True, "id": "old", "image": "old",
+                "volumes": ["state"], "state_volumes": ["state"], "database_volumes": ["bank"],
+                "config": "unchanged", "runtime": {}}
+    snapshots = iter((previous, previous))
+    monkeypatch.setattr(linux, "daemon_snapshot", lambda *_: next(snapshots))
+    envs = []
+
+    def update(arguments, **options):
+        envs.append(options["env"])
+        return hosted.Result(1, b"{}", 0)
+
+    monkeypatch.setattr(linux, "command", update)
+    peer = SimpleNamespace(owner_executable="fixture", owner_env={ENGINE: ""}, during=lambda _, run: run())
+    row = hosted.Receipt("upgrade-and-rollback", "linux-arm64")
+    with pytest.raises(hosted.Failed):
+        linux.stock_upgrade(row, SimpleNamespace(version="0.25.0"), tmp_path, None, peer, tmp_path)
+    assert [env.get(ENGINE) for env in envs] == ["native"]
+
+
 def test_the_installer_label_names_the_engine(monkeypatch):
     assert hosted.installer("default") == "bash ops/install.sh"
     assert hosted.installer("native") == "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh"
