@@ -105,7 +105,9 @@ that artifact with `--control` and run dream against a fresh bank.
 
 `regression_gate.ps1` expects a local neutral fixture from `rebuild_contexts.py`
 and a measured Rust baseline. `-Establish` writes a candidate into the specified
-run directory. The historical `results/regression_gate.baseline.json` was
+run directory, and the maintainer commits a reviewed candidate as
+`results/rust-quality/regression_gate.baseline.json`. The first one was
+established on 25 November 2026 on the reproducible Qwen server. The historical `results/regression_gate.baseline.json` was
 measured on the Python engine and remains frozen. The gate builds and records
 every context before it starts the model server, so the GPU is held only for
 answering and judging. It builds several cells at once (`-ContextWorkers`; the
