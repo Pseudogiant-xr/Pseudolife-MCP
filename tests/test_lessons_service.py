@@ -259,9 +259,9 @@ def test_list_shaped_about_gets_no_graph_node(svc):
         assert svc._storage.find_entity(norm_name(compound)) is None, compound
     # A real single referent is still linked.
     svc.lesson_write("adding a new eval checker", "tool-choice",
-                     "use the leak checker", about="evals/leak_check.py",
+                     "use the leak checker", about="tools/leak_check.py",
                      outcome="success", polarity="+")
-    assert svc._storage.find_entity(norm_name("evals/leak_check.py")) is not None
+    assert svc._storage.find_entity(norm_name("tools/leak_check.py")) is not None
 
 
 def test_mcp_lesson_limit_follows_live_config_and_preserves_explicit_width(svc, monkeypatch):

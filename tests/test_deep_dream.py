@@ -648,9 +648,9 @@ def test_partition_candidates_variant_conflict_stays_link():
     assert merges == [] and len(links) == 1
     # control: same-variant containment still partitions as a merge
     pairs2 = [{"src_id": 1, "dst_id": 2, "src": "update.ps1",
-               "dst": "ops/update.ps1", "similarity": 0.99}]
+               "dst": "bin/update.ps1", "similarity": 0.99}]
     ents2 = [{"id": 1, "display": "update.ps1"},
-             {"id": 2, "display": "ops/update.ps1"}]
+             {"id": 2, "display": "bin/update.ps1"}]
     merges2, links2 = partition_candidates(pairs2, ents2, [])
     assert len(merges2) == 1 and links2 == []
 
