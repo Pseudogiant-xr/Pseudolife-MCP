@@ -17,8 +17,8 @@ downloads the pinned models (about 2.4 GB, once, into their own
 any container starts, and records the selection once the daemon reports ready at that
 release. With no `--engine`, the install takes the Python daemon instead,
 saying why, when it has no bearer token (`--no-token`, `--transport http`
-with no token set, or a host that cannot install the shim and so mints
-none), when the release publishes no Rust image or its models cannot be
+with no token set, or a Python-client install on a host that cannot
+install the shim and so mints none), when the release publishes no Rust image or its models cannot be
 downloaded, or when the bank already exists
 (the next attended `pseudolife-mcp update` moves that bank, after its own
 checks). `ops/install.sh --engine python` (Windows: `ops/install.ps1
@@ -147,9 +147,12 @@ while the daemon starts. A rejected token (HTTP 401 or 403) stops the check
 immediately. If the check fails, the installer completes the rest of the
 setup and skips Codex registration.
 
-If the native installer records a connection setup failure for a requested
-client, it completes the remaining setup and exits with status 5. Its final
-summary names the incomplete clients and how to retry. Clients selected by
+If the native installer records a setup failure for a requested client (its
+connection, its Claude Code plugin or hooks, an unreadable Claude Code plugin
+registry, or native shim autostart for an extractor chosen by flag or at the
+prompt), it completes the remaining setup and exits with status 5. Its final
+summary names each failure and how to retry. Hooks awaiting approval and
+platforms without native shim autostart produce warnings. Clients selected by
 flag or at the prompt count as requested, including the default accepted
 with Enter. A rerun treats a restored list as requested only when the saved
 request matches the list. A detected-client failure produces a warning and
@@ -159,6 +162,10 @@ On reruns, the native installer can check a client without changing its
 registration. It uses read-only helpers to inspect the Pseudolife entry in
 Gemini's configuration, verify the existing bearer token with the daemon,
 and identify connection plans that need only credential verification.
+An identical client-only rerun with `--token-file` leaves Codex's
+registration on Codex's own copy of that token while the copy holds the
+same token, and says there is nothing to write; a rotated token in the file
+moves the registration to the file.
 For a current registration on a client-only rerun, credential verification
 can wait up to three minutes if the daemon is unreachable. If a grouped
 client-only check fails, the installer checks the clients separately and
@@ -190,7 +197,7 @@ message, then rerun the original installer:
 | A foreign container, even stopped, or a selected volume attached to another stack | Maintain it with that stack's own compose file. For clients only, use `ops/install.sh --client-only --daemon-url <url>` (Windows: `ops/install.ps1 -ClientOnly -DaemonUrl <url>`). |
 | An existing volume not recorded by this install | Restore the original `ops/.env`, including `POSTGRES_PASSWORD`, `PSEUDOLIFE_BANK_VOLUME` and `PSEUDOLIFE_STATE_VOLUME`; do not delete the volume. For pre-rename volumes, use the exact names printed by preflight. |
 | Postgres rejects `POSTGRES_PASSWORD` | Restore that setting from the original `ops/.env`. If a stopped container records a different initialization password, start the original stack with its own compose file so preflight can verify the current password. |
-| Port 8765 or 5433 belongs to another service | Stop or reconfigure that service, then rerun. The installer's own bound ports are valid on reruns. |
+| Port 8765 or 5433 belongs to another service | Stop or reconfigure that service, then rerun. The installer's own bound ports are valid on reruns. If the refusal says no service answers on the port, a service that stopped a moment ago most likely held it: rerun in about a minute. |
 | A different install directory or missing recorded origin | Rerun from the original checkout with its original `ops/.env`; restore that checkout or env file if missing. A stack using multiple env files is maintained with `pseudolife-mcp update`. |
 | The configuration no longer retains daemon authentication | Restore the original `ops/.env` instead of generating replacement credentials. |
 

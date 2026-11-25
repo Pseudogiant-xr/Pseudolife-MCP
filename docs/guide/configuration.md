@@ -452,11 +452,13 @@ comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
 `principal_not_allowed` or `coordination_requires_postgres`).
 
 To keep an open-loopback install with the board dormant, pass `--no-token`
-(`-NoToken`). `--transport http` mints no token either, nor does a host that
+(`-NoToken`). `--transport http` mints no token either, nor does a
+Python-client install (`PSEUDOLIFE_SHIM_ENGINE=python`, or the installer's
+fallback where the native client cannot serve the machine) on a host that
 cannot install the shim (no Python >= 3.10 that can make a virtualenv, and no
-pipx), since its registrations fall back to HTTP; the native installer
-(`PSEUDOLIFE_SHIM_ENGINE=native`) needs no Python to mint one. None of
-these removes a token that is already configured.
+pipx), since its registrations fall back to HTTP. The native client, the
+installers' default, needs no Python to mint one. None of these removes a
+token that is already configured.
 
 ### Coordination diagnostic quickstart
 
@@ -1560,7 +1562,10 @@ codex-runtime-defaults --approve-memory-message`) applies it and reports its
 own `mailbox_approval`. If that install does not register the server, a later
 installer run that finds it registered approves it only with hook consent
 again (interactively, or `--codex-hook-trust yes`): an unattended run's
-default does not consent. When the approval is not set, the end-of-setup
+default does not consent. A host first set up by an older installer can
+lack the approval for the same reason, also after `pseudolife-mcp update`
+moves it to the native client, since an update never grants it: the next
+installer run with hook consent sets it. When the approval is not set, the end-of-setup
 notice says how to choose it. The reason is the doorbell: a board ring wakes a
 thread only when it has mail it needs, and a woken thread that must ask before
 calling `memory_message` stalls on that prompt. A recipient running with
@@ -3635,7 +3640,7 @@ The installers put the shim into its own **runtime** and register one
 | runtimes | `%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN\` | `$XDG_DATA_HOME/pseudolife-mcp/runtimes/NNNNNN/` (`~/.local/share/...`) |
 | launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` (its directory goes on the user `PATH`) | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp`, linked from `~/.local/bin/pseudolife-mcp` |
 
-A runtime is a plain virtualenv holding the package (`pip install
+A Python client's runtime is a plain virtualenv holding the package (`pip install
 --no-deps`) and the shim's own dependencies — not torch, chromadb or the
 embedder, which a stdio shim never loads (`serve` and `embedded` need a
 full install). `runtime.json` inside it (version, source, commit) is

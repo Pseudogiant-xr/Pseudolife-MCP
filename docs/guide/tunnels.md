@@ -89,7 +89,11 @@ Use the same commands when the updated client pins a different vendor version.
 If a service or scheduled task started that supervisor, restart the existing
 registration through its manager.
 
-A Python-supervised tunnel keeps serving after the client switch.
+A Python-supervised tunnel keeps serving after the client switch. A
+person's `pseudolife-mcp update` makes that switch by default unless a
+tunnel is registered to start by itself; to keep the Python client's
+background launch, run the update with `PSEUDOLIFE_SHIM_ENGINE=python`, or
+rerun the installer with it to record that choice.
 For a planned switch, stop it with the Python client before changing clients.
 After switching, run `pseudolife-mcp tunnel stop --profile <name>`. It prints
 a copyable stop command when it can read the saved profile and locate the
@@ -128,8 +132,9 @@ credentials (such as a key-based SSH logon), is reported as `not_verified`.
 `pseudolife-mcp doctor` lists saved tunnels and names only steps this client
 runs. The native client does not register or start a tunnel service. A
 machine whose tunnel the Python client registered to start by itself stays on
-the Python client: an update keeps it unless you opt in with
-`PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
+the Python client: an update keeps it, and
+`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` prints
+how to remove the autostart, changing nothing until it is gone. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how
 to go back). A machine whose tunnel is set to start by itself stays on the

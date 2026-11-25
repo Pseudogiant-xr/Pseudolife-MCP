@@ -738,7 +738,7 @@ no terminal and no `--yes` refuses, having changed nothing.
 installed Docker bank (its daemon and Postgres containers exist), with no
 lost writes. Run it on the bank's current host.
 
-**With the native client** (opt-in, see [The native
+**With the native client** (the installers' default, see [The native
 client](configuration.md#the-native-client)), `pseudolife-mcp move --to
 <ssh-target> --target-url <url> --no-keep-tokens` moves the bank, asking
 first (or `--yes`).
@@ -747,8 +747,8 @@ plan. Use `--help` to see the move and recovery commands. Write option values
 as separate arguments, such as `--to <ssh-target>`, and use full option names.
 The native client reports usage errors before inspecting the host or move
 records. The target needs:
-- the native client installed: an update with `PSEUDOLIFE_SHIM_ENGINE=native`
-  set moves a host to it (`update --clients-only` for one that already has
+- the native client installed: a person's `pseudolife-mcp update` moves a
+  Python-client host to it (`update --clients-only` for one that already has
   its daemon), or `pseudolife-mcp runtime install --archive`. A target whose
   native client is older, or speaks another move protocol, is refused with
   the fix;

@@ -138,9 +138,10 @@ Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 ## Claude Desktop
 
 `--client claude-desktop` writes the stdio-shim entry into
-`claude_desktop_config.json` — Desktop has no `mcp add`. The merge lives in
-`ops/register_claude_desktop.py` (standard library only), which both
-installers call and which you can run by hand with
+`claude_desktop_config.json` — Desktop has no `mcp add`. The native client does the merge
+as `pseudolife-mcp installer claude-desktop`, which the installers run by
+default; with the Python client they call `ops/register_claude_desktop.py`
+(standard library only) instead. Either runs by hand with
 `--command <absolute shim path>` (`--dry-run` prints the resolved path and
 entry). What Desktop does differently, and what the entry carries because
 of it:
@@ -236,7 +237,9 @@ choice approves just PseudoLife's exact current hook definitions and permits
 the standing memory block as a fallback if verification fails. It does not
 approve unrelated hooks or turn off Codex's trust checks.
 
-For an existing installation with the daemon running, use the same helper:
+For an existing installation with the daemon running, rerun the installer
+with `--client codex` (`-Client codex`), which runs the same setup step. From
+a checkout with Python 3.10 or newer, the helper also runs on its own:
 
 ```bash
 python ops/setup-codex-hooks.py
@@ -263,8 +266,13 @@ update (`pseudolife-mcp update` from a checkout, `ops/update.ps1 -All`,
 checks it, moves `current` and removes the bundle it replaced, all without
 asking, because nothing Codex approved changed. A manual copy set up before
 2026-09-30 names a bundle directly in its commands; the update says so, and
-running `python ops/setup-codex-hooks.py` once more is the last approval it
-needs. Bundles from before the launcher stay, since a Codex session started
+one more installer run that approves the Codex hooks (or `python
+ops/setup-codex-hooks.py`) is the last approval it needs. When the
+`current` pointer is broken, the launcher says to rerun the installer and
+approve the Codex hooks. A client older than 0.26.0 does not know this
+release's launcher bytes, so its `doctor` and installer verification report
+the launchers as missing or modified: update that client, or rerun its own
+installer and approve the Codex hooks. Bundles from before the launcher stay, since a Codex session started
 earlier may still run them. Codex bounds SessionEnd and Interrupt timeouts
 to 1..3 seconds before hashing their definitions
 ([verified source](https://github.com/openai/codex/blob/b741e480e203f037ca726bc2a76d99a8e8668e66/codex-rs/hooks/src/engine/discovery.rs#L742-L796)).
@@ -386,9 +394,10 @@ tool, so this also covers sending board mail
 ([details](configuration.md#codex-cli-and-desktop)).
 
 ```bash
-# Full unattended setup with automatic memory approved:
+# Full unattended setup with automatic memory approved (on an existing
+# installation, rerun the installer as you installed it with these flags):
 ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes
-# Existing installation, same scoped approval:
+# Existing installation, from a checkout with Python, same scoped approval:
 python ops/setup-codex-hooks.py --trust yes --non-interactive
 # Standing instructions only:
 python ops/setup-codex-hooks.py --source skip --instructions append --non-interactive
@@ -666,7 +675,9 @@ the policy: the installer offers to append the block to `~/.gemini/GEMINI.md`
 ## Other MCP agents (Cursor, Windsurf, Zed, Copilot CLI, …)
 
 `--client generic` prints two paste-ready `mcpServers` shapes — stdio shim
-(per-session identity, needs `pip install pseudolife-mcp`) and plain HTTP —
+(per-session identity; needs the `pseudolife-mcp` client on `PATH` or by its
+full path in `"command"`: the native client the installers set up, or the
+Python client from `pip install pseudolife-mcp`) and plain HTTP —
 plus the usual config homes per tool. These agents get the tools and the
 server `instructions` field; there is no hook layer to wire, so pair the
 config with a standing `AGENTS.md` block (the installer offers a
