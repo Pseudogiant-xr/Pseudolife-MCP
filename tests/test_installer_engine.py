@@ -518,6 +518,46 @@ def test_stage_5b_tells_an_accepted_rust_host_the_switch_needs_the_token(tmp_pat
     assert (_switch_rerun(script) in output) == (flag == "python"), output
 
 
+def test_a_token_only_change_recreates_the_daemon_before_the_switch(tmp_path, monkeypatch):
+    # #1968 case 2's route: once the bearer is restored (set by hand or
+    # minted), the rerun's stage 7 must recreate the Rust daemon with it
+    # before the switch's update reads the daemon with that bearer
+    # (rust/cli_harness/test_update_transactions.py
+    # test_release_switch_off_rust_needs_the_bearer refuses a mismatch). The
+    # plan sees the token through the resolved Compose config's hash.
+    spec = importlib.util.spec_from_file_location("installer_state_token_plan", ROOT / "ops/installer_state.py")
+    state = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(state)
+    env = tmp_path / ".env"
+    env.write_text("# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\n"
+                   "PSEUDOLIFE_INSTALL_EXTRACTOR=sidecar\n# <<< pseudolife-mcp install <<<\n", encoding="utf-8")
+    override = tmp_path / "absent.yml"
+    daemon = {"container_name": "pseudolife-mcp-daemon", "environment": {"PSEUDOLIFE_MCP_TOKEN": "old-bearer"}}
+    config = {"services": {"daemon": daemon}}
+    inventory = [{"Id": "fixture-id", "Name": "/pseudolife-mcp-daemon", "Image": "fixture-image",
+                  "State": {"Running": True}, "Config": {"Labels": {"com.docker.compose.project": "pseudolife-mcp",
+                  "com.docker.compose.service": "daemon", "com.docker.compose.config-hash": "fixture-config-hash"}}}]
+
+    def run(argv):
+        if argv[0] == "git":
+            return "fixture-head" if "rev-parse" in argv else ""
+        if argv[1] == "compose":
+            return "daemon fixture-config-hash\n" if "--hash" in argv else json.dumps(config)
+        if argv[1] == "ps":
+            return "fixture-id"
+        if argv[1] == "inspect":
+            return json.dumps(inventory)
+        pytest.fail("Unexpected Docker mutation")
+
+    monkeypatch.setattr(state, "run", run)
+    monkeypatch.delenv("COMPOSE_PROFILES", raising=False)
+    recorded = state.started(tmp_path, env, override, expected=state.plan(tmp_path, env, override, snapshot=True))
+    state.record(tmp_path, env, override, expected=recorded)
+    assert state.plan(tmp_path, env, override) == "unchanged"
+    daemon["environment"]["PSEUDOLIFE_MCP_TOKEN"] = "new-bearer"
+    assert state.plan(tmp_path, env, override) == "start"
+
+
 def test_foreign_states_prepares_refusal_and_touches_nothing(helper, capsys):
     # #1968: stage 4b asks this before its bearer refusal, so it must be
     # prepare's own refusal, read with no pull, run or write.
