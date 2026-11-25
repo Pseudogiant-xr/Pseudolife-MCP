@@ -1723,3 +1723,36 @@ fn an_installer_rerun_replaces_an_earlier_releases_launchers() {
         "the approved commands stay byte for byte"
     );
 }
+
+/// A rerun of a Docker install passes `--non-interactive` to this step
+/// (`ops/install-native.sh` and `.ps1` set it for every rerun of a Docker
+/// install, and for any unattended or non-terminal run), so the
+/// recovery for hooks that await approval must name the flag that approves
+/// them, as the "not installed" recovery does, never an interactive rerun.
+#[tokio::test]
+async fn hooks_awaiting_approval_name_the_trust_flag() {
+    for trust in ["no", "ask"] {
+        let world = World::new();
+        let plugin = world.plugin();
+        world.codex().hooks = plugin;
+        let report = world.run("plugin", trust, "auto").await;
+        assert_eq!(report.status, "pending", "{trust}: {:?}", report.recovery);
+        let recovery = report
+            .recovery
+            .expect("a pending report names its recovery");
+        assert!(
+            recovery.starts_with("PseudoLife hooks await approval."),
+            "{trust}: the installers match this prefix: {recovery}"
+        );
+        assert!(
+            recovery.contains("--codex-hook-trust yes") && recovery.contains("-CodexHookTrust yes"),
+            "{trust}: {recovery}"
+        );
+        assert!(!recovery.contains("interactively"), "{trust}: {recovery}");
+        // The flag also approves the memory_message tool; /hooks approves hooks only.
+        assert!(
+            recovery.contains("memory_message") && recovery.contains("/hooks"),
+            "{trust}: {recovery}"
+        );
+    }
+}
