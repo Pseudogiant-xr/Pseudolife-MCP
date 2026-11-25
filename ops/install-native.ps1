@@ -1809,6 +1809,18 @@ if (-not $ClientOnly) {
 # <<< volumes <<<
 
 # -- 4b. daemon engine -----------------------------------------------------------
+# >>> bearer refusal ways >>>
+# How the bearer refusals (stage 4b and stage 5b) end. An accepted Rust
+# install keeps its engine (-Engine python only schedules the switch), so a
+# Python rerun is offered only without one; where -Engine python scheduled
+# the switch, the refusal says it needs the token too: pseudolife-mcp update
+# makes it, and reads the Rust daemon with its bearer first.
+function Get-BearerRefusalWays {
+    if ($installedEngine -ne 'rust') { return @{ Python = '; or rerun with -Engine python'; Switch = '' } }
+    if ($switchEngine -ne 'python') { return @{ Python = ''; Switch = '' } }
+    return @{ Python = ''; Switch = ' Switching to the Python daemon needs that token too, because pseudolife-mcp update makes the switch and reads the Rust daemon with it first: once the token is set or can be minted, rerun with -Engine python and the install switches this host after it.' }
+}
+# <<< bearer refusal ways <<<
 # >>> daemon engine >>>
 # The bearer stage 5b will have: one already set, or one it mints for the
 # shim transport. Rust is verified with an authenticated read.
@@ -1859,10 +1871,15 @@ if (-not $ClientOnly) {
     $defaultArgs = @()
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if ($composeEngine -eq 'rust' -and -not $engineDefaulted -and -not (Test-RustTokenExpected)) {
-        # An accepted Rust install keeps its engine (-Engine python only
-        # schedules the switch), so a Python rerun is offered only without one.
-        $pythonWay = if ($installedEngine -eq 'rust') { '' } else { '; or rerun with -Engine python' }
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false$pythonWay. Nothing was pulled or started.")
+        # Another release's unfinished Rust container is refused by prepare
+        # whatever the token, so its refusal comes first: no fix below passes it.
+        # A client without the step (a usage error, exit 2) leaves it to prepare.
+        if ($installedEngine -eq 'rust-unaccepted') {
+            Invoke-EngineHelper foreign --repo $repo | Out-Null
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 2) { exit 1 }
+        }
+        $ways = Get-BearerRefusalWays
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install cannot mint one (-NoToken, or -Transport http with no token, given now or recorded in ops/.env by an earlier run): rerun with -NoToken:`$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun with -NoToken:`$false$($ways.Python).$($ways.Switch) Nothing was pulled or started.")
         exit 2
     }
     if ($engineDefaulted) { $defaultArgs = @('--default') }
@@ -2037,9 +2054,9 @@ if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
         $engineFiles = @()
         Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
     } else {
-        # As at stage 4b: no Python rerun where an accepted Rust install keeps its engine.
-        $pythonWay = if ($installedEngine -eq 'rust') { '' } else { '; or rerun with -Engine python' }
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one$pythonWay. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
+        # As at stage 4b (the bearer refusal ways).
+        $ways = Get-BearerRefusalWays
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one$($ways.Python).$($ways.Switch) The daemon was not started; the Rust image and models stay downloaded for the rerun.")
         exit 2
     }
 }

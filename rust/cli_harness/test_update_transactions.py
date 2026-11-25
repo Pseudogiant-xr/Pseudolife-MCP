@@ -1324,6 +1324,49 @@ def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_pa
 
 
 @pytest.mark.parametrize("native", [True], ids=["native"])
+@pytest.mark.parametrize("gone", ["env-file", "env-file-and-container", "kept"])
+def test_release_switch_off_rust_needs_the_bearer(tmp_path, native, gone):
+    # #1968 case 2: the installers' refusal for an accepted Rust host with no
+    # bearer names the switch to Python. update makes it only with the bearer
+    # in the env file (and the running daemon started with that bearer); with
+    # it gone, it refuses before any pull, backup or tag and names the token.
+    binary = _native_binary()
+    if native and not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        common = ["--daemon-only", "--json", "--health-retries", "1", "--health-delay-ms", "0"]
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "rust", "--tag", "0.21.1", *common, "--rollback-tag", "pre-rust"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        if gone != "kept":
+            # Removed from ops/.env: Compose no longer configures it.
+            state["config"]["services"][SERVICE]["environment"].pop("PSEUDOLIFE_MCP_TOKEN")
+        if gone == "env-file-and-container":
+            # And the container was recreated from that file since.
+            state["running"]["Config"]["Env"] = [e for e in state["running"]["Config"]["Env"]
+                                                 if not e.startswith("PSEUDOLIFE_MCP_TOKEN=")]
+        calls = len(state["calls"])
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary if native else None,
+                         ["--engine", "python", "--tag", "0.21.1", "--reinstall", *common, "--rollback-tag", "pre-back"])
+        output = result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        accepted = json.loads(_accepted(env).read_text())["services"][SERVICE]["labels"]["org.pseudolife.engine"]
+        if gone == "kept":
+            assert result.returncode == 0, output
+            assert _labels(state_path)["org.pseudolife.engine"] == "python" and accepted == "python"
+            return
+        assert result.returncode == 2, output
+        expected = {"env-file": "would change the running daemon's bearer settings",
+                    "env-file-and-container": "the engine health gate needs bearer auth; set PSEUDOLIFE_MCP_TOKEN"}
+        assert expected[gone] in output, output
+        assert "Nothing was changed" in output or "nothing was changed" in output, output
+        assert not any(a[:1] in (["pull"], ["fixture-backup"], ["tag"]) for a in state["calls"][calls:])
+        assert _labels(state_path)["org.pseudolife.engine"] == "rust" and accepted == "rust"
+
+
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("failure", ["pull", "provision", "backup", "up", "health", "version", "read"])
 def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, native, failure):
     binary = _native_binary()

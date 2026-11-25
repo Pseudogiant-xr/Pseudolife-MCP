@@ -1,10 +1,16 @@
 """Pure CPU controls using captured operator and hold observations."""
 
+import ast
 import base64
 import copy
 import json
 import re
+import subprocess
+import sys
+from contextlib import contextmanager
+from http.client import HTTPMessage
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -333,3 +339,211 @@ def test_a_mapped_oracle_failure_still_differs_from_a_candidate_that_succeeded()
     same = dict(rust, exit=1, stdout="", db={"final": 1},
                 stderr=base64.b64encode(NATIVE_FAILURE + b"\n").decode())
     assert compare.diff(python, same, ("lease-native-pg-diagnostics",)) == []
+
+
+# The row's own state, built without the frozen package: the recorded seeds
+# and the recorded hold board (fixtures/lease-operator.json).
+
+ROW = Path(__file__).parent / "rows" / "lease_operator.py"
+
+
+def _names_the_package(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(alias.name.split(".")[0] == "pseudolife_memory"
+                                                for alias in node.names):
+            yield node.lineno
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "pseudolife_memory":
+            yield node.lineno
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and "pseudolife_memory" in node.value:
+            # An importlib or patch target by name.
+            yield node.lineno
+
+
+def test_lease_operator_row_never_reaches_the_frozen_package():
+    # The base row imported the package lazily (inside the board and its
+    # dispatch, and as patch targets), which an import-time check cannot see.
+    assert list(_names_the_package(ast.parse(ROW.read_text(encoding="utf-8")))) == []
+
+
+def test_lease_operator_row_loads_with_the_package_blocked():
+    # A fresh interpreter with the package import refused. Only the module is
+    # imported: building cases is left out, as in the other rows' cold-load
+    # tests, because a row's cases may read the test login, which the parity
+    # cli lane's pytest step does not have.
+    script = "\n".join([
+        "import sys",
+        "sys.modules['pseudolife_memory'] = None",
+        "sys.path.insert(0, sys.argv[1])",
+        "from rust.harness_support.import_blocker import cold_harness_imports",
+        "with cold_harness_imports():",
+        "    from rust.cli_harness.rows import lease_operator",
+        "    assert callable(lease_operator.cases)",
+        "assert not any(name.startswith('pseudolife_memory.') for name in sys.modules)",
+    ])
+    repo = Path(__file__).resolve().parents[2]
+    child = subprocess.run([sys.executable, "-I", "-c", script, str(repo)],
+                           capture_output=True, text=True, timeout=60)
+    assert child.returncode == 0, child.stderr
+
+
+def _scenarios():
+    lease_operator.cases()
+    return lease_operator.CASE_SCENARIOS
+
+
+def _canonical(rows):
+    return sorted(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows)
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+@pytest.mark.parametrize("identifier", CLOCK_CASES)
+def test_recorded_seeds_rebuild_every_golden_before_state(platform, identifier):
+    obs = captured(platform, identifier)
+    scenario = _scenarios()[identifier]
+    rows, sequences, target = lease_operator.seed_rows(scenario, obs["seed_stamp"])
+    before = obs["db"]["before"]
+    for table, raws in before["tables"].items():
+        assert _canonical(rows.get(table, [])) == _canonical(json.loads(raw) for raw in raws), table
+    assert set(rows) <= set(before["tables"])
+    assert sequences == before["sequences"]
+    # The case's {AGENT} is the agent the operator's grant went to.
+    seeded = {json.dumps(json.loads(raw), sort_keys=True) for raw in before["tables"]["coordination_leases"]}
+    granted = [row for row in records(obs["db"]["final"], "coordination_leases")
+               if row["name"].startswith("conductor:") and row["holder_agent_id"]
+               and json.dumps(row, sort_keys=True) not in seeded]
+    for row in granted:
+        assert row["holder_agent_id"] == target
+
+
+def test_every_seed_scenario_is_recorded_and_used():
+    assert set(_scenarios().values()) == set(lease_operator._fixture()["seeds"])
+
+
+class _Connection:
+    def __init__(self):
+        self.statements = []
+        self.transactions = 0
+
+    @contextmanager
+    def transaction(self):
+        self.transactions += 1
+        self.statements.append("BEGIN")
+        yield
+        self.statements.append("COMMIT")
+
+    def execute(self, statement, params=()):
+        self.statements.append((statement, params))
+
+
+@pytest.mark.parametrize("scenario", ["queue", "missing", "legacy"])
+def test_seed_writes_the_recorded_rows_in_one_transaction_with_the_package_blocked(monkeypatch, scenario):
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    inserted = []
+
+    def insert(conn, table, rows):
+        # The real helper locks the table and reads its catalog on conn,
+        # which needs the seed's transaction.
+        conn.statements.append(f"PREPARE {table}")
+        inserted.append((table, rows))
+        return f"INSERT {table}", (len(rows),)
+
+    conn = _Connection()
+    with cold_harness_imports():
+        from rust.cli_harness.rows import lease_operator as row
+        from rust.harness_support import fixture_rows
+        monkeypatch.setattr(fixture_rows, "checked_fixture_insert", insert)
+        target = row.seed_bank(conn, scenario, 1_800_000_000.5)
+        rows, sequences, expected_target = row.seed_rows(scenario, 1_800_000_000.5)
+        tables = row._SEED_TABLES
+    assert target == expected_target
+    assert inserted == [(table, rows[table]) for table in tables if table in rows]
+    setvals = [("SELECT setval(%s::regclass, %s, true)", ("public." + name, value))
+               for name, value in sequences.items() if value is not None]
+    assert conn.statements == ["BEGIN", *[f"PREPARE {table}" for table, _ in inserted],
+                               *[(f"INSERT {table}", (len(written),)) for table, written in inserted],
+                               *setvals, "COMMIT"]
+    assert conn.transactions == 1
+    if scenario != "missing":
+        assert verify_audit_chain(sorted(rows["coordination_events"], key=lambda row: row["seq"]))["ok"]
+        assert setvals
+
+
+def test_a_seed_naming_a_table_the_seed_does_not_write_is_refused(monkeypatch):
+    fixture = copy.deepcopy(lease_operator._fixture())
+    fixture["seeds"]["held"]["rows"]["coordination_messages"] = [{"id": 1}]
+    monkeypatch.setattr(lease_operator, "_FIXTURE", fixture)
+    with pytest.raises(ValueError, match="unexpected tables"):
+        lease_operator.seed_rows("held", 1_800_000_000.0)
+
+
+def _headers(request):
+    headers = HTTPMessage()
+    for name, value in request["headers"].items():
+        headers[name] = value
+    return headers
+
+
+def _replay(board, obs, pid):
+    pattern = re.compile(rf"\bpid {obs['fixture_pid']}\b")
+    requests = []
+    for request in obs["requests"]:
+        body = pattern.sub(f"pid {pid}", request["body"])
+        status, reply = board.dispatch(request["target"].rsplit("/", 1)[-1], json.loads(body), _headers(request))
+        assert status == 200, reply
+        assert "<PID>" not in json.dumps(reply)
+        requests.append({**request, "body": body,
+                         "headers": {**request["headers"], "content-length": str(len(body.encode()))}})
+    return requests
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+@pytest.mark.parametrize("identifier", ["hold-board", "hold-board-renew"])
+def test_recorded_hold_board_answers_each_golden_for_its_watched_pid(platform, identifier):
+    from rust.harness_support.import_blocker import cold_harness_imports
+
+    obs = captured(platform, identifier)
+    with cold_harness_imports():
+        from rust.cli_harness.rows import lease_operator as row
+        same = row.HoldBoard(bank=True)
+        other = row.HoldBoard(bank=True)
+    try:
+        # The golden's own pid: every state it recorded, byte for byte.
+        same.pid = obs["fixture_pid"]
+        _replay(same, obs, same.pid)
+        assert same.states == obs["db"]["writes"]
+        assert same.final_state() == obs["db"]["final"]
+        # Another pid: the rows carry it, the chains verify, and the
+        # observation compares equal to the golden as the replay compares.
+        other.pid = obs["fixture_pid"] + 7919
+        requests = _replay(other, obs, other.pid)
+        for item in other.states:
+            text = json.dumps(item["state"])
+            assert f"pid {other.pid}" in text and "<PID>" not in text
+            assert verify_audit_chain(audit(item["state"]))["ok"]
+        candidate = {**copy.deepcopy(obs), "requests": requests, "fixture_pid": other.pid,
+                     "db": {"writes": other.states, "final": other.final_state()}}
+        assert not compare.diff(obs, candidate, PID_RULES)
+    finally:
+        same.close()
+        other.close()
+
+
+def test_hold_board_refuses_an_unrecorded_request_and_an_unset_pid():
+    from .rows import lease
+
+    obs = captured("linux", "hold-board")
+    board = lease_operator.HoldBoard(bank=True)
+    try:
+        request = obs["requests"][0]
+        with pytest.raises(RuntimeError, match="pid was never set"):
+            board.dispatch("register", json.loads(request["body"]), _headers(request))
+        board.pid = obs["fixture_pid"]
+        status, reply = board.dispatch("register", {**json.loads(request["body"]), "task": "other"},
+                                       _headers(request))
+        assert status == 500 and "not in the recording" in reply["error"]
+        with pytest.raises(AssertionError, match="never answered"):
+            lease._after(SimpleNamespace(daemon=board, name="rust", state={}), {})
+    finally:
+        board.close()

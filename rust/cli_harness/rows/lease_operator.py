@@ -4,169 +4,172 @@ from __future__ import annotations
 
 import base64
 import copy
-import hashlib
 import json
 import math
 import re
-import threading
 import time
 import uuid
-from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import patch
+from pathlib import Path
 
-from .. import core, lease_fixture, normalize
+from rust.harness_support.audit_oracle import GENESIS_HASH, audit_hash, canonical_payload
+
+from .. import lease_fixture, normalize
 from ..core import Case
 from . import _bank
-from .lease import NAME, TOKEN, T0, _Holder, _after, _local, _release_local, coordination_state
+from .lease import TOKEN, T0, Board, _Holder, _after, _local, _release_local, coordination_state
 
 
-class _Storage:
-    def __init__(self, conn):
-        self.conn = conn
+# What the frozen CoordinationStore wrote and answered for this row, captured
+# once from the store at 8b1be337a (the README's "Seeding" section):
+# - "seeds": per operator scenario, the coordination rows its setup wrote and
+#   the sequence positions, every timestamp an integer offset from the seed
+#   stamp and every event without its two hashes, which the seed recomputes
+#   for the stamp it writes;
+# - "hold": the board's answers to the hold cases' requests (the store's clock
+#   fixed at T0), with the watched pid templated as "pid <PID>".
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "lease-operator.json"
+_FIXTURE: dict | None = None
+# In insertion order: an agent before the leases, waiters and events naming it.
+_SEED_TABLES = ("coordination_agents", "coordination_leases", "coordination_lease_waiters",
+                "coordination_events")
+_PID = "pid <PID>"
+# Every operator case's seed scenario, filled as cases() builds them.
+CASE_SCENARIOS: dict[str, str] = {}
 
-    @contextmanager
-    def _txn(self):
-        with self.conn.transaction():
-            yield
+
+def _fixture() -> dict:
+    global _FIXTURE
+    if _FIXTURE is None:
+        _FIXTURE = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return _FIXTURE
 
 
-class StoreBoard:
-    """Loopback HTTP boundary backed by the oracle CoordinationStore: the
-    operator row seeds leases and grants through the store and its clients
-    act on the same disposable bank, so it keeps the live store (moved here
-    from rows/lease.py, whose row replays a recording of it)."""
+def _absolute(value, stamp):
+    """The recorded offsets (the clock-named fields, as the comparison names
+    them) as times after ``stamp``."""
+    if isinstance(value, dict):
+        return {key: stamp + item if _timestamp(key, item) else _absolute(item, stamp)
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [_absolute(item, stamp) for item in value]
+    return value
 
-    def __init__(self, scenario="free", bank=True):
-        self.name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}") if bank else None
-        self.conn = None
-        self.records = []
-        self.states = []
-        self.locals = []
-        self.unrecorded = []
-        if not bank:
-            self.url = core.DEAD_DAEMON_URL
-            return
-        from pseudolife_memory.storage.coordination import CoordinationStore
 
+def seed_rows(scenario: str, stamp: float) -> tuple[dict, dict, str | None]:
+    """The rows, sequence positions and target agent the frozen store's setup
+    wrote for ``scenario`` with its clock at ``stamp``."""
+    seed = _fixture()["seeds"][scenario]
+    rows = {table: _absolute(records, stamp) for table, records in seed["rows"].items()}
+    previous = GENESIS_HASH
+    for row in sorted(rows.get("coordination_events", []), key=lambda row: row["seq"]):
+        row["payload"] = canonical_payload(row["payload"])
+        row["prev_hash"] = previous
+        row["hash"] = previous = audit_hash(previous, row)
+    if set(rows) - set(_SEED_TABLES):
+        raise ValueError(f"lease_operator seed {scenario}: unexpected tables {sorted(set(rows) - set(_SEED_TABLES))}")
+    return rows, dict(seed["sequences"]), seed["target"]
+
+
+def seed_bank(conn, scenario: str, stamp: float) -> str | None:
+    """Write ``scenario``'s recorded rows in one transaction; returns the
+    target agent's id (None when the scenario registers none)."""
+    # psycopg only where a bank is written: the row loads without it.
+    from rust.harness_support.fixture_rows import checked_fixture_insert  # noqa: PLC0415
+
+    rows, sequences, target = seed_rows(scenario, stamp)
+    with conn.transaction():
+        inserts = [checked_fixture_insert(conn, table, rows[table]) for table in _SEED_TABLES if table in rows]
+        for statement, params in inserts:
+            conn.execute(statement, params)
+        for sequence, value in sequences.items():
+            # A position the store never advanced stays at the fresh bank's.
+            if value is not None:
+                conn.execute("SELECT setval(%s::regclass, %s, true)", ("public." + sequence, value))
+    return target
+
+
+class OperatorBank(Board):
+    """A disposable bank the operator CLI writes directly, seeded with the
+    rows the frozen store wrote, behind a loopback board with no recorded
+    answers: the operator actions never call it, and a request they sent
+    would be refused and recorded in the case's requests, which every
+    operator golden records as none."""
+
+    def __init__(self):
+        name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}")
         with _bank._admin() as conn:
-            if conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (self.name,)).fetchone():
+            if conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone():
                 raise RuntimeError("disposable name collision")
-        _bank.create(self.name)
-        self.conn = _bank.connect(self.name, autocommit=True)
-        self.store = CoordinationStore(_Storage(self.conn), clock=lambda: T0)
-        self.lock = threading.RLock()
-        self.counter = 0
-        self.scenario = scenario
-        self.calls = {}
-        self.holder = None
-        if scenario in ("held", "queue", "claim", "other-mirror", "same-mirror"):
-            label = {"other-mirror": "lease-hold@0123456789ab", "same-mirror": "lease-hold@abcdef123456"}.get(scenario, "codex")
-            self.holder = self.register(label=label, project="fixture", task="peer work")
-            self.store.acquire_lease("alice", self.holder["agent_id"], self.holder["credential"],
-                                     name=NAME, ttl=120, expect=60, purpose="peer work")
-            if scenario == "queue":
-                self.waiter = self.register(label="codex", project="fixture", task="first waiter")
-                self.store.acquire_lease("alice", self.waiter["agent_id"], self.waiter["credential"],
-                                         name=NAME, ttl=120, purpose="first waiter")
-        fixture = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *_):
-                pass
-
-            def do_POST(self):
-                raw = self.rfile.read(int(self.headers["Content-Length"]))
-                body = json.loads(raw)
-                action = self.path.rsplit("/", 1)[-1]
-                with fixture.lock:
-                    fixture.records.append({"method": "POST", "target": self.path,
-                                            "headers": list(self.headers.items()),
-                                            "body": raw.decode()})
-                    status, reply = fixture.dispatch(action, body, self.headers)
-                data = json.dumps(reply).encode()
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.url = f"http://127.0.0.1:{self.server.server_port}"
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-
-    def register(self, **fields):
-        self.counter += 1
-        # Fixed test entropy at the writer boundary, rather than SQL inserts
-        # or erasing identity/hash columns from compared database state.
-        identifier = uuid.UUID(int=self.counter, version=4)
-        credential = base64.urlsafe_b64encode(hashlib.sha256(f"fixture-{self.counter}".encode()).digest()).decode().rstrip("=")
-        with patch("pseudolife_memory.storage.coordination.uuid.uuid4", return_value=identifier), \
-                patch("pseudolife_memory.storage.coordination.secrets.token_urlsafe", return_value=credential):
-            return self.store.register("alice", **fields)
-
-    def dispatch(self, action, body, headers):
-        from pseudolife_memory.storage.coordination import CoordinationError
-        self.calls[action] = self.calls.get(action, 0) + 1
-        if headers.get("Authorization") != f"Bearer {TOKEN}":
-            return 401, {"error": "unauthorized"}
-        if self.scenario == "refused" and action == "register":
-            return 403, {"error": "forbidden"}
-        if self.scenario == "malformed" and action == "register":
-            return 200, {"registered": True}
-        if self.scenario == "transient" and action == "lease" and self.calls[action] == 1:
-            return 503, {"error": "temporarily_unavailable"}
-        creds = ("alice", headers.get("X-PL-Agent"), headers.get("X-PL-Agent-Key"))
+        _bank.create(name)
         try:
-            if action == "register":
-                reply = self.register(**body)
-            elif action == "lease":
-                reply = self.store.acquire_lease(*creds, **body)
-            elif action == "release":
-                reply = self.store.release_lease(*creds, **body)
-            elif action == "leases":
-                reply = self.store.list_leases(**body)
-            else:
-                raise RuntimeError(f"unexpected fixture action {action}")
-        except CoordinationError as error:
-            return 400, {"error": error.code}
-        if action in ("register", "lease", "release"):
-            self.states.append({"action": action, "state": coordination_state(_bank.dump(self.name))})
-        if self.scenario == "queue" and action == "lease" and reply["state"] == "queued":
-            self.store.release_lease("alice", self.holder["agent_id"], self.holder["credential"], name=NAME)
-            self.states.append({"action": "fixture-release", "state": coordination_state(_bank.dump(self.name))})
-            self.store.release_lease("alice", self.waiter["agent_id"], self.waiter["credential"], name=NAME)
-            self.states.append({"action": "fixture-release-waiter", "state": coordination_state(_bank.dump(self.name))})
-        return 200, reply
+            super().__init__("operator", recorded={"initial": None, "transcripts": []})
+            self.conn = _bank.connect(name, autocommit=True)
+        except BaseException:
+            # The harness closes a daemon only once it was built.
+            super().close()
+            _bank.teardown(name)
+            raise
+        self.name = name
+
+    def seed(self, scenario: str, stamp: float) -> str | None:
+        return seed_bank(self.conn, scenario, stamp)
 
     def final_state(self) -> dict:
         return coordination_state(_bank.dump(self.name))
 
-    def requests(self):
-        return self.records
-
     def close(self):
-        for holder in self.locals:
-            holder.stop()
-        if self.conn is None:
-            return
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(5)
+        super().close()
         self.conn.close()
         _bank.teardown(self.name)
 
 
-class OperatorBoard(StoreBoard):
+def _bind_text(text: str, pid: int) -> str:
+    return text.replace(_PID, f"pid {pid}")
+
+
+def _bind_state(state: dict, pid: int) -> dict:
+    """A recorded state with the watched pid in its rows, its audit chain
+    recomputed over them; only the pid and the two hash fields' text change."""
+    out = {"tables": {table: [_bind_text(raw, pid) for raw in raws]
+                      for table, raws in state["tables"].items()},
+           "sequences": dict(state["sequences"])}
+    raws = out["tables"].get("coordination_events", [])
+    order = sorted(range(len(raws)), key=lambda index: json.loads(raws[index])["seq"])
+    previous = json.loads(raws[order[0]])["prev_hash"] if order else None
+    for index in order:
+        row = json.loads(raws[index])
+        digest = audit_hash(previous, row)
+        raw = raws[index]
+        for field, old, new in (("prev_hash", row["prev_hash"], previous), ("hash", row["hash"], digest)):
+            needle = f'"{field}": "{old}"'
+            if raw.count(needle) != 1:
+                raise ValueError(f"lease_operator hold recording: no single {field} in {raw!r}")
+            raw = raw.replace(needle, f'"{field}": "{new}"')
+        raws[index] = raw
+        previous = digest
+    return out
+
+
+class HoldBoard(Board):
+    """The hold cases' loopback board, answering as the recorded frozen store
+    did. The watched process's pid is in the CLI's requests and in the store's
+    answers and rows, so a request is matched with it templated and answered
+    with it bound to ``pid``, which the case's setup sets."""
+
+    def __init__(self, bank=True):
+        super().__init__("hold", bank=bank, recorded=_fixture()["hold"] if bank else None)
+        self.pid: int | None = None
+
     def dispatch(self, action, body, headers):
-        if action == "agents":
-            assert headers.get("Authorization") == f"Bearer {TOKEN}"
-            self.calls[action] = self.calls.get(action, 0) + 1
-            reply = self.store.list_agents("alice", headers.get("X-PL-Agent"), headers.get("X-PL-Agent-Key"), **body)
-            self.states.append({"action": action, "state": coordination_state(_bank.dump(self.name))})
-            return 200, reply
-        return super().dispatch(action, body, headers)
+        if self.pid is None:
+            raise RuntimeError("lease_operator hold board: the watched pid was never set")
+        pattern = re.compile(rf"\bpid {self.pid}\b")
+        body = json.loads(pattern.sub(_PID, json.dumps(body, ensure_ascii=False)))
+        before = len(self.states)
+        status, reply = super().dispatch(action, body, headers)
+        self.states[before:] = [{"action": item["action"], "state": _bind_state(item["state"], self.pid)}
+                                for item in self.states[before:]]
+        return status, json.loads(_bind_text(json.dumps(reply, ensure_ascii=False), self.pid))
 
 
 @normalize.rule("lease-fixture-pid")
@@ -221,6 +224,7 @@ def hold_case(identifier, *, board=False, queued=False, gone=False, renew=False)
         watched = _Holder(arm.home / "watch.lock")
         assert watched.line() == "HELD"
         arm.daemon.locals.append(watched)
+        arm.daemon.pid = watched.pid
         arm.state["watched"] = watched
         arm.state["local_seen"] = False
         arm.state["stable_hold"] = False
@@ -271,7 +275,7 @@ def hold_case(identifier, *, board=False, queued=False, gone=False, renew=False)
             assert b"waiting for the local lock" in base64.b64decode(obs["stderr"])
     case = Case(identifier, [], env=env, setup=setup, during=during, after=after,
                 before_capture=_release_local if queued else None,
-                daemon=lambda: OperatorBoard(bank=board), timeout=35,
+                daemon=lambda: HoldBoard(bank=board), timeout=35,
                 rules=("lease-http-json", "lease-fixture-pid", "lease-seeded-clock"))
     return case
 
@@ -468,54 +472,23 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
         _local("held" if local else "absent")(arm)
         start = time.time()
         stamp = time.time()
-        arm.daemon.store.clock = lambda: stamp
         arm.state["seed_stamp"] = stamp
-        target = None
-        if scenario != "missing":
-            target = arm.daemon.register(label="codex", project="fixture", task="fixture target",
-                                         capabilities={"resumable": True, "pull": True},
-                                         wake_enabled=scenario in ("listener", "ring"))
-        if scenario in ("held", "queue", "free"):
-            arm.daemon.store.acquire_lease("alice", target["agent_id"], target["credential"],
-                                         name="fixture", ttl=300, expect=60, purpose="fixture work")
-        if scenario == "queue":
-            other = arm.daemon.register(label="codex", project="fixture", task="first waiter")
-            arm.daemon.store.acquire_lease("alice", other["agent_id"], other["credential"],
-                                         name="fixture", ttl=120, expect=30, purpose="waiter work")
-        if scenario == "free":
-            arm.daemon.store.release_lease("alice", target["agent_id"], target["credential"], name="fixture")
-        if scenario == "replace":
-            other = arm.daemon.register(label="codex", project="fixture", task="old conductor")
-            arm.daemon.store.grant_conductor("fixture", other["agent_id"], hold=300)
-        if scenario in ("legacy", "legacy-expired"):
-            # A grant made before the role's rename: the hold
-            # delegate:<project> and its lease_delegate record for the same
-            # fence. The new grant vacates it (break, or expire when lapsed).
-            other = arm.daemon.register(label="codex", project="fixture", task="old-named conductor")
-            store = arm.daemon.store
-            with store.storage._txn():
-                fence = store._one("SELECT nextval('coordination_lease_fence') AS f", ())["f"]
-                store.storage.conn.execute(
-                    "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,purpose,"
-                    "fence,acquired_at,expires_at) VALUES (%s,%s,'alice','granted by the operator',"
-                    "%s,%s,%s)",
-                    ("delegate:fixture", other["agent_id"], fence, stamp - 60,
-                     stamp + (300 if scenario == "legacy" else -10)))
-                store._append([store._event("lease_delegate",
-                                            {"name": "delegate:fixture", "fence": fence,
-                                             "hold": 300, "replaced": None},
-                                            actor="operator", agent_id=other["agent_id"])],
-                              stamp)
-        if scenario == "coordinator":
-            arm.daemon.store.acquire_lease("alice", target["agent_id"], target["credential"],
-                                         name="coordinator:fixture", ttl=300)
-        if scenario == "ambiguous":
-            arm.daemon.register(label="codex", project="fixture", task="another target")
-        if scenario in ("listener", "ring"):
-            arm.daemon.store.attach("alice", target["agent_id"], target["credential"],
-                                    attachment_id="fixture-listener", wake_enabled=True,
-                                    ring=scenario == "ring", ring_armed_until=stamp + 600 if scenario == "ring" else None)
-        case.argv[:] = ["lease", *(target["agent_id"] if arg == "{AGENT}" else arg for arg in argv)]
+        # The rows the frozen store wrote with its clock at ``stamp``. Every
+        # scenario but "missing" first registers the target (label codex,
+        # project fixture, capabilities resumable and pull, wake enabled for
+        # listener and ring). Then:
+        # - held, queue, free: the target takes "fixture" (ttl 300, expect
+        #   60); queue adds a waiter (ttl 120, expect 30); free releases it;
+        # - replace: another agent holds conductor:fixture (hold 300);
+        # - legacy, legacy-expired: another agent holds delegate:fixture, the
+        #   role's name before its rename, from stamp - 60 until stamp + 300
+        #   (or stamp - 10, lapsed), with its lease_delegate record;
+        # - coordinator: the target holds coordinator:fixture (ttl 300);
+        # - ambiguous: a second agent shares the target's id prefix;
+        # - listener, ring: the target attached as fixture-listener (ring
+        #   armed until stamp + 600, which the store caps at its attach lease).
+        target = arm.daemon.seed(scenario, stamp)
+        case.argv[:] = ["lease", *(target if arg == "{AGENT}" else arg for arg in argv)]
         if fault:
             # After seeding, so only the CLI's own transaction meets it.
             _install_fault(arm.daemon.conn, fault)
@@ -564,8 +537,9 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
         new = sorted(final, key=lambda row: row["seq"])[len(before):]
         assert [row["event"] for row in new] == list(events)
 
+    CASE_SCENARIOS[identifier] = scenario
     case = Case(identifier, ["lease", *argv], env=env, setup=setup, after=after,
-                daemon=OperatorBoard, stdout_closed=stdout_closed,
+                daemon=OperatorBank, stdout_closed=stdout_closed,
                 rules=("lease-http-json", "lease-operator-clock", *(('lease-native-stdout',) if stdout_closed else ()),
                        *(("lease-native-pg-diagnostics",) if fault else ())))
     return case

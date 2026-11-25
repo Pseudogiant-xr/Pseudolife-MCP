@@ -1,0 +1,2196 @@
+{
+ "capture": "Captured once from the frozen CoordinationStore at 8b1be337a44008779ea699ec95f5e2b1889a5bd1: the lease_operator row's own setup (seeds) and its store-backed board answering the hold-board and hold-board-renew goldens' requests (hold), every recorded state equal to the goldens' on both platforms. Seed timestamps are integer offsets from the seed stamp; seed events carry no hashes (the seed computes them); hold rows template the watched pid as 'pid <PID>'.",
+ "baseline": "8b1be337a44008779ea699ec95f5e2b1889a5bd1",
+ "seeds": {
+  "missing": {
+   "target": null,
+   "rows": {},
+   "sequences": {
+    "coordination_lease_fence": null,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "free": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "lease_acquire",
+      "payload": {
+       "expect": 60,
+       "fence": 1,
+       "name": "fixture",
+       "purpose": "fixture work",
+       "ttl": 300
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 3,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "lease_release",
+      "payload": {
+       "fence": 1,
+       "name": "fixture"
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ],
+    "coordination_leases": [
+     {
+      "name": "fixture",
+      "fence": 1,
+      "expect": null,
+      "purpose": "",
+      "freed_at": 0,
+      "expires_at": null,
+      "acquired_at": null,
+      "expected_end": null,
+      "holder_agent_id": null,
+      "holder_principal": ""
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": 1,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "held": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "lease_acquire",
+      "payload": {
+       "expect": 60,
+       "fence": 1,
+       "name": "fixture",
+       "purpose": "fixture work",
+       "ttl": 300
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ],
+    "coordination_leases": [
+     {
+      "name": "fixture",
+      "fence": 1,
+      "expect": 60,
+      "purpose": "fixture work",
+      "freed_at": null,
+      "expires_at": 300,
+      "acquired_at": 0,
+      "expected_end": 60,
+      "holder_agent_id": "00000000000040008000000000000001",
+      "holder_principal": "alice"
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": 1,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "queue": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     },
+     {
+      "name": "",
+      "task": "first waiter",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {},
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "lease_acquire",
+      "payload": {
+       "expect": 60,
+       "fence": 1,
+       "name": "fixture",
+       "purpose": "fixture work",
+       "ttl": 300
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 3,
+      "body": null,
+      "task": "first waiter",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {},
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "first waiter",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 4,
+      "body": null,
+      "task": "first waiter",
+      "actor": "agent",
+      "event": "lease_queue",
+      "payload": {
+       "expect": 30,
+       "name": "fixture",
+       "purpose": "waiter work",
+       "ttl": 120
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ],
+    "coordination_lease_waiters": [
+     {
+      "ttl": 120,
+      "name": "fixture",
+      "expect": 30,
+      "ticket": 1,
+      "purpose": "waiter work",
+      "agent_id": "00000000000040008000000000000002",
+      "principal": "alice",
+      "enqueued_at": 0
+     }
+    ],
+    "coordination_leases": [
+     {
+      "name": "fixture",
+      "fence": 1,
+      "expect": 60,
+      "purpose": "fixture work",
+      "freed_at": null,
+      "expires_at": 300,
+      "acquired_at": 0,
+      "expected_end": 60,
+      "holder_agent_id": "00000000000040008000000000000001",
+      "holder_principal": "alice"
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": 1,
+    "coordination_lease_waiters_ticket_seq": 1,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "target": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": null,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "replace": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     },
+     {
+      "name": "",
+      "task": "old conductor",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {},
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "old conductor",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {},
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "old conductor",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 3,
+      "body": null,
+      "task": "old conductor",
+      "actor": "operator",
+      "event": "lease_conductor",
+      "payload": {
+       "fence": 1,
+       "hold": 300,
+       "name": "conductor:fixture",
+       "replaced": null
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ],
+    "coordination_leases": [
+     {
+      "name": "conductor:fixture",
+      "fence": 1,
+      "expect": null,
+      "purpose": "granted by the operator",
+      "freed_at": null,
+      "expires_at": 300,
+      "acquired_at": 0,
+      "expected_end": null,
+      "holder_agent_id": "00000000000040008000000000000002",
+      "holder_principal": "alice"
+     },
+     {
+      "name": "coordinator:fixture",
+      "fence": 0,
+      "expect": null,
+      "purpose": "",
+      "freed_at": null,
+      "expires_at": null,
+      "acquired_at": null,
+      "expected_end": null,
+      "holder_agent_id": null,
+      "holder_principal": ""
+     },
+     {
+      "name": "delegate:fixture",
+      "fence": 0,
+      "expect": null,
+      "purpose": "",
+      "freed_at": null,
+      "expires_at": null,
+      "acquired_at": null,
+      "expected_end": null,
+      "holder_agent_id": null,
+      "holder_principal": ""
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": 1,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "coordinator": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "lease_acquire",
+      "payload": {
+       "expect": null,
+       "fence": 1,
+       "name": "coordinator:fixture",
+       "purpose": "",
+       "ttl": 300
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ],
+    "coordination_leases": [
+     {
+      "name": "conductor:fixture",
+      "fence": 0,
+      "expect": null,
+      "purpose": "",
+      "freed_at": null,
+      "expires_at": null,
+      "acquired_at": null,
+      "expected_end": null,
+      "holder_agent_id": null,
+      "holder_principal": ""
+     },
+     {
+      "name": "coordinator:fixture",
+      "fence": 1,
+      "expect": null,
+      "purpose": "",
+      "freed_at": null,
+      "expires_at": 300,
+      "acquired_at": 0,
+      "expected_end": null,
+      "holder_agent_id": "00000000000040008000000000000001",
+      "holder_principal": "alice"
+     },
+     {
+      "name": "delegate:fixture",
+      "fence": 0,
+      "expect": null,
+      "purpose": "",
+      "freed_at": null,
+      "expires_at": null,
+      "acquired_at": null,
+      "expected_end": null,
+      "holder_agent_id": null,
+      "holder_principal": ""
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": 1,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "legacy": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     },
+     {
+      "name": "",
+      "task": "old-named conductor",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {},
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "old-named conductor",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {},
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "old-named conductor",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 3,
+      "body": null,
+      "task": "",
+      "actor": "operator",
+      "event": "lease_delegate",
+      "payload": {
+       "fence": 1,
+       "hold": 300,
+       "name": "delegate:fixture",
+       "replaced": null
+      },
+      "project": "",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ],
+    "coordination_leases": [
+     {
+      "name": "delegate:fixture",
+      "fence": 1,
+      "expect": null,
+      "purpose": "granted by the operator",
+      "freed_at": null,
+      "expires_at": 300,
+      "acquired_at": -60,
+      "expected_end": null,
+      "holder_agent_id": "00000000000040008000000000000002",
+      "holder_principal": "alice"
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": 1,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "legacy-expired": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     },
+     {
+      "name": "",
+      "task": "old-named conductor",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {},
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "old-named conductor",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {},
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "old-named conductor",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 3,
+      "body": null,
+      "task": "",
+      "actor": "operator",
+      "event": "lease_delegate",
+      "payload": {
+       "fence": 1,
+       "hold": 300,
+       "name": "delegate:fixture",
+       "replaced": null
+      },
+      "project": "",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ],
+    "coordination_leases": [
+     {
+      "name": "delegate:fixture",
+      "fence": 1,
+      "expect": null,
+      "purpose": "granted by the operator",
+      "freed_at": null,
+      "expires_at": -10,
+      "acquired_at": -60,
+      "expected_end": null,
+      "holder_agent_id": "00000000000040008000000000000002",
+      "holder_principal": "alice"
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": 1,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "ambiguous": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     },
+     {
+      "name": "",
+      "task": "another target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "children": [],
+      "lifecycle": "registered",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 0,
+      "park_needs": "",
+      "lease_until": null,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {},
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": false,
+      "attachment_id": null,
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "8a6e6a04f12b496a177e67eab120daa600374a46030f3440ef94b82bb2608097",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "another target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {},
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "another target",
+       "wake_enabled": false
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000002",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": null,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "listener": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "attached",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 1,
+      "park_needs": "",
+      "lease_until": 60,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "ring": false,
+       "resumable": true
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": true,
+      "attachment_id": "fixture-listener",
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": true
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "attach",
+      "payload": {
+       "generation": 1,
+       "lease_until": 60,
+       "renewed": false,
+       "wake_enabled": true
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": null,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "ring": {
+   "target": "00000000000040008000000000000001",
+   "rows": {
+    "coordination_agents": [
+     {
+      "name": "",
+      "task": "fixture target",
+      "label": "codex",
+      "status": "",
+      "episode": "",
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "children": [],
+      "lifecycle": "attached",
+      "principal": "alice",
+      "created_at": 0,
+      "generation": 1,
+      "park_needs": "",
+      "lease_until": 60,
+      "name_set_at": null,
+      "name_source": "",
+      "park_reason": null,
+      "park_resume": "",
+      "park_set_at": null,
+      "capabilities": {
+       "pull": true,
+       "ring": true,
+       "resumable": true,
+       "ring_armed_until": 60
+      },
+      "harness_name": "",
+      "park_expires": null,
+      "wake_enabled": true,
+      "attachment_id": "fixture-listener",
+      "last_activity": 0,
+      "next_sequence": 0,
+      "parent_thread": null,
+      "park_clear_by": "",
+      "credential_hash": "fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953",
+      "parent_agent_id": null,
+      "status_expires_at": null
+     }
+    ],
+    "coordination_events": [
+     {
+      "hlc": "",
+      "seq": 1,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "register",
+      "payload": {
+       "capabilities": {
+        "pull": true,
+        "resumable": true
+       },
+       "episode": "",
+       "label": "codex",
+       "project": "fixture",
+       "status": "",
+       "task": "fixture target",
+       "wake_enabled": true
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     },
+     {
+      "hlc": "",
+      "seq": 2,
+      "body": null,
+      "task": "fixture target",
+      "actor": "agent",
+      "event": "attach",
+      "payload": {
+       "generation": 1,
+       "lease_until": 60,
+       "renewed": false,
+       "wake_enabled": true
+      },
+      "project": "fixture",
+      "agent_id": "00000000000040008000000000000001",
+      "body_salt": null,
+      "principal": "alice",
+      "created_at": 0,
+      "message_id": null,
+      "recipient_agent_id": null
+     }
+    ]
+   },
+   "sequences": {
+    "coordination_lease_fence": null,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  }
+ },
+ "hold": {
+  "initial": {
+   "tables": {
+    "coordination_agents": [],
+    "coordination_events": [],
+    "coordination_lease_waiters": [],
+    "coordination_leases": [],
+    "coordination_messages": [],
+    "coordination_wakes": []
+   },
+   "sequences": {
+    "coordination_lease_fence": null,
+    "coordination_lease_waiters_ticket_seq": null,
+    "coordination_wakes_wake_id_seq": null
+   }
+  },
+  "transcripts": [
+   [
+    {
+     "key": [
+      "register",
+      {
+       "label": "lease-hold@abcdef123456",
+       "project": "fixture",
+       "task": "fixture: pid <PID>",
+       "status": "lease:fixture pid <PID> cwd",
+       "capabilities": {
+        "resumable": false
+       },
+       "wake_enabled": false
+      },
+      null,
+      null
+     ],
+     "status": 200,
+     "reply": {
+      "agent_id": "00000000000040008000000000000001",
+      "principal": "alice",
+      "label": "lease-hold@abcdef123456",
+      "project": "fixture",
+      "task": "fixture: pid <PID>",
+      "status": "lease:fixture pid <PID> cwd",
+      "episode": "",
+      "capabilities": {
+       "resumable": false
+      },
+      "wake_enabled": false,
+      "created_at": 1700000000.0,
+      "last_activity": 1700000000.0,
+      "lifecycle": "registered",
+      "children": [],
+      "park_reason": null,
+      "park_needs": "",
+      "park_clear_by": "",
+      "park_resume": "",
+      "park_expires": null,
+      "park_set_at": null,
+      "parent_agent_id": null,
+      "subagent": false,
+      "adapter_available": false,
+      "name": "lease-hold@abcdef123456 00000000",
+      "name_source": "",
+      "credential": "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     },
+     "states": [
+      {
+       "action": "register",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": null,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "lease",
+      {
+       "name": "fixture",
+       "ttl": 30,
+       "expect": 120,
+       "purpose": "hold proof"
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "name": "fixture",
+      "state": "held",
+      "fence": 1,
+      "expires_at": 1700000030.0,
+      "expected_end": 1700000120.0,
+      "position": null,
+      "queued": 0,
+      "holder": {
+       "agent_id": "00000000000040008000000000000001",
+       "label": "lease-hold@abcdef123456",
+       "name": "lease-hold@abcdef123456 00000000",
+       "principal": "alice",
+       "purpose": "hold proof",
+       "acquired_at": 1700000000.0,
+       "expires_at": 1700000030.0,
+       "expected_end": 1700000120.0
+      }
+     },
+     "states": [
+      {
+       "action": "lease",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 120, \"purpose\": \"hold proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "agents",
+      {
+       "limit": 50
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "agents": [],
+      "truncated": false,
+      "idle_omitted": 0,
+      "leases": [
+       {
+        "name": "fixture",
+        "holder": {
+         "agent_id": "00000000000040008000000000000001",
+         "label": "lease-hold@abcdef123456",
+         "name": "lease-hold@abcdef123456 00000000",
+         "principal": "alice",
+         "purpose": "hold proof",
+         "acquired_at": 1700000000.0,
+         "expires_at": 1700000030.0,
+         "expected_end": 1700000120.0
+        },
+        "fence": 1,
+        "expires_at": 1700000030.0,
+        "expected_end": 1700000120.0,
+        "stale": false,
+        "queued": 0,
+        "queue": []
+       }
+      ],
+      "leases_truncated": false
+     },
+     "states": [
+      {
+       "action": "agents",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 120, \"purpose\": \"hold proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "release",
+      {
+       "name": "fixture"
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "name": "fixture",
+      "released": true,
+      "dequeued": false
+     },
+     "states": [
+      {
+       "action": "release",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"5a21f6b02e8ad31d422691a779b6c54b331126a7cd7f1ded2bf6e6cfea261231\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": null, \"purpose\": \"\", \"freed_at\": 1700000000, \"expires_at\": null, \"acquired_at\": null, \"expected_end\": null, \"holder_agent_id\": null, \"holder_principal\": \"\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "agents",
+      {
+       "limit": 50
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "agents": [],
+      "truncated": false,
+      "idle_omitted": 0,
+      "leases": [],
+      "leases_truncated": false
+     },
+     "states": [
+      {
+       "action": "agents",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"5a21f6b02e8ad31d422691a779b6c54b331126a7cd7f1ded2bf6e6cfea261231\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": null, \"purpose\": \"\", \"freed_at\": 1700000000, \"expires_at\": null, \"acquired_at\": null, \"expected_end\": null, \"holder_agent_id\": null, \"holder_principal\": \"\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "key": [
+      "register",
+      {
+       "label": "lease-hold@abcdef123456",
+       "project": "fixture",
+       "task": "fixture: pid <PID>",
+       "status": "lease:fixture pid <PID> cwd",
+       "capabilities": {
+        "resumable": false
+       },
+       "wake_enabled": false
+      },
+      null,
+      null
+     ],
+     "status": 200,
+     "reply": {
+      "agent_id": "00000000000040008000000000000001",
+      "principal": "alice",
+      "label": "lease-hold@abcdef123456",
+      "project": "fixture",
+      "task": "fixture: pid <PID>",
+      "status": "lease:fixture pid <PID> cwd",
+      "episode": "",
+      "capabilities": {
+       "resumable": false
+      },
+      "wake_enabled": false,
+      "created_at": 1700000000.0,
+      "last_activity": 1700000000.0,
+      "lifecycle": "registered",
+      "children": [],
+      "park_reason": null,
+      "park_needs": "",
+      "park_clear_by": "",
+      "park_resume": "",
+      "park_expires": null,
+      "park_set_at": null,
+      "parent_agent_id": null,
+      "subagent": false,
+      "adapter_available": false,
+      "name": "lease-hold@abcdef123456 00000000",
+      "name_source": "",
+      "credential": "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     },
+     "states": [
+      {
+       "action": "register",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": null,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "lease",
+      {
+       "name": "fixture",
+       "ttl": 30,
+       "expect": 120,
+       "purpose": "hold proof"
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "name": "fixture",
+      "state": "held",
+      "fence": 1,
+      "expires_at": 1700000030.0,
+      "expected_end": 1700000120.0,
+      "position": null,
+      "queued": 0,
+      "holder": {
+       "agent_id": "00000000000040008000000000000001",
+       "label": "lease-hold@abcdef123456",
+       "name": "lease-hold@abcdef123456 00000000",
+       "principal": "alice",
+       "purpose": "hold proof",
+       "acquired_at": 1700000000.0,
+       "expires_at": 1700000030.0,
+       "expected_end": 1700000120.0
+      }
+     },
+     "states": [
+      {
+       "action": "lease",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 120, \"purpose\": \"hold proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "agents",
+      {
+       "limit": 50
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "agents": [],
+      "truncated": false,
+      "idle_omitted": 0,
+      "leases": [
+       {
+        "name": "fixture",
+        "holder": {
+         "agent_id": "00000000000040008000000000000001",
+         "label": "lease-hold@abcdef123456",
+         "name": "lease-hold@abcdef123456 00000000",
+         "principal": "alice",
+         "purpose": "hold proof",
+         "acquired_at": 1700000000.0,
+         "expires_at": 1700000030.0,
+         "expected_end": 1700000120.0
+        },
+        "fence": 1,
+        "expires_at": 1700000030.0,
+        "expected_end": 1700000120.0,
+        "stale": false,
+        "queued": 0,
+        "queue": []
+       }
+      ],
+      "leases_truncated": false
+     },
+     "states": [
+      {
+       "action": "agents",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 120, \"purpose\": \"hold proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "lease",
+      {
+       "name": "fixture",
+       "ttl": 30,
+       "expect": 120,
+       "purpose": "hold proof"
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "name": "fixture",
+      "state": "held",
+      "fence": 1,
+      "expires_at": 1700000030.0,
+      "expected_end": 1700000120.0,
+      "position": null,
+      "queued": 0,
+      "holder": {
+       "agent_id": "00000000000040008000000000000001",
+       "label": "lease-hold@abcdef123456",
+       "name": "lease-hold@abcdef123456 00000000",
+       "principal": "alice",
+       "purpose": "hold proof",
+       "acquired_at": 1700000000.0,
+       "expires_at": 1700000030.0,
+       "expected_end": 1700000120.0
+      }
+     },
+     "states": [
+      {
+       "action": "lease",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": 120, \"purpose\": \"hold proof\", \"freed_at\": null, \"expires_at\": 1700000030, \"acquired_at\": 1700000000, \"expected_end\": 1700000120, \"holder_agent_id\": \"00000000000040008000000000000001\", \"holder_principal\": \"alice\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "release",
+      {
+       "name": "fixture"
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "name": "fixture",
+      "released": true,
+      "dequeued": false
+     },
+     "states": [
+      {
+       "action": "release",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"5a21f6b02e8ad31d422691a779b6c54b331126a7cd7f1ded2bf6e6cfea261231\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": null, \"purpose\": \"\", \"freed_at\": 1700000000, \"expires_at\": null, \"acquired_at\": null, \"expected_end\": null, \"holder_agent_id\": null, \"holder_principal\": \"\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    },
+    {
+     "key": [
+      "agents",
+      {
+       "limit": 50
+      },
+      "00000000000040008000000000000001",
+      "BCiW3BlmuKYhTlODq6W4uTHPoEnReq-jfrinfIWbldo"
+     ],
+     "status": 200,
+     "reply": {
+      "agents": [],
+      "truncated": false,
+      "idle_omitted": 0,
+      "leases": [],
+      "leases_truncated": false
+     },
+     "states": [
+      {
+       "action": "agents",
+       "state": {
+        "tables": {
+         "coordination_agents": [
+          "{\"name\": \"\", \"task\": \"fixture: pid <PID>\", \"label\": \"lease-hold@abcdef123456\", \"status\": \"lease:fixture pid <PID> cwd\", \"episode\": \"\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"children\": [], \"lifecycle\": \"registered\", \"principal\": \"alice\", \"created_at\": 1700000000, \"generation\": 0, \"park_needs\": \"\", \"lease_until\": null, \"name_set_at\": null, \"name_source\": \"\", \"park_reason\": null, \"park_resume\": \"\", \"park_set_at\": null, \"capabilities\": {\"resumable\": false}, \"harness_name\": \"\", \"park_expires\": null, \"wake_enabled\": false, \"attachment_id\": null, \"last_activity\": 1700000000, \"next_sequence\": 0, \"parent_thread\": null, \"park_clear_by\": \"\", \"credential_hash\": \"fe8190e5bf8e495baab2542c3f40ba5627e9019db9e03009fff60bfee7e8c953\", \"parent_agent_id\": null, \"status_expires_at\": null}"
+         ],
+         "coordination_events": [
+          "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"register\", \"payload\": \"{\\\"capabilities\\\":{\\\"resumable\\\":false},\\\"episode\\\":\\\"\\\",\\\"label\\\":\\\"lease-hold@abcdef123456\\\",\\\"project\\\":\\\"fixture\\\",\\\"status\\\":\\\"lease:fixture pid <PID> cwd\\\",\\\"task\\\":\\\"fixture: pid <PID>\\\",\\\"wake_enabled\\\":false}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_acquire\", \"payload\": \"{\\\"expect\\\":120,\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\",\\\"purpose\\\":\\\"hold proof\\\",\\\"ttl\\\":30}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"f1703d4290a9af92b225b9526aaa1d31b7c7f81aabdb117f1b123334ddceb0a6\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}",
+          "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"5a21f6b02e8ad31d422691a779b6c54b331126a7cd7f1ded2bf6e6cfea261231\", \"task\": \"fixture: pid <PID>\", \"actor\": \"agent\", \"event\": \"lease_release\", \"payload\": \"{\\\"fence\\\":1,\\\"name\\\":\\\"fixture\\\"}\", \"project\": \"fixture\", \"agent_id\": \"00000000000040008000000000000001\", \"body_salt\": null, \"prev_hash\": \"395b09a5f1f12bef5777129b54ead4065e55432df1f0586ae219d2bce11e51ec\", \"principal\": \"alice\", \"created_at\": 1700000000, \"message_id\": null, \"recipient_agent_id\": null}"
+         ],
+         "coordination_lease_waiters": [],
+         "coordination_leases": [
+          "{\"name\": \"fixture\", \"fence\": 1, \"expect\": null, \"purpose\": \"\", \"freed_at\": 1700000000, \"expires_at\": null, \"acquired_at\": null, \"expected_end\": null, \"holder_agent_id\": null, \"holder_principal\": \"\"}"
+         ],
+         "coordination_messages": [],
+         "coordination_wakes": []
+        },
+        "sequences": {
+         "coordination_lease_fence": 1,
+         "coordination_lease_waiters_ticket_seq": null,
+         "coordination_wakes_wake_id_seq": null
+        }
+       }
+      }
+     ]
+    }
+   ]
+  ]
+ }
+}
