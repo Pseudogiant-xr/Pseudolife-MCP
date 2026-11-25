@@ -467,6 +467,12 @@ def test_an_accepted_rust_host_asking_for_python_is_told_the_switch_needs_the_to
         # The true cause is the flag, not missing pip tooling.
         assert ("cannot mint one (-NoToken" if ps else "cannot mint one (--no-token") in output, output
         assert "install pipx, then rerun" not in output, output
+        # Under --no-token a token in ops/.env alone does not pass stage 4b
+        # (RUST_BEARER), so each fix names dropping the flag.
+        assert ("rerun with -NoToken:$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun "
+                "with -NoToken:$false" if ps else
+                "rerun with --transport shim and without --no-token, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and "
+                "rerun without --no-token") in output, output
     else:
         assert "cannot mint one (no pipx or pip-capable Python" in output, output
     switched = flag == "python"

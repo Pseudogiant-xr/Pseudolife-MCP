@@ -216,6 +216,12 @@ def test_an_accepted_rust_host_asking_for_python_is_told_the_switch_needs_the_to
     assert (_switch_rerun(script) in output) == switched, output
     # The native client is the shim here: no pip tooling is named.
     assert "pipx" not in output and "pip-capable" not in output, output
+    # Under --no-token a token in ops/.env alone does not pass stage 4b
+    # (RUST_BEARER), so each fix names dropping the flag.
+    assert ("rerun with -NoToken:$false -Transport shim, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun "
+            "with -NoToken:$false" if ps else
+            "rerun with --transport shim and without --no-token, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and "
+            "rerun without --no-token") in output, output
     assert [call for call in shell.logged() if "prepare" in call] == []
 
 

@@ -33,7 +33,8 @@ const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--cl
 /// a step whose absence the installers treat as today's behaviour:
 /// `codex-token-copy` and `connect-report codex-only` joined level 5 before any
 /// release answered 5, and an installer that gets no answer from them applies
-/// connect's plan as before.
+/// connect's plan as before; so did `engine foreign`, whose usage error (exit 2)
+/// the native installers read as no answer, leaving the refusal to `prepare`.
 pub const INSTALLER_PROTOCOL: u32 = 5;
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 

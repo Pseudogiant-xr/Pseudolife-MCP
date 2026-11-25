@@ -1558,7 +1558,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         if [ "$INSTALLED_ENGINE" = rust-unaccepted ]; then engine_helper foreign --repo "$repo" || exit 1; fi
         engine_switch_way
         if [ -z "$RUST_BEARER" ]; then
-            echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http$python_way.$switch_way Nothing was pulled or started." >&2
+            echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): rerun with --transport shim and without --no-token, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun without --no-token$python_way.$switch_way Nothing was pulled or started." >&2
         else
             echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun$python_way.$switch_way Nothing was pulled or started." >&2
         fi
