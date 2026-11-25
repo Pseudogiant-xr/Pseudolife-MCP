@@ -14,7 +14,7 @@ import pytest
 
 from tests import native_client_stub as native_stub
 
-from pseudolife_memory.credentials import CredentialProvider
+from tests.client_credentials_fixture import read_token
 from tests.installer_fragments import _bash_fixture_path, _bash_variants, _between, _marker_block
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
@@ -158,7 +158,7 @@ def test_claude_and_gemini_get_owner_only_token_files(bash, tmp_path):
     assert "fixture-singular" not in proc.stdout + proc.stderr
     for principal in ("claude-code", "gemini"):
         target = shell.home / ".pseudolife-mcp" / f"{principal}.token"
-        assert CredentialProvider(path=target).snapshot().token == "fixture-singular"
+        assert read_token(target) == "fixture-singular"
     assert re.search(r"(?m)^CLAUDE=.*/\.pseudolife-mcp/claude-code\.token$", proc.stdout)
     assert re.search(r"(?m)^GEMINI=.*/\.pseudolife-mcp/gemini\.token$", proc.stdout)
 

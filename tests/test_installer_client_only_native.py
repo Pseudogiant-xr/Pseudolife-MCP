@@ -22,7 +22,7 @@ from rust.ci import release_version
 from tests import installer_sandbox
 from tests import native_client_stub as native_stub
 
-from pseudolife_memory.credentials import CredentialProvider, _write_token_file
+from tests.client_credentials_fixture import read_token, write_token_file
 from tests.installer_fragments import _bash_fixture_path, _bash_variants, _between
 from tests.user_path_guard import user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
@@ -191,7 +191,7 @@ SHIM_LOOPBACK_FORMS = ["http://127.999.1.1:8765", "http://127.0.0.01:8765",
 @pytest.mark.parametrize("url", SHIM_LOOPBACK_FORMS)
 @BASH
 def test_loopback_is_the_shims_own_answer(bash, tmp_path, url):
-    from pseudolife_memory.daemon_url import _is_loopback_url
+    from tests.client_credentials_fixture import _is_loopback_url
     proc = _mode(_Shell(bash, tmp_path), daemon_url=url)
     assert proc.returncode == 0, proc.stderr
     expected = "" if _is_loopback_url(url) else "1"
@@ -379,7 +379,7 @@ def _preflight(shell: _Shell, *, daemon_url: str = REMOTE, token_file: str = "",
 def _token(shell: _Shell) -> Path:
     path = shell.tmp / "keys" / "remote.token"
     path.parent.mkdir()
-    _write_token_file(path, FIXTURE_TOKEN)
+    write_token_file(path, FIXTURE_TOKEN)
     return path
 
 
@@ -466,7 +466,7 @@ def test_read_token_creates_an_owner_only_token_file_from_stdin(bash, tmp_path):
     proc = _preflight(shell, token_file=shell.path(target), read_token="1",
                       feed=FIXTURE_TOKEN)
     assert proc.returncode == 0, proc.stderr
-    assert CredentialProvider(path=target).snapshot().token == FIXTURE_TOKEN
+    assert read_token(target) == FIXTURE_TOKEN
     assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
     assert any(call.startswith("curl|") for call in shell.logged())
 
@@ -729,7 +729,7 @@ def _is_code_sh(shell: _Shell, values: list[str], helper_answers: bool = True) -
 def test_a_pairing_code_is_recognised_exactly_as_pair_reads_one(bash, tmp_path, fallback):
     """The shape is the shim's own rule (principals.normalize_pairing_code),
     and the shell rule used when that cannot be asked gives the same answer."""
-    from pseudolife_memory.principals import normalize_pairing_code
+    from tests.client_credentials_fixture import normalize_pairing_code
     shell = _Shell(bash, tmp_path)
     values = CODE_FORMS + NOT_CODES
     assert _is_code_sh(shell, values, helper_answers=not fallback) == [
@@ -759,7 +759,7 @@ def test_a_pasted_token_is_still_written_as_the_token(bash, tmp_path, token):
     proc = _preflight(shell, token_file=shell.path(target), read_token="1", feed=token)
     assert proc.returncode == 0, proc.stderr
     assert "PAIRING=\n" in proc.stdout
-    assert CredentialProvider(path=target).snapshot().token == token
+    assert read_token(target) == token
 
 
 @pytest.mark.parametrize("clients,name", [("claude", "claude-code"), ("codex", "codex"),
@@ -823,8 +823,7 @@ def test_a_pairing_code_is_redeemed_on_stdin_and_then_used_as_the_token_file(bas
         f"shim|pair {REMOTE} --read-code --token-file {target} --json",
         f"shim|connect {REMOTE} --token-file {target} --client codex --dry-run --json"]
     assert _pair_stdin(shell) == PAIRING_CODE + "\n"
-    assert CredentialProvider(path=shell.home / ".pseudolife-mcp" / "codex.token"
-                              ).snapshot().token == PAIRED_TOKEN
+    assert read_token(shell.home / ".pseudolife-mcp" / "codex.token") == PAIRED_TOKEN
     # The code is forgotten once pair has it.
     assert f"PAIRED={target}|\n" in proc.stdout
     assert "fixture-laptop" in proc.stdout
@@ -843,7 +842,7 @@ def test_a_pasted_pairing_code_reaches_pair_as_it_was_typed(bash, tmp_path):
     assert _shim_calls(shell) == [
         f"shim|pair {REMOTE} --read-code --token-file {shell.path(target)} --json"]
     assert _pair_stdin(shell).strip() == "oil2-mx4p-9tzc"
-    assert CredentialProvider(path=target).snapshot().token == PAIRED_TOKEN
+    assert read_token(target) == PAIRED_TOKEN
     _assert_code_unseen(shell, proc, "oil2-mx4p-9tzc")
 
 
