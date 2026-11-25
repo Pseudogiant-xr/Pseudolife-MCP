@@ -818,6 +818,28 @@
         {
           "argv": [
             "engine",
+            "foreign",
+            "--repo",
+            "{HOME}/repo"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Cannot reach Docker; start Docker and rerun the installer. Nothing was started.\n"
+        },
+        {
+          "argv": [
+            "engine",
+            "foreign"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "foreign needs --repo.\n"
+        },
+        {
+          "argv": [
+            "engine",
             "prepare",
             "--repo",
             "{HOME}/repo",

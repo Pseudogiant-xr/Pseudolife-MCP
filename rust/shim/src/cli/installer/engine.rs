@@ -17,6 +17,9 @@
 //!   ready at its release with its counters imported; a rerun on an accepted
 //!   host changes nothing.
 //! - `choose --engine python` records an explicit Python choice.
+//! - `foreign --repo R` exits 1 with `prepare`'s refusal when the container
+//!   is another release's unfinished Rust daemon, and otherwise prints
+//!   nothing; it pulls and writes nothing.
 //!
 //! Progress goes to stderr; stdout carries only the machine-readable answer.
 use crate::cli::update::engine::{
@@ -44,7 +47,7 @@ const NO_DOCKER: &str =
     "Cannot reach Docker; start Docker and rerun the installer. Nothing was started.";
 const BAD_OVERLAY: &str =
     "Cannot read the installer's engine overlay; rerun the installer. Nothing was started.";
-const USAGE: &str = "usage: pseudolife-mcp installer engine {detect,prepare,accept,choose} [--repo REPO] [--engine {python,rust,rust-checkout}] [--default]";
+const USAGE: &str = "usage: pseudolife-mcp installer engine {detect,prepare,accept,choose,foreign} [--repo REPO] [--engine {python,rust,rust-checkout}] [--default]";
 
 /// A refusal; `unavailable` marks Rust unavailable for this checkout (no
 /// release version, image or models), on which alone a defaulted engine
@@ -454,6 +457,19 @@ fn refuse_foreign_unaccepted(found: Option<&Map<String, Value>>, version: &str) 
     Ok(())
 }
 
+/// The refusal `prepare` gives another release's unfinished Rust container,
+/// whichever engine is asked for, read without the ownership repair, a pull
+/// or a write: stage 4b states it before a bearer refusal whose fixes would
+/// only lead here.
+fn foreign(repo: &Path) -> Result<()> {
+    if let Some(found) = labels()?
+        && *label(&found, ENGINE_LABEL) == "rust"
+    {
+        refuse_foreign_unaccepted(Some(&found), &checkout_version(repo)?)?;
+    }
+    Ok(())
+}
+
 /// The part of an unavailability refusal before its advice, for the
 /// fallback line.
 fn cause(message: &str) -> &str {
@@ -480,11 +496,7 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
         ownership()?;
     }
     if engine == "python" {
-        if let Some(found) = labels()?
-            && *label(&found, ENGINE_LABEL) == "rust"
-        {
-            refuse_foreign_unaccepted(Some(&found), &checkout_version(repo)?)?;
-        }
+        foreign(repo)?;
         return Ok(vec![]);
     }
     if engine == "rust-checkout" {
@@ -802,7 +814,7 @@ fn parse(args: &[String]) -> std::result::Result<Arguments, String> {
             "--default" => parsed.default = true,
             action
                 if parsed.action.is_empty()
-                    && ["detect", "prepare", "accept", "choose"].contains(&action) =>
+                    && ["detect", "prepare", "accept", "choose", "foreign"].contains(&action) =>
             {
                 parsed.action = action.to_owned();
             }
@@ -810,7 +822,7 @@ fn parse(args: &[String]) -> std::result::Result<Arguments, String> {
         }
     }
     if parsed.action.is_empty() {
-        return Err("an action is required: detect, prepare, accept or choose".into());
+        return Err("an action is required: detect, prepare, accept, choose or foreign".into());
     }
     Ok(parsed)
 }
@@ -842,6 +854,10 @@ pub(crate) fn run(args: &[String]) -> u8 {
             (Some(repo), Some(engine)) => prepare(repo, engine, arguments.default)
                 .map(|paths| paths.iter().map(|p| p.display().to_string()).collect()),
             _ => Err(refusal("prepare needs --repo and --engine.")),
+        },
+        "foreign" => match &arguments.repo {
+            Some(repo) => foreign(repo).map(|()| vec![]),
+            None => Err(refusal("foreign needs --repo.")),
         },
         "choose" if arguments.engine.as_deref() != Some("python") => {
             Err(refusal("choose records only --engine python."))
@@ -1194,6 +1210,11 @@ mod tests {
             ("prepare", Some("rust"), true)
         );
         assert!(parse(&args(&["prepare", "--engine", "lite"])).is_err());
+        let parsed = parse(&args(&["foreign", "--repo", "r"])).unwrap();
+        assert_eq!(
+            (parsed.action.as_str(), parsed.repo.as_deref()),
+            ("foreign", Some(Path::new("r")))
+        );
         assert!(parse(&args(&["install"])).is_err());
         assert!(parse(&args(&[])).is_err());
     }

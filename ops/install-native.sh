@@ -1989,6 +1989,21 @@ fi
 # <<< volumes <<<
 
 # ── 4b. daemon engine ──────────────────────────────────────────────────────
+# >>> bearer refusal ways >>>
+# How the bearer refusals (stage 4b and stage 5b) end. An accepted Rust
+# install keeps its engine (--engine python only schedules the switch), so a
+# Python rerun is offered only without one; where --engine python scheduled
+# the switch, the refusal says it needs the token too: pseudolife-mcp update
+# makes it, and reads the Rust daemon with its bearer first.
+engine_switch_way() {
+    python_way="; or rerun with --engine python"
+    switch_way=""
+    [ "${INSTALLED_ENGINE:-}" = rust ] || return 0
+    python_way=""
+    [ "${SWITCH_ENGINE:-}" = python ] || return 0
+    switch_way=" Switching to the Python daemon needs that token too, because pseudolife-mcp update makes the switch and reads the Rust daemon with it first: once the token is set or can be minted, rerun with --engine python and the install switches this host after it."
+}
+# <<< bearer refusal ways <<<
 # >>> daemon engine >>>
 # The bearer stage 5b will have: one already set, or one it mints for the
 # shim transport. Rust is verified with an authenticated read.
@@ -2035,11 +2050,14 @@ if [ -z "$CLIENT_ONLY" ]; then
     esac
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if [ "$COMPOSE_ENGINE" = rust ] && [ -z "${ENGINE_DEFAULTED:-}" ] && ! rust_token_expected; then
-        # An accepted Rust install keeps its engine (--engine python only
-        # schedules the switch), so a Python rerun is offered only without one.
-        python_way="; or rerun with --engine python"
-        [ "$INSTALLED_ENGINE" = rust ] && python_way=""
-        echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http$python_way. Nothing was pulled or started." >&2
+        # Another release's unfinished Rust container is refused by prepare
+        # whatever the token, so its refusal comes first: no fix below passes it.
+        # A client without the step (a usage error, exit 2) leaves it to prepare.
+        if [ "$INSTALLED_ENGINE" = rust-unaccepted ]; then
+            engine_helper foreign --repo "$repo" || { [ $? = 2 ] || exit 1; }
+        fi
+        engine_switch_way
+        echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http$python_way.$switch_way Nothing was pulled or started." >&2
         exit 2
     fi
     default_args=()
@@ -2208,10 +2226,9 @@ if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN
         engine_files=()
         step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
     else
-        # As at stage 4b: no Python rerun where an accepted Rust install keeps its engine.
-        python_way="; or rerun with --engine python"
-        [ "${INSTALLED_ENGINE:-}" = rust ] && python_way=""
-        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http so the installer mints one$python_way. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
+        # As at stage 4b (the bearer refusal ways).
+        engine_switch_way
+        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without --no-token and --transport http so the installer mints one$python_way.$switch_way The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
         exit 2
     fi
 fi
