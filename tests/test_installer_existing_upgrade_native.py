@@ -870,6 +870,22 @@ def test_the_user_path_guard_takes_back_only_the_tests_own_entries(monkeypatch, 
     assert announced == [1]
 
 
+def test_the_user_path_guards_default_announcement_needs_no_package(monkeypatch):
+    # Without a broadcast argument the guard announces the restore with its
+    # own copy of the WM_SETTINGCHANGE broadcast, never the frozen package's.
+    import sys
+    from tests import user_path_guard
+
+    fake, announced, _ = _guarded(monkeypatch, BEFORE)
+    for name in ("pseudolife_memory", "pseudolife_memory.runtimes"):
+        monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.setattr(user_path_guard, "_broadcast_environment_change", lambda: announced.append("own"))
+    with pytest.raises(AssertionError, match="put .* on the real user PATH; removed them again"):
+        with user_path_unchanged(HOME):
+            fake.values["Path"] = (HOME + "\shim\bin;" + BEFORE[0], 2)
+    assert fake.values["Path"] == BEFORE and announced == ["own"]
+
+
 def test_the_user_path_guard_leaves_someone_elses_change_alone(monkeypatch):
     # The conductor's review of d4daf4358: on a shared PC another session or
     # a real installer may change the user PATH meanwhile. That is not
