@@ -20,7 +20,7 @@ import zipfile
 
 from .hosted import (
     CODEX_HOME_NOTE, DAEMON_URL, DAEMONS, REDACTOR, TOKEN_FILE, Failed, Peer, Profile, Result, Unavailable,
-    CleanupFailed, codex_probe, command, download, explain, read_tail,
+    CleanupFailed, client_engine, codex_probe, command, download, explain, installer, read_tail,
 )
 
 
@@ -341,10 +341,11 @@ def source_peer(build, release, repo, path, scratch, budget):
             # From here the published installer and client are under test.
             profile = Profile(scratch / "owner", path)
             budget.note("owner Codex home", fixture_note=CODEX_HOME_NOTE)
-            label = "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh <owner client-only>"
+            label = f"{installer()} <owner client-only>"
             installed = install(repo, profile, ["--yes", "--client-only", "--client", "codex",
                                 "--daemon-url", url, "--token-file", str(token_file)], timeout=300)
-            budget.note(label, exit_code=installed.code, seconds=installed.seconds)
+            budget.note(label, exit_code=installed.code, seconds=installed.seconds,
+                        client_engine=client_engine(installed, profile, release))
             if installed.code != 0 or not (profile.codex / "config.toml").is_file():
                 failure = explain(label, installed)
                 budget.steps[-1]["failure"] = failure

@@ -18,11 +18,11 @@ from threading import Event, Thread
 from time import monotonic, sleep
 from traceback import extract_tb
 
-from . import matrix
+from . import hosted, matrix
 from .hosted import (
-    CLIENT, DAEMON_URL, DAEMONS, INSTALL, REDACTOR, STOCK_CODEX_NOTE, TOKEN_FILE, Failed, Peer, Profile, Receipt,
-    Result, Unavailable, codex_probe, command, explain, get, native_path, prepare_codex, published_release,
-    read_tail, registered_session, require, session, sha256, write_json,
+    CLIENT, DAEMON_URL, DAEMONS, REDACTOR, STOCK_CODEX_NOTE, TOKEN_FILE, Failed, Peer, Profile, Receipt,
+    Result, Unavailable, client_engine, codex_probe, command, engine_env, explain, get, installer, native_path,
+    prepare_codex, published_release, read_tail, registered_session, require, session, sha256, write_json,
 )
 
 
@@ -60,6 +60,8 @@ BASELINE_MESSAGES = (
     # the default's hand-back to the Python client.
     (b"Native client install (the default client;", "Native client install selected."),
     (b"the native client cannot serve this machine", "The installer fell back to the Python client. <details redacted>"),
+    (b"records an earlier PSEUDOLIFE_SHIM_ENGINE=python install", "The installer kept a recorded Python client choice."),
+    (b"Python client chosen: recorded", "The installer recorded a Python client choice."),
     (b"Unattended install:", "Unattended install: no prompts; documented defaults apply."),
     (b"nothing was deployed", "Nothing was deployed. <details redacted>"),
     (b"rollback", "Rollback: <details redacted>"),
@@ -113,14 +115,25 @@ LEGACY_PYTHON = {"PIPX_DEFAULT_PYTHON": sys.executable}
 LEGACY_PYTHON_NOTE = "The legacy Python clients were installed with the job's Python 3.12."
 
 
-def install(repo, profile, flags, *, overrides=None, engine="native", timeout=300):
-    env = profile.env | {"PSEUDOLIFE_SHIM_ENGINE": engine} | (overrides or {})
-    if engine == "native":
+def installer_env(profile, overrides=None, engine=None):
+    """The installer's environment for `engine`, the run's selected engine when None.
+
+    The native and default engines run with Python and pip off the PATH, so
+    a default that needs Python cannot pass; python adds the host's PATH.
+    """
+    engine = hosted.known_engine(engine)
+    env = engine_env(profile.env | (overrides or {}), engine)
+    if engine in ("native", "default"):
         require(all(shutil.which(name, path=env["PATH"]) is None
                     for name in ("python", "python3", "python3.12", "pip", "pip3", "py")),
                 "Python and pip were absent from the native installer PATH.")
     else:
         env["PATH"] += os.pathsep + os.environ["PATH"]
+    return env
+
+
+def install(repo, profile, flags, *, overrides=None, engine=None, timeout=300):
+    env = installer_env(profile, overrides, engine)
     return command(["bash", "ops/install.sh", *flags], cwd=repo, env=env, timeout=timeout)
 
 
@@ -321,7 +334,7 @@ def baseline(release, path, scratch, output):
                                                              or "default Rust daemon is unavailable" in line)]
         receipt = {
             "platform": "linux-arm64",
-            "command": f"{INSTALL} --yes --client codex --extractor openai-only --firewall-rule no",
+            "command": f"{installer()} --yes --client codex --extractor openai-only --firewall-rule no",
             "exit_code": result.code, "seconds": result.seconds,
             "last_lines_sanitized": installer_tail(result.output),
             "installer_engine_lines": selected_engine,
@@ -339,6 +352,7 @@ def baseline(release, path, scratch, output):
             "created_volumes": len(added["volume"]),
             "wrote_deployment_settings": (repo / "ops" / ".env").is_file(),
             "installed_native_runtime": profile.native_marker(release),
+            "client_engine": client_engine(result, profile, release),
             "codex": {
                 "configured_location": "CODEX_HOME/config.toml",
                 "wrote_configuration": (profile.codex / "config.toml").is_file(),
@@ -407,8 +421,8 @@ def stock_peer(row, release, path, scratch):
     repo = release.checkout(scratch / "peer-checkout")
     profile = Profile(scratch / "peer-home", path, codex_started=False)
     legacy = row.scenario == "upgrade-and-rollback"
-    installer_engine = "python" if legacy else "native"
-    installer_label = "bash ops/install.sh <stock v0.24.0 Docker install>" if legacy else f"{INSTALL} <stock Docker>"
+    installer_engine = "python" if legacy else None
+    installer_label = "bash ops/install.sh <stock v0.24.0 Docker install>" if legacy else f"{installer()} <stock Docker>"
     try:
         result = install(repo, profile, DOCKER_FLAGS, engine=installer_engine, timeout=600)
         register_settings_secrets(repo)
@@ -436,7 +450,8 @@ def stock_peer(row, release, path, scratch):
             require(not row.cleanup_failed, "The disposable environment's Docker objects and user services were removed.")
 
 
-def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=False):
+def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=False, release=None):
+    """Pair the candidate client; with `release`, record what the install left active."""
     start = monotonic()
     with session(peer.owner_executable, [], peer.owner_env, peer.checkout) as mcp:
         mcp.tool("memory_agents", action="update", project="hosted-acceptance", status="fixture")
@@ -461,18 +476,20 @@ def paired_install(receipt, repo, profile, peer, *, template=None, try_schedule=
     if try_schedule:
         flags.extend(["--client-update-schedule", "yes"])
     result = peer.during(receipt, lambda: live_install(peer, repo, profile, flags))
-    receipt.observe(f"{INSTALL} <client-only pairing>", result, result.code == 0,
+    if release is not None and receipt.client_engine is None:
+        receipt.client_engine = client_engine(result, profile, release)
+    receipt.observe(f"{installer()} <client-only pairing>", result, result.code == 0,
                     "The published client-only installer completed.", template=template)
-    receipt.steps.append({"command": f"{INSTALL} <codex-hook-verification>", "exit_code": result.code,
+    receipt.steps.append({"command": f"{installer()} <codex-hook-verification>", "exit_code": result.code,
                           "assertion": "The installer reported trusted and verified Codex hooks.",
                           "observed": b"Memory hooks         trusted and verified" in result.output})
     if try_schedule:
-        receipt.steps.append({"command": f"{INSTALL} --client-update-schedule yes", "exit_code": result.code,
+        receipt.steps.append({"command": f"{installer()} --client-update-schedule yes", "exit_code": result.code,
                               "assertion": "The installer reported the documented macOS scheduling limit.",
                               "observed": b"the daily job needs systemd (Linux) or Task Scheduler (Windows)" in result.output})
 
 
-def live_install(peer, repo, profile, flags, *, overrides=None, engine="native"):
+def live_install(peer, repo, profile, flags, *, overrides=None, engine=None):
     return install(repo, profile, CLIENT_FLAGS + flags, overrides=overrides, engine=engine)
 
 
@@ -495,7 +512,7 @@ def clean_install(receipt, release, repo, profile, peer, scratch):
     if peer.kind == DAEMONS[1]:
         first_session(receipt, profile, repo, session_template)
         return
-    paired_install(receipt, repo, profile, peer, template=first)
+    paired_install(receipt, repo, profile, peer, template=first, release=release)
     require(profile.native_marker(release), "The installed runtime matched the candidate archive.")
     first_session(receipt, profile, repo, session_template)
 
@@ -612,8 +629,10 @@ def upgrade(receipt, release, repo, path, peer, scratch):
             raise Unavailable(f"The {tag} Python client could not be installed on this runner, so the upgrade "
                               "had no starting client.", explain("Published legacy installer <client-only>", result))
         first_session(receipt, profile, repo)
-        python_env = profile.env | {"PATH": profile.env["PATH"] + os.pathsep + os.environ["PATH"],
-                                    "PSEUDOLIFE_SHIM_ENGINE": "native"}
+        # The hand-off is the documented opt-in (`<native-opt-in>`), so it
+        # stays an explicit native request whatever engine the run selected.
+        python_env = engine_env(profile.env | {"PATH": profile.env["PATH"] + os.pathsep + os.environ["PATH"]},
+                                "native")
         result = peer.during(receipt, lambda: command(
             [profile.launcher(), "update", "--clients-only", "--tag", release.version],
             env=python_env | profile.registration().get("env", {}), cwd=repo, timeout=300))
@@ -634,7 +653,7 @@ def upgrade(receipt, release, repo, path, peer, scratch):
         changes = setting_changes(config_before, config_after)
         kept = result.code == 0 and first_rerun_kept(tag, before, after, changes, config_after,
                                                      config.relative_to(profile.folder), release.version)
-        receipt.observe(f"{INSTALL} <rerun>", result, kept, FIRST_RERUN_ASSERTION,
+        receipt.observe(f"{installer()} <rerun>", result, kept, FIRST_RERUN_ASSERTION,
                         template=next(templates), required=False)
         receipt.steps[-1]["changed_files"] = changed_files(before, after)
         receipt.steps[-1]["changed_codex_settings"] = sorted(changes)
@@ -647,7 +666,7 @@ def upgrade(receipt, release, repo, path, peer, scratch):
         again, config_again = profile.fingerprint(), config_text()
         quiet = (result.code == 0 and again == after and config_again == config_after
                  and UNCHANGED_LINE.search(result.output) is not None)
-        receipt.observe(f"{INSTALL} <second rerun>", result, quiet, SECOND_RERUN_ASSERTION, required=False)
+        receipt.observe(f"{installer()} <second rerun>", result, quiet, SECOND_RERUN_ASSERTION, required=False)
         receipt.steps[-1]["changed_files"] = changed_files(after, again)
         receipt.steps[-1]["changed_codex_settings"] = changed_settings(config_after, config_again)
         require(quiet, SECOND_RERUN_ASSERTION)
@@ -728,7 +747,8 @@ def stock_upgrade(receipt, release, repo, profile, peer, scratch):
     result_file = scratch / "update-result.json"
     result = peer.during(receipt, lambda: command(
         [peer.owner_executable, "update", "--tag", release.version, "--json", "--result-file", result_file],
-        env=peer.owner_env | {"PSEUDOLIFE_SHIM_ENGINE": "native"}, cwd=repo, timeout=600, stdout_only=True))
+        # The legacy updater's opt-in (`<native-opt-in>`): explicit in every run.
+        env=engine_env(peer.owner_env, "native"), cwd=repo, timeout=600, stdout_only=True))
     report = result.json()
     if not isinstance(report, dict):
         report = {}
@@ -849,7 +869,7 @@ def paused_download(release):
 def cancel_download(release, repo, profile, flags):
     start = monotonic()
     with paused_download(release) as (url, requested), tempfile.TemporaryFile() as transcript:
-        env = profile.env | {"PSEUDOLIFE_SHIM_ENGINE": "native", "PSEUDOLIFE_NATIVE_ARCHIVE_URL": url}
+        env = installer_env(profile, {"PSEUDOLIFE_NATIVE_ARCHIVE_URL": url})
         with subprocess.Popen(["bash", "ops/install.sh", *flags],
                               cwd=repo, env=env, start_new_session=True, stdin=subprocess.DEVNULL,
                               stdout=transcript, stderr=subprocess.STDOUT) as process:
@@ -906,12 +926,12 @@ def failure(receipt, release, repo, profile, peer, scratch):
             if defect == "corrupt":
                 (assets / release.archive.name).write_bytes(b"not a release archive\n")
             result = install(repo, profile, flags, overrides={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(assets)}, timeout=600)
-            receipt.observe(f"{INSTALL} <{defect}-archive>", result,
+            receipt.observe(f"{installer()} <{defect}-archive>", result,
                             result.code not in (0, 124) and diagnostic in result.output and unchanged(),
                             "The installer rejected the fault before changing the working runtime.",
                             template=templates[index])
         result, observed = cancel_download(release, repo, profile, flags)
-    receipt.observe(f"{INSTALL} <cancelled-install>", result,
+    receipt.observe(f"{installer()} <cancelled-install>", result,
                     observed and result.code != 0 and unchanged(),
                     "Interrupting the archive download preserved the working runtime.", template=templates[2])
 
@@ -927,7 +947,7 @@ def failure(receipt, release, repo, profile, peer, scratch):
                         and unchanged(),
                         "The installed lock prevented concurrent activation.", template=templates[3])
     result = install(repo, profile, flags, timeout=600)
-    receipt.observe(f"{INSTALL} <retry-options>", result,
+    receipt.observe(f"{installer()} <retry-options>", result,
                     result.code == 0 and profile.native_marker(release) and readiness(peer.url),
                     "The clean retry selected the verified runtime and left a healthy daemon.", template=templates[-1])
     if local:
@@ -1026,8 +1046,9 @@ def probe_stock(release, provenance, result, repo, profile, scratch, by_name, ou
     """The stock clean install row. The client rows use the test peer instead."""
     clean = by_name["clean-install"]
     clean.fixture_notes.append(STOCK_CODEX_NOTE)
+    clean.client_engine = client_engine(result, profile, release)
     ready = result.code == 0 and provenance["daemon_healthy"]
-    clean.observe(f"{INSTALL} <stock Docker>", result, ready,
+    clean.observe(f"{installer()} <stock Docker>", result, ready,
                   "The tagged stock installer exited 0 and left a healthy daemon.",
                   template=matrix.commands(clean.scenario, clean.platform)[0], required=False)
     if not ready:

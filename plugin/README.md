@@ -43,14 +43,17 @@ When loaded by a current Codex runtime, the plugin's lifecycle hooks use the
 same events. On Windows, Codex runs each entry's `commandWindows`, a native
 PowerShell 7 helper (`lifecycle.ps1`); Claude Code has no such field and
 runs the Bash `command` through Git Bash (see [Windows](#windows)). With the
-daemon running, rerun the installer with `--client codex` and
-`PSEUDOLIFE_SHIM_ENGINE=native` (`--codex-hook-trust yes` approves without a
-prompt) to approve the PseudoLife hook definitions and verify their lifecycle (the
+daemon running, rerun the installer with `--codex-hook-trust yes`
+(`-CodexHookTrust yes`) to approve the PseudoLife hook definitions and verify
+their lifecycle (the
 `Stop` entry is Claude Code's wake hook, on by default; in Codex it runs only
 the park gate, and the `SubagentStop` entry runs that gate for a Codex child
 thread under the child's own address, doing nothing in Claude Code; the
 `PreToolUse` entry is Claude Code's subagent board guard, which in Codex
-allows every call, and setup approves it with the rest). The same consent
+allows every call, and setup approves it with the rest). A rerun of a Docker
+install does not prompt, so without that flag it approves nothing. That rerun
+keeps its recorded clients, and `--client codex` replaces them, so name every
+client you use. The same consent
 approves the `memory_message` tool, unless you chose its approval yourself,
 so a task woken by board mail does not stall on a prompt (the plugin's hook
 definitions are unchanged by it).
