@@ -16,6 +16,9 @@ record keep the exact format ``pseudolife-mcp update`` verifies
 - ``accept`` records the installer's Rust activation once the daemon is
   ready at its release with its counters imported, as update records its
   own after its gate; a rerun on an accepted host changes nothing.
+- ``foreign --repo`` exits 1 with prepare's refusal when the container is
+  another release's unfinished Rust daemon, and otherwise prints nothing; it
+  pulls and writes nothing.
 
 Progress goes to stderr; stdout carries only the machine-readable answer.
 """
@@ -237,11 +240,19 @@ def refuse_foreign_unaccepted(found: dict | None, version: str) -> None:
                       "(docker rm -f pseudolife-mcp-daemon; the bank volumes stay) and rerun. Nothing was started.")
 
 
+def foreign(repo: Path) -> None:
+    """The refusal prepare gives another release's unfinished Rust container,
+    whichever engine is asked for, read without pulling or writing anything:
+    stage 4b states it before a bearer refusal whose fixes would only lead
+    here."""
+    found = labels()
+    if found and found.get(eng.ENGINE_LABEL) == "rust":
+        refuse_foreign_unaccepted(found, checkout_version(repo))
+
+
 def prepare(repo: Path, engine: str, default: bool = False) -> list[Path]:
     if engine == "python":
-        found = labels()
-        if found and found.get(eng.ENGINE_LABEL) == "rust":
-            refuse_foreign_unaccepted(found, checkout_version(repo))
+        foreign(repo)
         return []
     if engine == "rust-checkout":
         # A rerun would rebuild it from the checkout with none of update's
@@ -339,7 +350,7 @@ def accept(url: str = up.DEFAULT_DAEMON_URL) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("detect", "prepare", "accept", "choose"))
+    parser.add_argument("action", choices=("detect", "prepare", "accept", "choose", "foreign"))
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--engine", choices=("python", "rust", "rust-checkout"))
     parser.add_argument("--default", action="store_true", help="the engine was defaulted, not named: fall back to Python")
@@ -352,6 +363,10 @@ def main(argv=None) -> int:
                 raise Refusal("prepare needs --repo and --engine.")
             for path in prepare(args.repo, args.engine, args.default):
                 print(path)
+        elif args.action == "foreign":
+            if not args.repo:
+                raise Refusal("foreign needs --repo.")
+            foreign(args.repo)
         elif args.action == "choose":
             # An explicit engine choice that leaves no activation (--engine
             # python), recorded as update reads it, so the G2 default keeps it.

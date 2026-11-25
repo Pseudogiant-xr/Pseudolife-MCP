@@ -1492,6 +1492,21 @@ marker = os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")
 sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)' >/dev/null 2>&1
 }
 # <<< shim tooling <<<
+# >>> bearer refusal ways >>>
+# How the bearer refusals (stage 4b and stage 5b) end. An accepted Rust
+# install keeps its engine (--engine python only schedules the switch), so a
+# Python rerun is offered only without one; where --engine python scheduled
+# the switch, the refusal says what the switch needs: pseudolife-mcp update
+# makes it from the shim, and reads the Rust daemon with its bearer first.
+engine_switch_way() {
+    python_way="; or rerun with --engine python"
+    switch_way=""
+    [ "${INSTALLED_ENGINE:-}" = rust ] || return 0
+    python_way=""
+    [ "${SWITCH_ENGINE:-}" = python ] || return 0
+    switch_way=" Switching to the Python daemon needs that token too, and the shim (pipx or a pip-capable Python >= 3.10), because pseudolife-mcp update makes the switch and reads the Rust daemon with the token first: with both in place, rerun with --engine python and the install switches this host after it."
+}
+# <<< bearer refusal ways <<<
 # >>> daemon engine >>>
 # The bearer stage 5b will have: one already set, or one it can mint
 # (which needs the shim's tooling). Rust is verified with an authenticated read.
@@ -1538,11 +1553,15 @@ if [ -z "$CLIENT_ONLY" ]; then
     esac
     # Before anything is pulled: Rust with no bearer to come refuses here.
     if [ "$COMPOSE_ENGINE" = rust ] && [ -z "${ENGINE_DEFAULTED:-}" ] && ! rust_token_expected; then
-        # An accepted Rust install keeps its engine (--engine python only
-        # schedules the switch), so a Python rerun is offered only without one.
-        python_way="; or rerun with --engine python"
-        [ "$INSTALLED_ENGINE" = rust ] && python_way=""
-        echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun$python_way. Nothing was pulled or started." >&2
+        # Another release's unfinished Rust container is refused by prepare
+        # whatever the token, so its refusal comes first: no fix below passes it.
+        if [ "$INSTALLED_ENGINE" = rust-unaccepted ]; then engine_helper foreign --repo "$repo" || exit 1; fi
+        engine_switch_way
+        if [ -z "$RUST_BEARER" ]; then
+            echo "The Rust daemon needs its bearer token, and this install cannot mint one (--no-token, or --transport http, whose registrations cannot carry a token file): rerun with --transport shim and without --no-token, or set PSEUDOLIFE_MCP_TOKEN in ops/.env and rerun without --no-token$python_way.$switch_way Nothing was pulled or started." >&2
+        else
+            echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun$python_way.$switch_way Nothing was pulled or started." >&2
+        fi
         exit 2
     fi
     default_args=()
@@ -1710,10 +1729,9 @@ if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN
         engine_files=()
         step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
     else
-        # As at stage 4b: no Python rerun where an accepted Rust install keeps its engine.
-        python_way="; or rerun with --engine python"
-        [ "${INSTALLED_ENGINE:-}" = rust ] && python_way=""
-        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun$python_way. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
+        # As at stage 4b (the bearer refusal ways).
+        engine_switch_way
+        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun$python_way.$switch_way The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
         exit 2
     fi
 fi
