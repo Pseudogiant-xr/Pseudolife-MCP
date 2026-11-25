@@ -753,7 +753,7 @@ def test_the_staging_folder_is_gone_when_the_installer_returns_to_an_open_sessio
     # open after the script exits. A client-only run stages, then stops at the
     # daemon health check (exit 1, not a native refusal); the staged copy must
     # be gone while the session is still open, after each of two runs.
-    from tests.test_installer_existing_upgrade import user_path_unchanged
+    from tests.user_path_guard import user_path_unchanged
 
     repo = _whole_repo(tmp_path)
     _release(tmp_path / "release", client=INSTALL)

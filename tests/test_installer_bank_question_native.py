@@ -13,12 +13,9 @@ import pytest
 
 from pseudolife_memory.credentials import CredentialProvider
 from tests import native_client_stub as native_stub
-from tests.test_client_install_ux import _heredoc_payload, _marker_block
-from tests.test_installer_client_only import BASH, CRED_READY, FIXTURE_TOKEN, HEALTH_ON, REMOTE, _stub, _q as _sh_q, _token as _sh_token
-from tests.test_installer_client_only_native import _Shell
-from tests.test_installer_client_only_ps import _output, _q as _ps_q, _token as _ps_token
-from tests.test_installer_client_only_ps_native import _PowerShell
-from tests.test_installer_existing_upgrade import _bash_fixture_path
+from tests.installer_fragments import _bash_fixture_path
+from tests.test_installer_client_only_native import BASH, CRED_READY, FIXTURE_TOKEN, REMOTE, _Shell, _stub, _token as _sh_token
+from tests.test_installer_client_only_ps_native import _PowerShell, _output, _q as _ps_q, _token as _ps_token
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,7 +87,7 @@ def _connect_stages_sh(shell: _Shell, *, plan: str, plan_exit: int = 0, apply_ex
           "exit 0\n")
     stages = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)"
                        r"^# [^\n]*12\. health", SH)[1]
-    from tests.test_installer_existing_upgrade import _between
+    from tests.installer_fragments import _between
     proc = shell.run(
         f"env_file='{shell.path(shell.tmp / 'absent.env')}'\n"
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"

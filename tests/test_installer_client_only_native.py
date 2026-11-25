@@ -23,8 +23,8 @@ from tests import installer_sandbox
 from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
-from tests.test_client_install_ux import _heredoc_payload, _marker_block
-from tests.test_installer_existing_upgrade import _bash_fixture_path, _bash_variants, _between, user_path_unchanged
+from tests.installer_fragments import _bash_fixture_path, _bash_variants, _between
+from tests.user_path_guard import user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
