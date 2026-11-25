@@ -146,6 +146,16 @@ The capture command ran from a disposable checkout of `d81bba3a2`.
 python -X utf8 -c 'import json; from rust.cli_harness.rows import hook, mail; print(json.dumps({"capture":"one-time capture at d81bba3a2","baseline":"d81bba3a233724c008e866a66f308ed0712c5745","wait_mail_digest":mail._body(),"doorbell_records":{"regular":hook.pending_text(hook.THREAD),"maintainer":hook.pending_text(hook.THREAD,count=3,maintainer=1),"legacy":hook.pending_text(hook.THREAD,legacy=True)}},ensure_ascii=False,indent=2))'
 ```
 
+The lease_operator row seeds each operator case's bank with the rows in
+`fixtures/lease-operator.json` (`seeds`), and answers its two board-backed
+hold cases from the same file (`hold`), both captured once from the frozen
+`CoordinationStore` at `8b1be337a`. A seed's timestamps are offsets from the
+case's seed stamp, and its audit hashes are recomputed for that stamp; the
+hold answers template the watched pid as `pid <PID>`. After a schema bump
+that adds a coordination column, the seed's insert refuses and names the
+column (`harness_support/fixture_rows.py`): add it to the fixture's rows with
+the value the native writer stores, then replay the goldens.
+
 The transfer row imports `fixtures/transfer-archives/{current,tricky,ties}.zip`, which carry the schema version; after a schema bump, rebuild them from the row's own seeders with the native export, then re-record the transfer goldens: `python rust/cli_harness/regenerate_transfer_archives.py --candidate <pseudolife-stdio>` (`--check` compares with the committed archives instead of writing).
 
 ## Retired source mutants
