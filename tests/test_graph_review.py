@@ -28,10 +28,10 @@ def test_lesson_only_ids_identifies_lesson_minted_nodes():
 
 def test_duplicate_candidates_skips_lesson_only_entities():
     # 2026-07-26: lesson-topic nodes shadow the real artifact they name
-    # ("ops/update.ps1 deploy verification" vs "ops/update.ps1"). unattributed()
+    # ("bin/update.ps1 deploy verification" vs "bin/update.ps1"). unattributed()
     # already excludes them; the duplicate analyzer must apply the SAME
     # predicate or these pairs regenerate after every dismissal.
-    ents = _ents("ops/update.ps1", "ops/update.ps1 deploy verification")
+    ents = _ents("bin/update.ps1", "bin/update.ps1 deploy verification")
     assert gr.duplicate_candidates(ents) != []          # without the signal
     assert gr.duplicate_candidates(ents, lesson_ids=frozenset({2})) == []
 
@@ -96,11 +96,11 @@ def test_file_concept_detection_ignores_unrelated_and_two_file_pairs():
     # Only a file paired with ITS OWN bare stem qualifies. Two source files,
     # or a file next to an unrelated concept, keep the ordinary merge action.
     assert gr.file_concept_split("band.py", "band") == ("band.py", "band")
-    assert gr.file_concept_split("evals/dg_shim.py", "dg_shim") == (
-        "evals/dg_shim.py", "dg_shim")
+    assert gr.file_concept_split("tools/dg_shim.py", "dg_shim") == (
+        "tools/dg_shim.py", "dg_shim")
     assert gr.file_concept_split("test_shim.py", "tests/test_shim.py") is None
     assert gr.file_concept_split("band.py", "postgres") is None
-    assert gr.file_concept_split("README.md", "README") is None   # not code
+    assert gr.file_concept_split("NOTES.md", "NOTES") is None   # not code
 
 
 def test_file_concept_split_ignores_git_branches():
@@ -110,7 +110,7 @@ def test_file_concept_split_ignores_git_branches():
     # pair distinct. Stripping the branch prefix makes the stems match, so the
     # branch counterpart has to be rejected explicitly.
     assert gr.file_concept_split("terra_shim.py", "feat/terra-shim") is None
-    assert gr.file_concept_split("evals/terra_shim.py", "feat/terra-shim") is None
+    assert gr.file_concept_split("tools/terra_shim.py", "feat/terra-shim") is None
     assert gr.file_concept_split("band.py", "fix/band") is None
     assert gr.file_concept_split("band.py", "band") == ("band.py", "band")
 
@@ -146,7 +146,7 @@ def test_unattributed_excludes_lesson_only_entities():
     # 2026-07-19 hygiene follow-up: lesson-minted task/approach entities exist
     # only as prefers/avoids endpoints — the mention-scan can never attribute
     # them, so flagging them is permanent queue noise.
-    ents = _ents("deploy engine to host", "ops/update.ps1", "orphan-of-project")
+    ents = _ents("deploy engine to host", "bin/update.ps1", "orphan-of-project")
     edges = [{"src_id": 1, "relation": "prefers", "dst_id": 2,
               "origin": "action", "confidence": 0.9}]
     un = gr.unattributed(ents, {}, edges)
@@ -358,8 +358,8 @@ def test_near_duplicate_names_blocks_variant_conflicts():
 
 def test_near_duplicate_names_still_matches_same_variant():
     from pseudolife_memory.memory.graph_review import near_duplicate_names
-    existing = [{"id": 7, "canonical": "ops-update-ps1",
-                 "display": "ops/update.ps1", "aliases": []}]
+    existing = [{"id": 7, "canonical": "bin-update-ps1",
+                 "display": "bin/update.ps1", "aliases": []}]
     hits = near_duplicate_names("update.ps1", existing, min_jaccard=0.3)
     assert [h["entity_id"] for h in hits] == [7]
 

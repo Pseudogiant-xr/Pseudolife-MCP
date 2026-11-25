@@ -21,8 +21,8 @@ def test_git_branch_names_type_as_concepts():
 
 def test_branch_typing_does_not_capture_real_paths():
     # The rule must not swallow directory-prefixed FILES or plural dirs.
-    assert infer_type("docs/guide/benchmarks.md") == "file"
-    assert infer_type("evals/ladder_sweep.py") == "file"
+    assert infer_type("notes/guide/benchmarks.md") == "file"
+    assert infer_type("fixes/ladder_sweep.py") == "file"
     assert infer_type("tools/headless_export.py") == "file"
 
 
@@ -31,7 +31,7 @@ def test_branch_typing_does_not_capture_real_paths():
     ("schema 11", "concept"), ("schema v8", "concept"), ("11", "concept"),
     ("0.2.0", "concept"), ("master", "concept"),
     ("docker compose -f ops/docker-compose.yml up -d", "concept"),
-    ("config.yaml", "file"), ("ops/backup.ps1", "file"),
+    ("config.yaml", "file"), ("bin/backup.ps1", "file"),
     ("postgres", "datastore"), ("pg", "datastore"), ("chromadb", "datastore"),
     ("docker", "runtime"), ("docker-desktop", "runtime"), ("windows 11", "runtime"),
     ("pseudolife-daemon", "service"), ("daemon", "service"),
