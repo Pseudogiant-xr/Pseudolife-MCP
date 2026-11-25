@@ -526,10 +526,11 @@ artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
 
-The installer is the recommended route. It sets up a Docker bank with its
-dream extractor and wires your coding agents through the native
-`pseudolife-mcp` client, which needs no host Python (it installs the Python
-client instead, saying why, where the native one cannot serve the machine):
+The installer is the recommended route. It sets up a Docker bank with the
+dream extractor you choose (the bundled local sidecar by default) and wires
+your coding agents through the native `pseudolife-mcp` client, which needs no
+host Python (it installs the Python client instead, saying why, where the
+native one cannot serve the machine):
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -540,9 +541,15 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 What it asks and what it sets up: [Durable tier — Docker](#durable-tier--docker-recommended-for-a-long-lived-bank).
 
-To try the lite tier instead, install and register the Python package (it
-needs Python 3.10 or newer, and only the Python client runs a lite bank).
-No Docker, no database to set up, no container runtime:
+### Lite tier (pip)
+
+Everything from here to the Docker tier is about lite, the Python package:
+it needs Python 3.10 or newer, and only the Python client runs a lite bank.
+The installer refuses a machine that still holds a lite bank until it has
+moved ([Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker)). To try it
+instead, install and register the package. No Docker, no database to set
+up, no container runtime:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
@@ -664,7 +671,7 @@ trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 ## Durable tier — Docker (recommended for a long-lived bank)
 
-Everything above plus the bundled extractor, external volumes,
+Everything lite gives you, plus the bundled extractor, external volumes,
 health-checked services, and backup/rollback tooling. Requires Docker
 (with the compose v2 and buildx plugins) and
 at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI

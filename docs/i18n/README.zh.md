@@ -18,7 +18,7 @@
 
 ## 快速开始
 
-推荐使用安装程序。它会搭建一个带梦境提取器的 Docker 记忆库,并通过原生 `pseudolife-mcp` 客户端接入你的编码智能体,主机上无需安装 Python:
+推荐使用安装脚本。它会搭建一个 Docker 记忆库并配置你所选的梦境提取器,再通过原生 `pseudolife-mcp` 客户端(它本身无需主机 Python)接入你的编码智能体:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git

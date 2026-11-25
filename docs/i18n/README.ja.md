@@ -18,7 +18,7 @@
 
 ## クイックスタート
 
-推奨はインストーラーです。夢の抽出器付きの Docker バンクを構築し、ネイティブの `pseudolife-mcp` クライアントを通じてコーディングエージェントを接続します。ホストに Python は不要です:
+推奨はインストーラーです。選んだドリーム抽出器とともに Docker バンクを構築し、ネイティブの `pseudolife-mcp` クライアントを通じてコーディングエージェントを接続します。このクライアント自体はホストに Python を必要としません:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git

@@ -29,9 +29,9 @@
 
 ## 빠른 시작
 
-권장 경로는 설치 프로그램입니다. 드림 추출기를 갖춘 Docker 뱅크를 구성하고,
-네이티브 `pseudolife-mcp` 클라이언트로 코딩 에이전트를 연결합니다. 호스트에
-Python이 필요 없습니다:
+권장 경로는 설치 스크립트입니다. 선택한 드림 추출기와 함께 Docker 뱅크를
+구성하고, 네이티브 `pseudolife-mcp` 클라이언트(그 자체로는 호스트에 Python이
+필요 없음)로 코딩 에이전트를 연결합니다:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git

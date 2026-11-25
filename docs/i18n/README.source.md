@@ -36,9 +36,9 @@ What you get:
 
 ## Quickstart
 
-The installer is the recommended route. It sets up a Docker bank with its
-dream extractor and wires your coding agents through the native
-`pseudolife-mcp` client, which needs no host Python:
+The installer is the recommended route. It sets up a Docker bank with the
+dream extractor you choose and wires your coding agents through the native
+`pseudolife-mcp` client, which itself needs no host Python:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git

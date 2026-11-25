@@ -33,9 +33,10 @@ Lo que obtienes:
 
 ## Inicio rápido
 
-La ruta recomendada es el instalador. Prepara un banco en Docker con su
-extractor de sueños y conecta tus agentes de codificación mediante el
-cliente nativo `pseudolife-mcp`, que no necesita Python en el host:
+La ruta recomendada es el instalador. Prepara un banco en Docker con el
+extractor de sueños que elijas y conecta tus agentes de codificación mediante
+el cliente nativo `pseudolife-mcp`, que por sí mismo no necesita Python en el
+host:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -46,8 +47,8 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 Lo que pregunta y lo que prepara está en la sección Nivel duradero, más abajo.
 
-Para probar el nivel lite (el paquete de Python, que por tanto necesita
-Python en el host), dos comandos. Sin Docker, sin base de datos que
+Para probar en su lugar el nivel lite (el paquete de Python, que por tanto
+necesita Python en el host), dos comandos. Sin Docker, sin base de datos que
 configurar, sin runtime de contenedores:
 
 ```bash
