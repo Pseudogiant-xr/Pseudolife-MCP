@@ -12,11 +12,10 @@ import threading
 
 import pytest
 
-from tests.test_installer_existing_upgrade import user_path_unchanged
+from tests.user_path_guard import user_path_unchanged
 
 from tests import installer_sandbox
-from tests.test_installer_client_only_ps import ROOT, _output, _q
-from tests.test_installer_client_only_ps_native import _PowerShell
+from tests.test_installer_client_only_ps_native import ROOT, _PowerShell, _output
 
 INSTALL = "ops/install-native.ps1"
 

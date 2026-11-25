@@ -7,12 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_installer_existing_upgrade import user_path_unchanged
+from tests.user_path_guard import user_path_unchanged
 
-from tests.test_installer_client_only import BASH, ROOT
-from tests.test_installer_client_only_native import _Shell
-from tests.test_installer_client_only_ps import _q, _output
-from tests.test_installer_client_only_ps_native import _PowerShell
+from tests.test_installer_client_only_native import BASH, ROOT, _Shell
 from tests.test_installer_extractor_modes_native import _release_env
 
 

@@ -8,37 +8,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_fragments import _heredoc_payload, _marker_block
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def _read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
-
-
-def _marker_block(text: str, name: str) -> list[str]:
-    """Lines strictly between ``# >>> <name> >>>`` and ``# <<< <name> <<<``."""
-    lines = text.splitlines()
-    return lines[lines.index(f"# >>> {name} >>>") + 1:
-                 lines.index(f"# <<< {name} <<<")]
-
-
-def _heredoc_payload(block: list[str]) -> list[str]:
-    """The literal payload inside a marker block: a bash quoted heredoc
-    (``cat <<'TAG'`` ... ``TAG``) or a PowerShell literal here-string
-    (``@'`` ... ``'@``). Both terminators must sit at column 0."""
-    for i, line in enumerate(block):
-        stripped = line.strip()
-        if stripped.endswith("@'"):
-            term = "'@"
-        elif "<<'" in stripped:
-            term = stripped.split("<<'", 1)[1].split("'", 1)[0]
-        else:
-            continue
-        for j in range(i + 1, len(block)):
-            if block[j].rstrip() == term:
-                return block[i + 1:j]
-    raise AssertionError("no heredoc/here-string payload in marker block")
 
 
 def test_one_shot_installers_support_both_clients() -> None:

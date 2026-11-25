@@ -14,7 +14,7 @@ import subprocess
 
 import pytest
 
-from tests.test_installer_existing_upgrade import _bash_fixture_path, _bash_variants, _between
+from tests.installer_fragments import _bash_fixture_path, _bash_variants, _between
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]

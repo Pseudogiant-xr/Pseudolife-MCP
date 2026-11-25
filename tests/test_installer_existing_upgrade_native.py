@@ -6,6 +6,7 @@ test_installer_existing_upgrade.py keeps the default (Python client) installer's
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,8 @@ import pytest
 
 from tests import installer_sandbox
 from tests import native_client_stub as native_stub
-from tests.test_client_install_ux import _marker_block
+from tests.installer_fragments import _bash_fixture_path, _bash_variants, _between, _marker_block
+from tests.user_path_guard import _inside, _path_difference, user_path_unchanged
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,20 +60,6 @@ def _fixture_env(tmp_path: Path) -> dict[str, str]:
     # Every harness built on this environment runs installer code.
     installer_sandbox.require(env, tmp_path)
     return env
-
-
-def _bash_fixture_path(
-    bash: str, path: Path, env: dict[str, str],
-) -> str:
-    """Return the path spelling understood by the selected Bash runtime."""
-    if os.name != "nt":
-        return str(path)
-    converted = subprocess.run(
-        [bash, "-c", 'cygpath -u -- "$1"', "fixture", str(path)],
-        capture_output=True, check=True, text=True, timeout=5,
-        env=env,
-    )
-    return converted.stdout.strip()
 
 
 def _managed_config(client: str, no_spawn: str = "1") -> str:
@@ -134,22 +122,6 @@ def _lookalike_guard_config(client: str) -> str:
         "Arguments: --label=PSEUDOLIFE_MCP_NO_SPAWN=1\nEnvironment:\n"
         "  OTHER_PSEUDOLIFE_MCP_NO_SPAWN=1"
     )
-
-
-def _between(path: str, start: str, end: str) -> str:
-    text = (ROOT / path).read_text(encoding="utf-8")
-    return start + text.split(start, 1)[1].split(end, 1)[0]
-
-
-def _bash_variants() -> list[str]:
-    variants: list[str] = []
-    for candidate in (
-        shutil.which("bash") if os.name != "nt" else None,
-        r"C:\Program Files\Git\bin\bash.exe" if os.name == "nt" else None,
-    ):
-        if candidate and Path(candidate).is_file() and candidate not in variants:
-            variants.append(candidate)
-    return variants
 
 
 def _run_bash_existing(
@@ -837,3 +809,251 @@ def test_install_ps1_reports_a_registration_already_on_the_launcher_as_preserved
     assert "STATE=present-current\n" in output
     assert "registration preserved; it already runs the native client" in output
     assert "registration moved" not in output
+
+
+# The real user PATH guard (tests/user_path_guard.py), which the whole-installer
+# tests wrap their runs in: never the real registry, a fake winreg over a dict.
+
+class _FakeWinreg:
+    """Just enough of winreg for user_path_unchanged, over a dict."""
+
+    HKEY_CURRENT_USER = "HKCU"
+    KEY_SET_VALUE = 2
+
+    def __init__(self, path):
+        self.values = {} if path is None else {"Path": path}
+
+    @contextlib.contextmanager
+    def OpenKey(self, *args):
+        yield self
+
+    def QueryValueEx(self, key, name):
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        return self.values[name]
+
+    def SetValueEx(self, key, name, reserved, kind, value):
+        self.values[name] = (value, kind)
+
+    def DeleteValue(self, key, name):
+        del self.values[name]
+
+
+HOME = "C:\\Users\\<user>\\AppData\\Local\\Temp\\pytest-1\\env\\home"
+BEFORE = ("C:\\tools;%USERPROFILE%\\.local\\bin", 2)
+
+
+def _guarded(monkeypatch, before):
+    """A fake winreg (never the real registry), os.name nt, and a recorder
+    of the guard's broadcasts."""
+    import sys
+    fake = _FakeWinreg(before)
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+    monkeypatch.setattr(os, "name", "nt")
+    announced = []
+    return fake, announced, lambda: user_path_unchanged(HOME, broadcast=lambda: announced.append(1))
+
+
+@pytest.mark.parametrize("before", [BEFORE, None], ids=["set", "absent"])
+def test_the_user_path_guard_takes_back_only_the_tests_own_entries(monkeypatch, before):
+    fake, announced, guard = _guarded(monkeypatch, before)
+    with guard():
+        pass
+    assert announced == []
+    leaked = HOME + "\\shim\\bin"
+    with pytest.raises(AssertionError, match="put .* on the real user PATH; removed them again"):
+        with guard():
+            # What ensure_user_path writes: the directory first, the rest kept.
+            fake.values["Path"] = (f"{leaked};{before[0]}" if before else leaked, 2)
+    assert fake.values.get("Path") == before
+    # Codex review of faea97a1a: the leak was announced, so the restore is too.
+    assert announced == [1]
+
+
+def test_the_user_path_guard_leaves_someone_elses_change_alone(monkeypatch):
+    # The conductor's review of d4daf4358: on a shared PC another session or
+    # a real installer may change the user PATH meanwhile. That is not
+    # undone; the test fails naming it.
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    changed = ("C:\\someone-else\\bin;" + BEFORE[0], 2)
+    with pytest.raises(AssertionError, match="in a way this test did not cause") as raised:
+        with guard():
+            fake.values["Path"] = changed
+    assert "C:\\\\someone-else\\\\bin" in str(raised.value)
+    assert fake.values["Path"] == changed and announced == []
+
+
+@pytest.mark.parametrize("change", ["mixed", "removed", "type"])
+def test_the_user_path_guard_touches_nothing_unless_the_change_is_only_the_leak(monkeypatch, change):
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    changed = {"mixed": (HOME + "\\shim\\bin;C:\\someone-else\\bin;" + BEFORE[0], 2),
+               "removed": ("C:\\tools", 2),
+               "type": (BEFORE[0], 1)}[change]
+    with pytest.raises(AssertionError, match="in a way this test did not cause"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_the_user_path_guard_leaves_a_later_unrelated_change_alone(monkeypatch):
+    # Codex review of d356bbb9b: the reread decides too. The leak, then
+    # someone else's entry before the guard rereads: nothing is written.
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    leaked = HOME + "\\shim\\bin"
+    later = ("C:\\later\\bin;" + leaked + ";" + BEFORE[0], 2)
+    real_read = fake.QueryValueEx
+    reads = []
+
+    def query(key, name):
+        reads.append(name)
+        if len(reads) == 3:   # the reread just before any write
+            fake.values["Path"] = later
+        return real_read(key, name)
+
+    fake.QueryValueEx = query
+    with pytest.raises(AssertionError, match="in a way this test did not cause"):
+        with guard():
+            fake.values["Path"] = (leaked + ";" + BEFORE[0], 2)
+    assert fake.values["Path"] == later and announced == []
+
+
+@pytest.mark.parametrize("reread", ["deleted", "type", "removed"])
+def test_the_user_path_guard_writes_nothing_when_the_reread_moved(monkeypatch, reread):
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    leaked = HOME + "\\shim\\bin"
+    real_read = fake.QueryValueEx
+    reads = []
+    moved = {"deleted": None, "type": (leaked + ";" + BEFORE[0], 1), "removed": (leaked, 2)}[reread]
+
+    def query(key, name):
+        reads.append(name)
+        if len(reads) == 3:
+            if moved is None:
+                fake.values.pop("Path", None)
+            else:
+                fake.values["Path"] = moved
+        return real_read(key, name)
+
+    fake.QueryValueEx = query
+    with pytest.raises(AssertionError, match="in a way this test did not cause"):
+        with guard():
+            fake.values["Path"] = (leaked + ";" + BEFORE[0], 2)
+    assert fake.values.get("Path") == moved and announced == []
+
+
+def test_the_user_path_guard_keeps_an_original_duplicate(monkeypatch):
+    # Codex review of d356bbb9b: a fixture entry already on the PATH and
+    # added again; only the added copy may go.
+    leaked = HOME + "\\shim\\bin"
+    before = (leaked + ";" + BEFORE[0], 2)
+    fake, announced, guard = _guarded(monkeypatch, before)
+    with pytest.raises(AssertionError, match="removed them again"):
+        with guard():
+            fake.values["Path"] = (leaked + ";" + before[0], 2)
+    assert fake.values["Path"] == before and announced == [1]
+
+
+def test_entries_inside_the_fixture_home_are_matched_as_windows_paths(monkeypatch):
+    monkeypatch.setenv("PL_GUARD_HOME", HOME)
+    assert _inside(HOME.upper() + "/shim/bin", HOME)
+    assert _inside(HOME, HOME)
+    assert _inside('"' + HOME + '\\shim\\bin"', HOME)              # a quoted entry
+    assert _inside("%PL_GUARD_HOME%\\shim\\bin", HOME)               # Windows expands %VAR%
+    assert not _inside("$PL_GUARD_HOME\\shim\\bin", HOME)            # but not $VAR
+    assert not _inside("${PL_GUARD_HOME}\\shim\\bin", HOME)
+    assert not _inside(HOME + "-other\\bin", HOME)
+    assert not _inside("C:\\tools", HOME) and not _inside("", HOME)
+
+
+def test_the_user_path_guard_leaves_a_reorder_alone_even_beside_the_leak(monkeypatch):
+    # Codex review of 4cf7cdec2: someone reordering the old entries changes
+    # which program wins; with a fixture entry added too, nothing is written.
+    fake, announced, guard = _guarded(monkeypatch, ("C:\\a;C:\\b", 2))
+    changed = (HOME + "\\bin;C:\\b;C:\\a", 2)
+    # Codex review of 721fb8c00: the failure names the reorder, not only the addition.
+    with pytest.raises(AssertionError, match="did not cause .*in a different order"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_the_user_path_guard_names_a_type_change_beside_the_leak(monkeypatch):
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    changed = (HOME + "\\bin;" + BEFORE[0], 1)
+    with pytest.raises(AssertionError, match="did not cause .*registry type changed from 2 to 1"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_a_variable_that_expands_to_several_entries_is_not_inside_the_home(monkeypatch):
+    # Codex review of 721fb8c00: %VAR% naming a home entry and an outside one
+    # must not let the guard remove the outside one.
+    monkeypatch.setenv("PL_GUARD_TWO", HOME + "\\bin;C:\\other\\bin")
+    assert not _inside("%PL_GUARD_TWO%", HOME)
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    changed = ("%PL_GUARD_TWO%;" + BEFORE[0], 2)
+    with pytest.raises(AssertionError, match="in a way this test did not cause"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_the_user_path_guard_names_a_reorder_on_its_own(monkeypatch):
+    fake, announced, guard = _guarded(monkeypatch, ("C:\\a;C:\\b", 2))
+    with pytest.raises(AssertionError, match="in a different order"):
+        with guard():
+            fake.values["Path"] = ("C:\\b;C:\\a", 2)
+    assert fake.values["Path"] == ("C:\\b;C:\\a", 2) and announced == []
+
+
+def test_the_user_path_guard_restores_an_empty_original(monkeypatch):
+    # Codex review of 4cf7cdec2: over an empty value ensure_user_path writes
+    # just its directory, with no separator.
+    fake, announced, guard = _guarded(monkeypatch, ("", 2))
+    with pytest.raises(AssertionError, match="removed them again"):
+        with guard():
+            fake.values["Path"] = (HOME + "\\shim\\bin", 2)
+    assert fake.values["Path"] == ("", 2) and announced == [1]
+
+
+def test_a_variable_folded_back_by_normpath_is_not_inside_the_home(monkeypatch):
+    # Codex review of 38aafbdce: "home\bin;C:\.." normalises to home itself,
+    # so the separator check comes before normpath.
+    monkeypatch.setenv("PL_GUARD_FOLD", HOME + "\\bin;C:\\..")
+    assert not _inside("%PL_GUARD_FOLD%", HOME)
+
+
+@pytest.mark.parametrize(("old", "new", "names", "not_named"), [
+    # Codex review of 38aafbdce: a removed trailing duplicate is a removal, not a reorder.
+    ("C:\\a;C:\\b;C:\\a", "C:\\a;C:\\b", "removed ['C:\\\\a']", "different order"),
+    ("C:\\a;C:\\b;C:\\a", "C:\\b;C:\\a", "removed ['C:\\\\a']", "different order"),
+    ("C:\\a;C:\\b", "C:\\b;C:\\a", "different order", "removed ['C:"),
+])
+def test_the_failure_names_removals_and_moves_apart(old, new, names, not_named):
+    message = _path_difference((old, 2), (new, 2))
+    assert names in message and not_named not in message, message
+
+
+def test_the_failure_names_a_created_or_deleted_value():
+    assert "the value was created" in _path_difference(None, ("", 2))
+    assert "the value was deleted" in _path_difference(("", 2), None)
+
+
+def test_a_plain_string_path_expands_no_variable(monkeypatch):
+    # Codex review of 7519cc866: Windows expands %VAR% only in a REG_EXPAND_SZ
+    # value; in a REG_SZ one the entry is the literal text, not the home.
+    monkeypatch.setenv("PL_GUARD_HOME", HOME)
+    assert not _inside("%PL_GUARD_HOME%\\bin", HOME, expand_vars=False)
+    fake, announced, guard = _guarded(monkeypatch, ("C:\\tools", 1))
+    changed = ("%PL_GUARD_HOME%\\bin;C:\\tools", 1)
+    with pytest.raises(AssertionError, match="in a way this test did not cause"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_a_deletion_among_duplicates_is_not_reported_as_a_move():
+    # Codex review of 7519cc866: the new entries are a subsequence of the old.
+    message = _path_difference(("B;C;D;A;B;X;C;Y;D;E", 2), ("A;B;C;D;E", 2))
+    assert "different order" not in message, message

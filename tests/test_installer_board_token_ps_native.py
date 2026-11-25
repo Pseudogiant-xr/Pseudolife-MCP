@@ -17,8 +17,7 @@ import pytest
 from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider
-from tests.test_client_install_ux import _marker_block
-from tests.test_installer_existing_upgrade import _between
+from tests.installer_fragments import _between, _marker_block
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
