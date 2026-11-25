@@ -148,9 +148,9 @@ immediately. If the check fails, the installer completes the rest of the
 setup and skips Codex registration.
 
 If the native installer records a setup failure for a requested client (its
-connection, its Claude Code plugin or hooks, an unreadable Claude Code plugin
-registry, or native shim autostart for an extractor chosen by flag or at the
-prompt), it completes the remaining setup and exits with status 5. Its final
+connection, its plugin or hooks, or an unreadable Claude Code plugin
+registry), or native shim autostart fails for an extractor chosen by flag or
+typed at the prompt, it completes the remaining setup and exits with status 5. Its final
 summary names each failure and how to retry. Hooks awaiting approval and
 platforms without native shim autostart produce warnings. Clients selected by
 flag or at the prompt count as requested, including the default accepted

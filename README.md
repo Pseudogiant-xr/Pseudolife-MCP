@@ -1217,12 +1217,15 @@ verbose logs so they stay out of the dream), **REFLECT at the end**
 dream distils these signals into the lessons surfaced at your next session
 start).
 
-For an existing Codex installation, rerun the installer with `--client
-codex` (`-Client codex`), or run `python ops/setup-codex-hooks.py` from a
-checkout with Python 3.10 or newer. The step asks once, detects the hook source, backs up changed configuration,
+For an existing Codex installation, rerun the installer with
+`--codex-hook-trust yes` (`-CodexHookTrust yes`): a rerun of a Docker install
+does not ask, so it approves only with that flag. Add `--client` only to add
+Codex, naming every client you use. From a checkout with Python 3.10 or
+newer, `python ops/setup-codex-hooks.py` runs the same step and asks once.
+The step detects the hook source, backs up changed configuration,
 persists scoped trust through Codex, and verifies startup briefing, prompt
 reminder, and session cleanup, plus the agent-board check-in where the board
-is on. The Docker installer runs this step for you.
+is on. A first install runs this step for you.
 See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
 
 For Claude Code, use the [plugin](plugin/README.md), or the legacy

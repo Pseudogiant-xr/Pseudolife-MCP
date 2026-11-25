@@ -238,8 +238,11 @@ the standing memory block as a fallback if verification fails. It does not
 approve unrelated hooks or turn off Codex's trust checks.
 
 For an existing installation with the daemon running, rerun the installer
-with `--client codex` (`-Client codex`), which runs the same setup step. From
-a checkout with Python 3.10 or newer, the helper also runs on its own:
+with `--codex-hook-trust yes` (`-CodexHookTrust yes`), which runs the same
+setup step: a rerun of a Docker install does not ask, so it approves only
+with that flag. Add `--client` only to add Codex, naming every client you
+use. From a checkout with Python 3.10 or newer, the helper also runs on its
+own and asks once:
 
 ```bash
 python ops/setup-codex-hooks.py
@@ -261,7 +264,7 @@ command asks again. The manual copy therefore runs through a launcher,
 `~/.codex/pseudolife/hooks/run.sh` (`run.ps1` on Windows), whose commands
 never change. It runs the script bundle that `current` beside it names.
 Bundles are content-addressed and verified, and so are the launchers. The
-update (`pseudolife-mcp update` from a checkout, `ops/update.ps1 -All`,
+update (`pseudolife-mcp update`, or from a checkout `ops/update.ps1 -All`,
 `ops/update.sh --all`, `ops/update_clients.py`) writes the new bundle,
 checks it, moves `current` and removes the bundle it replaced, all without
 asking, because nothing Codex approved changed. A manual copy set up before
@@ -395,7 +398,8 @@ tool, so this also covers sending board mail
 
 ```bash
 # Full unattended setup with automatic memory approved (on an existing
-# installation, rerun the installer as you installed it with these flags):
+# installation, rerun the installer as you installed it, adding
+# --codex-hook-trust yes):
 ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes
 # Existing installation, from a checkout with Python, same scoped approval:
 python ops/setup-codex-hooks.py --trust yes --non-interactive

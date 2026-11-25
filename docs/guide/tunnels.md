@@ -134,11 +134,12 @@ runs. The native client does not register or start a tunnel service. A
 machine whose tunnel the Python client registered to start by itself stays on
 the Python client: an update keeps it, and
 `PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` prints
-how to remove the autostart, changing nothing until it is gone. A native `update` there leaves the running
-tunnel as it is and says so in its tunnel line (see
+how to remove the autostart, changing nothing until it is gone (see
+[Autostart and private storage](#autostart-and-private-storage)). Once it
+is gone, that command moves the machine and leaves a running tunnel as it
+is, saying so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how
-to go back). A machine whose tunnel is set to start by itself stays on the
-Python client (see [Autostart and private storage](#autostart-and-private-storage)).
+to go back).
 
 ## Start or resume
 
