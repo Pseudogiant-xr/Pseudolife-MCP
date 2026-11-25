@@ -193,11 +193,17 @@ def test_both_lanes_run_their_postgres_tests_instead_of_skipping_them():
     # missing server into a failure.
     for job_id in (REQUIRED, NIGHTLY):
         steps = jobs()[job_id]["steps"]
-        start = next(i for i, s in enumerate(steps) if "attach_or_start" in s.get("run", ""))
+        start = next(i for i, s in enumerate(steps) if "rust/ci/disposable_postgres.py" in s.get("run", ""))
+        # The step imports the pg0 wheel and psycopg: an earlier step installs
+        # them (the lite extra, or the helper's own pins).
+        install = next(i for i, s in enumerate(steps) if ".[dev,lite]" in s.get("run", "")
+                       or "rust/ci/requirements-postgres.txt" in s.get("run", ""))
+        assert install < start, job_id
         tests = next(i for i, s in enumerate(steps)
                      if "pytest" in s.get("run", "") or WRAPPER in s.get("run", ""))
         assert start < tests, job_id
-        assert "PSEUDOLIFE_TEST_DATABASE_URL=" in steps[start]["run"], job_id
+        assert "--github-env PSEUDOLIFE_TEST_DATABASE_URL" in steps[start]["run"], job_id
+        assert "--database pseudolife_memory_test" in steps[start]["run"], job_id
         assert steps[tests]["env"]["PSEUDOLIFE_REQUIRE_TEST_POSTGRES"] == "1", job_id
 
 

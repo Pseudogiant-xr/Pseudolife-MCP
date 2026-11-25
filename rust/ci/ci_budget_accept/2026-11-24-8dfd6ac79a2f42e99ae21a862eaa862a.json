@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "9fc8b117ea3d158f",
+  "fingerprint": "3cee495f9aaa12fd",
+  "reason": "Re-accepted on master's current guards job: the Rust-only step for live tests that read rust/ files gains tests/test_ci_windows_lanes.py, ten YAML-shape tests that run in about a second; no new step, job or shard, so the measured minutes hold."
+}
