@@ -1460,7 +1460,7 @@
     "Native commands include update with client hand-off, backup and restore for Docker banks, connect, console, conductor-watch, doctor, the hook leaves and expose. Native move handles help, refusals, dry runs, the move and recovery.",
     "Native tunnel supports explicit profile and key setup, verification, foreground run and stop, and refresh of a compatible supervisor. Python still provides guided setup, background start and service management.",
     "Refuses a lite-tier bank, serve and embedded (cli/retired.rs); starts a local daemon only from PSEUDOLIFE_MCP_SERVE_COMMAND",
-    "The installers' default since 0.26.0, and a person's update moves a Python-client machine to it; unattended updates, PSEUDOLIFE_SHIM_ENGINE=python and a registered tunnel autostart keep the Python client. Install and update verify the platform archive before moving the client."
+    "The installers' default since 0.26.0, and a person's update moves a Python-client machine to it; updates that run without a person (scheduled and session-start), PSEUDOLIFE_SHIM_ENGINE=python and a registered tunnel autostart keep the Python client. Install and update verify the platform archive before moving the client."
    ]
   },
   {
