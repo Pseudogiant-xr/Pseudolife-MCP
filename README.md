@@ -89,7 +89,30 @@ artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
 
-Install and register the lite tier. No Docker, no database to set up, no container runtime:
+The installer is the recommended route. It sets up a Docker bank with the
+dream extractor you choose (the bundled local sidecar by default) and wires
+your coding agents through the native `pseudolife-mcp` client, which needs no
+host Python (it installs the Python client instead, saying why, where the
+native one cannot serve the machine):
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+What it asks and what it sets up: [Durable tier — Docker](#durable-tier--docker-recommended-for-a-long-lived-bank).
+
+### Lite tier (pip)
+
+Everything from here to the Docker tier is about lite, the Python package:
+it needs Python 3.10 or newer, and only the Python client runs a lite bank.
+The installer refuses a machine that still holds a lite bank until it has
+moved ([Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker)). To try it
+instead, install and register the package. No Docker, no database to set
+up, no container runtime:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
@@ -116,7 +139,8 @@ the shim's 180-second deadline to report a failure before the host cancels it; p
 Approve `memory_message` in that table's tool configuration
 (`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
 "approve"`, or allow it once and keep the approval); Codex hook setup
-(`python ops/setup-codex-hooks.py`) sets it when you approve the hooks, and
+(the installer's Codex step, or `python ops/setup-codex-hooks.py` from a
+checkout) sets it when you approve the hooks, and
 keeps any value you chose. Board mail can wake an
 idle Codex task by default, and the woken task reads its mail with that tool:
 without the approval it stalls on a prompt until someone answers it. Set
@@ -210,7 +234,7 @@ trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 ## Durable tier — Docker (recommended for a long-lived bank)
 
-Everything above plus the bundled extractor, external volumes,
+Everything lite gives you, plus the bundled extractor, external volumes,
 health-checked services, and backup/rollback tooling. Requires Docker
 (with the compose v2 and buildx plugins) and
 at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI
@@ -408,7 +432,8 @@ docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
 # Verify, then wire the transport into one or both clients.
 curl http://127.0.0.1:8765/health
 
-# Stdio shim (the installer's default — per-session episode identity).
+# Stdio shim (per-session episode identity), by hand with the Python
+# client's package; the installer sets up the native client instead.
 # PSEUDOLIFE_MCP_NO_SPAWN=1 makes the shim wait for the container instead
 # of spawning a host fallback that can shadow the Docker bank after a
 # reboot; set it on Docker-tier registrations like these.
@@ -968,7 +993,9 @@ Details, non-default ports/tokens, and migration:
 
 **Manual transport registration.** The installer's default (shim mode)
 registers a thin stdio shim — one shim process per session, so every
-session carries its own tier-1 identity. The same wiring by hand:
+session carries its own tier-1 identity. The same wiring by hand, with the
+Python client's package (the installers set up the native client instead,
+which needs no host Python):
 
 ```bash
 pip install pseudolife-mcp    # daemon in Docker; add [lite] for the pip tier
@@ -1072,7 +1099,8 @@ config.
 
 Codex — the installer's default (shim mode) wires the same stdio shim, so a
 Codex session gets its own tier-1 identity instead of inheriting a
-concurrent Claude session's episode:
+concurrent Claude session's episode. By hand, with the Python client's
+package:
 
 ```bash
 pip install pseudolife-mcp
@@ -1103,7 +1131,8 @@ Codex reads it when connecting. This is unnecessary for the default stdio shim.
 
 Gemini CLI — same shape (`-s user` matters: Gemini defaults to project
 scope; the `-e` env gives Gemini sessions their own write attribution, and
-the same Docker-tier `PSEUDOLIFE_MCP_NO_SPAWN=1` note as above applies):
+the same Docker-tier `PSEUDOLIFE_MCP_NO_SPAWN=1` note as above applies). By
+hand, with the Python client's package:
 
 ```bash
 pip install pseudolife-mcp
@@ -1214,11 +1243,15 @@ verbose logs so they stay out of the dream), **REFLECT at the end**
 dream distils these signals into the lessons surfaced at your next session
 start).
 
-For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
-The helper asks once, detects the hook source, backs up changed configuration,
+For an existing Codex installation, rerun the installer with
+`--codex-hook-trust yes` (`-CodexHookTrust yes`): a rerun of a Docker install
+does not ask, so it approves only with that flag. Add `--client` only to add
+Codex, naming every client you use. From a checkout with Python 3.10 or
+newer, `python ops/setup-codex-hooks.py` runs the same step and asks once.
+The step detects the hook source, backs up changed configuration,
 persists scoped trust through Codex, and verifies startup briefing, prompt
 reminder, and session cleanup, plus the agent-board check-in where the board
-is on. The Docker installer runs this step for you.
+is on. A first install runs this step for you.
 See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
 
 For Claude Code, use the [plugin](plugin/README.md), or the legacy

@@ -1,4 +1,4 @@
-<!-- i18n-source: v13 (2026-09-28) — canonical English text for the translated
+<!-- i18n-source: v14 (2026-11-26) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -36,7 +36,22 @@ What you get:
 
 ## Quickstart
 
-Two commands. No Docker, no database to set up, no container runtime:
+The installer is the recommended route. It sets up a Docker bank with the
+dream extractor you choose and wires your coding agents through the native
+`pseudolife-mcp` client, which itself needs no host Python:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+What it asks and what it sets up are in the Durable tier section below.
+
+To try the lite tier instead (the Python package, so it needs a host
+Python), two commands. No Docker, no database to set up, no container
+runtime:
 
 ```bash
 pip install "pseudolife-mcp[lite]"

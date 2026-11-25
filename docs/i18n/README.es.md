@@ -1,8 +1,8 @@
-<!-- i18n-sync: v13 -->
+<!-- i18n-sync: v14 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v13 (2026-09-28)
+> Traducción del [README](../../README.md) canónico — sincronizado: v14 (2026-11-26)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -33,8 +33,23 @@ Lo que obtienes:
 
 ## Inicio rápido
 
-Dos comandos. Sin Docker, sin base de datos que configurar, sin runtime de
-contenedores:
+La ruta recomendada es el instalador. Prepara un banco en Docker con el
+extractor de sueños que elijas y conecta tus agentes de codificación mediante
+el cliente nativo `pseudolife-mcp`, que por sí mismo no necesita Python en el
+host:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+Lo que pregunta y lo que prepara está en la sección Nivel duradero, más abajo.
+
+Para probar en su lugar el nivel lite (el paquete de Python, que por tanto
+necesita Python en el host), dos comandos. Sin Docker, sin base de datos que
+configurar, sin runtime de contenedores:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
