@@ -880,9 +880,14 @@ def test_the_user_path_guards_default_announcement_needs_no_package(monkeypatch)
     for name in ("pseudolife_memory", "pseudolife_memory.runtimes"):
         monkeypatch.setitem(sys.modules, name, None)
     monkeypatch.setattr(user_path_guard, "_broadcast_environment_change", lambda: announced.append("own"))
-    with pytest.raises(AssertionError, match="put .* on the real user PATH; removed them again"):
-        with user_path_unchanged(HOME):
-            fake.values["Path"] = (HOME + "\\shim\\bin;" + BEFORE[0], 2)
+    try:
+        with pytest.raises(AssertionError, match="put .* on the real user PATH; removed them again"):
+            with user_path_unchanged(HOME):
+                fake.values["Path"] = (HOME + "\\shim\\bin;" + BEFORE[0], 2)
+    finally:
+        # os.name back before a failure is reported: off Windows, pytest's
+        # report builds a Path, which refuses while os.name says nt.
+        monkeypatch.undo()
     assert fake.values["Path"] == BEFORE and announced == ["own"]
 
 
