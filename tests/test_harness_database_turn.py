@@ -25,8 +25,11 @@ def test_no_marker_does_only_one_existence_check(tmp_path, monkeypatch):
         return exists(path)
 
     def import_without_engine(name, globals=None, locals=None, fromlist=(), level=0):
-        if "_database_turn" in name or "_database_turn" in fromlist:
-            raise AssertionError("the unconfigured path imported the turn engine")
+        # A plain ``import x`` passes fromlist=None (pathlib's ``import ntpath``
+        # on Linux with Python 3.13), and fromlist may hold non-str items.
+        names = [name, *(item for item in fromlist or () if isinstance(item, str))]
+        if any("_database_turn" in each for each in names):
+            raise AssertionError(f"the unconfigured path imported the turn engine ({name} {fromlist})")
         return importer(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(Path, "exists", check)
