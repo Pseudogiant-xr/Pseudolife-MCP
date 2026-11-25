@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .. import core, normalize, producers
+from .. import _plugin_hooks, core, credential_files, normalize, producers
 from ..core import Case
 from . import _handshake_cache  # noqa: F401 (registers shim-handshake-cache-name)
 
@@ -577,11 +577,9 @@ def plugin_hook_fixture(state: str):
     `app-server` is a script in the disposable cwd, never a real Codex turn.
     """
     def step(arm):
-        from pseudolife_memory.plugin_hooks import HOOK_SCRIPTS
-
         directory = arm.home / PLUGIN_HOOKS
         directory.mkdir(parents=True)
-        for name in HOOK_SCRIPTS:
+        for name in _plugin_hooks.HOOK_SCRIPTS:
             (directory / name).write_bytes(b"# fixture hook\n")
         manifest = {"hooks": {"SessionStart": [{"hooks": [
             {"type": "command", "command": "fixture-hook-not-executed"}]}]}}
@@ -610,9 +608,8 @@ for line in sys.stdin:
 
 
 def matching_plugin_health(daemon):
-    from pseudolife_memory.plugin_hooks import hooks_digest
-
-    return Route(200, health(daemon.version, hooks_digest=hooks_digest(daemon.home / PLUGIN_HOOKS)))
+    return Route(200, health(daemon.version,
+                             hooks_digest=_plugin_hooks.hooks_digest(daemon.home / PLUGIN_HOOKS)))
 
 
 def observe_plugin_runtime(state: str):
@@ -633,8 +630,7 @@ def observe_plugin_runtime(state: str):
 
 def token_file(rel: str, token: str = "fixture-token"):
     def step(arm):
-        from pseudolife_memory.credentials import _write_token_file  # noqa: PLC0415 (oracle)
-        _write_token_file(arm.home / rel, token)
+        credential_files.write_token_file(arm.home / rel, token)
     return step
 
 
@@ -1003,8 +999,7 @@ def cases() -> list[Case]:
     # The bearer is read again for each probe (doctor_cli.py:434, :650):
     # the board answer rotates the token file before the next ones.
     def rotate(daemon):
-        from pseudolife_memory.credentials import _write_token_file  # noqa: PLC0415 (oracle)
-        _write_token_file(daemon.home / "secrets/token", "rotated-token")
+        credential_files.write_token_file(daemon.home / "secrets/token", "rotated-token")
         return BOARD_ON
     add(case("token-rotated-between-probes", state_arg,
              env={"PSEUDOLIFE_MCP_TOKEN_FILE": "{HOME}/secrets/token"},

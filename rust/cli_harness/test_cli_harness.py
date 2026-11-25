@@ -355,28 +355,27 @@ def test_windows_acl_capture_only_directories_drop_inherited_aces(tmp_path, monk
 @pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor")
 def test_windows_hand_edited_login_fixture_has_bound_private_acl(tmp_path, monkeypatch):
     from types import SimpleNamespace  # noqa: PLC0415
+    from cli_harness import credential_files  # noqa: PLC0415
     from cli_harness.rows import test_login  # noqa: PLC0415
-    from pseudolife_memory.credentials import _windows_owner_only  # noqa: PLC0415
     monkeypatch.setattr(test_login, "_seed_login", lambda *args, **kwargs: None)
     body = b"invalid byte: \xff"
     test_login._hand_edited(body)(SimpleNamespace(home=tmp_path), None)
     path = tmp_path / test_login.LOGIN_REL
     assert path.read_bytes() == body
-    with path.open("rb") as handle:
-        assert _windows_owner_only(handle.fileno())
+    assert credential_files.windows_owner_only(path)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows security descriptor")
 def test_native_login_file_inherited_everyone_grant_is_a_difference(tmp_path):
     import ctypes  # noqa: PLC0415
     from ctypes import wintypes  # noqa: PLC0415
+    from cli_harness import credential_files  # noqa: PLC0415
     from cli_harness.rows import test_login  # noqa: PLC0415
-    from pseudolife_memory.credentials import _secure_windows_file, _windows_owner_only  # noqa: PLC0415
+    from rust.harness_support._windows_fixture_acl import secure_windows_file  # noqa: PLC0415
     path = tmp_path / "login"
     path.write_bytes(b"fixture")
-    _secure_windows_file(path)
-    with path.open("rb") as handle:
-        assert _windows_owner_only(handle.fileno())
+    secure_windows_file(path)
+    assert credential_files.windows_owner_only(path)
     before = test_login._permissions(path)
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
@@ -396,8 +395,7 @@ def test_native_login_file_inherited_everyone_grant_is_a_difference(tmp_path):
         assert apply(str(path), 0x80000005, descriptor)  # owner and protected DACL
     finally:
         free(descriptor)
-    with path.open("rb") as handle:
-        assert not _windows_owner_only(handle.fileno())
+    assert not credential_files.windows_owner_only(path)
     after = test_login._permissions(path)
     assert compare.diff(obs(db={"file_acl": before}), obs(db={"file_acl": after}), ())
     assert after["protected"]
@@ -2862,3 +2860,90 @@ def test_test_login_seed_runs_with_frozen_imports_blocked(tmp_path):
         assert login.stat().st_mode & 0o777 == 0o600
         # The folder keeps the default mode, as the command's own writer leaves it.
         assert login.parent.stat().st_mode & 0o777 == 0o777 & ~umask
+
+
+@pytest.mark.parametrize("retried", [True, False])
+def test_owner_only_writer_retries_a_refused_replace_as_the_client_writer_does(tmp_path, monkeypatch, retried):
+    from rust.harness_support import private_fixture
+
+    real, refusals = os.replace, []
+
+    def replace(source, target):
+        if not refusals:
+            refusals.append(target)
+            raise PermissionError(13, "the file is open in another process")
+        return real(source, target)
+
+    monkeypatch.setattr(private_fixture, "_RETRY_REPLACE", retried)
+    monkeypatch.setattr(private_fixture.os, "replace", replace)
+    path = tmp_path / ".pseudolife-mcp" / "x.token"
+    if retried:
+        private_fixture.write_owner_only(path, b"rotated-token")
+        assert path.read_bytes() == b"rotated-token"
+    else:
+        with pytest.raises(PermissionError):
+            private_fixture.write_owner_only(path, b"rotated-token")
+        assert not path.exists()
+    assert refusals == [path]
+    assert [p.name for p in path.parent.iterdir()] == ([path.name] if retried else [])
+
+
+def test_copied_hook_script_list_is_the_daemons():
+    import re
+    from cli_harness import _plugin_hooks
+
+    health = (Path(__file__).resolve().parents[1] / "daemon/src/health.rs").read_text(encoding="utf-8")
+    block = re.search(r"const HOOK_SCRIPTS: \[&str; \d+\] = \[(.*?)\];", health, re.S)[1]
+    assert tuple(re.findall(r'"([^"]+)"', block)) == _plugin_hooks.HOOK_SCRIPTS
+    hooks = Path(__file__).resolve().parents[2] / "plugin" / "hooks"
+    assert re.fullmatch(r"[0-9a-f]{64}", _plugin_hooks.hooks_digest(hooks))
+    assert _plugin_hooks.hooks_digest(hooks.parent) is None
+
+
+def test_transport_credential_fixtures_run_with_frozen_imports_blocked(tmp_path):
+    from rust.harness_support.import_blocker import cold_harness_imports
+    from cli_harness import credential_files
+    from cli_harness.rows import _process_start
+
+    token = tmp_path / ".pseudolife-mcp" / "claude-code.token"
+    bom = tmp_path / "bom.token"
+    with cold_harness_imports():
+        credential_files.write_token_file(token, "fixture-token")
+        credential_files.write_token_file(bom, "\ufefffixture-token")
+        status = credential_files.token_file_status(token)
+        bom_status = credential_files.token_file_status(bom)
+        missing = credential_files.token_file_status(tmp_path / "missing.token")
+        started = _process_start._process_start(os.getpid())
+        owner_only = credential_files.windows_owner_only(token) if os.name == "nt" else None
+    assert token.read_bytes() == b"fixture-token"
+    assert (status, bom_status, missing) == ("ready", "failed", "failed")
+    assert started and started == _process_start._process_start(os.getpid())
+    if os.name == "nt":
+        assert owner_only is True
+    else:
+        assert token.stat().st_mode & 0o777 == 0o600
+    from cli_harness._credential_checks import CredentialError
+    with pytest.raises(CredentialError, match="invalid bearer token"):
+        credential_files.write_token_file(tmp_path / "bad.token", "white space")
+
+
+def test_transport_credential_rows_import_without_the_frozen_package():
+    # A fresh interpreter, so the modules' top-level imports run under the
+    # blocker (collection has already imported them here). Only imports: no
+    # case is built, so no test login or database is read.
+    import subprocess
+    script = """\
+import importlib
+import sys
+sys.path.insert(0, sys.argv[1])
+from rust.harness_support.import_blocker import cold_harness_imports
+with cold_harness_imports():
+    for name in ("credential_files", "_credential_checks", "_plugin_hooks", "rows._process_start",
+                 "rows.connect", "rows.console", "rows.doctor", "rows.pair", "rows.conductor_watch"):
+        importlib.import_module("rust.cli_harness." + name)
+assert not any(name == "pseudolife_memory" or name.startswith("pseudolife_memory.") for name in sys.modules)
+"""
+    repo = Path(__file__).resolve().parents[2]
+    child = subprocess.run([sys.executable, "-I", "-c", script, str(repo)],
+                           capture_output=True, text=True, timeout=60)
+    assert child.returncode == 0, child.stderr
