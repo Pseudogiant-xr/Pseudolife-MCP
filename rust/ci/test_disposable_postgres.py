@@ -1029,6 +1029,100 @@ def test_lease_fixture_imports_nothing_from_the_package(lease_ci):
     assert not any(name.startswith("pseudolife_memory") for name in sys.modules)
 
 
+# ── the lease row's fixture on a machine with database turns (the Windows VM) ─
+
+@pytest.fixture
+def lease_turn(lease_ci, monkeypatch):
+    """The real turn engine with an inert backend, as
+    tests/test_harness_database_turn.py drives it: ``contains`` counts the
+    kill-on-close containments a Windows run would make."""
+    from rust.harness_support import _database_turn as turn
+    from rust.harness_support._database_turn_platform import Identity
+
+    locks = lease_ci.tmp / ".pseudolife-mcp" / "locks"
+    locks.mkdir(parents=True)
+    marker = locks / "test-postgres.turn-enabled"
+    marker.touch()
+    monkeypatch.setattr(lease_ci.module, "_DATABASE_TURN_MARKER", marker)
+    current = os.getpid()
+    holder = current + 10000000
+    identities = {current: Identity(current, "200", "test-owner", holder),
+                  holder: Identity(holder, "100", "test-owner", 0)}
+    state = types.SimpleNamespace(busy=False, contains=0, current=current, holder=holder,
+                                  identities=identities, lock=locks / "test-postgres.lock", Identity=Identity)
+    state.identity = identities.get
+    state.try_lock = lambda path: None if state.busy else path.open("a+b")
+
+    def contain():
+        state.contains += 1
+
+    state.contain_process_tree = contain
+    leases = {}
+    state.leases = leases
+    monkeypatch.setattr(turn, "_held", leases)
+    monkeypatch.setattr(turn, "_backend", lambda: state)
+    yield state
+    for lease in leases.values():
+        lease.close()
+
+
+def _ancestor_holds_the_turn(turn_state):
+    record = {"holder": "worker database run", "pid": turn_state.holder,
+              "process_started": "100", "owner": "test-owner",
+              "acquired": "2026-11-25T00:00:00+00:00"}
+    turn_state.lock.write_text(json.dumps(record), encoding="utf-8")
+    turn_state.busy = True
+    return record
+
+
+def test_lease_fixture_under_a_delegated_turn_leaves_the_cluster_to_the_holder(lease_ci, lease_turn):
+    # ops/dev-database-lock.ps1 holds the turn and contains the whole command;
+    # a containment here would kill the exported cluster when this step exits.
+    record = _ancestor_holds_the_turn(lease_turn)
+    assert lease_ci.module.main() == 0
+    assert lease_turn.contains == 0
+    assert lease_ci.fakes.stops == []  # the next steps use it
+    lines = lease_ci.env_file.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:55432"
+    # The holder's record is the holder's: a delegated child never rewrites it.
+    assert json.loads(lease_turn.lock.read_text(encoding="utf-8")) == record
+    assert lease_turn.leases == {}
+
+
+def test_lease_fixture_that_owns_the_turn_contains_itself_once(lease_ci, lease_turn):
+    # A standalone VM run with no wrapper: the turn ends with this process, so
+    # nothing it started may outlive it.
+    assert lease_ci.module.main() == 0
+    assert lease_turn.contains == 1
+    (lease,), = [list(lease_turn.leases.values())]
+    assert not lease.delegated and lease.contained and lease.pid == os.getpid()
+    assert json.loads(lease_turn.lock.read_text(encoding="utf-8"))["holder"] == "standalone database harness"
+
+
+def test_lease_fixture_refuses_an_unverified_holder_before_starting_a_cluster(lease_ci, lease_turn):
+    # Not an ancestor (no parent link): the held turn is refused, never reused.
+    _ancestor_holds_the_turn(lease_turn)
+    lease_turn.identities[lease_turn.current] = lease_turn.Identity(lease_turn.current, "200", "test-owner", 0)
+    with pytest.raises(SystemExit, match="database turn is held by worker database run"):
+        lease_ci.module.main()
+    assert lease_turn.contains == 0
+    assert lease_ci.fakes.pg0.instances == [] and not lease_ci.env_file.exists()
+
+
+def test_lease_fixture_without_the_marker_never_imports_the_turn_engine(lease_ci, monkeypatch):
+    import builtins
+
+    importer = builtins.__import__
+
+    def import_without_turn(name, globals=None, locals=None, fromlist=(), level=0):
+        if "database_turn" in name or any("database_turn" in item for item in fromlist or ()):
+            raise AssertionError(f"the unconfigured path imported {name} {fromlist}")
+        return importer(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_turn)
+    assert lease_ci.module.main() == 0
+
+
 # ── the command line the Windows ci.yml lanes run ────────────────────────────
 
 @pytest.fixture
