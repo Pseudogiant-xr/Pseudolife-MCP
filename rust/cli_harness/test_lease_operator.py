@@ -443,6 +443,9 @@ def test_seed_writes_the_recorded_rows_in_one_transaction_with_the_package_block
     inserted = []
 
     def insert(conn, table, rows):
+        # The real helper locks the table and reads its catalog on conn,
+        # which needs the seed's transaction.
+        conn.statements.append(f"PREPARE {table}")
         inserted.append((table, rows))
         return f"INSERT {table}", (len(rows),)
 
@@ -458,7 +461,8 @@ def test_seed_writes_the_recorded_rows_in_one_transaction_with_the_package_block
     assert inserted == [(table, rows[table]) for table in tables if table in rows]
     setvals = [("SELECT setval(%s::regclass, %s, true)", ("public." + name, value))
                for name, value in sequences.items() if value is not None]
-    assert conn.statements == ["BEGIN", *[(f"INSERT {table}", (len(written),)) for table, written in inserted],
+    assert conn.statements == ["BEGIN", *[f"PREPARE {table}" for table, _ in inserted],
+                               *[(f"INSERT {table}", (len(written),)) for table, written in inserted],
                                *setvals, "COMMIT"]
     assert conn.transactions == 1
     if scenario != "missing":

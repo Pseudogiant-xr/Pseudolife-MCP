@@ -151,10 +151,14 @@ The lease_operator row seeds each operator case's bank with the rows in
 hold cases from the same file (`hold`), both captured once from the frozen
 `CoordinationStore` at `8b1be337a`. A seed's timestamps are offsets from the
 case's seed stamp, and its audit hashes are recomputed for that stamp; the
-hold answers template the watched pid as `pid <PID>`. After a schema bump
-that adds a coordination column, the seed's insert refuses and names the
-column (`harness_support/fixture_rows.py`): add it to the fixture's rows with
-the value the native writer stores, then replay the goldens.
+hold answers template the watched pid as `pid <PID>`. A schema bump that
+adds, drops or renames a coordination column makes the seed's insert refuse
+and name the column (`harness_support/fixture_rows.py`). Change the
+fixture's rows and hold states with the value the native writer stores,
+and re-record the row's goldens from the candidate in the same change
+("Goldens after the freeze"), because every dumped row then carries the
+column too; `test_lease_operator.py` compares the fixture's seeds with the
+goldens' seeded states.
 
 The transfer row imports `fixtures/transfer-archives/{current,tricky,ties}.zip`, which carry the schema version; after a schema bump, rebuild them from the row's own seeders with the native export, then re-record the transfer goldens: `python rust/cli_harness/regenerate_transfer_archives.py --candidate <pseudolife-stdio>` (`--check` compares with the committed archives instead of writing).
 

@@ -92,7 +92,8 @@ class OperatorBank(Board):
     """A disposable bank the operator CLI writes directly, seeded with the
     rows the frozen store wrote, behind a loopback board with no recorded
     answers: the operator actions never call it, and a request they sent
-    would be answered 500 and fail the case."""
+    would be refused and recorded in the case's requests, which every
+    operator golden records as none."""
 
     def __init__(self):
         name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}")
@@ -100,9 +101,15 @@ class OperatorBank(Board):
             if conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone():
                 raise RuntimeError("disposable name collision")
         _bank.create(name)
-        super().__init__("operator", recorded={"initial": None, "transcripts": []})
+        try:
+            super().__init__("operator", recorded={"initial": None, "transcripts": []})
+            self.conn = _bank.connect(name, autocommit=True)
+        except BaseException:
+            # The harness closes a daemon only once it was built.
+            super().close()
+            _bank.teardown(name)
+            raise
         self.name = name
-        self.conn = _bank.connect(name, autocommit=True)
 
     def seed(self, scenario: str, stamp: float) -> str | None:
         return seed_bank(self.conn, scenario, stamp)
