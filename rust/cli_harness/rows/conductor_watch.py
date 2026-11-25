@@ -28,6 +28,7 @@ import sys
 
 from .. import core, normalize
 from ..core import Case
+from ._process_start import _process_start
 
 OWNER = "0123456789abcdef0123456789abcdef"
 OTHER = "fedcba9876543210fedcba9876543210"
@@ -149,10 +150,10 @@ def _private_folder(relative: str):
 def _record(state: str, **fields):
     """A pid file beside ``state`` (relative to the home). ``pid`` may be
     "live" (a sleeper the row starts), and ``process_start`` "live" (the
-    oracle's own token for that sleeper); any other value is written as is.
+    frozen watcher's own token for that sleeper, ``_process_start``); any
+    other value is written as is.
     ``raw`` writes those bytes instead of a record."""
     def setup(arm):
-        from pseudolife_memory.conductor_watch_cli import _process_start  # noqa: PLC0415
         path = arm.home / (state.rsplit(".", 1)[0] + ".pid")
         if "raw" in fields:
             _write(path, fields["raw"])

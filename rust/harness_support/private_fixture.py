@@ -4,6 +4,10 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import time
+
+# Whether a refused replace is retried (Windows only, as the client's writer).
+_RETRY_REPLACE = os.name == "nt"
 
 
 def _check_directory(root: Path, directory: Path) -> None:
@@ -41,7 +45,18 @@ def write_owner_only(path: Path, data: bytes) -> None:
             else:
                 os.fchmod(handle.fileno(), 0o600)
             handle.write(data)
-        os.replace(temporary, target)
+        # As the client's own token writer (credentials._write_token_file):
+        # a reader holding the file open can briefly refuse the replace on
+        # Windows. Its 2026-09-13 40-rotation/100-snapshot Windows stress run
+        # observed such delete-share conflicts; it caps recovery at 20 x 5 ms.
+        for attempt in range(20):
+            try:
+                os.replace(temporary, target)
+                break
+            except PermissionError:
+                if not _RETRY_REPLACE or attempt == 19:
+                    raise
+                time.sleep(0.005)
     finally:
         with suppress(OSError):
             temporary.unlink(missing_ok=True)
