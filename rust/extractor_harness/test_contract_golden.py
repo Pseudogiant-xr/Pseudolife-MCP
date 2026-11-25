@@ -79,7 +79,9 @@ class NativeOnly(unittest.TestCase):
                 patch.object(run, "call", lambda *args, **kwargs: (200, b"{}")), \
                 patch.object(run, "journal_rows", lambda path: []), \
                 patch.object(run.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, b"", b"")), \
-                patch.object(run.autostart_oracle, "write_config", lambda *args, **kwargs: None):
+                patch.object(run.autostart_oracle, "write_config", lambda *args, **kwargs: None), \
+                patch.object(run, "env_files_match", lambda *args, **kwargs: None), \
+                patch.object(run, "config_round_trip", lambda *args, **kwargs: 1):
             slice_(NATIVE, scratch / slice_.__name__)
         return started
 

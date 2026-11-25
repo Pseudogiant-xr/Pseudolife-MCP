@@ -236,6 +236,10 @@ def contract_golden():
 # The live Python files a recording proves the native shim against. A
 # change to one asks for --record-goldens again (test_contract_golden.py).
 PYTHON_SOURCES = ("evals/claude_shim.py", "evals/codex_shim.py", "ops/shim_autostart.py")
+# The restart the native settings block names on this platform (config.rs).
+NATIVE_RESTART_STEP = ("run again, in PowerShell, the pseudolife-mcp extractor-shim install-autostart command" if os.name == "nt"
+                       else "systemctl --user restart pseudolife-sonnet-shim.service" if sys.platform.startswith("linux")
+                       else "stop the extractor shim you started and start it again")
 
 
 def provider_models(kind):
@@ -538,6 +542,44 @@ def differential(binary, root):
     return count
 
 
+def env_files_match(python_file, native_file):
+    """The native writer replaces the Python tool's first block line, whose
+    instruction needs Python, with its platform's restart step; everything
+    else matches the Python writer byte for byte."""
+    written = native_file.read_text(encoding="utf-8")
+    begins = [line for line in written.splitlines() if line.startswith("# >>> pseudolife shim autostart (")]
+    assert len(begins) == 1 and begins[0] != autostart_oracle.BLOCK_BEGIN, begins
+    assert "shim_autostart.py" not in begins[0], begins[0]
+    assert NATIVE_RESTART_STEP in begins[0], begins[0]
+    assert python_file.read_text(encoding="utf-8").replace(autostart_oracle.BLOCK_BEGIN, begins[0]) == written
+
+
+def config_round_trip(binary, root, kind):
+    # A native, then Python, then native write (a host moved back to the
+    # Python client and forward again) keeps every line outside the shim
+    # block: the Python writer leaves the native first line behind as an
+    # ordinary line, and the installer's own block follows it.
+    trip = root / (kind + "-config-trip")
+    (trip / "ops").mkdir(parents=True)
+    native_config = [str(binary), "extractor-shim", "config", kind, "--repo", str(trip), "--model", "fixture-model"]
+    result = subprocess.run(native_config, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    user = ("# a user comment after the block\nPSEUDOLIFE_API_TOKEN=${TOKEN_FROM_SHELL}\n"
+            "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\n"
+            "PSEUDOLIFE_INSTALL_MODE=docker\n# <<< pseudolife-mcp install <<<\n")
+    with (trip / "ops/.env").open("a", encoding="utf-8", newline="") as settings:
+        settings.write(user)
+    autostart_oracle.write_config(trip, kind, {"host": "127.0.0.1"})
+    result = subprocess.run(native_config, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    final = (trip / "ops/.env").read_text(encoding="utf-8")
+    assert user in final, final
+    assert final.count("# >>> pseudolife shim autostart (") == 1, final
+    assert final.endswith(autostart_oracle.BLOCK_END + "\n"), final
+    assert f"PSEUDOLIFE_{kind.upper()}_SHIM_HOST=127.0.0.1\n" in final, final
+    return 1
+
+
 def configuration(binary, root):
     count = 0
     for kind in ("claude", "codex"):
@@ -554,8 +596,9 @@ def configuration(binary, root):
             result = subprocess.run([str(binary), "extractor-shim", "config", kind, "--repo", str(native),
                                      "--model", model, "--host", "127.0.0.1", "--log", log], capture_output=True)
             assert result.returncode == 0, result.stderr
-            assert (pyroot / "ops/.env").read_text() == (native / "ops/.env").read_text(), kind
+            env_files_match(pyroot / "ops/.env", native / "ops/.env")
             count += 1
+        count += config_round_trip(binary, root, kind)
         observations = []
         for arm, exe in CONTRACT.arms(binary):
             with server(exe, kind, root / f"managed-{kind}-{arm}", canned(kind, "OK"), managed=True) as (port, _, journal, _, _):
