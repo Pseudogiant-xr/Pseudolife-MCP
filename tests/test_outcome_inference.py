@@ -12,11 +12,11 @@ from pseudolife_memory.utils.config import LessonsConfig
 
 def test_parse_outcome_claims_happy_path():
     content = ('noise before {"outcomes": [{"task": "deploy daemon", '
-               '"outcome": "success", "about": "ops/update.ps1", '
+               '"outcome": "success", "about": "bin/update.ps1", '
                '"detail": "health check passed"}]} noise after')
     claims = _parse_outcome_claims(content, cap=3)
     assert claims == [{"task": "deploy daemon", "outcome": "success",
-                       "about": "ops/update.ps1",
+                       "about": "bin/update.ps1",
                        "detail": "health check passed"}]
 
 
