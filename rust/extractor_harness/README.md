@@ -161,7 +161,8 @@ deliberate native change re-records from the native shim alone with
 `--record-candidate`, then `--write`, on each OS whose golden it changes
 (`rust/daemon/harness/candidate_record.py` has the shared rules). The
 `.env` comparison against `ops/shim_autostart.py`, the live writer, still
-runs every time. The lifecycle
+runs every time; only the block's first line differs, because the native
+writer names its platform's restart step instead of the Python tool. The lifecycle
 suite above covers timeout descendant cleanup, serialized calls and health
 refresh on the native shim alone. Windows exercises native
 executables and batch launchers separately, each with its own snapshots. A dev-only fixture crate compiles
