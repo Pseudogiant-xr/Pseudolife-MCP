@@ -129,7 +129,7 @@ fn unpack_tar(bytes: &[u8]) -> Result<Vec<u8>> {
     }
     data.ok_or_else(|| "release archive contains no binary".into())
 }
-fn native_header(bytes: &[u8]) -> bool {
+pub(super) fn native_header(bytes: &[u8]) -> bool {
     #[cfg(windows)]
     {
         bytes.starts_with(b"MZ")
@@ -324,6 +324,14 @@ pub(crate) fn rename_retry(source: &Path, target: &Path) -> Result<()> {
     }
     unreachable!()
 }
+/// The record the Python client writes beside each launcher it writes
+/// (`pseudolife_memory/runtimes.py` `_launcher_record`). A committed
+/// activation removes it, so it exists only while the launcher is Python's.
+pub(crate) fn python_launcher_record(layout: &Layout) -> PathBuf {
+    let mut name = layout.launcher.as_os_str().to_os_string();
+    name.push(".json");
+    PathBuf::from(name)
+}
 pub(crate) fn activate_launcher(layout: &Layout, binary: &Path) -> Result<Activation> {
     let parent = layout
         .launcher
@@ -338,9 +346,7 @@ pub(crate) fn activate_launcher(layout: &Layout, binary: &Path) -> Result<Activa
     }
     let unchanged = exists && hash_file(&layout.launcher)? == hash_file(binary)?;
     let id = uuid::Uuid::new_v4();
-    let mut record_name = layout.launcher.as_os_str().to_os_string();
-    record_name.push(".json");
-    let python_record = PathBuf::from(record_name);
+    let python_record = python_launcher_record(layout);
     let record_backup = match fs::symlink_metadata(&python_record) {
         Ok(meta) if meta.is_file() && !redirect(&meta) => {
             let backup = parent.join(format!(".python-launcher-record.old-native-{id}"));

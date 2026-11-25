@@ -191,6 +191,27 @@ fn dropped_activation_restores_old_launcher() {
     assert_eq!(current_runtime(&f.layout).unwrap().version, "1.0.0");
 }
 #[test]
+fn only_a_native_launcher_without_the_python_record_is_native() {
+    // The update's autostart report names the stable launcher in its
+    // command only when this holds.
+    let f = Fixture::new();
+    assert!(!super::launcher_is_native(&f.layout), "no launcher");
+    fs::create_dir_all(f.layout.launcher.parent().unwrap()).unwrap();
+    fs::write(&f.layout.launcher, b"#!/bin/sh\nexec python\n").unwrap();
+    assert!(!super::launcher_is_native(&f.layout), "a script launcher");
+    fs::remove_file(&f.layout.launcher).unwrap();
+    install::activate_launcher(&f.layout, &f.binary("1.0.1"))
+        .unwrap()
+        .commit();
+    assert!(super::launcher_is_native(&f.layout));
+    fs::write(install::python_launcher_record(&f.layout), b"{}").unwrap();
+    assert!(
+        !super::launcher_is_native(&f.layout),
+        "the Python client's record"
+    );
+}
+
+#[test]
 fn activation_invalidates_python_launcher_record_and_restores_it_on_rollback() {
     let f = Fixture::new();
     f.install("1.0.0");
