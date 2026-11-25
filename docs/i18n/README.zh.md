@@ -1,8 +1,8 @@
-<!-- i18n-sync: v13 -->
+<!-- i18n-sync: v14 -->
 
 # Pseudolife-MCP
 
-[英文版 README](../../README.md) · 已同步:v13 (2026-09-28)
+[英文版 README](../../README.md) · 已同步:v14 (2026-11-26)
 
 **为 Claude Code、Codex 及其他 MCP 客户端提供持久的长期记忆。**
 
@@ -18,7 +18,18 @@
 
 ## 快速开始
 
-只需两条命令。无需 Docker,无需搭建数据库,也无需容器运行时:
+推荐使用安装程序。它会搭建一个带梦境提取器的 Docker 记忆库,并通过原生 `pseudolife-mcp` 客户端接入你的编码智能体,主机上无需安装 Python:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+它会询问什么、搭建哪些内容,见下文的“持久层”一节。
+
+若想改为试用 lite 层(即 Python 包,因此主机上需要 Python),只需两条命令。无需 Docker,无需搭建数据库,也无需容器运行时:
 
 ```bash
 pip install "pseudolife-mcp[lite]"

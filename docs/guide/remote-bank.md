@@ -559,6 +559,9 @@ Details: [unattended client updates](configuration.md#unattended-client-updates-
 
 ### By hand
 
+With the Python client's package (a client-only install sets up the native
+client instead):
+
 ```bash
 pipx install pseudolife-mcp
 

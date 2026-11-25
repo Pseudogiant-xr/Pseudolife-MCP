@@ -1,8 +1,8 @@
-<!-- i18n-sync: v13 -->
+<!-- i18n-sync: v14 -->
 
 # Pseudolife-MCP
 
-[영어 원본 README](../../README.md)와 동기화된 버전: v13 (2026-09-28)
+[영어 원본 README](../../README.md)와 동기화된 버전: v14 (2026-11-26)
 
 **Claude Code, Codex, 그리고 그 밖의 MCP 클라이언트를 위한 영구적인 장기 메모리.**
 
@@ -29,6 +29,20 @@
 
 ## 빠른 시작
 
+권장 경로는 설치 프로그램입니다. 드림 추출기를 갖춘 Docker 뱅크를 구성하고,
+네이티브 `pseudolife-mcp` 클라이언트로 코딩 에이전트를 연결합니다. 호스트에
+Python이 필요 없습니다:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+무엇을 묻고 무엇을 구성하는지는 아래 "영구 보존 티어" 절에 있습니다.
+
+대신 lite 티어(Python 패키지이므로 호스트에 Python이 필요합니다)를 써 보려면
 명령 두 줄이면 충분합니다. Docker도, 따로 구성할 데이터베이스도, 컨테이너
 런타임도 필요 없습니다:
 

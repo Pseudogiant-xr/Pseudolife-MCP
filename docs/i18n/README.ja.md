@@ -1,8 +1,8 @@
-<!-- i18n-sync: v13 -->
+<!-- i18n-sync: v14 -->
 
 # Pseudolife-MCP
 
-[英語版 README(正典)](../../README.md) — 同期バージョン: v13 (2026-09-28)
+[英語版 README(正典)](../../README.md) — 同期バージョン: v14 (2026-11-26)
 
 **Claude Code、Codex、その他の MCP クライアントに永続的な長期メモリを提供します。**
 
@@ -18,7 +18,18 @@
 
 ## クイックスタート
 
-コマンド 2 つだけです。Docker も、セットアップが必要なデータベースも、コンテナランタイムも不要です:
+推奨はインストーラーです。夢の抽出器付きの Docker バンクを構築し、ネイティブの `pseudolife-mcp` クライアントを通じてコーディングエージェントを接続します。ホストに Python は不要です:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+何を尋ね、何を構築するかは、下の「永続ティア」の節にあります。
+
+代わりに lite ティア(Python パッケージなので、ホストに Python が必要です)を試すなら、コマンド 2 つだけです。Docker も、セットアップが必要なデータベースも、コンテナランタイムも不要です:
 
 ```bash
 pip install "pseudolife-mcp[lite]"

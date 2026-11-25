@@ -1,8 +1,8 @@
-<!-- i18n-sync: v13 -->
+<!-- i18n-sync: v14 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v13 (2026-09-28)
+[README original em inglês](../../README.md) — sincronizado: v14 (2026-11-26)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -33,8 +33,22 @@ O que você ganha:
 
 ## Início rápido
 
-Dois comandos. Sem Docker, sem banco de dados para configurar, sem
-runtime de container:
+O caminho recomendado é o instalador. Ele configura um banco de memória em
+Docker com o extrator de sonhos e conecta seus agentes de codificação pelo
+cliente nativo `pseudolife-mcp`, que não precisa de Python no host:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+O que ele pergunta e o que configura está na seção Camada durável, abaixo.
+
+Para experimentar a camada lite (o pacote Python, que portanto precisa de
+Python no host), dois comandos. Sem Docker, sem banco de dados para
+configurar, sem runtime de container:
 
 ```bash
 pip install "pseudolife-mcp[lite]"

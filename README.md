@@ -89,7 +89,23 @@ artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
 
-Install and register the lite tier. No Docker, no database to set up, no container runtime:
+The installer is the recommended route. It sets up a Docker bank with its
+dream extractor and wires your coding agents through the native
+`pseudolife-mcp` client, which needs no host Python (it installs the Python
+client instead, saying why, where the native one cannot serve the machine):
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+What it asks and what it sets up: [Durable tier — Docker](#durable-tier--docker-recommended-for-a-long-lived-bank).
+
+To try the lite tier instead, install and register the Python package (it
+needs Python 3.10 or newer, and only the Python client runs a lite bank).
+No Docker, no database to set up, no container runtime:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
@@ -409,7 +425,8 @@ docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
 # Verify, then wire the transport into one or both clients.
 curl http://127.0.0.1:8765/health
 
-# Stdio shim (the installer's default — per-session episode identity).
+# Stdio shim (per-session episode identity), by hand with the Python
+# client's package; the installer sets up the native client instead.
 # PSEUDOLIFE_MCP_NO_SPAWN=1 makes the shim wait for the container instead
 # of spawning a host fallback that can shadow the Docker bank after a
 # reboot; set it on Docker-tier registrations like these.
@@ -1075,7 +1092,8 @@ config.
 
 Codex — the installer's default (shim mode) wires the same stdio shim, so a
 Codex session gets its own tier-1 identity instead of inheriting a
-concurrent Claude session's episode:
+concurrent Claude session's episode. By hand, with the Python client's
+package:
 
 ```bash
 pip install pseudolife-mcp
@@ -1106,7 +1124,8 @@ Codex reads it when connecting. This is unnecessary for the default stdio shim.
 
 Gemini CLI — same shape (`-s user` matters: Gemini defaults to project
 scope; the `-e` env gives Gemini sessions their own write attribution, and
-the same Docker-tier `PSEUDOLIFE_MCP_NO_SPAWN=1` note as above applies):
+the same Docker-tier `PSEUDOLIFE_MCP_NO_SPAWN=1` note as above applies). By
+hand, with the Python client's package:
 
 ```bash
 pip install pseudolife-mcp
