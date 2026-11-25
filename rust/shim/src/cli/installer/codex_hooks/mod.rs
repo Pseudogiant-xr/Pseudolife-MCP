@@ -568,7 +568,7 @@ async fn hook_setup<H: Host>(
     vet(&chosen, true)?;
     if chosen.iter().any(|h| h.trust_status != "trusted") {
         report.recovery = Some(
-            "PseudoLife hooks await approval. Rerun the installer interactively, or review them in Codex /hooks.".into(),
+            "PseudoLife hooks await approval. Rerun the installer with --codex-hook-trust yes (install.ps1: -CodexHookTrust yes), or review them in Codex /hooks.".into(),
         );
         return Ok(());
     }
