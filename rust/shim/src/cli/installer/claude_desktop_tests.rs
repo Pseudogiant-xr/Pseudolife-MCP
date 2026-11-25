@@ -771,6 +771,11 @@ fn the_native_help_advertises_the_token_file_form() {
     // The probe reads this text from the installed native client.
     let help = include_str!("../../cli_help.txt");
     assert!(help.contains(TOKEN_FILE_MARKER));
+    assert!(
+        help.contains("The installers' Claude Desktop step reads this text"),
+        "the help names the native step that probes it"
+    );
+    assert!(!help.contains(".py"), "the help names no Python script");
 }
 
 #[test]

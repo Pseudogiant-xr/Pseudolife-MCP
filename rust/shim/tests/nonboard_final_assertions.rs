@@ -594,7 +594,8 @@ fn test_shim_accept_health_gives_a_manual_remedy_before_the_postframe_update() {
     let (_, out, _) = runtime_update_fixture();
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("unattended") && stderr.contains("99.0.0"));
-    assert!(stderr.contains("python ops/update_clients.py"));
+    assert!(stderr.contains("update --clients-only --tag 99.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache), or update the daemon"));
+    assert!(!stderr.contains("update_clients.py"), "{stderr}");
     assert!(
         stderr.find("then start a new session.").unwrap()
             < stderr.find("started the unattended client update").unwrap()

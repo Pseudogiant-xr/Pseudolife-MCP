@@ -34,11 +34,10 @@ Carry these decisions forward:
 - Lite, embedded and file mode are retired in the native client. Preserve the
   documented old-bank upgrade route through a release that still opens them;
   do not rebuild those engines or discard their state.
-- The installers select the native client by default on master (the 0.26.0
-  change); `update` from a Python client still moves only on request. The
-  update default, the release and the retirement after it need their
-  installed proof; publishing archives alone does not prove a supported
-  native client.
+- The installers and an attended `update` select the native client by
+  default on master (the 0.26.0 change); an unattended update never changes
+  the client. The release and the retirement after it need their installed
+  proof; publishing archives alone does not prove a supported native client.
 - Merge, publication, deploy and live-bank changes retain their existing
   user-owned gates. A previous conductor's delegation is not transferred by
   this handoff.

@@ -114,14 +114,17 @@ Microsoft Visual C++ Redistributable for x64 to keep using that archive.
 Starting with 0.25.1, the native installers and the native updater's
 hand-off probe identify this loader error when they detect it.
 
-On an installer-managed Python client from 0.23.0 or later, opt in with
-`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` (set
-`$env:PSEUDOLIFE_SHIM_ENGINE = 'native'` first in PowerShell). If your client
-predates 0.23.0, update it on Python first, then run the opt-in command.
-The updater checks the release archive and keeps the Python client if it
-cannot move this installation. Running sessions keep their runtime. New
-sessions use the selected client through the existing launcher. Pip, pipx
-and lite installs update in place. See [The native client](configuration.md#the-native-client)
+On an installer-managed Python client from 0.23.0 or later,
+`pseudolife-mcp update` moves the machine to the native client, also
+`update --clients-only` on this release's Python client. If your client
+predates 0.23.0, update it on Python first, then run `pseudolife-mcp update
+--clients-only`. The updater checks the release archive and keeps the Python
+client, saying why, when it cannot move this installation. It also keeps
+the Python client when the update runs without a person, when
+`PSEUDOLIFE_SHIM_ENGINE=python` is set, or when an installer run recorded
+that choice. Running sessions keep their runtime. New sessions use the
+selected client through the existing launcher. Pip, pipx and lite installs
+update in place. See [The native client](configuration.md#the-native-client)
 for the supported platforms, tunnel limits and the route back to Python.
 
 If the Python client registered a tunnel to start automatically, the

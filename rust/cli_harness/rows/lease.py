@@ -1,14 +1,20 @@
-"""Canonical process lease leaves, using real OS locks and oracle board writers.
+"""Canonical process lease leaves, using real OS locks and a recorded board.
 
-The fixture clock and random producers are deterministic; the database is
-real, disposable PostgreSQL. Every mutating HTTP action has a complete
-post-state dump, including the audit chain, in the compared observation.
+The board fake answers the leases API as the frozen Python store did
+(``CoordinationStore`` on disposable PostgreSQL, a fixed clock and fixed
+identities): ``fixtures/lease-board.json`` holds, per platform (the run
+command the clients name differs) and scenario, the
+coordination state the scenario starts from and every store-backed request
+the clients made, with the store's answer and the coordination state after
+it (the complete post-state, audit chain included). The fake replays it: a
+request that is not the next one recorded for that history is answered 500
+and fails the case, so a client that changes what it sends is still caught.
+The bearer check and the scripted refusals stay live.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import os
 import queue
@@ -16,14 +22,10 @@ import subprocess
 import sys
 import threading
 import time
-import uuid
-from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
 
 from .. import core, lease_fixture, normalize, producers
-from . import _bank
 
 NAME = "fixture"
 TOKEN = "lease-fixture-bearer"
@@ -68,50 +70,43 @@ class _Holder:
             stream.close()
 
 
-class _Storage:
-    def __init__(self, conn):
-        self.conn = conn
+RECORDING = Path(__file__).resolve().parents[1] / "fixtures" / "lease-board.json"
+_RECORDED: dict | None = None
 
-    @contextmanager
-    def _txn(self):
-        with self.conn.transaction():
-            yield
+
+def _recorded(scenario: str) -> dict:
+    global _RECORDED
+    if _RECORDED is None:
+        _RECORDED = json.loads(RECORDING.read_text(encoding="utf-8"))["platforms"][core.PLATFORM]
+    return _RECORDED[scenario]
+
+
+def _key(action, body, headers) -> list:
+    """What decides the store's answer: the action, the body and the caller."""
+    return [action, body, headers.get("X-PL-Agent"), headers.get("X-PL-Agent-Key")]
 
 
 class Board:
-    """Loopback HTTP boundary backed by the oracle CoordinationStore."""
+    """Loopback HTTP boundary answering as the recorded frozen store."""
 
     def __init__(self, scenario="free", bank=True):
-        self.name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}") if bank else None
-        self.conn = None
+        self.name = None
         self.records = []
         self.states = []
         self.locals = []
+        self.server = None
         if not bank:
             self.url = core.DEAD_DAEMON_URL
             return
-        from pseudolife_memory.storage.coordination import CoordinationStore
-
-        with _bank._admin() as conn:
-            if conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (self.name,)).fetchone():
-                raise RuntimeError("disposable name collision")
-        _bank.create(self.name)
-        self.conn = _bank.connect(self.name, autocommit=True)
-        self.store = CoordinationStore(_Storage(self.conn), clock=lambda: T0)
+        self.name = "recorded:" + scenario
+        recorded = _recorded(scenario)
+        self.initial = recorded["initial"]
+        self.transcripts = recorded["transcripts"]
+        self.history: list = []
+        self.unrecorded: list = []
         self.lock = threading.RLock()
-        self.counter = 0
         self.scenario = scenario
         self.calls = {}
-        self.holder = None
-        if scenario in ("held", "queue", "claim", "other-mirror", "same-mirror"):
-            label = {"other-mirror": "lease-hold@0123456789ab", "same-mirror": "lease-hold@abcdef123456"}.get(scenario, "codex")
-            self.holder = self.register(label=label, project="fixture", task="peer work")
-            self.store.acquire_lease("alice", self.holder["agent_id"], self.holder["credential"],
-                                     name=NAME, ttl=120, expect=60, purpose="peer work")
-            if scenario == "queue":
-                self.waiter = self.register(label="codex", project="fixture", task="first waiter")
-                self.store.acquire_lease("alice", self.waiter["agent_id"], self.waiter["credential"],
-                                         name=NAME, ttl=120, purpose="first waiter")
         fixture = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -139,18 +134,7 @@ class Board:
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
-    def register(self, **fields):
-        self.counter += 1
-        # Fixed test entropy at the writer boundary, rather than SQL inserts
-        # or erasing identity/hash columns from compared database state.
-        identifier = uuid.UUID(int=self.counter, version=4)
-        credential = base64.urlsafe_b64encode(hashlib.sha256(f"fixture-{self.counter}".encode()).digest()).decode().rstrip("=")
-        with patch("pseudolife_memory.storage.coordination.uuid.uuid4", return_value=identifier), \
-                patch("pseudolife_memory.storage.coordination.secrets.token_urlsafe", return_value=credential):
-            return self.store.register("alice", **fields)
-
     def dispatch(self, action, body, headers):
-        from pseudolife_memory.storage.coordination import CoordinationError
         self.calls[action] = self.calls.get(action, 0) + 1
         if headers.get("Authorization") != f"Bearer {TOKEN}":
             return 401, {"error": "unauthorized"}
@@ -160,28 +144,21 @@ class Board:
             return 200, {"registered": True}
         if self.scenario == "transient" and action == "lease" and self.calls[action] == 1:
             return 503, {"error": "temporarily_unavailable"}
-        creds = ("alice", headers.get("X-PL-Agent"), headers.get("X-PL-Agent-Key"))
-        try:
-            if action == "register":
-                reply = self.register(**body)
-            elif action == "lease":
-                reply = self.store.acquire_lease(*creds, **body)
-            elif action == "release":
-                reply = self.store.release_lease(*creds, **body)
-            elif action == "leases":
-                reply = self.store.list_leases(**body)
-            else:
-                raise RuntimeError(f"unexpected fixture action {action}")
-        except CoordinationError as error:
-            return 400, {"error": error.code}
-        if action in ("register", "lease", "release"):
-            self.states.append({"action": action, "state": _bank.dump(self.name)})
-        if self.scenario == "queue" and action == "lease" and reply["state"] == "queued":
-            self.store.release_lease("alice", self.holder["agent_id"], self.holder["credential"], name=NAME)
-            self.states.append({"action": "fixture-release", "state": _bank.dump(self.name)})
-            self.store.release_lease("alice", self.waiter["agent_id"], self.waiter["credential"], name=NAME)
-            self.states.append({"action": "fixture-release-waiter", "state": _bank.dump(self.name)})
-        return 200, reply
+        key = _key(action, body, headers)
+        steps = [t[len(self.history)] for t in self.transcripts
+                 if len(t) > len(self.history)
+                 and [step["key"] for step in t[:len(self.history)]] == self.history
+                 and t[len(self.history)]["key"] == key]
+        if not steps or any(step != steps[0] for step in steps):
+            self.unrecorded.append(key)
+            return 500, {"error": "fixture: request not in the recording"}
+        step = steps[0]
+        self.history.append(key)
+        self.states.extend(step["states"])
+        return step["status"], step["reply"]
+
+    def final_state(self) -> dict:
+        return self.states[-1]["state"] if self.states else self.initial
 
     def requests(self):
         return self.records
@@ -189,13 +166,11 @@ class Board:
     def close(self):
         for holder in self.locals:
             holder.stop()
-        if self.conn is None:
+        if self.server is None:
             return
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(5)
-        self.conn.close()
-        _bank.teardown(self.name)
 
 
 def _setup_lock(arm, path, state):
@@ -236,11 +211,15 @@ def coordination_state(state):
 
 
 def _after(arm, obs):
-    # Every write, rather than only the final released state.
+    # Every write, rather than only the final released state (the recorded
+    # coordination tables and sequences after each store-backed request).
     if arm.daemon.name:
-        obs["db"] = {"writes": [{"action": item["action"], "state": coordination_state(item["state"])}
+        if arm.daemon.unrecorded:
+            raise AssertionError(f"lease row: {arm.name} sent a request the recorded board never "
+                                 f"answered: {arm.daemon.unrecorded[0]!r}")
+        obs["db"] = {"writes": [{"action": item["action"], "state": item["state"]}
                                  for item in arm.daemon.states],
-                     "final": coordination_state(_bank.dump(arm.daemon.name))}
+                     "final": arm.daemon.final_state()}
     obs["seed_offsets"] = {str(stamp): time.localtime(stamp).tm_gmtoff for stamp in (T0, T0 + 60)}
     for holder in arm.daemon.locals:
         holder.stop()
