@@ -11,7 +11,6 @@ import re
 
 import pytest
 
-from pseudolife_memory.credentials import CredentialProvider
 from tests import native_client_stub as native_stub
 from tests.installer_fragments import _bash_fixture_path
 from tests.test_installer_client_only_native import BASH, CRED_READY, FIXTURE_TOKEN, REMOTE, _Shell, _stub, _token as _sh_token

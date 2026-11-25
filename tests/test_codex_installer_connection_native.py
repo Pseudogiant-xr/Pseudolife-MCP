@@ -15,7 +15,7 @@ import pytest
 
 from tests import native_client_stub as native_stub
 
-from pseudolife_memory.credentials import CredentialProvider, _write_token_file
+from tests.client_credentials_fixture import read_token, write_token_file
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,7 +37,7 @@ def test_powershell_fresh_install_keeps_connection_across_stages(tmp_path, shim_
     (repo / "ops/setup-codex-coordination.py").write_text('''
 import json, os, sys
 from pathlib import Path
-from pseudolife_memory.credentials import _write_token_file
+from tests.client_credentials_fixture import write_token_file
 if '--runtime-defaults' in sys.argv:
     Path(os.environ['FIXTURE_RUNTIME']).write_text('verified')
     print(json.dumps({'status':'ready','runtime_defaults':'configured'}))
@@ -49,19 +49,19 @@ assert token=='fixture-installer'
 assert all(key in os.environ for key in (
     'PSEUDOLIFE_MCP_TOKEN','PSEUDOLIFE_MCP_TOKEN_FILE','PSEUDOLIFE_MCP_DAEMON_URL'))
 target=Path(os.environ['CODEX_HOME'])/'pseudolife'/'token'
-_write_token_file(target, token)
+write_token_file(target, token)
 print(json.dumps({'status':'ready','credential_file_configured':True,'connection_configured':True,
  'credential_file_path':str(target),'daemon_url':'http://127.0.0.1:9876'}))
 ''')
     (repo / "ops/setup-codex-hooks.py").write_text('''
 import json, os
 from pathlib import Path
-from pseudolife_memory.credentials import CredentialProvider
+from tests.client_credentials_fixture import read_token
 path=Path(os.environ['PSEUDOLIFE_MCP_TOKEN_FILE'])
 report={'same_file':path==Path(os.environ['CODEX_HOME'])/'pseudolife'/'token',
  'same_url':os.environ.get('PSEUDOLIFE_MCP_DAEMON_URL')=='http://127.0.0.1:9876',
  'no_literal':'PSEUDOLIFE_MCP_TOKEN' not in os.environ,
- 'valid_file':CredentialProvider(path=path).snapshot().token=='fixture-installer'}
+ 'valid_file':read_token(path)=='fixture-installer'}
 Path(os.environ['FIXTURE_HOOK']).write_text(json.dumps(report))
 print(json.dumps({'source':'manual','status':'ready',
  'instructions':'covered-by-hooks','recovery':None}))
@@ -70,7 +70,7 @@ print(json.dumps({'source':'manual','status':'ready',
     stages = re.search(r"(?ms)^# -- 9\. session lifecycle hooks[^\n]*\n(.*?)^# -- 12\. health", source)[1]
     home = tmp_path / "home"
     ambient = tmp_path / "ambient-token"
-    _write_token_file(ambient, "ambient-file")
+    write_token_file(ambient, "ambient-file")
     marker, calls, result, runtime = (tmp_path / name for name in (
         "hook.json", "calls.json", "result.json", "runtime.txt"))
     driver = tmp_path / "driver.ps1"
@@ -119,7 +119,7 @@ function codex {{
         "state": "shim-env" if shim_available else "failed", "restored": True}
     assert json.loads(marker.read_text()) == dict(same_file=True, same_url=True, no_literal=True, valid_file=True)
     managed = home / "pseudolife/token"
-    assert (CredentialProvider(path=managed).snapshot().token == "fixture-installer") is True
+    assert (read_token(managed) == "fixture-installer") is True
     if shim_available:
         assert runtime.read_text() == "verified"
         arguments = json.loads(calls.read_text(encoding="utf-8-sig"))
