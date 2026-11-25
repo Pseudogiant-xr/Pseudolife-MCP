@@ -25,12 +25,18 @@ def isolated_redactor():
     hosted.REDACTOR.values.update(saved)
 
 
+@pytest.fixture(autouse=True)
+def native_engine(monkeypatch):
+    """Each test starts on the run's default engine, native, as a dispatch without the input does."""
+    monkeypatch.setattr(hosted, "ENGINE", "native", raising=False)
+
+
 def test_hosted_acceptance_is_dispatch_only():
     root = Path(__file__).resolve().parents[2]
     workflow = yaml.safe_load((root / ".github/workflows/hosted-acceptance.yml").read_text(encoding="utf-8"))
     events = workflow.get(True) or workflow["on"]
     assert set(events) == {"workflow_dispatch"}
-    assert {"release", "columns"} == set(events["workflow_dispatch"]["inputs"])
+    assert {"release", "columns", "engine"} == set(events["workflow_dispatch"]["inputs"])
     assert workflow["permissions"] == {"contents": "read"}
     assert all("permissions" not in job for job in workflow["jobs"].values())
 
@@ -943,17 +949,18 @@ REPOINTED_CONFIG = APPROVED_CONFIG.replace('"copy"', '"operator"')
 UNCHANGED = b"==> Native client 0.25.1 already installed at /fixture/bin/pseudolife-mcp; nothing changed\n"
 
 
-def _upgrade_with(tmp_path, monkeypatch, first, second, candidate="0.25.2"):
+def _upgrade_with(tmp_path, monkeypatch, first, second, candidate="0.25.2", updates=None):
     """Run hosted_linux.upgrade from one legacy start, with every external step
     faked: the legacy install writes LEGACY_CONFIG, the first native rerun
     `first` and the second `second` (each a config text and its output).
     `candidate` is the release under test (0.25.2 stands for one carrying
-    #1908's fix)."""
+    #1908's fix). `calls` records each install's engine (None: the run's
+    selection), and `updates`, when given, each hand-off's engine variable."""
     from ops.acceptance import hosted_linux as linux
 
     calls = []
 
-    def live_install(peer, repo, profile, flags, *, overrides=None, engine="native"):
+    def live_install(peer, repo, profile, flags, *, overrides=None, engine=None):
         calls.append(engine)
         step = len(calls) % 4  # per starting tag: legacy, run 1, run 2, rollback
         config, launcher = profile.codex / "config.toml", profile.installed_launcher
@@ -969,6 +976,8 @@ def _upgrade_with(tmp_path, monkeypatch, first, second, candidate="0.25.2"):
 
     def update(argv, **options):
         if "update" in argv:
+            if updates is not None:
+                updates.append(options["env"].get("PSEUDOLIFE_SHIM_ENGINE"))
             launcher = Path(options["env"]["HOME"]) / "data" / "pseudolife-mcp" / "bin" / "pseudolife-mcp"
             launcher.parent.mkdir(parents=True, exist_ok=True)
             launcher.write_bytes(b"native")
@@ -998,8 +1007,8 @@ def test_the_upgrade_row_completes_the_lost_approval_once_then_holds_run_two_to_
     row, error, calls = _upgrade_with(tmp_path, monkeypatch, (RERUN_CONFIG, UNCHANGED),
                                       (RERUN_CONFIG, UNCHANGED))
     assert error is None, error
-    # Both starts: legacy install, two native reruns, rollback.
-    assert calls == ["python", "native", "native", "python"] * 2
+    # Both starts: legacy install, two reruns on the run's engine, rollback.
+    assert calls == ["python", None, None, "python"] * 2
     reruns = [step for step in row.steps if step["command"].endswith(("<rerun>", "<second rerun>"))]
     assert [step["observed"] for step in reruns] == [True] * 4, reruns
     assert reruns[0]["changed_codex_settings"] == [linux.LOST_APPROVAL]
@@ -1305,3 +1314,304 @@ def test_a_digest_line_keeps_the_plain_marker_and_is_not_called_key_material():
     cleaned = Redactor().text(f"expected\n{digest}\n")
     assert digest not in cleaned
     assert "<redacted>" in cleaned and "key material" not in cleaned
+
+
+# --- The installer engine a run asks for (W121 gap G6) ---
+
+ENGINE = "PSEUDOLIFE_SHIM_ENGINE"
+DEFAULT_BANNER = (b"Native client install (the default client; PSEUDOLIFE_SHIM_ENGINE=python installs the Python "
+                  b"client instead).\n")
+
+
+def captured_install_envs(monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    envs = []
+    monkeypatch.setattr(linux, "command", lambda argv, **options: envs.append(options["env"]) or
+                        hosted.Result(0, b"", 0))
+    return linux, envs
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+@pytest.mark.parametrize("override", [None, "", "native"])
+def test_the_default_engine_leaves_the_installer_variable_unset(tmp_path, monkeypatch, override):
+    # The near miss: an empty value is set, not unset, so it must go too.
+    linux, envs = captured_install_envs(monkeypatch)
+    profile = hosted.Profile(tmp_path / "home", str(tmp_path / "tools"))
+    overrides = None if override is None else {ENGINE: override}
+    linux.install(tmp_path, profile, [], engine="default", overrides=overrides)
+    assert ENGINE not in envs[0]
+    # Like native, the default runs with Python and pip off its PATH.
+    assert envs[0]["PATH"] == profile.env["PATH"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+@pytest.mark.parametrize("selected, expected, host_path", [
+    ("native", "native", False), ("default", None, False), ("python", "python", True)])
+def test_an_install_without_an_engine_follows_the_run_selection(tmp_path, monkeypatch, selected, expected,
+                                                               host_path):
+    linux, envs = captured_install_envs(monkeypatch)
+    monkeypatch.setattr(hosted, "ENGINE", selected, raising=False)
+    profile = hosted.Profile(tmp_path / "home", str(tmp_path / "tools"))
+    linux.live_install(None, tmp_path, profile, [])
+    assert envs[0].get(ENGINE) == expected
+    assert (os.environ["PATH"] in envs[0]["PATH"]) is host_path
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+@pytest.mark.parametrize("selected, expected, host_path", [
+    ("default", None, False), ("native", "native", False), ("python", "python", True)])
+def test_a_cancelled_install_uses_the_selected_engine(tmp_path, monkeypatch, selected, expected, host_path):
+    from threading import Event
+    from ops.acceptance import hosted_linux as linux
+
+    envs = []
+
+    @contextmanager
+    def paused(release):
+        requested = Event()
+        requested.set()
+        yield "http://127.0.0.1:1/archive", requested
+
+    class Installer:
+        def __init__(self, argv, **options):
+            envs.append(options["env"])
+            self.pid, self.returncode = 0, 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(linux, "paused_download", paused)
+    monkeypatch.setattr(linux.subprocess, "Popen", Installer)
+    monkeypatch.setattr(hosted, "ENGINE", selected, raising=False)
+    profile = hosted.Profile(tmp_path / "home", str(tmp_path / "tools"))
+    _, observed = linux.cancel_download(None, tmp_path, profile, [])
+    assert observed
+    assert envs[0].get(ENGINE) == expected
+    assert (os.environ["PATH"] in envs[0]["PATH"]) is host_path
+    assert envs[0]["PSEUDOLIFE_NATIVE_ARCHIVE_URL"] == "http://127.0.0.1:1/archive"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_upgrade_keeps_its_python_fixtures_and_native_opt_in_under_the_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(hosted, "ENGINE", "default", raising=False)
+    updates = []
+    row, error, calls = _upgrade_with(tmp_path, monkeypatch, (RERUN_CONFIG, UNCHANGED),
+                                      (RERUN_CONFIG, UNCHANGED), updates=updates)
+    assert error is None, error
+    # The legacy installs and rollbacks stay python, the reruns follow the run.
+    assert calls == ["python", None, None, "python"] * 2
+    # Each hand-off stays the documented explicit opt-in.
+    assert updates == ["native", "native"]
+    reruns = [step["command"] for step in row.steps if step["command"].endswith(("<rerun>", "<second rerun>"))]
+    assert reruns == ["bash ops/install.sh <rerun>", "bash ops/install.sh <second rerun>"] * 2
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_stock_update_hand_off_stays_an_explicit_native_opt_in(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    monkeypatch.setattr(hosted, "ENGINE", "default", raising=False)
+    previous = {"version": "0.24.0", "authenticated": True, "id": "old", "image": "old",
+                "volumes": ["state"], "state_volumes": ["state"], "database_volumes": ["bank"],
+                "config": "unchanged", "runtime": {}}
+    snapshots = iter((previous, previous))
+    monkeypatch.setattr(linux, "daemon_snapshot", lambda *_: next(snapshots))
+    envs = []
+
+    def update(arguments, **options):
+        envs.append(options["env"])
+        return hosted.Result(1, b"{}", 0)
+
+    monkeypatch.setattr(linux, "command", update)
+    peer = SimpleNamespace(owner_executable="fixture", owner_env={ENGINE: ""}, during=lambda _, run: run())
+    row = hosted.Receipt("upgrade-and-rollback", "linux-arm64")
+    with pytest.raises(hosted.Failed):
+        linux.stock_upgrade(row, SimpleNamespace(version="0.25.0"), tmp_path, None, peer, tmp_path)
+    assert [env.get(ENGINE) for env in envs] == ["native"]
+
+
+def test_the_installer_label_names_the_engine(monkeypatch):
+    assert hosted.installer("default") == "bash ops/install.sh"
+    assert hosted.installer("native") == "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh"
+    assert hosted.installer("python") == "PSEUDOLIFE_SHIM_ENGINE=python bash ops/install.sh"
+    monkeypatch.setattr(hosted, "ENGINE", "default")
+    assert hosted.installer() == "bash ops/install.sh"
+    with pytest.raises(ValueError):
+        hosted.engine_env({}, "")
+    with pytest.raises(ValueError):
+        hosted.select_engine("")
+    with pytest.raises(ValueError):
+        hosted.installer("")
+
+
+@pytest.mark.parametrize("argv, expected", [
+    ([], "native"), (["--engine", "default"], "default"), (["--engine", "python"], "python")])
+def test_the_run_option_selects_the_installer_engine(tmp_path, monkeypatch, argv, expected):
+    import ops.acceptance
+
+    seen = []
+    fake = SimpleNamespace(run=lambda tag, platform, output: seen.append(hosted.ENGINE) or 0)
+    monkeypatch.setitem(sys.modules, "ops.acceptance.hosted_macos", fake)
+    monkeypatch.setattr(ops.acceptance, "hosted_macos", fake, raising=False)
+    monkeypatch.setattr(sys, "argv", ["hosted", "run", *argv, "v0.26.0", "macos", "macos-arm64",
+                                      str(tmp_path / "out")])
+    assert hosted.main() == 0
+    assert seen == [expected]
+
+
+@pytest.mark.parametrize("engine", ["default", "python"])
+def test_the_run_option_reaches_the_runners_under_python_dash_m(tmp_path, monkeypatch, engine):
+    # The workflow starts `python3 -m ops.acceptance.hosted`, so main() runs in
+    # __main__, a second copy of the module; the runners read the package's.
+    import runpy
+    import warnings
+    import ops.acceptance
+
+    seen = []
+
+    def run(tag, platform, output):
+        from ops.acceptance import hosted as package
+
+        seen.append((package.ENGINE, package.installer(), package.engine_env({}).get(ENGINE)))
+        return 0
+
+    fake = SimpleNamespace(run=run)
+    monkeypatch.setitem(sys.modules, "ops.acceptance.hosted_macos", fake)
+    monkeypatch.setattr(ops.acceptance, "hosted_macos", fake, raising=False)
+    monkeypatch.setattr(sys, "argv", ["hosted", "run", "--engine", engine, "v0.26.0", "macos", "macos-arm64",
+                                      str(tmp_path / "out")])
+    with warnings.catch_warnings(), pytest.raises(SystemExit) as finished:
+        warnings.simplefilter("ignore", RuntimeWarning)  # runpy: the package module is already imported
+        runpy.run_module("ops.acceptance.hosted", run_name="__main__", alter_sys=True)
+    assert finished.value.code == 0
+    assert seen == [(engine, hosted.installer(engine), None if engine == "default" else engine)]
+
+
+@pytest.mark.parametrize("value", ["", "auto"])
+def test_the_run_option_refuses_an_engine_it_does_not_know(tmp_path, monkeypatch, value):
+    monkeypatch.setattr(sys, "argv", ["hosted", "run", "--engine", value, "v0.26.0", "macos", "macos-arm64",
+                                      str(tmp_path / "out")])
+    with pytest.raises(SystemExit) as refused:
+        hosted.main()
+    assert refused.value.code == 2
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_workflow_passes_its_engine_input_to_the_run():
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((root / ".github/workflows/hosted-acceptance.yml").read_text(encoding="utf-8"))
+    events = workflow.get(True) or workflow["on"]
+    engine = events["workflow_dispatch"]["inputs"]["engine"]
+    assert (engine["type"], engine["default"], engine["options"]) == ("choice", "native", list(hosted.ENGINES))
+    job = workflow["jobs"]["acceptance"]
+    assert job["env"]["CLIENT_ENGINE"] == "${{ inputs.engine || 'native' }}"
+    assert ENGINE not in job["env"]
+    observe = next(step for step in job["steps"] if step.get("name") == "Observe installed release")
+    assert observe["run"].startswith('python3 -m ops.acceptance.hosted run --engine "$CLIENT_ENGINE" ')
+
+
+@contextmanager
+def owner_session(*args, **kwargs):
+    yield SimpleNamespace(tool=lambda *a, **k: None, process=SimpleNamespace(returncode=0))
+
+
+FALLBACK = (DEFAULT_BANNER + b"==> the native client cannot serve this machine (no client), so this install uses "
+                             b"the Python client\n")
+
+
+# `installed` is read from the home, never from the installer's words: a
+# fallback that announced the Python client but installed nothing is `none`.
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+@pytest.mark.parametrize("output, native, launcher, installed", [
+    (DEFAULT_BANNER, True, True, "native"),
+    (FALLBACK, False, True, "other"),
+    (FALLBACK, False, False, "none"),
+    (b"Python client installed\n", False, True, "other"),
+])
+def test_the_clean_install_row_records_what_the_default_installed(tmp_path, monkeypatch, output, native, launcher,
+                                                                   installed):
+    from ops.acceptance import hosted_linux as linux
+
+    monkeypatch.setattr(hosted, "ENGINE", "default", raising=False)
+    monkeypatch.setattr(hosted.Profile, "native_marker", lambda self, release: native)
+    monkeypatch.setattr(linux, "first_session", lambda *a, **k: None)
+    monkeypatch.setattr(linux, "session", owner_session)
+    monkeypatch.setattr(linux, "get", lambda url, token=None: ({"status": 200}, {"bank": "fixture"}))
+    monkeypatch.setattr(linux, "command", lambda argv, **options: hosted.Result(0, b'{"code": "pair"}', 0))
+    monkeypatch.setattr(linux, "live_install", lambda *a, **k: hosted.Result(0, output, 1))
+    release = SimpleNamespace(commit="a" * 40, archive=tmp_path / "client.tar.gz", digest="b" * 64,
+                              verified_by="release API and SHA256SUMS")
+    peer = SimpleNamespace(kind=hosted.DAEMONS[3], engine="rust", url="http://127.0.0.1:1", owner_executable="owner",
+                           owner_env={}, checkout=tmp_path, during=lambda receipt, run: run())
+    row = hosted.Receipt("clean-install", "macos-arm64", daemon=hosted.DAEMONS[3], daemon_engine="rust")
+    profile = hosted.Profile(tmp_path / "home", str(tmp_path / "tools"))
+    if launcher:
+        profile.installed_launcher.parent.mkdir(parents=True)
+        profile.installed_launcher.write_bytes(b"launcher")
+    try:
+        linux.clean_install(row, release, tmp_path, profile, peer, tmp_path)
+    except hosted.Failed:
+        assert not native
+    assert row.client_engine["requested"] == "default"
+    assert row.client_engine["variable"] == "unset"
+    assert row.client_engine["installed"] == installed
+    assert row.client_engine["installer_lines"] == (
+        ["The installer announced the native client."] * output.startswith(DEFAULT_BANNER)
+        + ["The installer fell back to the Python client."] * (output == FALLBACK))
+    assert all(step["command"].startswith("bash ops/install.sh") for step in row.steps
+               if "ops/install.sh" in step["command"])
+    (tmp_path / "ledger").mkdir()
+    row.checkpoint(tmp_path, release)
+    receipt = json.loads((tmp_path / "clean-install.json").read_bytes())
+    assert receipt["client_engine_requested"] == "default"
+    assert receipt["client_engine"] == row.client_engine
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The Docker acceptance harness is POSIX-only")
+def test_the_stock_clean_row_records_its_installer_choice(tmp_path, monkeypatch):
+    from ops.acceptance import hosted_linux as linux
+
+    monkeypatch.setattr(hosted, "ENGINE", "default", raising=False)
+    (tmp_path / "ledger").mkdir()
+    by_name = {scenario: hosted.Receipt(scenario, "linux-arm64") for scenario in matrix.SCENARIOS}
+    linux.probe_stock(None, {"daemon_healthy": True, "running_containers": []}, hosted.Result(5, DEFAULT_BANNER, 1),
+                      tmp_path, None, tmp_path, by_name, tmp_path)
+    clean = by_name["clean-install"]
+    assert clean.client_engine == {"requested": "default", "variable": "unset", "installed": "none",
+                                   "installer_lines": ["The installer announced the native client."]}
+    assert clean.steps[0]["command"] == "bash ops/install.sh <stock Docker>"
+
+
+def test_the_summary_names_the_requested_engine_and_the_installed_client(tmp_path, capsys):
+    target = tmp_path / "acceptance-macos-arm64"
+    target.mkdir()
+    for scenario in matrix.SCENARIOS:
+        payload = {"status": "pass", "daemon": hosted.DAEMONS[3], "daemon_engine": "rust",
+                   "client_engine_requested": "default"}
+        if scenario == "clean-install":
+            payload["client_engine"] = {"requested": "default", "variable": "unset", "installed": "native",
+                                        "installer_lines": []}
+        (target / f"{scenario}.json").write_text(json.dumps(payload), encoding="utf-8")
+    assert hosted.summary("macos-arm64", tmp_path) == "pass"
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("**Verdict: pass.**")
+    assert "Installer client requested: `default` (PSEUDOLIFE_SHIM_ENGINE unset)." in lines
+    assert any(line.startswith("| clean-install |") and "pass / source-built from the tag / rust / client native"
+               in line for line in lines)
+
+
+def test_the_summary_refuses_an_installed_client_outside_its_vocabulary(tmp_path, capsys):
+    target = tmp_path / "acceptance-macos-arm64"
+    target.mkdir()
+    payload = {"status": "pass", "daemon": hosted.DAEMONS[3], "daemon_engine": "rust",
+               "client_engine": {"installed": "<script>"}}
+    (target / "clean-install.json").write_text(json.dumps(payload), encoding="utf-8")
+    hosted.summary("macos-arm64", tmp_path)
+    assert "| clean-install | not selected | not selected | invalid result |" in capsys.readouterr().out
