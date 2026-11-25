@@ -1066,8 +1066,8 @@ def lease_turn(lease_ci, monkeypatch):
         lease.close()
 
 
-def _ancestor_holds_the_turn(turn_state):
-    record = {"holder": "worker database run", "pid": turn_state.holder,
+def _ancestor_holds_the_turn(turn_state, holder="worker database run"):
+    record = {"holder": holder, "pid": turn_state.holder,
               "process_started": "100", "owner": "test-owner",
               "acquired": "2026-11-25T00:00:00+00:00"}
     turn_state.lock.write_text(json.dumps(record), encoding="utf-8")
@@ -1089,6 +1089,15 @@ def test_lease_fixture_under_a_delegated_turn_leaves_the_cluster_to_the_holder(l
     assert lease_turn.leases == {}
 
 
+def test_lease_fixture_under_a_delegated_turn_named_like_its_own_proceeds(lease_ci, lease_turn):
+    # The record's holder text is a label, not the signal: an ancestor whose
+    # record carries the name lease_ci itself writes is still delegated.
+    _ancestor_holds_the_turn(lease_turn, holder="standalone database harness")
+    assert lease_ci.module.main() == 0
+    assert lease_turn.contains == 0 and lease_turn.leases == {}
+    assert lease_ci.env_file.read_text(encoding="utf-8").startswith("PSEUDOLIFE_TEST_PG_HOST_PORT=")
+
+
 def test_lease_fixture_refuses_to_own_the_turn_before_starting_a_cluster(lease_ci, lease_turn, capsys,
                                                                           monkeypatch):
     # A standalone VM run with no wrapper would own the turn, which ends with
@@ -1100,8 +1109,9 @@ def test_lease_fixture_refuses_to_own_the_turn_before_starting_a_cluster(lease_c
         lease_ci.module.main()
     message = str(refusal.value.code)
     assert refusal.value.code not in (None, 0)
-    assert "would die" in message and "lease_ci" in message
+    assert "kill it with this process" in message and "lease_ci" in message
     assert "pwsh -NoProfile -NonInteractive -File ops/dev-database-lock.ps1 -- <command>" in message
+    assert "PSEUDOLIFE_TEST_PG_HOST_PORT" in message and "data directory" in message
     assert lease_turn.contains == 0
     assert lease_ci.fakes.pg0.instances == [] and lease_ci.calls == []
     assert not lease_ci.env_file.exists()

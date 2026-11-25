@@ -48,10 +48,13 @@ _OWNED_TURN_REFUSAL = (
     "lease_ci refused before starting PostgreSQL: this machine takes database turns "
     "(~/.pseudolife-mcp/locks/test-postgres.turn-enabled) and no verified ancestor holds the turn, "
     "so this run would own it. An owned turn ends when lease_ci exits, so the cluster could not "
-    "be kept for the steps that use it: on Windows the turn's containment means it would die with "
-    "this process, and elsewhere it would keep running outside any turn. "
+    "serve the steps after it under the turn: on Windows the turn's containment would kill it with "
+    "this process, and elsewhere it would keep running unguarded once the turn is released. "
     "From the repository root, run lease_ci and the steps that use its cluster as one wrapped "
-    "command: pwsh -NoProfile -NonInteractive -File ops/dev-database-lock.ps1 -- <command>"
+    "command: pwsh -NoProfile -NonInteractive -File ops/dev-database-lock.ps1 -- <command>. "
+    "Inside that command, give those steps the PSEUDOLIFE_TEST_PG_HOST_PORT and "
+    "PSEUDOLIFE_TEST_PG_LOGIN_FILE lines lease_ci appends to $GITHUB_ENV, and stop the cluster "
+    "by its data directory before the command ends."
 )
 
 
