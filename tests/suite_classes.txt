@@ -199,7 +199,7 @@ frozen test_daemon_http.py
 live test_daemon_image_is_cpu_only.py
 frozen test_daemon_moved_fence.py
 live test_dedup_cortex_script.py
-live test_deep_dream.py
+frozen test_deep_dream.py
 frozen test_deep_dream_judge.py
 frozen test_deep_dream_response_bound.py
 frozen test_deep_dream_tick.py
@@ -268,9 +268,9 @@ frozen test_freshness.py
 frozen test_freshness_resolve.py
 frozen test_graph.py
 live test_graph_ablation.py
-live test_graph_consolidation.py
+frozen test_graph_consolidation.py
 frozen test_graph_insight.py
-live test_graph_review.py
+frozen test_graph_review.py
 frozen test_graph_store.py
 frozen test_graph_write_gating.py
 live test_hang_diagnostics.py
@@ -360,7 +360,7 @@ live test_lesson_rule_mode.py
 frozen test_lesson_source_lifecycle.py
 frozen test_lesson_source_lineage.py
 frozen test_lessons.py
-live test_lessons_service.py
+frozen test_lessons_service.py
 frozen test_lessons_storage.py
 live test_linux_pool_health.py
 frozen test_lite_extractor_visibility.py
@@ -423,7 +423,7 @@ live test_ops_restore_rehearsal.py
 live test_ops_restore_skips_held.py
 live test_ops_script_modes.py
 live test_ops_update_wrappers.py
-live test_outcome_inference.py
+frozen test_outcome_inference.py
 frozen test_pair_cli.py
 frozen test_pair_endpoint.py
 live test_pdfium_pin.py
@@ -462,7 +462,7 @@ live test_register_claude_desktop.py
 live test_regression_gate_defaults.py
 live test_regression_gate_inputs.py
 live test_relation_bench.py
-live test_relation_quality.py
+frozen test_relation_quality.py
 live test_release_ux.py
 live test_report_redaction.py
 live test_repository_claims.py
@@ -583,5 +583,5 @@ frozen test_world_cortex.py
 frozen test_write_through.py
 frozen test_writer_context.py
 live test_writer_keying.py
-live test_writer_lease.py
+frozen test_writer_lease.py
 live test_wsl_suite_launcher.py

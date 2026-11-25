@@ -417,9 +417,9 @@ def test_partition_candidates_keeps_bare_vs_path_when_both_sides_are_thin():
     # Regression guard for the ranking change: two evidence-free entities must
     # still partition as a merge (the ordinary bare-name -> path-form case).
     ents = [{"id": 1, "canonical": "update-ps1", "display": "update.ps1", "etype": None},
-            {"id": 2, "canonical": "ops-update-ps1", "display": "ops/update.ps1", "etype": None}]
+            {"id": 2, "canonical": "bin-update-ps1", "display": "bin/update.ps1", "etype": None}]
     pairs = [{"src_id": 1, "dst_id": 2, "src": "update.ps1",
-              "dst": "ops/update.ps1", "similarity": 0.99}]
+              "dst": "bin/update.ps1", "similarity": 0.99}]
     merges, links = gc.partition_candidates(pairs, ents, [], fact_counts={})
     assert len(merges) == 1 and links == []
 
@@ -736,15 +736,15 @@ def test_junk_entities_flags_resolvable_compounds_only():
     # a ref/path/route separator — see _COMPOUND_SEP).
     ents = [{"id": 1, "display": "memory_lesson_search / world_search"},
             {"id": 2, "display": "pg+extractor"},
-            {"id": 3, "display": "ops/backup.ps1"},       # extension-exempt
+            {"id": 3, "display": "bin/backup.ps1"},       # extension-exempt
             {"id": 4, "display": "C++"}]                  # empty right side
     known = frozenset({"memory-lesson-search", "world-search", "pg",
-                       "extractor", "ops", "backup-ps1"})
+                       "extractor", "bin", "backup-ps1"})
     out = junk_entities(ents, [], max_degree=1, known_norms=known)
     reasons = {j["display"]: j["reason"] for j in out}
     assert reasons.get("memory_lesson_search / world_search") == "compound-artifact"
     assert reasons.get("pg+extractor") == "compound-artifact"
-    assert "ops/backup.ps1" not in reasons
+    assert "bin/backup.ps1" not in reasons
     assert "C++" not in reasons
     # without known_norms (default) nothing is flagged as compound
     out2 = junk_entities(ents, [], max_degree=1)
@@ -774,8 +774,8 @@ def test_variant_conflict_blocks_cross_model_pairs():
 
 def test_variant_conflict_allows_same_or_absent_variants():
     assert not variant_conflict("Gemma 4 E4B", "gemma-4-E4B-it base")
-    assert not variant_conflict("update.ps1", "ops/update.ps1")
-    assert not variant_conflict("Claude shim", "evals/claude_shim.py")
+    assert not variant_conflict("update.ps1", "bin/update.ps1")
+    assert not variant_conflict("Claude shim", "tools/claude_shim.py")
     # underscore vs hyphen quant forms are the SAME token (norm_name folds _ to -)
     assert not variant_conflict("UD-Q4_K_XL quant", "ud-q4-k-xl quant")
     # Q4 alone (quarter label) is NOT a variant token — it needs _K suffix

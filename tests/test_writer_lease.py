@@ -806,7 +806,7 @@ def test_application_name_names_the_command_but_never_its_arguments(
     monkeypatch.setattr("sys.argv", ["/usr/local/bin/pseudolife-mcp", "serve"])
     assert _application_name().endswith(" pseudolife-mcp serve")
     monkeypatch.setattr("sys.argv", [
-        "ops/restore_from_pt.py", "--dsn", "postgresql://u:hunter2@h/db"])
+        "bin/restore_from_pt.py", "--dsn", "postgresql://u:hunter2@h/db"])
     name = _application_name()
     assert name.endswith(" restore_from_pt.py")
     assert "hunter2" not in name and "--dsn" not in name
