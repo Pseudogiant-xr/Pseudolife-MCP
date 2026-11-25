@@ -44,17 +44,34 @@ def _helper():
     return disposable_postgres
 
 
-def main() -> int:
-    if _DATABASE_TURN_MARKER.exists():
-        _turn_sys = __import__("sys")
-        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[2])
-        _turn_sys.path.insert(0, _turn_root)
-        try:
-            from rust.harness_support.database_turn import require_turn
+def _take_database_turn() -> None:
+    """Take the machine's database turn where the opt-in marker asks for it.
 
+    The cluster this script starts must outlive it, because the job's later
+    steps use it. Contain this process tree only when it owns the turn: then
+    the turn ends with this process and nothing it started may outlive it.
+    A delegated turn belongs to a verified live ancestor (such as
+    ``ops/dev-database-lock.ps1``), whose own lifetime bounds the cluster;
+    containing here would kill the cluster the moment this script exits.
+    """
+    if not _DATABASE_TURN_MARKER.exists():
+        return
+    _turn_sys = __import__("sys")
+    _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[2])
+    _turn_sys.path.insert(0, _turn_root)
+    try:
+        from rust.harness_support.database_turn import require_turn
+
+        lease = require_turn(holder="standalone database harness", contain=False)
+        if lease is not None and not lease.delegated:
+            # Reuses the handle just taken and contains it now.
             require_turn(holder="standalone database harness", contain=True)
-        finally:
-            _turn_sys.path.remove(_turn_root)
+    finally:
+        _turn_sys.path.remove(_turn_root)
+
+
+def main() -> int:
+    _take_database_turn()
     postgres = _helper()
 
     runner_temp = Path(os.environ["RUNNER_TEMP"])
