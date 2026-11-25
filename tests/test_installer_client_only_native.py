@@ -198,6 +198,30 @@ def test_loopback_is_the_shims_own_answer(bash, tmp_path, url):
     assert f"CLIENT_ONLY={expected}\n" in proc.stdout
 
 
+# The stand-in started as the installers start it, with the frozen package
+# unimportable in it: a helper answer it cannot give would send the installers
+# to their shell fallbacks without failing the tests above.
+_STANDIN_WITHOUT_PACKAGE = ("import runpy, sys; sys.modules['pseudolife_memory'] = None; "
+                            "sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+
+
+def _standin(*args: str, stdin: str = "") -> int:
+    script = str(ROOT / "tests" / "native_helper_standin.py")
+    return subprocess.run([sys.executable, "-c", _STANDIN_WITHOUT_PACKAGE, script, str(ROOT), *args],
+                          input=stdin, capture_output=True, text=True, timeout=60).returncode
+
+
+def test_the_helper_stand_in_answers_without_the_package():
+    from tests.client_credentials_fixture import _is_loopback_url, normalize_pairing_code
+    urls = SHIM_LOOPBACK_FORMS + ["http://127.0.0.1:8765", REMOTE]
+    assert [_standin("is-loopback", url) for url in urls] == [
+        10 if _is_loopback_url(url) else 11 for url in urls]
+    assert {_standin("is-loopback", url) for url in urls} == {10, 11}
+    values = CODE_FORMS + NOT_CODES
+    assert [_standin("pairing-code-valid", stdin=value + "\n") for value in values] == [
+        10 if normalize_pairing_code(value) else 11 for value in values]
+
+
 @BASH
 def test_the_installer_asks_the_shims_helper(bash, tmp_path):
     """The decision is the native client's, not a copy of its rule: an
