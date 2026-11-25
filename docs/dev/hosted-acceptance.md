@@ -7,12 +7,26 @@ Select the columns and enter a published release tag. The default is
 
 Each selected runner checks out the release tag, verifies the native archive
 and Compose bundle against the release's `SHA256SUMS`, and calls
-`PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh` from that checkout.
+`bash ops/install.sh` from that checkout with the client the `engine` input
+names:
+
+| `engine` | The installer runs with |
+| --- | --- |
+| `native` (the input's default) | `PSEUDOLIFE_SHIM_ENGINE=native` |
+| `default` | `PSEUDOLIFE_SHIM_ENGINE` unset, as for a user who sets nothing; since 0.26.0 that is the native client |
+| `python` | `PSEUDOLIFE_SHIM_ENGINE=python`, with the host's `PATH` |
+
+Every row's scenario expects the release's native client. So on a release
+whose default is still the Python client, a `default` run fails at its
+native-runtime checks, and so does any `python` run. The legacy start
+installs and their rollback stay `python`, and the update hand-off from them
+stays the explicit `native` opt-in, whatever the input says.
 The release API's asset digests also check `SHA256SUMS` itself. When the
 anonymous API refuses the request, which shared hosted addresses hit, the
 job takes `SHA256SUMS` from the public release download alone. Every
 receipt records which check applied as `release_verified_by`.
-The installer and native client run with Python and pip off their PATH.
+With `native` and `default`, the installer and native client run with
+Python and pip off their PATH.
 Legacy start and rollback operations use Python in a separate environment.
 The jobs use signed-out Codex CLI 0.171.0 installations and disposable bank
 credentials. A full dispatch uses up to four hosted slots across the platform
@@ -100,10 +114,23 @@ fails, cells that cannot run and missing receipts. A green job with pending
 cells is still "no pass". Below the table, each cell without a pass has its
 one-sentence reason.
 
+Under the verdict the summary names the client the run asked for. A
+clean-install cell also names the client the install left in the home:
+`client native` when it is the release's verified native client, `client
+other` when a launcher is installed but is not that client (a Python client
+or another runtime), and `client none` when no launcher is installed. That
+is read from the home, never from what the installer printed.
+
 Download an `acceptance-<platform>` artifact for the receipts. Each one has
 the fixed command labels, observed exit codes, deciding assertions, daemon
-kind and engine. `peer-setup.json` records every setup step and the free disk
-around the build. A failed setup or product step also keeps a `failure`
+kind and engine, and the requested client as `client_engine_requested`. The
+clean-install receipt, the Linux `default-install.json` and the Mac
+`peer-setup.json` owner install also carry `client_engine`: the requested
+client, whether `PSEUDOLIFE_SHIM_ENGINE` was set, the installer's own lines
+about its choice in fixed words (the native client announced, a fallback to
+the Python client, a recorded Python choice), and that installed client.
+`peer-setup.json` records every setup step and the free disk around the
+build. A failed setup or product step also keeps a `failure`
 entry with its step, exit status, error class and its last output lines.
 Those lines pass through `ops/acceptance/sanitize.py` first. That removes every
 token, password and pairing code the job generated, URL credentials and

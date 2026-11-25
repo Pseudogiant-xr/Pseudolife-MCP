@@ -13,7 +13,7 @@
     "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
     "docs/dev/dev-machines.md": "fff57f7e87d2bddfd1067483b64f41379d0f5562aeebf9e70b8bfbf48dfd7e34",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
-    "docs/dev/hosted-acceptance.md": "e27e606f2f55afd92def8fd985e7e516318804632c32d7cc0231ca0c285cc1ef",
+    "docs/dev/hosted-acceptance.md": "f05098915d111ee36bbd3b77c0af6e80cd47fafdfb4eaa8330b12f1ca7f1859c",
     "docs/dev/install-ux.md": "cd6afc0afaa6fe313e51feb927c9223f12590a16e183a20c629c3e3b942f638f",
     "docs/dev/merge-batches.md": "aa47377ce1b8d0ab236e75622f7d036a0097fc1e73ca12acfe69585284bc510e",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
@@ -226,17 +226,17 @@
     "frontend/dist/assets/index-CWP6PB_i.js": "81fe776d09744f879e49be51971799d8d290ab831186e98e20a7da378c360cf5",
     "frontend/dist/index.html": "11d0a84baee68201fd461ff99c696434fc76c276a5ef6155bd8292ddb25761c9",
     "frontend/dist/theme.js": "f2399e3aaa94b61d639937aab791511ef83efb27276330b82324a21be9eea17e",
-    "ops/.env.example": "13c3d741b4553f01cfa9be8990f1109fa5fe48c92a6e826c0eeae2fb39aeaa2a",
+    "ops/.env.example": "73d104216b354104ed86ff407b95258c93641857f0838078ee9ce2762972b218",
     "ops/Dockerfile.daemon": "f6df7ae912c5fe79045bf65386d7a9085e7b31f675be62ccd2dab73994ab2932",
     "ops/Dockerfile.daemon-rust": "5dd59a2e612dfe2413b01f2c1780d95e886910657d46040f11d74f4a2aa403f7",
     "ops/Dockerfile.extractor": "cfd9068d7ba58aad49e00b000ca82ebe83add0e4d8ba7f75043c424243e3451d",
     "ops/Dockerfile.mirror-runner": "b71046c9947e25a2c63cb95c6675621e2f3b6ba935853f73b283c89efa304342",
     "ops/Dockerfile.pg": "ff8b83d3a569807d851eed7219063514d7f5405c8280fe7b6d3e40e56ab2b401",
     "ops/acceptance/README.md": "4c1e898d427799990c99bb81f10861e6096c6b50d0a2e3afe2986e25a9972d52",
-    "ops/acceptance/hosted.py": "9b2ee6bb7b942b8d3ecdc5952654f88bf11df587399d3c0348f1752c80bf6ac3",
-    "ops/acceptance/hosted_linux.py": "853b5ed141065940aa38668551d8910dfcc8321d87ba39b5e82bf8186f100507",
-    "ops/acceptance/hosted_macos.py": "2730057781ac17c4a81b38c1ab410ddf46f9038e66818409dce69afa4c0a8d4f",
-    "ops/acceptance/hosted_source.py": "ed3b07687fb7ed9c8e5edc4bb78c55cc3c7ea1b8f23262dc1ab8b05c736c0a95",
+    "ops/acceptance/hosted.py": "0d23ecda79d3b2b0b4668ed221440d6b7220a11139967fbfe23eaf35e87da4b6",
+    "ops/acceptance/hosted_linux.py": "53d839a031c30beb4ffeb019ee2e40d0d003aed743c8354dc9626baa8c62cf08",
+    "ops/acceptance/hosted_macos.py": "d7a2f24e0020e5f5c2d908ba982ff6652ada1895e2e654e8f6371a8f3499a1b2",
+    "ops/acceptance/hosted_source.py": "82e81a515c15b2a5393ca27da815f29199311b2260445f15b131a01e0fdf8f53",
     "ops/acceptance/matrix.py": "adbb7715662aa570089c2b4a2cc4cc8e4b07dbfb40af940117f26d08d6be259c",
     "ops/acceptance/runner.py": "48e0647674b0551f57a82620d043c1b6d36ac4603b36a11ed65cf12847163dc8",
     "ops/acceptance/sanitize.py": "aa4ccaa114cd1aa371f51b778761c4b3167c3f0f548ab7f72ab0a7ee31dbb6be",
@@ -341,7 +341,7 @@
     "ops/wsl-suite.sh": "5315cdb45177ab21a107adaf20f29681bd263c2a22385da2f41238b654762c34",
     "ops/wslconfig.example": "3f5fe471082489b2efe1a68b3ddee60138a00f7cb75dbd179b6f550e3b898720",
     "plugin/.claude-plugin/plugin.json": "026758428663d17b6345b2a614f856487f79bee078cfd29077ae154f4e863d6e",
-    "plugin/README.md": "88ef911b4a23211e3b6886e6e774ab173d005804eb9162728a2ed786e395b1c9",
+    "plugin/README.md": "d99ea1a6150697b2d340945e158e593940efb927468e13b8426b822219b14e40",
     "plugin/commands/dream.md": "e101854a5c4c47720707ec712eda1f0f345750f07d6898cbedf3adb13802d37f",
     "plugin/commands/memory-status.md": "6cf794157308880f0cc35aebea7f3d578c38d4f84440d20c6ea2df0ed1d09b20",
     "plugin/hooks/coordination-prompt.sh": "021cb09b8afdd4bf81bfdbc7321218f688bc4f1db5807ba95381b7b2d6918971",
@@ -461,11 +461,11 @@
     "rust/shim/src/cli/installer/codex_hooks/definitions.rs": "b0361f361f8279037ab9e63972ef04169a31fbf97e8d209b5a57bcca96a03313",
     "rust/shim/src/cli/installer/codex_hooks/instructions.rs": "bd2c5d4fbf97df63d5b833177e894a8090736b13364b44c636bfcc42325c4d4a",
     "rust/shim/src/cli/installer/codex_hooks/manual.rs": "2637c2047a7e520f6ee661b40e05d1848c365f677d964f7896554ff48b08fbd8",
-    "rust/shim/src/cli/installer/codex_hooks/mod.rs": "451ba9b9102064127c7c2c8dc02bbb7b3269f0b5fda52c03cde4a2a373cd748d",
+    "rust/shim/src/cli/installer/codex_hooks/mod.rs": "17178de5b7522197ebc432ab19fc4b8fb76cb7dc096d379000b15059a6540148",
     "rust/shim/src/cli/installer/codex_hooks/plugin.rs": "ef98cce37aa49ac85d7b3e9d0fb03044f81201bab6a73b5da424907e598ee633",
     "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json": "47062d9732320bce54746c14b58e179b94dc6fa090ac5ecc77071b154ab96f9f",
     "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json": "db0b6087ee7e5f88ec3e1f14ec0ce4fac7af27bc83de55967d20c240f2aba4b5",
-    "rust/shim/src/cli/installer/codex_hooks/tests.rs": "d9441ce430bcc57e9ac2cb79bdba6520e647700a5078d241915d7c9067fed41a",
+    "rust/shim/src/cli/installer/codex_hooks/tests.rs": "0e5429397bc09a3a7e85058c69732981b94e50b9558f46c2bfb373f01771fc57",
     "rust/shim/src/cli/installer/codex_hooks/trust.rs": "1eae24d47ccde305c282f039c31d2fedbf1503f37311d27d31a4bb608713da32",
     "rust/shim/src/cli/installer/codex_hooks/verify.rs": "8e4c7d5f66f063daed3891ed70e8af516c5ba654d7dcf246e96f33e0d97e98d6",
     "rust/shim/src/cli/installer/codex_token_copy.rs": "a190625752039b5bcb47f99c9e4b432965f20414a8caf31ad16d9cf7f5a9c548",
@@ -610,10 +610,11 @@
     "rust/shim/src/cli/tunnel/syntax.rs": "bafbf6307fdd29df5be69c3c4f42296284480e3cef37f92147b36101c38353de",
     "rust/shim/src/cli/tunnel/vendor.rs": "35a1e5c4fa69842026d9e2bc099c615b3f8db4b8a3b65ddea61c6e2c56c2ce32",
     "rust/shim/src/cli/update/backup.rs": "0bd50c5815dbeb6d08f8850f944db329ab26218b6f0886793e4cba8b9ffab9b1",
+    "rust/shim/src/cli/update/clients/autostart.rs": "3a1346b125327f43782c212f06a46e2df826c40dbe1650965890e0e21fa61a43",
     "rust/shim/src/cli/update/clients/codex.rs": "0aee60a7d5a8b7cd6d5b8a9d83dcafb5b9853fdeb0947b533ebe9a7057d587ca",
     "rust/shim/src/cli/update/clients/command.rs": "081f499c99d3b1cc789716319075509681af78e3d7794dc8a4490d404d0a8db2",
     "rust/shim/src/cli/update/clients/handoff.rs": "44a19be7ecf28aeb94efd72adcd929802f2c7c860761c26a8596c2502c2ce380",
-    "rust/shim/src/cli/update/clients/mod.rs": "41374d3ad937f3b740b826e91f56402744a3d3e90cd26a5b6ff66148f0c02780",
+    "rust/shim/src/cli/update/clients/mod.rs": "0aed5040c498052caeabd774842dafc1a23225aeceb2f916412cc079b7d1068d",
     "rust/shim/src/cli/update/clients/plugin.rs": "0368c717c63f22d40d24502e65d49e677cab29f0a1ee2adf3cbf29609cf6b274",
     "rust/shim/src/cli/update/clients/tests.rs": "c320a3c9a91f0a47e6e4befd55ae849b5a8310e189dd428f960a1dd960f088db",
     "rust/shim/src/cli/update/disk.rs": "f2a49f6a8571441504a42b9eddbb22836f00e0d6753b290975c4969b771eeaef",
@@ -641,13 +642,13 @@
     "rust/shim/src/credentials/unix_accounts.rs": "d30f56e73eb66cb4dad5989bab84e4ccb33692b0433262f50caca02dcf58a0be",
     "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
     "rust/shim/src/errors.rs": "931855f942c85f46d5748dead49ef4cb53ca244884702679b0ac70c42cfd8774",
-    "rust/shim/src/extractor_shim/autostart.ps1": "b21d75ca333c6e747f0081ca738b30ac59d0102009c0e0e08aa04ae084754ec7",
-    "rust/shim/src/extractor_shim/autostart.rs": "3cd52c3dba5d22012f3669e54273b8cab5f896b30593240793eb01c22e7a9ede",
+    "rust/shim/src/extractor_shim/autostart.ps1": "92661b55021e47c57f41ce3ed743d778c7fe8919a6c05740b4904d9057fe42a0",
+    "rust/shim/src/extractor_shim/autostart.rs": "0168dd02a1408749ec8bf743f52a7a0637e026ee67eae9b0fffcfcaecf0e9cb4",
     "rust/shim/src/extractor_shim/autostart.sh": "04e6dad715e202f908ffe7967ca2288fe86aed771abb40cb7b03845eda16d39f",
     "rust/shim/src/extractor_shim/cli.rs": "c5abfe23903703581b3660b2526fb41f043d2247b972bc1d143cf38fc40eb279",
-    "rust/shim/src/extractor_shim/config.rs": "f529f4bc688fdcf57ce0ee9513f6181db60439c17874a26a2705aea98876f300",
+    "rust/shim/src/extractor_shim/config.rs": "18b6eb357eefaf38392820eded25007754d71a429ef3caad7326e56e12555ae0",
     "rust/shim/src/extractor_shim/json.rs": "77f399cfb88ba751fb8ca01b4e2ceb59fbabe60492ea16c135c96743dba6e395",
-    "rust/shim/src/extractor_shim/mod.rs": "81a4ba60d3ea69aa084db0af00a678eaa00d355608329ca442cb4e7c0a34bfd8",
+    "rust/shim/src/extractor_shim/mod.rs": "b3e395d763be6cbf592802f31621bf6d28999e394ad9158d23c2e4d047d1039d",
     "rust/shim/src/extractor_shim/tool_preamble.txt": "bf23e1413f76e349563368df84da07a57ce33cc5dbd795218a32a70b489aacdb",
     "rust/shim/src/extractor_shim/tools.rs": "53fa2e0a24cb81bc14b290179a8c5d5a6745cb23a1efe683d37cb7c2fd6bb8d2",
     "rust/shim/src/lib.rs": "1b6adec7a26e876b3d01366081a1c4b99434b8f450f5e009631e808ef4443db4",
@@ -668,12 +669,12 @@
     "rust/shim/src/recovery.rs": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201",
     "rust/shim/src/runtime/cli.rs": "3a1e78edd8c7f5d500733df5f9338f01a0f414046660293f202fb62235f0ff5f",
     "rust/shim/src/runtime/config_file.rs": "794225d1de1ac3bbdfafbe6ccb9dd559a123d4b914a7647f3ce008952bd38179",
-    "rust/shim/src/runtime/install.rs": "04b99ecd4c38f57af46f36144c82256c562e5b93b50f31ee86ea81605d315495",
+    "rust/shim/src/runtime/install.rs": "5b87f541495534ce1faf14984fa82cc1da78ca2901b94c8aaa6be6120330df0c",
     "rust/shim/src/runtime/launch.rs": "019f4faae4ed01464d275c09d00c78f7a6182b5dfaef7398607ef12cfce9b8e2",
-    "rust/shim/src/runtime/mod.rs": "2c81e9f84ee505f6ae3424a3948a84cd40b3059f7aa6c2b2c471c3e9663829bd",
+    "rust/shim/src/runtime/mod.rs": "0ef158bbfad7abdb09dc2978235e94ed4b57b1fe5d281efcef2d12954d40eae9",
     "rust/shim/src/runtime/prune.rs": "25539c7ebb2672c82d7548bb831475ed7e13a0737504a8b5779caa801ac1d122",
     "rust/shim/src/runtime/registrations.rs": "5d678ce803acf8e785c9e84d7adae9d28764d1ae89ace339826254f731dc9d3a",
-    "rust/shim/src/runtime/tests.rs": "fb7b1b15c8761d15739eec93759de6406932a40e5ca074f6ff23cc6c86ba863b",
+    "rust/shim/src/runtime/tests.rs": "682084d18565db983f0639773a38f57804c35a61cf0315d27bc78cdd1775b449",
     "rust/shim/src/sent_config.rs": "03cb07c81b860fe1f90cb823c67720a00a76c45b7d4520203198875d9b614387",
     "rust/shim/src/sent_json.rs": "6986f9f3fdabeb695c12a5b2e6d0e6e72a19288f4eaa284b8287f9d8709db5cc",
     "rust/shim/src/sent_jsonb.rs": "d9265b4adb2842160310fd5410bd8c9224933bf09acce6ff48143d21022cc46e",
@@ -2140,7 +2141,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:186",
+          "location": "plugin/README.md:189",
           "shape": {
             "argv_source": "briefing",
             "channel": "argv",
@@ -2160,7 +2161,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/tests.rs:352",
+          "location": "rust/shim/src/runtime/tests.rs:373",
           "shape": {
             "argv": [
               {
@@ -2178,7 +2179,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/tests.rs:360",
+          "location": "rust/shim/src/runtime/tests.rs:381",
           "shape": {
             "argv": [
               {
@@ -3512,7 +3513,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:81",
+          "location": "plugin/README.md:84",
           "shape": {
             "argv_source": "doctor",
             "channel": "argv",
@@ -3738,7 +3739,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:198",
+          "location": "plugin/README.md:201",
           "shape": {
             "argv_source": "episode-end",
             "channel": "argv",
@@ -3975,7 +3976,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:197",
+          "location": "plugin/README.md:200",
           "shape": {
             "argv_source": "episode-start",
             "channel": "argv",
@@ -8092,7 +8093,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:189",
+          "location": "plugin/README.md:192",
           "shape": {
             "argv_source": "prompt-hook",
             "channel": "argv",
@@ -8302,7 +8303,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:101",
+          "location": "ops/acceptance/hosted_linux.py:103",
           "shape": {
             "argv_source": "shim \", \"Wired into Codex via the pseudolife-mcp shim.\"),",
             "channel": "argv",
@@ -9371,7 +9372,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:90",
+          "location": "ops/acceptance/hosted_linux.py:92",
           "shape": {
             "argv_source": "tunnel setup (guided private key and app setup; docs/guide/tunnels.md).\"),",
             "channel": "argv",
@@ -11516,6 +11517,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "rust/shim/src/cli/update/clients/autostart.rs:305",
+          "shape": {
+            "argv_source": "update --clients-only), move it to the native shim with {}\",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--clients-only), move it to the native shim with {}\",",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "rust/shim/src/cli/update/clients/codex.rs:729",
           "shape": {
             "argv_source": "update --clients-only\",",
@@ -12744,7 +12758,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:270",
+          "location": "plugin/README.md:273",
           "shape": {
             "argv_source": "update",
             "channel": "argv",
@@ -14273,7 +14287,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:117",
+          "location": "plugin/README.md:120",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -15321,7 +15335,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:117",
+          "location": "plugin/README.md:120",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -24011,7 +24025,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:213",
+          "location": "plugin/README.md:216",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -24083,7 +24097,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:213",
+          "location": "plugin/README.md:216",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -28087,7 +28101,7 @@
           "dynamic": "unresolved",
           "evidence": "documented",
           "forwarded_from_tool": "memory_message",
-          "location": "plugin/README.md:148",
+          "location": "plugin/README.md:151",
           "mapping_source": "pseudolife_memory/mcp_server.py:650",
           "shape": {
             "channel": "body",
@@ -28961,7 +28975,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:119",
+          "location": "plugin/README.md:122",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29444,7 +29458,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:123",
+          "location": "plugin/README.md:126",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29459,7 +29473,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:233",
+          "location": "plugin/README.md:236",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29474,7 +29488,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:239",
+          "location": "plugin/README.md:242",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29489,7 +29503,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:253",
+          "location": "plugin/README.md:256",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -30592,7 +30606,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:232",
+          "location": "plugin/README.md:235",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31622,7 +31636,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/.env.example:151",
+          "location": "ops/.env.example:158",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31658,7 +31672,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:150",
+          "location": "ops/.env.example:157",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31698,7 +31712,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/.env.example:153",
+          "location": "ops/.env.example:160",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31747,7 +31761,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:147",
+          "location": "ops/.env.example:154",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31786,7 +31800,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:148",
+          "location": "ops/.env.example:155",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31838,7 +31852,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:149",
+          "location": "ops/.env.example:156",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -31878,7 +31892,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/.env.example:152",
+          "location": "ops/.env.example:159",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34247,7 +34261,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/.env.example:158",
+          "location": "ops/.env.example:165",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34283,7 +34297,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:156",
+          "location": "ops/.env.example:163",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34322,7 +34336,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:157",
+          "location": "ops/.env.example:164",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34362,7 +34376,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/.env.example:160",
+          "location": "ops/.env.example:167",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34398,7 +34412,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:154",
+          "location": "ops/.env.example:161",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34437,7 +34451,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:155",
+          "location": "ops/.env.example:162",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -34477,7 +34491,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/.env.example:159",
+          "location": "ops/.env.example:166",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35042,7 +35056,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:142",
+          "location": "plugin/README.md:145",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35055,7 +35069,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:227",
+          "location": "plugin/README.md:230",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38624,7 +38638,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/.env.example:164",
+          "location": "ops/.env.example:171",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38853,7 +38867,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/.env.example:166",
+          "location": "ops/.env.example:173",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38968,7 +38982,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:706",
+          "location": "ops/acceptance/hosted_linux.py:725",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40605,7 +40619,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:297",
+          "location": "plugin/README.md:300",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40618,7 +40632,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/hosted.py:47",
+          "location": "ops/acceptance/hosted.py:61",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44591,7 +44605,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:981",
+          "location": "ops/acceptance/hosted_linux.py:1001",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -44621,7 +44635,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/acceptance/hosted_source.py:359",
+          "location": "ops/acceptance/hosted_source.py:360",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -46747,7 +46761,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:395",
+          "location": "ops/acceptance/hosted_linux.py:409",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -47587,7 +47601,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/runtime/tests.rs:352",
+          "location": "rust/shim/src/runtime/tests.rs:373",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -47811,7 +47825,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/acceptance/hosted_source.py:358",
+          "location": "ops/acceptance/hosted_source.py:359",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -49213,7 +49227,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:299",
+          "location": "plugin/README.md:302",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -51556,7 +51570,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:388",
+          "location": "ops/acceptance/hosted_linux.py:402",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -53743,7 +53757,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/hosted.py:46",
+          "location": "ops/acceptance/hosted.py:60",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53756,7 +53770,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:513",
+          "location": "ops/acceptance/hosted_linux.py:530",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53769,7 +53783,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:517",
+          "location": "ops/acceptance/hosted_linux.py:534",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58583,7 +58597,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/tests.rs:439",
+          "location": "rust/shim/src/runtime/tests.rs:460",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58833,7 +58847,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/tests.rs:435",
+          "location": "rust/shim/src/runtime/tests.rs:456",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58846,7 +58860,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/runtime/tests.rs:438",
+          "location": "rust/shim/src/runtime/tests.rs:459",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -63594,7 +63608,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/acceptance/hosted.py:462",
+          "location": "ops/acceptance/hosted.py:528",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -65387,7 +65401,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:112",
+          "location": "plugin/README.md:115",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -65666,7 +65680,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "plugin/README.md:211",
+          "location": "plugin/README.md:214",
           "method": null,
           "shape": {
             "channel": "body",
@@ -65985,7 +65999,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "plugin/README.md:205",
+          "location": "plugin/README.md:208",
           "method": null,
           "shape": {
             "channel": "body",
@@ -69469,7 +69483,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "plugin/README.md:256",
+          "location": "plugin/README.md:259",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -70094,7 +70108,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "plugin/README.md:106",
+          "location": "plugin/README.md:109",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -70107,7 +70121,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "plugin/README.md:243",
+          "location": "plugin/README.md:246",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -72572,7 +72586,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/acceptance/hosted_linux.py:83",
+          "location": "ops/acceptance/hosted_linux.py:85",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -75968,20 +75982,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "plugin/README.md:107",
-          "shape": {
-            "channel": "parameters",
-            "complete": false,
-            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "instruction-reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "unverified",
-          "location": "plugin/README.md:243",
+          "location": "plugin/README.md:110",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -76007,7 +76008,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
-          "location": "plugin/README.md:54",
+          "location": "plugin/README.md:249",
+          "shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "Shipped instruction reference supplies no confirmed parameter shape.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "instruction-reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "location": "plugin/README.md:57",
           "shape": {
             "channel": "parameters",
             "complete": false,
@@ -76429,7 +76443,7 @@
         },
         {
           "evidence": "documented",
-          "location": "plugin/README.md:148",
+          "location": "plugin/README.md:151",
           "shape": {
             "channel": "parameters",
             "complete": true,
@@ -79714,6 +79728,34 @@
       "kind": "environment",
       "location": "docs/dev/dev-machines.md:128",
       "name": "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "environment",
+      "location": "docs/dev/hosted-acceptance.md:129",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "environment",
+      "location": "docs/dev/hosted-acceptance.md:16",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -83820,7 +83862,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/extractor_shim/autostart.rs:177",
+      "location": "rust/shim/src/extractor_shim/autostart.rs:199",
       "name": "extractor-shim",
       "shape": {
         "argv_source": "extractor-shim install-autostart claude|codex [--env-file PATH] [--repo PATH] [--name NAME] [--native-exe PATH] [--replace-sibling] [--startup-timeout SECONDS] [--task-logon-type Interactive|S4U] [shim settings]\\nDefault config: ~/.pseudolife-mcp/extractor-shims.env. Settings include --cli, --model, --host, --port, --prompt-file, --health-ttl and --log. An explicit --repo reads that checkout's ops/.env. Registration requires systemd --user on Linux. On Windows it registers a task for this user only and needs no elevation; a task of the same name registered from an elevated PowerShell is never re-registered: when it already runs this action it is restarted with the new settings, otherwise nothing changes and the error names the one elevated command that removes it. S4U is an explicit local-only task principal for unattended hosts, and Windows lets only an elevated PowerShell register it.\"",
@@ -83856,7 +83898,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/extractor_shim/config.rs:476",
+      "location": "rust/shim/src/extractor_shim/config.rs:717",
       "name": "extractor-shim",
       "shape": {
         "argv_source": "extractor-shim [config] claude|codex [--repo PATH] [--cli PATH] [--model ID] [--host HOST] [--port PORT] [--call-timeout SECONDS] [--health-ttl SECONDS] [--system-prompt-file PATH] [--reasoning-effort LEVEL] [--emulate-tools]\\nWith --repo, read ops/.env at every start; config writes only shim settings. Without --repo, match the eval shims' defaults.\"",
@@ -84386,6 +84428,20 @@
       "kind": "environment",
       "location": "ops/Dockerfile.daemon-rust:45",
       "name": "PSEUDOLIFE_DAEMON_RERANK_DIR",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/acceptance/hosted.py:44",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -88108,7 +88164,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/runtime/install.rs:488",
+      "location": "rust/shim/src/runtime/install.rs:494",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -88122,7 +88178,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/runtime/install.rs:539",
+      "location": "rust/shim/src/runtime/install.rs:545",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -88136,7 +88192,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/runtime/install.rs:551",
+      "location": "rust/shim/src/runtime/install.rs:557",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -88150,7 +88206,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/runtime/install.rs:564",
+      "location": "rust/shim/src/runtime/install.rs:570",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -88178,7 +88234,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/runtime/tests.rs:649",
+      "location": "rust/shim/src/runtime/tests.rs:670",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -91819,7 +91875,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "ops/acceptance/hosted_linux.py:71",
+      "location": "ops/acceptance/hosted_linux.py:73",
       "method": null,
       "name": "/health",
       "shape": {
@@ -94739,7 +94795,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/hosted-acceptance.md:10",
+      "location": "docs/dev/hosted-acceptance.md:15",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -94747,6 +94803,22 @@
         "parameters": {
           "value": {
             "literal": "native"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "documented",
+      "kind": "environment",
+      "location": "docs/dev/hosted-acceptance.md:17",
+      "name": "PSEUDOLIFE_SHIM_ENGINE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "python"
           }
         }
       },
@@ -96306,22 +96378,6 @@
     },
     {
       "evidence": "documented",
-      "kind": "environment",
-      "location": "plugin/README.md:47",
-      "name": "PSEUDOLIFE_SHIM_ENGINE",
-      "shape": {
-        "channel": "environment",
-        "complete": true,
-        "parameters": {
-          "value": {
-            "literal": "native"
-          }
-        }
-      },
-      "usage": "assignment"
-    },
-    {
-      "evidence": "documented",
       "kind": "tool",
       "location": "docs/cortex-mcp-spec.md:134",
       "name": "memory_fact_forget",
@@ -97082,7 +97138,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/acceptance/hosted.py:372",
+      "location": "ops/acceptance/hosted.py:438",
       "name": "PSEUDOLIFE_UNATTENDED",
       "shape": {
         "channel": "environment",
@@ -97098,30 +97154,14 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/acceptance/hosted.py:44",
+      "location": "ops/acceptance/hosted.py:56",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
         "complete": true,
         "parameters": {
           "value": {
-            "literal": "native"
-          }
-        }
-      },
-      "usage": "assignment"
-    },
-    {
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/acceptance/hosted_linux.py:117",
-      "name": "PSEUDOLIFE_SHIM_ENGINE",
-      "shape": {
-        "channel": "environment",
-        "complete": true,
-        "parameters": {
-          "value": {
-            "literal": "engine"
+            "literal": "python"
           }
         }
       },
@@ -97146,23 +97186,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/acceptance/hosted_linux.py:616",
-      "name": "PSEUDOLIFE_SHIM_ENGINE",
-      "shape": {
-        "channel": "environment",
-        "complete": true,
-        "parameters": {
-          "value": {
-            "literal": "native"
-          }
-        }
-      },
-      "usage": "assignment"
-    },
-    {
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/acceptance/hosted_linux.py:656",
+      "location": "ops/acceptance/hosted_linux.py:63",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -97178,14 +97202,14 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/acceptance/hosted_linux.py:731",
+      "location": "ops/acceptance/hosted_linux.py:675",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
         "complete": true,
         "parameters": {
           "value": {
-            "literal": "native"
+            "literal": "python"
           }
         }
       },
@@ -97194,7 +97218,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/acceptance/hosted_linux.py:852",
+      "location": "ops/acceptance/hosted_linux.py:872",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -97210,23 +97234,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/acceptance/hosted_linux.py:852",
-      "name": "PSEUDOLIFE_SHIM_ENGINE",
-      "shape": {
-        "channel": "environment",
-        "complete": true,
-        "parameters": {
-          "value": {
-            "literal": "native"
-          }
-        }
-      },
-      "usage": "assignment"
-    },
-    {
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/acceptance/hosted_linux.py:908",
+      "location": "ops/acceptance/hosted_linux.py:928",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -97282,22 +97290,6 @@
         "parameters": {
           "value": {
             "expression": "str(repo"
-          }
-        }
-      },
-      "usage": "assignment"
-    },
-    {
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/acceptance/hosted_source.py:344",
-      "name": "PSEUDOLIFE_SHIM_ENGINE",
-      "shape": {
-        "channel": "environment",
-        "complete": true,
-        "parameters": {
-          "value": {
-            "literal": "native"
           }
         }
       },
@@ -99594,7 +99586,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/runtime/install.rs:530",
+      "location": "rust/shim/src/runtime/install.rs:536",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -99610,7 +99602,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/runtime/tests.rs:664",
+      "location": "rust/shim/src/runtime/tests.rs:685",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -100667,6 +100659,18 @@
       "dynamic": "unresolved",
       "location": "docs/dev/glossary.md:46",
       "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/hosted-acceptance.md:129",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SHIM_ENGINE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/hosted-acceptance.md:16",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SHIM_ENGINE"
     },
     {
       "dynamic": "unresolved",
@@ -115890,43 +115894,43 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/.env.example:151",
+      "location": "ops/.env.example:158",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CLAUDE_SHIM_CLI"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/.env.example:152",
+      "location": "ops/.env.example:159",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CLAUDE_SHIM_PYTHON"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/.env.example:153",
+      "location": "ops/.env.example:160",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CLAUDE_SHIM_LOG"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/.env.example:158",
+      "location": "ops/.env.example:165",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_SHIM_CLI"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/.env.example:159",
+      "location": "ops/.env.example:166",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_SHIM_PYTHON"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/.env.example:160",
+      "location": "ops/.env.example:167",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_SHIM_LOG"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/.env.example:164",
+      "location": "ops/.env.example:171",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DREAM_TIMEOUT_SECONDS"
     },
@@ -116056,85 +116060,91 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:201",
+      "location": "ops/acceptance/hosted.py:267",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:261",
+      "location": "ops/acceptance/hosted.py:327",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:272",
+      "location": "ops/acceptance/hosted.py:338",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:278",
+      "location": "ops/acceptance/hosted.py:344",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:280",
+      "location": "ops/acceptance/hosted.py:346",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:453",
+      "location": "ops/acceptance/hosted.py:44",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SHIM_ENGINE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:519",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:46",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:462",
+      "location": "ops/acceptance/hosted.py:528",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/episodes"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted.py:47",
+      "location": "ops/acceptance/hosted.py:60",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/acceptance/hosted.py:61",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted_linux.py:101",
+      "location": "ops/acceptance/hosted_linux.py:103",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted_linux.py:513",
+      "location": "ops/acceptance/hosted_linux.py:530",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted_linux.py:517",
+      "location": "ops/acceptance/hosted_linux.py:534",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted_linux.py:706",
+      "location": "ops/acceptance/hosted_linux.py:725",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_IMAGE_TAG"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted_linux.py:71",
+      "location": "ops/acceptance/hosted_linux.py:73",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/acceptance/hosted_linux.py:90",
+      "location": "ops/acceptance/hosted_linux.py:92",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:tunnel"
     },
@@ -124198,93 +124208,87 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:106",
+      "location": "plugin/README.md:109",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_agents"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:107",
+      "location": "plugin/README.md:110",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_message"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:112",
+      "location": "plugin/README.md:115",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/coordination-start"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:117",
+      "location": "plugin/README.md:120",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:117",
+      "location": "plugin/README.md:120",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:119",
+      "location": "plugin/README.md:122",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:142",
+      "location": "plugin/README.md:145",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:148",
+      "location": "plugin/README.md:151",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:receive"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:205",
+      "location": "plugin/README.md:208",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/session-start"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:211",
+      "location": "plugin/README.md:214",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:GET /api/hook/memory-policy"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:213",
+      "location": "plugin/README.md:216",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:MemoryPolicyConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:213",
+      "location": "plugin/README.md:216",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:MemoryPolicyConfig.variant"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:227",
+      "location": "plugin/README.md:230",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:243",
+      "location": "plugin/README.md:246",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_agents"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "plugin/README.md:243",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "tool:memory_message"
     },
     {
       "dynamic": "unresolved",
@@ -124294,19 +124298,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:256",
+      "location": "plugin/README.md:249",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_message"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "plugin/README.md:259",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "route:POST /api/hook/subagent"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:297",
+      "location": "plugin/README.md:300",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:299",
+      "location": "plugin/README.md:302",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
@@ -124318,7 +124328,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "plugin/README.md:54",
+      "location": "plugin/README.md:57",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "tool:memory_message"
     },
@@ -130020,6 +130030,12 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/update/clients/autostart.rs:305",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "rust/shim/src/cli/update/clients/codex.rs:491",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_BIN"
@@ -130939,7 +130955,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/extractor_shim/autostart.rs:177",
+      "location": "rust/shim/src/extractor_shim/autostart.rs:199",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:extractor-shim"
     },
@@ -130961,7 +130977,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/extractor_shim/config.rs:476",
+      "location": "rust/shim/src/extractor_shim/config.rs:717",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:extractor-shim"
     },
@@ -131261,41 +131277,41 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/install.rs:488",
+      "location": "rust/shim/src/runtime/install.rs:494",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/install.rs:507",
+      "location": "rust/shim/src/runtime/install.rs:513",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/install.rs:510",
+      "location": "rust/shim/src/runtime/install.rs:516",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/install.rs:539",
+      "location": "rust/shim/src/runtime/install.rs:545",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/install.rs:551",
+      "location": "rust/shim/src/runtime/install.rs:557",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/install.rs:564",
+      "location": "rust/shim/src/runtime/install.rs:570",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/install.rs:603",
+      "location": "rust/shim/src/runtime/install.rs:609",
       "reason": "request target supplied dynamically or external"
     },
     {
@@ -131324,37 +131340,37 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/tests.rs:352",
+      "location": "rust/shim/src/runtime/tests.rs:373",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:channel"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/tests.rs:360",
+      "location": "rust/shim/src/runtime/tests.rs:381",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:channel"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/tests.rs:435",
+      "location": "rust/shim/src/runtime/tests.rs:456",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/tests.rs:438",
+      "location": "rust/shim/src/runtime/tests.rs:459",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/tests.rs:439",
+      "location": "rust/shim/src/runtime/tests.rs:460",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/runtime/tests.rs:649",
+      "location": "rust/shim/src/runtime/tests.rs:670",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
     },

@@ -171,6 +171,28 @@ impl From<&str> for Failure {
     }
 }
 
+/// The log path to register when none is given: the native shim's default,
+/// unless the settings file already names one. Writing the default over a
+/// configured path would undo an edit of it at every rerun.
+fn default_log(
+    settings: &[OsString],
+    env_file: &std::path::Path,
+    kind: &str,
+) -> Result<Option<PathBuf>, String> {
+    if settings.iter().any(|a| a == "--log")
+        || config::env_file(env_file)
+            .get(&format!("PSEUDOLIFE_{}_SHIM_LOG", kind.to_uppercase()))
+            .is_some_and(|v| !v.is_empty())
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        dirs::home_dir()
+            .ok_or("home directory unavailable")?
+            .join(format!(".pseudolife-mcp/{kind}-shim.log")),
+    ))
+}
+
 pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     if args.is_empty() || args.iter().any(|a| a == "--help") {
         println!(
@@ -239,10 +261,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     if let Some(repo) = &repo {
         settings.extend(["--repo".into(), repo.as_os_str().into()]);
     }
-    if !settings.iter().any(|a| a == "--log") {
-        let path = dirs::home_dir()
-            .ok_or("home directory unavailable")?
-            .join(format!(".pseudolife-mcp/{kind}-shim.log"));
+    if let Some(path) = default_log(&settings, &env_file, kind)? {
         settings.extend(["--log".into(), path.into_os_string()]);
     }
     for at in 0..settings.len().saturating_sub(1) {
@@ -272,18 +291,17 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     }
     let port = config.as_ref().map(|c| c.port).unwrap_or(0);
     let host = config.as_ref().map(|c| c.host.as_str()).unwrap_or("");
-    let name = name.unwrap_or_else(|| {
-        if cfg!(windows) {
-            format!(
-                "Pseudolife {} Shim",
-                if kind == "claude" { "Claude" } else { "Codex" }
-            )
-        } else if kind == "claude" {
-            "pseudolife-sonnet-shim.service".into()
-        } else {
-            "pseudolife-codex-shim.service".into()
-        }
-    });
+    let default_name = if cfg!(windows) {
+        format!(
+            "Pseudolife {} Shim",
+            if kind == "claude" { "Claude" } else { "Codex" }
+        )
+    } else if kind == "claude" {
+        "pseudolife-sonnet-shim.service".into()
+    } else {
+        "pseudolife-codex-shim.service".into()
+    };
+    let name = name.unwrap_or_else(|| default_name.clone());
     if name.is_empty()
         || name.chars().any(|c| c.is_control() || "/\\".contains(c))
         // ScheduledTasks uses wildcard matching, including backtick escaping.
@@ -329,8 +347,35 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     let mut scratch = Scratch::create(
         std::env::temp_dir().join(format!("pseudolife-shim-install-{}", uuid::Uuid::new_v4())),
     )?;
+    // What an edit of the settings file is applied with on Windows; the
+    // block's first line and the registration's last line name it.
+    // The last one, as `config::parse` reads it.
+    let receipt_dir = settings
+        .windows(2)
+        .rev()
+        .find(|a| a[0] == "--receipt-dir")
+        .map(|a| config::absolute_path(&PathBuf::from(&a[1])))
+        .transpose()?;
+    // The parsed value: the line is recognised only with plain digits.
+    let wait_text = wait.to_string();
+    let rerun = config::rerun_command(&config::Rerun {
+        native: &native,
+        kind,
+        repo: repo.as_deref(),
+        env_file: &env_file,
+        name: (name != default_name).then_some(name.as_str()),
+        logon: (logon != "Interactive").then_some(logon.as_str()),
+        startup_timeout: (wait != 90).then_some(wait_text.as_str()),
+        receipt_dir: receipt_dir.as_deref(),
+    });
     let mut config_args = vec!["extractor-shim".to_owned(), "config".into()];
     config_args.extend(settings.iter().map(|s| s.to_string_lossy().into_owned()));
+    config_args.extend([
+        "--rerun-task".into(),
+        name.clone(),
+        "--rerun-command".into(),
+        rerun.clone(),
+    ]);
     let mut serve_args = vec![
         "extractor-shim".to_owned(),
         kind.into(),
@@ -350,7 +395,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     }
     let status = if cfg!(windows) {
         let script_bytes = include_bytes!("autostart.ps1");
-        let data_bytes = registration_data(json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args}))?;
+        let data_bytes = registration_data(json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args,"Rerun":rerun}))?;
         let script = scratch.write("register.ps1", script_bytes)?;
         let data = scratch.write("registration.json", &data_bytes)?;
         windows_registration_command(&script, &data, script_bytes, &data_bytes)?.status()
@@ -862,5 +907,40 @@ exit 0"#;
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::default_log;
+    use std::{ffi::OsString, fs};
+
+    #[test]
+    fn a_configured_log_is_kept_and_only_a_missing_one_gets_the_default() {
+        let dir = std::env::temp_dir().join(format!("shim-log-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let env = dir.join("settings.env");
+        fs::write(
+            &env,
+            "PSEUDOLIFE_CLAUDE_SHIM_LOG='/var/log/my shim.log'
+PSEUDOLIFE_CODEX_SHIM_LOG=
+",
+        )
+        .unwrap();
+        let none: [OsString; 1] = ["claude".into()];
+        assert_eq!(default_log(&none, &env, "claude").unwrap(), None);
+        let codex = default_log(&none, &env, "codex").unwrap().unwrap();
+        assert!(
+            codex.ends_with(".pseudolife-mcp/codex-shim.log"),
+            "{codex:?}"
+        );
+        let given: [OsString; 3] = ["codex".into(), "--log".into(), "/x.log".into()];
+        assert_eq!(default_log(&given, &env, "codex").unwrap(), None);
+        assert!(
+            default_log(&none, &dir.join("missing.env"), "claude")
+                .unwrap()
+                .is_some()
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 }

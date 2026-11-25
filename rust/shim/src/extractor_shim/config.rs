@@ -269,8 +269,233 @@ pub(super) fn verify_settings(config: &Config, pid: u32) -> Result<(), String> {
     }
 }
 
-const BEGIN: &str = "# >>> pseudolife shim autostart (managed by ops/shim_autostart.py; edit values here, then: python ops/shim_autostart.py restart claude|codex) >>>";
+// The block's first line tells whoever edits the file how to apply the edit.
+// The shim reads this file at every start, so on Linux a restart of its unit
+// is enough: the step autostart.sh prints as its reload, for the default unit
+// names (autostart.rs) or the one given with --name. macOS has no native
+// autostart. A shipped text is never edited: files written with it must
+// still match.
+const BEGIN_LINUX: &str = "# >>> pseudolife shim autostart (edit values here, then: systemctl --user restart pseudolife-sonnet-shim.service for Claude, pseudolife-codex-shim.service for Codex, or the unit named at install with --name) >>>";
+const BEGIN_OTHER: &str = "# >>> pseudolife shim autostart (edit values here, then stop the extractor shim you started and start it again) >>>";
+// On Windows stopping and starting the task stops only the PowerShell
+// wrapper it runs: the shim that wrapper started keeps its port and its old
+// settings (Windows dev VM, 26 November 2026, real-autostart harness). The
+// registration's own rerun captures and stops that shim, so the line names
+// it with this install's values, built at write time, and the task it is
+// for, so the line stays true beside a sibling or after a removal.
+const BEGIN_WINDOWS_PREFIX: &str =
+    "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task ";
+const BEGIN_WINDOWS_INFIX: &str = " is registered, run in PowerShell: ";
+const BEGIN_WINDOWS_SUFFIX: &str = ") >>>";
+// A Windows write that does not know the registration (a bare `config` on a
+// file no install-autostart wrote) never guesses its name or logon type.
+const BEGIN_WINDOWS_UNKNOWN: &str = "# >>> pseudolife shim autostart (edit values here, then run again, in PowerShell, the pseudolife-mcp extractor-shim install-autostart command this shim was registered with) >>>";
+// Written by ops/shim_autostart.py and by earlier native releases; its
+// instruction needs Python, so it is read and replaced but never written.
+const BEGIN_PYTHON: &str = "# >>> pseudolife shim autostart (managed by ops/shim_autostart.py; edit values here, then: python ops/shim_autostart.py restart claude|codex) >>>";
 const END: &str = "# <<< pseudolife shim autostart <<<";
+
+/// The characters PowerShell accepts as a single-quote delimiter.
+fn powershell_quote_char(c: char) -> bool {
+    matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}')
+}
+
+/// `value` as a PowerShell single-quoted string: each quote character is
+/// doubled, as PowerShell's own escaping does.
+pub(super) fn powershell_quote(value: &str) -> String {
+    let mut quoted = String::from("'");
+    for c in value.chars() {
+        if powershell_quote_char(c) {
+            quoted.push(c);
+        }
+        quoted.push(c);
+    }
+    quoted.push('\'');
+    quoted
+}
+
+/// What follows a PowerShell single-quoted string at the start of `text`.
+fn after_powershell_quoted(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('\'')?;
+    let mut chars = rest.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if powershell_quote_char(c) {
+            if chars
+                .peek()
+                .is_some_and(|&(_, next)| powershell_quote_char(next))
+            {
+                chars.next();
+                continue;
+            }
+            return Some(&rest[at + c.len_utf8()..]);
+        }
+    }
+    None
+}
+
+/// A command `rerun_command` builds, parsed whole: `& '<native>'
+/// extractor-shim install-autostart <kind>`, then `--repo '<path>'` and/or
+/// `--env-file '<path>'`, `--native-exe '<path>'`, and optionally `--name
+/// '<name>'`, `--task-logon-type Interactive|S4U`, `--startup-timeout
+/// <seconds>` and `--receipt-dir '<path>'`, each at most once and nothing else.
+fn generated_rerun(command: &str) -> bool {
+    let Some(mut rest) = command.strip_prefix("& ").and_then(after_powershell_quoted) else {
+        return false;
+    };
+    let Some(kind_rest) = rest.strip_prefix(" extractor-shim install-autostart ") else {
+        return false;
+    };
+    let Some(after_kind) = ["claude", "codex"]
+        .iter()
+        .find_map(|kind| kind_rest.strip_prefix(kind))
+    else {
+        return false;
+    };
+    rest = after_kind;
+    let mut seen: Vec<&str> = vec![];
+    while !rest.is_empty() {
+        let Some(flagged) = rest.strip_prefix(" --") else {
+            return false;
+        };
+        let Some((flag, value)) = flagged.split_once(' ') else {
+            return false;
+        };
+        if seen.contains(&flag) {
+            return false;
+        }
+        rest = match flag {
+            "repo" | "env-file" | "native-exe" | "name" | "receipt-dir" => {
+                match after_powershell_quoted(value) {
+                    Some(after) => after,
+                    None => return false,
+                }
+            }
+            "task-logon-type" => match ["Interactive", "S4U"]
+                .iter()
+                .find_map(|logon| value.strip_prefix(logon))
+            {
+                Some(after) => after,
+                None => return false,
+            },
+            "startup-timeout" => {
+                let digits = value.bytes().take_while(u8::is_ascii_digit).count();
+                if digits == 0 {
+                    return false;
+                }
+                &value[digits..]
+            }
+            _ => return false,
+        };
+        seen.push(flag);
+    }
+    seen.contains(&"native-exe") && (seen.contains(&"repo") || seen.contains(&"env-file"))
+}
+
+/// A Windows first line naming a registration's task and rerun.
+fn windows_line(line: &str) -> bool {
+    line.strip_prefix(BEGIN_WINDOWS_PREFIX)
+        .and_then(after_powershell_quoted)
+        .and_then(|rest| rest.strip_prefix(BEGIN_WINDOWS_INFIX))
+        .and_then(|rest| rest.strip_suffix(BEGIN_WINDOWS_SUFFIX))
+        .is_some_and(generated_rerun)
+}
+
+fn windows_begin(task: &str, command: &str) -> String {
+    format!(
+        "{BEGIN_WINDOWS_PREFIX}{}{BEGIN_WINDOWS_INFIX}{command}{BEGIN_WINDOWS_SUFFIX}",
+        powershell_quote(task)
+    )
+}
+
+/// The Windows first line for a write: the registration's, when
+/// install-autostart names it; else the file's own (a bare `config` keeps
+/// the registration's task, name and logon type); else the fixed text.
+fn windows_chosen(rerun: Option<(&str, &str)>, raw: &str) -> String {
+    match rerun {
+        Some((task, command)) => windows_begin(task, command),
+        None => raw
+            .lines()
+            .map(str::trim)
+            .find(|line| windows_line(line))
+            .map_or_else(|| BEGIN_WINDOWS_UNKNOWN.into(), str::to_owned),
+    }
+}
+
+/// This platform's first line for a write.
+fn chosen_begin(rerun: Option<(&str, &str)>, raw: &str) -> String {
+    if cfg!(windows) {
+        windows_chosen(rerun, raw)
+    } else if cfg!(target_os = "linux") {
+        BEGIN_LINUX.into()
+    } else {
+        BEGIN_OTHER.into()
+    }
+}
+
+/// Every first line a managed block has been written with, matched exactly
+/// (the Windows one by its whole generated structure) so a block from any
+/// platform or release is replaced, never duplicated.
+fn is_begin(line: &str) -> bool {
+    let line = line.trim();
+    [
+        BEGIN_LINUX,
+        BEGIN_OTHER,
+        BEGIN_PYTHON,
+        BEGIN_WINDOWS_UNKNOWN,
+    ]
+    .contains(&line)
+        || windows_line(line)
+}
+
+/// What a Windows registration is run again with to apply an edit of its
+/// settings file: everything install-autostart was given that the file does
+/// not keep.
+pub(super) struct Rerun<'a> {
+    pub native: &'a Path,
+    pub kind: &'a str,
+    pub repo: Option<&'a Path>,
+    pub env_file: &'a Path,
+    pub name: Option<&'a str>,
+    pub logon: Option<&'a str>,
+    pub startup_timeout: Option<&'a str>,
+    pub receipt_dir: Option<&'a Path>,
+}
+
+/// The PowerShell command that registers this shim again with the settings
+/// in its file: the way an edit applies on Windows.
+pub(super) fn rerun_command(rerun: &Rerun) -> String {
+    let path = |p: &Path| powershell_quote(&p.display().to_string());
+    let native = path(rerun.native);
+    let mut words = vec![
+        format!("& {native}"),
+        "extractor-shim".into(),
+        "install-autostart".into(),
+        rerun.kind.into(),
+    ];
+    match rerun.repo {
+        Some(repo) => {
+            words.extend(["--repo".into(), path(repo)]);
+            if rerun.env_file != repo.join("ops/.env") {
+                words.extend(["--env-file".into(), path(rerun.env_file)]);
+            }
+        }
+        None => words.extend(["--env-file".into(), path(rerun.env_file)]),
+    }
+    words.extend(["--native-exe".into(), native]);
+    if let Some(name) = rerun.name {
+        words.extend(["--name".into(), powershell_quote(name)]);
+    }
+    if let Some(logon) = rerun.logon {
+        words.extend(["--task-logon-type".into(), logon.into()]);
+    }
+    if let Some(timeout) = rerun.startup_timeout {
+        words.extend(["--startup-timeout".into(), timeout.into()]);
+    }
+    if let Some(receipt_dir) = rerun.receipt_dir {
+        words.extend(["--receipt-dir".into(), path(receipt_dir)]);
+    }
+    words.join(" ")
+}
 
 fn env_line(line: &str) -> Option<(String, String)> {
     let line = line
@@ -305,7 +530,7 @@ fn env_line(line: &str) -> Option<(String, String)> {
     Some((key.into(), v))
 }
 
-fn env_file(path: &Path) -> BTreeMap<String, String> {
+pub(super) fn env_file(path: &Path) -> BTreeMap<String, String> {
     let raw = fs::read(path).unwrap_or_default();
     String::from_utf8_lossy(&raw)
         .lines()
@@ -348,6 +573,7 @@ fn write_config(
     path: &Path,
     kind: Kind,
     values: &BTreeMap<String, String>,
+    rerun: Option<(&str, &str)>,
 ) -> Result<(), String> {
     let raw = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -359,26 +585,41 @@ fn write_config(
     let mut kept = vec![];
     let mut block = BTreeMap::new();
     let mut moved = BTreeMap::new();
-    let mut inside = false;
-    for line in raw.lines() {
-        if line.trim() == BEGIN {
-            inside = true;
-            continue;
-        }
-        if line.trim() == END {
-            inside = false;
-            continue;
-        }
-        let parsed = env_line(line);
-        if inside {
-            if let Some((k, v)) = parsed {
-                block.insert(k, v);
-            }
-        } else if let Some((k, v)) = parsed.filter(|(k, _)| k.starts_with(&kind.prefix())) {
+    let mut outside = |line: &str| {
+        if let Some((k, v)) = env_line(line).filter(|(k, _)| k.starts_with(&kind.prefix())) {
             moved.insert(k, v);
         } else {
             kept.push(line.to_owned());
         }
+    };
+    // A block is a first line, then lines, then the last line. A first line
+    // with no last line before the next first line or the end of the file
+    // owns nothing: ops/shim_autostart.py keeps a first line it does not
+    // know as an ordinary line, drops the shared last line and appends its
+    // own block, so the lines after that stray first line are the user's.
+    let mut open: Option<Vec<&str>> = None;
+    for line in raw.lines() {
+        if is_begin(line) {
+            for stray in open.replace(vec![]).unwrap_or_default() {
+                outside(stray);
+            }
+            continue;
+        }
+        if line.trim() == END {
+            for inner in open.take().unwrap_or_default() {
+                if let Some((k, v)) = env_line(inner) {
+                    block.insert(k, v);
+                }
+            }
+            continue;
+        }
+        match open.as_mut() {
+            Some(lines) => lines.push(line),
+            None => outside(line),
+        }
+    }
+    for stray in open.unwrap_or_default() {
+        outside(stray);
     }
     block.extend(moved);
     for (k, v) in values {
@@ -393,7 +634,7 @@ fn write_config(
         kept.pop();
     }
     kept.push(String::new());
-    kept.push(BEGIN.into());
+    kept.push(chosen_begin(rerun, &raw));
     kept.extend(block.into_iter().map(|(k, v)| format!("{k}={}", quote(&v))));
     kept.push(END.into());
     if let Some(parent) = path.parent() {
@@ -511,6 +752,8 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
             "prompt-file",
             "reasoning-effort",
             "log",
+            "rerun-task",
+            "rerun-command",
         ]
         .contains(&key)
         {
@@ -546,16 +789,24 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
                 validate_cli_token(key, value)?;
             }
         }
+        let settings_path = settings_path
+            .as_deref()
+            .ok_or("config needs --repo or --env-file")?;
+        // install-autostart names its registration's task and rerun; a bare
+        // config keeps the file's.
+        let task = opts.remove("rerun-task");
+        let command = opts.remove("rerun-command");
         write_config(
             repo.as_deref().unwrap_or(Path::new(".")),
-            settings_path
-                .as_deref()
-                .ok_or("config needs --repo or --env-file")?,
+            settings_path,
             kind,
             &opts,
+            task.as_deref().zip(command.as_deref()),
         )?;
         return Ok(None);
     }
+    opts.remove("rerun-task");
+    opts.remove("rerun-command");
     let managed = repo.is_some() || settings_path.is_some();
     let receipt_dir = if managed {
         Some(receipt_dir.map_or_else(default_receipt_dir, Ok)?)
@@ -717,6 +968,324 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
         log,
         receipt_dir,
     }))
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::{
+        BEGIN_WINDOWS_UNKNOWN, Kind, Rerun, chosen_begin, is_begin, rerun_command, windows_begin,
+        windows_chosen, write_config,
+    };
+    use std::{
+        collections::BTreeMap,
+        fs,
+        path::{Path, PathBuf},
+    };
+
+    const PYTHON_MARKER: &str = "# >>> pseudolife shim autostart (managed by ops/shim_autostart.py; edit values here, then: python ops/shim_autostart.py restart claude|codex) >>>";
+    const END: &str = "# <<< pseudolife shim autostart <<<";
+    // What install-autostart passes as --rerun-task and --rerun-command.
+    const TASK: &str = "Pseudolife Claude Shim";
+    const RERUN: &str = r"& 'C:\fixture\bin\pseudolife-mcp.exe' extractor-shim install-autostart claude --repo 'C:\fixture\it''s repo' --native-exe 'C:\fixture\bin\pseudolife-mcp.exe'";
+    // The installer's own block (cli/installer/state.rs), which shares the file.
+    const INSTALL_BEGIN: &str =
+        "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>";
+    const INSTALL_END: &str = "# <<< pseudolife-mcp install <<<";
+
+    /// The first line an install-autostart write gives this platform.
+    fn this_begin() -> String {
+        chosen_begin(Some((TASK, RERUN)), "")
+    }
+
+    struct Repo(PathBuf);
+    impl Drop for Repo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn write_with(
+        seed: Option<&str>,
+        kind: Kind,
+        values: &[(&str, &str)],
+        rerun: Option<(&str, &str)>,
+    ) -> String {
+        let repo = Repo(std::env::temp_dir().join(format!("shim-block-{}", uuid::Uuid::new_v4())));
+        fs::create_dir_all(repo.0.join("ops")).unwrap();
+        let env = repo.0.join("ops/.env");
+        if let Some(seed) = seed {
+            fs::write(&env, seed).unwrap();
+        }
+        let values: BTreeMap<String, String> = values
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        write_config(&repo.0, &env, kind, &values, rerun).unwrap();
+        fs::read_to_string(&env).unwrap()
+    }
+
+    fn write(seed: Option<&str>, kind: Kind, values: &[(&str, &str)]) -> String {
+        write_with(seed, kind, values, Some((TASK, RERUN)))
+    }
+
+    fn begin_lines(text: &str) -> Vec<&str> {
+        text.lines()
+            .filter(|l| l.starts_with("# >>> pseudolife shim autostart"))
+            .collect()
+    }
+
+    #[test]
+    fn the_block_names_this_platforms_step_not_python() {
+        let text = write(None, Kind::Claude, &[("port", "8082")]);
+        let begins = begin_lines(&text);
+        assert_eq!(begins.len(), 1, "{text}");
+        let begin = begins[0];
+        assert!(!begin.contains("shim_autostart.py"), "{begin}");
+        if cfg!(windows) {
+            // Stopping and starting the task leaves the old shim on its port.
+            assert_eq!(
+                begin,
+                format!(
+                    "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'Pseudolife Claude Shim' is registered, run in PowerShell: {RERUN}) >>>"
+                )
+            );
+        } else if cfg!(target_os = "linux") {
+            assert!(
+                begin.contains("systemctl --user restart pseudolife-sonnet-shim.service")
+                    && begin.contains("pseudolife-codex-shim.service"),
+                "{begin}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_windows_line_names_its_task_and_rerun_on_any_host() {
+        assert_eq!(
+            windows_chosen(Some(("Team’s Shim", RERUN)), ""),
+            format!(
+                "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'Team’’s Shim' is registered, run in PowerShell: {RERUN}) >>>"
+            )
+        );
+        assert!(is_begin(&windows_begin("Team’s Shim", RERUN)));
+    }
+
+    #[test]
+    fn a_python_marker_block_is_replaced_not_duplicated() {
+        let seed = format!(
+            "UNRELATED=kept\n# a comment that stays\n\n{PYTHON_MARKER}\nPSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-opus-5\nPSEUDOLIFE_CODEX_SHIM_PORT=8086\n{END}\n"
+        );
+        let text = write(Some(&seed), Kind::Claude, &[("port", "9001")]);
+        assert!(!text.contains(PYTHON_MARKER), "{text}");
+        assert_eq!(begin_lines(&text).len(), 1, "{text}");
+        assert_eq!(text.matches(END).count(), 1, "{text}");
+        for line in [
+            "UNRELATED=kept",
+            "# a comment that stays",
+            "PSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-opus-5",
+            "PSEUDOLIFE_CODEX_SHIM_PORT=8086",
+            "PSEUDOLIFE_CLAUDE_SHIM_PORT=9001",
+        ] {
+            assert_eq!(
+                text.lines().filter(|l| *l == line).count(),
+                1,
+                "{line}\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_block_this_writer_wrote_is_rewritten_in_one_piece() {
+        let first = write(None, Kind::Codex, &[("port", "8086")]);
+        let again = write(Some(&first), Kind::Codex, &[("model", "gpt-5.6-terra")]);
+        assert_eq!(begin_lines(&again).len(), 1, "{again}");
+        assert_eq!(again.matches(END).count(), 1, "{again}");
+        assert!(
+            again.contains("PSEUDOLIFE_CODEX_SHIM_PORT=8086\n"),
+            "{again}"
+        );
+        // Unchanged settings leave the file byte-identical, a bare config
+        // (no rerun named) included.
+        assert_eq!(write(Some(&again), Kind::Codex, &[]), again);
+        assert_eq!(write_with(Some(&again), Kind::Codex, &[], None), again);
+    }
+
+    #[test]
+    fn every_shipped_marker_is_recognised() {
+        // A file carried between hosts, or written by another platform's
+        // build or an earlier release. Literal copies: a shipped first line
+        // must keep matching even if the constants change.
+        for begin in [
+            "# >>> pseudolife shim autostart (edit values here, then: systemctl --user restart pseudolife-sonnet-shim.service for Claude, pseudolife-codex-shim.service for Codex, or the unit named at install with --name) >>>",
+            r"# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'My Shim' is registered, run in PowerShell: & 'C:\Users\<user>\AppData\Local\pseudolife-mcp\bin\pseudolife-mcp.exe' extractor-shim install-autostart codex --repo 'C:\Users\<user>\repo' --native-exe 'C:\Users\<user>\AppData\Local\pseudolife-mcp\bin\pseudolife-mcp.exe' --name 'My Shim' --task-logon-type S4U) >>>",
+            "# >>> pseudolife shim autostart (edit values here, then run again, in PowerShell, the pseudolife-mcp extractor-shim install-autostart command this shim was registered with) >>>",
+            "# >>> pseudolife shim autostart (edit values here, then stop the extractor shim you started and start it again) >>>",
+            PYTHON_MARKER,
+        ] {
+            assert!(is_begin(begin), "{begin}");
+            let seed = format!("{begin}\nPSEUDOLIFE_CLAUDE_SHIM_PORT=1234\n{END}\n");
+            let text = write(Some(&seed), Kind::Claude, &[]);
+            assert_eq!(begin_lines(&text), [this_begin()], "{begin}\n{text}");
+            assert!(
+                text.contains("PSEUDOLIFE_CLAUDE_SHIM_PORT=1234\n"),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_python_rewrite_of_a_native_block_keeps_every_other_line() {
+        // What ops/shim_autostart.py write_config made of a native block with
+        // user lines and the installer's block after it (run 26 November
+        // 2026): it keeps the native first line it does not know as an
+        // ordinary line, drops the shared last line and appends its own
+        // block. Nothing between that stray first line and the Python block
+        // belongs to the shim block.
+        let python_rewrite = format!(
+            "UNRELATED=kept\n\n{}\nPSEUDOLIFE_CODEX_SHIM_PORT=8086\n# a user comment after the block\nPSEUDOLIFE_API_TOKEN=${{TOKEN_FROM_SHELL}}\nexport OTHER=\"x y\"\n{INSTALL_BEGIN}\nPSEUDOLIFE_INSTALL_MODE=docker\n{INSTALL_END}\n\n{PYTHON_MARKER}\nPSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-opus-5-5\nPSEUDOLIFE_CLAUDE_SHIM_PORT=8082\n{END}\n",
+            this_begin()
+        );
+        let text = write(Some(&python_rewrite), Kind::Claude, &[]);
+        assert_eq!(
+            text,
+            format!(
+                "UNRELATED=kept\n\nPSEUDOLIFE_CODEX_SHIM_PORT=8086\n# a user comment after the block\nPSEUDOLIFE_API_TOKEN=${{TOKEN_FROM_SHELL}}\nexport OTHER=\"x y\"\n{INSTALL_BEGIN}\nPSEUDOLIFE_INSTALL_MODE=docker\n{INSTALL_END}\n\n{}\nPSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-opus-5-5\nPSEUDOLIFE_CLAUDE_SHIM_PORT=8082\n{END}\n",
+                this_begin()
+            )
+        );
+    }
+
+    #[test]
+    fn a_first_line_with_no_last_line_owns_nothing() {
+        let seed = format!(
+            "{}\n# kept comment\nOTHER=kept\nPSEUDOLIFE_CLAUDE_SHIM_PORT=1234\n",
+            this_begin()
+        );
+        let text = write(Some(&seed), Kind::Claude, &[]);
+        assert_eq!(
+            text,
+            format!(
+                "# kept comment\nOTHER=kept\n\n{}\nPSEUDOLIFE_CLAUDE_SHIM_PORT=1234\n{END}\n",
+                this_begin()
+            )
+        );
+    }
+
+    #[test]
+    fn a_comment_that_only_resembles_the_marker_is_left_alone() {
+        let near = [
+            "# >>> pseudolife shim autostart (my own notes) >>>",
+            "# >>> pseudolife shim autostart >>>",
+            "## >>> pseudolife shim autostart (managed by ops/shim_autostart.py; edit values here, then: python ops/shim_autostart.py restart claude|codex) >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: ) >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: python ops/shim_autostart.py restart claude) >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: & 'pseudolife-mcp.exe' extractor-shim install-autostart --help) >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: & 'x' extractor-shim install-autostart claude --repo 'r') >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task X is registered, run in PowerShell: & 'x' extractor-shim install-autostart claude --repo 'r' --native-exe 'x') >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: & 'x' extractor-shim install-autostart claude --repo ' --native-exe ') >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: & 'x' extractor-shim install-autostart claude --repo 'r' --native-exe 'x'; Remove-Item 'y') >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: & 'x' extractor-shim install-autostart claude --repo 'r' --native-exe 'x' --native-exe 'z') >>>",
+            "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: & 'x' extractor-shim install-autostart claude --repo 'r' --native-exe 'x' --task-logon-type Admin) >>>",
+        ];
+        let seed = format!("{}\nNOT_A_SHIM_KEY=stays\n", near.join("\n"));
+        let text = write(Some(&seed), Kind::Claude, &[("port", "8082")]);
+        for line in near {
+            assert!(!is_begin(line), "{line}");
+            assert_eq!(
+                text.lines().filter(|l| *l == line).count(),
+                1,
+                "{line}\n{text}"
+            );
+        }
+        assert!(text.contains("NOT_A_SHIM_KEY=stays\n"), "{text}");
+        assert_eq!(text.matches(this_begin().as_str()).count(), 1, "{text}");
+        // The near misses come before the managed block, which is still the
+        // file's only block and ends it.
+        assert!(
+            text.ends_with(&format!(
+                "{}\nPSEUDOLIFE_CLAUDE_SHIM_PORT=8082\n{END}\n",
+                this_begin()
+            )),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_write_that_names_no_rerun_keeps_the_registrations_and_never_guesses() {
+        // `extractor-shim config` after install-autostart: the registration's
+        // task and rerun (its --name, its logon type) stay the file's.
+        let theirs = windows_begin(
+            "Mine",
+            r"& 'C:\x\pseudolife-mcp.exe' extractor-shim install-autostart claude --repo 'C:\x' --native-exe 'C:\x\pseudolife-mcp.exe' --name 'Mine' --task-logon-type S4U",
+        );
+        let raw = format!("OTHER=1\n{theirs}\nPSEUDOLIFE_CLAUDE_SHIM_PORT=1\n{END}\n");
+        assert_eq!(windows_chosen(None, &raw), theirs);
+        assert_eq!(
+            windows_chosen(Some(("Given", RERUN)), &raw),
+            windows_begin("Given", RERUN)
+        );
+        // Nothing to keep (no file, an earlier release's Python marker, a
+        // look-alike comment): the fixed text, never a guessed registration.
+        let near = "# >>> pseudolife shim autostart (edit values here, then, while the scheduled task 'X' is registered, run in PowerShell: & 'x' extractor-shim config claude) >>>\n";
+        for raw in [
+            "OTHER=1\n".to_owned(),
+            format!("{PYTHON_MARKER}\n{END}\n"),
+            near.into(),
+        ] {
+            assert_eq!(windows_chosen(None, &raw), BEGIN_WINDOWS_UNKNOWN, "{raw}");
+        }
+    }
+
+    #[test]
+    fn the_windows_rerun_names_every_value_its_registration_needs() {
+        let native = Path::new(r"C:\Users\<user>\bin\pseudolife-mcp.exe");
+        let repo = Path::new(r"C:\Users\<user>\Team’s repo");
+        let env = repo.join("ops/.env");
+        let plain = Rerun {
+            native,
+            kind: "claude",
+            repo: Some(repo),
+            env_file: &env,
+            name: None,
+            logon: None,
+            startup_timeout: None,
+            receipt_dir: None,
+        };
+        let repo_rerun = rerun_command(&plain);
+        assert_eq!(
+            repo_rerun,
+            r"& 'C:\Users\<user>\bin\pseudolife-mcp.exe' extractor-shim install-autostart claude --repo 'C:\Users\<user>\Team’’s repo' --native-exe 'C:\Users\<user>\bin\pseudolife-mcp.exe'"
+        );
+        let other_env = Path::new(r"C:\Users\<user>\shims.env");
+        let both = rerun_command(&Rerun {
+            env_file: other_env,
+            ..plain
+        });
+        assert!(
+            both.contains(
+                r" --repo 'C:\Users\<user>\Team’’s repo' --env-file 'C:\Users\<user>\shims.env' "
+            ),
+            "{both}"
+        );
+        let receipts = Path::new(r"C:\Users\<user>\receipts");
+        let named_rerun = rerun_command(&Rerun {
+            kind: "codex",
+            repo: None,
+            env_file: other_env,
+            name: Some("Shim 'beta'"),
+            logon: Some("S4U"),
+            startup_timeout: Some("240"),
+            receipt_dir: Some(receipts),
+            ..plain
+        });
+        assert_eq!(
+            named_rerun,
+            r"& 'C:\Users\<user>\bin\pseudolife-mcp.exe' extractor-shim install-autostart codex --env-file 'C:\Users\<user>\shims.env' --native-exe 'C:\Users\<user>\bin\pseudolife-mcp.exe' --name 'Shim ''beta''' --task-logon-type S4U --startup-timeout 240 --receipt-dir 'C:\Users\<user>\receipts'"
+        );
+        // Every rerun it builds is recognised in the line that names it.
+        for rerun in [RERUN, &repo_rerun, &both, &named_rerun] {
+            assert!(is_begin(&windows_begin("Shim ’x’", rerun)), "{rerun}");
+        }
+    }
 }
 
 #[cfg(test)]

@@ -897,7 +897,7 @@ if ($c.ReplaceSibling) {
 }
 if (-not $unchanged -and -not $followsFile) {
     Write-Host "Registered + started native $kind shim (port $port, pid $script:verifiedPid)."
-    Write-Host "To reload $($c.EnvFile): stop and start scheduled task $name."
+    Write-Host "To apply an edit of $($c.EnvFile), run in PowerShell: $($c.Rerun)"
 } elseif ($followsFile) {
     Write-Host "Native $kind shim autostart '$name' keeps its registration and was restarted with the new settings in $($c.EnvFile) (port $port, pid $script:verifiedPid). Note: $(Format-TaskLock $selectedLock -Follows $c.EnvFile)"
 } elseif ($selectedLock) {

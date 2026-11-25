@@ -5,6 +5,8 @@ then removes precisely those registrations. Never run on the maintainer's PC.
 """
 from __future__ import annotations
 import argparse
+import base64
+import contextlib
 import ctypes
 import json
 import os
@@ -324,6 +326,39 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                 checked(args, env=env)
                 checked(["systemctl", "--user", "is-enabled", "--quiet", registration])
                 assert len(run.journal_rows(journal)) == initial_calls, "re-enabling restarted its provider"
+            # The settings block's first line names how to apply an edit
+            # (config.rs): on Linux the unit's restart, on Windows the
+            # registration's own rerun, which this runs exactly as written.
+            # Either must bring up a shim on the edited settings and keep the
+            # log the registration chose.
+            restarted = model + "-restart"
+            checked([str(native), "extractor-shim", "config", kind, "--env-file", str(config_file), "--model", restarted], env=env)
+            settings_lines = config_file.read_text(encoding="utf-8").splitlines()
+            log_line = [line for line in settings_lines if line.startswith(f"PSEUDOLIFE_{kind.upper()}_SHIM_LOG=")]
+            if windows:
+                prefix = ("# >>> pseudolife shim autostart (edit values here, then, while the scheduled task "
+                          f"'{token}' is registered, run in PowerShell: ")
+                suffix = ") >>>"
+                rerun = [line[len(prefix):-len(suffix)] for line in settings_lines if line.startswith(prefix) and line.endswith(suffix)]
+                assert len(rerun) == 1, settings_lines
+                assert f"--name '{token}'" in rerun[0] and "--task-logon-type S4U" in rerun[0], rerun[0]
+                # Windows PowerShell, as typed: the encoded form passes the
+                # text unchanged, without a second layer of quoting.
+                encoded = base64.b64encode(rerun[0].encode("utf-16-le")).decode()
+                checked(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], env=env,
+                        step=f"{kind} named rerun")
+            else:
+                checked(["systemctl", "--user", "restart", registration], step=f"{kind} named restart")
+            deadline, served = time.monotonic() + 30, None
+            while time.monotonic() < deadline:
+                with contextlib.suppress(Exception):  # not serving yet, or mid-restart
+                    served = json.loads(run.call(port, "GET", "/models")[1])["data"][0]["id"]
+                if served == restarted:
+                    break
+                time.sleep(0.5)
+            assert served == restarted, f"{kind}: the step the settings name did not apply the edit (serving {served})"
+            assert [line for line in config_file.read_text(encoding="utf-8").splitlines()
+                    if line.startswith(f"PSEUDOLIFE_{kind.upper()}_SHIM_LOG=")] == log_line, "the step reset the configured log"
             # Config was edited before the reinstall, so comparing disk with
             # itself would incorrectly keep the old running process.
             checked([str(native), "extractor-shim", "config", kind, "--env-file", str(config_file), "--model", model], env=env)
