@@ -28,12 +28,14 @@ password as text over the loopback interface of a discarded runner.
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import contextlib
 import hashlib
 import hmac
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import shutil
@@ -41,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 SUPERUSER = "postgres"
 # Variables libpq and the native client read; the native client refuses
@@ -183,6 +185,11 @@ class Server:
     def admin_conninfo(self, dbname: str = "postgres") -> str:
         """Key/value conninfo without the password (PGPASSWORD carries it)."""
         return f"host={self.host} port={self.port} user={SUPERUSER} dbname={dbname}"
+
+    def url(self, dbname: str) -> str:
+        """A superuser URL with the password, for the command line's export
+        to a CI job's later steps (``main``)."""
+        return f"postgresql://{SUPERUSER}:{quote(self.password, safe='')}@{self.host}:{self.port}/{dbname}"
 
     def stop(self) -> bool:
         """Stop and remove the server if this process started it and it is
@@ -501,3 +508,67 @@ def native_binary(root: Path) -> Path:
     """The native client a job built or downloaded, at its release path."""
     name = "pseudolife-stdio.exe" if os.name == "nt" else "pseudolife-stdio"
     return root / "rust" / "target" / "release" / name
+
+
+_ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
+_DATABASE = re.compile(r"[a-z_][a-z0-9_]*")
+# The cluster's own databases: tests that took one for their test database
+# would truncate and reap the connections of the admin database itself.
+_RESERVED_DATABASES = frozenset({"postgres", "template0", "template1"})
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Start a cluster for a CI job's later steps and export its URL.
+
+    ``python rust/ci/disposable_postgres.py --github-env NAME --database DB``
+    starts a cluster under the home directory (initdb's chmod; see
+    ``start``), leaves it running for the rest of the job (the runner is
+    discarded afterwards), masks its superuser password in the job log and
+    appends ``NAME=<superuser URL of DB>`` to ``$GITHUB_ENV``.
+    """
+    parser = argparse.ArgumentParser(
+        description="Start a disposable PostgreSQL for a CI job's later steps and export its URL.")
+    parser.add_argument("--github-env", required=True, metavar="NAME",
+                        help="the variable later steps read the superuser URL from")
+    parser.add_argument("--database", required=True,
+                        help="the test database the URL names (not postgres or a template)")
+    options = parser.parse_args(argv)
+    if not _ENV_NAME.fullmatch(options.github_env):
+        parser.error("--github-env takes an environment variable name (A-Z, 0-9, _)")
+    if not _DATABASE.fullmatch(options.database) or options.database in _RESERVED_DATABASES:
+        parser.error("--database takes a lowercase identifier (a-z, 0-9, _) naming a test database, "
+                     "not postgres, template0 or template1")
+    github_env = os.environ.get("GITHUB_ENV")
+    if not github_env:
+        parser.error("GITHUB_ENV is not set: run this as a GitHub Actions step")
+    try:
+        server = start(Path.home(), "pl-ci-postgres-")
+    except ImportError as error:  # start() imports the pg0 wheel and psycopg
+        raise SystemExit(f"cannot start PostgreSQL: the {error.name or 'pg0 or psycopg'} module is not installed; "
+                         "run `pip install -r rust/ci/requirements-postgres.txt` in an earlier step") from error
+    try:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # Masked before anything carries it: the raw password and the
+            # form the URL quotes it in (the same text while it is hex).
+            for secret in dict.fromkeys((server.password, quote(server.password, safe=""))):
+                print(f"::add-mask::{secret}", flush=True)
+        with open(github_env, "a", encoding="utf-8", newline="") as stream:
+            stream.write(f"{options.github_env}={server.url(options.database)}\n")
+    except BaseException:
+        # A cleanup that fails is reported beside the export error, which
+        # stays the one raised.
+        try:
+            stopped = server.stop()
+        except Exception as cleanup:  # noqa: BLE001
+            stopped = False
+            print(f"cleanup failed ({type(cleanup).__name__})", file=sys.stderr)
+        if not stopped:
+            print(f"the disposable PostgreSQL in {server.data_dir} is still running", file=sys.stderr)
+        raise
+    print(f"Disposable PostgreSQL is ready on {server.host}:{server.port}; {options.github_env} names "
+          f"database {options.database}.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

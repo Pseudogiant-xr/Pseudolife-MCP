@@ -1027,3 +1027,116 @@ def test_lease_fixture_refuses_values_github_env_cannot_hold_before_starting(lea
 def test_lease_fixture_imports_nothing_from_the_package(lease_ci):
     assert lease_ci.module.main() == 0
     assert not any(name.startswith("pseudolife_memory") for name in sys.modules)
+
+
+# ── the command line the Windows ci.yml lanes run ────────────────────────────
+
+@pytest.fixture
+def command_line(fakes, monkeypatch, tmp_path):
+    env_file = tmp_path / "github-env"
+    monkeypatch.setenv("GITHUB_ENV", str(env_file))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    return types.SimpleNamespace(env_file=env_file, fakes=fakes, tmp=tmp_path)
+
+
+def test_the_url_quotes_the_password(tmp_path):
+    server = postgres.Server(name="n", data_dir=tmp_path, pgdata=tmp_path, port=55432, pid=1,
+                             password="a b/@:%", owned=True)
+    assert server.url("pl_test") == "postgresql://postgres:a%20b%2F%40%3A%25@127.0.0.1:55432/pl_test"
+
+
+def test_command_line_exports_a_superuser_url_and_leaves_the_cluster_running(command_line, capsys):
+    assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
+    line, = command_line.env_file.read_text(encoding="utf-8").splitlines()
+    name, _, url = line.partition("=")
+    assert name == "PSEUDOLIFE_TEST_DATABASE_URL"
+    assert re.fullmatch(r"postgresql://postgres:[0-9a-f]{32}@127\.0\.0\.1:55432/pseudolife_memory_test", url)
+    password = url.split(":")[2].split("@")[0]
+    assert command_line.fakes.server.accepts(password)  # the rotated password, not pg0's start-up one
+    out = capsys.readouterr().out
+    assert f"::add-mask::{password}" in out and out.index("::add-mask::") < out.index("ready")
+    assert command_line.fakes.stops == []  # later steps use it
+    started = Path(command_line.fakes.pg0.instances[0]["data_dir"])
+    assert started.parent.parent == command_line.tmp  # under home, not RUNNER_TEMP
+
+
+def test_command_line_masks_the_password_before_it_writes_the_url(command_line, capsys, monkeypatch):
+    import builtins
+    seen = []
+
+    def spy(path, *args, **kwargs):
+        seen.append((str(path), capsys.readouterr().out))
+        return builtins.open(path, *args, **kwargs)
+
+    monkeypatch.setattr(postgres, "open", spy, raising=False)
+    assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
+    (path, before), = seen
+    password = command_line.env_file.read_text(encoding="utf-8").split(":")[2].split("@")[0]
+    assert path == str(command_line.env_file) and f"::add-mask::{password}" in before
+
+
+def test_command_line_masks_the_quoted_form_of_a_password_that_needs_it(command_line, capsys, monkeypatch):
+    server = postgres.Server(name="n", data_dir=command_line.tmp, pgdata=command_line.tmp, port=55432, pid=1,
+                             password="a b/", owned=False)
+    monkeypatch.setattr(postgres, "start", lambda parent, prefix: server)
+    assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
+    masks = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::add-mask::")]
+    assert masks == ["::add-mask::a b/", "::add-mask::a%20b%2F"]
+
+
+def test_command_line_names_the_install_when_a_wheel_is_missing(command_line, monkeypatch):
+    def start(parent, prefix):
+        raise ModuleNotFoundError("No module named 'pg0'", name="pg0")
+    monkeypatch.setattr(postgres, "start", start)
+    with pytest.raises(SystemExit) as refused:
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"])
+    assert "the pg0 module is not installed" in str(refused.value.code)
+    assert "pip install -r rust/ci/requirements-postgres.txt" in str(refused.value.code)
+    assert not command_line.env_file.exists()
+
+
+@pytest.mark.parametrize("argv", [["--github-env", "lower", "--database", "ok_db"],
+                                  ["--github-env", "A=B", "--database", "ok_db"],
+                                  ["--github-env", "OK", "--database", "Bad-Name"],
+                                  ["--github-env", "OK"],
+                                  ["--github-env", "OK", "--database", "postgres"],
+                                  ["--github-env", "OK", "--database", "template1"], []])
+def test_command_line_refuses_bad_arguments_before_starting(command_line, argv):
+    with pytest.raises(SystemExit) as refused:
+        postgres.main(argv)
+    assert refused.value.code == 2
+    assert command_line.fakes.pg0.instances == [] and not command_line.env_file.exists()
+
+
+def test_command_line_refuses_outside_github_actions(command_line, monkeypatch):
+    monkeypatch.delenv("GITHUB_ENV")
+    with pytest.raises(SystemExit):
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"])
+    assert command_line.fakes.pg0.instances == []
+
+
+def test_command_line_stops_the_cluster_when_it_cannot_export(command_line, monkeypatch):
+    monkeypatch.setenv("GITHUB_ENV", str(command_line.tmp / "missing-dir" / "github-env"))
+    with pytest.raises(OSError):
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"])
+    assert len(command_line.fakes.stops) == 1
+
+
+def test_command_line_keeps_the_export_error_when_cleanup_raises(command_line, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ENV", str(command_line.tmp / "missing-dir" / "github-env"))
+
+    def stop(self):
+        raise RuntimeError("cleanup broke")
+
+    monkeypatch.setattr(postgres.Server, "stop", stop)
+    with pytest.raises(OSError):  # the export's error, not the cleanup's
+        postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"])
+    err = capsys.readouterr().err
+    assert "cleanup failed (RuntimeError)" in err and "is still running" in err
+
+
+def test_command_line_masks_only_under_github_actions(command_line, monkeypatch, capsys):
+    monkeypatch.delenv("GITHUB_ACTIONS")
+    assert postgres.main(["--github-env", "PSEUDOLIFE_TEST_DATABASE_URL", "--database", "pseudolife_memory_test"]) == 0
+    assert "::add-mask::" not in capsys.readouterr().out

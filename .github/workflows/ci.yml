@@ -364,7 +364,7 @@ jobs:
           tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
           tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks_native.py tests/test_client_install_ux_native.py
           tests/test_scheduled_task_lock.py tests/test_fixture_guards_package_absent.py
-          tests/test_suite_lock.py
+          tests/test_suite_lock.py tests/test_ci_windows_lanes.py
           tests/test_installer_native_client.py tests/test_installer_native_client_ps.py tests/test_installer_client_only_native.py
           tests/test_installer_client_only_ps_native.py tests/test_installer_native_ask_order.py tests/test_installer_extractor_modes_native.py
 
@@ -641,21 +641,11 @@ jobs:
       - name: Start embedded PostgreSQL (test infrastructure; the lite tier itself is dropped)
         # Without it the shim-to-daemon tests and the PG-backed coordination
         # tests skip silently: hosted Windows has no service containers.
-        # attach_or_start, not start_embedded (whose atexit stop would end the
-        # server with this helper); the runner VM is discarded at job end.
+        # rust/ci/disposable_postgres.py starts it through the pg0 wheel (not
+        # the Python package) under the user profile, masks its password and
+        # leaves it running; the runner VM is discarded at job end.
         shell: bash
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          from pseudolife_memory.storage.embedded_pg import attach_or_start
-
-          dsn, _ = attach_or_start(Path.home() / "pl-ci-lite-bank")
-          base = dsn.rsplit("/", 1)[0]
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
-              fh.write(f"PSEUDOLIFE_TEST_DATABASE_URL={base}/pseudolife_memory_test\n")
-          print("embedded PG up:", base.rsplit("@", 1)[-1])
-          PY
+        run: python rust/ci/disposable_postgres.py --github-env PSEUDOLIFE_TEST_DATABASE_URL --database pseudolife_memory_test
 
       # The installer tests run a native client built from this commit:
       # PSEUDOLIFE_NATIVE_TEST_BINARY names it, and with
@@ -1088,21 +1078,11 @@ jobs:
       - name: Start embedded PostgreSQL (test infrastructure; the lite tier itself is dropped)
         # Without it the shim-to-daemon tests and the PG-backed coordination
         # tests skip silently: hosted Windows has no service containers.
-        # attach_or_start, not start_embedded (whose atexit stop would end the
-        # server with this helper); the runner VM is discarded at job end.
+        # rust/ci/disposable_postgres.py starts it through the pg0 wheel (not
+        # the Python package) under the user profile, masks its password and
+        # leaves it running; the runner VM is discarded at job end.
         shell: bash
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          from pseudolife_memory.storage.embedded_pg import attach_or_start
-
-          dsn, _ = attach_or_start(Path.home() / "pl-ci-lite-bank")
-          base = dsn.rsplit("/", 1)[0]
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
-              fh.write(f"PSEUDOLIFE_TEST_DATABASE_URL={base}/pseudolife_memory_test\n")
-          print("embedded PG up:", base.rsplit("@", 1)[-1])
-          PY
+        run: python rust/ci/disposable_postgres.py --github-env PSEUDOLIFE_TEST_DATABASE_URL --database pseudolife_memory_test
 
       # The installer tests run a native client built from this commit:
       # PSEUDOLIFE_NATIVE_TEST_BINARY names it, and with

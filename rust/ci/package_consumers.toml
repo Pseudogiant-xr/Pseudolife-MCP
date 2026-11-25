@@ -245,12 +245,6 @@ class = "active dependency"
 reason = "Hosted workflows install the checkout, build the wheel or depend on its metadata."
 
 [[rules]]
-globs = [".github/workflows/ci.yml"]
-kinds = ["python-import"]
-class = "active dependency"
-reason = "Hosted Windows tests start embedded PostgreSQL through a Python package import."
-
-[[rules]]
 globs = ["ops/Dockerfile.daemon", "ops/Dockerfile.daemon-*"]
 kinds = ["command", "docker-copy", "metadata", "path"]
 class = "active dependency"
