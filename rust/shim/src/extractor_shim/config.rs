@@ -305,7 +305,7 @@ fn env_line(line: &str) -> Option<(String, String)> {
     Some((key.into(), v))
 }
 
-fn env_file(path: &Path) -> BTreeMap<String, String> {
+pub(super) fn env_file(path: &Path) -> BTreeMap<String, String> {
     let raw = fs::read(path).unwrap_or_default();
     String::from_utf8_lossy(&raw)
         .lines()

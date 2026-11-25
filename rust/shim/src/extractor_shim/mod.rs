@@ -445,6 +445,15 @@ fn decode_error(raw: &str, error: serde_json::Error) -> String {
     format!("{message}: line {line} column {col} (char {pos})")
 }
 
+/// The value `env_file` gives the shim setting `key` of `provider` (`claude`
+/// or `codex`), read as the shim reads it at start; `None` when unset or empty.
+pub fn configured_setting(env_file: &std::path::Path, provider: &str, key: &str) -> Option<String> {
+    let name = format!("PSEUDOLIFE_{}_SHIM_{key}", provider.to_uppercase());
+    config::env_file(env_file)
+        .remove(&name)
+        .filter(|v| !v.is_empty())
+}
+
 /// Synchronous dispatch keeps this mode outside the MCP runtime and its bank.
 pub fn dispatch_if_requested(args: &[OsString]) {
     if args.first().is_some_and(|a| a == "extractor-shim") {
