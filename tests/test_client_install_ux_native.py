@@ -190,8 +190,12 @@ def test_the_plugin_readme_names_no_checkout_python_script():
     """#1609: the plugin README's Codex and update steps exist on an installed client."""
     text = _read("plugin/README.md")
     assert "setup-codex-hooks.py" not in text and "update_clients.py" not in text
-    assert "rerun the installer with `--client codex` and" in text
-    assert "`PSEUDOLIFE_SHIM_ENGINE=native`" in text
+    # A Docker-install rerun runs the Codex hook step non-interactively, so the
+    # README names the flag that approves, not a prompt that never appears.
+    flat = " ".join(text.split())
+    assert "rerun the installer with `--codex-hook-trust yes`" in flat
+    assert "A rerun does not prompt, so without that flag it approves nothing" in flat
+    assert "approves without a prompt" not in flat
     assert "`pseudolife-mcp update --clients-only` on its" in text
 
 
