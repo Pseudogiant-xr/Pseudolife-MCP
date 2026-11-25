@@ -1725,7 +1725,8 @@ fn an_installer_rerun_replaces_an_earlier_releases_launchers() {
 }
 
 /// A rerun of a Docker install passes `--non-interactive` to this step
-/// (`ops/install-native.sh` and `.ps1` set it for every rerun), so the
+/// (`ops/install-native.sh` and `.ps1` set it for every rerun of a Docker
+/// install, and for any unattended or non-terminal run), so the
 /// recovery for hooks that await approval must name the flag that approves
 /// them, as the "not installed" recovery does, never an interactive rerun.
 #[tokio::test]
@@ -1748,5 +1749,10 @@ async fn hooks_awaiting_approval_name_the_trust_flag() {
             "{trust}: {recovery}"
         );
         assert!(!recovery.contains("interactively"), "{trust}: {recovery}");
+        // The flag also approves the memory_message tool; /hooks approves hooks only.
+        assert!(
+            recovery.contains("memory_message") && recovery.contains("/hooks"),
+            "{trust}: {recovery}"
+        );
     }
 }
