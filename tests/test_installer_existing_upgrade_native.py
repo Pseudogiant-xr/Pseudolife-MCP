@@ -882,7 +882,7 @@ def test_the_user_path_guards_default_announcement_needs_no_package(monkeypatch)
     monkeypatch.setattr(user_path_guard, "_broadcast_environment_change", lambda: announced.append("own"))
     with pytest.raises(AssertionError, match="put .* on the real user PATH; removed them again"):
         with user_path_unchanged(HOME):
-            fake.values["Path"] = (HOME + "\shim\bin;" + BEFORE[0], 2)
+            fake.values["Path"] = (HOME + "\\shim\\bin;" + BEFORE[0], 2)
     assert fake.values["Path"] == BEFORE and announced == ["own"]
 
 
