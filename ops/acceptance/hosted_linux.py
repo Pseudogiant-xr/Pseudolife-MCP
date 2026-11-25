@@ -115,11 +115,11 @@ LEGACY_PYTHON = {"PIPX_DEFAULT_PYTHON": sys.executable}
 LEGACY_PYTHON_NOTE = "The legacy Python clients were installed with the job's Python 3.12."
 
 
-def install(repo, profile, flags, *, overrides=None, engine=None, timeout=300):
-    """Run the installer for `engine`, the run's selected engine when None.
+def installer_env(profile, overrides=None, engine=None):
+    """The installer's environment for `engine`, the run's selected engine when None.
 
     The native and default engines run with Python and pip off the PATH, so
-    a default that needs Python cannot pass.
+    a default that needs Python cannot pass; python adds the host's PATH.
     """
     engine = hosted.known_engine(engine)
     env = engine_env(profile.env | (overrides or {}), engine)
@@ -129,6 +129,11 @@ def install(repo, profile, flags, *, overrides=None, engine=None, timeout=300):
                 "Python and pip were absent from the native installer PATH.")
     else:
         env["PATH"] += os.pathsep + os.environ["PATH"]
+    return env
+
+
+def install(repo, profile, flags, *, overrides=None, engine=None, timeout=300):
+    env = installer_env(profile, overrides, engine)
     return command(["bash", "ops/install.sh", *flags], cwd=repo, env=env, timeout=timeout)
 
 
@@ -864,7 +869,7 @@ def paused_download(release):
 def cancel_download(release, repo, profile, flags):
     start = monotonic()
     with paused_download(release) as (url, requested), tempfile.TemporaryFile() as transcript:
-        env = engine_env(profile.env | {"PSEUDOLIFE_NATIVE_ARCHIVE_URL": url})
+        env = installer_env(profile, {"PSEUDOLIFE_NATIVE_ARCHIVE_URL": url})
         with subprocess.Popen(["bash", "ops/install.sh", *flags],
                               cwd=repo, env=env, start_new_session=True, stdin=subprocess.DEVNULL,
                               stdout=transcript, stderr=subprocess.STDOUT) as process:

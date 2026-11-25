@@ -115,9 +115,11 @@ cells is still "no pass". Below the table, each cell without a pass has its
 one-sentence reason.
 
 Under the verdict the summary names the client the run asked for. A
-clean-install cell adds `client native` when the release's verified native
-client was what the install left active, `client python` when the installer
-said it chose the Python client, and `client unknown` when it said neither.
+clean-install cell also names the client the install left in the home:
+`client native` when it is the release's verified native client, `client
+other` when a launcher is installed but is not that client (a Python client
+or another runtime), and `client none` when no launcher is installed. That
+is read from the home, never from what the installer printed.
 
 Download an `acceptance-<platform>` artifact for the receipts. Each one has
 the fixed command labels, observed exit codes, deciding assertions, daemon
@@ -125,8 +127,10 @@ kind and engine, and the requested client as `client_engine_requested`. The
 clean-install receipt, the Linux `default-install.json` and the Mac
 `peer-setup.json` owner install also carry `client_engine`: the requested
 client, whether `PSEUDOLIFE_SHIM_ENGINE` was set, the installer's own lines
-about its choice in fixed words, and the client it left active. `peer-setup.json` records every setup step and the free disk
-around the build. A failed setup or product step also keeps a `failure`
+about its choice in fixed words (the native client announced, a fallback to
+the Python client, a recorded Python choice), and that installed client.
+`peer-setup.json` records every setup step and the free disk around the
+build. A failed setup or product step also keeps a `failure`
 entry with its step, exit status, error class and its last output lines.
 Those lines pass through `ops/acceptance/sanitize.py` first. That removes every
 token, password and pairing code the job generated, URL credentials and

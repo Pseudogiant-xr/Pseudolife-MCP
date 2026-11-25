@@ -48,7 +48,7 @@ ENGINE_VARIABLE = "PSEUDOLIFE_SHIM_ENGINE"
 # the update hand-offs (`<native-opt-in>`) stay `native`, whatever is chosen.
 ENGINES = ("native", "default", "python")
 ENGINE = "native"
-CLIENT_ENGINES = ("native", "python", "unknown")
+CLIENT_ENGINES = ("native", "other", "none")
 # What the installer printed about its choice, in fixed words.
 ENGINE_LINES = (
     (b"Native client install (", "The installer announced the native client."),
@@ -108,15 +108,20 @@ def installer(engine=None):
 def client_engine(result, profile, release, engine=None):
     """What a candidate install was asked for and what it left active.
 
-    `installed` is `native` only when the candidate archive's verified native
-    client is active, `python` when the installer said it chose the Python
-    client, and `unknown` otherwise (a tag that predates the native default
-    prints neither).
+    `installer_lines` are the installer's own words about its choice, in
+    fixed text. `installed` is read from the home, never from that text:
+    `native` when the candidate archive's verified native client is active,
+    `other` when a launcher is installed but is not that client (a Python
+    client, or another runtime), and `none` when no launcher is installed.
     """
     engine = known_engine(engine)
     lines = [line for fragment, line in ENGINE_LINES if fragment in result.output]
-    native = profile is not None and release is not None and profile.native_marker(release)
-    installed = "native" if native else "python" if any("Python" in line for line in lines) else "unknown"
+    if profile is None or release is None:
+        installed = "none"
+    elif profile.native_marker(release):
+        installed = "native"
+    else:
+        installed = "other" if profile.installed_launcher.is_file() else "none"
     return {"requested": engine, "variable": "unset" if engine == "default" else engine,
             "installer_lines": lines, "installed": installed}
 
@@ -833,7 +838,11 @@ def main():
         return 0
     if args.platform not in SELECTIONS[args.selection]:
         return 0
-    select_engine(args.engine)
+    # Under `python -m` this file runs as __main__, a second copy of the
+    # module; the runners read the package's, so the choice is made there.
+    from . import hosted as package
+
+    package.select_engine(args.engine)
     args.output.mkdir()
     (args.output / "ledger").mkdir()
     if args.platform == "linux-arm64":
