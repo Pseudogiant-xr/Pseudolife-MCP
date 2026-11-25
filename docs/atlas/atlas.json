@@ -1320,7 +1320,7 @@
    "p": "evals/regression_gate.ps1",
    "d": [
     "Uses the pinned knowledge-update slice and public Rust search, replaying projected slots without running extraction",
-    "Requires a measured, comparable Rust baseline and at least two replicates. The baseline is pending.",
+    "Requires a measured, comparable Rust baseline and at least two replicates; the first baseline was measured on 25 November 2026",
     "Uses pinned historical RAG bytes as the raw control and records acquisition, rendering and scoring source digests"
    ]
   },

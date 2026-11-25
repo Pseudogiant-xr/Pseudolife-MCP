@@ -15,7 +15,7 @@ import pytest
 
 from tests.test_installer_client_only_native import _Shell, _stub
 from tests.test_installer_client_only_ps_native import _PowerShell, _q
-from tests.test_installer_existing_upgrade import _bash_variants
+from tests.installer_fragments import _bash_variants
 from tests.test_installer_reruns_native import BEGIN, END, managed
 
 

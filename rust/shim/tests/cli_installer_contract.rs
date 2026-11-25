@@ -681,3 +681,128 @@ fn expose_keeps_the_old_entry_a_bare_command_reaches_through_path() {
     );
     assert_eq!(fs::read_to_string(&entry).unwrap(), content);
 }
+
+/// A `docker` whose `inspect` prints the daemon container's labels from
+/// `FAKE_LABELS` (or, when that file is absent, says there is no such
+/// container) and fails every other call (exit 3), logging each call.
+fn labels_docker(home: &Home) -> PathBuf {
+    #[cfg(windows)]
+    let (name, script) = (
+        "labels-docker.cmd",
+        "@echo off\r\n>>\"%FAKE_CALLS%\" echo %*\r\nif not \"%~1\"==\"inspect\" exit /b 3\r\nif not exist \"%FAKE_LABELS%\" (echo Error: No such object: pseudolife-mcp-daemon 1>&2& exit /b 1)\r\ntype \"%FAKE_LABELS%\"\r\nexit /b 0\r\n",
+    );
+    #[cfg(unix)]
+    let (name, script) = (
+        "labels-docker",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_CALLS\"\n[ \"$1\" = inspect ] || exit 3\n[ -f \"$FAKE_LABELS\" ] || { echo 'Error: No such object: pseudolife-mcp-daemon' >&2; exit 1; }\n# Builtins only: the test's PATH names no program.\nIFS= read -r line < \"$FAKE_LABELS\"\nprintf '%s\\n' \"$line\"\n",
+    );
+    let bin = home.0.join("fake-bin");
+    fs::create_dir_all(&bin).unwrap();
+    let path = bin.join(name);
+    #[cfg(windows)]
+    fs::write(&path, script).unwrap();
+    // A shell writes it, so no descriptor of this process names the file
+    // when it runs (ETXTBSY).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert!(
+            Command::new("/bin/sh")
+                .args(["-c", "printf '%s' \"$2\" > \"$1\"", "sh"])
+                .arg(&path)
+                .arg(script)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    path
+}
+
+/// #1968: stage 4b asks `engine foreign` before its bearer refusal, so it
+/// refuses another release's unfinished Rust container with exactly the
+/// refusal `prepare` gives it, passes everything else, and only inspects.
+#[test]
+fn engine_foreign_refuses_only_another_releases_unfinished_rust_daemon() {
+    let home = Home::new();
+    let repo = home.0.join("repo");
+    fs::create_dir_all(repo.join("rust/shim")).unwrap();
+    fs::write(
+        repo.join("rust/shim/Cargo.toml"),
+        "[package]\nname = \"pseudolife-stdio\"\nversion = \"0.23.0\"\n",
+    )
+    .unwrap();
+    let docker = labels_docker(&home);
+    let labels = home.0.join("labels.json");
+    let calls = home.0.join("calls.txt");
+    let refusal = |release: &str| {
+        format!(
+            "The running Rust daemon {release} has no accepted selection, and this checkout installs 0.23.0; the installer will not replace it. Remove the container (docker rm -f pseudolife-mcp-daemon; the bank volumes stay) and rerun. Nothing was started.\n"
+        )
+    };
+    let cases: [(Option<Value>, Option<String>); 5] = [
+        (
+            Some(
+                json!({"org.pseudolife.engine": "rust", "org.pseudolife.activation": "a",
+                        "org.pseudolife.release": "0.24.0"}),
+            ),
+            Some(refusal("0.24.0")),
+        ),
+        (
+            Some(json!({"org.pseudolife.engine": "rust", "org.pseudolife.activation": "a"})),
+            Some(refusal("of unknown release")),
+        ),
+        // This checkout's own unfinished install is redone, not refused.
+        (
+            Some(
+                json!({"org.pseudolife.engine": "rust", "org.pseudolife.activation": "a",
+                        "org.pseudolife.release": "0.23.0"}),
+            ),
+            None,
+        ),
+        (Some(json!({"org.pseudolife.engine": "python"})), None),
+        (None, None),
+    ];
+    for (found, expected) in cases {
+        match &found {
+            Some(value) => fs::write(&labels, value.to_string()).unwrap(),
+            None => {
+                let _ = fs::remove_file(&labels);
+            }
+        }
+        let _ = fs::remove_file(&calls);
+        let output = home
+            .command(&["engine", "foreign", "--repo", repo.to_str().unwrap()])
+            .env("PSEUDOLIFE_DOCKER", &docker)
+            .env("PSEUDOLIFE_MCP_DATA_DIR", home.0.join("data"))
+            .env("FAKE_LABELS", &labels)
+            .env("FAKE_CALLS", &calls)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.stdout, b"", "{found:?}");
+        match &expected {
+            Some(text) => {
+                assert_eq!(output.status.code(), Some(1), "{found:?}: {stderr}");
+                assert_eq!(stderr, *text, "{found:?}");
+            }
+            None => {
+                assert_eq!(output.status.code(), Some(0), "{found:?}: {stderr}");
+                assert_eq!(stderr, "", "{found:?}");
+            }
+        }
+        let logged = fs::read_to_string(&calls).unwrap();
+        assert!(
+            !logged.is_empty() && logged.lines().all(|line| line.starts_with("inspect")),
+            "{found:?}: {logged}"
+        );
+        assert!(
+            !home.0.join("data").exists(),
+            "{found:?}: nothing is written"
+        );
+    }
+    let output = home.run(&["engine", "foreign"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, b"foreign needs --repo.\n");
+}

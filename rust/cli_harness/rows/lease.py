@@ -89,7 +89,7 @@ def _key(action, body, headers) -> list:
 class Board:
     """Loopback HTTP boundary answering as the recorded frozen store."""
 
-    def __init__(self, scenario="free", bank=True):
+    def __init__(self, scenario="free", bank=True, recorded=None):
         self.name = None
         self.records = []
         self.states = []
@@ -99,7 +99,7 @@ class Board:
             self.url = core.DEAD_DAEMON_URL
             return
         self.name = "recorded:" + scenario
-        recorded = _recorded(scenario)
+        recorded = _recorded(scenario) if recorded is None else recorded
         self.initial = recorded["initial"]
         self.transcripts = recorded["transcripts"]
         self.history: list = []

@@ -24,7 +24,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]\n       pseudolife-mcp installer --capability\n       pseudolife-mcp installer credentials STEP ... (installer credentials --help)\n       pseudolife-mcp installer state ACTION ... | volume-names --repo R --env-file F | engine detect|prepare|accept|choose ...\n       pseudolife-mcp installer json-field FIELD | json-string | connect-report valid|error|plan|manual|handled|current|codex-only (JSON on stdin)\n       pseudolife-mcp installer is-loopback URL | pairing-code-valid (code on stdin) | codex-fields credentials|hooks|runtime-defaults (JSON on stdin)\n       pseudolife-mcp installer plugin-marketplace | preflight-check --repo R --env-file F | hook-settings install|remove-legacy\n       pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]\n       pseudolife-mcp installer codex-runtime-defaults [--approve-memory-message]\n       pseudolife-mcp installer codex-token-copy --daemon-url URL --token-file PATH\n       pseudolife-mcp installer codex-hooks --checkout DIR [--source S] [--trust T] [--instructions I] [--non-interactive]\n       pseudolife-mcp installer claude-desktop --command ABSOLUTE_PATH [options; see --help]";
+const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]\n       pseudolife-mcp installer --capability\n       pseudolife-mcp installer credentials STEP ... (installer credentials --help)\n       pseudolife-mcp installer state ACTION ... | volume-names --repo R --env-file F | engine detect|prepare|accept|choose|foreign ...\n       pseudolife-mcp installer json-field FIELD | json-string | connect-report valid|error|plan|manual|handled|current|codex-only (JSON on stdin)\n       pseudolife-mcp installer is-loopback URL | pairing-code-valid (code on stdin) | codex-fields credentials|hooks|runtime-defaults (JSON on stdin)\n       pseudolife-mcp installer plugin-marketplace | preflight-check --repo R --env-file F | hook-settings install|remove-legacy\n       pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]\n       pseudolife-mcp installer codex-runtime-defaults [--approve-memory-message]\n       pseudolife-mcp installer codex-token-copy --daemon-url URL --token-file PATH\n       pseudolife-mcp installer codex-hooks --checkout DIR [--source S] [--trust T] [--instructions I] [--non-interactive]\n       pseudolife-mcp installer claude-desktop --command ABSOLUTE_PATH [options; see --help]";
 /// The installer steps this binary carries, as a level the installers probe
 /// before running any of them (`installer --capability`;
 /// ops/install-native.sh `NATIVE_INSTALLER_PROTOCOL`). Raise it when a step the
@@ -33,7 +33,8 @@ const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--cl
 /// a step whose absence the installers treat as today's behaviour:
 /// `codex-token-copy` and `connect-report codex-only` joined level 5 before any
 /// release answered 5, and an installer that gets no answer from them applies
-/// connect's plan as before.
+/// connect's plan as before; so did `engine foreign`, whose usage error (exit 2)
+/// the native installers read as no answer, leaving the refusal to `prepare`.
 pub const INSTALLER_PROTOCOL: u32 = 5;
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 

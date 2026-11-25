@@ -22,10 +22,12 @@ from rust.ci import release_version
 from tests import installer_sandbox
 from tests import native_client_stub as native_stub
 
-from pseudolife_memory.credentials import CredentialProvider, _write_token_file
-from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
-from tests.test_installer_client_only_native import CODEX_HOOK_APPROVAL, CODEX_HOOK_REPORTS, CODEX_PENDING_CASES, COMPLETION_CASES, DENIED_CREDENTIAL
-from tests.test_installer_existing_upgrade import _between, user_path_unchanged
+from tests.client_credentials_fixture import read_token, write_token_file
+from tests.installer_fragments import _between
+from tests.test_installer_client_only_native import (
+    CODE_FORMS, CODEX_HOOK_APPROVAL, CODEX_HOOK_REPORTS, CODEX_PENDING_CASES, COMPLETION_CASES, DENIED_CREDENTIAL,
+    NOT_CODES, _pair_report)
+from tests.user_path_guard import user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
@@ -208,7 +210,7 @@ SHIM_LOOPBACK_FORMS = ["http://127.999.1.1:8765", "http://127.0.0.01:8765",
 
 @pytest.mark.parametrize("url", SHIM_LOOPBACK_FORMS)
 def test_loopback_is_the_shims_own_answer(tmp_path, url):
-    from pseudolife_memory.daemon_url import _is_loopback_url
+    from tests.client_credentials_fixture import _is_loopback_url
     proc = _mode(_PowerShell(tmp_path), daemon_url=url)
     assert proc.returncode == 0, _output(proc)
     assert f"CLIENT_ONLY={not _is_loopback_url(url)}" in proc.stdout.splitlines()
@@ -398,7 +400,7 @@ def _preflight(ps: _PowerShell, *, daemon_url: str = REMOTE, token_file: str = "
 def _token(ps: _PowerShell) -> Path:
     path = ps.tmp / "keys" / "remote.token"
     path.parent.mkdir()
-    _write_token_file(path, FIXTURE_TOKEN)
+    write_token_file(path, FIXTURE_TOKEN)
     return path
 
 
@@ -476,7 +478,7 @@ def test_read_token_creates_an_owner_only_token_file_from_stdin(tmp_path):
     target = tmp_path / "keys" / "new.token"
     proc = _preflight(ps, token_file=str(target), read_token=True, feed=FIXTURE_TOKEN + "\n")
     assert proc.returncode == 0, _output(proc)
-    assert CredentialProvider(path=target).snapshot().token == FIXTURE_TOKEN
+    assert read_token(target) == FIXTURE_TOKEN
     assert FIXTURE_TOKEN not in _output(proc)
 
 
@@ -694,7 +696,7 @@ def _is_code_ps(ps: _PowerShell, values: list[str], helper_answers: bool = True)
 
 @pytest.mark.parametrize("helper_answers", [True, False], ids=["client", "own-rule"])
 def test_a_pairing_code_is_recognised_exactly_as_pair_reads_one(tmp_path, helper_answers):
-    from pseudolife_memory.principals import normalize_pairing_code
+    from tests.client_credentials_fixture import normalize_pairing_code
     values = CODE_FORMS + NOT_CODES
     assert _is_code_ps(_PowerShell(tmp_path), values, helper_answers) == [
         normalize_pairing_code(value) is not None for value in values]
@@ -721,7 +723,7 @@ def test_a_pasted_token_is_still_written_as_the_token(tmp_path, token):
     proc = _preflight(ps, token_file=str(target), read_token=True, feed=token + "\n")
     assert proc.returncode == 0, _output(proc)
     assert "PAIRING=" in proc.stdout.splitlines()
-    assert CredentialProvider(path=target).snapshot().token == token
+    assert read_token(target) == token
 
 
 @pytest.mark.parametrize("clients,name", [(("claude",), "claude-code"), (("codex",), "codex"),
@@ -777,7 +779,7 @@ def test_a_pairing_code_is_redeemed_on_stdin_and_then_used_as_the_token_file(tmp
         f"shim|pair {REMOTE} --read-code --token-file {target} --json",
         f"shim|connect {REMOTE} --token-file {target} --client codex --dry-run --json"]
     assert _pair_stdin(ps).strip() == PAIRING_CODE
-    assert CredentialProvider(path=target).snapshot().token == PAIRED_TOKEN
+    assert read_token(target) == PAIRED_TOKEN
     assert f"PAIRED={target}|" in proc.stdout.splitlines()
     assert "fixture-laptop" in _output(proc)
     _assert_code_unseen(ps, proc)
@@ -792,7 +794,7 @@ def test_a_pasted_pairing_code_reaches_pair_as_it_was_typed(tmp_path):
     assert proc.returncode == 0, _output(proc)
     assert _shim_calls(ps) == [f"shim|pair {REMOTE} --read-code --token-file {target} --json"]
     assert _pair_stdin(ps).strip() == "oil2-mx4p-9tzc"
-    assert CredentialProvider(path=target).snapshot().token == PAIRED_TOKEN
+    assert read_token(target) == PAIRED_TOKEN
     _assert_code_unseen(ps, proc, "oil2-mx4p-9tzc")
 
 

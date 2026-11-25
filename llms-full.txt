@@ -23,8 +23,8 @@ downloads the pinned models (about 2.4 GB, once, into their own
 any container starts, and records the selection once the daemon reports ready at that
 release. With no `--engine`, the install takes the Python daemon instead,
 saying why, when it has no bearer token (`--no-token`, `--transport http`
-with no token set, or a host that cannot install the shim and so mints
-none), when the release publishes no Rust image or its models cannot be
+with no token set, or a Python-client install on a host that cannot
+install the shim and so mints none), when the release publishes no Rust image or its models cannot be
 downloaded, or when the bank already exists
 (the next attended `pseudolife-mcp update` moves that bank, after its own
 checks). `ops/install.sh --engine python` (Windows: `ops/install.ps1
@@ -153,9 +153,12 @@ while the daemon starts. A rejected token (HTTP 401 or 403) stops the check
 immediately. If the check fails, the installer completes the rest of the
 setup and skips Codex registration.
 
-If the native installer records a connection setup failure for a requested
-client, it completes the remaining setup and exits with status 5. Its final
-summary names the incomplete clients and how to retry. Clients selected by
+If the native installer records a setup failure for a requested client (its
+connection, its plugin or hooks, or an unreadable Claude Code plugin
+registry), or native shim autostart fails for an extractor chosen by flag or
+typed at the prompt, it completes the remaining setup and exits with status 5. Its final
+summary names each failure and how to retry. Hooks awaiting approval and
+platforms without native shim autostart produce warnings. Clients selected by
 flag or at the prompt count as requested, including the default accepted
 with Enter. A rerun treats a restored list as requested only when the saved
 request matches the list. A detected-client failure produces a warning and
@@ -165,6 +168,10 @@ On reruns, the native installer can check a client without changing its
 registration. It uses read-only helpers to inspect the Pseudolife entry in
 Gemini's configuration, verify the existing bearer token with the daemon,
 and identify connection plans that need only credential verification.
+An identical client-only rerun with `--token-file` leaves Codex's
+registration on Codex's own copy of that token while the copy holds the
+same token, and says there is nothing to write; a rotated token in the file
+moves the registration to the file.
 For a current registration on a client-only rerun, credential verification
 can wait up to three minutes if the daemon is unreachable. If a grouped
 client-only check fails, the installer checks the clients separately and
@@ -196,7 +203,7 @@ message, then rerun the original installer:
 | A foreign container, even stopped, or a selected volume attached to another stack | Maintain it with that stack's own compose file. For clients only, use `ops/install.sh --client-only --daemon-url <url>` (Windows: `ops/install.ps1 -ClientOnly -DaemonUrl <url>`). |
 | An existing volume not recorded by this install | Restore the original `ops/.env`, including `POSTGRES_PASSWORD`, `PSEUDOLIFE_BANK_VOLUME` and `PSEUDOLIFE_STATE_VOLUME`; do not delete the volume. For pre-rename volumes, use the exact names printed by preflight. |
 | Postgres rejects `POSTGRES_PASSWORD` | Restore that setting from the original `ops/.env`. If a stopped container records a different initialization password, start the original stack with its own compose file so preflight can verify the current password. |
-| Port 8765 or 5433 belongs to another service | Stop or reconfigure that service, then rerun. The installer's own bound ports are valid on reruns. |
+| Port 8765 or 5433 belongs to another service | Stop or reconfigure that service, then rerun. The installer's own bound ports are valid on reruns. If the refusal says no service answers on the port, a service that stopped a moment ago most likely held it: rerun in about a minute. |
 | A different install directory or missing recorded origin | Rerun from the original checkout with its original `ops/.env`; restore that checkout or env file if missing. A stack using multiple env files is maintained with `pseudolife-mcp update`. |
 | The configuration no longer retains daemon authentication | Restore the original `ops/.env` instead of generating replacement credentials. |
 
@@ -519,7 +526,30 @@ artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
 
-Install and register the lite tier. No Docker, no database to set up, no container runtime:
+The installer is the recommended route. It sets up a Docker bank with the
+dream extractor you choose (the bundled local sidecar by default) and wires
+your coding agents through the native `pseudolife-mcp` client, which needs no
+host Python (it installs the Python client instead, saying why, where the
+native one cannot serve the machine):
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+What it asks and what it sets up: [Durable tier — Docker](#durable-tier--docker-recommended-for-a-long-lived-bank).
+
+### Lite tier (pip)
+
+Everything from here to the Docker tier is about lite, the Python package:
+it needs Python 3.10 or newer, and only the Python client runs a lite bank.
+The installer refuses a machine that still holds a lite bank until it has
+moved ([Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker)). To try it
+instead, install and register the package. No Docker, no database to set
+up, no container runtime:
 
 ```bash
 pip install "pseudolife-mcp[lite]"
@@ -546,7 +576,8 @@ the shim's 180-second deadline to report a failure before the host cancels it; p
 Approve `memory_message` in that table's tool configuration
 (`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
 "approve"`, or allow it once and keep the approval); Codex hook setup
-(`python ops/setup-codex-hooks.py`) sets it when you approve the hooks, and
+(the installer's Codex step, or `python ops/setup-codex-hooks.py` from a
+checkout) sets it when you approve the hooks, and
 keeps any value you chose. Board mail can wake an
 idle Codex task by default, and the woken task reads its mail with that tool:
 without the approval it stalls on a prompt until someone answers it. Set
@@ -640,7 +671,7 @@ trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 ## Durable tier — Docker (recommended for a long-lived bank)
 
-Everything above plus the bundled extractor, external volumes,
+Everything lite gives you, plus the bundled extractor, external volumes,
 health-checked services, and backup/rollback tooling. Requires Docker
 (with the compose v2 and buildx plugins) and
 at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI
@@ -838,7 +869,8 @@ docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
 # Verify, then wire the transport into one or both clients.
 curl http://127.0.0.1:8765/health
 
-# Stdio shim (the installer's default — per-session episode identity).
+# Stdio shim (per-session episode identity), by hand with the Python
+# client's package; the installer sets up the native client instead.
 # PSEUDOLIFE_MCP_NO_SPAWN=1 makes the shim wait for the container instead
 # of spawning a host fallback that can shadow the Docker bank after a
 # reboot; set it on Docker-tier registrations like these.
@@ -1398,7 +1430,9 @@ Details, non-default ports/tokens, and migration:
 
 **Manual transport registration.** The installer's default (shim mode)
 registers a thin stdio shim — one shim process per session, so every
-session carries its own tier-1 identity. The same wiring by hand:
+session carries its own tier-1 identity. The same wiring by hand, with the
+Python client's package (the installers set up the native client instead,
+which needs no host Python):
 
 ```bash
 pip install pseudolife-mcp    # daemon in Docker; add [lite] for the pip tier
@@ -1502,7 +1536,8 @@ config.
 
 Codex — the installer's default (shim mode) wires the same stdio shim, so a
 Codex session gets its own tier-1 identity instead of inheriting a
-concurrent Claude session's episode:
+concurrent Claude session's episode. By hand, with the Python client's
+package:
 
 ```bash
 pip install pseudolife-mcp
@@ -1533,7 +1568,8 @@ Codex reads it when connecting. This is unnecessary for the default stdio shim.
 
 Gemini CLI — same shape (`-s user` matters: Gemini defaults to project
 scope; the `-e` env gives Gemini sessions their own write attribution, and
-the same Docker-tier `PSEUDOLIFE_MCP_NO_SPAWN=1` note as above applies):
+the same Docker-tier `PSEUDOLIFE_MCP_NO_SPAWN=1` note as above applies). By
+hand, with the Python client's package:
 
 ```bash
 pip install pseudolife-mcp
@@ -1644,11 +1680,15 @@ verbose logs so they stay out of the dream), **REFLECT at the end**
 dream distils these signals into the lessons surfaced at your next session
 start).
 
-For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
-The helper asks once, detects the hook source, backs up changed configuration,
+For an existing Codex installation, rerun the installer with
+`--codex-hook-trust yes` (`-CodexHookTrust yes`): a rerun of a Docker install
+does not ask, so it approves only with that flag. Add `--client` only to add
+Codex, naming every client you use. From a checkout with Python 3.10 or
+newer, `python ops/setup-codex-hooks.py` runs the same step and asks once.
+The step detects the hook source, backs up changed configuration,
 persists scoped trust through Codex, and verifies startup briefing, prompt
 reminder, and session cleanup, plus the agent-board check-in where the board
-is on. The Docker installer runs this step for you.
+is on. A first install runs this step for you.
 See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
 
 For Claude Code, use the [plugin](plugin/README.md), or the legacy
@@ -5800,11 +5840,13 @@ comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
 `principal_not_allowed` or `coordination_requires_postgres`).
 
 To keep an open-loopback install with the board dormant, pass `--no-token`
-(`-NoToken`). `--transport http` mints no token either, nor does a host that
+(`-NoToken`). `--transport http` mints no token either, nor does a
+Python-client install (`PSEUDOLIFE_SHIM_ENGINE=python`, or the installer's
+fallback where the native client cannot serve the machine) on a host that
 cannot install the shim (no Python >= 3.10 that can make a virtualenv, and no
-pipx), since its registrations fall back to HTTP; the native installer
-(`PSEUDOLIFE_SHIM_ENGINE=native`) needs no Python to mint one. None of
-these removes a token that is already configured.
+pipx), since its registrations fall back to HTTP. The native client, the
+installers' default, needs no Python to mint one. None of these removes a
+token that is already configured.
 
 ### Coordination diagnostic quickstart
 
@@ -6907,8 +6949,12 @@ runtime-defaults step right after `codex mcp add` (`installer
 codex-runtime-defaults --approve-memory-message`) applies it and reports its
 own `mailbox_approval`. If that install does not register the server, a later
 installer run that finds it registered approves it only with hook consent
-again (interactively, or `--codex-hook-trust yes`): an unattended run's
-default does not consent. When the approval is not set, the end-of-setup
+again (`--codex-hook-trust yes`, or a yes where the run asks; a rerun of a
+Docker install does not ask): an unattended run's default does not consent.
+A host first set up by an older installer can lack the approval too,
+because those installers also ran the hook step before registering the
+server. An update never grants it, also when it moves the host to the native
+client, so the next installer run with `--codex-hook-trust yes` sets it. When the approval is not set, the end-of-setup
 notice says how to choose it. The reason is the doorbell: a board ring wakes a
 thread only when it has mail it needs, and a woken thread that must ask before
 calling `memory_message` stalls on that prompt. A recipient running with
@@ -8983,14 +9029,15 @@ The installers put the shim into its own **runtime** and register one
 | runtimes | `%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN\` | `$XDG_DATA_HOME/pseudolife-mcp/runtimes/NNNNNN/` (`~/.local/share/...`) |
 | launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` (its directory goes on the user `PATH`) | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp`, linked from `~/.local/bin/pseudolife-mcp` |
 
-A runtime is a plain virtualenv holding the package (`pip install
+A Python client's runtime is a plain virtualenv holding the package (`pip install
 --no-deps`) and the shim's own dependencies — not torch, chromadb or the
 embedder, which a stdio shim never loads (`serve` and `embedded` need a
 full install). `runtime.json` inside it (version, source, commit) is
 written last, so a directory without it is an install that did not
-finish; the launcher starts the highest-numbered complete runtime (on
-Windows a console-script executable of the kind pip writes, on POSIX a
-`/bin/sh` script that `exec`s it). Installing a new version — the
+finish; the launcher starts the highest-numbered complete runtime (for the
+Python client, on Windows a console-script executable of the kind pip
+writes, on POSIX a `/bin/sh` script that `exec`s it; the native client's
+launcher is described in [The native client](#the-native-client)). Installing a new version — the
 installer, `ops/update.ps1 -All` / `update.sh --all`, or `python
 ops/shim_runtime.py install --source <checkout or requirement>` — builds a
 new runtime beside the old ones and never touches a file a running session
@@ -11067,9 +11114,10 @@ Claude Code reads `CLAUDE.md`, not `AGENTS.md` — see
 ## Claude Desktop
 
 `--client claude-desktop` writes the stdio-shim entry into
-`claude_desktop_config.json` — Desktop has no `mcp add`. The merge lives in
-`ops/register_claude_desktop.py` (standard library only), which both
-installers call and which you can run by hand with
+`claude_desktop_config.json` — Desktop has no `mcp add`. The native client does the merge
+as `pseudolife-mcp installer claude-desktop`, which the installers run by
+default; with the Python client they call `ops/register_claude_desktop.py`
+(standard library only) instead. Either runs by hand with
 `--command <absolute shim path>` (`--dry-run` prints the resolved path and
 entry). What Desktop does differently, and what the entry carries because
 of it:
@@ -11165,7 +11213,12 @@ choice approves just PseudoLife's exact current hook definitions and permits
 the standing memory block as a fallback if verification fails. It does not
 approve unrelated hooks or turn off Codex's trust checks.
 
-For an existing installation with the daemon running, use the same helper:
+For an existing installation with the daemon running, rerun the installer
+with `--codex-hook-trust yes` (`-CodexHookTrust yes`), which runs the same
+setup step: a rerun of a Docker install does not ask, so it approves only
+with that flag. Add `--client` only to add Codex, naming every client you
+use. From a checkout with Python 3.10 or newer, the helper also runs on its
+own and asks once:
 
 ```bash
 python ops/setup-codex-hooks.py
@@ -11187,13 +11240,18 @@ command asks again. The manual copy therefore runs through a launcher,
 `~/.codex/pseudolife/hooks/run.sh` (`run.ps1` on Windows), whose commands
 never change. It runs the script bundle that `current` beside it names.
 Bundles are content-addressed and verified, and so are the launchers. The
-update (`pseudolife-mcp update` from a checkout, `ops/update.ps1 -All`,
+update (`pseudolife-mcp update`, or from a checkout `ops/update.ps1 -All`,
 `ops/update.sh --all`, `ops/update_clients.py`) writes the new bundle,
 checks it, moves `current` and removes the bundle it replaced, all without
 asking, because nothing Codex approved changed. A manual copy set up before
 2026-09-30 names a bundle directly in its commands; the update says so, and
-running `python ops/setup-codex-hooks.py` once more is the last approval it
-needs. Bundles from before the launcher stay, since a Codex session started
+one more installer run that approves the Codex hooks (or `python
+ops/setup-codex-hooks.py`) is the last approval it needs. When the
+`current` pointer is broken, the launcher says to rerun the installer and
+approve the Codex hooks. A client older than 0.26.0 does not know this
+release's launcher bytes, so its `doctor` and installer verification report
+the launchers as missing or modified: update that client, or rerun its own
+installer and approve the Codex hooks. Bundles from before the launcher stay, since a Codex session started
 earlier may still run them. Codex bounds SessionEnd and Interrupt timeouts
 to 1..3 seconds before hashing their definitions
 ([verified source](https://github.com/openai/codex/blob/b741e480e203f037ca726bc2a76d99a8e8668e66/codex-rs/hooks/src/engine/discovery.rs#L742-L796)).
@@ -11315,9 +11373,11 @@ tool, so this also covers sending board mail
 ([details](configuration.md#codex-cli-and-desktop)).
 
 ```bash
-# Full unattended setup with automatic memory approved:
+# Full unattended setup with automatic memory approved (on an existing
+# installation, rerun the installer as you installed it, adding
+# --codex-hook-trust yes):
 ops/install.sh --extractor sidecar --client codex --codex-hook-trust yes
-# Existing installation, same scoped approval:
+# Existing installation, from a checkout with Python, same scoped approval:
 python ops/setup-codex-hooks.py --trust yes --non-interactive
 # Standing instructions only:
 python ops/setup-codex-hooks.py --source skip --instructions append --non-interactive
@@ -11595,7 +11655,9 @@ the policy: the installer offers to append the block to `~/.gemini/GEMINI.md`
 ## Other MCP agents (Cursor, Windsurf, Zed, Copilot CLI, …)
 
 `--client generic` prints two paste-ready `mcpServers` shapes — stdio shim
-(per-session identity, needs `pip install pseudolife-mcp`) and plain HTTP —
+(per-session identity; needs the `pseudolife-mcp` client on `PATH` or by its
+full path in `"command"`: the native client the installers set up, or the
+Python client from `pip install pseudolife-mcp`) and plain HTTP —
 plus the usual config homes per tool. These agents get the tools and the
 server `instructions` field; there is no hook layer to wire, so pair the
 config with a standing `AGENTS.md` block (the installer offers a
@@ -13403,6 +13465,9 @@ Details: [unattended client updates](configuration.md#unattended-client-updates-
 
 ### By hand
 
+With the Python client's package (a client-only install sets up the native
+client instead):
+
 ```bash
 pipx install pseudolife-mcp
 
@@ -13582,7 +13647,7 @@ no terminal and no `--yes` refuses, having changed nothing.
 installed Docker bank (its daemon and Postgres containers exist), with no
 lost writes. Run it on the bank's current host.
 
-**With the native client** (opt-in, see [The native
+**With the native client** (the installers' default, see [The native
 client](configuration.md#the-native-client)), `pseudolife-mcp move --to
 <ssh-target> --target-url <url> --no-keep-tokens` moves the bank, asking
 first (or `--yes`).
@@ -13591,8 +13656,8 @@ plan. Use `--help` to see the move and recovery commands. Write option values
 as separate arguments, such as `--to <ssh-target>`, and use full option names.
 The native client reports usage errors before inspecting the host or move
 records. The target needs:
-- the native client installed: an update with `PSEUDOLIFE_SHIM_ENGINE=native`
-  set moves a host to it (`update --clients-only` for one that already has
+- the native client installed: a person's `pseudolife-mcp update` moves a
+  Python-client host to it (`update --clients-only` for one that already has
   its daemon), or `pseudolife-mcp runtime install --archive`. A target whose
   native client is older, or speaks another move protocol, is refused with
   the fix;
@@ -14211,7 +14276,11 @@ Use the same commands when the updated client pins a different vendor version.
 If a service or scheduled task started that supervisor, restart the existing
 registration through its manager.
 
-A Python-supervised tunnel keeps serving after the client switch.
+A Python-supervised tunnel keeps serving after the client switch. A
+person's `pseudolife-mcp update` makes that switch by default unless a
+tunnel is registered to start by itself; to keep the Python client's
+background launch, run the update with `PSEUDOLIFE_SHIM_ENGINE=python`, or
+rerun the installer with it to record that choice.
 For a planned switch, stop it with the Python client before changing clients.
 After switching, run `pseudolife-mcp tunnel stop --profile <name>`. It prints
 a copyable stop command when it can read the saved profile and locate the
@@ -14250,12 +14319,14 @@ credentials (such as a key-based SSH logon), is reported as `not_verified`.
 `pseudolife-mcp doctor` lists saved tunnels and names only steps this client
 runs. The native client does not register or start a tunnel service. A
 machine whose tunnel the Python client registered to start by itself stays on
-the Python client: an update keeps it unless you opt in with
-`PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
-tunnel as it is and says so in its tunnel line (see
+the Python client: an update keeps it, and
+`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only` prints
+how to remove the autostart, changing nothing until it is gone (see
+[Autostart and private storage](#autostart-and-private-storage)). Once it
+is gone, that command moves the machine and leaves a running tunnel as it
+is, saying so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how
-to go back). A machine whose tunnel is set to start by itself stays on the
-Python client (see [Autostart and private storage](#autostart-and-private-storage)).
+to go back).
 
 ## Start or resume
 

@@ -5,7 +5,7 @@ test_installer_py_launcher_ps.py keeps the default (Python client) installer's t
 """
 import pytest
 
-from tests.test_installer_client_only import ROOT
+from tests.installer_fragments import ROOT
 
 
 
