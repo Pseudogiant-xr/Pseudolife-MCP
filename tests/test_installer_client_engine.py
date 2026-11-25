@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_installer_existing_upgrade import user_path_unchanged
+from tests.user_path_guard import user_path_unchanged
 
 from tests.ops_harness import find_bash
 

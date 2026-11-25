@@ -16,9 +16,8 @@ import pytest
 
 from tests import native_client_stub as native_stub
 
-from pseudolife_memory.credentials import CredentialProvider
-from tests.test_client_install_ux import _marker_block
-from tests.test_installer_existing_upgrade import _between
+from tests.client_credentials_fixture import read_token
+from tests.installer_fragments import _between, _marker_block
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
@@ -180,7 +179,7 @@ def test_claude_and_gemini_get_owner_only_token_files(tmp_path):
     assert re.search(r"(?m)^LEFT=\r?$", proc.stdout)
     for principal in ("claude-code", "gemini"):
         target = ps.home / ".pseudolife-mcp" / f"{principal}.token"
-        assert CredentialProvider(path=target).snapshot().token == "fixture-singular"
+        assert read_token(target) == "fixture-singular"
         assert f"{'CLAUDE' if principal == 'claude-code' else 'GEMINI'}={target}" in proc.stdout
 
 
@@ -193,7 +192,7 @@ def test_token_map_entry_wins_for_its_principal(tmp_path):
     assert proc.returncode == 0, _output(proc)
     assert "fixture-mapped" not in _output(proc)
     target = ps.home / ".pseudolife-mcp" / "claude-code.token"
-    assert CredentialProvider(path=target).snapshot().token == "fixture-mapped"
+    assert read_token(target) == "fixture-mapped"
 
 
 def test_tokenless_install_writes_no_client_files(tmp_path):

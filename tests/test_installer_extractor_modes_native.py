@@ -11,12 +11,11 @@ import subprocess
 
 import pytest
 
-from tests.test_installer_existing_upgrade import user_path_unchanged
+from tests.user_path_guard import user_path_unchanged
 
 from rust.ci import release_version
 from tests import native_client_stub as native_stub
-from tests.test_installer_client_only import BASH, ROOT, _q, _stub
-from tests.test_installer_client_only_native import _Shell
+from tests.test_installer_client_only_native import BASH, ROOT, _Shell
 
 def _block(name: str) -> str:
     text = (ROOT / "ops" / "install-native.sh").read_text(encoding="utf-8")

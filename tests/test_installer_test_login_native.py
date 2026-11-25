@@ -11,14 +11,11 @@ import subprocess
 
 import pytest
 
-from tests.test_installer_existing_upgrade import user_path_unchanged
+from tests.user_path_guard import user_path_unchanged
 
 from tests import installer_sandbox
-from tests.test_installer_client_only import BASH, REMOTE, ROOT, _mode, _stub
-from tests.test_installer_client_only_native import _Shell
-from tests.test_installer_client_only_ps import _output
-from tests.test_installer_client_only_ps_native import _PowerShell
-from tests.test_installer_client_only_ps import _block as _ps_block
+from tests.test_installer_client_only_native import BASH, ROOT, _Shell, _stub
+from tests.test_installer_client_only_ps_native import _PowerShell, _output
 
 COMMAND = "test-login create"
 

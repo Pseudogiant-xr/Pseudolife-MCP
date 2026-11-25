@@ -128,12 +128,14 @@ def main(argv: list[str]) -> int:
         return _connect_report(args[0])
     if step == "codex-fields":
         return _codex_fields(args[0])
-    sys.path.insert(0, str(repo))
+    # The frozen client's two rules, as copied in tests/client_credentials_fixture.py
+    # (its checkout first on the path, ahead of a fixture repository's files).
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     if step == "is-loopback":
-        from pseudolife_memory.daemon_url import _is_loopback_url
+        from tests.client_credentials_fixture import _is_loopback_url
         return 10 if _is_loopback_url(args[0]) else 11
     if step == "pairing-code-valid":
-        from pseudolife_memory.principals import normalize_pairing_code
+        from tests.client_credentials_fixture import normalize_pairing_code
         line = sys.stdin.buffer.readline().decode("utf-8", "replace").rstrip("\r\n")
         return 10 if normalize_pairing_code(line) else 11
     print(f"native helper stand-in: unknown step {step}", file=sys.stderr)
