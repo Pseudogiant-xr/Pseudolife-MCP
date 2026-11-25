@@ -41,7 +41,21 @@ STOCK_CODEX_NOTE = ("The home had no Codex folder, as before a first Codex start
 PEER_NOTE = ("The daemon is a test peer built from the tagged source on this runner. Only the client "
              "steps are evidence about the published release artifact.")
 OUTCOMES = ("pass", "fail", "not yet run")
-INSTALL = "PSEUDOLIFE_SHIM_ENGINE=native bash ops/install.sh"
+ENGINE_VARIABLE = "PSEUDOLIFE_SHIM_ENGINE"
+# The client a run asks the candidate's installer for. `default` leaves the
+# variable unset, as a user who sets nothing does; since 0.26.0 that is the
+# native client. The legacy fixtures and their rollback stay `python`, and
+# the update hand-offs (`<native-opt-in>`) stay `native`, whatever is chosen.
+ENGINES = ("native", "default", "python")
+ENGINE = "native"
+CLIENT_ENGINES = ("native", "python", "unknown")
+# What the installer printed about its choice, in fixed words.
+ENGINE_LINES = (
+    (b"Native client install (", "The installer announced the native client."),
+    (b"the native client cannot serve this machine", "The installer fell back to the Python client."),
+    (b"records an earlier PSEUDOLIFE_SHIM_ENGINE=python install", "The installer kept a recorded Python client choice."),
+    (b"Python client chosen: recorded", "The installer recorded a Python client choice."),
+)
 CLIENT = "pseudolife-mcp"
 TOKEN_FILE = "PSEUDOLIFE_MCP_TOKEN_FILE"
 DAEMON_URL = "PSEUDOLIFE_MCP_DAEMON_URL"
@@ -58,6 +72,53 @@ CODEX_ASSETS = {
 # Every value a job generates (tokens, passwords, pairing codes) and every
 # private directory is registered here before anything can print it.
 REDACTOR = runner_redactor()
+
+
+def known_engine(engine=None):
+    """`engine`, or the run's when it is None; an unknown or empty one is refused."""
+    engine = ENGINE if engine is None else engine
+    if engine not in ENGINES:
+        raise ValueError(f"unknown installer engine {engine!r}")
+    return engine
+
+
+def select_engine(engine):
+    global ENGINE
+    ENGINE = known_engine(engine)
+
+
+def engine_env(env, engine=None):
+    """The installer environment for an engine, the run's when none is named.
+
+    `default` removes the variable: an empty value is set, not unset.
+    """
+    engine = known_engine(engine)
+    env = {key: value for key, value in env.items() if key != ENGINE_VARIABLE}
+    if engine != "default":
+        env[ENGINE_VARIABLE] = engine
+    return env
+
+
+def installer(engine=None):
+    """The installer command label for an engine, the run's when none is named."""
+    engine = known_engine(engine)
+    return "bash ops/install.sh" if engine == "default" else f"{ENGINE_VARIABLE}={engine} bash ops/install.sh"
+
+
+def client_engine(result, profile, release, engine=None):
+    """What a candidate install was asked for and what it left active.
+
+    `installed` is `native` only when the candidate archive's verified native
+    client is active, `python` when the installer said it chose the Python
+    client, and `unknown` otherwise (a tag that predates the native default
+    prints neither).
+    """
+    engine = known_engine(engine)
+    lines = [line for fragment, line in ENGINE_LINES if fragment in result.output]
+    native = profile is not None and release is not None and profile.native_marker(release)
+    installed = "native" if native else "python" if any("Python" in line for line in lines) else "unknown"
+    return {"requested": engine, "variable": "unset" if engine == "default" else engine,
+            "installer_lines": lines, "installed": installed}
 
 
 class Observation(Exception):
@@ -585,6 +646,8 @@ class Receipt:
     note: str = "The scenario was not selected."
     cleanup_failed: bool = False
     fixture_notes: list = field(default_factory=list)
+    # client_engine()'s record of the row's first candidate install, if any.
+    client_engine: dict | None = None
 
     def observe(self, label, result, ok, assertion, *, template=None, required=True):
         # The labels and assertions are fixed call-site strings. Never
@@ -643,8 +706,10 @@ class Receipt:
         receipt = {
             "scenario": self.scenario, "platform": self.platform, "daemon": self.daemon,
             "daemon_engine": self.daemon_engine, "status": status, "assertion": REDACTOR.text(note),
-            "steps": self.steps, "cleanup_verified": cleanup,
+            "steps": self.steps, "cleanup_verified": cleanup, "client_engine_requested": ENGINE,
         }
+        if self.client_engine is not None:
+            receipt["client_engine"] = self.client_engine
         if self.fixture_notes:
             receipt["fixture_notes"] = list(dict.fromkeys(self.fixture_notes))
         if self.daemon in matrix.DAEMON_KINDS[2:]:
@@ -683,12 +748,15 @@ def cell(path, selected):
     status = result.get("status") if isinstance(result, dict) else None
     daemon = result.get("daemon") if isinstance(result, dict) else None
     engine = result.get("daemon_engine") if isinstance(result, dict) else None
-    known = status in OUTCOMES and daemon in DAEMONS and (engine in matrix.DAEMON_ENGINES or engine is None)
+    recorded = result.get("client_engine") if isinstance(result, dict) else None
+    client = recorded.get("installed") if isinstance(recorded, dict) else None
+    known = (status in OUTCOMES and daemon in DAEMONS and (engine in matrix.DAEMON_ENGINES or engine is None)
+             and (recorded is None or client in CLIENT_ENGINES))
     pass_provenance = status != "pass" or (daemon in matrix.DAEMON_KINDS and engine in matrix.DAEMON_ENGINES)
     if not (known and pass_provenance):
         return "invalid result", "missing", "The receipt used values outside the published vocabulary."
     shown = "cannot run" if status == "not yet run" else status
-    text = f"{shown} / {daemon}" + (f" / {engine}" if engine else "")
+    text = f"{shown} / {daemon}" + (f" / {engine}" if engine else "") + (f" / client {client}" if client else "")
     reason = result.get("assertion")
     if status == "pass":
         reason = None
@@ -697,13 +765,25 @@ def cell(path, selected):
     return text, {"pass": "pass", "fail": "fail"}.get(status, "cannot run"), reason
 
 
+def requested_engine(path):
+    """The installer engine a receipt says its run asked for, if it says one."""
+    try:
+        engine = json.loads(path.read_bytes()).get("client_engine_requested")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return engine if engine in ENGINES else None
+
+
 def summary(selection, folder):
     rows, counts, reasons = [], dict.fromkeys(("pass", "fail", "cannot run", "missing"), 0), []
+    requested = set()
     for scenario in matrix.SCENARIOS:
         statuses = []
         for platform in PLATFORMS:
-            text, category, reason = cell(folder / f"acceptance-{platform}" / f"{scenario}.json",
-                                          platform in SELECTIONS[selection])
+            path = folder / f"acceptance-{platform}" / f"{scenario}.json"
+            text, category, reason = cell(path, platform in SELECTIONS[selection])
+            if platform in SELECTIONS[selection] and (engine := requested_engine(path)) is not None:
+                requested.add(engine)
             statuses.append(text)
             if category is not None:
                 counts[category] += 1
@@ -716,6 +796,11 @@ def summary(selection, folder):
     print(f"**Verdict: {verdict}.** {counts['pass']} pass, {counts['fail']} fail, "
           f"{counts['cannot run']} cannot run and {counts['missing']} missing, of {selected} selected cells.")
     print()
+    if requested:
+        asked = ", ".join(f"`{engine}`" + (f" ({ENGINE_VARIABLE} unset)" if engine == "default" else "")
+                          for engine in sorted(requested))
+        print(f"Installer client requested: {asked}.")
+        print()
     print("| Scenario | Linux arm64 | macOS Intel | macOS Apple silicon |")
     print("| --- | --- | --- | --- |")
     for row in rows:
@@ -737,6 +822,8 @@ def main():
     run.add_argument("selection", choices=SELECTIONS)
     run.add_argument("platform", choices=PLATFORMS)
     run.add_argument("output", type=Path)
+    run.add_argument("--engine", choices=ENGINES, default="native",
+                     help=f"the client the candidate's installer is asked for; default leaves {ENGINE_VARIABLE} unset")
     show = subparsers.add_parser("summary")
     show.add_argument("selection", choices=SELECTIONS)
     show.add_argument("folder", type=Path)
@@ -746,6 +833,7 @@ def main():
         return 0
     if args.platform not in SELECTIONS[args.selection]:
         return 0
+    select_engine(args.engine)
     args.output.mkdir()
     (args.output / "ledger").mkdir()
     if args.platform == "linux-arm64":

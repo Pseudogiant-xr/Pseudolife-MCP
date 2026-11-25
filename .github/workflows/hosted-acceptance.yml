@@ -13,6 +13,11 @@ on:
         default: all
         type: choice
         options: [all, linux-arm64, macos, macos-x64, macos-arm64]
+      engine:
+        description: Client the release's installer is asked for (default leaves PSEUDOLIFE_SHIM_ENGINE unset)
+        default: native
+        type: choice
+        options: [native, default, python]
 
 permissions:
   contents: read
@@ -30,6 +35,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.release || 'v0.25.0' }}
       COLUMNS: ${{ inputs.columns || 'all' }}
       PLATFORM: ${{ matrix.platform }}
+      CLIENT_ENGINE: ${{ inputs.engine || 'native' }}
     steps:
       - name: Fetch observation tooling anonymously
         run: |
@@ -46,7 +52,7 @@ jobs:
           toolchain: 1.94.0
       - name: Observe installed release
         timeout-minutes: 68
-        run: python3 -m ops.acceptance.hosted run "$RELEASE_TAG" "$COLUMNS" "$PLATFORM" receipts
+        run: python3 -m ops.acceptance.hosted run --engine "$CLIENT_ENGINE" "$RELEASE_TAG" "$COLUMNS" "$PLATFORM" receipts
       - name: Upload allowlisted observations
         if: ${{ always() && hashFiles('receipts/*.json', 'receipts/ledger/*.json') != '' }}
         uses: actions/upload-artifact@v4

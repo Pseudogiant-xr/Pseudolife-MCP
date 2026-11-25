@@ -8,8 +8,8 @@ import tempfile
 
 from . import matrix
 from .hosted import (
-    CODEX_HOME_NOTE, INSTALL, NOT_MET, PEER_NOTE, REDACTOR, CleanupFailed, Failed, Profile, Receipt, Unavailable,
-    command, native_path, prepare_codex, published_release, write_json,
+    CODEX_HOME_NOTE, NOT_MET, PEER_NOTE, REDACTOR, CleanupFailed, Failed, Profile, Receipt, Unavailable,
+    command, installer, native_path, prepare_codex, published_release, write_json,
 )
 from .hosted_linux import (
     CLIENT_FLAGS, clean_install, diagnostic_note, failure, free_space, install,
@@ -22,7 +22,7 @@ def offline(receipt, release, repo, profile, scratch):
     token_file = private_file(scratch / "offline.token", REDACTOR.secret(secrets.token_hex(32)) + "\n")
     url = f"http://127.0.0.1:{loopback_port()}"
     result = live_install(None, repo, profile, ["--daemon-url", url, "--token-file", str(token_file)])
-    receipt.observe(f"{INSTALL} <closed-loopback>", result,
+    receipt.observe(f"{installer()} <closed-loopback>", result,
                     result.code not in (0, 124) and b"client-only install: no healthy daemon answered at" in result.output
                     and not (profile.codex / "config.toml").is_file(),
                     "The published installer refused the closed endpoint without registering a client.")
@@ -40,7 +40,7 @@ def offline_faults(receipt, release, repo, profile, scratch):
         if defect == "corrupt":
             (assets / release.archive.name).write_bytes(b"not a release archive\n")
         result = install(repo, profile, flags, overrides={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(assets)}, timeout=120)
-        receipt.observe(f"{INSTALL} <{defect}-archive>", result,
+        receipt.observe(f"{installer()} <{defect}-archive>", result,
                         result.code not in (0, 124) and diagnostic in result.output
                         and not (profile.codex / "config.toml").is_file(),
                         "The installer identified the archive fault before it registered a client.")
