@@ -44,6 +44,7 @@ costs ~3 minutes of GPU per replicate.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -53,6 +54,10 @@ FROZEN_GATE = REPO / "evals" / "_python_regression_gate.ps1"
 RUST_GATE = REPO / "evals" / "regression_gate.ps1"
 BASELINE = REPO / "evals" / "results" / "regression_gate.baseline.json"
 RUST_BASELINE = REPO / "evals" / "results" / "rust-quality" / "regression_gate.baseline.json"
+# The reviewed -Establish candidate the maintainer accepted on 25 November 2026
+# (run 3, 13:18 to 13:37 AEDT), hashed with LF line endings. Promoting a new
+# baseline changes this in the same commit; any other edit to the file fails.
+RUST_BASELINE_SHA256 = "164df6866acff69696a472ddfdf637e90ce2ea4e439559ad0ef4abc0cea551b4"
 
 # 2: one run plus one canary. Not an estimator — see the module docstring.
 DEFAULT_REPLICATES = 2
@@ -84,12 +89,22 @@ def test_committed_baseline_was_established_at_the_default_or_more():
         f"of {DEFAULT_REPLICATES} — re-establish it")
 
 
+def test_committed_rust_baseline_is_the_reviewed_candidate():
+    """The gate's own check accepts any in-range score, so only the reviewed
+    file's digest catches a hand edit that would turn a regression into a pass."""
+    data = RUST_BASELINE.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(data).hexdigest() == RUST_BASELINE_SHA256, (
+        "the committed Rust baseline is not the reviewed -Establish candidate; promote "
+        "a new candidate by committing it unchanged and updating RUST_BASELINE_SHA256")
+
+
 def test_committed_rust_baseline_passes_the_gates_own_check():
     """The committed Rust baseline is the file `regression_gate.py` loads when it
     is not establishing. The gate's own check accepts it against the manifest it
-    records, so a hand edit to a score, margin, arm or pin fails here rather than
-    at the start of a GPU run. Whether the pins still match the live instruments
-    is the gate's question, asked at run time."""
+    records, so a promoted candidate with a missing arm, an off-floor margin or a
+    malformed pin fails here rather than at the start of a GPU run. Whether the
+    pins still match the live instruments is the gate's question, asked at run
+    time."""
     from evals import regression_gate as gate
 
     baseline = json.loads(RUST_BASELINE.read_text(encoding="utf-8"))
