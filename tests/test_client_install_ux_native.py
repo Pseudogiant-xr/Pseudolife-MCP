@@ -194,7 +194,8 @@ def test_the_plugin_readme_names_no_checkout_python_script():
     # README names the flag that approves, not a prompt that never appears.
     flat = " ".join(text.split())
     assert "rerun the installer with `--codex-hook-trust yes`" in flat
-    assert "A rerun does not prompt, so without that flag it approves nothing" in flat
+    assert "A rerun of a Docker install does not prompt, so without that flag it approves nothing" in flat
+    assert "`--client codex` replaces them, so name every client you use" in flat
     assert "approves without a prompt" not in flat
     assert "`pseudolife-mcp update --clients-only` on its" in text
 

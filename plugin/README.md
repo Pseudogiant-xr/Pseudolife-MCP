@@ -50,9 +50,10 @@ their lifecycle (the
 the park gate, and the `SubagentStop` entry runs that gate for a Codex child
 thread under the child's own address, doing nothing in Claude Code; the
 `PreToolUse` entry is Claude Code's subagent board guard, which in Codex
-allows every call, and setup approves it with the rest). A rerun does not
-prompt, so without that flag it approves nothing; add `--client codex` only to
-add Codex, naming every client you use. The same consent
+allows every call, and setup approves it with the rest). A rerun of a Docker
+install does not prompt, so without that flag it approves nothing. That rerun
+keeps its recorded clients, and `--client codex` replaces them, so name every
+client you use. The same consent
 approves the `memory_message` tool, unless you chose its approval yourself,
 so a task woken by board mail does not stall on a prompt (the plugin's hook
 definitions are unchanged by it).
