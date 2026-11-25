@@ -44,15 +44,28 @@ def _helper():
     return disposable_postgres
 
 
+_OWNED_TURN_REFUSAL = (
+    "lease_ci refused before starting PostgreSQL: this machine takes database turns "
+    "(~/.pseudolife-mcp/locks/test-postgres.turn-enabled) and no verified ancestor holds the turn, "
+    "so this run would own it. An owned turn ends when lease_ci exits, so the cluster could not "
+    "be kept for the steps that use it: on Windows the turn's containment means it would die with "
+    "this process, and elsewhere it would keep running outside any turn. "
+    "From the repository root, run lease_ci and the steps that use its cluster as one wrapped "
+    "command: pwsh -NoProfile -NonInteractive -File ops/dev-database-lock.ps1 -- <command>"
+)
+
+
 def _take_database_turn() -> None:
     """Take the machine's database turn where the opt-in marker asks for it.
 
     The cluster this script starts must outlive it, because the job's later
-    steps use it. Contain this process tree only when it owns the turn: then
-    the turn ends with this process and nothing it started may outlive it.
-    A delegated turn belongs to a verified live ancestor (such as
-    ``ops/dev-database-lock.ps1``), whose own lifetime bounds the cluster;
-    containing here would kill the cluster the moment this script exits.
+    steps use it. A delegated turn belongs to a verified live ancestor (such
+    as ``ops/dev-database-lock.ps1``), whose own lifetime bounds the cluster,
+    so this script does not contain itself. A turn this script would own
+    ends with it, so the cluster could not be kept for later steps (on
+    Windows its containment kills the cluster with this process): that is
+    refused before any cluster starts. The decision rests on
+    ``Lease.delegated`` alone.
     """
     if not _DATABASE_TURN_MARKER.exists():
         return
@@ -64,8 +77,9 @@ def _take_database_turn() -> None:
 
         lease = require_turn(holder="standalone database harness", contain=False)
         if lease is not None and not lease.delegated:
-            # Reuses the handle just taken and contains it now.
-            require_turn(holder="standalone database harness", contain=True)
+            # Exiting releases the turn (the engine's atexit close, then the
+            # OS handle); an in-process caller's own turn is left to it.
+            raise SystemExit(_OWNED_TURN_REFUSAL)
     finally:
         _turn_sys.path.remove(_turn_root)
 
