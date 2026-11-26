@@ -498,7 +498,7 @@ def render(findings: list[Finding], now: datetime) -> str:
     state = json.dumps({"findings": [asdict(finding) for finding in findings]},
                        sort_keys=True).replace(">", "\\u003e")
     return "\n".join([
-        f"`rust/ci/ci_headroom.py` found hosted runs that used more than {THRESHOLD:.0%} of a time "
+        f"`rust/ci/ci_headroom.py` found hosted runs that used {THRESHOLD:.0%} or more of a time "
         "bound in the last "
         f"{RETENTION_DAYS} days. A slower runner CPU can push such a job over its bound and fail "
         "a run that would have passed. Raise the bound with headroom over the slowest run (its comment "
