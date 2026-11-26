@@ -318,6 +318,44 @@ pub(crate) async fn traces_for_slot(db: &Client, key: &SlotKey) -> Result<Vec<i6
         .collect())
 }
 
+/// Every slot's `traces_for_slot` in one statement: each distinct key maps
+/// to its entry ids in ascending order, and a slot with no trace is absent.
+pub(crate) async fn traces_for_slots(
+    db: &Client,
+    slots: &[SlotKey],
+) -> Result<HashMap<SlotKey, Vec<i64>>> {
+    let mut out: HashMap<SlotKey, Vec<i64>> = HashMap::new();
+    if slots.is_empty() {
+        return Ok(out);
+    }
+    let (es, attrs) = distinct_slot_arrays(slots);
+    let rows = db
+        .query(
+            "SELECT t.entity_norm, t.attribute_norm, t.entry_id \
+             FROM memory_traces t \
+             JOIN unnest($1::text[], $2::text[]) AS k(e, a) \
+               ON t.entity_norm = k.e AND t.attribute_norm = k.a \
+             ORDER BY t.entity_norm, t.attribute_norm, t.entry_id",
+            &[&es, &attrs],
+        )
+        .await?;
+    for r in rows {
+        out.entry((r.get(0), r.get(1))).or_default().push(r.get(2));
+    }
+    Ok(out)
+}
+
+/// The entity and attribute arrays a batched slot read joins on: each key
+/// once, pairwise aligned. A key passed twice (a set slot's several member
+/// rows) would otherwise match each of its rows twice.
+fn distinct_slot_arrays(slots: &[SlotKey]) -> (Vec<&str>, Vec<&str>) {
+    let distinct: BTreeSet<&SlotKey> = slots.iter().collect();
+    distinct
+        .into_iter()
+        .map(|k| (k.0.as_str(), k.1.as_str()))
+        .unzip()
+}
+
 pub(crate) struct Invalidation {
     pub(crate) source_entry_id: i64,
     pub(crate) invalidated_at: f64,
@@ -974,6 +1012,89 @@ async fn attach_served_facts_locked(db: &Client, event_id: i64, facts: &[Value])
 mod tests {
     use super::*;
     use crate::stores::cortex::tests::{axis, rec, store};
+
+    #[test]
+    fn batched_slot_reads_join_each_key_once() {
+        let k = |e: &str, a: &str| (e.to_string(), a.to_string());
+        // A set slot's member rows repeat its key; the arrays stay aligned.
+        let slots = [
+            k("b", "y"),
+            k("a", "x"),
+            k("b", "y"),
+            k("a", ""),
+            k("b", "y"),
+        ];
+        let (es, attrs) = distinct_slot_arrays(&slots);
+        assert_eq!(es, ["a", "a", "b"]);
+        assert_eq!(attrs, ["", "x", "y"]);
+    }
+
+    /// `traces_for_slots` answers what `traces_for_slot` answers for every
+    /// key: ascending ids, a repeated key's rows once, no entry for a slot
+    /// without traces. Needs a disposable bank (`pl_cf_w2d_*`).
+    #[tokio::test]
+    async fn batched_traces_match_the_per_slot_read() {
+        let Ok(dsn) = std::env::var("PL_W2D_GUARD_DSN") else {
+            return;
+        };
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|n| n.starts_with("pl_cf_w2d_"))
+        );
+        let storage = crate::storage::Storage::open(&dsn).await.unwrap();
+        let db = storage.client();
+        db.batch_execute("DELETE FROM memory_traces").await.unwrap();
+        let vector = format!("[{}]", vec!["0.5"; 1024].join(","));
+        let mut ids: Vec<i64> = Vec::new();
+        for i in 0..6 {
+            let row = db
+                .query_one(
+                    "INSERT INTO entries (band, text, embedding, ts) \
+                     VALUES ('working', $1, $2::text::vector, 0) RETURNING id",
+                    &[&format!("trace source {i}"), &vector],
+                )
+                .await
+                .unwrap();
+            ids.push(row.get(0));
+        }
+        // Inserted out of id order; "caf\u{e9}" is non-ASCII, "" an empty attribute.
+        let traced = [
+            ("set-owner", "members", ids[4]),
+            ("set-owner", "members", ids[1]),
+            ("set-owner", "members", ids[3]),
+            ("caf\u{e9}", "", ids[5]),
+            ("plain", "cpu", ids[2]),
+            ("plain", "cpu", ids[0]),
+        ];
+        for (e, a, id) in traced {
+            db.execute(
+                "INSERT INTO memory_traces VALUES ($1, $2, $3, 0)",
+                &[&e, &a, &id],
+            )
+            .await
+            .unwrap();
+        }
+        let k = |e: &str, a: &str| (e.to_string(), a.to_string());
+        let slots = vec![
+            k("set-owner", "members"),
+            k("plain", "cpu"),
+            k("set-owner", "members"),
+            k("caf\u{e9}", ""),
+            k("untraced", "slot"),
+            k("set-owner", "members"),
+        ];
+        let batched = traces_for_slots(db, &slots).await.unwrap();
+        for key in &slots {
+            let single = traces_for_slot(db, key).await.unwrap();
+            let got = batched.get(key).cloned().unwrap_or_default();
+            assert_eq!(got, single, "slot {key:?}");
+        }
+        assert!(!batched.contains_key(&k("untraced", "slot")));
+        assert_eq!(batched.len(), 3);
+        db.batch_execute("DELETE FROM memory_traces").await.unwrap();
+    }
 
     #[tokio::test]
     async fn served_facts_recovers_abandoned_writer_transaction() {
