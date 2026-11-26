@@ -4530,14 +4530,31 @@ def _refuse_docs_during_batch(master: str) -> None:
                 raise Refusal(f"batch {branch} is built locally; {remedy}")
 
 
+# The identity of the local preview commit, which is never pushed: fixed, so
+# the preview does not depend on the operator's Git configuration.
+DOCS_PREVIEW_IDENTITY = ("-c", "user.name=ops/integrate.py merge-docs",
+                         "-c", "user.email=merge-docs@example.com", "-c", "commit.gpgSign=false")
+
+
 def _docs_preview(number: int, master: str, head: str) -> str:
-    ref = f"refs/pull/{number}/merge"
-    if git("fetch", "-q", "--no-tags", REMOTE, ref, check=False).returncode != 0:
-        raise Refusal(f"cannot fetch GitHub's test merge for #{number}; wait for it to be ready and retry")
-    preview = _out("rev-parse", "FETCH_HEAD")
-    if _out("rev-list", "--parents", "-n", "1", preview).split() != [preview, master, head]:
-        raise Refusal(f"GitHub's test merge for #{number} has a different base or head; wait for it to refresh and retry")
-    return preview
+    """The merge commit of `head` into `master` that the doc guards test.
+
+    It is computed here rather than fetched as GitHub's test merge
+    (refs/pull/N/merge), which GitHub can leave on an older base long after
+    master moves (#1992). The merge `merge_docs` lands has these parents, and
+    its tree is compared with this one after landing."""
+    merged = git("merge-tree", "--write-tree", "--no-messages", master, head, check=False)
+    # A conflict still prints the tree first; exit 1 with no tree is an
+    # unreadable revision, which git reports with the same exit code.
+    tree = (merged.stdout or "").splitlines()[0] if (merged.stdout or "").strip() else ""
+    if merged.returncode == 1 and re.fullmatch(r"[0-9a-f]{40}", tree):
+        raise Refusal(f"#{number} conflicts with {BASE} at {master[:12]}; merge {BASE} into the PR "
+                      "and resolve the conflict, then retry")
+    if merged.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", tree):
+        raise Refusal(f"cannot compute the merge of #{number} into {BASE} (`git merge-tree` exit "
+                      f"{merged.returncode}: {(merged.stderr or '').strip()}); it needs git 2.38+")
+    return _out(*DOCS_PREVIEW_IDENTITY, "commit-tree", tree, "-p", master, "-p", head,
+                "-m", f"Merge #{number} into {BASE} (merge-docs preview, never pushed)")
 
 
 _DOCS_SCOPE_RUNNER = """import json, pathlib, sys
@@ -4628,8 +4645,8 @@ def merge_docs(args: argparse.Namespace) -> int:
     view = _docs_pr_view(number)
     _, master = _preflight(require_master=False)
     recorded_base = view.get("baseRefOid")
-    # GitHub can report an older baseRefOid after master advances.
-    # The preview's parents below establish which base and head will be tested.
+    # GitHub can report an older baseRefOid after master advances. The
+    # preview below is the merge of this master and the fetched head.
     if recorded_base != master and not (
         isinstance(recorded_base, str)
         and re.fullmatch(r"[0-9a-f]{40}", recorded_base)

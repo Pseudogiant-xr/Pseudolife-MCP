@@ -595,27 +595,26 @@ def test_merge_docs_refuses_an_incomplete_open_pr_listing(world, capsys, monkeyp
     assert not world.gh.mutations()
 
 
-@pytest.mark.parametrize(("recorded", "preview_base", "change_after_guards", "refusal"), [
-    pytest.param("current", "current", None, None, id="current"),
-    pytest.param("older", "current", None, None, id="older"),
-    pytest.param("older", "older", None, "test merge for #42 has a different base or head",
-                 id="stale-preview"),
-    pytest.param("unrelated", "current", None, "recorded base is not an ancestor of master",
-                 id="unrelated"),
-    pytest.param("older", "current", "master", "master changed after the doc guards",
-                 id="master-moved"),
-    pytest.param("older", "current", "recorded", "base or head of #42 changed during the doc guards",
+@pytest.mark.parametrize(("recorded", "change_after_guards", "refusal"), [
+    pytest.param("current", None, None, id="current"),
+    pytest.param("older", None, None, id="older"),
+    pytest.param("unrelated", None, "recorded base is not an ancestor of master", id="unrelated"),
+    pytest.param("older", "master", "master changed after the doc guards", id="master-moved"),
+    pytest.param("older", "recorded", "base or head of #42 changed during the doc guards",
                  id="recorded-base-changed"),
-    pytest.param("older", "current", "caught-up", None, id="recorded-base-caught-up"),
+    pytest.param("older", "head", "base or head of #42 changed during the doc guards",
+                 id="head-changed"),
+    pytest.param("older", "caught-up", None, id="recorded-base-caught-up"),
 ])
-def test_merge_docs_uses_the_preview_base(recorded, preview_base, change_after_guards,
-                                         refusal, monkeypatch, capsys):
+def test_merge_docs_uses_the_preview_base(recorded, change_after_guards, refusal, monkeypatch, capsys):
     shas = {"current": "a" * 40, "older": "b" * 40, "unrelated": "c" * 40}
     master, head, preview, landed = shas["current"], "d" * 40, "e" * 40, "f" * 40
     view = FakeGh.VIEW_DEFAULTS | {"number": 42, "isDraft": False, "mergeable": "MERGEABLE",
                                    "baseRefOid": shas[recorded], "headRefOid": head}
     reported_after = {"recorded": shas["unrelated"], "caught-up": master}
     current = view | {"baseRefOid": reported_after.get(change_after_guards, shas[recorded])}
+    if change_after_guards == "head":
+        current["headRefOid"] = "9" * 40
     remote_base = "1" * 40 if change_after_guards == "master" else master
     gh = Mock(side_effect=[json.dumps(view), json.dumps(current),
                            json.dumps({"merged": True, "sha": landed})])
@@ -627,9 +626,9 @@ def test_merge_docs_uses_the_preview_base(recorded, preview_base, change_after_g
     monkeypatch.setattr(integrate, "_is_ancestor", lambda old, new: {
         (shas[recorded], master): recorded != "unrelated", (landed, "origin/master"): True,
     }[old, new])
+    previews = []
+    monkeypatch.setattr(integrate, "_docs_preview", lambda *args: previews.append(args) or preview)
     monkeypatch.setattr(integrate, "_out", lambda *args: {
-        ("rev-parse", "FETCH_HEAD"): preview,
-        ("rev-list", "--parents", "-n", "1", preview): f"{preview} {shas[preview_base]} {head}",
         ("ls-remote", "--exit-code", "origin", "refs/heads/master"):
             f"{remote_base}\trefs/heads/master",
         ("rev-list", "--parents", "-n", "1", landed): f"{landed} {master} {head}",
@@ -654,6 +653,8 @@ def test_merge_docs_uses_the_preview_base(recorded, preview_base, change_after_g
         guards.assert_called_once_with(42, master, preview)
         gh.assert_called_with("api", "--method", "PUT", "repos/{owner}/{repo}/pulls/42/merge",
                               "-f", "merge_method=merge", "-f", f"sha={head}")
+    # The tested tree is always the merge of this master and the fetched head.
+    assert previews == ([] if recorded == "unrelated" else [(42, master, head)])
 
 
 def test_merge_docs_refuses_a_dirty_checkout(world, capsys):
@@ -738,13 +739,67 @@ def test_merge_docs_checks_both_sides_of_a_rename(docs_world, capsys):
 
 
 def test_merge_docs_refuses_non_docs_in_the_proposed_push(docs_world, capsys):
+    # The preview is computed from master and the head, so GitHub's test
+    # merge cannot inject another tree; a docs change master already carries
+    # leaves the proposed push empty, which is not docs-only either.
     world = docs_world
     head = _docs_pr(world)
+    world.advance_master({"docs/guide.md": "guide\n"})
     other = world.pr(43, {"docs/guide.md": "guide\n", "ops/example.py": "changed\n"})
     _docs_preview(world, head, preview_head=other)
     assert integrate.main(["merge-docs", "42"]) == 2
     assert "test merge into master is not docs-only" in capsys.readouterr().err
     assert not world.gh.mutations()
+
+
+@pytest.mark.parametrize("github_preview", ["stale", "missing"])
+def test_merge_docs_tests_master_and_the_head_when_githubs_test_merge_is_stale(
+        docs_world, capsys, github_preview):
+    # #1992: GitHub kept refs/pull/N/merge on a base several master commits
+    # old, so merge-docs refused it until the PR was updated by hand.
+    world = docs_world
+    old = _git(world.origin, "rev-parse", "master")
+    head = _docs_pr(world, {"docs/guide.md": "updated guide\n"}, baseRefOid=old)
+    if github_preview == "stale":
+        _docs_preview(world, head)
+    world.advance_master({"docs/other.md": "a later docs change on master\n"})
+    world.advance_master({"a.txt": "and a later code change on master\n"})
+    base = _git(world.origin, "rev-parse", "master")
+    tree = _git(world.seed, "merge-tree", "--write-tree", base, head)
+    assert integrate.main(["merge-docs", "42"]) == 0, capsys.readouterr().err
+    assert world.gh.mutations() == [["api", "--method", "PUT", "repos/{owner}/{repo}/pulls/42/merge",
+                                     "-f", "merge_method=merge", "-f", f"sha={head}"]]
+    assert _git(world.origin, "rev-parse", "master^{tree}") == tree
+    assert _git(world.origin, "rev-parse", "master^1", "master^2").splitlines() == [base, head]
+
+
+def test_merge_docs_refuses_a_conflict_github_has_not_reported(docs_world, capsys):
+    # GitHub's mergeability can be as stale as its test merge.
+    world = docs_world
+    head = _docs_pr(world, {"docs/guide.md": "the PR's guide\n"})
+    world.advance_master({"docs/guide.md": "master's guide\n"})
+    assert world.gh.pr(42)["mergeable"] == "MERGEABLE"
+    assert integrate.main(["merge-docs", "42"]) == 2
+    err = capsys.readouterr().err
+    assert "#42 conflicts with master" in err and "resolve the conflict" in err
+    assert not world.gh.mutations()
+    assert head == _git(world.origin, "rev-parse", "refs/pull/42/head")
+
+
+def test_merge_docs_preview_does_not_depend_on_the_operator_identity(docs_world, capsys):
+    world = docs_world
+    head = _docs_pr(world)
+    _git(world.work, "config", "user.name", "")
+    _git(world.work, "config", "user.email", "")
+    base = _git(world.origin, "rev-parse", "master")
+    with pytest.raises(integrate.Refusal, match="cannot compute the merge of #42"):
+        integrate._docs_preview(42, base, head)  # not fetched yet: no object, no conflict claim
+    assert integrate._fetch_head(42) == head
+    preview = integrate._docs_preview(42, base, head)
+    assert _git(world.work, "log", "-1", "--format=%an <%ae>|%cn <%ce>", preview) == (
+        "ops/integrate.py merge-docs <merge-docs@example.com>|"
+        "ops/integrate.py merge-docs <merge-docs@example.com>")
+    assert _git(world.work, "rev-parse", f"{preview}^1", f"{preview}^2").splitlines() == [base, head]
 
 
 def test_merge_docs_refuses_conflicting_edits_in_the_combined_doc_guards(docs_world, monkeypatch, capsys):
@@ -847,22 +902,6 @@ def test_merge_docs_rechecks_after_the_guards(docs_world, capsys, monkeypatch, c
     monkeypatch.setattr(integrate, "_docs_guards", guards)
     assert integrate.main(["merge-docs", "42"]) == 2
     assert reason in capsys.readouterr().err
-    assert not world.gh.mutations()
-
-
-def test_merge_docs_rejects_a_stale_test_merge(docs_world, capsys):
-    head = _docs_pr(docs_world)
-    _docs_preview(docs_world, head)
-    docs_world.advance_master({"doc.md": "master moved after the preview\n"})
-    assert integrate.main(["merge-docs", "42"]) == 2
-    assert "test merge for #42 has a different base or head" in capsys.readouterr().err
-    assert not docs_world.gh.mutations()
-
-
-def test_merge_docs_requires_githubs_test_merge(world, capsys):
-    _docs_pr(world)
-    assert integrate.main(["merge-docs", "42"]) == 2
-    assert "cannot fetch GitHub's test merge" in capsys.readouterr().err
     assert not world.gh.mutations()
 
 
