@@ -331,12 +331,13 @@ the net diff and its file modes. Documentation accompanied only by the
 generated `rust/producer-census.json` is skipped whatever the scope job's
 docs lane does, so it is admitted at once; census alone or alongside
 runtime edits still requires replay. A diff only the docs lane skips, such
-as Markdown under `evals/`, is admitted once the head's own pull-request
-run of the Rust workflow has finished successfully with its `Scope` job
-passed and its Rust job skipped (reported unexpanded as
-`Rust / ${{ matrix.os }}`); until then it waits, a cancelled run needs a
-rerun, and if that run expanded the `Rust / <os>` jobs (its docs test
-selection failed) their replay is required. A diff reaching none satisfies
+as Markdown under `evals/`, is admitted once the latest attempt of the
+head's newest pull-request run of the Rust workflow has finished
+successfully with its `Scope` job passed and its Rust job skipped
+(reported unexpanded as `Rust / ${{ matrix.os }}`); until then it waits, a
+cancelled run needs a rerun, and if that attempt expanded the `Rust / <os>`
+jobs (its docs test selection failed) their replay is required. `open`
+reads that run again before publishing. A diff reaching none satisfies
 admission immediately, without Actions metadata: documentation and pure
 test-only changes do not wait. Tests imported by a runtime harness are
 runtime inputs and retain their replay requirement. The selector code
@@ -431,8 +432,9 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   shows only once it merges. The report never refuses the build.
 - **`--expect <PR,PR...>`** names the members the batch must hold. A named
   pull request that sits out stops `build` before any merge; after the
-  merges, a named one that was dropped or an unnamed one that merged stops
-  it before the plan is saved or any comment is posted. Either way it exits
+  merges, a named one that was dropped, an unnamed one that merged, or an
+  unnamed open one whose head a member's head carries stops it before the
+  plan is saved or any comment is posted. Either way it exits
   2, prints each such pull request with the reason, and removes the branch
   it made. Without the option `build` behaves as above.
 - **`--dry-run`** does the same merges on a detached HEAD, prints the plan,

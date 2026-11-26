@@ -5,6 +5,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -298,35 +299,55 @@ def test_requirement_uses_frozen_selector_without_importing_member_code(
     assert not marker.exists()
 
 
+def _rust_jobs(scope, rust):
+    """(name, status, conclusion) of one attempt's Scope and Rust jobs."""
+    listed = [("Scope", *scope)]
+    if rust == "unexpanded":
+        listed.append(("Rust / ${{ matrix.os }}", "completed", "skipped"))
+    elif rust == "expanded":
+        listed += [(name, "in_progress", None) for name in JOBS]
+    return listed
+
+
 def _rust_run(monkeypatch, integrate, *, run_id=9, event="pull_request", head=SHA,
               scope=("completed", "success"), run=("completed", "success"), rust="unexpanded",
-              attempts=(1, 1), extra=()):
-    """A rollup of one Rust workflow run on the head, with the Actions job
-    and run metadata `gh api` returns for it; `extra` adds other runs'."""
-    jobs, runs, rollup = {}, {}, []
+              attempt=1, latest=None, extra=()):
+    """A rollup of one Rust workflow run on the head, with the Actions job,
+    run and attempt-jobs metadata `gh api` returns for it. `latest` is the
+    job list of the run's latest attempt when a rerun differs from the
+    rollup's; `extra` adds other runs as (run id, event, created_at, rust)."""
+    jobs, runs, attempts, rollup = {}, {}, {}, []
 
-    def add(job_id, name, state, rid, ev, sha, attempt=(1, 1)):
-        status, conclusion = state
-        rollup.append({"name": name, "workflowName": "Rust shim", "status": status.upper(),
-                       "conclusion": (conclusion or "").upper() or None, "detailsUrl":
-                       f"https://github.com/o/r/actions/runs/{rid}/job/{job_id}"})
-        jobs[str(job_id)] = {"name": name, "head_sha": sha, "run_id": rid, "run_attempt": attempt[0],
-                            "status": status, "conclusion": conclusion, "steps": [],
-                            "started_at": "2026-11-26T01:00:00Z", "completed_at": None}
+    def add_run(rid, ev, sha, created, run_state, listed, attempt_number, latest_listed):
+        runs[str(rid)] = {"id": rid, "head_sha": sha, "event": ev, "path": ".github/workflows/rust.yml",
+                          "run_attempt": attempt_number, "status": run_state[0], "conclusion": run_state[1],
+                          "created_at": created}
+        for offset, (name, status, conclusion) in enumerate(listed, 1):
+            job_id = rid * 10 + offset
+            rollup.append({"name": name, "workflowName": "Rust shim", "status": status.upper(),
+                           "conclusion": (conclusion or "").upper() or None, "detailsUrl":
+                           f"https://github.com/o/r/actions/runs/{rid}/job/{job_id}"})
+            jobs[str(job_id)] = {"name": name, "head_sha": sha, "run_id": rid, "run_attempt": 1,
+                                "status": status, "conclusion": conclusion, "steps": [],
+                                "started_at": "2026-11-26T01:00:00Z", "completed_at": None}
+        attempts[(str(rid), str(attempt_number))] = [
+            {"name": name, "status": status, "conclusion": conclusion}
+            for name, status, conclusion in latest_listed]
 
-    for rid, ev, sha, scope_state, run_state, rust_state, attempt in (
-            (run_id, event, head, scope, run, rust, attempts), *extra):
-        runs[str(rid)] = {"head_sha": sha, "event": ev, "path": ".github/workflows/rust.yml",
-                          "run_attempt": attempt[1], "status": run_state[0], "conclusion": run_state[1]}
-        add(rid * 10 + 1, "Scope", scope_state, rid, ev, sha, attempt)
-        if rust_state == "unexpanded":
-            add(rid * 10 + 2, "Rust / ${{ matrix.os }}", ("completed", "skipped"), rid, ev, sha)
-        elif rust_state == "expanded":
-            for offset, name in enumerate(JOBS, 3):
-                add(rid * 10 + offset, name, ("in_progress", None), rid, ev, sha)
+    listed = _rust_jobs(scope, rust)
+    add_run(run_id, event, head, "2026-11-26T01:00:00Z", run, listed, attempt,
+            listed if latest is None else latest)
+    for rid, ev, created, other_rust in extra:
+        other = _rust_jobs(("completed", "success"), other_rust)
+        add_run(rid, ev, head, created, ("completed", "success"), other, 1, other)
 
     def gh(*args):
         assert args[0] == "api", args
+        found = re.search(r"/runs/(\d+)/attempts/(\d+)/jobs\?per_page=100&page=(\d+)$", args[1])
+        if found:
+            rid, number, page = found.groups()
+            listed = attempts[(rid, number)] if page == "1" else []
+            return json.dumps({"total_count": len(attempts[(rid, number)]), "jobs": listed})
         kind, ident = args[1].rsplit("/", 2)[-2:]
         return json.dumps(jobs[ident] if kind == "jobs" else runs[ident])
 
@@ -369,7 +390,7 @@ RERUN = ("run cancelled", "scope failed", "rust job absent")
 
 
 @pytest.mark.parametrize("case", ["no run yet", "scope running", "run still going", *RERUN,
-                                  "other head", "push event", "older attempt", "other workflow"])
+                                  "other head", "push event", "rerun in progress", "other workflow"])
 def test_a_docs_lane_skip_needs_the_heads_own_finished_run(integrate, monkeypatch, evals_member, case):
     # The docs lane skips the Rust lanes only when its test selection works,
     # so until the head's own pull-request run shows the skip, admission waits.
@@ -380,7 +401,8 @@ def test_a_docs_lane_skip_needs_the_heads_own_finished_run(integrate, monkeypatc
               "scope failed": {"scope": ("completed", "failure")},
               "rust job absent": {"rust": "absent"},
               "other head": {"head": "b" * 40}, "push event": {"event": "push"},
-              "older attempt": {"attempts": (1, 2)}}.get(case, {})
+              "rerun in progress": {"run": ("in_progress", None), "attempt": 2,
+                                    "latest": [("Scope", "queued", None)]}}.get(case, {})
     rollup = [] if case == "no run yet" else _rust_run(monkeypatch, integrate, **kwargs)
     if case == "other workflow":
         api = integrate.gh
@@ -405,15 +427,60 @@ def test_a_docs_lane_skip_whose_run_ran_the_rust_lanes_needs_their_replay(integr
     assert evals_member(failed_scope) == (True, "")
 
 
+def test_the_latest_attempt_of_the_run_decides(integrate, monkeypatch, evals_member):
+    # The rollup can still show an earlier attempt's jobs; a rerun's own job
+    # list decides, whichever way it went.
+    latest_skipped = _rust_run(monkeypatch, integrate, rust="expanded", attempt=2,
+                               latest=_rust_jobs(("completed", "success"), "unexpanded"))
+    assert evals_member(latest_skipped) == (False, "")
+    latest_ran = _rust_run(monkeypatch, integrate, attempt=2,
+                           latest=_rust_jobs(("completed", "success"), "expanded"))
+    assert evals_member(latest_ran) == (True, "")
+
+
+def test_the_newest_pull_request_run_decides(integrate, monkeypatch, evals_member):
+    # A reopened PR can carry two pull-request runs on one head.
+    older_ran = _rust_run(monkeypatch, integrate, extra=[(8, "pull_request", "2026-11-26T00:00:00Z", "expanded")])
+    assert evals_member(older_ran) == (False, "")
+    newer_ran = _rust_run(monkeypatch, integrate, extra=[(10, "pull_request", "2026-11-26T02:00:00Z", "expanded")])
+    assert evals_member(newer_ran) == (True, "")
+
+
 def test_another_runs_rust_jobs_do_not_undo_the_heads_skip(integrate, monkeypatch, evals_member):
     # A manual dispatch on the same head expands the job names too; only the
     # head's own pull-request run decides (its replay would never come).
-    rollup = _rust_run(monkeypatch, integrate, extra=[
-        (12, "workflow_dispatch", SHA, ("completed", "success"), ("in_progress", None), "expanded", (1, 1))])
+    rollup = _rust_run(monkeypatch, integrate, extra=[(12, "workflow_dispatch", "2026-11-26T03:00:00Z", "expanded")])
     assert evals_member(rollup) == (False, "")
     contexts = [{"__typename": "StatusContext", "context": "Scope", "name": "Scope", "state": "SUCCESS"},
                 {"name": "Scope", "status": "COMPLETED", "conclusion": "SUCCESS"}]   # no Actions job
     assert evals_member(contexts)[0] is None
+
+
+@pytest.mark.parametrize("since_build,refusal", [
+    ("still skipped", None), ("rerun ran the lanes", "pending"), ("rerun going", "has not shown"),
+    ("head moved", "head moved since snapshot admission"),
+])
+def test_open_reads_a_ci_scope_skip_again(integrate, monkeypatch, since_build, refusal):
+    # `build` admitted the member on its run's skip; a rerun before `open`
+    # may have run the Rust lanes after all, and then their replay counts.
+    kwargs = {"rerun ran the lanes": {"attempt": 2, "latest": _rust_jobs(("completed", "success"), "expanded")},
+              "rerun going": {"run": ("in_progress", None), "attempt": 2,
+                              "latest": [("Scope", "in_progress", None)]}}.get(since_build, {})
+    rollup = _rust_run(monkeypatch, integrate, **kwargs)
+    api = integrate.gh
+    head = "b" * 40 if since_build == "head moved" else SHA
+    monkeypatch.setattr(integrate, "gh", lambda *args: json.dumps({"headRefOid": head, "statusCheckRollup": rollup})
+                        if args[:2] == ("pr", "view") else api(*args))
+    monkeypatch.setattr(integrate, "_checks_why", lambda checks: ("pending", ""))
+    value = member(integrate)
+    value.snapshot_required, value.snapshot_ci_skip = False, True
+    plan = integrate.Plan("integrate/2026-11-26-batch-1", "base", merged=[value])
+    if refusal is None:
+        integrate._refuse_red_members(plan)
+        assert value.snapshot == "not required"
+    else:
+        with pytest.raises(integrate.Refusal, match=refusal):
+            integrate._refuse_red_members(plan)
 
 
 def test_unreadable_scope_metadata_waits_and_names_the_cause(integrate, monkeypatch, evals_member):

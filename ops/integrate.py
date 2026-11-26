@@ -284,6 +284,9 @@ class Member:
     checks_why: str = ""   # for `unverified`: the read that failed; for `failing`: the red checks
     report_only_red: tuple[str, ...] = ()   # red REPORT_ONLY_CHECK runs, shown, not counted
     snapshot_required: bool | None = None
+    # Not required only because the head's own Rust run showed its scope
+    # skipped the Rust lanes: `open` reads that run again before publishing.
+    snapshot_ci_skip: bool = False
     snapshot: str = "not required"
     snapshot_why: str = ""
     rust_jobs: str = ""
@@ -492,7 +495,6 @@ print(json.dumps([any(selector.rows_for(path, {}) for path in files), always, wi
 SCOPE_JOB = "Scope"
 # A matrix job its `if` skipped is reported unexpanded, under its template.
 UNEXPANDED_RUST_JOB = "Rust / ${{ matrix.os }}"
-_ACTIONS_RUN = re.compile(r"/actions/runs/(\d+)/job/\d+(?:[?#].*)?$")
 REGULAR_MODES = frozenset({"000000", "100644", "100755"})
 
 
@@ -590,20 +592,24 @@ def _snapshot_requirement(member: Member, base: str,
     # Only the docs lane skips these paths, and CI selects it only when its
     # test selection succeeds: the head's own run must show the skip.
     state, why = _scope_skip(member.sha, rollup)
+    member.snapshot_ci_skip = state == "skipped"
     return {"skipped": (False, ""), "ran": (True, "")}.get(state, (None, why))
 
 
 def _scope_skip(sha: str, rollup: list[dict] | None) -> tuple[str, str]:
     """How the head's own pull-request run of the Rust workflow treated its
-    Rust lanes: `skipped` only once that run completed successfully with
-    its Scope job passed and the Rust job skipped unexpanded; `ran` when
-    that run expanded a snapshot job (then its replay is the evidence);
-    otherwise `pending`, with why. Reads Actions metadata, never logs, and
-    a run of another head, event, workflow or attempt does not count."""
+    Rust lanes: `skipped` only once that run's latest attempt completed
+    successfully with its Scope job passed and the Rust job skipped
+    unexpanded; `ran` when that attempt expanded a snapshot job (then its
+    replay is the evidence); otherwise `pending`, with why. The rollup's
+    Scope checks only locate the run (the newest one of this head's
+    pull-request event and workflow); the verdict comes from the job list
+    of the run's latest attempt, as ops/ci_batch_passed.py reads one, so a
+    rerun's own jobs decide. Reads Actions metadata, never logs."""
     wait = ("the Rust workflow has not shown on the PR head whether its scope skips the Rust "
             "lanes (its pull-request run has not finished); retry build once it has")
     try:
-        candidates, runs = [], {}
+        runs: dict[int, dict] = {}
         for check in rollup or []:
             if check.get("name") != SCOPE_JOB or "context" in check:
                 continue
@@ -612,40 +618,52 @@ def _scope_skip(sha: str, rollup: list[dict] | None) -> tuple[str, str]:
                 continue
             meta = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/jobs/{match.group(1)}"))
             run_id = int(meta["run_id"])
-            if run_id not in runs:
-                runs[run_id] = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}"))
-            run = runs[run_id]
-            if (meta.get("head_sha") != sha or run.get("head_sha") != sha
-                    or meta.get("name") != SCOPE_JOB or run.get("event") != "pull_request"
-                    or str(run.get("path", "")).split("@", 1)[0] != SNAPSHOT_WORKFLOW
-                    or int(meta["run_attempt"]) != int(run["run_attempt"])):
-                continue
-            candidates.append({"name": SCOPE_JOB, "workflowName": SNAPSHOT_WORKFLOW,
-                               "status": meta["status"], "conclusion": meta.get("conclusion"),
-                               "startedAt": meta.get("started_at"), "completedAt": meta.get("completed_at"),
-                               "scope_meta": meta, "scope_run": run})
-        latest = _latest_checks(candidates)
-        if not latest:
+            run = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}"))
+            if (meta.get("head_sha") == sha and run.get("head_sha") == sha
+                    and meta.get("name") == SCOPE_JOB and run.get("event") == "pull_request"
+                    and str(run.get("path", "")).split("@", 1)[0] == SNAPSHOT_WORKFLOW):
+                runs[run_id] = run
+        if not runs:
             return "pending", wait
-        meta, run = latest[0]["scope_meta"], latest[0]["scope_run"]
-        run_id = int(meta["run_id"])
-        jobs = [check for check in rollup or [] if "context" not in check
-                and (found := _ACTIONS_RUN.search(check.get("detailsUrl") or ""))
-                and int(found.group(1)) == run_id]
-        if any(check.get("name") in SNAPSHOT_JOBS for check in jobs):
+        run = max(runs.values(), key=lambda run: (str(run.get("created_at", "")), int(run.get("id") or 0)))
+        run_id, attempt = int(run["id"]), int(run["run_attempt"])
+        jobs = _attempt_jobs(run_id, attempt)
+        if any(job.get("name") in SNAPSHOT_JOBS for job in jobs):
             return "ran", ""
-        if meta.get("status") != "completed" or run.get("status") != "completed":
+        scope = [job for job in jobs if job.get("name") == SCOPE_JOB]
+        if run.get("status") != "completed" or any(job.get("status") != "completed" for job in scope):
             return "pending", wait
-        if (_check_state(meta) == "SUCCESS" and str(run.get("conclusion") or "").upper() == "SUCCESS"
-                and any(check.get("name") == UNEXPANDED_RUST_JOB and _check_state(check) == "SKIPPED"
-                        for check in jobs)):
+        if (str(run.get("conclusion")).lower() == "success" and len(scope) == 1
+                and str(scope[0].get("conclusion")).lower() == "success"
+                and any(job.get("name") == UNEXPANDED_RUST_JOB and str(job.get("conclusion")).lower() == "skipped"
+                        for job in jobs)):
             return "skipped", ""
-        return "pending", (f"the Rust workflow's pull-request run {run_id} on the PR head ended "
-                           f"{str(run.get('conclusion')).lower()} (Scope {str(meta.get('conclusion')).lower()}) "
-                           "without showing that its scope skipped the Rust lanes; rerun the Rust "
-                           "workflow or push a new commit")
+        scope_ended = ", ".join(str(job.get("conclusion")).lower() for job in scope) or "absent"
+        return "pending", (f"the Rust workflow's pull-request run {run_id} (attempt {attempt}) on the PR "
+                           f"head ended {str(run.get('conclusion')).lower()} (Scope {scope_ended}) without "
+                           "showing that its scope skipped the Rust lanes; rerun the Rust workflow or "
+                           "push a new commit")
     except (Refusal, KeyError, TypeError, ValueError) as exc:
         return "pending", _unread("the Rust workflow's scope job metadata", exc) + "; retry build"
+
+
+def _attempt_jobs(run_id: int, attempt: int) -> list[dict]:
+    """Every job of one attempt of a workflow run, across pages."""
+    jobs: list[dict] = []
+    page = 1
+    while True:
+        listing = json.loads(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/attempts/"
+                                       f"{attempt}/jobs?per_page=100&page={page}"))
+        if not isinstance(listing, dict) or not isinstance(listing.get("jobs"), list) \
+                or not isinstance(listing.get("total_count"), int):
+            raise ValueError(f"the jobs of run {run_id} attempt {attempt} could not be read")
+        jobs.extend(job for job in listing["jobs"] if isinstance(job, dict))
+        if len(jobs) >= listing["total_count"] or not listing["jobs"]:
+            if len(jobs) < listing["total_count"]:
+                raise ValueError(f"the jobs of run {run_id} attempt {attempt} ended at {len(jobs)} "
+                                 f"of {listing['total_count']}")
+            return jobs
+        page += 1
 
 
 def _snapshot_state(sha: str, rollup: list[dict] | None,
@@ -3635,8 +3653,11 @@ def _expect_refusal(expected: frozenset[int], admitted: set[int], why: dict[int,
     lines = [f"#{n} is left out: " + (why.get(n) or f"it is not an open pull request on {BASE} "
                                       f"carrying `{label}`") for n in missing]
     lines += [f"#{n} would be admitted, but --expect does not name it" for n in extra]
-    lines += [f"#{n}'s head is carried into the batch by " + ", ".join(f"#{m}" for m in by)
-              + ", but --expect does not name it" for n, by in sorted(carried.items())]
+    lines += [f"#{n}'s head is carried into the batch by "
+              + (", ".join(f"#{m}" for m in by) or "the batch head")
+              + f", so its change would land without #{n} being a member; make #{n} ready and "
+              f"labelled and name it, or take it off {'that branch' if len(by) < 2 else 'those branches'}"
+              for n, by in sorted(carried.items())]
     named = ",".join(str(n) for n in sorted(expected))
     return (f"the batch differs from --expect {named}, so nothing was built:\n  "
             + "\n  ".join(lines)
@@ -4049,7 +4070,7 @@ def _refuse_red_members(plan: Plan) -> None:
         if view["headRefOid"] != m.sha:
             if plan.stacked_source:
                 raise Refusal(f"#{m.number}'s head moved since the stacked rebuild; build and gate normally")
-            if m.snapshot_required:
+            if m.snapshot_required or m.snapshot_ci_skip:
                 raise Refusal(f"#{m.number}'s head moved since snapshot admission; rebuild the batch")
             continue
         checks, why = _checks_why(view.get("statusCheckRollup"))
@@ -4062,6 +4083,13 @@ def _refuse_red_members(plan: Plan) -> None:
                           "failure this batch would carry. Drop it: switch back with "
                           f"`git switch --detach {REMOTE}/{BASE}`, remove the local "
                           "branch and build again (it sits out while its head is red)")
+        if m.snapshot_ci_skip and m.snapshot_required is False:
+            # A rerun since `build` may have run the Rust lanes after all.
+            skip, why = _scope_skip(m.sha, view.get("statusCheckRollup"))
+            if skip == "ran":
+                m.snapshot_required, m.snapshot_ci_skip = True, False
+            elif skip != "skipped":
+                raise Refusal(f"#{m.number}: {why}; nothing was opened")
         state, why = _snapshot_state(m.sha, view.get("statusCheckRollup"),
                                      m.snapshot_required if m.snapshot_required is not None else False)
         m.snapshot, m.snapshot_why = state, why
@@ -4661,7 +4689,7 @@ def _refuse_docs_during_batch(master: str) -> None:
 # The identity of the local preview commit, which is never pushed: fixed, so
 # the preview does not depend on the operator's Git configuration.
 DOCS_PREVIEW_IDENTITY = ("-c", "user.name=ops/integrate.py merge-docs",
-                         "-c", "user.email=merge-docs@example.com", "-c", "commit.gpgSign=false")
+                         "-c", "user.email=merge-docs@example.com")
 # Git's default rename handling, whatever the operator's configuration says,
 # so a merge GitHub can make is not refused as a local conflict.
 DOCS_PREVIEW_MERGE = ("-c", "merge.renames=true", "-c", "merge.directoryRenames=conflict")

@@ -817,8 +817,6 @@ def test_merge_docs_preview_does_not_depend_on_the_operator_identity(docs_world,
     head = _docs_pr(world)
     _git(world.work, "config", "user.name", "")
     _git(world.work, "config", "user.email", "")
-    _git(world.work, "config", "commit.gpgSign", "true")   # no key here: signing would fail
-    _git(world.work, "config", "gpg.program", "false")
     base = _git(world.origin, "rev-parse", "master")
     with pytest.raises(integrate.Refusal, match="cannot compute the merge of #42"):
         integrate._docs_preview(42, base, head)  # not fetched yet: no object, no conflict claim
@@ -2628,9 +2626,14 @@ def _integrate_branches(world) -> list[str]:
 
 def test_build_expect_builds_exactly_the_named_members(world, capsys):
     _three_with_a_collision(world)        # #11 conflicts with #10 and is dropped
-    # An open pull request no member's head carries is not counted.
+    # GitHub lists the members as open too, and an open pull request whose
+    # head is in this checkout but no member carries is not counted either.
+    for row in world.gh.ready:
+        world.gh.history.append({"number": row["number"], "state": "OPEN", "labels": [],
+                                 "headRefOid": row["headRefOid"]})
     world.gh.history.append({"number": 30, "state": "OPEN", "labels": [],
                              "headRefOid": world.pr(30, {"g.txt": "g\n"})})
+    _git(world.work, "fetch", "-q", "origin", "refs/pull/30/head")
     assert _build("--expect", "10,#12") == 0, capsys.readouterr().err
     assert _integrate_branches(world) == [f"integrate/{DATE}-batch-1"]
     assert [m.number for m in integrate.Plan.load(f"integrate/{DATE}-batch-1").merged] == [10, 12]
@@ -2713,7 +2716,8 @@ def test_build_expect_counts_an_open_pr_a_members_head_carries(world, capsys, pa
         assert _build("--dry-run", "--expect", "11") == 0, capsys.readouterr()
         return
     err = _refused_and_nothing_built(world, capsys, "--expect", "11")
-    assert "#10's head is carried into the batch by #11, but --expect does not name it" in err
+    assert ("#10's head is carried into the batch by #11, so its change would land without #10 being "
+            "a member; make #10 ready and labelled and name it, or take it off that branch") in err
 
 
 @pytest.mark.parametrize("value", ["", " ", "10,", "10,x", "0", "-3", "10 12"])
