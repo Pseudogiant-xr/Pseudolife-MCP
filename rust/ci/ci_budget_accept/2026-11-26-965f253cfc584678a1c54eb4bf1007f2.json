@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "8927fe81c3135280",
+  "fingerprint": "286f6fefadb97992",
+  "reason": "Its condition also runs it on an ordinary release-cut pull request (scope's cut), frozen-inclusive, with the same steps; a batch, push, nightly or merge group runs exactly as before, so the budgeted live-files price holds. What a cut pull request adds, one ubuntu-latest slot per push of a cut (about one or two cuts a week; cancel-in-progress drops a superseded run): a frozen-inclusive test job took 43.1 minutes on an Intel Xeon Platinum 8573C (run 45747873168 attempt 1) and 49.3 minutes of pytest in a 52.4-minute job on an AMD EPYC 7763 (run 45512966117 attempt 2), so about 43 to 57 minutes under the 72-minute bound."
+}
