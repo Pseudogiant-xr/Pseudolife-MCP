@@ -92,10 +92,7 @@ async fn lost_board_commit_fails_and_next_call_reconnects() {
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         startup(&mut stream).await;
-        assert_eq!(
-            query(&mut stream).await,
-            "SET lock_timeout = '5s'; SET search_path TO public"
-        );
+        assert_eq!(query(&mut stream).await, SESSION_SETUP);
         completion(&mut stream, b"SET\0", b'I').await;
         assert_eq!(query(&mut stream).await, "START TRANSACTION");
         completion(&mut stream, b"BEGIN\0", b'T').await;
@@ -106,10 +103,7 @@ async fn lost_board_commit_fails_and_next_call_reconnects() {
         drop(stream);
         let (mut stream, _) = listener.accept().await.unwrap();
         startup(&mut stream).await;
-        assert_eq!(
-            query(&mut stream).await,
-            "SET lock_timeout = '5s'; SET search_path TO public"
-        );
+        assert_eq!(query(&mut stream).await, SESSION_SETUP);
         completion(&mut stream, b"SET\0", b'I').await;
         assert_eq!(query(&mut stream).await, "NEXT CALL");
         completion(&mut stream, b"SELECT 0\0", b'I').await;
@@ -203,6 +197,90 @@ async fn board_startup_handshake_has_a_deadline() {
         result.unwrap().is_err(),
         "unfinished authentication cannot return a usable client"
     );
+}
+
+#[test]
+fn board_session_detects_a_half_open_connection() {
+    use std::time::Duration;
+    // A DSN's own keepalive values are replaced, not kept.
+    let config =
+        session_config("host=127.0.0.1 port=9 user=fixture sslmode=disable keepalives_idle=7200")
+            .unwrap();
+    assert!(config.get_keepalives(), "board keepalives are off");
+    assert_eq!(config.get_keepalives_idle(), Duration::from_secs(10));
+    assert_eq!(
+        config.get_keepalives_interval(),
+        Some(Duration::from_secs(5))
+    );
+    assert_eq!(config.get_keepalives_retries(), Some(3));
+    assert_eq!(
+        config.get_tcp_user_timeout(),
+        Some(&Duration::from_secs(30))
+    );
+}
+
+#[tokio::test]
+async fn board_session_bounds_every_statement() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        startup(&mut stream).await;
+        let setup = query(&mut stream).await;
+        completion(&mut stream, b"SET\0", b'I').await;
+        setup
+    });
+    let dsn = format!(
+        "host=127.0.0.1 port={} user=fixture sslmode=disable",
+        address.port()
+    );
+    let mut conn = Conn::new(dsn);
+    conn.client().await.unwrap();
+    let setup = server.await.unwrap();
+    assert!(
+        setup.contains("set_config('statement_timeout', '60s', false)"),
+        "board session has no statement_timeout: {setup}"
+    );
+    assert!(setup.contains("SET lock_timeout = '5s'"), "{setup}");
+    assert!(setup.contains("SET search_path TO public"), "{setup}");
+}
+
+/// On a real server: the 60 s backstop applies when the session has no
+/// bound or a looser one, and a tighter bound the database, role or DSN
+/// already set is kept.
+#[tokio::test]
+#[ignore = "needs a disposable board bank: PL_W2F_BOARD_DSN (pl_cf_w2f_*)"]
+async fn board_statement_timeout_keeps_a_tighter_server_bound() {
+    let dsn = std::env::var("PL_W2F_BOARD_DSN").expect("owned board fixture DSN");
+    let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+    assert!(
+        parsed
+            .get_dbname()
+            .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
+    );
+    let sep = if dsn.contains('?') { '&' } else { '?' };
+    for (preset, want) in [
+        (None, "60000"),
+        (Some("0"), "60000"),
+        (Some("120s"), "60000"),
+        (Some("10s"), "10000"),
+    ] {
+        let dsn = match preset {
+            Some(v) => format!("{dsn}{sep}options=-c%20statement_timeout%3D{v}"),
+            None => dsn.clone(),
+        };
+        let mut conn = Conn::new(dsn);
+        let client = conn.client().await.unwrap();
+        let got: String = client
+            .query_one(
+                "SELECT setting FROM pg_settings WHERE name = 'statement_timeout'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(got, want, "preset {preset:?}");
+    }
 }
 
 #[test]

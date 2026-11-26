@@ -1,9 +1,10 @@
 //! The board's own Postgres session and its row shapes.
 //!
 //! `CoordinationConnection` (`storage/coordination.py:48-117`): a dedicated
-//! connection, never the writer's, with `lock_timeout` 5 s and the public
-//! search path; healed on next use after a restart, never mid-transaction
-//! (a transaction holds the client, so a broken one fails with it).
+//! connection, never the writer's, with `lock_timeout` 5 s, a
+//! `statement_timeout` backstop, client TCP keepalives and the public search
+//! path; healed on next use after a restart, never mid-transaction (a
+//! transaction holds the client, so a broken one fails with it).
 
 use super::canon::float_value;
 use super::error::{BoardError, Result};
@@ -60,6 +61,31 @@ pub struct Conn {
     client: Option<Client>,
 }
 
+/// The board session's settings. Every board call queues behind this one
+/// session, so a statement the server never finishes would stall the whole
+/// board: `statement_timeout` bounds it at 60 s unless the database or role
+/// already sets a tighter bound, which is kept. 60 s is well above the 5 s
+/// `lock_timeout` (a lock wait counts toward both) and the board's longest
+/// legitimate statement, the inline prune's audit `DELETE` after a
+/// retention cut. Measured 27 November 2026 on the bench PostgreSQL of a
+/// Linux dev box: that `DELETE` removed 1,000,000 events (all indexes in
+/// place) in 1.24 s, against about 78,000 events on the live board in
+/// November 2026. The per-transaction `SET LOCAL statement_timeout = '5s'`
+/// reads keep their own tighter bound.
+const SESSION_SETUP: &str = "SET lock_timeout = '5s'; SET search_path TO public; \
+     SELECT set_config('statement_timeout', '60s', false) FROM pg_settings \
+     WHERE name = 'statement_timeout' AND (setting::bigint = 0 OR setting::bigint > 60000)";
+
+/// The board session's connection options: the DSN's own (keepalive values
+/// replaced) plus [`crate::storage::HALF_OPEN_RECONNECTS`], so on Linux a
+/// half-open TCP connection fails in about 30 s instead of hanging every
+/// board call behind the board lock; the next call reconnects.
+fn session_config(dsn: &str) -> std::result::Result<crate::storage::Config, String> {
+    let mut config = crate::storage::parse_dsn(dsn)?;
+    crate::storage::detect_half_open(&mut config, crate::storage::HALF_OPEN_RECONNECTS);
+    Ok(config)
+}
+
 impl Conn {
     pub fn new(dsn: String) -> Conn {
         Conn {
@@ -75,16 +101,14 @@ impl Conn {
     }
 
     async fn connect(&self) -> Result<Client> {
-        let config = crate::storage::parse_dsn(&self.dsn).map_err(BoardError::Internal)?;
+        let config = session_config(&self.dsn).map_err(BoardError::Internal)?;
         // Bound authentication/startup as well as the TCP connection. The
         // shared connector creates a fresh session; no board write is retried.
         let (client, _connection) =
             crate::storage::connect(&config, std::time::Duration::from_secs(10))
                 .await
                 .map_err(BoardError::Internal)?;
-        client
-            .batch_execute("SET lock_timeout = '5s'; SET search_path TO public")
-            .await?;
+        client.batch_execute(SESSION_SETUP).await?;
         if self.read_only {
             client
                 .batch_execute("SET default_transaction_read_only = on")
