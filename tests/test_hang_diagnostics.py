@@ -7,7 +7,7 @@ log for the cancelled job: nothing said which test hung or where.
 test item (setup + call + teardown) outlives it. The dump is diagnostic
 only: the test keeps running and can still pass. It works from inside
 xdist workers too (checked 2026-09-25 with ``-n 2 --dist loadfile``).
-``ops/ci_tests.sh`` ends pytest at 50 minutes with SIGABRT inside the step,
+``ops/ci_tests.sh`` ends pytest at 72 minutes with SIGABRT inside the step,
 so a hang fails the step (keeping its log) instead of being cancelled with
 the job, and every pytest process dumps its stacks as it dies (checked
 2026-09-25 on Linux: ``timeout`` exits 124 after the dump). Neither helps
@@ -65,6 +65,23 @@ def test_ci_ends_a_hung_run_inside_the_step_after_the_dump():
     assert jobs, "no ci.yml job runs ops/ci_tests.sh"
     assert _faulthandler_timeout() < bound
     assert _CI_SETUP_ALLOWANCE_S + bound + grace <= min(jobs)
+
+
+# The slowest legitimate pytest run in the `test` job: the frozen-inclusive
+# suite on an AMD EPYC 7763 4-CPU ubuntu-latest runner. On 2026-11-26 the
+# old 50-minute bound killed both EPYC attempts of the 0.26.0 cut batch
+# (run 45747873168) at 99% after 50:28 and 50:12, and a whole run on that
+# CPU took 49:07 on 2026-11-25 (run 45512966117), so about 51 minutes.
+_SLOWEST_FROZEN_INCLUSIVE_RUN_S = 51 * 60
+
+
+def test_the_bound_clears_the_slowest_frozen_inclusive_run_with_headroom():
+    # About 40% headroom, the rule ops/ci_tests.sh's comment states, so a
+    # runner CPU somewhat slower than the EPYC 7763 still finishes the run.
+    script = (REPO / "ops" / "ci_tests.sh").read_text(encoding="utf-8")
+    m = re.search(r"timeout --signal=ABRT --kill-after=\d+s (\d+)m", script)
+    assert m, "ops/ci_tests.sh does not bound the pytest run with timeout --signal=ABRT"
+    assert int(m.group(1)) * 60 >= 1.4 * _SLOWEST_FROZEN_INCLUSIVE_RUN_S
 
 
 def test_the_timeout_clears_the_slowest_legitimate_test():

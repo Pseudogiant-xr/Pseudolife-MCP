@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "492e9b9ddbe2b98f",
+  "fingerprint": "8927fe81c3135280",
+  "reason": "Raises timeout-minutes from 65 to 87 to fit ops/ci_tests.sh's pytest bound, raised from 50 to 72 minutes because the frozen-inclusive suite takes about 51 minutes on an AMD EPYC 7763 runner (runs 45512966117 and 45747873168). The steps run the same tests, so a passing run costs what it did; only a hung run can use the extra minutes before the bound ends it."
+}

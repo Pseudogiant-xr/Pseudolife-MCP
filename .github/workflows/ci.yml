@@ -403,10 +403,11 @@ jobs:
     # empty scope runs the suite instead of skipping it.
     if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test') }}
     runs-on: ubuntu-latest
-    # ops/ci_tests.sh bounds pytest at 50 min (its comment names the
-    # 2026-11-13/14 measurements, issue #1408); install, a cold HF cache
-    # (a ~1.2 GB download) and the kill grace fit in the rest.
-    timeout-minutes: 65
+    # ops/ci_tests.sh bounds pytest at 72 min (its comment names the
+    # 2026-11-25/26 frozen-inclusive measurements on an AMD EPYC 7763);
+    # install, a cold HF cache (a ~1.2 GB download) and the kill grace fit
+    # in the rest.
+    timeout-minutes: 87
 
     services:
       postgres:
