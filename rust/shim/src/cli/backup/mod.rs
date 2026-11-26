@@ -6,7 +6,9 @@
 //! instance) is refused before any effect, naming the Docker install.
 mod archive;
 pub(super) mod args;
+mod conninfo;
 mod dump;
+mod private;
 
 use super::restore_cli::docker_backup;
 
@@ -35,7 +37,11 @@ pub(super) fn migration_backup(data_dir: &Path, dsn: &str) -> Result<serde_json:
     let pg_dump = dump::find(&home).map_err(|_| fail())?.ok_or_else(fail)?;
     archive::admit(data_dir, &bdir).map_err(|_| fail())?;
     let stamp = timestamp().ok_or_else(fail)?;
-    fs::create_dir_all(&bdir).map_err(|_| fail())?;
+    // A connection string the dump would refuse names its own fix.
+    dump::connection(dsn).map_err(|reason| {
+        format!("the bank backup could not start: {reason} migrate-flat --apply changed nothing")
+    })?;
+    private::create_dir_all(&bdir).map_err(|_| fail())?;
     let dump = dump::write(dsn, &pg_dump, &bdir, &stamp).map_err(|_| fail())?;
     let state = archive::write(data_dir, &bdir, &stamp).map_err(|_| fail())?;
     let mut source = flate2::read::GzDecoder::new(fs::File::open(&dump).map_err(|_| fail())?);
@@ -379,7 +385,7 @@ fn main(arguments: Vec<OsString>) -> u8 {
     }
 
     // Effects start here, in Python's order.
-    if let Err(error) = fs::create_dir_all(&bdir) {
+    if let Err(error) = private::create_dir_all(&bdir) {
         return failed(&error.to_string());
     }
     if let Some(Err(error)) = &pg_dump {

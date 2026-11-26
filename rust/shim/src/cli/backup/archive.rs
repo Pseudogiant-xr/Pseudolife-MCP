@@ -927,9 +927,9 @@ fn add<W: io::Write>(
 
 pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBuf> {
     let target = super::args::join(bdir, &format!("{}{ts}.tar.gz", super::STATE_PREFIX));
-    let partial = super::args::join(bdir, &format!("{}{ts}.tar.gz.part", super::STATE_PREFIX));
+    let partial = super::private::partial_path(&target);
     let written = (|| -> io::Result<()> {
-        let gz = GzEncoder::new(fs::File::create(&partial)?, Compression::best());
+        let gz = GzEncoder::new(super::private::create_file(&partial)?, Compression::best());
         let mut tar = Builder::new(gz);
         let children = top_children(data_dir)
             .ok_or_else(|| io::Error::other("data dir could not be listed"))?;
