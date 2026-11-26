@@ -652,13 +652,107 @@ fn write_config(
     Ok(())
 }
 
-pub(super) fn resolve_cli(name: &str, kind: Kind) -> Option<PathBuf> {
+/// Whether a `--cli` value names a path rather than a program to look up:
+/// it has a separator, or on Windows a drive prefix (`C:claude.exe` is
+/// relative to drive C's current folder).
+pub(super) fn cli_is_path(name: &str) -> bool {
+    let drive =
+        name.len() >= 2 && name.as_bytes()[0].is_ascii_alphabetic() && name.as_bytes()[1] == b':';
+    name.contains('/') || (cfg!(windows) && (name.contains('\\') || drive))
+}
+
+/// Where `PATH` and `PATHEXT` come from: this process, or a test's values.
+pub(super) struct Lookup {
+    pub path: Option<OsString>,
+    pub pathext: Option<OsString>,
+    pub localappdata: Option<OsString>,
+}
+
+impl Lookup {
+    fn from_environment() -> Self {
+        Self {
+            path: std::env::var_os("PATH"),
+            pathext: std::env::var_os("PATHEXT"),
+            localappdata: std::env::var_os("LOCALAPPDATA"),
+        }
+    }
+}
+
+/// The CLI `--cli <cli_name>` runs. A bare name (`claude`, `codex`) is
+/// looked up only in PATH's absolute directories, never in the working
+/// folder, the checkout or the settings file's folder, as SECURITY.md
+/// promises. A value with a separator is the file the user named; a
+/// relative one is tried against `base` (the checkout or the settings
+/// file's folder) first, then the working folder.
+pub(super) fn locate_cli(
+    cli_name: &str,
+    base: Option<&Path>,
+    kind: Kind,
+    lookup: &Lookup,
+) -> Result<PathBuf, String> {
+    let local = base
+        .filter(|_| cli_is_path(cli_name) && Path::new(cli_name).is_relative())
+        .and_then(|base| resolve_cli(&base.join(cli_name).to_string_lossy(), kind, lookup));
+    local
+        .or_else(|| resolve_cli(cli_name, kind, lookup))
+        .ok_or_else(|| {
+            let named = base
+                .filter(|_| Path::new(cli_name).is_relative())
+                .map(|base| base.join(cli_name))
+                .filter(|path| path.is_file())
+                .unwrap_or_else(|| PathBuf::from(cli_name));
+            if cli_is_path(cli_name) && named.is_file() {
+                format!(
+                    "{} CLI at {cli_name} cannot be run: {} is not a program this system starts (on Linux and macOS it needs its execute bit); fix it or pass another --cli",
+                    kind.name(),
+                    named.display()
+                )
+            } else if cli_is_path(cli_name) {
+                format!("{} CLI not found at {cli_name}", kind.name())
+            } else {
+                format!(
+                    "{} CLI not found at {cli_name}: a bare name is looked up only in PATH's absolute directories, never the working folder; install it on PATH or pass --cli with its full path",
+                    kind.name()
+                )
+            }
+        })
+}
+
+fn resolve_cli(name: &str, kind: Kind, lookup: &Lookup) -> Option<PathBuf> {
+    if !cli_is_path(name) {
+        if let Some(path) = crate::cli::program_lookup::find_program_path_in(
+            name,
+            lookup.path.clone(),
+            lookup.pathext.clone(),
+        ) {
+            return Some(path);
+        }
+        if cfg!(windows) && kind == Kind::Codex && matches!(name, "codex" | "codex.exe") {
+            // Codex's own install folder, and only an absolute one: a
+            // relative LOCALAPPDATA would be read from the working folder.
+            let base = PathBuf::from(lookup.localappdata.clone()?);
+            if !base.is_absolute() {
+                return None;
+            }
+            let root = base.join("OpenAI/Codex/bin");
+            return fs::read_dir(root)
+                .ok()?
+                .filter_map(Result::ok)
+                .map(|d| d.path().join("codex.exe"))
+                .filter(|p| p.is_file())
+                .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok());
+        }
+        return None;
+    }
     let direct = PathBuf::from(name);
     let runnable = |path: PathBuf| -> Option<PathBuf> {
         #[cfg(windows)]
         {
-            let extensions =
-                std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+            let extensions = lookup
+                .pathext
+                .as_ref()
+                .and_then(|value| value.to_str())
+                .unwrap_or(".COM;.EXE;.BAT;.CMD");
             let extensions: Vec<_> = extensions
                 .split(';')
                 .filter(|s| s.starts_with('.') && s.len() > 1)
@@ -681,27 +775,11 @@ pub(super) fn resolve_cli(name: &str, kind: Kind) -> Option<PathBuf> {
         }
         #[cfg(not(windows))]
         {
-            path.is_file().then_some(path)
+            (path.is_file() && rustix::fs::access(&path, rustix::fs::Access::EXEC_OK).is_ok())
+                .then_some(path)
         }
     };
-    if let Some(path) = runnable(direct) {
-        return Some(path);
-    }
-    for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
-        if let Some(path) = runnable(dir.join(name)) {
-            return Some(path);
-        }
-    }
-    if cfg!(windows) && kind == Kind::Codex && matches!(name, "codex" | "codex.exe") {
-        let root = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("OpenAI/Codex/bin");
-        return fs::read_dir(root)
-            .ok()?
-            .filter_map(Result::ok)
-            .map(|d| d.path().join("codex.exe"))
-            .filter(|p| p.is_file())
-            .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok());
-    }
-    None
+    runnable(direct)
 }
 
 pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
@@ -901,13 +979,7 @@ pub(super) fn parse(args: Vec<OsString>) -> Result<Option<Config>, String> {
     if let Some(effort) = vals.get("reasoning-effort").filter(|s| !s.is_empty()) {
         validate_cli_token("reasoning-effort", effort)?;
     }
-    let local_cli = cwd
-        .as_ref()
-        .map(|p| p.join(&cli_name))
-        .and_then(|p| resolve_cli(&p.to_string_lossy(), kind));
-    let cli = local_cli
-        .or_else(|| resolve_cli(&cli_name, kind))
-        .ok_or_else(|| format!("{} CLI not found at {cli_name}", kind.name()))?;
+    let cli = locate_cli(&cli_name, cwd.as_deref(), kind, &Lookup::from_environment())?;
     let cli = if cwd.is_some() {
         std::path::absolute(cli).map_err(|e| e.to_string())?
     } else {
@@ -1358,5 +1430,169 @@ mod path_tests {
         ] {
             assert_eq!(windows_path_without_verbatim_prefix(path), path);
         }
+    }
+}
+
+#[cfg(test)]
+mod cli_lookup_tests {
+    use super::{Kind, Lookup, locate_cli};
+    use std::{fs, path::Path, path::PathBuf};
+
+    /// A disposable folder removed when the test ends.
+    struct Dir(PathBuf);
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn dir() -> Dir {
+        let path =
+            std::env::temp_dir().join(format!("pl-cli-lookup-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(path.join("repo")).unwrap();
+        fs::create_dir_all(path.join("bin")).unwrap();
+        fs::create_dir_all(path.join("empty")).unwrap();
+        Dir(path)
+    }
+
+    /// A launchable `claude` in `folder`: an executable script on Unix, a
+    /// `.cmd` on Windows. Returns the path a lookup should find.
+    fn plant(folder: &Path) -> PathBuf {
+        let path = folder.join(if cfg!(windows) {
+            "claude.cmd"
+        } else {
+            "claude"
+        });
+        fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    fn lookup(path: &Path) -> Lookup {
+        Lookup {
+            path: Some(path.as_os_str().to_owned()),
+            pathext: Some(".COM;.EXE;.BAT;.CMD".into()),
+            localappdata: None,
+        }
+    }
+
+    /// The same file, whatever spelling (case, `./`) the lookup returned.
+    fn same(found: Result<PathBuf, String>, expected: &Path) {
+        let found = found.unwrap();
+        assert_eq!(
+            fs::canonicalize(&found).unwrap(),
+            fs::canonicalize(expected).unwrap(),
+            "{}",
+            found.display()
+        );
+    }
+
+    #[test]
+    fn a_bare_name_ignores_a_cli_planted_in_the_checkout() {
+        let d = dir();
+        let repo = d.0.join("repo");
+        plant(&repo);
+        let error = locate_cli(
+            "claude",
+            Some(&repo),
+            Kind::Claude,
+            &lookup(&d.0.join("empty")),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("looked up only in PATH's absolute directories"),
+            "{error}"
+        );
+        // With the real CLI on PATH, PATH's copy is the one chosen.
+        let real = plant(&d.0.join("bin"));
+        same(
+            locate_cli(
+                "claude",
+                Some(&repo),
+                Kind::Claude,
+                &lookup(&d.0.join("bin")),
+            ),
+            &real,
+        );
+    }
+
+    #[test]
+    fn an_explicit_relative_path_still_resolves_in_the_checkout() {
+        let d = dir();
+        let repo = d.0.join("repo");
+        let planted = plant(&repo);
+        same(
+            locate_cli(
+                "./claude",
+                Some(&repo),
+                Kind::Claude,
+                &lookup(&d.0.join("empty")),
+            ),
+            &planted,
+        );
+    }
+
+    #[test]
+    fn an_explicit_absolute_path_still_resolves() {
+        let d = dir();
+        let planted = plant(&d.0.join("bin"));
+        let named = d.0.join("bin").join("claude");
+        same(
+            locate_cli(
+                &named.to_string_lossy(),
+                None,
+                Kind::Claude,
+                &lookup(&d.0.join("empty")),
+            ),
+            &planted,
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cannot_run_is_not_a_cli() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = dir();
+        let stray = d.0.join("bin").join("claude");
+        fs::write(&stray, "not a program").unwrap();
+        fs::set_permissions(&stray, fs::Permissions::from_mode(0o644)).unwrap();
+        let bare = locate_cli("claude", None, Kind::Claude, &lookup(&d.0.join("bin")));
+        assert!(bare.unwrap_err().contains("not found"));
+        // A file the user named is reported for what it is.
+        let named = stray.to_string_lossy();
+        let error =
+            locate_cli(&named, None, Kind::Claude, &lookup(&d.0.join("empty"))).unwrap_err();
+        assert!(
+            error.contains("cannot be run") && error.contains("execute bit"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_drive_prefix_names_a_path_on_windows() {
+        assert_eq!(super::cli_is_path("C:claude.exe"), cfg!(windows));
+        assert!(!super::cli_is_path("claude"));
+        assert!(super::cli_is_path("./claude"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_discovery_needs_an_absolute_install_folder() {
+        let d = dir();
+        let bin = d.0.join("OpenAI").join("Codex").join("bin").join("1");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("codex.exe"), "").unwrap();
+        let mut found = lookup(&d.0.join("empty"));
+        found.localappdata = Some(d.0.clone().into_os_string());
+        same(
+            locate_cli("codex", None, Kind::Codex, &found),
+            &bin.join("codex.exe"),
+        );
+        found.localappdata = Some("relative".into());
+        assert!(locate_cli("codex", None, Kind::Codex, &found).is_err());
     }
 }

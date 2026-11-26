@@ -266,7 +266,16 @@ fn which(
 /// does not reproduce; `None` when nothing is found (or `PATHEXT` is not
 /// UTF-8).
 pub(crate) fn find_program_path(name: &str) -> Option<PathBuf> {
-    search(name, std::env::var_os("PATH"), std::env::var_os("PATHEXT"))
+    find_program_path_in(name, std::env::var_os("PATH"), std::env::var_os("PATHEXT"))
+}
+
+/// [`find_program_path`] over the given `PATH` and `PATHEXT`.
+pub(crate) fn find_program_path_in(
+    name: &str,
+    path: Option<OsString>,
+    pathext: Option<OsString>,
+) -> Option<PathBuf> {
+    search(name, path, pathext)
         .ok()
         .flatten()
         .map(|found| found.path)

@@ -75,7 +75,8 @@ The shipped configuration is deliberately conservative:
   can read this payload.
 - **Programs are found by absolute path.** The programs Pseudolife looks
   up and then runs by the path it found (`tailscale` for `expose`, `pg_dump`
-  for `backup`, `codex` for Codex setup) are found only in absolute `PATH`
+  for `backup`, `codex` for Codex setup, `claude` and `codex` for the
+  extractor shim) are found only in absolute `PATH`
   directories or the program's known install location, never in the
   current directory. A program the Python client starts by its bare name,
   such as `docker`, still goes through the operating system's own search,
