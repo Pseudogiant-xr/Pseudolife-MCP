@@ -219,9 +219,9 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    verify the marker's version and commit match the tag and its digests match
    the published daemon, PostgreSQL and Rust images.
    The `images` and `rust-image` jobs must both succeed: if either fails, no
-   marker is attached, and
-   native clients and daemons never learn of the release. The build-only dispatch verifies the archive bundle
-   and skips the marker job.
+   marker is attached, and native clients and daemons never learn of the
+   release. The build-only dispatch verifies the archive bundle and skips the
+   marker job.
 
    Verify a published image with
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
