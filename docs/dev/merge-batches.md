@@ -15,7 +15,10 @@ Each change waits for hosted CI once, on its batch:
 - **An ordinary pull request** (any head branch but `integrate/*`) without a
   docs-only scope decision runs the fast lanes only. In `ci.yml`: `scope`,
   `guards`, `lock-resolve` and
-  `frontend`; the `test` job and the lite OS lanes are skipped. In
+  `frontend`; the `test` job and the lite OS lanes are skipped, except that
+  a release cut's pull request runs `test` with the frozen test files
+  (`ops/ci_release_cut.py`), so the cut learns its suite's time and failures
+  before its batch. In
   `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest and
   the selected early parity replay described below),
   the disposable-image check and the `Parity` gate; the candidate, harness
@@ -389,7 +392,9 @@ the cut adds) is left out instead, with the fix in its comment, and the
 others batch as usual. Nothing in CI compares a cut with the old Python
 release since the Python freeze, so a cut no longer has to be version-only
 for CI (`release_cut()` in `evals/rust_port/oracle_selection.py` is used
-only by a manual stress dispatch); it still needs `freeze-exception`, a
+by a manual stress dispatch, and by `ci.yml`'s scope to give a version-only
+cut's own pull request its early frozen-inclusive `test` run; a cut that
+carries other changes gets no early run); it still needs `freeze-exception`, a
 label only the maintainer's ruling for that cut puts on it, while it edits
 `pseudolife_memory/compose/docker-compose.yml`, and a cut that changes any
 other package path is refused, label or no label.
