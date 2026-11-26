@@ -8,7 +8,7 @@
     "docs/README.md": "344f55f1081ec2899af8136ae9428c6e53ea6b9dd9e3ba43e263ab636b705807",
     "docs/atlas/README.md": "77897a89250cf80f9f3fe707f8f681bc6d8e6233908270cfd1a107471cb82e88",
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
-    "docs/atlas/atlas.json": "fbd75742c377d959f2f456d99b662700379c54053fa220a4b9c684f9556ffca5",
+    "docs/atlas/atlas.json": "637f7137032d6c6168fda380908497437cc240d12669eb3377664e6238aa77b7",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
     "docs/dev/dev-machines.md": "fff57f7e87d2bddfd1067483b64f41379d0f5562aeebf9e70b8bfbf48dfd7e34",
@@ -264,7 +264,7 @@
     "ops/docker-compose.rust.yml": "29b3590c58a8cd7a13a581d0e0488e48b2f934ad10844b4bf7b0b2eed4670ce0",
     "ops/docker-compose.stack-extractor.yml": "2af67c750ef93efe2528d7936ff2a8e5d3bd97c6d27721f41467ad79a1126091",
     "ops/docker-compose.stack.yml": "e03dd1386234809ee8ce8e4c6d9efaa56fe66b20c61025626591b40a0dab997b",
-    "ops/docker-compose.yml": "3f09f063278885ee124b1b0bd50cbbd8836a8857da2feb55d8442812e13bfad1",
+    "ops/docker-compose.yml": "40ee24f619b8e7ad30f23475286f0c51d664d14e7b8ba3623bd17136941b4546",
     "ops/gen_llms_txt.py": "8a8099c47ff8b3d5a54fa3aa65dacaa708706fd4e6a48a297082d574c214f223",
     "ops/harness_selection.py": "97461a7a73e15e3bf6e59a14445d8a1b5b288b954c62408cbd20804d68e5e763",
     "ops/install-autostart.ps1": "ba472020c721c6b0d45dbbc7813be9ea06088fa9e0f99b6138a434383f05ff0e",
@@ -354,7 +354,7 @@
     "plugin/hooks/subagent-board-guard.sh": "a0b6e32be59a744a362033af06bd3647ad0ad86b46b0ad62d8cc84331b22a2c1",
     "plugin/hooks/subagent-board.sh": "7eb72ce501e83f082359fb5ab22e845edc2e000b2bbf4f048fbf7f60b57af6fb",
     "plugin/hooks/user-prompt-submit.sh": "39c583c145c97e9c0fea6a9b36ea9c2e879a1bd4733a6362a493d4a194750ba9",
-    "plugin/release.json": "8ed812c19971189324099b956bf75fb9304f2c3a7f9237352ee90ef270afd035",
+    "plugin/release.json": "93bb09570aa6c409366fff64b7372e96202fde595a7f79c1383fe7a12d956f76",
     "pseudolife_memory/coordination.py": "4a2893528b850112ebb7464c0f18282b5c4c7ff1bdd20e15d0d3434d6a0b2643",
     "pseudolife_memory/mcp_server.py": "7554893c368b1330134dddb2fb7b9f2f0b3f9ab722ddd8d5850d0acf78a362d6",
     "pseudolife_memory/utils/config.py": "72f527f3926bb3ec87300cf3414adfed7b583285cc7a0bc6307734d30f55f197",
@@ -652,7 +652,7 @@
     "rust/shim/src/extractor_shim/tool_preamble.txt": "bf23e1413f76e349563368df84da07a57ce33cc5dbd795218a32a70b489aacdb",
     "rust/shim/src/extractor_shim/tools.rs": "53fa2e0a24cb81bc14b290179a8c5d5a6745cb23a1efe683d37cb7c2fd6bb8d2",
     "rust/shim/src/lib.rs": "1b6adec7a26e876b3d01366081a1c4b99434b8f450f5e009631e808ef4443db4",
-    "rust/shim/src/lifecycle.rs": "dcd95b0d908d64e551c3335fa5f03e74e3a40a8d228b9ba84c7ff89cd41f1138",
+    "rust/shim/src/lifecycle.rs": "e5729de45693b03874d6b66cddaa76f20b28ca098bec998ad76a18e5f01e0ea6",
     "rust/shim/src/lifecycle_executable.rs": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995",
     "rust/shim/src/main.rs": "303ec1344d8184687389ccf969dfb5e662d1430f99ff20535cc007a68bdb6095",
     "rust/shim/src/maintainer_sent.rs": "26a539f852d669eb93f1a99d4f96f757ea74c548fde1d3830e2dba6dbe661af3",
@@ -97033,7 +97033,7 @@
         "complete": true,
         "parameters": {
           "value": {
-            "literal": "native."
+            "literal": "python"
           }
         }
       },
