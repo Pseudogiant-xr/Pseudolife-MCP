@@ -275,9 +275,8 @@ def _frozen_base(tmp_path, files, *, mode="100644", ci_scope=True):
     (["docs/guide.md", "rust/producer-census.json", "pseudolife_memory/doctor_cli.py"], True),
     (["pseudolife_memory/doctor_cli.py"], True), (["rust/shim/src/main.rs"], True),
     (["tests/test_runtime_seed.py"], True),
-    # CI's scope skips the Rust lanes of Markdown under evals/ (#1992, #2010),
-    # so admission waits for no replay there; prompts and code still need it.
-    (["evals/README.md"], False), (["evals/RUST-DRIVERS.md", "llms-full.txt"], False),
+    # Markdown under evals/ waits on the head's own scope verdict (below);
+    # prompts and code beside it still need the replay.
     (["evals/prompts/extract.md"], True), (["evals/README.md", "rust/shim/src/main.rs"], True),
     (["evals/README.md", "evals/harness.py"], True),
 ])
@@ -295,10 +294,57 @@ def test_requirement_uses_frozen_selector_without_importing_member_code(
     assert not marker.exists()
 
 
+def _rust_run(monkeypatch, integrate, *, run_id=9, event="pull_request", head=SHA,
+              scope=("completed", "success"), run=("completed", "success"), rust="unexpanded",
+              attempts=(1, 1), extra=()):
+    """A rollup of one Rust workflow run on the head, with the Actions job
+    and run metadata `gh api` returns for it; `extra` adds other runs'."""
+    jobs, runs, rollup = {}, {}, []
+
+    def add(job_id, name, state, rid, ev, sha, attempt=(1, 1)):
+        status, conclusion = state
+        rollup.append({"name": name, "workflowName": "Rust shim", "status": status.upper(),
+                       "conclusion": (conclusion or "").upper() or None, "detailsUrl":
+                       f"https://github.com/o/r/actions/runs/{rid}/job/{job_id}"})
+        jobs[str(job_id)] = {"name": name, "head_sha": sha, "run_id": rid, "run_attempt": attempt[0],
+                            "status": status, "conclusion": conclusion, "steps": [],
+                            "started_at": "2026-11-26T01:00:00Z", "completed_at": None}
+
+    for rid, ev, sha, scope_state, run_state, rust_state, attempt in (
+            (run_id, event, head, scope, run, rust, attempts), *extra):
+        runs[str(rid)] = {"head_sha": sha, "event": ev, "path": ".github/workflows/rust.yml",
+                          "run_attempt": attempt[1], "status": run_state[0], "conclusion": run_state[1]}
+        add(rid * 10 + 1, "Scope", scope_state, rid, ev, sha, attempt)
+        if rust_state == "unexpanded":
+            add(rid * 10 + 2, "Rust / ${{ matrix.os }}", ("completed", "skipped"), rid, ev, sha)
+        elif rust_state == "expanded":
+            for offset, name in enumerate(JOBS, 3):
+                add(rid * 10 + offset, name, ("in_progress", None), rid, ev, sha)
+
+    def gh(*args):
+        assert args[0] == "api", args
+        kind, ident = args[1].rsplit("/", 2)[-2:]
+        return json.dumps(jobs[ident] if kind == "jobs" else runs[ident])
+
+    monkeypatch.setattr(integrate, "gh", gh)
+    return rollup
+
+
+@pytest.fixture
+def evals_member(integrate, monkeypatch, tmp_path):
+    out, _ = _frozen_base(tmp_path, ["evals/README.md"])
+    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="merged-tree\n"))
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
+    return lambda rollup: integrate._snapshot_requirement(member(integrate), "base", rollup)
+
+
 @pytest.mark.parametrize("files", [["evals/README.md"], ["evals/RUST-DRIVERS.md", "llms-full.txt"]])
 def test_requirement_agrees_with_the_ci_scope_verdict(integrate, monkeypatch, tmp_path, files):
-    # Admission and the scope job call one predicate: whatever the Rust
-    # workflow skips for a pull request, admission does not demand.
+    # #1992, #2010: the scope job skipped the Rust lanes of Markdown under
+    # evals/ through the predicate admission now reads, so once the head's
+    # own run shows that skip, no replay is demanded.
     from rust.ci import docs_scope
 
     assert docs_scope.pull_request_skips_rust(files, True) is True
@@ -307,16 +353,65 @@ def test_requirement_agrees_with_the_ci_scope_verdict(integrate, monkeypatch, tm
     monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
                         SimpleNamespace(returncode=0, stdout="merged-tree\n"))
     monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
-    skipped = [{"name": "Scope", "status": "COMPLETED", "conclusion": "SUCCESS"},
-               {"name": "Rust / ${{ matrix.os }}", "status": "COMPLETED", "conclusion": "SKIPPED"}]
-    assert integrate._snapshot_requirement(member(integrate), "base") == (False, "")
-    assert integrate._snapshot_requirement(member(integrate), "base", skipped) == (False, "")
-    # When the scope job's docs test selection fails, it runs the Rust lanes
-    # for these paths after all, and then their replay is the evidence.
-    ran = skipped[:1] + [{"name": name, "status": "IN_PROGRESS"} for name in JOBS]
-    assert integrate._snapshot_requirement(member(integrate), "base", ran) == (True, "")
-    near_miss = skipped + [{"__typename": "StatusContext", "context": JOBS[0], "name": JOBS[0]}]
-    assert integrate._snapshot_requirement(member(integrate), "base", near_miss) == (False, "")
+    rollup = _rust_run(monkeypatch, integrate)
+    assert integrate._snapshot_requirement(member(integrate), "base", rollup) == (False, "")
+    value = member(integrate)
+    value.snapshot_required = False
+    value.snapshot, value.snapshot_why = integrate._snapshot_state(SHA, rollup, False)
+    assert integrate._not_ready(value) is None
+
+
+@pytest.mark.parametrize("case", ["no run yet", "scope running", "run still going", "run cancelled",
+                                  "other head", "push event", "older attempt"])
+def test_a_docs_lane_skip_needs_the_heads_own_finished_run(integrate, monkeypatch, evals_member, case):
+    # The docs lane skips the Rust lanes only when its test selection works,
+    # so until the head's own pull-request run shows the skip, admission waits.
+    kwargs = {"scope running": {"scope": ("in_progress", None), "run": ("in_progress", None),
+                                "rust": "absent"},
+              "run still going": {"run": ("in_progress", None)},
+              "run cancelled": {"run": ("completed", "cancelled")},
+              "other head": {"head": "b" * 40}, "push event": {"event": "push"},
+              "older attempt": {"attempts": (1, 2)}}.get(case, {})
+    rollup = [] if case == "no run yet" else _rust_run(monkeypatch, integrate, **kwargs)
+    required, why = evals_member(rollup)
+    assert required is None
+    assert ("rerun the Rust workflow" if case == "run cancelled" else "retry build once it has") in why
+    value = member(integrate)
+    value.snapshot_required = None
+    value.snapshot, value.snapshot_why = integrate._snapshot_state(SHA, rollup, None)
+    value.snapshot_why = why
+    assert integrate._not_ready(value) == why
+
+
+def test_a_docs_lane_skip_whose_run_ran_the_rust_lanes_needs_their_replay(integrate, monkeypatch, evals_member):
+    # The scope job's docs test selection failed: it ran the Rust lanes for
+    # these paths, so their replay is the evidence, as for any runtime diff.
+    assert evals_member(_rust_run(monkeypatch, integrate, rust="expanded")) == (True, "")
+    failed_scope = _rust_run(monkeypatch, integrate, scope=("completed", "failure"),
+                             run=("in_progress", None), rust="expanded")
+    assert evals_member(failed_scope) == (True, "")
+
+
+def test_another_runs_rust_jobs_do_not_undo_the_heads_skip(integrate, monkeypatch, evals_member):
+    # A manual dispatch on the same head expands the job names too; only the
+    # head's own pull-request run decides (its replay would never come).
+    rollup = _rust_run(monkeypatch, integrate, extra=[
+        (12, "workflow_dispatch", SHA, ("completed", "success"), ("in_progress", None), "expanded", (1, 1))])
+    assert evals_member(rollup) == (False, "")
+    contexts = [{"__typename": "StatusContext", "context": "Scope", "name": "Scope", "state": "SUCCESS"}]
+    assert evals_member(contexts)[0] is None
+
+
+def test_an_always_skipped_diff_needs_no_actions_metadata(integrate, monkeypatch, tmp_path):
+    # Docs beside the generated census skip the Rust lanes whatever the docs
+    # lane does, so admission reads no run, as before.
+    out, _ = _frozen_base(tmp_path, ["docs/guide.md", "rust/producer-census.json"])
+    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="merged-tree\n"))
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
+    monkeypatch.setattr(integrate, "gh", lambda *args: pytest.fail(f"unexpected gh call {args}"))
+    assert integrate._snapshot_requirement(member(integrate), "base", []) == (False, "")
 
 
 @pytest.mark.parametrize("mode,ci_scope", [("120000", True), ("160000", True), ("100644", False)])
@@ -345,6 +440,19 @@ def test_code_pr_whose_rust_lanes_were_skipped_is_still_refused(integrate, scope
     value = member(integrate, state)
     value.snapshot_why = why
     assert "own-head snapshot replay is pending" in integrate._not_ready(value)
+
+
+@pytest.mark.parametrize("files", [["rust/shim/src/main.rs"], ["evals/README.md", "evals/harness.py"]])
+def test_a_skipped_rust_job_does_not_waive_a_code_prs_replay(integrate, monkeypatch, tmp_path, files):
+    # Even a run that looks exactly like a docs skip waives nothing for a
+    # diff the scope job's predicate does not skip.
+    out, _ = _frozen_base(tmp_path, files)
+    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="merged-tree\n"))
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
+    rollup = _rust_run(monkeypatch, integrate)
+    assert integrate._snapshot_requirement(member(integrate), "base", rollup) == (True, "")
 
 
 def test_head_moves_during_requirement_read(integrate, monkeypatch):

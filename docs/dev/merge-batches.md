@@ -327,11 +327,16 @@ are regenerated on the batch head, and other conflicts
 are dropped. A diff whose Rust lanes the Rust workflow's scope skips needs
 no replay: admission asks the frozen base's `pull_request_skips_rust` in
 `rust/ci/docs_scope.py`, the predicate the scope job decides with, about
-the net diff and its file modes. Markdown under `evals/` and documentation
-accompanied only by the generated `rust/producer-census.json` are such
-diffs; census alone or alongside runtime edits still requires replay, and
-so does a skipped diff whose head shows the expanded `Rust / <os>` jobs
-(the scope job ran them because its docs test selection failed). A diff reaching none satisfies
+the net diff and its file modes. Documentation accompanied only by the
+generated `rust/producer-census.json` is skipped whatever the scope job's
+docs lane does, so it is admitted at once; census alone or alongside
+runtime edits still requires replay. A diff only the docs lane skips, such
+as Markdown under `evals/`, is admitted once the head's own pull-request
+run of the Rust workflow has finished successfully with its `Scope` job
+passed and its Rust job skipped (reported unexpanded as
+`Rust / ${{ matrix.os }}`); until then it waits, a cancelled run needs a
+rerun, and if that run expanded the `Rust / <os>` jobs (its docs test
+selection failed) their replay is required. A diff reaching none satisfies
 admission immediately, without Actions metadata: documentation and pure
 test-only changes do not wait. Tests imported by a runtime harness are
 runtime inputs and retain their replay requirement. The selector code

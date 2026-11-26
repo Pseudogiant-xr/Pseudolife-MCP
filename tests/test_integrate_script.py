@@ -708,7 +708,8 @@ def test_merge_docs_rejects_an_empty_diff(docs_world, capsys):
     world.gh.pr(42)["headRefOid"] = head
     _docs_preview(world, head)
     assert integrate.main(["merge-docs", "42"]) == 2
-    assert "whole diff is not docs-only" in capsys.readouterr().err
+    # An empty change leaves master's tree, so it is refused as nothing to merge.
+    assert "#42 changes nothing master does not already carry" in capsys.readouterr().err
     assert not world.gh.mutations()
 
 
@@ -738,18 +739,43 @@ def test_merge_docs_checks_both_sides_of_a_rename(docs_world, capsys):
     assert not world.gh.mutations()
 
 
-def test_merge_docs_refuses_non_docs_in_the_proposed_push(docs_world, capsys):
-    # The preview is computed from master and the head, so GitHub's test
-    # merge cannot inject another tree; a docs change master already carries
-    # leaves the proposed push empty, which is not docs-only either.
+def test_merge_docs_tests_its_own_preview_not_an_injected_one(docs_world, capsys):
+    # The preview is computed from master and the head, so a GitHub test
+    # merge carrying another tree (here one with code) changes nothing.
     world = docs_world
     head = _docs_pr(world)
-    world.advance_master({"docs/guide.md": "guide\n"})
     other = world.pr(43, {"docs/guide.md": "guide\n", "ops/example.py": "changed\n"})
     _docs_preview(world, head, preview_head=other)
+    assert integrate.main(["merge-docs", "42"]) == 0, capsys.readouterr().err
+    assert _git(world.origin, "ls-tree", "--name-only", "master", "ops/example.py") == ""
+
+
+def test_merge_docs_says_a_change_master_already_carries_needs_no_merge(docs_world, capsys):
+    world = docs_world
+    _docs_pr(world)
+    world.advance_master({"docs/guide.md": "guide\n"})
     assert integrate.main(["merge-docs", "42"]) == 2
-    assert "test merge into master is not docs-only" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "#42 changes nothing master does not already carry" in err and "close it" in err
     assert not world.gh.mutations()
+
+
+def test_merge_docs_preview_follows_renames_whatever_the_operator_config(docs_world, capsys):
+    # GitHub follows a rename on master; a local merge.renames=false would
+    # turn the same merge into a modify/delete conflict and refuse it.
+    world = docs_world
+    world.advance_master({"docs/old-name.md": "line one\nline two\nline three\nline four\n"})
+    head = _docs_pr(world, {"docs/old-name.md": "line one\nline TWO\nline three\nline four\n"})
+    _git(world.seed, "switch", "-q", "-C", "master", "origin/master")
+    _git(world.seed, "mv", "docs/old-name.md", "docs/new-name.md")
+    _git(world.seed, "commit", "-qm", "rename on master")
+    _git(world.seed, "push", "-q", "origin", "master")
+    _git(world.work, "fetch", "-q", "origin")
+    _git(world.work, "reset", "-q", "--hard", "origin/master")
+    _git(world.work, "config", "merge.renames", "false")
+    assert integrate.main(["merge-docs", "42"]) == 0, capsys.readouterr().err
+    assert _git(world.origin, "show", "master:docs/new-name.md").splitlines()[1] == "line TWO"
+    assert world.gh.mutations()[-1][-1] == f"sha={head}"
 
 
 @pytest.mark.parametrize("github_preview", ["stale", "missing"])
@@ -2658,6 +2684,27 @@ def test_build_expect_refuses_before_the_no_batch_drop_comments(world, capsys):
     assert "conflicts with master itself" in capsys.readouterr().out
     err = _refused_and_nothing_built(world, capsys, "--expect", "20")
     assert "#20 is left out: " in err and "conflicts with master itself" in err
+
+
+@pytest.mark.parametrize("parent_state", ["OPEN", "MERGED"])
+def test_build_expect_counts_an_open_pr_a_members_head_carries(world, capsys, parent_state):
+    # A ready #11 stacked on draft #10 brings #10's change into the batch
+    # although #10 never merges as a member: unnamed, that is a different set.
+    sha10 = world.pr(10, {"e.txt": "e\n"})
+    sha11 = world.pr(11, {"f.txt": "f\n"}, base="pr-10")
+    world.gh.add(10, sha10, isDraft=True)
+    world.gh.add(11, sha11)
+    world.gh.history.append({"number": 10, "state": "OPEN", "headRefOid": sha10, "labels": []})
+    if parent_state == "MERGED":
+        # A parent that has landed is in the base, so it is carried by no one.
+        world.advance_master({"e.txt": "e\n"})
+        _git(world.seed, "push", "-q", "origin", f"{sha10}:refs/heads/landed-10")
+        world.gh.history[-1]["state"] = "MERGED"
+        world.gh.ready = [r for r in world.gh.ready if r["number"] != 10]
+        assert _build("--dry-run", "--expect", "11") == 0, capsys.readouterr()
+        return
+    err = _refused_and_nothing_built(world, capsys, "--expect", "11")
+    assert "#10's head is carried into the batch by #11, but --expect does not name it" in err
 
 
 @pytest.mark.parametrize("value", ["", " ", "10,", "10,x", "0", "-3", "10 12"])
@@ -7361,6 +7408,17 @@ def test_stacked_build_refuses_an_unverified_parent(world, stack_parent, monkeyp
                          parent_checkout=world.work.resolve()) in capsys.readouterr().err
     assert _origin_refs(world) == original_refs
     assert len(world.gh.mutations()) == 1  # only the fixture's parent open
+
+
+def test_stacked_build_expect_names_the_parent_batch_holding_a_member(world, stack_parent,
+                                                                      monkeypatch, capsys):
+    parent, work = stack_parent
+    monkeypatch.chdir(work)
+    assert _build("--stacked", "--expect", "10,11") == 2
+    err = capsys.readouterr().err
+    assert f"#10 is left out: the open batch {parent['headRefName']} it stacks on already holds it" in err
+    assert not _git(work, "branch", "--list", "stacked/*")
+    assert _build("--stacked", "--expect", "11") == 0, capsys.readouterr()
 
 
 @pytest.fixture
