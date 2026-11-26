@@ -661,7 +661,6 @@ async fn store_body(
     .map_err(ToolError::Invalid)?;
     let (auth, dt) = (resolved_label(authority), resolved_label(distortion));
 
-    let mut ws = ready.write.lock().await;
     let text = py_strip(raw_text);
     let mut out = Map::new();
     if text.is_empty() {
@@ -672,12 +671,18 @@ async fn store_body(
         out.insert("note".into(), json!(store_note("empty")));
         return Ok(Value::Object(out));
     }
+    // The entry's embedding depends on its text alone, so it is computed
+    // before the write lock: searches and other writes no longer wait out
+    // the model's forward pass behind it.
     let embedder = ready.embedder.clone();
     let owned = text.to_string();
+    let admitted = crate::fact_set::admit_write_embed().await;
     let row = tokio::task::spawn_blocking(move || embedder.embed(&owned))
         .await
         .map_err(|e| ToolError::Internal(e.to_string()))?
         .map_err(|e| ToolError::Internal(e.to_string()))?;
+    drop(admitted);
+    let mut ws = ready.write.lock().await;
     let client = ready.storage.client();
     let mut session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let resolved = ws.resolve_handle(client, episode).await;

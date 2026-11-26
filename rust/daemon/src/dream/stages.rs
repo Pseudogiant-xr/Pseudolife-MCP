@@ -523,22 +523,16 @@ fn utc_day(ts: f64) -> String {
 /// pipeline (no surprise gate, contradiction decay or slot extraction) in
 /// the first band at surprise 1.0, the capacity victim dropped first,
 /// stamped to the summarized episode, tagged `digest`. Caller holds the
-/// writer lock.
+/// writer lock and passes the text's [`digest_embedding`], made before it.
 async fn store_digest(
     svc: &Service,
     ready: &Ready,
     text: &str,
+    row: Result<Vec<f32>, ToolError>,
     episode_id: &str,
     title: &str,
 ) -> Result<(), ToolError> {
-    // The embedder's tokenizer refuses a reply's lone surrogate (a
-    // TypeError) before psycopg sees the text.
-    if let Some(e) = super::extractor::embed_refused(&[text]) {
-        return Err(internal(e));
-    }
-    let row = crate::fact_set::embed(ready, text.to_string())
-        .await?
-        .to_vec();
+    let row = row?;
     let cfg = &svc.config.memory;
     if let Some(idx) = crate::store::first_band_victim(ready, cfg, &[]) {
         crate::store::evict_resident(ready, idx).await;
@@ -574,6 +568,39 @@ async fn store_digest(
     crate::bank::normalize_query(&mut unit);
     ready.bank.write().expect("bank lock").push(entry, &unit);
     Ok(())
+}
+
+/// A digest entry's text: the header naming the session, its UTC day span
+/// and entry count, then the reply.
+fn digest_text(cand: &DigestCandidate, digest: &str) -> String {
+    let d0 = utc_day(if cand.started_at != 0.0 {
+        cand.started_at
+    } else {
+        cand.ended_at
+    });
+    let d1 = utc_day(cand.ended_at);
+    let span = if d0 == d1 {
+        d0
+    } else {
+        format!("{d0}\u{2013}{d1}")
+    };
+    let header = format!(
+        "Session digest: {} ({span}, {} entries)",
+        cand.title, cand.n_entries
+    );
+    format!("{header}\n{digest}")
+}
+
+/// [`store_digest`]'s embedding of `text`, needing no lock.
+async fn digest_embedding(ready: &Ready, text: &str) -> Result<Vec<f32>, ToolError> {
+    // The embedder's tokenizer refuses a reply's lone surrogate (a
+    // TypeError) before psycopg sees the text.
+    if let Some(e) = super::extractor::embed_refused(&[text]) {
+        return Err(internal(e));
+    }
+    Ok(crate::fact_set::embed(ready, text.to_string())
+        .await?
+        .to_vec())
 }
 
 /// The digest of one candidate: one call, or map-reduce over the context
@@ -627,6 +654,17 @@ pub async fn generate_digests_stage(
             }
         };
         scanned += 1;
+        // The entry text and its embedding depend on the reply and the
+        // candidate alone, so they are made before the write lock; a
+        // candidate the checks below skip wastes one forward pass.
+        let prepared = match digest {
+            Some(digest) => {
+                let text = digest_text(&cand, &digest);
+                let row = digest_embedding(ready, &text).await;
+                Some((text, row))
+            }
+            None => None,
+        };
         let ws = ready.write.lock().await;
         let mut cur = Cursor::load(ready, DIGEST_CURSOR_KEY, true).await?;
         let rid = cand.root_id.as_str();
@@ -677,7 +715,7 @@ pub async fn generate_digests_stage(
             eprintln!("session digest: {what} for episode {rid} (attempt {attempts}); will retry");
             Ok(false)
         };
-        let Some(digest) = digest else {
+        let Some((text, row)) = prepared else {
             let advanced = fail(&mut cur, "malformed attempts")?;
             cur.save(ready, DIGEST_CURSOR_KEY).await?;
             if advanced {
@@ -685,24 +723,7 @@ pub async fn generate_digests_stage(
             }
             break;
         };
-        let d0 = utc_day(if cand.started_at != 0.0 {
-            cand.started_at
-        } else {
-            cand.ended_at
-        });
-        let d1 = utc_day(cand.ended_at);
-        let span = if d0 == d1 {
-            d0
-        } else {
-            format!("{d0}\u{2013}{d1}")
-        };
-        let header = format!(
-            "Session digest: {} ({span}, {} entries)",
-            cand.title, cand.n_entries
-        );
-        if let Err(e) =
-            store_digest(svc, ready, &format!("{header}\n{digest}"), rid, &cand.title).await
-        {
+        if let Err(e) = store_digest(svc, ready, &text, row, rid, &cand.title).await {
             eprintln!("session digest: write failed for episode {rid}: {e:?}");
             let advanced = fail(&mut cur, "failed writes")?;
             cur.save(ready, DIGEST_CURSOR_KEY).await?;

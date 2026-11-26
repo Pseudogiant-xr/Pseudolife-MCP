@@ -187,8 +187,25 @@ async fn entity_kind(
         .and_then(|m| m.get(&norm_key(entity)).cloned()))
 }
 
+/// Admits one write-side embedding at a time to the blocking pool. The
+/// embedder runs one forward pass at a time anyway (its own mutex); without
+/// this gate a burst of writes, which no longer queue on the write lock
+/// before embedding, would each park a blocking-pool thread on that mutex,
+/// and a search ranking under the write lock needs a free one.
+static WRITE_EMBEDS: std::sync::LazyLock<tokio::sync::Semaphore> =
+    std::sync::LazyLock::new(|| tokio::sync::Semaphore::new(1));
+
+/// A permit from [`WRITE_EMBEDS`], held across one write-side embedding.
+pub(crate) async fn admit_write_embed() -> tokio::sync::SemaphorePermit<'static> {
+    WRITE_EMBEDS
+        .acquire()
+        .await
+        .expect("the write embedding gate is never closed")
+}
+
 pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, ToolError> {
     let embedder = ready.embedder.clone();
+    let _admitted = admit_write_embed().await;
     let row = tokio::task::spawn_blocking(move || embedder.embed(&text))
         .await
         .map_err(internal_cause)?
@@ -196,9 +213,10 @@ pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, Too
     Ok(Arc::from(row))
 }
 
-/// `service.cortex_write` (`service.py:3916-4040`), under the write lock
-/// (the Python service lock) from the freshness lookup to the answer: the
-/// label resolution before it, then the class, both embeddings, the writer
+/// `service.cortex_write` (`service.py:3916-4040`): the label resolution and
+/// both embeddings (which depend on the arguments alone) before the write
+/// lock, then under it (the Python service lock) from the freshness lookup
+/// to the answer: the class, the writer
 /// and episode stamps, an HLC tick, the store write, the entity mint, the
 /// per-slot save and, for a direct user supersede (never a dream write),
 /// the correction signal. A set-valued slot answers `ToolError::Invalid`
@@ -219,14 +237,9 @@ pub(crate) async fn cortex_write(
         .distortion_tolerance
         .resolve(&a.value, crate::labels::resolve_distortion)
         .map_err(ToolError::Invalid)?;
-    let db = ready.storage.client();
-    let mut ws = ready.write.lock().await;
-    let freshness_class = if a.freshness_class == "auto" {
-        let kind = entity_kind(&mut ws, db, &a.entity).await?;
-        crate::freshness::resolve_class(kind.as_deref(), &norm_key(&a.attribute)).to_string()
-    } else {
-        a.freshness_class.clone()
-    };
+    // Both embeddings depend on the arguments alone, so they are computed
+    // before the write lock: searches and other writes no longer wait out
+    // two forward passes behind it.
     let display = |key: &str, fallback: &str| {
         a.raw
             .get(key)
@@ -240,6 +253,14 @@ pub(crate) async fn cortex_write(
     let embedding = embed(ready, claim).await?;
     let slot_text = py_strip(&format!("{entity_text} {attribute_text}")).to_string();
     let slot_embedding = embed(ready, slot_text).await?;
+    let db = ready.storage.client();
+    let mut ws = ready.write.lock().await;
+    let freshness_class = if a.freshness_class == "auto" {
+        let kind = entity_kind(&mut ws, db, &a.entity).await?;
+        crate::freshness::resolve_class(kind.as_deref(), &norm_key(&a.attribute)).to_string()
+    } else {
+        a.freshness_class.clone()
+    };
     let mut session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let resolved = ws.resolve_handle(db, a.episode.as_deref()).await;
     let warning = (a.episode.as_deref().is_some_and(|e| !e.is_empty()) && resolved.is_none())
