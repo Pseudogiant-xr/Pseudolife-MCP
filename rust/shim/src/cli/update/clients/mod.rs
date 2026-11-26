@@ -1,4 +1,7 @@
 //! Native client update ladder; user approvals remain user-owned.
+mod autostart;
+#[cfg(test)]
+mod autostart_tests;
 mod codex;
 mod command;
 pub(crate) mod handoff;
@@ -52,8 +55,8 @@ pub fn run_steps(
     if steps.contains(&"codex") {
         report["codex"] = check_codex_hooks(repo, daemon_digest, true);
     }
-    if repo.is_some() {
-        report["autostart"] = check_autostart(repo);
+    if let Some(step) = autostart_step(repo) {
+        report["autostart"] = step;
     }
     if crate::board::state::exists(&runtime::home().join(".pseudolife-mcp/tunnel"))
         && let Some(tunnel) = update_tunnels(report.get("shim"), &NativeRunner)
@@ -74,21 +77,24 @@ fn ladder_ok(report: &Value) -> bool {
         .all(|r| r["state"] != "failed")
 }
 
-fn check_autostart(_repo: Option<&Path>) -> Value {
-    let mut notes = Vec::new();
-    let mut registered = 0;
-    for (kind, task, unit) in [
-        (
-            "claude",
-            "Pseudolife Claude Shim",
-            "pseudolife-sonnet-shim.service",
-        ),
-        (
-            "codex",
-            "Pseudolife Codex Shim",
-            "pseudolife-codex-shim.service",
-        ),
-    ] {
+/// The autostart step: reports the default registrations and changes none.
+/// A release update (no checkout) runs it unless the stable launcher is
+/// overridden, as tests and contributor layouts do, and shows it only when
+/// it found one.
+fn autostart_step(repo: Option<&Path>) -> Option<Value> {
+    let overridden = std::env::var_os("PSEUDOLIFE_SHIM_LAUNCHER").is_some_and(|v| !v.is_empty());
+    if repo.is_none() && overridden {
+        return None;
+    }
+    let layout = runtime::default_layout().ok();
+    let native = layout
+        .as_ref()
+        .filter(|layout| runtime::launcher_is_native(layout))
+        .map(|layout| layout.launcher.clone());
+    let launcher_path = layout
+        .map(|layout| layout.launcher)
+        .unwrap_or_else(|| PathBuf::from("pseudolife-mcp"));
+    let query = |_kind: &str, task: &str, unit: &str| -> Option<Output> {
         let (binary, args) = if cfg!(windows) {
             let root = std::env::var_os("SystemRoot")
                 .map(PathBuf::from)
@@ -98,39 +104,15 @@ fn check_autostart(_repo: Option<&Path>) -> Value {
                 vec!["/Query", "/TN", task, "/XML"],
             )
         } else {
-            let Some(binary) = registrations::absolute_command("systemctl") else {
-                continue;
-            };
-            (binary, vec!["--user", "cat", unit])
+            (
+                registrations::absolute_command("systemctl")?,
+                vec!["--user", "cat", unit],
+            )
         };
-        let output = NativeRunner.run(&binary, &args, None, Duration::from_secs(30), &[]);
-        if output.code != 0 {
-            continue;
-        } // Informational, as in the Python oracle.
-        registered += 1;
-        let text = registration_text(&output.bytes);
-        if text
-            .to_ascii_lowercase()
-            .contains("<enabled>false</enabled>")
-        {
-            notes.push(format!("{kind}: the extractor autostart task is disabled; rerun native extractor setup if it should start at logon"));
-        } else if text.contains("shim_autostart.py") {
-            notes.push(format!("{kind}: extractor autostart still names the legacy Python runner; rerun native extractor setup to migrate it"));
-        } else if text.contains("--model") || text.contains("-Model") {
-            notes.push(format!("{kind}: extractor autostart carries model values on its command line; rerun native extractor setup to read current configuration at logon"));
-        }
-    }
-    if !notes.is_empty() {
-        return json!({"state":"stale","detail":notes.join("; "),"notes":notes});
-    }
-    result(
-        if registered > 0 { "current" } else { "none" },
-        if registered > 0 {
-            "registered extractor autostart has no legacy runner or baked model override"
-        } else {
-            "no extractor autostart task or unit was found"
-        },
-    )
+        Some(NativeRunner.run(&binary, &args, None, Duration::from_secs(30), &[]))
+    };
+    let report = autostart::check_autostart(&query, native.as_deref(), &launcher_path);
+    (repo.is_some() || report["state"] != "none").then_some(report)
 }
 fn registration_text(bytes: &[u8]) -> String {
     // schtasks output may be UTF-16 even when the surrounding console uses a

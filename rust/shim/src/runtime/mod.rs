@@ -342,6 +342,17 @@ impl Drop for UpdateLock {
     }
 }
 
+/// Whether the stable launcher is the native client's: a native executable
+/// with no record of the Python client beside it (the Python client's
+/// Windows launcher is an executable too, and it records each one it writes).
+pub(crate) fn launcher_is_native(layout: &Layout) -> bool {
+    use std::io::Read as _;
+    let mut head = [0u8; 4];
+    let read = fs::File::open(&layout.launcher).and_then(|mut file| file.read(&mut head));
+    read.is_ok_and(|n| install::native_header(&head[..n]))
+        && fs::symlink_metadata(install::python_launcher_record(layout)).is_err()
+}
+
 pub fn update_shim(source: &str, repo: Option<&Path>, reinstall: bool) -> Value {
     let result = (|| -> Result<Value> {
         let layout = default_layout()?;
