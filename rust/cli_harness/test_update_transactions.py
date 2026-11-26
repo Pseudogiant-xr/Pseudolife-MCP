@@ -2905,6 +2905,57 @@ def _as_python_updater_left_it(state_path, round_name, platform=None):
     return captured
 
 
+@pytest.mark.parametrize("env_file", [False, True], ids=["plain", "env-file"])
+def test_release_update_adopts_a_stack_deployed_rust_daemon(tmp_path, env_file):
+    # ops/docker-compose.stack.yml (Portainer, Dockge, Komodo) labels its Rust
+    # daemon with the engine alone: no activation, release or checkout label,
+    # and no accepted record. A release update takes it as a Rust host, records
+    # its activation, and is not refused as an unfinished activation.
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        state["running"]["Config"]["Labels"]["org.pseudolife.engine"] = "rust"
+        state_path.write_text(json.dumps(state))
+        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-stack"]
+        if env_file:
+            args += ["--env-file", str(repo / "ops/.env")]
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "no valid accepted activation" not in result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
+        assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"], pulled
+        assert stages(state) == ["pull", "backup", "tag", "up"], stages(state)
+        labels = _labels(state_path)
+        assert labels["org.pseudolife.engine"] == "rust" and labels["org.pseudolife.release"] == "0.21.1"
+        accepted = json.loads(_accepted(env).read_text())["services"][SERVICE]["labels"]
+        assert accepted["org.pseudolife.activation"] == labels["org.pseudolife.activation"]
+
+
+@pytest.mark.parametrize("label", ["activation", "release"])
+def test_a_labelled_unaccepted_rust_daemon_is_still_refused(tmp_path, label):
+    # The near miss: a Rust daemon that carries an activation or a release
+    # label came from update or an installer, and without its accepted record
+    # it is an unfinished activation, refused as before.
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        state = json.loads(state_path.read_text())
+        state["rust_published"] = True
+        labels = state["running"]["Config"]["Labels"]
+        labels["org.pseudolife.engine"] = "rust"
+        labels["org.pseudolife." + label] = "a" * 32 if label == "activation" else "0.21.0"
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "no valid accepted activation" in result.stdout + result.stderr
+        assert not stages(json.loads(state_path.read_text()))
+
+
 @pytest.mark.parametrize("platform", ["linux", "windows"])
 @pytest.mark.parametrize("round_name", ["engine-rust", "engine-rust-then-plain", "plain"])
 def test_python_updater_host_files_are_written_byte_for_byte(tmp_path, platform, round_name):
@@ -3953,54 +4004,3 @@ def test_an_unattended_update_with_a_tunnel_service_updates_the_daemon_alone(tmp
         assert "Start a new session to run on the new shim runtime" not in out, out
         log = (Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "unattended-update.log").read_text()
         assert warning in log and f"systemd user unit {unit}" in log, log
-
-
-@pytest.mark.parametrize("env_file", [False, True], ids=["plain", "env-file"])
-def test_release_update_adopts_a_stack_deployed_rust_daemon(tmp_path, env_file):
-    # ops/docker-compose.stack.yml (Portainer, Dockge, Komodo) labels its Rust
-    # daemon with the engine alone: no activation, release or checkout label,
-    # and no accepted record. A release update takes it as a Rust host, records
-    # its activation, and is not refused as an unfinished activation.
-    binary = _native_binary()
-    if not binary:
-        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
-    with host(tmp_path) as (repo, env, state_path):
-        state = json.loads(state_path.read_text())
-        state["rust_published"] = True
-        state["running"]["Config"]["Labels"]["org.pseudolife.engine"] = "rust"
-        state_path.write_text(json.dumps(state))
-        args = ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1", "--rollback-tag", "pre-stack"]
-        if env_file:
-            args += ["--env-file", str(repo / "ops/.env")]
-        result = run_arm(repo, env, binary, args)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "no valid accepted activation" not in result.stdout + result.stderr
-        state = json.loads(state_path.read_text())
-        pulled = [a[-1] for a in state["calls"] if a[:1] == ["pull"]]
-        assert pulled == ["ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:0.21.1"], pulled
-        assert stages(state) == ["pull", "backup", "tag", "up"], stages(state)
-        labels = _labels(state_path)
-        assert labels["org.pseudolife.engine"] == "rust" and labels["org.pseudolife.release"] == "0.21.1"
-        accepted = json.loads(_accepted(env).read_text())["services"][SERVICE]["labels"]
-        assert accepted["org.pseudolife.activation"] == labels["org.pseudolife.activation"]
-
-
-@pytest.mark.parametrize("label", ["activation", "release"])
-def test_a_labelled_unaccepted_rust_daemon_is_still_refused(tmp_path, label):
-    # The near miss: a Rust daemon that carries an activation or a release
-    # label came from update or an installer, and without its accepted record
-    # it is an unfinished activation, refused as before.
-    binary = _native_binary()
-    if not binary:
-        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
-    with host(tmp_path) as (repo, env, state_path):
-        state = json.loads(state_path.read_text())
-        state["rust_published"] = True
-        labels = state["running"]["Config"]["Labels"]
-        labels["org.pseudolife.engine"] = "rust"
-        labels["org.pseudolife." + label] = "a" * 32 if label == "activation" else "0.21.0"
-        state_path.write_text(json.dumps(state))
-        result = run_arm(repo, env, binary, ["--tag", "0.21.1", "--daemon-only", "--json", "--health-retries", "1"])
-        assert result.returncode == 2, result.stdout + result.stderr
-        assert "no valid accepted activation" in result.stdout + result.stderr
-        assert not stages(json.loads(state_path.read_text()))
