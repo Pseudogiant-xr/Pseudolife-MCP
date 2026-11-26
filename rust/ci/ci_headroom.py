@@ -309,6 +309,7 @@ class Reading:
     unplaced: dict[str, int] = field(default_factory=dict)
     unresolved: dict[str, str] = field(default_factory=dict)
     unreadable: dict[str, str] = field(default_factory=dict)
+    unlisted: list[str] = field(default_factory=list)
     runs: int = 0
     jobs: int = 0
     forks: int = 0
@@ -589,7 +590,16 @@ def read_runs(github, bounds: Bounds, since: datetime, now: datetime | None = No
     reading = Reading()
     now = now or datetime.now(timezone.utc)
     for workflow in sorted(bounds.shapes):
-        for run in recent_runs(github, workflow, since, now):
+        try:
+            listed = recent_runs(github, workflow, since, now)
+        except GitHubError as error:
+            # A workflow file GitHub has not registered (new on this branch,
+            # not yet on the default one) has no runs to read.
+            if "(HTTP 404)" not in str(error):
+                raise
+            reading.unlisted.append(workflow)
+            continue
+        for run in listed:
             # A fork's pull request runs the fork's own workflow file and
             # uploads what its branch wrote: its job names and artifacts are
             # its author's text. A fork runs only the fast lanes anyway.
@@ -667,6 +677,8 @@ def summary(reading: Reading) -> str:
                      + ", ".join(f"{name} x{count}" for name, count in sorted(reading.unplaced.items())))
     for name, note in sorted(reading.unresolved.items()):
         lines.append(f"no bound for {name}: {note}")
+    if reading.unlisted:
+        lines.append("workflows GitHub has no runs of (not on the default branch yet): " + ", ".join(reading.unlisted))
     for name, error in sorted(reading.unreadable.items()):
         lines.append(f"diagnostics artifact of run/job {name} unreadable: {error}")
     return "\n".join(lines)

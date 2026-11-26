@@ -369,6 +369,26 @@ def test_an_unreadable_artifact_costs_its_reading_not_the_pass(monkeypatch):
     assert table(reading) == [row for row in table(read(bounds(ONE_BOUND))) if row[2] == "job"]
 
 
+def test_a_workflow_github_does_not_know_yet_is_skipped_and_named():
+    # ci-headroom.yml itself, run from its own branch before it merges:
+    # GitHub answers 404 for its runs (found by the first live run, 26 Nov).
+    class Unregistered(Recorded):
+        def pages(self, path, key):
+            if "/workflows/ci.yml/" in path:
+                raise ci_headroom.GitHubError("gh api --paginate repos/x failed: gh: Not Found (HTTP 404)")
+            return super().pages(path, key)
+    reading = ci_headroom.read_runs(Unregistered(), bounds(), NOW)
+    assert reading.unlisted == ["ci.yml"]
+    assert {f.workflow for f in reading.findings} == {"rust.yml"}
+    assert "not on the default branch yet): ci.yml" in ci_headroom.summary(reading)
+
+    class Limited(Recorded):
+        def pages(self, path, key):
+            raise ci_headroom.GitHubError("gh api failed: HTTP 403: API rate limit exceeded")
+    with pytest.raises(ci_headroom.GitHubError, match="rate limit"):
+        ci_headroom.read_runs(Limited(), bounds(), NOW)
+
+
 def test_a_failed_gh_call_names_gh_s_own_reason(monkeypatch):
     class Done:
         returncode, stdout, stderr = 1, b"", b"HTTP 403: API rate limit exceeded for installation\n"
