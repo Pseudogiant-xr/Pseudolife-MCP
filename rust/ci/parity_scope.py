@@ -57,8 +57,11 @@ SHARDS = [
     # cli 23.2 min, cli-daemon 25.9, started 9.6 min late). Windows step
     # times from that run, plus about 3.5 min setup per shard:
     # cli keeps the sent-YAML check and the CLI rows' self-tests and goldens,
-    # lease and lease operator steps, 10.0 min.
-    {"suite": "cli", "job_timeout": 35},
+    # lease and lease operator steps, 10.0 min. 35 -> 42 on 2026-11-26:
+    # hosted Windows cli took 29.4 min on batch run 45533353153 (job
+    # 138938739556), 84% of 35 (rust/ci/ci_headroom.py's 2026-11-12..26
+    # survey); 42 is about 40% over it.
+    {"suite": "cli", "job_timeout": 42},
     # cli-store: dream cursor, static, graph store, background and
     # principal steps, 9.6 min; since the freeze also the body and security
     # golden replays from cli-live (whose live passes took most of their

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "69bdf189fc018713",
+  "fingerprint": "a26edffa51ea3249",
+  "reason": "Raises timeout-minutes only, 40 -> 51: the slowest successful run took 36.4 min (run 45747873168, 91% of 40) and 30 attempts took 32 or more (2026-11-12..26 survey). The steps are unchanged, so a run that finishes costs what it did; only a hung or slower run can use up to 11 more minutes."
+}

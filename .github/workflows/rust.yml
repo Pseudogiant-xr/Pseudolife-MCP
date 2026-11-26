@@ -254,7 +254,12 @@ jobs:
     # in (jobs 131684824680, 131776517042), less the 9.5 and 9.2 min of
     # frozen probes that left the job (and since the freeze, CI): 52.8 and
     # 58.6, so 90 -> 100.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 100 || 75 }}
+    # 2026-11-26 (rust/ci/ci_headroom.py's survey of every attempt,
+    # 2026-11-12..26): hosted Windows took 72.0 min on batch run 45052267402
+    # (job 137299879109), 96% of 75, and 90.5 on ordinary PR run 45106587399
+    # (job 137469282228), 90% of 100; about 40% over each: 75 -> 101 and
+    # 100 -> 127.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 127 || 101 }}
     defaults:
       run:
         working-directory: rust

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "42ec8b1f257c8e30",
+  "fingerprint": "d3d700c3481a9931",
+  "reason": "Raises the cli shard's job_timeout only, 35 -> 42 (rust/ci/parity_scope.py): hosted Windows cli took 29.4 min on batch run 45533353153, 84% of 35 (2026-11-12..26 survey). No shard's steps or selection change, so the measured minutes hold; only a hung or slower cli shard can run up to 7 more minutes."
+}
