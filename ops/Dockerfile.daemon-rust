@@ -20,12 +20,32 @@ RUN --mount=type=cache,id=w3j-cargo-registry,target=/usr/local/cargo/registry,sh
 RUN PSEUDOLIFE_DAEMON_PDFIUM_DIR=/opt/pdfium /pseudolife-daemon provision pdfium \
     && chmod -R a+rX /opt/pdfium
 
-FROM python:3.12-slim-bookworm AS runtime-inputs
-# The CPU wheel is used only as a source of its native library, never torch/CUDA.
-RUN pip install --no-cache-dir --no-deps onnxruntime==1.27.0 \
+FROM debian:bookworm-slim AS runtime-inputs
+# The ONNX Runtime 1.27.0 CPU wheel from PyPI is used only as a source of its
+# native library, never torch/CUDA, and needs no Python: a wheel is a zip.
+# Each hash is that wheel's PyPI SHA-256; bump both URLs, both hashes and
+# ORT_DYLIB_PATH together. TARGETARCH picks the build platform's wheel, as pip
+# did; any other platform stops here with its name.
+ARG TARGETARCH
+ARG ORT_WHEEL_URL_AMD64=https://files.pythonhosted.org/packages/26/81/24dd9b31b0fb912ee19ca53ac1c9764bfd79d58a2ccef564eb693be831a5/onnxruntime-1.27.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+ARG ORT_WHEEL_SHA256_AMD64=7c65a7438632d55dfbc8a02ee60bd6cf7dd9d1ba05a43d4b851452f32338e194
+ARG ORT_WHEEL_URL_ARM64=https://files.pythonhosted.org/packages/84/86/c3b6b17745a1997d784dadc9bd88d713d2e6721139a5a0e885b28cfb79b1/onnxruntime-1.27.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
+ARG ORT_WHEEL_SHA256_ARM64=c6fddce0539a4898c7bef35b052ffd37935b2190e35488eab99ce91887743ea1
+RUN case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64) url="$ORT_WHEEL_URL_AMD64" sha="$ORT_WHEEL_SHA256_AMD64" ;; \
+        arm64) url="$ORT_WHEEL_URL_ARM64" sha="$ORT_WHEEL_SHA256_ARM64" ;; \
+        *) echo "ONNX Runtime: no pinned wheel for ${TARGETARCH:-$(dpkg --print-architecture)}; build for amd64 or arm64" >&2; exit 1 ;; \
+    esac \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+    && curl -fsSL --retry 3 --retry-delay 5 "$url" -o /tmp/onnxruntime.whl \
+    && echo "${sha}  /tmp/onnxruntime.whl" | sha256sum -c - \
     && mkdir /opt/ort \
-    && cp /usr/local/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so* /opt/ort/ \
-    && cp /usr/local/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime_providers_shared.so /opt/ort/
+    && unzip -j /tmp/onnxruntime.whl 'onnxruntime/capi/libonnxruntime.so*' \
+        onnxruntime/capi/libonnxruntime_providers_shared.so -d /opt/ort \
+    && test -f /opt/ort/libonnxruntime.so.1.27.0 \
+    && test -f /opt/ort/libonnxruntime_providers_shared.so \
+    && rm -rf /tmp/onnxruntime.whl /var/lib/apt/lists/*
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get -y upgrade \
@@ -44,10 +64,7 @@ COPY frontend/dist /app/static
 COPY --chmod=755 ops/provision-daemon-models.sh /usr/local/bin/provision-daemon-models
 # PSEUDOLIFE_DAEMON_ONNX_DIR=<model-root> and PSEUDOLIFE_DAEMON_RERANK_DIR
 # remain optional overrides; ordinary startup resolves the pinned cache.
-ENV CUDA_VISIBLE_DEVICES=-1 \
-    HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1 \
-    PSEUDOLIFE_MCP_HOST=0.0.0.0 \
+ENV PSEUDOLIFE_MCP_HOST=0.0.0.0 \
     PSEUDOLIFE_MCP_PORT=8765 \
     PSEUDOLIFE_MCP_DATA_DIR=/data \
     PSEUDOLIFE_DAEMON_ORT_THREADS=3 \

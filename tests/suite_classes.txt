@@ -289,6 +289,7 @@ live test_hooks_digest.py
 frozen test_hybrid_default.py
 frozen test_hydrate_capacity.py
 live test_i18n_readme.py
+live test_image_supply_chain_pins.py
 frozen test_init_retry_model_reuse.py
 live test_installed_acceptance.py
 live test_installer_bank_question.py
