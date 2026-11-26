@@ -347,3 +347,18 @@ def test_source_guard_uses_selected_schema_and_rejects_actual_source_drift(monke
         assert checked["oracle_selection"] == selection
         assert checked["stale_pin_report"]["informational_only"]
     assert calls[0][3] == HEAD
+
+
+def test_a_stack_file_tag_bump_is_release_metadata_and_nothing_else_is():
+    # The stack-manager file's Rust image defaults its tag to the release, so a
+    # cut moves it; any other change to the file is not a version-only edit.
+    path = "ops/docker-compose.stack.yml"
+    line = "    image: ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:${PSEUDOLIFE_IMAGE_TAG:-%s}
+"
+    before = (line % "0.26.0").encode()
+    assert oracle.version_metadata_matches(path, before, (line % "0.27.0").encode(), "0.26.0", "0.27.0")
+    # The near misses: another tag, and a change beside the tag.
+    assert not oracle.version_metadata_matches(path, before, (line % "0.27.1").encode(), "0.26.0", "0.27.0")
+    assert not oracle.version_metadata_matches(
+        path, before + b"    restart: always
+", (line % "0.27.0").encode(), "0.26.0", "0.27.0")

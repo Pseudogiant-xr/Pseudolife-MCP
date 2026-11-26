@@ -133,7 +133,15 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
     }
     let labels = host_labels(u, &container);
     let current = labels[ENGINE_LABEL].as_str().unwrap_or("python");
-    if current == "rust" || truthy(&labels[ACTIVATION_LABEL]) {
+    // A Rust daemon a stack manager deployed from ops/docker-compose.stack.yml
+    // carries the engine label alone: update and the installers always add an
+    // activation, so it cannot be an unfinished activation of theirs. A
+    // release update adopts it and records its activation.
+    let stack_deployed = current == "rust"
+        && !truthy(&labels[ACTIVATION_LABEL])
+        && labels[RELEASE_LABEL].is_null()
+        && labels[CHECKOUT_LABEL].is_null();
+    if (current == "rust" || truthy(&labels[ACTIVATION_LABEL])) && !stack_deployed {
         validated(&labels)?;
     }
     if let Some(selected) = selected
@@ -156,7 +164,7 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
     if let Some(repo) = repo {
         return Ok(Some(repo));
     }
-    if labels[RELEASE_LABEL].as_str().is_some() {
+    if labels[RELEASE_LABEL].as_str().is_some() || stack_deployed {
         return Ok(None);
     }
     if u.o.tag.is_some() || u.o.reinstall || u.o.allow_downgrade || u.o.env_file.is_some() {

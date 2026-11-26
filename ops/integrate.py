@@ -1800,7 +1800,7 @@ def _is_ancestor(ancestor: str, descendant: str) -> bool:
     return git("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode == 0
 
 
-# The files of the release-procedure skill's seven-file version cut that
+# The files of the release-procedure skill's eight-file version cut that
 # lie inside the frozen package: the only package paths a cut may change,
 # label or no label.
 CUT_FROZEN_FILES = frozenset({"pseudolife_memory/compose/docker-compose.yml"})
