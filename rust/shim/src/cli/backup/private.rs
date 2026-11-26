@@ -164,7 +164,8 @@ mod tests {
             "host=db oauth_client_secret=s",
         ] {
             let error = super::pg_dump_connection(dsn, false).unwrap_err();
-            assert!(error.contains("service=<name>"), "{dsn}: {error}");
+            // The message names the key, never the value.
+            assert!(error.contains("service=<name>"), "{error}");
         }
     }
 
@@ -176,10 +177,7 @@ mod tests {
             ("postgresql://owner:pw@db/bank", true),
         ] {
             let error = super::pg_dump_connection(dsn, pgservice).unwrap_err();
-            assert!(
-                error.contains("in that service's entry instead"),
-                "{dsn}: {error}"
-            );
+            assert!(error.contains("in that service's entry instead"), "{error}");
         }
         // A service with no password in the string is left to libpq.
         assert_eq!(
