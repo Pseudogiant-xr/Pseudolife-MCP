@@ -13,6 +13,25 @@ pub(super) fn write_config_with(
     after: &[u8],
     before_replace: impl FnOnce(),
 ) -> Result<PathBuf> {
+    // The folders on the way as the path names them, before resolving it: a
+    // link there is followed only when no other account can change it
+    // (`private_path`). Resolving first would hide such a link. The file
+    // itself may be the user's link (a config kept with dotfiles): the
+    // folders on the way to each place it points get the same check, as
+    // written, before the last hop is resolved. (The file's own link is
+    // not checked: whoever can replace it can already rewrite the config.)
+    let mut hop = path.to_owned();
+    for _ in 0..=crate::private_path::MAX_LINKS {
+        crate::credentials::reject_ancestor_redirects(&hop)
+            .map_err(|_| "client config target is redirected")?;
+        let Ok(next) = fs::read_link(&hop) else {
+            break;
+        };
+        hop = match hop.parent() {
+            Some(parent) if next.is_relative() => parent.join(next),
+            _ => next,
+        };
+    }
     let target = if path.exists() {
         fs::canonicalize(path).map_err(io_error)?
     } else {
