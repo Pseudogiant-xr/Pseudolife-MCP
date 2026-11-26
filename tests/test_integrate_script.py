@@ -2594,6 +2594,81 @@ def _three_with_a_collision(world) -> None:
         world.gh.add(n, sha)
 
 
+def _integrate_branches(world) -> list[str]:
+    return _git(world.work, "branch", "--list", "integrate/*", "--format=%(refname:short)").split()
+
+
+def test_build_expect_builds_exactly_the_named_members(world, capsys):
+    _three_with_a_collision(world)        # #11 conflicts with #10 and is dropped
+    assert _build("--expect", "10,#12") == 0, capsys.readouterr().err
+    assert _integrate_branches(world) == [f"integrate/{DATE}-batch-1"]
+    assert [m.number for m in integrate.Plan.load(f"integrate/{DATE}-batch-1").merged] == [10, 12]
+
+
+def _refused_and_nothing_built(world, capsys, *extra) -> str:
+    master = _git(world.work, "rev-parse", "origin/master")
+    assert _build(*extra) == 2
+    err = capsys.readouterr().err
+    assert "nothing was built" in err
+    assert _integrate_branches(world) == [] and world.remote_branches() == []
+    assert world.gh.mutations() == []
+    assert _git(world.work, "rev-parse", "HEAD") == master
+    return err
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_build_expect_stops_when_a_named_member_is_dropped(world, capsys, dry_run):
+    # #2012 left a gate testing the wrong set: a named member left out by a
+    # conflict now stops the build before anything is saved or commented.
+    _three_with_a_collision(world)
+    err = _refused_and_nothing_built(world, capsys, *(["--dry-run"] * dry_run), "--expect", "10,11,12")
+    assert "#11 is left out: " in err and "#10" in err.split("#11 is left out: ", 1)[1]
+
+
+def test_build_expect_stops_when_an_unnamed_member_is_admitted(world, capsys):
+    _three_with_a_collision(world)
+    err = _refused_and_nothing_built(world, capsys, "--expect", "10")
+    assert "#12 would be admitted, but --expect does not name it" in err
+    assert "#11" not in err             # dropped by its conflict: not admitted
+
+
+def test_build_expect_stops_before_merging_when_a_named_member_is_not_ready(world, capsys):
+    _three_with_a_collision(world)
+    world.gh.add(13, world.pr(13, {"e.txt": "e\n"}), isDraft=True)
+    err = _refused_and_nothing_built(world, capsys, "--expect", "10,12,13,99")
+    assert "#13 is left out: is a draft" in err
+    assert "#99 is left out: it is not an open pull request on master carrying `ready-to-batch`" in err
+    assert "dropped #11" not in capsys.readouterr().out
+
+
+def test_build_expect_refuses_where_no_ready_member_would_return_zero(world, capsys):
+    world.gh.add(13, world.pr(13, {"e.txt": "e\n"}), isDraft=True)
+    assert _build() == 0                # today's behaviour without the option
+    capsys.readouterr()
+    err = _refused_and_nothing_built(world, capsys, "--expect", "13")
+    assert "#13 is left out: is a draft" in err
+
+
+def test_build_expect_refuses_before_the_no_batch_drop_comments(world, capsys):
+    # With nothing merged, `build` comments on and unlabels the dropped
+    # member; a named member left out stops it before those comments.
+    world.gh.add(20, world.pr(20, {"a.txt": "one\nTWENTY\nthree\n"}))
+    world.advance_master({"a.txt": "one\nMASTER\nthree\n"})
+    assert _build("--dry-run") == 0     # without the option: no batch, the drop is reported
+    assert "conflicts with master itself" in capsys.readouterr().out
+    err = _refused_and_nothing_built(world, capsys, "--expect", "20")
+    assert "#20 is left out: " in err and "conflicts with master itself" in err
+
+
+@pytest.mark.parametrize("value", ["", " ", "10,", "10,x", "0", "-3", "10 12"])
+def test_build_expect_takes_only_pull_request_numbers(world, capsys, value):
+    with pytest.raises(SystemExit) as stopped:
+        _build("--expect", value)
+    assert stopped.value.code == 2
+    assert "comma-separated pull request numbers" in capsys.readouterr().err
+    assert world.gh.calls == []
+
+
 def test_a_failed_pr_create_can_be_finished_by_rerunning_open(world, capsys):
     _three_with_a_collision(world)
     world.gh.fail_create = "before"

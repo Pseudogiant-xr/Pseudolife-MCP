@@ -10,6 +10,8 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
     python ops/integrate.py status            # labelled PRs, CI, mergeability
     python ops/integrate.py build --dry-run   # what a build would do
     python ops/integrate.py build             # merge the batch locally
+    python ops/integrate.py build --expect <PR,PR...>
+                                              # and stop unless exactly those merge
     python ops/integrate.py build --after-drop <closed batch PR>
                                               # again without its dropped culprit,
                                               # no suite ("After a drop")
@@ -3556,6 +3558,30 @@ def _check_stack_reuse(plan: Plan) -> StackSource | None:
     return record
 
 
+def _expect_refusal(expected: frozenset[int], admitted: set[int], why: dict[int, str],
+                    label: str) -> str | None:
+    """Why the members `build --expect` named differ from those admitted, or None."""
+    missing, extra = sorted(expected - admitted), sorted(admitted - expected)
+    if not missing and not extra:
+        return None
+    lines = [f"#{n} is left out: " + (why.get(n) or f"it is not an open pull request on {BASE} "
+                                      f"carrying `{label}`") for n in missing]
+    lines += [f"#{n} would be admitted, but --expect does not name it" for n in extra]
+    named = ",".join(str(n) for n in sorted(expected))
+    return (f"the batch differs from --expect {named}, so nothing was built:\n  "
+            + "\n  ".join(lines)
+            + "\nfix what leaves a named member out, or name the members you mean, and build again")
+
+
+def _expected_members(text: str) -> frozenset[int]:
+    """`--expect 2012,2009`: the pull request numbers a build must admit."""
+    parts = [part.strip().removeprefix("#") for part in text.split(",")]
+    if not text.strip() or not all(re.fullmatch(r"[1-9][0-9]*", part) for part in parts):
+        raise argparse.ArgumentTypeError(
+            f"expected comma-separated pull request numbers such as 2012,2009, not {text!r}")
+    return frozenset(int(part) for part in parts)
+
+
 def build(args: argparse.Namespace) -> int:
     if args.stacked or args.from_stacked:
         _require_clean_stack(Path.cwd())
@@ -3585,6 +3611,13 @@ def build(args: argparse.Namespace) -> int:
             if m.number in previous and m.sha != previous[m.number]:
                 raise Refusal(f"#{m.number}'s head moved since the stacked build; build and gate normally")
     waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
+    if args.expect is not None:
+        # A named member that sits out stops the build before any merge; an
+        # unnamed one counts only once it merges (a conflict may drop it).
+        ready_now = {m.number for m in members} - {m.number for m, _ in waiting}
+        if refusal := _expect_refusal(args.expect, ready_now & args.expect, dict(
+                (m.number, reason) for m, reason in waiting), args.label):
+            raise Refusal(refusal)
     if len(members) - len(waiting) < MIN_MEMBERS:
         print(f"{len(members) - len(waiting)} of {len(members)} pull request(s) "
               f"carrying `{args.label}` are ready (not a draft, CI on the head not "
@@ -3619,6 +3652,12 @@ def build(args: argparse.Namespace) -> int:
     judged = None
     try:
         judged = _merge_batch(plan, members)
+        if args.expect is not None:
+            # Before anything is saved, commented or checked: the finally
+            # below removes the branch this run made.
+            if refusal := _expect_refusal(args.expect, {m.number for m in plan.merged}, {
+                    d.member.number: d.reason for d in plan.dropped}, args.label):
+                raise Refusal(refusal)
         plan.markers = _new_markers(base_sha)
         plan.head = _out("rev-parse", "HEAD")
         _harness_recipe(plan.head)  # Recheck after the generated metadata commit.
@@ -4777,6 +4816,9 @@ def main(argv: list[str] | None = None) -> int:
                         "creates, pushes and comments on nothing")
     b.add_argument("--date", default=dt.date.today().isoformat(),
                    help="batch date (default: today)")
+    b.add_argument("--expect", type=_expected_members, metavar="PR[,PR...]",
+                   help="the pull requests the batch must hold: exit non-zero and build "
+                        "nothing when one is left out or another is admitted")
     modes = b.add_mutually_exclusive_group()
     modes.add_argument("--stacked", action="store_true",
                        help="build a local-only batch on the sole open batch in a second worktree")
