@@ -225,7 +225,7 @@ provisions them there before its backup.
 To prove the matrix without publication, dispatch `release.yml` on the
 candidate branch. The native build and bundle jobs upload an Actions
 artifact named `native-release-complete`. The version-guard job, wheel build
-and publishers are skipped, even if the Rust image variable is enabled. The
+and publishers are skipped. The
 matrix still checks native crate versions. A release event builds the same
 archives after `guards` succeeds, then verifies the downloaded
 `SHA256SUMS` immediately before attaching the complete set to the

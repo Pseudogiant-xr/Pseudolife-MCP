@@ -194,15 +194,13 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    "denied". Verify:
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
 
-   **Rust artifacts.** One repository variable, disabled when unset, gates
-   the Rust image, and its publication remains downstream of the human-approved
-   `publish` job (the native archives, which have no variable, come
-   before it). `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` publishes the
-   separate `pseudolife-daemon-rust:<version>` image. Since 0.23.0 the Rust
-   daemon is the default Docker engine, so confirm before the release that
-   this variable is still `true`: with the image published, install and
-   release-mode `pseudolife-mcp update` select it (`--engine python` keeps
-   or switches back to Python); without it, no readiness marker is attached,
+   **Rust artifacts.** Every release publishes the separate
+   `pseudolife-daemon-rust:<version>` image, downstream of the human-approved
+   `publish` job (the native archives come before it); no repository
+   variable gates it. Since 0.23.0 the Rust daemon is the default Docker
+   engine: with the image published, install and release-mode
+   `pseudolife-mcp update` select it (`--engine python` keeps or switches
+   back to Python). If the image job fails, no readiness marker is attached,
    so the native client's unpinned update and check report nothing newer and
    a daemon with the readiness rule gives no notice; clients that discover
    through PyPI, and `--tag <version>`, still reach the release, where a host
@@ -220,9 +218,9 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    size. Use `gh release download v<version> --pattern RELEASE-READY.json` to
    verify the marker's version and commit match the tag and its digests match
    the published daemon, PostgreSQL and Rust images.
-   `PSEUDOLIFE_PUBLISH_RUST_DAEMON` must be `true`: with it off the Rust image
-   job is skipped, no marker is attached, and native clients and daemons never
-   learn of the release. The build-only dispatch verifies the archive bundle
+   The `images` and `rust-image` jobs must both succeed: if either fails, no
+   marker is attached, and
+   native clients and daemons never learn of the release. The build-only dispatch verifies the archive bundle
    and skips the marker job.
 
    Verify a published image with

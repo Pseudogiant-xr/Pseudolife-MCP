@@ -90,8 +90,6 @@ def _reachable_jobs(jobs, event, unsuccessful=()):
 
     The budget evaluator treats those results as skipped. For the conditions
     pinned here, failed and skipped prerequisites both block success checks.
-    Repository variables are unknown, so this includes the opt-in image job
-    whenever its prerequisites can succeed.
     """
     blocked = set(unsuccessful)
     graph = {name: needs_of(job) for name, job in jobs.items()}
