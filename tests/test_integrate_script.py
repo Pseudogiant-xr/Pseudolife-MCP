@@ -817,6 +817,8 @@ def test_merge_docs_preview_does_not_depend_on_the_operator_identity(docs_world,
     head = _docs_pr(world)
     _git(world.work, "config", "user.name", "")
     _git(world.work, "config", "user.email", "")
+    _git(world.work, "config", "commit.gpgSign", "true")   # no key here: signing would fail
+    _git(world.work, "config", "gpg.program", "false")
     base = _git(world.origin, "rev-parse", "master")
     with pytest.raises(integrate.Refusal, match="cannot compute the merge of #42"):
         integrate._docs_preview(42, base, head)  # not fetched yet: no object, no conflict claim
@@ -2626,6 +2628,9 @@ def _integrate_branches(world) -> list[str]:
 
 def test_build_expect_builds_exactly_the_named_members(world, capsys):
     _three_with_a_collision(world)        # #11 conflicts with #10 and is dropped
+    # An open pull request no member's head carries is not counted.
+    world.gh.history.append({"number": 30, "state": "OPEN", "labels": [],
+                             "headRefOid": world.pr(30, {"g.txt": "g\n"})})
     assert _build("--expect", "10,#12") == 0, capsys.readouterr().err
     assert _integrate_branches(world) == [f"integrate/{DATE}-batch-1"]
     assert [m.number for m in integrate.Plan.load(f"integrate/{DATE}-batch-1").merged] == [10, 12]
@@ -2687,7 +2692,7 @@ def test_build_expect_refuses_before_the_no_batch_drop_comments(world, capsys):
     assert "#20 is left out: " in err and "conflicts with master itself" in err
 
 
-@pytest.mark.parametrize("parent_state", ["OPEN", "MERGED"])
+@pytest.mark.parametrize("parent_state", ["OPEN", "LANDED"])
 def test_build_expect_counts_an_open_pr_a_members_head_carries(world, capsys, parent_state):
     # A ready #11 stacked on draft #10 brings #10's change into the batch
     # although #10 never merges as a member: unnamed, that is a different set.
@@ -2696,11 +2701,14 @@ def test_build_expect_counts_an_open_pr_a_members_head_carries(world, capsys, pa
     world.gh.add(10, sha10, isDraft=True)
     world.gh.add(11, sha11)
     world.gh.history.append({"number": 10, "state": "OPEN", "headRefOid": sha10, "labels": []})
-    if parent_state == "MERGED":
-        # A parent that has landed is in the base, so it is carried by no one.
-        world.advance_master({"e.txt": "e\n"})
-        _git(world.seed, "push", "-q", "origin", f"{sha10}:refs/heads/landed-10")
-        world.gh.history[-1]["state"] = "MERGED"
+    if parent_state == "LANDED":
+        # #10 has landed on master while GitHub still lists it open: its head
+        # is in the base, so the batch carries nothing new of it.
+        _git(world.seed, "switch", "-q", "-C", "master", "origin/master")
+        _git(world.seed, "merge", "-q", "--no-ff", "-m", "land #10", sha10)
+        _git(world.seed, "push", "-q", "origin", "master")
+        _git(world.work, "fetch", "-q", "origin")
+        _git(world.work, "reset", "-q", "--hard", "origin/master")
         world.gh.ready = [r for r in world.gh.ready if r["number"] != 10]
         assert _build("--dry-run", "--expect", "11") == 0, capsys.readouterr()
         return

@@ -244,6 +244,9 @@ def _frozen_base(tmp_path, files, *, mode="100644", ci_scope=True):
     copies of both in the checkout that raise if anything imports them."""
     base = {path: (ROOT / path).read_text(encoding="utf-8")
             for path in (*SCOPE_FILES, "rust/ci/pr_precheck.py")}
+    if ci_scope == "without predicate":     # a base from before pull_request_skips_rust
+        base["rust/ci/docs_scope.py"] = base["rust/ci/docs_scope.py"].replace(
+            "def pull_request_skips_rust(", "def _renamed_skips_rust(")
     (tmp_path / "rust/ci").mkdir(parents=True)
     marker = tmp_path / "executed"
     for path in ("rust/ci/pr_precheck.py", "rust/ci/docs_scope.py"):
@@ -266,6 +269,7 @@ def _frozen_base(tmp_path, files, *, mode="100644", ci_scope=True):
 
 
 @pytest.mark.parametrize("files,required", [
+    ([], False),
     (["docs/guide.md"], False), (["tests/test_feature.py"], False),
     (["docs/guide.md", "tests/test_feature.py", "changelog.d/note.md"], False),
     (["docs/guide.md", "rust/producer-census.json"], False),
@@ -361,8 +365,11 @@ def test_requirement_agrees_with_the_ci_scope_verdict(integrate, monkeypatch, tm
     assert integrate._not_ready(value) is None
 
 
-@pytest.mark.parametrize("case", ["no run yet", "scope running", "run still going", "run cancelled",
-                                  "other head", "push event", "older attempt"])
+RERUN = ("run cancelled", "scope failed", "rust job absent")
+
+
+@pytest.mark.parametrize("case", ["no run yet", "scope running", "run still going", *RERUN,
+                                  "other head", "push event", "older attempt", "other workflow"])
 def test_a_docs_lane_skip_needs_the_heads_own_finished_run(integrate, monkeypatch, evals_member, case):
     # The docs lane skips the Rust lanes only when its test selection works,
     # so until the head's own pull-request run shows the skip, admission waits.
@@ -370,12 +377,18 @@ def test_a_docs_lane_skip_needs_the_heads_own_finished_run(integrate, monkeypatc
                                 "rust": "absent"},
               "run still going": {"run": ("in_progress", None)},
               "run cancelled": {"run": ("completed", "cancelled")},
+              "scope failed": {"scope": ("completed", "failure")},
+              "rust job absent": {"rust": "absent"},
               "other head": {"head": "b" * 40}, "push event": {"event": "push"},
               "older attempt": {"attempts": (1, 2)}}.get(case, {})
     rollup = [] if case == "no run yet" else _rust_run(monkeypatch, integrate, **kwargs)
+    if case == "other workflow":
+        api = integrate.gh
+        monkeypatch.setattr(integrate, "gh", lambda *args: json.dumps(
+            json.loads(api(*args)) | {"path": ".github/workflows/ci.yml"}) if "/runs/" in args[1] else api(*args))
     required, why = evals_member(rollup)
     assert required is None
-    assert ("rerun the Rust workflow" if case == "run cancelled" else "retry build once it has") in why
+    assert ("rerun the Rust workflow" if case in RERUN else "retry build once it has") in why
     value = member(integrate)
     value.snapshot_required = None
     value.snapshot, value.snapshot_why = integrate._snapshot_state(SHA, rollup, None)
@@ -398,8 +411,42 @@ def test_another_runs_rust_jobs_do_not_undo_the_heads_skip(integrate, monkeypatc
     rollup = _rust_run(monkeypatch, integrate, extra=[
         (12, "workflow_dispatch", SHA, ("completed", "success"), ("in_progress", None), "expanded", (1, 1))])
     assert evals_member(rollup) == (False, "")
-    contexts = [{"__typename": "StatusContext", "context": "Scope", "name": "Scope", "state": "SUCCESS"}]
+    contexts = [{"__typename": "StatusContext", "context": "Scope", "name": "Scope", "state": "SUCCESS"},
+                {"name": "Scope", "status": "COMPLETED", "conclusion": "SUCCESS"}]   # no Actions job
     assert evals_member(contexts)[0] is None
+
+
+def test_unreadable_scope_metadata_waits_and_names_the_cause(integrate, monkeypatch, evals_member):
+    rollup = _rust_run(monkeypatch, integrate)
+    def unavailable(*args):
+        raise integrate.Refusal("HTTP 502: bad gateway\nsecond line")
+    monkeypatch.setattr(integrate, "gh", unavailable)
+    required, why = evals_member(rollup)
+    assert required is None
+    assert "scope job metadata could not be read (HTTP 502: bad gateway)" in why and "retry build" in why
+
+
+@pytest.mark.parametrize("raw", [
+    pytest.param(":100644 100644 0000 1111 M\0evals/README.md", id="no-final-nul"),
+    pytest.param(":100644 100644 0000 1111 M\0evals/README.md\0extra\0", id="odd-records"),
+    pytest.param("100644 100644 0000 1111 M\0evals/README.md\0", id="no-colon"),
+])
+def test_a_malformed_net_diff_is_unread_not_guessed(integrate, monkeypatch, raw):
+    monkeypatch.setattr(integrate, "_out", lambda *args: raw)
+    with pytest.raises(ValueError, match="raw Git diff"):
+        integrate._net_diff("base", "tree")
+
+
+def test_a_selector_verdict_of_the_wrong_shape_is_unread(integrate, monkeypatch, tmp_path):
+    out, _ = _frozen_base(tmp_path, ["evals/README.md"])
+    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="merged-tree\n"))
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
+    monkeypatch.setattr(integrate, "_run", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout="[1, 0, 0]\n", stderr=""))
+    required, why = integrate._snapshot_requirement(member(integrate), "base", [])
+    assert required is None and "three booleans" in why
 
 
 def test_an_always_skipped_diff_needs_no_actions_metadata(integrate, monkeypatch, tmp_path):
@@ -414,7 +461,8 @@ def test_an_always_skipped_diff_needs_no_actions_metadata(integrate, monkeypatch
     assert integrate._snapshot_requirement(member(integrate), "base", []) == (False, "")
 
 
-@pytest.mark.parametrize("mode,ci_scope", [("120000", True), ("160000", True), ("100644", False)])
+@pytest.mark.parametrize("mode,ci_scope", [("120000", True), ("160000", True), ("100644", False),
+                                           ("100644", "without predicate")])
 def test_requirement_keeps_the_replay_ci_scope_would_run(integrate, monkeypatch, tmp_path, mode, ci_scope):
     # A symlink or gitlink under a docs name runs the Rust lanes in CI, and
     # a base without the shared scope verdict skips nothing.
@@ -497,6 +545,10 @@ def test_reported_workflow_names_stay_bound(integrate):
     assert tuple(job["name"].replace("${{ matrix.os }}", os)
                  for os in job["strategy"]["matrix"]["os"]) == integrate.SNAPSHOT_JOBS == JOBS
     assert sum(step.get("name") == integrate.SNAPSHOT_STEP == STEP for step in job["steps"]) == 1
+    # The docs-lane skip is read from these two job names: a rename would
+    # leave such a PR waiting for evidence that never comes.
+    assert job["name"] == integrate.UNEXPANDED_RUST_JOB
+    assert workflow["jobs"]["scope"]["name"] == integrate.SCOPE_JOB
 
 
 def test_ready_collects_checkpoint_before_admission(integrate, actions, monkeypatch):
