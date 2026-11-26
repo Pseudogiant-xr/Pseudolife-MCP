@@ -5,7 +5,7 @@
 //! separate `pseudolife-daemon` binary in the Docker tier).
 //!
 //! Every command that finds a lite bank refuses with [`lite_bank_refusal`],
-//! so the wording is one sentence from one place. The test for a lite bank is
+//! so the wording comes from one place. The test for a lite bank is
 //! the exact signal the lite tier itself wrote, `embedded_pg/PG_VERSION` as a
 //! file: the lite default directory alone is not one, because the native
 //! client installs its own runtimes there too.

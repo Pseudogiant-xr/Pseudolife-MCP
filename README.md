@@ -650,9 +650,11 @@ pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when cu
 **The first update from 0.15.0 or earlier** has no such command (that shim
 answers "unknown mode", and that daemon never announces a release): from a
 checkout, `git pull`, then `ops/update.sh --all` or `ops/update.ps1 -All`;
-for a pipx or pip install, `pipx install --force "pseudolife-mcp[lite]==<version>"`
-or `pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
-extra only for a lite install). After that, `pseudolife-mcp update` exists.
+for a pipx or pip install, `pipx install --force "pseudolife-mcp==<version>"`
+or `pip install --upgrade "pseudolife-mcp==<version>"`. A lite install does
+not take this path: the lite tier is retired, so move its bank with
+[Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker) instead. After that, `pseudolife-mcp update` exists.
 On a client-only machine (the daemon on another host), `update` and
 `--clients-only` move this machine's clients to the daemon's release.
 If that endpoint is silent or reports no version, retry with
@@ -672,7 +674,8 @@ away. `--clients-only` / `--daemon-only` take one half; the shim itself
 runs from wherever it was registered, so use its full path when
 `pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
 the package in the interpreter that holds it (pip, or pipx) and restarts
-nothing: it says what to restart.
+nothing: it says what to restart (a lite bank moves to Docker instead; see
+below).
 
 A Docker host that never chose a daemon engine moves to the Rust daemon on
 an update to a release that publishes its image, after the update has
@@ -717,8 +720,8 @@ definitions are unchanged ([Codex specifics](docs/guide/providers.md#codex-speci
 only a changed `hooks.json` makes every update path print the approval steps.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
-**A lite bank** is not upgraded in place: the lite tier is retired, so move
-it to the Docker tier with [Move a lite bank to
+**A lite bank:** do not upgrade a lite install in place. The lite tier is
+retired, so move its bank to the Docker tier with [Move a lite bank to
 Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker).
 
 Before upgrading a pip or pipx install on Windows, first close every Claude
@@ -1485,7 +1488,9 @@ pseudolife-memory` / `codex mcp remove pseudolife-memory`), then
 the per-user data directory (`%LOCALAPPDATA%\pseudolife-mcp` on Windows,
 `~/.local/share/pseudolife-mcp` on Linux, `~/Library/Application
 Support/pseudolife-mcp` on macOS — or wherever `PSEUDOLIFE_MCP_DATA_DIR`
-points). Back it up first: `pseudolife-mcp backup` works on lite too.
+points). Back it up first with the pip release that
+[Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker) names; the native client does not open a lite bank.
 
 **Docker tier** — deletion is deliberate at every step:
 

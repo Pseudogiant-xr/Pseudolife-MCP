@@ -126,7 +126,7 @@ the Python client when the update runs without a person, when
 `PSEUDOLIFE_SHIM_ENGINE=python` is set, or when an installer run recorded
 that choice. Running sessions keep their runtime. New sessions use the
 selected client through the existing launcher. Pip, pipx and lite installs
-update in place. See [The native client](configuration.md#the-native-client)
+update in place; a lite bank moves to Docker instead (above). See [The native client](configuration.md#the-native-client)
 for the supported platforms, tunnel limits and the route back to Python.
 
 If the Python client registered a tunnel to start automatically, the

@@ -3793,7 +3793,8 @@ says why in one line in each of these cases:
   this machine still runs the Python client, an update with
   PSEUDOLIFE_SHIM_ENGINE=python keeps it`, and its exit code is the run's.
 - **Not moved:** a pip, pipx or lite install, which `update` upgrades in
-  place; a checkout's environment and a checkout deploy; an update started
+  place (a lite bank moves to Docker instead:
+  [Move a lite bank to Docker](#move-a-lite-bank-to-docker)); a checkout's environment and a checkout deploy; an update started
   from 0.22.0 or earlier, which has no client hand-off; and a machine
   already on the native client.
 - **Going back to the Python client.** The native updater does not read
@@ -4618,10 +4619,21 @@ The lite tier is retired: the installer refuses a machine that still holds
 a lite bank, and the native client does not open one but points here
 ([The native client](#the-native-client)). Run these steps with the pip
 release (`pseudolife-mcp` 0.23.x), which still opens a lite bank and is the
-last release whose test suite ran on one. If the machine no longer has it,
-install it into its own virtualenv with Python 3.10 or newer
-(`python -m pip install "pseudolife-mcp[lite]==0.23.1"`) and run step 2's
-`pseudolife-mcp` from that environment.
+last release whose full test suite ran on one. If the machine does not have
+it, install it into its own virtualenv with Python 3.10 or newer, so it
+replaces nothing, and run step 2 with that environment's `pseudolife-mcp`
+(`<venv>/bin/pseudolife-mcp`, or `<venv>\Scripts\pseudolife-mcp` on
+Windows):
+
+```bash
+python -m venv "<venv>"
+"<venv>/bin/python" -m pip install "pseudolife-mcp[lite]==0.23.1"
+```
+
+```powershell
+python -m venv '<venv>'
+& '<venv>\Scripts\python.exe' -m pip install 'pseudolife-mcp[lite]==0.23.1'
+```
 
 An initialized lite bank is deliberately refused by the Docker installer. A
 backup alone does not clear that guard: preserve the stopped cluster before
@@ -4766,9 +4778,10 @@ or when no Python 3.10 or newer is found. It needs no checkout.
 shim answers "unknown mode", and that daemon never checks for a release,
 so nothing announces it): from a checkout, `git pull`, then
 `ops/update.sh --all` or `ops/update.ps1 -All`; for a pipx or pip install,
-`pipx install --force "pseudolife-mcp[lite]==<version>"` or
-`pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
-extra only for a lite install). After that, `pseudolife-mcp update`
+`pipx install --force "pseudolife-mcp==<version>"` or
+`pip install --upgrade "pseudolife-mcp==<version>"`; a lite install moves
+its bank instead ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)),
+because the lite tier is retired. After that, `pseudolife-mcp update`
 exists. The installers make `pseudolife-mcp` typed in a terminal reach the
 shim launcher ([Where the shim lives](#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher));
 in a terminal opened before that, or when `~/.local/bin` is not on `PATH`,

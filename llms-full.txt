@@ -132,7 +132,7 @@ the Python client when the update runs without a person, when
 `PSEUDOLIFE_SHIM_ENGINE=python` is set, or when an installer run recorded
 that choice. Running sessions keep their runtime. New sessions use the
 selected client through the existing launcher. Pip, pipx and lite installs
-update in place. See [The native client](configuration.md#the-native-client)
+update in place; a lite bank moves to Docker instead (above). See [The native client](configuration.md#the-native-client)
 for the supported platforms, tunnel limits and the route back to Python.
 
 If the Python client registered a tunnel to start automatically, the
@@ -1089,9 +1089,11 @@ pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when cu
 **The first update from 0.15.0 or earlier** has no such command (that shim
 answers "unknown mode", and that daemon never announces a release): from a
 checkout, `git pull`, then `ops/update.sh --all` or `ops/update.ps1 -All`;
-for a pipx or pip install, `pipx install --force "pseudolife-mcp[lite]==<version>"`
-or `pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
-extra only for a lite install). After that, `pseudolife-mcp update` exists.
+for a pipx or pip install, `pipx install --force "pseudolife-mcp==<version>"`
+or `pip install --upgrade "pseudolife-mcp==<version>"`. A lite install does
+not take this path: the lite tier is retired, so move its bank with
+[Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker) instead. After that, `pseudolife-mcp update` exists.
 On a client-only machine (the daemon on another host), `update` and
 `--clients-only` move this machine's clients to the daemon's release.
 If that endpoint is silent or reports no version, retry with
@@ -1111,7 +1113,8 @@ away. `--clients-only` / `--daemon-only` take one half; the shim itself
 runs from wherever it was registered, so use its full path when
 `pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
 the package in the interpreter that holds it (pip, or pipx) and restarts
-nothing: it says what to restart.
+nothing: it says what to restart (a lite bank moves to Docker instead; see
+below).
 
 A Docker host that never chose a daemon engine moves to the Rust daemon on
 an update to a release that publishes its image, after the update has
@@ -1156,8 +1159,8 @@ definitions are unchanged ([Codex specifics](docs/guide/providers.md#codex-speci
 only a changed `hooks.json` makes every update path print the approval steps.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
-**A lite bank** is not upgraded in place: the lite tier is retired, so move
-it to the Docker tier with [Move a lite bank to
+**A lite bank:** do not upgrade a lite install in place. The lite tier is
+retired, so move its bank to the Docker tier with [Move a lite bank to
 Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker).
 
 Before upgrading a pip or pipx install on Windows, first close every Claude
@@ -1924,7 +1927,9 @@ pseudolife-memory` / `codex mcp remove pseudolife-memory`), then
 the per-user data directory (`%LOCALAPPDATA%\pseudolife-mcp` on Windows,
 `~/.local/share/pseudolife-mcp` on Linux, `~/Library/Application
 Support/pseudolife-mcp` on macOS — or wherever `PSEUDOLIFE_MCP_DATA_DIR`
-points). Back it up first: `pseudolife-mcp backup` works on lite too.
+points). Back it up first with the pip release that
+[Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker) names; the native client does not open a lite bank.
 
 **Docker tier** — deletion is deliberate at every step:
 
@@ -9064,7 +9069,8 @@ says why in one line in each of these cases:
   this machine still runs the Python client, an update with
   PSEUDOLIFE_SHIM_ENGINE=python keeps it`, and its exit code is the run's.
 - **Not moved:** a pip, pipx or lite install, which `update` upgrades in
-  place; a checkout's environment and a checkout deploy; an update started
+  place (a lite bank moves to Docker instead:
+  [Move a lite bank to Docker](#move-a-lite-bank-to-docker)); a checkout's environment and a checkout deploy; an update started
   from 0.22.0 or earlier, which has no client hand-off; and a machine
   already on the native client.
 - **Going back to the Python client.** The native updater does not read
@@ -9889,10 +9895,21 @@ The lite tier is retired: the installer refuses a machine that still holds
 a lite bank, and the native client does not open one but points here
 ([The native client](#the-native-client)). Run these steps with the pip
 release (`pseudolife-mcp` 0.23.x), which still opens a lite bank and is the
-last release whose test suite ran on one. If the machine no longer has it,
-install it into its own virtualenv with Python 3.10 or newer
-(`python -m pip install "pseudolife-mcp[lite]==0.23.1"`) and run step 2's
-`pseudolife-mcp` from that environment.
+last release whose full test suite ran on one. If the machine does not have
+it, install it into its own virtualenv with Python 3.10 or newer, so it
+replaces nothing, and run step 2 with that environment's `pseudolife-mcp`
+(`<venv>/bin/pseudolife-mcp`, or `<venv>\Scripts\pseudolife-mcp` on
+Windows):
+
+```bash
+python -m venv "<venv>"
+"<venv>/bin/python" -m pip install "pseudolife-mcp[lite]==0.23.1"
+```
+
+```powershell
+python -m venv '<venv>'
+& '<venv>\Scripts\python.exe' -m pip install 'pseudolife-mcp[lite]==0.23.1'
+```
 
 An initialized lite bank is deliberately refused by the Docker installer. A
 backup alone does not clear that guard: preserve the stopped cluster before
@@ -10037,9 +10054,10 @@ or when no Python 3.10 or newer is found. It needs no checkout.
 shim answers "unknown mode", and that daemon never checks for a release,
 so nothing announces it): from a checkout, `git pull`, then
 `ops/update.sh --all` or `ops/update.ps1 -All`; for a pipx or pip install,
-`pipx install --force "pseudolife-mcp[lite]==<version>"` or
-`pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
-extra only for a lite install). After that, `pseudolife-mcp update`
+`pipx install --force "pseudolife-mcp==<version>"` or
+`pip install --upgrade "pseudolife-mcp==<version>"`; a lite install moves
+its bank instead ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)),
+because the lite tier is retired. After that, `pseudolife-mcp update`
 exists. The installers make `pseudolife-mcp` typed in a terminal reach the
 shim launcher ([Where the shim lives](#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher));
 in a terminal opened before that, or when `~/.local/bin` is not on `PATH`,
@@ -12416,10 +12434,11 @@ property away deliberately — that is a supported configuration, and
 [Dreaming](dreaming.md) says so where you make the choice.
 
 Two honest caveats. First, a bank with no extractor configured (the retired
-**lite** tier shipped none) sends no memory content anywhere, because
-nothing extracts anything until you point it at an endpoint (the same
-release check applies, and the same switch turns it off); [Dreaming](dreaming.md)
-says exactly what that costs you. Second, the agent
+**lite** tier shipped none) sends no memory content to any extraction
+endpoint, because nothing extracts anything until you point it at one (the
+same release check applies, and the same switch turns it off); its
+PostgreSQL still receives every memory, wherever that database runs.
+[Dreaming](dreaming.md) says exactly what no extractor costs you. Second, the agent
 calling these tools is usually a hosted model, so "no egress" describes
 this server's behaviour, not your whole stack.
 

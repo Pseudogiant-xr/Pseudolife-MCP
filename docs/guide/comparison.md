@@ -186,10 +186,11 @@ property away deliberately — that is a supported configuration, and
 [Dreaming](dreaming.md) says so where you make the choice.
 
 Two honest caveats. First, a bank with no extractor configured (the retired
-**lite** tier shipped none) sends no memory content anywhere, because
-nothing extracts anything until you point it at an endpoint (the same
-release check applies, and the same switch turns it off); [Dreaming](dreaming.md)
-says exactly what that costs you. Second, the agent
+**lite** tier shipped none) sends no memory content to any extraction
+endpoint, because nothing extracts anything until you point it at one (the
+same release check applies, and the same switch turns it off); its
+PostgreSQL still receives every memory, wherever that database runs.
+[Dreaming](dreaming.md) says exactly what no extractor costs you. Second, the agent
 calling these tools is usually a hosted model, so "no egress" describes
 this server's behaviour, not your whole stack.
 

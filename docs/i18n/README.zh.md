@@ -35,7 +35,7 @@ lite 层(即带有内嵌 PostgreSQL 记忆库、无需 Docker 的 pip 包)已停
 
 ### 持久层——Docker
 
-若需要长期存续的记忆库:包括内置提取器、外部卷、带健康检查的服务,以及备份/回滚工具。需要 Docker,以及至少一个支持 MCP 的编码智能体——Claude Code、Codex 与 Gemini CLI 已完成端到端接入;其他智能体则可获得可直接粘贴使用的配置。从克隆仓库到获得第一条记忆,只需一条命令:
+若需要长期存续的记忆库:它提供内置提取器、外部卷、带健康检查的服务,以及备份/回滚工具。需要 Docker,以及至少一个支持 MCP 的编码智能体——Claude Code、Codex 与 Gemini CLI 已完成端到端接入;其他智能体则可获得可直接粘贴使用的配置。从克隆仓库到获得第一条记忆,只需一条命令:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
