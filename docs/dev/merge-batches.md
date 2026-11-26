@@ -186,7 +186,9 @@ batch builds, opens, merges and other updates to master.
 - The required checks must have reported and each latest check must be
   finished with none failed. `SUCCESS`, `SKIPPED` and `NEUTRAL` qualify.
 - It runs the CI documentation guards and selected reader tests locally
-  in a disposable worktree at GitHub's test merge.
+  in a disposable worktree at the merge of current master and the pull
+  request head, computed locally, because GitHub's test merge can stay on
+  an older base; a conflict in that merge refuses.
 - After the guards, it rechecks the batch state and checks, and requires the
   base and head to match the tested pair. It pins the checked head in the
   merge request and uses a regular GitHub merge commit. It then verifies
@@ -322,9 +324,14 @@ Conflicting heads follow the existing merge/drop path rather than wait for
 replay evidence that GitHub cannot produce: compatible budget-only conflicts retain
 the existing normalization and use the batch's replay, census-only conflicts
 are regenerated on the batch head, and other conflicts
-are dropped. Documentation accompanied only by the generated
-`rust/producer-census.json` follows CI's docs-only skip; census alone or
-alongside runtime edits still requires replay. A diff reaching none satisfies
+are dropped. A diff whose Rust lanes the Rust workflow's scope skips needs
+no replay: admission asks the frozen base's `pull_request_skips_rust` in
+`rust/ci/docs_scope.py`, the predicate the scope job decides with, about
+the net diff and its file modes. Markdown under `evals/` and documentation
+accompanied only by the generated `rust/producer-census.json` are such
+diffs; census alone or alongside runtime edits still requires replay, and
+so does a skipped diff whose head shows the expanded `Rust / <os>` jobs
+(the scope job ran them because its docs test selection failed). A diff reaching none satisfies
 admission immediately, without Actions metadata: documentation and pure
 test-only changes do not wait. Tests imported by a runtime harness are
 runtime inputs and retain their replay requirement. The selector code
@@ -417,6 +424,12 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   master (a compatible one only in the budget file is normalized, so it is
   not shown). A conflict with another member
   shows only once it merges. The report never refuses the build.
+- **`--expect <PR,PR...>`** names the members the batch must hold. A named
+  pull request that sits out stops `build` before any merge; after the
+  merges, a named one that was dropped or an unnamed one that merged stops
+  it before the plan is saved or any comment is posted. Either way it exits
+  2, prints each such pull request with the reason, and removes the branch
+  it made. Without the option `build` behaves as above.
 - **`--dry-run`** does the same merges on a detached HEAD, prints the plan,
   the body and the comments `open` would post, then switches back; it
   creates, pushes and comments on nothing, and only says whether `build`
