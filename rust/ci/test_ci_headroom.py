@@ -353,7 +353,7 @@ def test_a_short_run_costs_no_jobs_call(monkeypatch):
         run.update(run_started_at=run["created_at"], updated_at=run["created_at"], run_attempt=1)
     monkeypatch.setitem(globals(), "FIXTURES", short)
     github = Recorded()
-    reading = ci_headroom.read_runs(github, bounds(), NOW)
+    reading = ci_headroom.read_runs(github, bounds(), datetime(2026, 11, 1, tzinfo=timezone.utc), NOW)
     assert reading.findings == [] and reading.short == len(runs())
     assert not any("/jobs?" in call for call in github.calls)
 
@@ -389,6 +389,41 @@ def test_the_issue_lists_at_most_its_worst_bounds():
     kept = ci_headroom.merge(bounds(ci=ci), [], many, NOW)
     assert [f.job for f in kept] == [f"job {n:02d}" for n in range(ci_headroom.MAX_BOUNDS + 2, 2, -1)]
     assert len(ci_headroom.render(kept, NOW)) < 65_536
+
+
+def test_a_rerun_of_an_older_run_is_read():
+    # A rerun keeps its run's creation time: the listing covers the whole
+    # retention window, one day per query, and keeps what was active since.
+    class Listing:
+        def __init__(self):
+            self.paths = []
+
+        def pages(self, path, key):
+            self.paths.append(path)
+            return [{"id": 1, "updated_at": "2026-11-26T08:00:00Z"},     # rerun today, created long ago
+                    {"id": 2, "updated_at": "2026-11-20T08:00:00Z"},     # nothing since
+                    {"id": 3}]
+    listing = Listing()
+    since = datetime(2026, 11, 24, 9, 0, tzinfo=timezone.utc)
+    found = ci_headroom.recent_runs(listing, "ci.yml", since, NOW)
+    assert sorted(run["id"] for run in found) == [1, 3]
+    days = [path.split("created=")[1].split("&")[0] for path in listing.paths]
+    assert days[0] == "2026-11-12" and days[-1] == "2026-11-26" and len(days) == ci_headroom.RETENTION_DAYS + 1
+
+
+def test_a_bound_keeps_its_newest_near_miss():
+    # Five older, worse runs must not push out the newest one: it decides
+    # how long the bound stays listed.
+    finding = current()[0]
+    older = [Finding(**{**finding.__dict__, "run_id": n, "minutes": finding.bound * 0.95,
+                        "completed_at": f"2026-11-2{n}T00:00:00Z"}) for n in range(5)]
+    newest = Finding(**{**finding.__dict__, "run_id": 99, "minutes": finding.bound * 0.85,
+                        "completed_at": "2026-11-26T00:00:00Z"})
+    kept = ci_headroom.merge(bounds(), [], [*older, newest], NOW)
+    assert newest in kept and len(kept) == ci_headroom.PER_BOUND + 1
+    # Once the older ones age out the newest still holds the bound listed.
+    later = datetime(2026, 12, 8, 12, 0, tzinfo=timezone.utc)
+    assert ci_headroom.merge(bounds(), kept, [], later) == [newest]
 
 
 def test_sync_reads_at_most_its_days(monkeypatch):

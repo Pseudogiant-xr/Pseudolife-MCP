@@ -69,11 +69,13 @@ RETENTION_DAYS = 14
 # body holds 65,536 characters.
 PER_BOUND = 5
 MAX_BOUNDS = 12
-# sync's longest look back. A day needs about 110 API calls, estimated from
-# W127's 2026-11-12..26 survey: about 85 runs a day outlast too_short()
-# (about 70 of rust.yml, 15 of ci.yml, none of python-freeze.yml), one jobs
-# listing each, plus run listings and about 10 test-diagnostics reads.
-# GITHUB_TOKEN allows 1000 calls an hour for the whole repository.
+# sync's longest look back. Estimated from W127's 2026-11-12..26 survey: the
+# run listings take about 90 calls (15 days of five workflows, one query per
+# day, python-freeze.yml's about 130 runs a day on two pages), and each day
+# of activity about 110 more: about 85 runs a day outlast too_short() (about
+# 70 of rust.yml, 15 of ci.yml, none of python-freeze.yml), one jobs listing
+# each, plus about 10 test-diagnostics reads. GITHUB_TOKEN allows 1000 calls
+# an hour for the whole repository.
 SYNC_DAYS = 3
 DIAGNOSTICS = "test-diagnostics"
 TITLE = "CI: a hosted job is close to its time limit"
@@ -404,6 +406,15 @@ def still_holds(bounds: Bounds, finding: Finding) -> Finding | None:
     return Finding(**{**asdict(finding), "bound": bound, "note": note})
 
 
+def keep(found: list[Finding]) -> list[Finding]:
+    """A bound's worst PER_BOUND runs, plus its newest near miss when that is
+    not among them: the newest one decides how long the bound stays listed,
+    so dropping it would let the issue close while it is still recent."""
+    worst = sorted(found, key=lambda finding: (finding.share, finding.completed_at), reverse=True)[:PER_BOUND]
+    newest = max(found, key=lambda finding: (finding.completed_at, finding.share))
+    return worst if newest in worst else [*worst, newest]
+
+
 def merge(bounds: Bounds, previous: list[Finding], current: list[Finding], now: datetime) -> list[Finding]:
     """Today's findings plus the earlier ones that still hold and are inside
     the retention window, newest first."""
@@ -418,8 +429,7 @@ def merge(bounds: Bounds, previous: list[Finding], current: list[Finding], now: 
             groups.setdefault(finding.group(), []).append(finding)
     # The worst runs of each bound, the worst bound first: what a reader
     # needs to size a raise, kept small enough for an issue body.
-    ranked = [sorted(found, key=lambda finding: (finding.share, finding.completed_at), reverse=True)[:PER_BOUND]
-              for found in groups.values()]
+    ranked = [keep(found) for found in groups.values()]
     ranked.sort(key=lambda found: (found[0].share, found[0].job), reverse=True)
     return [finding for found in ranked[:MAX_BOUNDS] for finding in found]
 
@@ -557,13 +567,29 @@ def too_short(bounds: Bounds, workflow: str, run: dict) -> bool:
     return smallest is not None and minutes_between(run["run_started_at"], run["updated_at"]) < THRESHOLD * smallest
 
 
-def read_runs(github, bounds: Bounds, since: datetime) -> Reading:
+def recent_runs(github, workflow: str, since: datetime, now: datetime) -> list[dict]:
+    """The completed runs with activity since ``since``. A rerun keeps its
+    run's creation time, so the listing covers every run created in the
+    retention window, one UTC day per query (a listing stops at 1000 runs),
+    and keeps those updated since then: a job rerun today of a run created a
+    week ago is read too."""
+    found: dict[int, dict] = {}
+    day = (now - timedelta(days=RETENTION_DAYS)).date()
+    while day <= now.date():
+        for run in github.pages(f"repos/{REPOSITORY}/actions/workflows/{workflow}/runs"
+                                f"?status=completed&created={day.isoformat()}&per_page=100", "workflow_runs"):
+            updated = run.get("updated_at")
+            if updated is None or parse_time(updated) >= since:
+                found.setdefault(int(run["id"]), run)
+        day += timedelta(days=1)
+    return list(found.values())
+
+
+def read_runs(github, bounds: Bounds, since: datetime, now: datetime | None = None) -> Reading:
     reading = Reading()
-    stamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now or datetime.now(timezone.utc)
     for workflow in sorted(bounds.shapes):
-        runs = github.pages(f"repos/{REPOSITORY}/actions/workflows/{workflow}/runs"
-                            f"?status=completed&created=%3E%3D{stamp}&per_page=100", "workflow_runs")
-        for run in runs:
+        for run in recent_runs(github, workflow, since, now):
             # A fork's pull request runs the fork's own workflow file and
             # uploads what its branch wrote: its job names and artifacts are
             # its author's text. A fork runs only the fast lanes anyway.
@@ -662,7 +688,7 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(timezone.utc)
     bounds = Bounds.from_checkout()
     github = GitHub()
-    reading = read_runs(github, bounds, now - timedelta(days=options.days))
+    reading = read_runs(github, bounds, now - timedelta(days=options.days), now)
     print(summary(reading))
     if options.command == "sync":
         print(sync(github, bounds, reading.findings, now))
