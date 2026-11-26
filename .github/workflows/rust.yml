@@ -254,7 +254,14 @@ jobs:
     # in (jobs 131684824680, 131776517042), less the 9.5 and 9.2 min of
     # frozen probes that left the job (and since the freeze, CI): 52.8 and
     # 58.6, so 90 -> 100.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 100 || 75 }}
+    # 2026-11-26, Windows only (every attempt of rust.yml runs created
+    # 2026-11-12..26): hosted Windows took 72.0 min on batch run 45052267402
+    # (job 137299879109), 96% of 75, and 90.5 on ordinary PR run 45106587399
+    # (job 137469282228), 90% of 100; about 40% over each: 75 -> 101 and
+    # 100 -> 127. Ubuntu's slowest were 43.2 (batch run 44957877008) and 72.0
+    # (ordinary PR run 45403894527), inside 75 and 100 with 40% to spare, so
+    # it keeps them and a hung Ubuntu job holds its slot no longer.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && (matrix.os == 'windows-latest' && 127 || 100) || (matrix.os == 'windows-latest' && 101 || 75) }}
     defaults:
       run:
         working-directory: rust

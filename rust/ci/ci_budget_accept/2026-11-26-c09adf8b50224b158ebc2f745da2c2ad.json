@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "74b330783badb465",
+  "fingerprint": "c5485972763d0a43",
+  "reason": "Raises timeout-minutes on Windows only, 75 -> 101 (batch, push, nightly) and 100 -> 127 (ordinary pull request): hosted Windows took 72.0 min on batch run 45052267402 and 90.5 on ordinary PR run 45106587399 (96% and 90% of the old bounds; every attempt of rust.yml runs created 2026-11-12..26). Ubuntu keeps 75 and 100. The steps are unchanged, so a run that finishes costs what it did; only a hung or slower Windows run can use up to 26 or 27 more minutes before the bound ends it."
+}
