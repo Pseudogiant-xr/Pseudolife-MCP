@@ -1416,7 +1416,7 @@
    "d": [
     "The guards match the tag to pyproject, both server.json versions and both native crate versions before build. PyPI uses OIDC and a human-approved environment.",
     "The native asset build can attach the archives, Compose bundle and SHA256SUMS even if the independent wheel build fails. PyPI publish requires both paths to succeed.",
-    "After PyPI: Python daemon and PostgreSQL images go to GHCR, and the Rust daemon image is published if PSEUDOLIFE_PUBLISH_RUST_DAEMON is true. Both image jobs must succeed before RELEASE-READY.json is attached. The registry job publishes server.json through OIDC."
+    "After PyPI: Python daemon and PostgreSQL images go to GHCR, and the Rust daemon image is published on every release. Both image jobs must succeed before RELEASE-READY.json is attached. The registry job publishes server.json through OIDC."
    ]
   },
   {

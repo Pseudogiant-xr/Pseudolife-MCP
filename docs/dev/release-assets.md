@@ -170,8 +170,7 @@ report its last accepted release from a previous check.
 | Daemon with the readiness rule | Accepts the full asset set and can advertise a newer version. | Offers no notice for that release. |
 
 The first cut with this rule must publish the traditional asset set, wheel,
-all three images and `RELEASE-READY.json` from the same tagged commit. Keep
-`PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` for existing Rust Docker installations.
+all three images and `RELEASE-READY.json` from the same tagged commit.
 
 ## Image and publication gates
 
@@ -183,9 +182,9 @@ does not imply a daemon image for every target. The runtime installs
 `pseudolife-daemon` and `/usr/local/bin/pseudolife-mcp`; the latter supports
 `docker run --rm <image> pseudolife-mcp version` without provisioning models.
 
-The image job is enabled only by the maintainer setting
-`PSEUDOLIFE_PUBLISH_RUST_DAEMON=true`; unset or other values disable it.
-On a published release, `guards` checks the tag, Python package metadata,
+Every published release runs the image job; no repository variable gates it,
+because a skipped image job would leave the marker absent without failing
+the run. On a published release, `guards` checks the tag, Python package metadata,
 both `server.json` version fields and both native crate versions. Then
 `build` builds and checks the wheel and sdist while `rust-assets`,
 `rust-assets-bundle` and `rust-assets-publish` build, verify and attach the
