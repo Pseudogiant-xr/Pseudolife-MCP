@@ -9,8 +9,10 @@ points here; each rule exists because it was broken at least once.
   before commit** when the maintainer authorizes the judged run. It measures
   Rust daemon retrieval and answer quality on the pinned slice against the
   committed Rust baseline. Exit 0 records a pass, exit 1 records a measured
-  regression, and exit 2 records an incomplete or invalid run. Until the Rust
-  baseline is committed, report the judged gate as pending. Extraction and
+  regression, and exit 2 records an incomplete or invalid run. The Rust
+  baseline is committed (`results/rust-quality/regression_gate.baseline.json`),
+  so report the judged gate by that exit; it is pending only while the
+  maintainer has not authorized the run. Extraction and
   dream-path changes re-run `evals/ladder_sweep.py` under the same authorization.
   In the pull request's Verification section, record the judged result or the
   applicable pending status (`judged gate: pending (not authorised)` or
