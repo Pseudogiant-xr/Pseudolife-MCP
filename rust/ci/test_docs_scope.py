@@ -323,6 +323,27 @@ def test_ordinary_docs_pull_request_keeps_the_fast_lanes(repo, tmp_path, generat
     assert not selected_lanes("rust.yml", RUST_JOBS, "pull_request", {"full": "false", "rust": "false"})
 
 
+@pytest.mark.parametrize("paths, docs_lane, legacy", [
+    (["evals/README.md"], True, False),
+    (["evals/RUST-DRIVERS.md", "llms-full.txt"], True, False),
+    (["docs/example.md", docs_scope.CENSUS], True, True),
+    (["evals/prompts/extract.md"], False, False),
+    (["evals/README.md", "evals/harness.py"], False, False),
+    ([docs_scope.CENSUS], False, False),
+])
+def test_pull_request_rust_verdict_is_the_shared_predicate(repo, paths, docs_lane, legacy):
+    # ops/integrate.py build admits on pull_request_skips_rust: it must be
+    # what rust_scope decides, with and without the docs lane selected.
+    root, _, commit = repo
+    sha = commit(*paths)
+    env = {"EVENT_NAME": "pull_request", "HEAD_REF": "docs/example", "GITHUB_SHA": sha}
+    assert docs_scope.pull_request_skips_rust(paths, True) is (docs_lane or legacy)
+    assert docs_scope.pull_request_skips_rust(paths, True, docs_lane=False) is legacy
+    assert docs_scope.pull_request_skips_rust(paths, False) is False
+    assert docs_scope.rust_scope(env) == (False, not (docs_lane or legacy))
+    assert docs_scope.rust_scope(env, docs=False) == (False, not legacy)
+
+
 def test_docs_guard_selection_keeps_the_named_guards_and_touched_readers(repo, tmp_path):
     root, before, commit = repo
     files = {"test_reader.py": "def test_doc(): assert 'guide-page.md'\n",

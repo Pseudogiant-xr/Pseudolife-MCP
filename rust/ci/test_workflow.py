@@ -1729,11 +1729,14 @@ def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
     class TimeoutContext(Evaluator):
         def lookup(self, path):
             return full if path == ["needs", "scope", "outputs", "full"] else super().lookup(path)
+    # The bound depends on the OS too since 2026-11-26 (Windows got more).
     for event, full in (("pull_request", "false"), ("pull_request", "true"),
                         ("pull_request", ""), ("push", "true"), ("schedule", "true")):
-        timeout = TimeoutContext(event, ["scope"], set()).run(condition_text(job["timeout-minutes"]))
-        assert timeout >= 45
-        assert 0 < override["timeout-minutes"] < timeout
+        for system in job["strategy"]["matrix"]["os"]:
+            timeout = TimeoutContext(event, ["scope"], set(), {"os": system}).run(
+                condition_text(job["timeout-minutes"]))
+            assert timeout >= 45, (event, full, system)
+            assert 0 < override["timeout-minutes"] < timeout
 
 
 # --- self-hosted comparison lane (docs/specs/2026-10-19-self-hosted-parity-lane.md) ---

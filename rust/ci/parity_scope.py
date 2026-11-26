@@ -57,8 +57,12 @@ SHARDS = [
     # cli 23.2 min, cli-daemon 25.9, started 9.6 min late). Windows step
     # times from that run, plus about 3.5 min setup per shard:
     # cli keeps the sent-YAML check and the CLI rows' self-tests and goldens,
-    # lease and lease operator steps, 10.0 min.
-    {"suite": "cli", "job_timeout": 35},
+    # lease and lease operator steps, 10.0 min. 35 -> 44 on 2026-11-26:
+    # hosted Windows cli took 31.3 min on run 43476090949 (job 132069304158,
+    # 2026-11-13) and 29.4 on batch run 45533353153 (job 138938739556), 84% of
+    # 35 (every attempt of rust.yml runs created 2026-11-12..26); 44 is about
+    # 40% over 31.3. One entry serves both OSes: Ubuntu's slowest was 17.1.
+    {"suite": "cli", "job_timeout": 44},
     # cli-store: dream cursor, static, graph store, background and
     # principal steps, 9.6 min; since the freeze also the body and security
     # golden replays from cli-live (whose live passes took most of their

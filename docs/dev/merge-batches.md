@@ -15,7 +15,10 @@ Each change waits for hosted CI once, on its batch:
 - **An ordinary pull request** (any head branch but `integrate/*`) without a
   docs-only scope decision runs the fast lanes only. In `ci.yml`: `scope`,
   `guards`, `lock-resolve` and
-  `frontend`; the `test` job and the lite OS lanes are skipped. In
+  `frontend`; the `test` job and the lite OS lanes are skipped, except that
+  a release cut's pull request runs `test` with the frozen test files
+  (`ops/ci_release_cut.py`), so the cut learns its suite's time and failures
+  before its batch. In
   `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest and
   the selected early parity replay described below),
   the disposable-image check and the `Parity` gate; the candidate, harness
@@ -186,7 +189,9 @@ batch builds, opens, merges and other updates to master.
 - The required checks must have reported and each latest check must be
   finished with none failed. `SUCCESS`, `SKIPPED` and `NEUTRAL` qualify.
 - It runs the CI documentation guards and selected reader tests locally
-  in a disposable worktree at GitHub's test merge.
+  in a disposable worktree at the merge of current master and the pull
+  request head, computed locally, because GitHub's test merge can stay on
+  an older base; a conflict in that merge refuses.
 - After the guards, it rechecks the batch state and checks, and requires the
   base and head to match the tested pair. It pins the checked head in the
   merge request and uses a regular GitHub merge commit. It then verifies
@@ -322,9 +327,20 @@ Conflicting heads follow the existing merge/drop path rather than wait for
 replay evidence that GitHub cannot produce: compatible budget-only conflicts retain
 the existing normalization and use the batch's replay, census-only conflicts
 are regenerated on the batch head, and other conflicts
-are dropped. Documentation accompanied only by the generated
-`rust/producer-census.json` follows CI's docs-only skip; census alone or
-alongside runtime edits still requires replay. A diff reaching none satisfies
+are dropped. A diff whose Rust lanes the Rust workflow's scope skips needs
+no replay: admission asks the frozen base's `pull_request_skips_rust` in
+`rust/ci/docs_scope.py`, the predicate the scope job decides with, about
+the net diff and its file modes. Documentation accompanied only by the
+generated `rust/producer-census.json` is skipped whatever the scope job's
+docs lane does, so it is admitted at once; census alone or alongside
+runtime edits still requires replay. A diff only the docs lane skips, such
+as Markdown under `evals/`, is admitted once the latest attempt of the
+head's newest pull-request run of the Rust workflow has finished
+successfully with its `Scope` job passed and its Rust job skipped
+(reported unexpanded as `Rust / ${{ matrix.os }}`); until then it waits, a
+cancelled run needs a rerun, and if that attempt expanded the `Rust / <os>`
+jobs (its docs test selection failed) their replay is required. `open`
+reads that run again before publishing. A diff reaching none satisfies
 admission immediately, without Actions metadata: documentation and pure
 test-only changes do not wait. Tests imported by a runtime harness are
 runtime inputs and retain their replay requirement. The selector code
@@ -376,7 +392,9 @@ the cut adds) is left out instead, with the fix in its comment, and the
 others batch as usual. Nothing in CI compares a cut with the old Python
 release since the Python freeze, so a cut no longer has to be version-only
 for CI (`release_cut()` in `evals/rust_port/oracle_selection.py` is used
-only by a manual stress dispatch); it still needs `freeze-exception`, a
+by a manual stress dispatch, and by `ci.yml`'s scope to give a version-only
+cut's own pull request its early frozen-inclusive `test` run; a cut that
+carries other changes gets no early run); it still needs `freeze-exception`, a
 label only the maintainer's ruling for that cut puts on it, while it edits
 `pseudolife_memory/compose/docker-compose.yml`, and a cut that changes any
 other package path is refused, label or no label.
@@ -417,6 +435,13 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   master (a compatible one only in the budget file is normalized, so it is
   not shown). A conflict with another member
   shows only once it merges. The report never refuses the build.
+- **`--expect <PR,PR...>`** names the members the batch must hold. A named
+  pull request that sits out stops `build` before any merge; after the
+  merges, a named one that was dropped, an unnamed one that merged, or an
+  unnamed open one whose head a member's head carries stops it before the
+  plan is saved or any comment is posted. Either way it exits
+  2, prints each such pull request with the reason, and removes the branch
+  it made. Without the option `build` behaves as above.
 - **`--dry-run`** does the same merges on a detached HEAD, prints the plan,
   the body and the comments `open` would post, then switches back; it
   creates, pushes and comments on nothing, and only says whether `build`
