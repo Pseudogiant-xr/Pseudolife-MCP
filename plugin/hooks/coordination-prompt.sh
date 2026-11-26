@@ -26,8 +26,17 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
     # the complete system-generated prompt against this thread's nonce.
     PENDING="$DIGEST_DIR/$KEY.bell-pending"
     if [ -f "$PENDING" ] && [ ! -L "$PENDING" ]; then
-        LAUNCHER="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-${HOME:-${USERPROFILE:-~}}/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
-        if [ -f "$LAUNCHER" ]; then
+        case "${OSTYPE:-}" in
+            msys*|mingw*|cygwin*)
+                # Git Bash on Windows: the installers put it under %LOCALAPPDATA%.
+                LAUNCHER=${PSEUDOLIFE_SHIM_LAUNCHER:-}
+                [ -n "$LAUNCHER" ] || [ -z "${LOCALAPPDATA:-}" ] ||
+                    LAUNCHER="$LOCALAPPDATA/pseudolife-mcp/bin/pseudolife-mcp.exe"
+                [ -z "$LAUNCHER" ] || LAUNCHER=$(cygpath -u "$LAUNCHER" 2>/dev/null) || LAUNCHER="" ;;
+            *)
+                LAUNCHER="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-${HOME:-${USERPROFILE:-~}}/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}" ;;
+        esac
+        if [ -n "$LAUNCHER" ] && [ -f "$LAUNCHER" ]; then
             printf '%s' "$INPUT" | "$LAUNCHER" doorbell-prompt-seen >/dev/null 2>&1 || true
         elif command -v pseudolife-mcp >/dev/null 2>&1; then
             printf '%s' "$INPUT" | pseudolife-mcp doorbell-prompt-seen >/dev/null 2>&1 || true

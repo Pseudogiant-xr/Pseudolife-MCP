@@ -134,6 +134,11 @@ decode_connection_value() {
 
 INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+# It goes into a JSON body: only an id-shaped value counts, with the
+# character set coordination-prompt.sh uses (spelled out, never a range:
+# tests/test_hook_glob_ranges.py).
+case "$SID" in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) SID="" ;; esac
+[ "${#SID}" -le 128 ] || SID=""
 REASON=$(printf '%s' "$INPUT" | sed -n 's/.*"reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 
 # Coordination digest key, first: Claude Code gives a plugin SessionEnd hook
@@ -309,7 +314,10 @@ if [ -n "$TOKEN_FILE" ]; then
         CONNECTION_ERROR=1
     else
         TOKEN=$(cat "$TOKEN_FILE")
-        if [ -z "$TOKEN" ] || printf '%s' "$TOKEN" | LC_ALL=C grep -q '[[:space:]]'; then
+        # A file saved with a CRLF line end (Notepad, Set-Content) ends in CR.
+        TOKEN=${TOKEN%$'\r'}
+        # grep reads lines, so a newline inside the token is checked apart.
+        if [ -z "$TOKEN" ] || [ "$TOKEN" != "${TOKEN//$'\n'/}" ] || printf '%s' "$TOKEN" | LC_ALL=C grep -q '[[:space:]]'; then
             CONNECTION_ERROR=1
         fi
     fi

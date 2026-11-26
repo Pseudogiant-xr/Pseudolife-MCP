@@ -8,6 +8,12 @@ INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$SRC" ] || SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"session_start_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+# Only an id-shaped value counts, with the character set coordination-prompt.sh
+# uses (spelled out, never a range: tests/test_hook_glob_ranges.py).
+case "$SID" in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) SID="" ;; esac
+[ "${#SID}" -le 128 ] || SID=""
+case "$SRC" in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) SRC="" ;; esac
+[ "${#SRC}" -le 64 ] || SRC=""
 # Coordination digest key (see coordination-prompt.sh for the file layout).
 # Claude Code keeps an MCP server's CLAUDE_CODE_SESSION_ID for the life of
 # the process, while /clear and /resume give hooks a new session id
@@ -422,7 +428,10 @@ if [ -n "$TOKEN_FILE" ]; then
         CONNECTION_ERROR=1
     else
         TOKEN=$(cat "$TOKEN_FILE")
-        if [ -z "$TOKEN" ] || printf '%s' "$TOKEN" | LC_ALL=C grep -q '[[:space:]]'; then
+        # A file saved with a CRLF line end (Notepad, Set-Content) ends in CR.
+        TOKEN=${TOKEN%$'\r'}
+        # grep reads lines, so a newline inside the token is checked apart.
+        if [ -z "$TOKEN" ] || [ "$TOKEN" != "${TOKEN//$'\n'/}" ] || printf '%s' "$TOKEN" | LC_ALL=C grep -q '[[:space:]]'; then
             CONNECTION_ERROR=1
         fi
     fi
