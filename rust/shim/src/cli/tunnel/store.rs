@@ -141,9 +141,15 @@ fn open_private(path: &Path) -> io::Result<File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
-        // The CRT's os.open shares read and write, never delete.
-        options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+        // The CRT's os.open shares read and write, never delete. A leaf
+        // swapped for a link after checked_path opens as the link itself,
+        // which private_read then refuses, as credentials.rs does.
+        options
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
     }
     sharing_retry(|| options.open(path))
 }
@@ -198,6 +204,12 @@ pub(super) fn private_read(path: &Path, limit: usize) -> Result<Vec<u8>, Fail> {
         }
     }
     let file = open_private(&target).map_err(|_| Fail::Tunnel(UNAVAILABLE))?;
+    // The opened handle, not the checked path: a link opened as itself.
+    match file.metadata() {
+        Ok(info) if is_redirect(&info) => return Err(Fail::Tunnel(REDIRECT)),
+        Ok(info) if !info.is_file() => return Err(Fail::Tunnel(UNAVAILABLE)),
+        _ => {}
+    }
     if !owner_only_file(&file) {
         return Err(Fail::Tunnel(UNAVAILABLE));
     }
@@ -708,6 +720,47 @@ mod tests {
         });
         assert!(result.is_ok());
         assert_eq!(attempts, 2);
+    }
+
+    /// A leaf swapped for a link between checked_path and the open opens as
+    /// the link itself (Windows: FILE_FLAG_OPEN_REPARSE_POINT; POSIX:
+    /// O_NOFOLLOW refuses it), never as the file it names.
+    #[test]
+    fn a_profile_leaf_that_is_a_link_never_opens_as_its_target() {
+        let dir = std::env::temp_dir().join(format!(
+            "w131-tunnel-leaf-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let real = dir.join("real.profile.json");
+        let link = dir.join("link.profile.json");
+        fs::write(&real, b"{}").unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&real, &link)
+            .expect("a file symlink (hosted runners and the Windows dev VM allow one)");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let opened = open_private(&link);
+        // Windows opens the link itself; O_NOFOLLOW refuses it on POSIX.
+        #[cfg(windows)]
+        assert!(
+            is_redirect(
+                &opened
+                    .expect("the link opens as itself")
+                    .metadata()
+                    .unwrap()
+            ),
+            "opened the link's target"
+        );
+        #[cfg(unix)]
+        assert!(opened.is_err(), "opened the link's target");
+        // The plain file next to it still opens as a file (the near miss).
+        let plain = open_private(&real).unwrap();
+        assert!(plain.metadata().unwrap().is_file());
+        drop(plain);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn payload(text: &str) -> Map<String, Value> {
