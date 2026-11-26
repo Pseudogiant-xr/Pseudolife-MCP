@@ -1,8 +1,8 @@
-<!-- i18n-sync: v14 -->
+<!-- i18n-sync: v15 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v14 (2026-11-26)
+[README original em inglês](../../README.md) — sincronizado: v15 (2026-11-26)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -47,36 +47,20 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 O que ele pergunta e o que configura está na seção Camada durável, abaixo.
 
-Para experimentar a camada lite em vez disso (o pacote Python, que portanto
-precisa de Python no host), dois comandos. Sem Docker, sem banco de dados para
-configurar, sem runtime de container:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-Codex em vez do Claude Code — mesmo formato:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory -- pseudolife-mcp
-```
-
-Em seguida, em qualquer um dos agentes de codificação: *"lembre que minha
+Em seguida, no seu agente de codificação: *"lembre que minha
 máquina de staging é haze-02"* — e, em uma sessão nova dias depois,
 *"qual é a máquina de staging?"* recebe a resposta de volta, vinda da
 memória. Navegue por tudo no Cortex Console em `http://127.0.0.1:8765/ui/`.
 
-A primeira sessão inicia o daemon automaticamente, que provisiona um
-PostgreSQL embutido e baixa o modelo de embedding — um passo único. O
-Lite não vem com um **extractor** de sonhos, então fatos canônicos não
-aparecem sozinhos: nesse caminho, `memory_fact_set` é o único gravador do
-**cortex**, até que um endpoint compatível com OpenAI seja configurado.
+A camada lite (o pacote pip com um banco PostgreSQL embutido e sem
+Docker) foi aposentada, e o instalador recusa uma máquina que ainda tenha
+um banco lite. Migre esse banco antes, com
+[Mover um banco lite para o Docker](../guide/configuration.md#move-a-lite-bank-to-docker):
+ele faz backup do banco parado e o restaura no novo banco Docker.
 
 ### Camada durável — Docker
 
-Para um banco de memória duradouro: tudo o que foi dito acima, mais o
+Para um banco de memória duradouro: o
 extrator incluído, volumes externos, serviços com health-check e
 ferramentas de backup/rollback. Requer Docker e pelo menos um agente de
 codificação compatível com MCP — Claude Code, Codex e Gemini CLI estão

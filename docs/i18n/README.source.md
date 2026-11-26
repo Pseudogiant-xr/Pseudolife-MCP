@@ -1,4 +1,4 @@
-<!-- i18n-source: v14 (2026-11-26) — canonical English text for the translated
+<!-- i18n-source: v15 (2026-11-26) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -49,36 +49,20 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 What it asks and what it sets up are in the Durable tier section below.
 
-To try the lite tier instead (the Python package, so it needs a host
-Python), two commands. No Docker, no database to set up, no container
-runtime:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-Codex instead of Claude Code — same shape:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory -- pseudolife-mcp
-```
-
-Then, in either coding agent: *"remember that my staging box is
+Then, in your coding agent: *"remember that my staging box is
 haze-02"* — and in a fresh session days later, *"which box is staging?"*
 gets the answer back from memory. Browse everything in the Cortex Console
 at `http://127.0.0.1:8765/ui/`.
 
-The first session auto-starts the daemon, which provisions an embedded
-PostgreSQL and downloads the embedding model — a one-time step. Lite ships
-no dream **extractor**, so canonical facts don't appear on their own: on
-this path `memory_fact_set` is the only **cortex** writer, until an
-OpenAI-compatible endpoint is configured.
+The lite tier (the pip package with an embedded PostgreSQL bank and no
+Docker) is retired, and the installer refuses a machine that still holds a
+lite bank. Move that bank first, with
+[Move a lite bank to Docker](../guide/configuration.md#move-a-lite-bank-to-docker):
+it backs the stopped bank up and restores it into the new Docker bank.
 
 ### Durable tier — Docker
 
-For a long-lived bank: everything above, plus the bundled extractor,
+For a long-lived bank: the bundled extractor,
 external volumes, health-checked services, and backup/rollback tooling.
 Requires Docker and at least one MCP-capable coding agent — Claude Code,
 Codex, and Gemini CLI are wired end-to-end; anything else gets paste-ready

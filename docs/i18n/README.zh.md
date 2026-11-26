@@ -1,8 +1,8 @@
-<!-- i18n-sync: v14 -->
+<!-- i18n-sync: v15 -->
 
 # Pseudolife-MCP
 
-[英文版 README](../../README.md) · 已同步:v14 (2026-11-26)
+[英文版 README](../../README.md) · 已同步:v15 (2026-11-26)
 
 **为 Claude Code、Codex 及其他 MCP 客户端提供持久的长期记忆。**
 
@@ -29,27 +29,13 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 它会询问什么、搭建哪些内容,见下文的“持久层”一节。
 
-若想改为试用 lite 层(即 Python 包,因此主机上需要 Python),只需两条命令。无需 Docker,无需搭建数据库,也无需容器运行时:
+之后,在你的编码智能体中说一句:*“记住我的 staging 服务器是 haze-02”*——几天后开启一个全新会话,再问一句:*“哪台是 staging 服务器?”*,答案就会从记忆中被找回。你可以在 Cortex Console(`http://127.0.0.1:8765/ui/`)中浏览一切。
 
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-如果使用 Codex 而非 Claude Code——步骤相同:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory -- pseudolife-mcp
-```
-
-之后,在任意一种编码智能体中说一句:*“记住我的 staging 服务器是 haze-02”*——几天后开启一个全新会话,再问一句:*“哪台是 staging 服务器?”*,答案就会从记忆中被找回。你可以在 Cortex Console(`http://127.0.0.1:8765/ui/`)中浏览一切。
-
-第一次会话会自动启动守护进程,由它配置一个内嵌的 PostgreSQL 并下载嵌入模型——这是一次性步骤。Lite 版本不附带梦境**提取器**,因此规范事实不会自动出现:在这条路径下,`memory_fact_set` 是唯一的**cortex**写入方式,直到配置了兼容 OpenAI 的接口端点为止。
+lite 层(即带有内嵌 PostgreSQL 记忆库、无需 Docker 的 pip 包)已停用,安装脚本会拒绝仍保有 lite 记忆库的机器。请先迁移该记忆库,参见[将 lite 记忆库迁移到 Docker](../guide/configuration.md#move-a-lite-bank-to-docker):它会备份已停止的记忆库,并将其恢复到新的 Docker 记忆库中。
 
 ### 持久层——Docker
 
-若需要长期存续的记忆库:在上述一切的基础上,还包括内置提取器、外部卷、带健康检查的服务,以及备份/回滚工具。需要 Docker,以及至少一个支持 MCP 的编码智能体——Claude Code、Codex 与 Gemini CLI 已完成端到端接入;其他智能体则可获得可直接粘贴使用的配置。从克隆仓库到获得第一条记忆,只需一条命令:
+若需要长期存续的记忆库:它提供内置提取器、外部卷、带健康检查的服务,以及备份/回滚工具。需要 Docker,以及至少一个支持 MCP 的编码智能体——Claude Code、Codex 与 Gemini CLI 已完成端到端接入;其他智能体则可获得可直接粘贴使用的配置。从克隆仓库到获得第一条记忆,只需一条命令:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git

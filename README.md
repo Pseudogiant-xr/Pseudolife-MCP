@@ -104,138 +104,25 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 What it asks and what it sets up: [Durable tier — Docker](#durable-tier--docker-recommended-for-a-long-lived-bank).
 
-### Lite tier (pip)
-
-Everything from here to the Docker tier is about lite, the Python package:
-it needs Python 3.10 or newer, and only the Python client runs a lite bank.
-The installer refuses a machine that still holds a lite bank until it has
-moved ([Move a lite bank to
-Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker)). To try it
-instead, install and register the package. No Docker, no database to set
-up, no container runtime:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-Codex instead of Claude Code — same shape:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-codex mcp add pseudolife-memory --env PSEUDOLIFE_WRITER_ID=codex -- pseudolife-mcp
-```
-
-For Codex, finish setup before starting a fresh task. In the existing
-`[mcp_servers.pseudolife-memory]` table in `~/.codex/config.toml`, add
-`startup_timeout_sec = 240`, `tool_timeout_sec = 240`, and `required = true`.
-The shim can wait up to 180 seconds for a cold daemon; Codex's default
-startup budget is 10 seconds. `required` makes missing memory visible at
-startup and waits for its initial catalog. These are starting budgets,
-not a promise that a first model download fits. The tool budget leaves time for
-the shim's 180-second deadline to report a failure before the host cancels it; prewarm with
-`pseudolife-mcp serve` in a terminal if needed.
-
-Approve `memory_message` in that table's tool configuration
-(`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
-"approve"`, or allow it once and keep the approval); Codex hook setup
-(the installer's Codex step, or `python ops/setup-codex-hooks.py` from a
-checkout) sets it when you approve the hooks, and
-keeps any value you chose. Board mail can wake an
-idle Codex task by default, and the woken task reads its mail with that tool:
-without the approval it stalls on a prompt until someone answers it. Set
-`PSEUDOLIFE_CODEX_DOORBELL = "0"` in the same `env` table to keep the task
-from being woken (see [Codex doorbell](docs/guide/configuration.md#codex-doorbell)).
-
-The agent board (peer awareness and addressed mail between sessions) is on by
-default, behind bearer authentication. Without `coordination.allowed_principals`
-in the daemon's `config.yaml`, only the singular `PSEUDOLIFE_MCP_TOKEN`
-principal is admitted. A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map stays
-off the board until an operator lists it (`allowed_principals: [default, codex]`).
-Until then a shim on the default setting leaves coordination off without an
-error; one pinned with `--enable` shows an attach-unavailable hint instead.
-`python ops/setup-codex-coordination.py --check` reports `ready (default-on)`
-or names the cause. See
-[Codex CLI and desktop](docs/guide/configuration.md#codex-cli-and-desktop).
-
-The MCP handshake delivers compact recall/capture/reflection instructions.
-For the complete standing guidance, copy the
-[bundled memory block](examples/CLAUDE.memory.md) into your project
-`AGENTS.md` or `~/.codex/AGENTS.md`. For session briefings and per-turn
-reminders, follow [Codex hooks and verification](docs/guide/providers.md#codex-specifics).
-Use one MCP registration and one hook source; an installed plugin may
-already provide either. After the daemon is running, execute
-`pseudolife-mcp doctor` from the **same environment as the registered command**.
-It checks the handshake and annotations without calling bank tools. When
-the shell has no `PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`,
-doctor takes the token from the Claude Code registration (`~/.claude.json`,
-or under `CLAUDE_CONFIG_DIR`), else from the Codex one, and names where it
-came from in `credential_source`; with none and a daemon that requires a
-token, it reports `BearerMissing`.
-
-Then in either coding agent: *"remember that my staging box is haze-02"* →
+Then in your coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
 `memory_search` finds it. Browse everything at the Cortex Console:
 <http://127.0.0.1:8765/ui/>.
 
-The first session auto-starts the daemon, which provisions an **embedded
-PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
-per-user data dir and downloads the embedding model (~1.2 GB, one-time).
-It is a real Postgres bank, not a cut-down one: `pseudolife-mcp backup`
-writes a standard owner-free `pg_dump` archive (plus a state archive, 7-day
-rotation) that restores into any PostgreSQL 18 target regardless of role —
-the Docker tier included — so outgrowing lite is a dump/restore, not a
-migration project ([backups](docs/guide/configuration.md#backups)). For a
-tier- and Postgres-version-independent copy, `pseudolife-mcp export` /
-`import` move the whole bank as portable JSONL
-([logical export / import](docs/guide/configuration.md#logical-export--import)).
-Windows needs an ASCII-only data path
-([`PSEUDOLIFE_MCP_DATA_DIR`](docs/guide/configuration.md#connection--deployment-env-vars)).
+### An existing lite bank
 
-### What lite gives you, and the one thing it doesn't
-
-| | lite (pip) | durable (Docker) |
-|---|---|---|
-| Associative store, hybrid search, supersession, version history | yes | yes |
-| Cortex facts, knowledge graph, lessons, world facts, episodes | yes | yes |
-| Cortex Console, document RAG, `pseudolife-mcp backup` | yes | yes |
-| **Dream consolidation filling the cortex on its own** | **no extractor ships** | yes — bundled local CPU sidecar |
-| External volumes, health-checked services, deploy/rollback tooling | no | yes |
-
-**The gap, stated plainly.** Lite ships no **extractor**, so the **dream**
-pass still runs, prunes, and acknowledges its input batch, but writes no
-canonical facts: on this path `memory_fact_set` is the only **cortex**
-writer. Everything else above works. Nothing about this is silent —
-`curl http://127.0.0.1:8765/health` reports `"extractor": "none"`, and the
-stdio shim says the same on stderr at session start.
-
-Any OpenAI-compatible endpoint closes it. The daemon inherits the
-environment it starts from, so two variables are the whole fix — with a
-local Ollama:
-
-```bash
-export PSEUDOLIFE_DREAM_BASE_URL=http://localhost:11434/v1
-export PSEUDOLIFE_DREAM_MODEL=qwen2.5:7b
-pseudolife-mcp serve
-```
-
-```powershell
-$env:PSEUDOLIFE_DREAM_BASE_URL = "http://localhost:11434/v1"
-$env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
-pseudolife-mcp serve
-```
-
-`/health` then reports `"extractor": "configured"`. One gotcha: a daemon
-that is already running keeps the environment it started with, and the shim
-reattaches to it rather than spawning a new one — stop the old daemon
-first. A hosted endpoint works too, and costs you the zero-egress
-property: memory text leaves the machine. Extractor tiers, quality, and the
-trade-offs: [Dreaming](docs/guide/dreaming.md).
+The lite tier (the pip package with an embedded PostgreSQL bank and no
+Docker) is retired: there are no new lite installs, the installer refuses a
+machine that still holds a lite bank, and the native client does not open
+one. Move that bank to the Docker tier with [Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker), which backs
+the stopped bank up with the pip release that still opens it and restores it
+into the new Docker bank.
 
 ## Durable tier — Docker (recommended for a long-lived bank)
 
-Everything lite gives you, plus the bundled extractor, external volumes,
-health-checked services, and backup/rollback tooling. Requires Docker
+The bank with the bundled extractor, external volumes, health-checked
+services, and backup/rollback tooling. Requires Docker
 (with the compose v2 and buildx plugins) and
 at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI
 are wired end-to-end; anything else gets paste-ready config
@@ -512,7 +399,7 @@ deep material lives in the user guide:
 
 | Page | What's in it |
 |---|---|
-| [Install and move](docs/guide/install-and-move.md) | Installer and lite setup, moving a bank, and running under Portainer or another stack manager |
+| [Install and move](docs/guide/install-and-move.md) | Installer setup, moving a bank (a lite bank included), and running under Portainer or another stack manager |
 | [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
 | [Providers](docs/guide/providers.md) | Capability matrix per coding agent, memory instruction layers, AGENTS.md standard, Codex hook setup and verification, writer ids |
 | [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
@@ -763,9 +650,11 @@ pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when cu
 **The first update from 0.15.0 or earlier** has no such command (that shim
 answers "unknown mode", and that daemon never announces a release): from a
 checkout, `git pull`, then `ops/update.sh --all` or `ops/update.ps1 -All`;
-for a pipx or pip install, `pipx install --force "pseudolife-mcp[lite]==<version>"`
-or `pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
-extra only for a lite install). After that, `pseudolife-mcp update` exists.
+for a pipx or pip install, `pipx install --force "pseudolife-mcp==<version>"`
+or `pip install --upgrade "pseudolife-mcp==<version>"`. A lite install does
+not take this path: the lite tier is retired, so move its bank with
+[Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker) instead. After that, `pseudolife-mcp update` exists.
 On a client-only machine (the daemon on another host), `update` and
 `--clients-only` move this machine's clients to the daemon's release.
 If that endpoint is silent or reports no version, retry with
@@ -785,7 +674,8 @@ away. `--clients-only` / `--daemon-only` take one half; the shim itself
 runs from wherever it was registered, so use its full path when
 `pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
 the package in the interpreter that holds it (pip, or pipx) and restarts
-nothing: it says what to restart.
+nothing: it says what to restart (a lite bank moves to Docker instead; see
+below).
 
 A Docker host that never chose a daemon engine moves to the Rust daemon on
 an update to a release that publishes its image, after the update has
@@ -830,15 +720,13 @@ definitions are unchanged ([Codex specifics](docs/guide/providers.md#codex-speci
 only a changed `hooks.json` makes every update path print the approval steps.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
-**Lite tier by hand:** one command, bank untouched:
+**A lite bank:** do not upgrade a lite install in place. The lite tier is
+retired, so move its bank to the Docker tier with [Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker).
 
-```bash
-pip install -U "pseudolife-mcp[lite]"
-```
-
-On Windows, first close every Claude Code, Codex and Claude Desktop
-session using the shim (quit Desktop from the tray): upgrading a package
-that is running can leave it half-removed.
+Before upgrading a pip or pipx install on Windows, first close every Claude
+Code, Codex and Claude Desktop session using the shim (quit Desktop from the
+tray): upgrading a package that is running can leave it half-removed.
 
 **Docker tier from a checkout:** after a `git pull` (or local code
 change), redeploy the **daemon only** — safely, without touching Postgres
@@ -998,15 +886,13 @@ Python client's package (the installers set up the native client instead,
 which needs no host Python):
 
 ```bash
-pip install pseudolife-mcp    # daemon in Docker; add [lite] for the pip tier
+pip install pseudolife-mcp    # daemon in Docker
 claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
 ```
 
 `PSEUDOLIFE_MCP_NO_SPAWN=1` belongs on Docker-tier registrations: the shim
 then waits for the container instead of spawning a host-side fallback whose
-port bind can race a still-booting Docker and shadow the real bank. On the
-`[lite]` pip tier drop the `--env` — there the spawn fallback *is* the
-zero-config path.
+port bind can race a still-booting Docker and shadow the real bank.
 
 Direct HTTP works too — the daemon serves MCP over HTTP natively (no shim,
 no host command, nothing OS-specific; concurrent sessions then share one
@@ -1108,8 +994,7 @@ codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mc
 ```
 
 (Same Docker-tier note as the Claude wiring above: keep
-`PSEUDOLIFE_MCP_NO_SPAWN=1` when the daemon runs in Docker; drop it on the
-`[lite]` pip tier.)
+`PSEUDOLIFE_MCP_NO_SPAWN=1` when the daemon runs in Docker.)
 
 The HTTP one-liner works too (no pip package needed):
 
@@ -1513,10 +1398,9 @@ pseudolife-mcp-daemon`).
 - **The cortex stays empty** (canonical facts never appear on their own).
   `/health` reporting `"extractor": "none"` means no extractor is
   configured, so the dream writes no facts and `memory_fact_set` is the
-  only cortex writer — expected on the lite tier. Point the daemon at an
-  OpenAI-compatible endpoint
-  ([Quickstart](#what-lite-gives-you-and-the-one-thing-it-doesnt)) or use
-  the Docker tier's bundled sidecar. `"extractor": "disabled"` instead
+  only cortex writer. Point the daemon at an OpenAI-compatible endpoint
+  ([Dreaming](docs/guide/dreaming.md)) or use the Docker tier's bundled
+  sidecar. `"extractor": "disabled"` instead
   means dreaming itself is switched off in config. `"extractor":
   "stalled"` means an extractor is configured but live dreams have stopped
   reaching it; the `stall` sub-object gives the reason and times. For
@@ -1604,7 +1488,9 @@ pseudolife-memory` / `codex mcp remove pseudolife-memory`), then
 the per-user data directory (`%LOCALAPPDATA%\pseudolife-mcp` on Windows,
 `~/.local/share/pseudolife-mcp` on Linux, `~/Library/Application
 Support/pseudolife-mcp` on macOS — or wherever `PSEUDOLIFE_MCP_DATA_DIR`
-points). Back it up first: `pseudolife-mcp backup` works on lite too.
+points). Back it up first with the pip release that
+[Move a lite bank to
+Docker](docs/guide/configuration.md#move-a-lite-bank-to-docker) names; the native client does not open a lite bank.
 
 **Docker tier** — deletion is deliberate at every step:
 
