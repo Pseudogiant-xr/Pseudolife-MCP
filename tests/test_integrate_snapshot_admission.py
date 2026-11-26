@@ -379,8 +379,9 @@ def test_requirement_agrees_with_the_ci_scope_verdict(integrate, monkeypatch, tm
                         SimpleNamespace(returncode=0, stdout="merged-tree\n"))
     monkeypatch.setattr(integrate, "_fetch_head", lambda number: SHA)
     rollup = _rust_run(monkeypatch, integrate)
-    assert integrate._snapshot_requirement(member(integrate), "base", rollup) == (False, "")
     value = member(integrate)
+    assert integrate._snapshot_requirement(value, "base", rollup) == (False, "")
+    assert value.snapshot_ci_skip is True     # so `open` reads the run again
     value.snapshot_required = False
     value.snapshot, value.snapshot_why = integrate._snapshot_state(SHA, rollup, False)
     assert integrate._not_ready(value) is None
